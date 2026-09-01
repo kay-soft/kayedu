@@ -77,6 +77,10 @@ lib/
     students.ts  classes.ts  sessions.ts  payments.ts  analytics.ts ...
   money.ts                      # the ONLY center-cut math + piastre helpers
   card-layout.ts                # the default ID-card layout the editor offers
+  id-card.ts                    # renders the card SVG from that layout
+  qr.ts                         # QR modules -> an SVG path
+  identity.ts                   # duplicate-match predicate + contact normalizing
+  storage-paths.ts              # pure storage-path primitives (no runtime imports)
   routes.ts                     # locale-less pathnames + role home paths
   format.ts                     # locale-aware number/date formatting
   i18n/  request.ts  routing.ts  navigation.ts
@@ -89,6 +93,7 @@ prisma/
 scripts/
   isolation-check.ts            # the cross-center acceptance gate (M1)
   config-check.ts               # the center-configuration acceptance gate (M2)
+  people-check.ts               # the teachers/students/blocks/storage gate (M3)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -111,6 +116,14 @@ docs/
 **Invites (staff):** Owner/Manager creates an invite → `Invitation` row + unguessable token link → invitee registers/logs in with the invited email → membership created on accept (audited as `membership.create`). Only an Owner may invite another Owner, and an outstanding invite for the same email+role is superseded. **Email delivery is out of Phase 1 scope** (notifications are deferred), so the accept link is shown to the inviter to share manually; it expires after 7 days. Teachers & students self-register and connect to centers (teachers by center invite/trust; students by discovery/enroll).
 
 **Duplicate prevention:** on register, match on verified phone/email. If found, link a new membership/enrollment to the existing `User` instead of creating a person. Merge is a manual, audited admin action.
+
+As of **M3** this is real on the add-teacher and add-student forms. `lib/identity.ts` owns the predicate (`contactMatchWhere()`), free of runtime imports so the acceptance gate exercises it, and normalizes contact details first — email lower-cased, Egyptian mobiles to `01XXXXXXXXX` — so `+201012345678` and `01012345678` are one person. `lib/db/identity.ts` resolves it into one of three outcomes:
+
+| Outcome | What happens |
+|---|---|
+| **none** | Nobody matches — create the person, then their membership/profile here. |
+| **matched** | The action writes **nothing** and returns the candidate. The UI shows who they are and what matched ("this person already exists"), and only a confirmed submit — now carrying `linkUserId` — attaches this center's record to them. Already connected here? The panel points at the existing record instead of offering to link. |
+| **conflict** | The email belongs to one person and the phone to another. Refused with an explanation: merging two identities is the manual admin action above, not something an add form decides. |
 
 ---
 
@@ -169,6 +182,8 @@ Enable RLS on every tenant table. Policy shape: a row is visible only if its `ce
 Either way, **write the two isolation tests early** (shared-teacher no-leak; cross-center-by-ID denied) and run them in CI.
 
 `npm run check:isolation` (`scripts/isolation-check.ts`) is the cross-center-by-ID gate: it creates two throwaway centers, asserts that Center A cannot read a Center B row by id through the scoping primitives, that `requireScopedById` throws, that scoped lists never contain foreign rows, and that an unscoped `where` fails loudly — then cleans up. It needs a reachable database. The shared-teacher no-leak test arrives with the teacher portal in M7.
+
+`npm run check:people` (`scripts/people-check.ts`) is the M3 gate, covering the paths that milestone added. It registers **one person at two throwaway centers** and asserts a single `User` with two `StudentProfile` rows; that a `+20`-prefixed phone and a capitalised email still match that person; that a student code repeats across centers but never inside one; that Center A resolves neither Center B's `StudentProfile`, teacher `Membership` nor `StudentBlock` by id; that a **teacher shared by both centers** who blocks a student at one has not blocked them at the other; that grade promotion moves only its own center's students; that the storage primitives refuse an unscoped path, a traversal segment, a prefix collision and a foreign center's path; that a card renders with its QR, escapes its text and mirrors in Arabic; and that the schemas reject what the UI must not store. Then it cleans up.
 
 `npm run check:config` (`scripts/config-check.ts`) is the M2 gate. It configures **two** throwaway centers through one `configureCenter(centerId)` — no per-center branching anywhere — using the same zod schemas the settings actions parse with and the same scoping primitives, then asserts the two configurations are independent, that neither center resolves the other center's config rows by id, that the permission-grant seam widens a receptionist and nobody else, and that the center-cut split is right in both modes. That is the "a second center needs zero code changes" claim, executed.
 
@@ -240,7 +255,15 @@ In practice the app shell sets `--brand` inline on its root element from `center
 
 ## 10. File storage (Supabase Storage)
 
-Buckets: `logos/` (center branding), `avatars/` (users/students), `id-cards/` (generated), `session-uploads/` (Phase-1 placeholder for teacher file uploads). Paths namespaced by `centerId`. Access controlled by storage policies mirroring tenant isolation. ID cards render from an HTML/CSS template (using the center's `cardLayout` JSON) → image/PDF for print.
+Buckets: `logos/` (center branding), `avatars/` (users/students), `id-cards/` (generated), `session-uploads/` (Phase-1 placeholder for teacher file uploads). Paths namespaced by `centerId`. Access controlled by storage policies mirroring tenant isolation.
+
+**`avatars/` and `id-cards/` exist as of M3**; `logos/` and `session-uploads/` land with the milestones that need them. Both are **private** buckets, with size and MIME limits set on the bucket itself (5 MB images for `avatars/`, 2 MB `image/svg+xml` for `id-cards/`).
+
+**Layer 1 — the app.** Files are scoped exactly like queries. `lib/storage-paths.ts` is to Storage what `lib/db/tenant-scope.ts` is to Prisma: no runtime imports, `centerObjectPath()` refuses to build a path without a `centerId` (and refuses a traversal segment), and `assertPathInCenter()` re-checks any path read back from the database before it is signed, downloaded or deleted. `lib/db/storage.ts` composes those into upload/sign/download/remove and is the only module that touches the Storage API. Layout is `{centerId}/{studentProfileId}.{ext}` — the filename **stem is the profile id**, which is what the read policy matches a student's own file on.
+
+**Layer 2 — Postgres.** Policies on `storage.objects` mirror the membership rules: read for any active member of that center folder (or the student whose own file it is), write for `OWNER`/`MANAGER`/`RECEPTIONIST` only. They read three no-argument `SECURITY DEFINER` helpers (`kayedu_member_center_ids()`, `kayedu_write_center_ids()`, `kayedu_own_student_profile_ids()`) that filter strictly on `auth.uid()`, execute granted to `authenticated` alone. The app itself writes with the service role, so these policies are the backstop for direct Supabase-client access — the same belt-and-braces shape as §5.
+
+**ID cards** render from the center's `cardLayout` JSON through `lib/id-card.ts` into a self-contained **SVG** — vector, so it is crisp on screen and at print DPI, and printable straight from the browser at true credit-card size (85.6 × 54 mm) with no headless-browser step. The preview, the print view and the file uploaded to `id-cards/` are the *same string*, so a center cannot preview one card and print another. Images are inlined as data URIs precisely because a stored card must not depend on a signed URL that expires, and every text value is XML-escaped. `x` is a **logical start offset**: an Arabic card mirrors the whole layout, the same rule as `ps-/pe-` on screen (docs/04 §7). The QR encodes `KAYEDU|{centerId}|{studentCode}` for the M5 reception scanner.
 
 ---
 

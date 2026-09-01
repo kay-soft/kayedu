@@ -8,12 +8,16 @@
  * The column is free-form JSON on purpose: a center may add keys we have not
  * thought of, and the renderer ignores what it does not understand. This
  * constant is the starting point the editor offers, not a schema.
+ *
+ * `width` is a percentage of the card **width** and the logo is drawn square,
+ * so it also has to clear the photo below it — 13% is the largest value that
+ * does on a 320 x 202 face (lib/id-card.ts).
  */
 export const DEFAULT_CARD_LAYOUT = {
   version: 1,
   background: "gradient-navy",
   elements: {
-    logo: { x: 6, y: 8, width: 18 },
+    logo: { x: 6, y: 8, width: 13 },
     centerName: { x: 28, y: 10, fontSize: 14, weight: 700 },
     photo: { x: 6, y: 32, width: 24 },
     studentName: { x: 36, y: 36, fontSize: 16, weight: 600 },

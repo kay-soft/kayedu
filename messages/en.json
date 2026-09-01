@@ -148,6 +148,202 @@
     "selfRow": "You",
     "ownerRow": "Owner-only"
   },
+  "People": {
+    "fields": {
+      "firstName": "First name",
+      "lastName": "Last name",
+      "email": "Email",
+      "phone": "Phone",
+      "phoneHint": "Egyptian mobile, e.g. 01012345678.",
+      "altPhone": "Alternative phone"
+    },
+    "match": {
+      "title": "This person already exists",
+      "description": "They already have a KayEdu identity. Confirm to connect them to this center — a new record here, linked to the same person.",
+      "person": "Person",
+      "matchedBy": "Matched on {fields}.",
+      "matchedOnSeparator": " and ",
+      "matchedOn": {
+        "email": "Email",
+        "phone": "Phone"
+      },
+      "alreadyHere": {
+        "student": "They are already registered as a student at this center.",
+        "teacher": "They already teach at this center.",
+        "staff": "They are already a staff member at this center."
+      },
+      "openProfile": "Open their profile",
+      "cancel": "Use different details"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists in this center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidPhone": "Enter a valid Egyptian mobile number.",
+      "contactRequired": "Add a phone number or an email — a teacher needs one to be matched and to sign in later.",
+      "invalidStudentCode": "A student code may only contain letters, numbers and dashes.",
+      "duplicateStudentCode": "Another student at this center already has that code.",
+      "samePromotionGrade": "Choose a different grade to promote to.",
+      "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
+      "contactInUse": "Those contact details already belong to someone else.",
+      "matchGone": "That person is no longer the match for these details. Check the form and try again.",
+      "alreadyTeacher": "They already teach at this center.",
+      "alreadyStudent": "They are already registered as a student at this center.",
+      "alreadyBlocked": "This student is already on that teacher's block-list.",
+      "teacherInUse": "This teacher still has classes or sessions here, so they cannot be deleted. Deactivate them instead.",
+      "studentInUse": "This student has attendance or payment history, so they cannot be deleted. Deactivate them instead.",
+      "noStudentsToPromote": "No active students are in that grade.",
+      "photoMissing": "Choose a photo first.",
+      "photoType": "Photos must be PNG, JPEG or WebP.",
+      "photoTooLarge": "That photo is larger than 5 MB.",
+      "storage": "File storage is unavailable right now. Try again in a moment."
+    }
+  },
+  "Teachers": {
+    "title": "Teachers",
+    "subtitle": "The teachers who work at this center, and who each of them will not take.",
+    "add": "Add teacher",
+    "addTitle": "Add a teacher",
+    "addDescription": "One person, one KayEdu identity. If they already teach elsewhere on KayEdu, you will be asked to link to them instead of creating a duplicate.",
+    "listTitle": "Teachers at this center",
+    "listDescription": "Deactivated teachers stay listed — hiding a former teacher is how a center loses track of its schedule.",
+    "empty": "No teachers yet.",
+    "open": "Open",
+    "columns": {
+      "name": "Name",
+      "contact": "Contact",
+      "blocked": "Block-list"
+    },
+    "blockedCount": "{count} blocked",
+    "canSeeEarnings": "Can see their earnings",
+    "canSeeEarningsHint": "What this center lets the teacher see financially in their own portal.",
+    "linkAsTeacher": "Link this person as a teacher",
+    "detailSubtitle": "Their record at this center, their classes and their block-list.",
+    "backToList": "All teachers",
+    "profileTitle": "Teacher record",
+    "profileDescription": "Name and contact details belong to the person; financial visibility belongs to this center.",
+    "profileLocked": "This person has their own KayEdu account or works at another center too, so their name and contact details are theirs to change — not this center's. Everything below still is.",
+    "identityTitle": "Identity",
+    "identityDescription": "How this person is connected across KayEdu.",
+    "classesTitle": "Classes",
+    "classesDescription": "The classes this teacher carries at this center.",
+    "classesEmpty": "No classes yet — classes and schedules arrive with the next milestone.",
+    "deleteConfirm": "This removes them from this center. It cannot be undone.",
+    "fields": {
+      "otherCenters": "Other centers",
+      "accountClaimed": "Signed in before"
+    },
+    "blocks": {
+      "title": "Block-list",
+      "description": "A student blocked here cannot be enrolled with, or added to a session of, this teacher.",
+      "empty": "No students are blocked from this teacher.",
+      "block": "Block",
+      "unblock": "Remove block",
+      "reason": "Reason",
+      "reasonPlaceholder": "Optional — why they are blocked",
+      "searchLabel": "Block a student",
+      "searchPlaceholder": "Search by name, code or phone",
+      "searchSubmit": "Search",
+      "noCandidates": "No students match that search.",
+      "unknownStudent": "Former student",
+      "unknownTeacher": "Former teacher"
+    }
+  },
+  "Students": {
+    "title": "Students",
+    "subtitle": "{count} registered at this center.",
+    "add": "Register student",
+    "addTitle": "Register a student",
+    "addDescription": "Register a student once and connect them to this center. A phone or email that already exists links to that person instead of creating a duplicate.",
+    "centerSectionTitle": "This center's details",
+    "centerSectionDescription": "Grade, ID-card number and parent contacts belong to this center.",
+    "linkAsStudent": "Link this person as a student",
+    "listTitle": "Registered students",
+    "listDescription": "Search by name, student code, or a student's or parent's phone.",
+    "empty": "No students yet.",
+    "noMatches": "No students match that search.",
+    "moreResults": "Showing {shown} of {total}. Narrow the search to see the rest.",
+    "searchLabel": "Search students",
+    "searchPlaceholder": "Name, code or phone",
+    "searchSubmit": "Search",
+    "open": "Open",
+    "columns": {
+      "code": "Code",
+      "name": "Name",
+      "grade": "Grade",
+      "contact": "Contact"
+    },
+    "detailSubtitle": "Their record at this center, their enrolments and their ID card.",
+    "backToList": "All students",
+    "profileTitle": "Student record",
+    "profileDescription": "The person's own details, then everything this center owns.",
+    "profileLocked": "This person has their own KayEdu account or is registered at another center too, so their name and contact details are theirs to change — not this center's. Everything below still is.",
+    "deleteConfirm": "This removes them from this center. It cannot be undone.",
+    "parentTitle": "Parent & guardian",
+    "parentDescription": "Who this center calls.",
+    "fields": {
+      "grade": "Grade",
+      "studentCode": "Student code",
+      "studentCodeHint": "The number on the ID card. Leave blank to assign the next one.",
+      "parentFirstName": "Parent first name",
+      "parentLastName": "Parent last name",
+      "parentPhone": "Parent phone",
+      "parentAltPhone": "Parent alternative phone",
+      "parentName": "Parent name",
+      "phone": "Phone",
+      "email": "Email",
+      "otherCenters": "Other centers"
+    },
+    "promote": {
+      "title": "Promote a grade",
+      "description": "At the end of a term, move every active student in one grade to the next.",
+      "from": "From grade",
+      "to": "To grade",
+      "warning": "This moves every active student in the chosen grade. The change is recorded in the audit log.",
+      "submit": "Promote students",
+      "done": "Students promoted.",
+      "needsGrades": "Add at least two grades in settings before promoting."
+    },
+    "photo": {
+      "title": "Photo",
+      "description": "Used on the ID card. Stored for this center only.",
+      "label": "Student photo",
+      "hint": "PNG, JPEG or WebP, up to 5 MB.",
+      "upload": "Upload photo",
+      "remove": "Remove photo"
+    },
+    "card": {
+      "title": "ID card",
+      "description": "Laid out from this center's card customization, with a QR code the reception desk can scan.",
+      "codeLabel": "Student code",
+      "printCard": "Print as ID card",
+      "printPaper": "Print as paper",
+      "generate": "Generate and store",
+      "download": "Download the generated card",
+      "generatedAt": "Last generated {date}.",
+      "notStored": "No card has been generated for this student yet.",
+      "noStorage": "File storage is not configured, so cards cannot be stored. Printing still works."
+    },
+    "enrollments": {
+      "title": "Enrolments",
+      "description": "The classes this student is in at this center.",
+      "empty": "Not enrolled in any class yet — classes and enrolment arrive with the next milestone.",
+      "emptyPrint": "Not enrolled in any class yet."
+    },
+    "blockedBy": {
+      "title": "Blocked by",
+      "description": "Teachers who have blocked this student.",
+      "empty": "No teacher has blocked this student."
+    },
+    "print": {
+      "print": "Print",
+      "back": "Back to the student",
+      "hint": "Only the sheet below is printed.",
+      "printedOn": "Printed {date}"
+    }
+  },
   "Settings": {
     "title": "Center configuration",
     "subtitle": "Set up this center's academic and operational reference data. Everything here is per center — the next center needs no code changes.",

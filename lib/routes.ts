@@ -13,6 +13,13 @@ export const ROUTES = {
   selectCenter: "/select-center",
   invite: (token: string) => `/invite/${token}`,
   centerDashboard: "/dashboard",
+  // People (M3). The print views live under the student they belong to.
+  centerTeachers: "/teachers",
+  centerTeacher: (id: string) => `/teachers/${id}`,
+  centerStudents: "/students",
+  centerStudent: (id: string) => `/students/${id}`,
+  centerStudentCard: (id: string) => `/students/${id}/card`,
+  centerStudentPaper: (id: string) => `/students/${id}/paper`,
   // Center configuration (M2). The settings shell lives at /settings and every
   // configuration screen is a child of it.
   centerSettings: "/settings",

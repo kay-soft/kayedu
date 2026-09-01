@@ -361,6 +361,10 @@ model StudentProfile {
   parentLastName  String?
   parentPhone     String?
   parentAltPhone  String?
+  // Center-uploaded student photo (Storage `avatars/{centerId}/…`). It lives
+  // here, not on User.avatarUrl, because the photo a center takes for its own
+  // ID card is that center's data — see docs/01-data-model.md §2.
+  photoUrl        String?
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -404,8 +408,12 @@ model StudentBlock {
   reason        String?
   createdAt     DateTime   @default(now())
 
+  // A student is blocked from a teacher/class once — blocking twice is a bug,
+  // and "is this student blocked here?" is a hot lookup on (scope, refId).
+  @@unique([centerId, scope, refId, blockedUserId])
   @@index([centerId])
   @@index([centerId, blockedUserId])
+  @@index([centerId, scope, refId])
 }
 
 // ─────────────────────────────────────────────────────────────
