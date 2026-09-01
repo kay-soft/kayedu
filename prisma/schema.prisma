@@ -118,51 +118,56 @@ model User {
 // ─────────────────────────────────────────────────────────────
 
 model Center {
-  id          String   @id @default(uuid())
-  slug        String   @unique // subdomain / branding key
-  name        String
-  nameEn      String?
-  logoUrl     String?
-  themeColor  String   @default("#2563EB")
-  active      Boolean  @default(true)
-  plan        String? // onboarding/plan metadata
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  slug       String   @unique // subdomain / branding key
+  name       String
+  nameEn     String?
+  logoUrl    String?
+  themeColor String   @default("#2563EB")
+  active     Boolean  @default(true)
+  plan       String? // onboarding/plan metadata
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  settings         CenterSettings?
-  branches         Branch[]
-  memberships      Membership[]
-  invitations      Invitation[]
-  educationSystems EducationSystem[]
-  grades           Grade[]
-  subjects         Subject[]
-  rooms            Room[]
-  classGroups      ClassGroup[]
-  studentProfiles  StudentProfile[]
-  enrollments      Enrollment[]
-  sessions         Session[]
-  attendees        SessionAttendee[]
-  payments         Payment[]
+  settings          CenterSettings?
+  branches          Branch[]
+  memberships       Membership[]
+  invitations       Invitation[]
+  educationSystems  EducationSystem[]
+  grades            Grade[]
+  subjects          Subject[]
+  rooms             Room[]
+  classGroups       ClassGroup[]
+  studentProfiles   StudentProfile[]
+  enrollments       Enrollment[]
+  sessions          Session[]
+  attendees         SessionAttendee[]
+  payments          Payment[]
   expenseCategories ExpenseCategory[]
-  expenses         Expense[]
-  reservations     Reservation[]
-  changeRequests   ChangeRequest[]
-  studentBlocks    StudentBlock[]
-  auditLogs        AuditLog[]
+  expenses          Expense[]
+  reservations      Reservation[]
+  changeRequests    ChangeRequest[]
+  studentBlocks     StudentBlock[]
+  auditLogs         AuditLog[]
 }
 
 model CenterSettings {
-  id                    String    @id @default(uuid())
-  centerId              String    @unique
-  center                Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  defaultShareType      ShareType @default(PERCENTAGE)
-  defaultShareValue     Int       @default(15) // percent OR piastres per defaultShareType
-  teacherTimeoutDays    Int? // null = disabled
-  defaultLateThreshold  Int       @default(10) // minutes
-  cardLayout            Json? // ID-card customization (positions of name/id/logo…)
-  timezone              String    @default("Africa/Cairo")
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                               String    @id @default(uuid())
+  centerId                         String    @unique
+  center                           Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  defaultShareType                 ShareType @default(PERCENTAGE)
+  defaultShareValue                Int       @default(15) // percent OR piastres per defaultShareType
+  teacherTimeoutDays               Int? // null = disabled
+  defaultLateThreshold             Int       @default(10) // minutes
+  cardLayout                       Json? // ID-card customization (positions of name/id/logo…)
+  timezone                         String    @default("Africa/Cairo")
+  // Permission grants — these only *widen* a role, never narrow it, and are
+  // read through permissionGrantsFromSettings() (docs/02-architecture.md §6).
+  // Receptionists are denied profit + corrections by default (spec §3).
+  receptionistCanViewProfit        Boolean   @default(false)
+  receptionistCanCorrectAttendance Boolean   @default(false)
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
 }
 
 model Branch {
@@ -182,19 +187,19 @@ model Branch {
 }
 
 model Membership {
-  id                 String   @id @default(uuid())
-  userId             String
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  centerId           String
-  center             Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  role               Role
-  active             Boolean  @default(true)
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  centerId       String
+  center         Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  role           Role
+  active         Boolean   @default(true)
   // Teacher-only: what this center lets the teacher see financially.
-  canSeeEarnings     Boolean  @default(true)
-  invitedAt          DateTime @default(now())
-  joinedAt           DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  canSeeEarnings Boolean   @default(true)
+  invitedAt      DateTime  @default(now())
+  joinedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@unique([userId, centerId, role])
   @@index([centerId])
@@ -238,15 +243,15 @@ model EducationSystem {
 }
 
 model Grade {
-  id                String          @id @default(uuid())
+  id                String           @id @default(uuid())
   centerId          String
-  center            Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center            Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
   name              String
   educationSystemId String?
   educationSystem   EducationSystem? @relation(fields: [educationSystemId], references: [id])
-  active            Boolean         @default(true)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  active            Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   subjects        Subject[]
   classGroups     ClassGroup[]
@@ -290,35 +295,35 @@ model Room {
 }
 
 model ClassGroup {
-  id                   String    @id @default(uuid())
+  id                   String           @id @default(uuid())
   centerId             String
-  center               Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center               Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
   teacherId            String
-  teacher              User      @relation("ClassTeacher", fields: [teacherId], references: [id])
+  teacher              User             @relation("ClassTeacher", fields: [teacherId], references: [id])
   subjectId            String?
-  subject              Subject?  @relation(fields: [subjectId], references: [id])
+  subject              Subject?         @relation(fields: [subjectId], references: [id])
   gradeId              String?
-  grade                Grade?    @relation(fields: [gradeId], references: [id])
+  grade                Grade?           @relation(fields: [gradeId], references: [id])
   educationSystemId    String?
   educationSystem      EducationSystem? @relation(fields: [educationSystemId], references: [id])
   roomId               String?
-  room                 Room?     @relation(fields: [roomId], references: [id])
-  price                Int       @default(0) // piastres per session
+  room                 Room?            @relation(fields: [roomId], references: [id])
+  price                Int              @default(0) // piastres per session
   // Center's cut config — resolved onto payments as a snapshot.
-  centerShareType      ShareType @default(PERCENTAGE)
-  centerShareValue     Int       @default(15) // percent OR piastres
-  capacity             Int       @default(0)
-  attendanceRequired   Boolean   @default(true)
-  lateThresholdMinutes Int       @default(10)
-  acceptsNewStudents   Boolean   @default(true)
-  requiresConfirmation Boolean   @default(false)
-  active               Boolean   @default(true)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  centerShareType      ShareType        @default(PERCENTAGE)
+  centerShareValue     Int              @default(15) // percent OR piastres
+  capacity             Int              @default(0)
+  attendanceRequired   Boolean          @default(true)
+  lateThresholdMinutes Int              @default(10)
+  acceptsNewStudents   Boolean          @default(true)
+  requiresConfirmation Boolean          @default(false)
+  active               Boolean          @default(true)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
-  schedules   ClassSchedule[]
-  sessions    Session[]
-  enrollments Enrollment[]
+  schedules    ClassSchedule[]
+  sessions     Session[]
+  enrollments  Enrollment[]
   reservations Reservation[]
 
   @@index([centerId])
@@ -344,21 +349,21 @@ model ClassSchedule {
 // ─────────────────────────────────────────────────────────────
 
 model StudentProfile {
-  id             String   @id @default(uuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  centerId       String
-  center         Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  studentCode    String // unique per center (ID-card number)
-  gradeId        String?
-  grade          Grade?   @relation(fields: [gradeId], references: [id])
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  centerId        String
+  center          Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentCode     String // unique per center (ID-card number)
+  gradeId         String?
+  grade           Grade?   @relation(fields: [gradeId], references: [id])
   parentFirstName String?
   parentLastName  String?
   parentPhone     String?
   parentAltPhone  String?
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   enrollments Enrollment[]
   attendees   SessionAttendee[]
@@ -505,16 +510,16 @@ model ExpenseCategory {
 }
 
 model Expense {
-  id         String          @id @default(uuid())
+  id         String           @id @default(uuid())
   centerId   String
-  center     Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center     Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
   categoryId String?
   category   ExpenseCategory? @relation(fields: [categoryId], references: [id])
   amount     Int // piastres
   date       DateTime
   note       String?
   recordedBy String
-  createdAt  DateTime        @default(now())
+  createdAt  DateTime         @default(now())
 
   @@index([centerId])
   @@index([centerId, date])
@@ -542,16 +547,16 @@ model Reservation {
 }
 
 model ChangeRequest {
-  id         String              @id @default(uuid())
-  centerId   String
-  center     Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  type       ChangeRequestType
+  id          String              @id @default(uuid())
+  centerId    String
+  center      Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  type        ChangeRequestType
   requestedBy String // teacher userId
-  payload    Json // proposed class/session details
-  status     ChangeRequestStatus @default(PENDING)
-  resolvedBy String?
-  resolvedAt DateTime?
-  createdAt  DateTime            @default(now())
+  payload     Json // proposed class/session details
+  status      ChangeRequestStatus @default(PENDING)
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime            @default(now())
 
   @@index([centerId])
 }

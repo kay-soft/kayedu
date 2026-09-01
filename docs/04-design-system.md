@@ -6,7 +6,7 @@
 
 ## 1. Direction in one line
 
-**Clean, trustworthy, data-dense SaaS** — light working canvas, white cards, a dark sidebar for anchoring, one confident blue as the brand, and color used *only* to carry meaning (status, money, alerts). Calm enough to stare at for eight hours, sharp enough that an owner trusts it with their money.
+**Clean, trustworthy, data-dense SaaS** — light working canvas, white cards, a dark sidebar for anchoring, one confident blue as the brand, and color used _only_ to carry meaning (status, money, alerts). Calm enough to stare at for eight hours, sharp enough that an owner trusts it with their money.
 
 ---
 
@@ -15,37 +15,38 @@
 Define these as CSS variables on `:root` in `globals.css`. The **brand** value is overridden per center at runtime (see architecture §9) — everything else stays fixed.
 
 ```css
---brand:            #2563EB;  /* primary blue — per-center overridable */
---brand-fg:         #FFFFFF;
+--brand: #2563eb; /* primary blue — per-center overridable */
+--brand-fg: #ffffff;
 
---bg-canvas:        #F5F6F8;  /* app background */
---bg-surface:       #FFFFFF;  /* cards, tables, panels */
---bg-sidebar:       #0F172A;  /* dark navy sidebar */
---bg-sidebar-hover: #1E293B;
---bg-subtle:        #F8FAFC;  /* table header, inset rows */
+--bg-canvas: #f5f6f8; /* app background */
+--bg-surface: #ffffff; /* cards, tables, panels */
+--bg-sidebar: #0f172a; /* dark navy sidebar */
+--bg-sidebar-hover: #1e293b;
+--bg-subtle: #f8fafc; /* table header, inset rows */
 
---text-primary:     #0F172A;
---text-secondary:   #475569;
---text-muted:       #94A3B8;
---text-on-dark:     #E2E8F0;
+--text-primary: #0f172a;
+--text-secondary: #475569;
+--text-muted: #94a3b8;
+--text-on-dark: #e2e8f0;
 
---border:           #E5E7EB;
---border-subtle:    #F1F5F9;
+--border: #e5e7eb;
+--border-subtle: #f1f5f9;
 
---success:          #16A34A;  /* present, paid, positive trend */
---success-bg:       #DCFCE7;
---warning:          #F59E0B;  /* late, pending, attention */
---warning-bg:       #FEF3C7;
---danger:           #DC2626;  /* absent, negative trend, destructive */
---danger-bg:        #FEE2E2;
---info:             #3B82F6;  /* upcoming, neutral badge */
---info-bg:          #DBEAFE;
+--success: #16a34a; /* present, paid, positive trend */
+--success-bg: #dcfce7;
+--warning: #f59e0b; /* late, pending, attention */
+--warning-bg: #fef3c7;
+--danger: #dc2626; /* absent, negative trend, destructive */
+--danger-bg: #fee2e2;
+--info: #3b82f6; /* upcoming, neutral badge */
+--info-bg: #dbeafe;
 ```
 
 **How these bind to shadcn (`app/globals.css`).** The tokens above are the source; the base-nova variables are aliases onto them, so components inherit the palette without per-screen overrides:
 `--background: var(--bg-canvas)` · `--card: var(--bg-surface)` · `--muted: var(--bg-subtle)` · `--primary`/`--ring`/`--sidebar-primary`: `var(--brand)` · `--destructive: var(--danger)` · the sidebar family maps to `--bg-sidebar` / `--bg-sidebar-hover` / `--text-on-dark`. The semantic set is exposed as Tailwind utilities too: `bg-success-bg text-success`, `text-text-muted`, `bg-canvas`, `bg-surface-subtle`.
 
 **Semantic color rules (non-negotiable — consistency here is what makes the app readable at a glance):**
+
 - **Present / Paid / positive** → success green.
 - **Late / Pending / warning** → amber.
 - **Absent / Void / negative** → danger red.
@@ -86,11 +87,11 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 
 ## 5. Core component patterns
 
-**Sidebar** — dark (`--bg-sidebar`), fixed, 240px (`w-60`). Logo + center name at top, nav items with icon + label, active item highlighted with the brand color, user block + sign-out pinned at the bottom. **Collapses to a drawer under `lg`** — hamburger in the header, overlay + slide-in panel, Escape and overlay-tap close it, body scroll locked while open. Implemented in `components/shell/app-shell.tsx`; nav items come from `components/shell/nav.ts`, filtered by `can(role, permission)` so a receptionist never sees a link they can't open.
+**Sidebar** — dark (`--bg-sidebar`), fixed, 240px (`w-60`). Logo + center name at top, nav items with icon + label, active item highlighted with the brand color, user block + sign-out pinned at the bottom. **Collapses to a drawer under `lg`** — hamburger in the header, overlay + slide-in panel, Escape and overlay-tap close it, body scroll locked while open. Implemented in `components/shell/app-shell.tsx`; a single item is `components/shell/nav-item.tsx` (icon + label, brand fill plus a logical start-edge indicator when active, 44px minimum height, and a `Soon` badge for routes a later milestone owns). Items come from `components/shell/nav.ts`, filtered by `can(role, permission)` so a receptionist never sees a link they can't open.
 
-**KPI / stat card** — white surface, label (12px muted) above a large figure, trend chip below (`▲ 12.4%` in success/danger). Optional colored top border or icon chip to differentiate.
+**KPI / stat card** — white surface, label (12px muted) above a large figure, trend chip below (`▲ 12.4%` in success/danger). Optional colored top border or icon chip to differentiate. Implemented in `components/shared/stat-card.tsx`: `trend` takes a direction plus an already-localized label, with `invertColor` for metrics where a rise is bad news (expenses, absences) so the color follows the meaning rather than the arrow; `accent` paints the top border; the icon sits in a tinted chip. The figure itself is never colored.
 
-**Data table** — subtle header background, 1px row borders, generous row height (~56px), hover highlight, status as a badge in its own column, avatar+name as a combined cell. **On mobile, tables become stacked cards** — never horizontally scroll a primary table.
+**Data table** — subtle header background, 1px row borders, generous row height (~56px), hover highlight, status as a badge in its own column, avatar+name as a combined cell. **On mobile, tables become stacked cards** — never horizontally scroll a primary table. The configuration screens share one implementation: `components/settings/entity-manager.tsx` takes a field-descriptor list and drives the create form, the row display and an inline edit panel from it, so a new master-data screen is a page file rather than another table. Editing expands in place instead of opening a modal — one behavior on phone and on desktop.
 
 **Status badge** — pill, 12px medium, tinted background + matching text color from the semantic set (e.g. `--success-bg` + `--success`). Live states get a pulsing dot.
 
@@ -135,3 +136,35 @@ Every screen must work on a phone. Breakpoints: `sm 640` / `md 768` / `lg 1024` 
 The approved direction is exemplified by: **Reception Desk** (search + student card + payment/attendance selectors + live session rail), **Today's Sessions** (KPI row + filters + data table), **Session Detail** (session panel + roster + receipt summary + absence alert), **Student Profile** (header stats + per-subject weekly attendance chips + ID card preview), **Analytics** (KPI cards with trends + revenue chart + per-teacher breakdown).
 
 When building any of these, match this structure and these tokens. Deviations need a reason.
+
+---
+
+## 9. Class Schedule Builder (M4 reference)
+
+Used when editing a `ClassGroup`'s `ClassSchedule` rows. Header shows read-only class context (subject icon+name, teacher icon+name, grade, active-status badge) in a bordered panel above the slot list — same panel style as a KPI card border, not a data table.
+
+**Weekly Time Slots list:** one row per slot — day dropdown, start/end time pickers, room dropdown, remove (×) icon at the row end. A slot-count + conflict-count summary sits top-right of the section header (e.g. "1 conflict · 3 slots this week"), conflict count in `--warning`.
+
+**Conflict display:** when a slot's room/teacher is double-booked, an inline amber banner (`--warning-bg` background, `--warning` text/icon, ⚠ icon) renders directly beneath that slot's row — never a modal or toast. Text pattern: "Room conflict with [Class Name]."
+
+**Add slot:** a `+ Add time slot` text-button below the last row, full-width tap target on mobile.
+
+**Mobile (< md):** slot rows stack into single cards (day/time/room as label→value pairs, matching the existing table→card responsive rule in §6) rather than a row grid. Remove control and Add button stay 44px+.
+
+---
+
+## 10. Student Discover / Browse (M8 reference)
+
+Marketplace-style grid for browsing published classes. Filter bar: grade / subject / day as pill-style dropdowns, result count right-aligned ("N classes found").
+
+**Class card:** white surface, `12px` radius, a 4px colored top border using the rotating subject-accent palette from §2 (assigned per subject, consistent app-wide — not per center). Contents: subject name (bold) + subject name in second locale beneath in muted text, status badge top-right (`Open` = info blue, `Requires Approval` = amber, `Pending` = amber, matching `ReservationStatus`), teacher avatar (initials, subject-accent color) + name, grade as a small outline chip, price right-aligned (never colored — money display rule from §2 still applies), schedule summary line with a calendar icon.
+
+**Action button (bottom of card, full width):**
+
+- Instant enroll (`requiresConfirmation = false`) → solid brand-blue button, label "Enroll."
+- Needs approval (`requiresConfirmation = true`) → outlined brand-blue button, label "Request to Join."
+- After a request is sent, the button is replaced by a `Pending` badge (amber) in the same position — no button shown.
+
+**Grid:** 3-up desktop, collapses to single column below `md` per §6. Filter bar collapses to a single "Filters" trigger opening a bottom sheet on mobile, per the existing modal→sheet rule.
+
+> **Note:** currency in all mockups must read **EGP**, not SAR — Phase 1 is Egypt-only per `00-master-product-spec.md` §1. Money still displays via `lib/format.ts`, never inline formatting.

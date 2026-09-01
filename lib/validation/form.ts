@@ -14,3 +14,15 @@ export function fieldErrorsFrom(error: ZodError): Record<string, string> {
   }
   return errors;
 }
+
+/**
+ * The state every settings Server Action returns (docs/02 §7).
+ * `error` and the values in `fieldErrors` are i18n keys, not copy.
+ */
+export type ActionState = {
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  status?: "created" | "saved" | "deleted";
+};
+
+export const IDLE_ACTION_STATE: ActionState = {};

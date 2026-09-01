@@ -44,7 +44,8 @@ const CENTER_NAV: NavDef[] = [
   { href: "/analytics", labelKey: "analytics", icon: "analytics", permission: "analytics.center.view", disabled: true },
   { href: "/expenses", labelKey: "expenses", icon: "expenses", permission: "expense.manage", disabled: true },
   { href: "/approvals", labelKey: "approvals", icon: "approvals", permission: "approvals.manage", disabled: true },
-  { href: ROUTES.centerStaff, labelKey: "staff", icon: "settings", permission: "staff.invite" },
+  // Settings owns its own sub-navigation (users & roles lives under it).
+  { href: ROUTES.centerSettings, labelKey: "settings", icon: "settings", permission: "center.settings.edit" },
 ];
 
 const TEACHER_NAV: NavDef[] = [

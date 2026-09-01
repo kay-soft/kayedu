@@ -39,6 +39,44 @@ These are settled. They shape the schema and the whole build.
 
 ---
 
+## 2.1 Pre-deployment checklist
+
+> The **Deployment gate** above says *when* we may deploy. This section says *what must be closed out first*. Everything listed here is a **deliberate development shortcut** standing in for a production requirement — each one is fine right now and unacceptable in front of a paying center. Nothing ships to production until every box is ticked. Add to this list the moment a new shortcut is taken; a shortcut that isn't written down here is a shortcut that gets forgotten.
+>
+> Referenced from `02-architecture.md` §13 (Deployment).
+
+### A. Auth & email
+
+- [ ] **Re-enable Supabase email confirmation.** Currently **disabled** so dev accounts can sign in instantly (Supabase dashboard → Authentication → Providers → Email → *Confirm email*). The code path already exists — `signUpAction` returns `status: "emailConfirmationRequired"` and `Auth.register.confirmEmail` is translated in both locales — so this is a dashboard toggle, not a code change. Until it is on, **anyone can register with an email address they do not control.**
+- [ ] **Wire a real transactional email sender** (e.g. Resend) once we own a domain, with SPF/DKIM configured. Today staff invite links are **copy/paste-shared manually** by the inviter (`02-architecture.md` §3, `createInvitationAction` → `InviteForm`), which is correct for Phase 1 and unworkable for a real center inviting a dozen staff. Same sender covers password reset and any future notification use. Note: this is **delivery plumbing**, not the deferred notifications feature (SMS/WhatsApp stay out of scope per §6).
+- [ ] **Enable leaked-password protection** in Supabase Auth (HaveIBeenPwned check) — currently off.
+- [ ] **Rotate / retire the seeded owner credential.** `prisma/seed.ts` creates a Supabase Auth user with `email_confirm: true` and the password from `SEED_OWNER_PASSWORD` (default `KayEdu!Dev123`). **`npm run db:seed` must never run against production.** The first real owner is provisioned through the admin panel + invite flow (M9), not the seed.
+- [ ] **Set `NEXT_PUBLIC_APP_URL`** to the real origin per environment (it is `http://localhost:3000` in dev).
+
+### B. Data & tenant security
+
+- [ ] **Give the RLS backstop real policies.** RLS is *enabled* on every table but **zero policies exist**, so PostgREST access is denied outright (safe by accident) while Prisma connects as a role that bypasses RLS. `02-architecture.md` §5 layer 2 asks for actual per-tenant policies. Before production: write the `center_id ∈ caller's memberships` policies, and confirm the Prisma connection role is **non-superuser**.
+- [ ] **Remove or lock down `public.rls_auto_enable()`** — a `SECURITY DEFINER` function currently executable by both `anon` and `authenticated` via `/rest/v1/rpc/rls_auto_enable`. Revoke `EXECUTE`, switch it to `SECURITY INVOKER`, or drop it.
+- [ ] **Service-role key hygiene.** `SUPABASE_SERVICE_ROLE_KEY` lives in the local `.env` for the seed. In production it exists only as a Vercel server-side env var — never `NEXT_PUBLIC_*`, never in a client bundle.
+- [ ] **Create the Storage buckets + policies** (`logos/`, `avatars/`, `id-cards/`, `session-uploads/`) with paths namespaced by `centerId` and policies mirroring tenant isolation (`02-architecture.md` §10). None exist yet — they land with M3.
+- [ ] **Backups + a *tested* restore**, and a privacy/legal review before handling minors' data (`02-architecture.md` §12).
+
+### C. Operations & pipeline
+
+- [ ] **Run the acceptance gates in CI**, not by hand: `npm run check:isolation` (cross-center by id, M1) and `npm run check:config` (center configuration, M2). `02-architecture.md` §5 requires them as gates; today they are manual local commands. The shared-teacher no-leak test joins them at M7.
+- [ ] **Migrations via `prisma migrate deploy` in CI** — never `migrate dev` against a deployed database.
+- [ ] **Error monitoring** (e.g. Sentry) wired before the pilot.
+- [ ] **Session-generation cron** configured on Vercel (`02-architecture.md` §11) — the rolling window does not materialize itself. Lands with M4.
+- [ ] **Data import/export** paths for onboarding and responsible offboarding (§7 criterion set / M10).
+
+### D. Code-level shortcuts
+
+- [ ] **`.dark` block in `app/globals.css` is stock shadcn placeholder values**, not KayEdu tokens, and nothing in the app ever sets `.dark`. Dark mode is not part of `04-design-system.md`. Either build it against the §2 tokens or delete the block — do not ship an unreviewed theme.
+- [ ] **Nav items marked `disabled: true`** in `components/shell/nav.ts` are milestone placeholders that render as "Soon". Every one must be either implemented or removed before a center sees the app.
+- [ ] **Run through all 15 acceptance criteria in §7** (M10) — this checklist is the *infrastructure* gate; §7 is the *product* gate. Both must pass.
+
+---
+
 ## 3. Roles & permissions
 
 Six roles. Start them **hardcoded** (not a fully dynamic permission engine) with a small number of toggles. Make it configurable *only* if centers demand it.

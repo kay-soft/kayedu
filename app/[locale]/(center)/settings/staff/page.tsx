@@ -2,7 +2,11 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { revokeInvitationAction } from "@/app/[locale]/(center)/settings/staff/actions";
 import { InviteForm } from "@/app/[locale]/(center)/settings/staff/invite-form";
-import { PageHeader } from "@/components/shared/page-header";
+import {
+  MemberRow,
+  type MemberRowData,
+} from "@/app/[locale]/(center)/settings/staff/member-row";
+import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
 
@@ -23,16 +27,33 @@ export default async function StaffSettingsPage() {
   const db = scoped(ctx);
   const locale = await getLocale();
   const t = await getTranslations("Staff");
+  const tCommon = await getTranslations("Settings.common");
   const tRoles = await getTranslations("Roles");
 
+  // Inactive memberships are listed too — deactivation is reversible, and a
+  // hidden former member is how a center loses track of who has access.
   const [members, invitations] = await Promise.all([
-    db.memberships.listWithUser({ active: true }),
+    db.memberships.listWithUser(),
     db.invitations.list({ status: "PENDING" }),
   ]);
 
+  const canManage = ctxCan(ctx, "staff.manage");
+  const canManageOwners = ctxCan(ctx, "center.ownership.manage");
+
+  const rows: MemberRowData[] = members.map((member) => ({
+    membershipId: member.id,
+    name: `${member.user.firstName} ${member.user.lastName}`.trim(),
+    email: member.user.email,
+    role: member.role,
+    active: member.active,
+    isSelf: member.userId === ctx.user.id,
+    // Only an owner may retitle or suspend another owner (docs/02 §3).
+    canEdit: canManage && (member.role !== "OWNER" || canManageOwners),
+  }));
+
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} description={t("subtitle")} />
+      <SectionHeader title={t("title")} description={t("subtitle")} />
 
       <Card>
         <CardHeader>
@@ -50,38 +71,26 @@ export default async function StaffSettingsPage() {
           <CardDescription>{t("membersSubtitle")}</CardDescription>
         </CardHeader>
         <CardContent>
-          {members.length === 0 ? (
+          {rows.length === 0 ? (
             <p className="text-sm text-text-muted">{t("noMembers")}</p>
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li
                 aria-hidden
-                className="hidden gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:grid md:grid-cols-[2fr_2fr_1fr]"
+                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
               >
-                <span>{t("columns.name")}</span>
-                <span>{t("columns.email")}</span>
-                <span>{t("columns.role")}</span>
+                <span className="min-w-0 flex-1">{t("columns.name")}</span>
+                <span className="min-w-0 flex-1">{t("columns.email")}</span>
+                <span className="min-w-0 flex-1">{t("columns.role")}</span>
+                <span className="w-20 shrink-0">{tCommon("status")}</span>
+                <span className="w-32 shrink-0 text-end">
+                  {tCommon("actions")}
+                </span>
               </li>
 
               {/* Stacked cards below md, table rows from md up (docs/04 §6). */}
-              {members.map((member) => (
-                <li
-                  key={member.id}
-                  className="grid gap-2 rounded-xl border border-border p-3 md:grid-cols-[2fr_2fr_1fr] md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3"
-                >
-                  <span className="text-sm font-medium">
-                    {member.user.firstName} {member.user.lastName}
-                  </span>
-                  <span
-                    className="truncate text-sm text-text-secondary"
-                    dir="ltr"
-                  >
-                    {member.user.email ?? "—"}
-                  </span>
-                  <span>
-                    <Badge variant="brand">{tRoles(member.role)}</Badge>
-                  </span>
-                </li>
+              {rows.map((member) => (
+                <MemberRow key={member.membershipId} member={member} />
               ))}
             </ul>
           )}
@@ -108,7 +117,9 @@ export default async function StaffSettingsPage() {
                       {invitation.email}
                     </p>
                     <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                      <Badge variant="warning">{tRoles(invitation.role)}</Badge>
+                      <Badge variant="warning">
+                        {tRoles(invitation.role)}
+                      </Badge>
                       <span>
                         {t("expiresOn", {
                           date: formatDate(invitation.expiresAt, locale),

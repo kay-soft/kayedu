@@ -1,4 +1,4 @@
-import type { Role } from "@prisma/client";
+import type { CenterSettings, Role } from "@prisma/client";
 
 /**
  * Hardcoded permission map (docs/02-architecture.md §6, spec §3).
@@ -103,6 +103,37 @@ const GRANTABLE_PERMISSIONS: Partial<Record<TenantRole, readonly Permission[]>> 
 };
 
 export type PermissionGrants = Partial<Record<Permission, boolean>>;
+
+/**
+ * Center settings that widen a role's baseline (docs/02-architecture.md §6).
+ * This is the single seam — nothing else reads the toggle columns.
+ *
+ * A grant only *adds*, and only for a permission listed as grantable for that
+ * role above. Both toggles below are receptionist-only there, so flipping one
+ * cannot widen anyone else: a TEACHER carrying `center.profit.view` in grants
+ * still fails `can()`, because profit is not in TEACHER's grantable set.
+ *
+ * Both default to false — spec §3 denies a receptionist profit and
+ * corrections until a center deliberately grants them.
+ *
+ * It lives here, beside the map it feeds, rather than in lib/auth/tenant.ts:
+ * this module has no runtime imports, so the check can be exercised outside
+ * the Next.js runtime (same reasoning as lib/db/tenant-scope.ts).
+ */
+export function permissionGrantsFromSettings(
+  settings: Pick<
+    CenterSettings,
+    "receptionistCanViewProfit" | "receptionistCanCorrectAttendance"
+  > | null,
+): PermissionGrants {
+  const grants: PermissionGrants = {};
+  if (!settings) return grants;
+  if (settings.receptionistCanViewProfit) grants["center.profit.view"] = true;
+  if (settings.receptionistCanCorrectAttendance) {
+    grants["attendance.correct"] = true;
+  }
+  return grants;
+}
 
 export function can(
   role: TenantRole,

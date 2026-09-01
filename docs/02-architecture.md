@@ -44,8 +44,13 @@ app/
       analytics/
       expenses/
       approvals/
-      settings/                 # education systems, subjects, grades, rooms,
-        staff/                  # roles, teacher-timeout, card, users
+      settings/                 # the configuration shell + its sub-nav
+        branches/  rooms/       # general (default cut, timeout, late, tz) is /settings
+        education-systems/
+        grades/  subjects/
+        card/                   # cardLayout JSON editor
+        permissions/            # receptionist grant toggles
+        staff/                  # users & roles: invite, change role, deactivate
     (teacher)/teacher/          # /teacher/dashboard, /teacher/sessions, ...
     (student)/student/          # /student/schedule, /student/discover, ...
     (admin)/admin/              # /admin/centers, /admin/platform
@@ -53,6 +58,7 @@ app/
 components/
   ui/                           # shadcn primitives
   shell/                        # app shell: sidebar, drawer, header, nav config
+  settings/                     # entity-manager (shared config CRUD), settings nav
   center/  teacher/  student/   # experience-specific composed components
   shared/                       # tables, filters, receipt, id-card, kpi-card
 lib/
@@ -70,6 +76,7 @@ lib/
     audit.ts                    # writeAuditLog()
     students.ts  classes.ts  sessions.ts  payments.ts  analytics.ts ...
   money.ts                      # the ONLY center-cut math + piastre helpers
+  card-layout.ts                # the default ID-card layout the editor offers
   routes.ts                     # locale-less pathnames + role home paths
   format.ts                     # locale-aware number/date formatting
   i18n/  request.ts  routing.ts  navigation.ts
@@ -80,7 +87,8 @@ messages/
 prisma/
   schema.prisma  migrations/  seed.ts
 scripts/
-  isolation-check.ts            # the cross-center acceptance gate
+  isolation-check.ts            # the cross-center acceptance gate (M1)
+  config-check.ts               # the center-configuration acceptance gate (M2)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -162,6 +170,10 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:isolation` (`scripts/isolation-check.ts`) is the cross-center-by-ID gate: it creates two throwaway centers, asserts that Center A cannot read a Center B row by id through the scoping primitives, that `requireScopedById` throws, that scoped lists never contain foreign rows, and that an unscoped `where` fails loudly — then cleans up. It needs a reachable database. The shared-teacher no-leak test arrives with the teacher portal in M7.
 
+`npm run check:config` (`scripts/config-check.ts`) is the M2 gate. It configures **two** throwaway centers through one `configureCenter(centerId)` — no per-center branching anywhere — using the same zod schemas the settings actions parse with and the same scoping primitives, then asserts the two configurations are independent, that neither center resolves the other center's config rows by id, that the permission-grant seam widens a receptionist and nobody else, and that the center-cut split is right in both modes. That is the "a second center needs zero code changes" claim, executed.
+
+Both gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts` and `lib/validation/settings.ts` are written that way. Keep it so.
+
 ---
 
 ## 6. Permissions
@@ -181,7 +193,16 @@ can(role, "analytics.own.view")   // TEACHER
 - **TEACHER** = `analytics.own.view`, `changeRequest.create`, `student.block`.
 - **PLATFORM_ADMIN** = `platform.manage`, `audit.view`.
 
-**Grants (the configurable edge cases).** `can(role, permission, grants)` can only *widen* a role, never narrow it, and only for permissions listed as grantable for that role (`RECEPTIONIST → attendance.correct, center.profit.view`). Grants come from `permissionGrantsFromSettings(ctx.settings)` — the single seam. `CenterSettings` carries no toggle columns yet: they land with the settings screens in **M2**, at which point that function maps them. Until then every grant is empty and the role baseline is the whole answer.
+**Grants (the configurable edge cases).** `can(role, permission, grants)` can only *widen* a role, never narrow it, and only for permissions listed as grantable for that role (`RECEPTIONIST → attendance.correct, center.profit.view`). Grants come from `permissionGrantsFromSettings(ctx.settings)` — the single seam. Nothing else reads the toggle columns.
+
+As of **M2** that function is real. It lives in `lib/auth/permissions.ts` (beside the map it feeds, and free of runtime imports so the acceptance gates can exercise it) and is re-exported from `lib/auth/tenant.ts`, where the context is assembled. It maps two `CenterSettings` columns:
+
+| Column | Grants | To |
+|---|---|---|
+| `receptionistCanViewProfit` | `center.profit.view` | RECEPTIONIST |
+| `receptionistCanCorrectAttendance` | `attendance.correct` | RECEPTIONIST |
+
+Both default to `false` (spec §3). The grants object is keyed by *permission*, not by role, and the grantable map is what confines each one: a TEACHER carrying `center.profit.view` in grants still fails `can()`, because profit is not in TEACHER's grantable set. Centers flip these at **`/settings/permissions`**, which requires `center.settings.edit` **and** `staff.manage`, and writes a `center.permissions.update` audit row.
 
 Server-side is authoritative (`requirePermission(ctx, perm)` in a loader, `ctxCan(ctx, perm)` in an action); client-side `can()` only hides controls.
 
@@ -238,3 +259,5 @@ Security by design + least privilege · strict tenant isolation (§5) · audit l
 ## 13. Deployment
 
 Vercel (Frankfurt) + Supabase (Frankfurt). Preview deploys for demos; **production only after the first center contract**. Migrations via `prisma migrate deploy` in CI. Secrets in Vercel env. Cron for session generation. Add error monitoring (e.g. Sentry) before pilot.
+
+**Before the first production deploy, work the [Pre-deployment checklist](./00-master-product-spec.md#21-pre-deployment-checklist) (`00-master-product-spec.md` §2.1).** It is the standing inventory of every deliberate dev-only shortcut currently standing in for a production requirement — disabled email confirmation, manually shared invite links, the seeded owner credential, the RLS policies this document's §5 layer 2 calls for, monitoring, backups. Add to it whenever a new shortcut is taken.

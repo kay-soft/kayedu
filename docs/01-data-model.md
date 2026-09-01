@@ -28,7 +28,7 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 ### Organization layer
 - **Center** — the tenant. `slug` (for subdomain/branding), `name`, `logoUrl`, theme color, `active`, plan/onboarding metadata.
 - **Branch** — physical location under a center.
-- **CenterSettings** — one row per center: default center-cut mode/value, teacher-timeout days, card-layout JSON, timezone, late-threshold default, feature toggles.
+- **CenterSettings** — one row per center: default center-cut mode/value, teacher-timeout days (`null` = disabled, never `0`), card-layout JSON, timezone, late-threshold default, and the **permission-grant toggles** (`receptionistCanViewProfit`, `receptionistCanCorrectAttendance`) — both `false` by default and read only through `permissionGrantsFromSettings()` (`02-architecture.md` §6). Configured from the Settings screens (M2); the row is upserted, so a center provisioned without one is still configurable.
 - **Membership** — `userId × centerId × role` for **Owner / Manager / Receptionist / Teacher**. `active`, invite metadata, and (for teachers) financial-visibility flags.
 - **Invitation** — pending email invite: `centerId`, email, role, token, status, expiry.
 
@@ -124,3 +124,4 @@ Center 1─* Expense *─1 ExpenseCategory
 - Timestamps: `createdAt`, `updatedAt` everywhere.
 - Money: store EGP as **integers in piastres** (i.e. `Int`, amount × 100) to avoid floating-point money bugs — or `Decimal`. **Decision: use `Int` piastres.** Document any display conversion in one place.
 - Soft-delete the things centers care about auditing (students, teachers, classes) via `active`/`deletedAt` rather than hard delete.
+- **Config master data (education systems, grades, subjects, branches, rooms) deactivates by default.** Hard delete is offered in the UI but refused while anything still references the row: these relations are optional FKs, so Postgres would `SET NULL` and silently orphan (a grade losing its subjects, a room losing its sessions) rather than fail. The settings actions count references first and tell the center to deactivate instead.

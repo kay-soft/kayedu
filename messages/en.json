@@ -28,7 +28,8 @@
     "discover": "Discover",
     "reservations": "My reservations",
     "centers": "Centers",
-    "platform": "Platform"
+    "platform": "Platform",
+    "settings": "Settings"
   },
   "Roles": {
     "OWNER": "Owner",
@@ -117,7 +118,7 @@
       "role": "Role"
     },
     "membersTitle": "Members",
-    "membersSubtitle": "Everyone with an active membership at this center.",
+    "membersSubtitle": "Everyone connected to this center. Change a role or suspend access here.",
     "noMembers": "No members yet.",
     "columns": {
       "name": "Name",
@@ -143,6 +144,180 @@
       "invalidEmail": "Enter a valid email address.",
       "invalidCenter": "Unknown center.",
       "invalidInvitation": "Unknown invitation."
+    },
+    "selfRow": "You",
+    "ownerRow": "Owner-only"
+  },
+  "Settings": {
+    "title": "Center configuration",
+    "subtitle": "Set up this center's academic and operational reference data. Everything here is per center — the next center needs no code changes.",
+    "nav": {
+      "label": "Settings sections",
+      "general": "General",
+      "branches": "Branches",
+      "rooms": "Rooms",
+      "educationSystems": "Education systems",
+      "grades": "Grades",
+      "subjects": "Subjects",
+      "card": "ID card",
+      "permissions": "Permissions",
+      "staff": "Users & roles"
+    },
+    "common": {
+      "add": "Add",
+      "save": "Save",
+      "cancel": "Cancel",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteYes": "Delete permanently",
+      "deleteConfirm": "This cannot be undone.",
+      "activate": "Activate",
+      "deactivate": "Deactivate",
+      "active": "Active",
+      "inactive": "Inactive",
+      "status": "Status",
+      "actions": "Actions",
+      "none": "Not set",
+      "saved": "Changes saved."
+    },
+    "errors": {
+      "forbidden": "You are not allowed to change this center's configuration.",
+      "notFound": "That record no longer exists in this center.",
+      "inUse": "Something still uses this record, so it cannot be deleted. Deactivate it instead.",
+      "duplicateName": "That name is already used here.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidNumber": "Enter a whole number.",
+      "invalidAmount": "Enter a valid amount in EGP.",
+      "invalidPercent": "Enter a whole percentage between 0 and 100.",
+      "invalidShareType": "Choose fixed EGP or a percentage.",
+      "invalidJson": "This is not valid JSON.",
+      "cardLayoutNotObject": "The card layout must be a JSON object.",
+      "ownerOnly": "Only an owner can change another owner.",
+      "lastOwner": "This is the center's only owner. Add another owner first.",
+      "selfEdit": "You cannot change your own role or access.",
+      "alreadyMember": "That person already holds this role at this center."
+    },
+    "general": {
+      "title": "General",
+      "description": "The defaults a new class starts from, and how this center runs day to day.",
+      "cutTitle": "Default center cut",
+      "cutDescription": "The share this center takes from a session payment. Each class can override it; this is the starting point.",
+      "shareType": "Cut type",
+      "percentage": "Percentage of the amount",
+      "fixed": "Fixed amount (EGP)",
+      "shareValuePct": "Percentage",
+      "shareValueEgp": "Amount (EGP)",
+      "previewLabel": "On a {amount} session",
+      "previewEmpty": "Enter a value to see the split.",
+      "centerShare": "Center keeps",
+      "teacherShare": "Teacher gets",
+      "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
+      "operationsTitle": "Daily operations",
+      "operationsDescription": "Teacher inactivity, the default late threshold, and the clock this center runs on.",
+      "timeoutLabel": "Mark a teacher inactive after a period with no sessions",
+      "timeoutDescription": "Counted from their last completed session. Leave this off to never auto-deactivate a teacher.",
+      "timeoutDays": "Days",
+      "lateThreshold": "Default late threshold (minutes)",
+      "lateThresholdHint": "A class can set its own; this is what a new class starts with.",
+      "timezone": "Timezone"
+    },
+    "educationSystems": {
+      "title": "Education systems",
+      "description": "The curricula this center teaches (National, Languages, IG…) and the price each one starts from.",
+      "addTitle": "Add an education system",
+      "addDescription": "Grades and classes are organised under these.",
+      "listTitle": "Education systems",
+      "listDescription": "Deactivate one to keep it out of new classes without losing its history.",
+      "empty": "No education systems yet. Add the first one above.",
+      "fields": {
+        "name": "Name",
+        "basePrice": "Base price",
+        "basePriceHint": "Per session, in EGP. A class can charge something different."
+      }
+    },
+    "grades": {
+      "title": "Grades",
+      "description": "The year groups this center teaches, optionally tied to an education system.",
+      "addTitle": "Add a grade",
+      "addDescription": "Subjects, students and classes all hang off a grade.",
+      "listTitle": "Grades",
+      "listDescription": "Deactivate a grade to retire it without touching the students already in it.",
+      "empty": "No grades yet. Add the first one above.",
+      "noSystemsHint": "You have no education systems yet. Grades work without one, but adding systems first keeps the taxonomy tidy.",
+      "fields": {
+        "name": "Name",
+        "educationSystem": "Education system"
+      }
+    },
+    "subjects": {
+      "title": "Subjects",
+      "description": "What is taught, per grade. The same subject name can repeat across grades.",
+      "addTitle": "Add a subject",
+      "addDescription": "A class is a teacher teaching one subject to one grade.",
+      "listTitle": "Subjects",
+      "listDescription": "Deactivate a subject to stop new classes using it.",
+      "empty": "No subjects yet. Add the first one above.",
+      "noGradesHint": "You have no grades yet. Add grades first so each subject can sit under one.",
+      "fields": {
+        "name": "Name",
+        "grade": "Grade"
+      }
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "The physical locations this center runs. Rooms and sessions belong to a branch.",
+      "addTitle": "Add a branch",
+      "addDescription": "A single-location center needs just one.",
+      "listTitle": "Branches",
+      "listDescription": "Deactivate a branch that has closed; its history stays intact.",
+      "empty": "No branches yet. Add the first one above.",
+      "fields": {
+        "name": "Name",
+        "address": "Address"
+      }
+    },
+    "rooms": {
+      "title": "Rooms",
+      "description": "Where sessions physically happen. Capacity is used to warn about over-booking.",
+      "addTitle": "Add a room",
+      "addDescription": "Name it the way staff say it out loud — that is what they will pick from.",
+      "listTitle": "Rooms",
+      "listDescription": "Deactivate a room that is out of service.",
+      "empty": "No rooms yet. Add the first one above.",
+      "noBranchesHint": "You have no branches yet. Rooms work without one, but assigning a branch keeps multi-location scheduling straight.",
+      "fields": {
+        "name": "Name",
+        "capacity": "Capacity",
+        "capacityHint": "Seats. Use 0 if you do not want a limit.",
+        "branch": "Branch"
+      }
+    },
+    "card": {
+      "title": "ID card",
+      "description": "Where the logo, photo, name, grade, student code and QR block sit on this center's printed student card.",
+      "rendererNote": "The card itself is generated in a later milestone (M3). This screen stores the layout it will use.",
+      "editorTitle": "Card layout",
+      "editorDescription": "A JSON object. Positions are percentages of the card face, so the same layout works on screen and at print size.",
+      "jsonLabel": "Layout JSON",
+      "emptyHint": "Leave this empty to use the built-in default card.",
+      "loadDefault": "Load the default",
+      "clear": "Clear"
+    },
+    "permissions": {
+      "title": "Permissions",
+      "description": "The few role edges this center can widen. A grant can only add — it never takes away what a role already has.",
+      "receptionistTitle": "Receptionist grants",
+      "receptionistDescription": "Both are denied by default. Turn one on only if this center's front desk genuinely needs it.",
+      "viewProfitLabel": "Can see center profit and settlement figures",
+      "viewProfitDescription": "Off by default: the desk records money but does not see what the center keeps.",
+      "correctAttendanceLabel": "Can correct an already-recorded attendance",
+      "correctAttendanceDescription": "Corrections are always written to the audit log, whoever makes them.",
+      "effectiveTitle": "In effect now",
+      "effectiveDescription": "What a {role} at this center can do right now, resolved through the same check the server enforces.",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "widenOnlyNote": "Owners and managers always have both; these toggles apply to receptionists only."
     }
   },
   "CenterDashboard": {

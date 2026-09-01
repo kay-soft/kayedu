@@ -15,6 +15,7 @@ import {
   ROLE_PRECEDENCE,
   can,
   isCenterStaffRole,
+  permissionGrantsFromSettings,
   type Permission,
   type PermissionGrants,
   type TenantRole,
@@ -55,18 +56,11 @@ export type CenterRelation = {
 };
 
 /**
- * Center settings that widen a role's baseline permissions.
- * No toggles exist on CenterSettings yet — they land with the settings screens
- * in M2. This is the single seam where they will be read.
+ * The permission-grant seam is re-exported here because this is where the
+ * TenantContext is assembled; the function itself lives in
+ * lib/auth/permissions.ts so it stays free of runtime imports.
  */
-export function permissionGrantsFromSettings(
-  settings: CenterSettings | null,
-): PermissionGrants {
-  const grants: PermissionGrants = {};
-  if (!settings) return grants;
-  // M2 maps the CenterSettings toggles onto grants here.
-  return grants;
-}
+export { permissionGrantsFromSettings };
 
 /** Drops the joined `center` relation so the row matches its Prisma model type. */
 function withoutCenter<T extends { center: unknown }>(row: T): Omit<T, "center"> {

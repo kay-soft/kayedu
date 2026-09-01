@@ -5,10 +5,9 @@ import { Menu, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Link, usePathname } from "@/lib/i18n/navigation";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
-import { ShellIcon } from "@/components/shell/shell-icon";
+import { NavItem } from "@/components/shell/nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
-import { Badge } from "@/components/ui/badge";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
@@ -86,49 +85,17 @@ function SidebarContent({
         className="flex-1 overflow-y-auto p-3"
       >
         <ul className="flex flex-col gap-1">
-          {nav.map((item) => {
-            const active = isActive(pathname, item.href);
-            const label = tNav(item.labelKey);
-
-            if (item.disabled) {
-              return (
-                <li key={item.href}>
-                  <span
-                    aria-disabled="true"
-                    className="flex min-h-11 cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm text-text-muted/70"
-                  >
-                    <ShellIcon name={item.icon} className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">{label}</span>
-                    <Badge
-                      variant="neutral"
-                      className="bg-white/5 text-text-muted ring-white/10"
-                    >
-                      {tShell("soon")}
-                    </Badge>
-                  </span>
-                </li>
-              );
-            }
-
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  onClick={onNavigate}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                    active
-                      ? "bg-brand font-medium text-brand-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  )}
-                >
-                  <ShellIcon name={item.icon} className="size-4 shrink-0" />
-                  <span className="truncate">{label}</span>
-                </Link>
-              </li>
-            );
-          })}
+          {nav.map((item) => (
+            <li key={item.href}>
+              <NavItem
+                item={item}
+                active={isActive(pathname, item.href)}
+                label={tNav(item.labelKey)}
+                soonLabel={tShell("soon")}
+                onNavigate={onNavigate}
+              />
+            </li>
+          ))}
         </ul>
       </nav>
 
