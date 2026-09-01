@@ -161,7 +161,7 @@ A few center settings toggle edge cases (e.g. whether receptionists may correct 
 
 ## 8. i18n & RTL
 
-- **next-intl** with a `[locale]` segment; `ar` default. All copy in `messages/ar.json` + `messages/en.json`, never hardcoded.
+- **next-intl** with a `[locale]` segment; `en` default, `ar` fully supported. All copy in `messages/ar.json` + `messages/en.json`, never hardcoded.
 - `<html lang={locale} dir={locale === "ar" ? "rtl" : "ltr"}>`.
 - **Tailwind logical properties only:** `ps-*/pe-*`, `ms-*/me-*`, `text-start/text-end`, `start-0/end-0`. No `left/right`.
 - Arabic-Indic vs Latin numerals: pick one convention for display (recommend Arabic-Indic in AR, Latin in EN) via an Intl formatter helper.

@@ -1,0 +1,13 @@
+{
+  "HomePage": {
+    "title": "KayEdu",
+    "description": "Education center management platform",
+    "body": "This starter screen verifies locale routing, page direction, and the base UI primitives are wired up correctly.",
+    "cta": "Get started"
+  },
+  "LocaleSwitcher": {
+    "label": "Language",
+    "ar": "العربية",
+    "en": "English"
+  }
+}
