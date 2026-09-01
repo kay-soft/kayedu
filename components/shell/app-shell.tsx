@@ -117,31 +117,6 @@ function SidebarContent({
         </ul>
       </nav>
 
-      {onToggleCollapsed ? (
-        <div className="border-t border-sidebar-border p-3">
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            title={collapsed ? tShell("expandSidebar") : tShell("collapseSidebar")}
-            aria-pressed={collapsed}
-            className={cn(
-              "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent",
-              collapsed && "justify-center px-0",
-            )}
-          >
-            {/* The panel flips edge with the toggle direction, so it mirrors
-                correctly in RTL (docs/04 §7) — collapsing always "closes
-                toward the start" regardless of locale. */}
-            {collapsed ? (
-              <PanelLeftOpen className="size-4 shrink-0 rtl:-scale-x-100" />
-            ) : (
-              <PanelLeftClose className="size-4 shrink-0 rtl:-scale-x-100" />
-            )}
-            {collapsed ? null : <span>{tShell("collapseSidebar")}</span>}
-          </button>
-        </div>
-      ) : null}
-
       <div className="border-t border-sidebar-border p-3">
         <div
           className={cn(
@@ -167,7 +142,33 @@ function SidebarContent({
             </span>
           )}
         </div>
-        <SignOutButton collapsed={collapsed} />
+
+        {/* Sign out and the collapse toggle share one row (icon-only, right
+            next to sign out — no label, so the rail never needs its own
+            scrollbar). They stack instead when the rail is already narrow. */}
+        <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
+          <div className="min-w-0 flex-1">
+            <SignOutButton collapsed={collapsed} />
+          </div>
+          {onToggleCollapsed ? (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              title={collapsed ? tShell("expandSidebar") : tShell("collapseSidebar")}
+              aria-pressed={collapsed}
+              className="flex size-11 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-accent"
+            >
+              {/* The panel flips edge with the toggle direction, so it mirrors
+                  correctly in RTL (docs/04 §7) — collapsing always "closes
+                  toward the start" regardless of locale. */}
+              {collapsed ? (
+                <PanelLeftOpen className="size-4 rtl:-scale-x-100" />
+              ) : (
+                <PanelLeftClose className="size-4 rtl:-scale-x-100" />
+              )}
+            </button>
+          ) : null}
+        </div>
       </div>
     </>
   );

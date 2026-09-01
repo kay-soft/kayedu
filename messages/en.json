@@ -225,6 +225,10 @@
     "listTitle": "Teachers at this center",
     "listDescription": "Deactivated teachers stay listed — hiding a former teacher is how a center loses track of its schedule.",
     "empty": "No teachers yet.",
+    "noMatches": "No teachers match that search.",
+    "searchLabel": "Search teachers",
+    "searchPlaceholder": "Name, email or phone",
+    "searchSubmit": "Search",
     "open": "Open",
     "columns": {
       "name": "Name",
