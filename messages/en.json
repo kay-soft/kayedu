@@ -1,13 +1,179 @@
 {
-  "HomePage": {
-    "title": "KayEdu",
-    "description": "Education center management platform",
-    "body": "This starter screen verifies locale routing, page direction, and the base UI primitives are wired up correctly.",
-    "cta": "Get started"
-  },
   "LocaleSwitcher": {
     "label": "Language",
     "ar": "العربية",
     "en": "English"
+  },
+  "Shell": {
+    "productName": "KayEdu",
+    "primaryNav": "Primary navigation",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "switchCenter": "Switch center",
+    "signOut": "Sign out",
+    "soon": "Soon"
+  },
+  "Nav": {
+    "dashboard": "Dashboard",
+    "reception": "Reception desk",
+    "sessions": "Sessions",
+    "classes": "Classes",
+    "students": "Students",
+    "teachers": "Teachers",
+    "analytics": "Analytics",
+    "expenses": "Expenses",
+    "approvals": "Approvals",
+    "staff": "Users & roles",
+    "schedule": "My schedule",
+    "discover": "Discover",
+    "reservations": "My reservations",
+    "centers": "Centers",
+    "platform": "Platform"
+  },
+  "Roles": {
+    "OWNER": "Owner",
+    "MANAGER": "Manager",
+    "RECEPTIONIST": "Receptionist",
+    "TEACHER": "Teacher",
+    "STUDENT": "Student",
+    "PLATFORM_ADMIN": "Super admin"
+  },
+  "Auth": {
+    "fields": {
+      "email": "Email",
+      "password": "Password",
+      "confirmPassword": "Confirm password",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "phone": "Phone",
+      "optional": "optional"
+    },
+    "login": {
+      "title": "Sign in",
+      "subtitle": "One KayEdu account, every center you belong to.",
+      "submit": "Sign in",
+      "noAccount": "No account yet?",
+      "registerLink": "Create one"
+    },
+    "register": {
+      "title": "Create your account",
+      "subtitle": "One account connects you to every center you work or study with.",
+      "submit": "Create account",
+      "haveAccount": "Already have an account?",
+      "loginLink": "Sign in",
+      "passwordHint": "At least 8 characters.",
+      "confirmEmail": "Check your inbox, confirm your email address, then sign in."
+    },
+    "selectCenter": {
+      "title": "Choose a center",
+      "subtitle": "You are connected to more than one center. Pick where you want to work.",
+      "emptySubtitle": "Your account is not connected to a center yet.",
+      "emptyHelp": "Ask a center owner or manager to invite you by email, or open the invitation link you were sent.",
+      "platformAdminLink": "Go to the platform admin"
+    },
+    "invite": {
+      "title": "Staff invitation",
+      "subtitle": "You have been invited to join {center} on KayEdu.",
+      "centerLabel": "Center",
+      "roleLabel": "Role",
+      "emailLabel": "Invited email",
+      "accept": "Accept invitation",
+      "signInToAccept": "Sign in with the invited email address to accept.",
+      "createAccount": "Create an account",
+      "signIn": "I already have an account",
+      "signedInAs": "You are signed in as {email}.",
+      "expiresAt": "This invitation expires on {date}.",
+      "goToLogin": "Go to sign in"
+    },
+    "errors": {
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidPhone": "Enter a valid Egyptian mobile number.",
+      "passwordTooShort": "Password must be at least 8 characters.",
+      "passwordMismatch": "The two passwords do not match.",
+      "invalidCredentials": "Wrong email or password.",
+      "emailInUse": "An account already uses this email. Sign in instead.",
+      "phoneInUse": "This phone number belongs to another account.",
+      "signUpFailed": "We could not create the account. Try again.",
+      "invalidToken": "This invitation link is not valid.",
+      "inviteNotFound": "This invitation no longer exists.",
+      "inviteExpired": "This invitation has expired. Ask for a new one.",
+      "inviteAlreadyAccepted": "This invitation was already accepted.",
+      "inviteEmailMismatch": "This invitation was sent to a different email address.",
+      "centerInactive": "This center is not active.",
+      "invalidCenter": "Unknown center.",
+      "invalidInvitation": "Unknown invitation."
+    }
+  },
+  "Staff": {
+    "title": "Users & roles",
+    "subtitle": "Invite staff and teachers to this center and manage who has access.",
+    "inviteTitle": "Invite by email",
+    "inviteSubtitle": "The invitee accepts with the link below and gets a membership at this center.",
+    "sendInvite": "Create invitation",
+    "fields": {
+      "email": "Email",
+      "role": "Role"
+    },
+    "membersTitle": "Members",
+    "membersSubtitle": "Everyone with an active membership at this center.",
+    "noMembers": "No members yet.",
+    "columns": {
+      "name": "Name",
+      "email": "Email",
+      "role": "Role"
+    },
+    "pendingTitle": "Pending invitations",
+    "pendingSubtitle": "Invitations that have not been accepted yet.",
+    "noInvitations": "No pending invitations.",
+    "revoke": "Revoke",
+    "expiresOn": "Expires {date}",
+    "inviteCreated": "Invitation created. Share the link below with the invitee.",
+    "inviteLinkLabel": "Invitation link",
+    "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "errors": {
+      "forbidden": "You are not allowed to invite people to this center.",
+      "alreadyMember": "That person already has this role at this center.",
+      "ownerOnly": "Only an owner can invite another owner.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidCenter": "Unknown center.",
+      "invalidInvitation": "Unknown invitation."
+    }
+  },
+  "CenterDashboard": {
+    "title": "{center}",
+    "subtitle": "Today at a glance.",
+    "stats": {
+      "staff": "Staff",
+      "teachers": "Teachers",
+      "students": "Students",
+      "branches": "Branches"
+    },
+    "milestoneNote": "Milestone M1 is in place: identity, memberships, center selection and tenant-scoped access. The daily loop (reception, sessions, attendance, payments) arrives in M5."
+  },
+  "TeacherDashboard": {
+    "title": "Teacher dashboard",
+    "subtitle": "Your work at {center}.",
+    "milestoneNote": "Your schedule, sessions, students and earnings land in M7."
+  },
+  "StudentSchedule": {
+    "title": "My schedule",
+    "subtitle": "Your classes at {center}.",
+    "milestoneNote": "Your schedule and class discovery arrive in M8."
+  },
+  "AdminCenters": {
+    "title": "Centers",
+    "subtitle": "Every tenant on the platform.",
+    "empty": "No centers yet. Run the seed script to create one.",
+    "active": "Active",
+    "suspended": "Suspended",
+    "members": "{count} members",
+    "students": "{count} students",
+    "milestoneNote": "Creating, activating and suspending tenants from here arrives in M9."
   }
 }

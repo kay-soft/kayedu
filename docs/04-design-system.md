@@ -42,6 +42,9 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 --info-bg:          #DBEAFE;
 ```
 
+**How these bind to shadcn (`app/globals.css`).** The tokens above are the source; the base-nova variables are aliases onto them, so components inherit the palette without per-screen overrides:
+`--background: var(--bg-canvas)` · `--card: var(--bg-surface)` · `--muted: var(--bg-subtle)` · `--primary`/`--ring`/`--sidebar-primary`: `var(--brand)` · `--destructive: var(--danger)` · the sidebar family maps to `--bg-sidebar` / `--bg-sidebar-hover` / `--text-on-dark`. The semantic set is exposed as Tailwind utilities too: `bg-success-bg text-success`, `text-text-muted`, `bg-canvas`, `bg-surface-subtle`.
+
 **Semantic color rules (non-negotiable — consistency here is what makes the app readable at a glance):**
 - **Present / Paid / positive** → success green.
 - **Late / Pending / warning** → amber.
@@ -74,15 +77,16 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 ## 4. Shape, spacing & elevation
 
 - **Radius:** cards & panels `12px`; buttons, inputs, badges `8px`; pills & avatars `full`.
+  In Tailwind: `--radius: 0.5rem` makes `rounded-lg` = 8px (buttons/inputs/badges) and `--radius-xl` is pinned to `0.75rem` = 12px (cards). Use `rounded-lg` and `rounded-xl`; don't hand-write radii.
 - **Spacing scale:** 4 / 8 / 12 / 16 / 24 / 32 px. Card padding `24px` desktop, `16px` mobile.
-- **Shadows:** soft and minimal — `0 1px 3px rgba(15,23,42,.06)` at rest, `0 4px 12px rgba(15,23,42,.08)` on hover/elevated. No heavy drop shadows.
+- **Shadows:** soft and minimal — `0 1px 3px rgba(15,23,42,.06)` at rest, `0 4px 12px rgba(15,23,42,.08)` on hover/elevated. Available as the `shadow-card` / `shadow-card-hover` utilities. No heavy drop shadows.
 - **Borders:** 1px `--border`. Prefer a border over a shadow for table and list separation.
 
 ---
 
 ## 5. Core component patterns
 
-**Sidebar** — dark (`--bg-sidebar`), fixed, ~240px. Logo + center name at top, nav items with icon + label, active item highlighted with the brand color, user block pinned at the bottom. **Collapses to a drawer under `lg`.**
+**Sidebar** — dark (`--bg-sidebar`), fixed, 240px (`w-60`). Logo + center name at top, nav items with icon + label, active item highlighted with the brand color, user block + sign-out pinned at the bottom. **Collapses to a drawer under `lg`** — hamburger in the header, overlay + slide-in panel, Escape and overlay-tap close it, body scroll locked while open. Implemented in `components/shell/app-shell.tsx`; nav items come from `components/shell/nav.ts`, filtered by `can(role, permission)` so a receptionist never sees a link they can't open.
 
 **KPI / stat card** — white surface, label (12px muted) above a large figure, trend chip below (`▲ 12.4%` in success/danger). Optional colored top border or icon chip to differentiate.
 
