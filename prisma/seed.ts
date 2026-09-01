@@ -3,15 +3,18 @@
  *
  * Run with:  npm run db:seed
  *
- * The owner's User row is created without an `authId`. On their first Supabase
- * login the mirror in lib/auth/session.ts links the two by email — identity
- * stays global, and no duplicate person is created.
+ * If SUPABASE_SERVICE_ROLE_KEY is set, this also creates the matching
+ * **Supabase Auth** user (email confirmed) and links it to the User row, so the
+ * owner can sign in immediately. Without that key it creates the app-side User
+ * only — the mirror in lib/auth/session.ts then links by email on first login.
  *
  * Override the defaults with env vars:
  *   SEED_CENTER_NAME, SEED_CENTER_SLUG, SEED_CENTER_THEME,
- *   SEED_OWNER_EMAIL, SEED_OWNER_FIRST_NAME, SEED_OWNER_LAST_NAME, SEED_OWNER_PHONE
+ *   SEED_OWNER_EMAIL, SEED_OWNER_PASSWORD,
+ *   SEED_OWNER_FIRST_NAME, SEED_OWNER_LAST_NAME, SEED_OWNER_PHONE
  */
 import { PrismaClient } from "@prisma/client";
+import { createClient } from "@supabase/supabase-js";
 
 const prisma = new PrismaClient();
 
@@ -21,9 +24,63 @@ const CENTER_THEME = process.env.SEED_CENTER_THEME ?? "#2563EB";
 const OWNER_EMAIL = (process.env.SEED_OWNER_EMAIL ?? "owner@kayedu.test")
   .trim()
   .toLowerCase();
+const OWNER_PASSWORD = process.env.SEED_OWNER_PASSWORD ?? "KayEdu!Dev123";
 const OWNER_FIRST_NAME = process.env.SEED_OWNER_FIRST_NAME ?? "محمد";
 const OWNER_LAST_NAME = process.env.SEED_OWNER_LAST_NAME ?? "الكيالي";
 const OWNER_PHONE = process.env.SEED_OWNER_PHONE ?? null;
+
+/**
+ * Creates (or finds) the Supabase Auth user for the owner and returns its id.
+ * Returns null when the service-role key isn't configured.
+ */
+async function ensureAuthUser(): Promise<string | null> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceRoleKey || serviceRoleKey.startsWith("[")) {
+    return null;
+  }
+
+  const admin = createClient(url, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  const { data, error } = await admin.auth.admin.createUser({
+    email: OWNER_EMAIL,
+    password: OWNER_PASSWORD,
+    email_confirm: true,
+    user_metadata: {
+      first_name: OWNER_FIRST_NAME,
+      last_name: OWNER_LAST_NAME,
+      locale: "ar",
+    },
+  });
+
+  if (!error && data.user) {
+    console.log(`  Auth user    created — password: ${OWNER_PASSWORD}`);
+    return data.user.id;
+  }
+
+  // Already registered: find the existing auth user instead of failing.
+  for (let page = 1; page <= 10; page += 1) {
+    const { data: list, error: listError } = await admin.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    });
+    if (listError) throw listError;
+
+    const match = list.users.find(
+      (user) => user.email?.toLowerCase() === OWNER_EMAIL,
+    );
+    if (match) {
+      console.log("  Auth user    already existed — password unchanged");
+      return match.id;
+    }
+    if (list.users.length < 200) break;
+  }
+
+  throw error ?? new Error(`Could not create or find auth user ${OWNER_EMAIL}`);
+}
 
 async function main() {
   const center = await prisma.center.upsert({
@@ -64,15 +121,25 @@ async function main() {
     },
   });
 
+  console.log("Seed complete:");
+  console.log(`  Center       ${center.name} (${center.slug}) — ${center.id}`);
+  console.log(
+    `  Settings     share ${settings.defaultShareType} ${settings.defaultShareValue}`,
+  );
+  console.log(`  Branch       ${branch.name}`);
+
+  const authId = await ensureAuthUser();
+
   const owner = await prisma.user.upsert({
     where: { email: OWNER_EMAIL },
-    update: {},
+    update: authId ? { authId } : {},
     create: {
       email: OWNER_EMAIL,
       firstName: OWNER_FIRST_NAME,
       lastName: OWNER_LAST_NAME,
       phone: OWNER_PHONE,
       locale: "ar",
+      authId,
     },
   });
 
@@ -92,15 +159,18 @@ async function main() {
       },
     }));
 
-  console.log("Seed complete:");
-  console.log(`  Center       ${center.name} (${center.slug}) — ${center.id}`);
-  console.log(`  Settings     share ${settings.defaultShareType} ${settings.defaultShareValue}`);
-  console.log(`  Branch       ${branch.name}`);
   console.log(`  Owner        ${OWNER_EMAIL} — membership ${membership.id}`);
   console.log("");
-  console.log("Next: create a Supabase Auth user with this same email");
-  console.log("(Supabase dashboard → Authentication → Users → Add user),");
-  console.log("then sign in — the User mirror links by email on first login.");
+
+  if (authId) {
+    console.log(`Sign in at /en/login with ${OWNER_EMAIL} / ${OWNER_PASSWORD}`);
+    console.log("This is a development credential — change it before any real use.");
+  } else {
+    console.log("SUPABASE_SERVICE_ROLE_KEY is not set, so no Auth user was created.");
+    console.log("Create one manually: Supabase dashboard → Authentication → Users →");
+    console.log(`Add user → ${OWNER_EMAIL} (tick \"Auto Confirm User\").`);
+    console.log("The User mirror links to it by email on first login.");
+  }
 }
 
 main()
