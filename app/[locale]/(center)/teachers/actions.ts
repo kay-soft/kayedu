@@ -5,17 +5,18 @@ import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
+import { prisma } from "@/lib/db/client";
 import {
-  countOtherCenterRelations,
   createPerson,
   deletePersonIfOrphaned,
   describeMatch,
   resolveContact,
-  updatePerson,
+  seedLocalName,
 } from "@/lib/db/identity";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { teacherDeleteBlockers } from "@/lib/db/students";
-import { canEditGlobalProfile, fullName } from "@/lib/identity";
+import { scopedData } from "@/lib/db/tenant-scope";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -29,13 +30,18 @@ import {
 } from "@/lib/validation/people";
 
 /**
- * Teachers (M3). Every action follows docs/02 §7: getTenantContext() →
- * permission check → zod → scoped write → audit if sensitive → revalidate.
+ * Teachers (M3, revised). Every action follows docs/02 §7: getTenantContext()
+ * → permission check → zod → scoped write → audit if sensitive → revalidate.
  *
  * A teacher is a **Membership**, not a user (CLAUDE.md rule 4). Adding one who
  * already exists on the platform links a membership to that person; it never
  * creates a second identity (spec §5), and the match is always shown to staff
  * before it is acted on.
+ *
+ * Name and contact details (firstName/lastName/email/phone/altPhone) are
+ * **this center's own local record** for the person (docs/01-data-model.md
+ * §6) — seeded from the global `User` at creation, then always editable here,
+ * independently of any other center, with no lock of any kind.
  */
 
 const FORBIDDEN: PeopleActionState = { error: "forbidden" };
@@ -44,14 +50,17 @@ const NOT_FOUND: PeopleActionState = { error: "notFound" };
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
 async function teacherScope(): Promise<Scope | null> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "teacher.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
 
-function revalidateTeachers(locale: string, teacherId?: string): void {
+function revalidateTeacherList(locale: string): void {
   revalidatePath(`/${locale}${ROUTES.centerTeachers}`);
-  if (teacherId) revalidatePath(`/${locale}${ROUTES.centerTeacher(teacherId)}`);
+}
+
+function revalidateTeacherDetail(locale: string, teacherId: string): void {
+  revalidatePath(`/${locale}${ROUTES.centerTeacher(teacherId)}`);
 }
 
 /** Both unique columns on User are contact details, so P2002 is a duplicate. */
@@ -74,16 +83,9 @@ export async function createTeacherAction(
   const parsed = teacherCreateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const {
-    locale,
-    firstName,
-    lastName,
-    email,
-    phone,
-    altPhone,
-    canSeeEarnings,
-    linkUserId,
-  } = parsed.data;
+  const { locale, firstName, lastName, email, phone, altPhone, linkUserId } =
+    parsed.data;
+  const centerId = scope.ctx.center.id;
 
   const contact = { email, phone };
   const resolution = await resolveContact(contact);
@@ -92,28 +94,37 @@ export async function createTeacherAction(
   // identities is a manual, audited admin action (docs/02 §3), not this form.
   if (resolution.kind === "conflict") return { error: "contactConflict" };
 
-  // Nothing matched: create the person, then their membership here.
+  // The name to seed onto this center's record: the existing person's real
+  // name when linking to a match, or the form's own input for a brand-new
+  // person (docs/01 §6) — editable here immediately either way, no lock.
+  const name = seedLocalName(resolution, { firstName, lastName });
+
+  // Nothing matched: create the person (seeding the global User from the
+  // entered contact — docs/01 §6) and this center's membership, atomically.
   if (resolution.kind === "none") {
     if (linkUserId) return { error: "matchGone" };
     try {
-      const person = await createPerson({
-        firstName,
-        lastName,
-        email,
-        phone,
-        altPhone,
-        locale,
-      });
-
-      const membership = await scope.db.teachers.create({
-        userId: person.id,
-        role: "TEACHER",
-        canSeeEarnings,
-        joinedAt: new Date(),
+      const membership = await prisma.$transaction(async (tx) => {
+        const person = await createPerson(
+          { firstName, lastName, email, phone, altPhone, locale },
+          tx,
+        );
+        return tx.membership.create({
+          data: scopedData(centerId, {
+            userId: person.id,
+            role: "TEACHER",
+            joinedAt: new Date(),
+            firstName: name.firstName,
+            lastName: name.lastName,
+            email,
+            phone,
+            altPhone,
+          }),
+        });
       });
 
       await writeAuditLog({
-        centerId: scope.ctx.center.id,
+        centerId,
         actorUserId: scope.ctx.user.id,
         action: "membership.create",
         entityType: "Membership",
@@ -121,7 +132,7 @@ export async function createTeacherAction(
         after: { role: "TEACHER", via: "teacher.add", linked: false },
       });
 
-      revalidateTeachers(locale);
+      revalidateTeacherList(locale);
       return { status: "created" };
     } catch (error) {
       if (isUniqueViolation(error)) return { error: "contactInUse" };
@@ -131,25 +142,30 @@ export async function createTeacherAction(
 
   // Someone matched. Show them before doing anything — "this person already
   // exists", never a silent merge (spec §5).
-  const match = await describeMatch(scope.ctx.center.id, resolution.user, contact);
-  if (linkUserId !== resolution.user.id) {
+  const match = await describeMatch(centerId, resolution.match, contact);
+  if (linkUserId !== resolution.match.user.id) {
     return { status: "matchFound", match };
   }
 
   if (match.existingHere === "teacher") return { error: "alreadyTeacher" };
 
   // Re-activating a former teacher is the same membership coming back, not a
-  // second one — Membership is unique on (userId, centerId, role).
-  const existing = await scope.db.teachers.findByUserId(resolution.user.id);
+  // second one — Membership is unique on (userId, centerId, role). Either
+  // way, this center's own contact record is written fresh from the form.
+  const existing = await scope.db.teachers.findByUserId(resolution.match.user.id);
   if (existing) {
     await scope.db.teachers.update(existing.id, {
       active: true,
-      canSeeEarnings,
       joinedAt: existing.joinedAt ?? new Date(),
+      firstName: name.firstName,
+      lastName: name.lastName,
+      email,
+      phone,
+      altPhone,
     });
 
     await writeAuditLog({
-      centerId: scope.ctx.center.id,
+      centerId,
       actorUserId: scope.ctx.user.id,
       action: "membership.activate",
       entityType: "Membership",
@@ -158,19 +174,23 @@ export async function createTeacherAction(
       after: { active: true, via: "teacher.add", linked: true },
     });
 
-    revalidateTeachers(locale);
+    revalidateTeacherList(locale);
     return { status: "created" };
   }
 
   const membership = await scope.db.teachers.create({
-    userId: resolution.user.id,
+    userId: resolution.match.user.id,
     role: "TEACHER",
-    canSeeEarnings,
     joinedAt: new Date(),
+    firstName: name.firstName,
+    lastName: name.lastName,
+    email,
+    phone,
+    altPhone,
   });
 
   await writeAuditLog({
-    centerId: scope.ctx.center.id,
+    centerId,
     actorUserId: scope.ctx.user.id,
     action: "membership.create",
     entityType: "Membership",
@@ -183,7 +203,7 @@ export async function createTeacherAction(
     },
   });
 
-  revalidateTeachers(locale);
+  revalidateTeacherList(locale);
   return { status: "created" };
 }
 
@@ -199,61 +219,24 @@ export async function updateTeacherAction(
   const parsed = teacherUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const {
-    locale,
-    membershipId,
+  const { locale, membershipId, firstName, lastName, email, phone, altPhone } =
+    parsed.data;
+
+  const teacher = await scope.db.teachers.findById(membershipId);
+  if (!teacher) return NOT_FOUND;
+
+  // This center's own record — name included — is always editable, with no
+  // lock of any kind (docs/01 §6).
+  await scope.db.teachers.update(teacher.id, {
     firstName,
     lastName,
     email,
     phone,
     altPhone,
-    canSeeEarnings,
-  } = parsed.data;
-
-  const teacher = await scope.db.teachers.findById(membershipId);
-  if (!teacher) return NOT_FOUND;
-
-  // Financial visibility is a permission change — always audited (rule 7).
-  if (teacher.canSeeEarnings !== canSeeEarnings) {
-    await scope.db.teachers.update(teacher.id, { canSeeEarnings });
-    await writeAuditLog({
-      centerId: scope.ctx.center.id,
-      actorUserId: scope.ctx.user.id,
-      action: "membership.visibility.change",
-      entityType: "Membership",
-      entityId: teacher.id,
-      before: { canSeeEarnings: teacher.canSeeEarnings },
-      after: { canSeeEarnings },
-    });
-  }
-
-  // Identity is global: this center may only rewrite a person it created and
-  // who exists nowhere else (lib/identity.ts). Otherwise the profile fields
-  // are read-only here and the form renders them disabled.
-  const editable = canEditGlobalProfile({
-    authId: teacher.user.authId,
-    otherCenterRelations: await countOtherCenterRelations(
-      teacher.userId,
-      scope.ctx.center.id,
-    ),
   });
 
-  if (editable) {
-    try {
-      await updatePerson(teacher.userId, {
-        firstName,
-        lastName,
-        email,
-        phone,
-        altPhone,
-      });
-    } catch (error) {
-      if (isUniqueViolation(error)) return { error: "contactInUse" };
-      throw error;
-    }
-  }
-
-  revalidateTeachers(locale, teacher.id);
+  revalidateTeacherDetail(locale, teacher.id);
+  revalidateTeacherList(locale);
   return { status: "saved" };
 }
 
@@ -287,7 +270,9 @@ export async function setTeacherActiveAction(
     after: { active },
   });
 
-  revalidateTeachers(locale, teacher.id);
+  // Active/inactive shows on the list row and the detail header only.
+  revalidateTeacherList(locale);
+  revalidateTeacherDetail(locale, teacher.id);
   return { status: "saved" };
 }
 
@@ -297,7 +282,7 @@ export async function deleteTeacherAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   // Delete is a Manager/Owner action, never a receptionist's (spec §3).
   if (!ctxCan(ctx, "teacher.delete")) return FORBIDDEN;
   const db = scoped(ctx);
@@ -334,12 +319,12 @@ export async function deleteTeacherAction(
     before: {
       role: "TEACHER",
       userId: teacher.userId,
-      name: fullName(teacher.user),
+      name: fullName(localName(teacher, teacher.user)),
     },
     after: { personDeleted, blocksRemoved: blocks.length },
   });
 
-  revalidateTeachers(locale, teacher.id);
+  revalidateTeacherList(locale);
   return { status: "deleted" };
 }
 
@@ -349,7 +334,7 @@ export async function blockStudentAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "student.block")) return FORBIDDEN;
   const db = scoped(ctx);
 
@@ -393,7 +378,7 @@ export async function blockStudentAction(
     },
   });
 
-  revalidateTeachers(locale, teacher.id);
+  revalidateTeacherDetail(locale, teacher.id);
   return { status: "created" };
 }
 
@@ -401,7 +386,7 @@ export async function unblockStudentAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "student.block")) return FORBIDDEN;
   const db = scoped(ctx);
 
@@ -428,6 +413,6 @@ export async function unblockStudentAction(
   });
 
   const teacher = await db.teachers.findByUserId(block.refId);
-  revalidateTeachers(parsed.data.locale, teacher?.id);
+  if (teacher) revalidateTeacherDetail(parsed.data.locale, teacher.id);
   return { status: "deleted" };
 }

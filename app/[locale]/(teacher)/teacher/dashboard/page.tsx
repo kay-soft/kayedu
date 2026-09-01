@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { getTenantContext } from "@/lib/auth/tenant";
 
 export default async function TeacherDashboardPage() {
-  const ctx = await getTenantContext({ experience: "teacher" });
+  const ctx = await getTenantContext("teacher");
   const t = await getTranslations("TeacherDashboard");
   const tRoles = await getTranslations("Roles");
 

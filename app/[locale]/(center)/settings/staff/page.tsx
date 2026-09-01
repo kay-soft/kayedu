@@ -21,7 +21,7 @@ import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
 
 export default async function StaffSettingsPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "staff.invite");
 
   const db = scoped(ctx);

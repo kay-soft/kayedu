@@ -8,7 +8,7 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
-import { fullName } from "@/lib/identity";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 
 /**
@@ -21,7 +21,7 @@ export default async function StudentPaperPrintPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "student.manage");
 
   const { id } = await params;
@@ -45,7 +45,7 @@ export default async function StudentPaperPrintPage({
 
       <PrintToolbar
         backHref={ROUTES.centerStudent(student.id)}
-        title={fullName(student.user)}
+        title={fullName(localName(student, student.user))}
       />
 
       <div className="mx-auto w-full max-w-3xl p-4 sm:p-8 print:max-w-none print:p-0">
@@ -53,7 +53,7 @@ export default async function StudentPaperPrintPage({
           <div className="min-w-0">
             <p className="text-xs text-text-muted">{ctx.center.name}</p>
             <h2 className="text-xl font-bold text-text-primary">
-              {fullName(student.user)}
+              {fullName(localName(student, student.user))}
             </h2>
             <p className="mt-1 text-sm text-text-secondary" dir="ltr">
               {student.studentCode}
@@ -76,12 +76,12 @@ export default async function StudentPaperPrintPage({
               />
               <DetailRow
                 label={t("fields.phone")}
-                value={student.user.phone}
+                value={student.phone}
                 ltr
               />
               <DetailRow
                 label={t("fields.email")}
-                value={student.user.email}
+                value={student.email}
                 ltr
               />
               <DetailRow

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { FieldError } from "@/components/shared/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +55,8 @@ export function EntityFields({
   fieldErrors?: Record<string, string>;
   translateError: (key: string) => string;
 }) {
+  const t = useTranslations("Shared");
+
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {fields.map((field) => {
@@ -60,10 +64,25 @@ export function EntityFields({
         const error = fieldErrors?.[field.name];
         const invalid = error ? true : undefined;
         const defaultValue = values?.[field.name] ?? "";
+        // The mandatory form convention (docs/04 §5 "Form fields"): a field
+        // that is genuinely always optional gets a dimmed "(optional)" tag.
+        const optional =
+          field.kind === "text"
+            ? !field.required
+            : field.kind === "select"
+              ? field.emptyLabel !== undefined
+              : false;
 
         return (
           <div key={field.name} className="flex min-w-0 flex-col gap-1.5">
-            <Label htmlFor={id}>{field.label}</Label>
+            <Label htmlFor={id}>
+              {field.label}
+              {optional ? (
+                <span className="font-normal text-text-muted">
+                  {t("optional")}
+                </span>
+              ) : null}
+            </Label>
 
             {field.kind === "select" ? (
               <SelectInput

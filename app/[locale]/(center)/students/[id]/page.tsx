@@ -22,7 +22,7 @@ import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped } from "@/lib/db/scoped";
 import { idCardGeneratedAt } from "@/lib/db/storage";
 import { formatDate } from "@/lib/format";
-import { canEditGlobalProfile, fullName } from "@/lib/identity";
+import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { storageConfigured } from "@/lib/supabase/admin";
@@ -39,7 +39,7 @@ export default async function StudentDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "student.manage");
 
   const { id } = await params;
@@ -80,11 +80,6 @@ export default async function StudentDetailPage({
     codeLabel: t("card.codeLabel"),
   });
 
-  const profileEditable = canEditGlobalProfile({
-    authId: student.user.authId,
-    otherCenterRelations: otherRelations,
-  });
-
   const gradeOptions = grades.map((grade) => ({
     value: grade.id,
     label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
@@ -93,7 +88,7 @@ export default async function StudentDetailPage({
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={fullName(student.user)}
+        title={fullName(localName(student, student.user))}
         description={t("detailSubtitle")}
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -120,12 +115,11 @@ export default async function StudentDetailPage({
           <CardContent>
             <StudentProfileForm
               studentProfileId={student.id}
-              person={{
-                firstName: student.user.firstName,
-                lastName: student.user.lastName,
-                email: student.user.email ?? "",
-                phone: student.user.phone ?? "",
-                altPhone: student.user.altPhone ?? "",
+              name={localName(student, student.user)}
+              contact={{
+                email: student.email ?? "",
+                phone: student.phone ?? "",
+                altPhone: student.altPhone ?? "",
               }}
               student={{
                 gradeId: student.gradeId ?? "",
@@ -137,7 +131,6 @@ export default async function StudentDetailPage({
               }}
               grades={gradeOptions}
               noneLabel={tCommon("none")}
-              profileEditable={profileEditable}
               canDelete={ctxCan(ctx, "student.delete")}
             />
           </CardContent>
@@ -260,7 +253,7 @@ export default async function StudentDetailPage({
                             href={ROUTES.centerTeacher(teacher.id)}
                             className="text-brand hover:underline"
                           >
-                            {fullName(teacher.user)}
+                            {fullName(localName(teacher, teacher.user))}
                           </Link>
                         ) : (
                           tTeachers("blocks.unknownTeacher")

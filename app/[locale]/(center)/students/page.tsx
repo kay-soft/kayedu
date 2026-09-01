@@ -1,11 +1,12 @@
 import { getTranslations } from "next-intl/server";
 
+import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
 import { PromoteForm } from "@/app/[locale]/(center)/students/promote-form";
-import { StudentForm } from "@/app/[locale]/(center)/students/student-form";
 import {
   StudentRow,
   type StudentRowData,
 } from "@/app/[locale]/(center)/students/student-row";
+import { Pagination } from "@/components/center/pagination";
 import { SearchBox } from "@/components/center/search-box";
 import { FormMessage } from "@/components/shared/form-message";
 import { PageHeader } from "@/components/shared/page-header";
@@ -19,26 +20,29 @@ import {
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
-import { fullName } from "@/lib/identity";
-
-/** Enough for a desk to work with; the search narrows anything bigger. */
-const PAGE_SIZE = 50;
+import { fullName, localName } from "@/lib/identity";
+import { ROUTES } from "@/lib/routes";
+import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 
 /**
- * Students (spec §4.1 item 4). Registering, searching, promoting — the list a
- * receptionist lives in. Every read and write is centerId-scoped through
- * `scoped(ctx)`; the search itself runs in the database, not in memory.
+ * Students (spec §4.1 item 4) — a dashboard first: search, filter and a
+ * paginated table. "Add student" opens a dialog (docs/04 §5) rather than
+ * embedding a registration form in the page, so the list is what a
+ * receptionist actually lands on and a center with thousands of students
+ * never loads them all at once (docs/02-architecture.md §14).
  */
 export default async function StudentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "student.manage");
 
-  const { q } = await searchParams;
+  const { q, page: pageParam } = await searchParams;
   const query = (q ?? "").trim();
+  const page = parsePageParam(pageParam);
+  const pageSize = DEFAULT_PAGE_SIZE;
 
   const db = scoped(ctx);
   const t = await getTranslations("Students");
@@ -47,17 +51,21 @@ export default async function StudentsPage({
   const where = query.length > 0 ? studentSearchWhere(query) : undefined;
 
   const [students, total, grades] = await Promise.all([
-    db.students.search({ where, take: PAGE_SIZE }),
+    db.students.search({
+      where,
+      take: pageSize,
+      skip: (page - 1) * pageSize,
+    }),
     db.students.count(where),
     db.grades.list(),
   ]);
 
   const rows: StudentRowData[] = students.map((student) => ({
     studentProfileId: student.id,
-    name: fullName(student.user),
+    name: fullName(localName(student, student.user)),
     studentCode: student.studentCode,
     gradeName: student.grade?.name ?? null,
-    contact: student.parentPhone ?? student.user.phone ?? student.user.email,
+    contact: student.parentPhone ?? student.phone ?? student.email,
     active: student.active,
   }));
 
@@ -70,17 +78,20 @@ export default async function StudentsPage({
 
   const canPromote = ctxCan(ctx, "student.promote");
 
+  const buildHref = (targetPage: number) => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (targetPage > 1) params.set("page", String(targetPage));
+    const qs = params.toString();
+    return qs ? `${ROUTES.centerStudents}?${qs}` : ROUTES.centerStudents;
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={t("title")}
         description={t("subtitle", { count: total })}
-      />
-
-      <StudentForm
-        grades={gradeOptions}
-        studentCount={total}
-        noneLabel={tCommon("none")}
+        action={<AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} />}
       />
 
       {canPromote ? (
@@ -142,11 +153,12 @@ export default async function StudentsPage({
             </ul>
           )}
 
-          {total > rows.length ? (
-            <p className="text-sm text-text-muted">
-              {t("moreResults", { shown: rows.length, total })}
-            </p>
-          ) : null}
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            buildHref={buildHref}
+          />
         </CardContent>
       </Card>
     </div>

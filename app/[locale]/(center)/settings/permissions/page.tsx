@@ -25,7 +25,7 @@ const GRANTABLE: { permission: Permission; labelKey: string }[] = [
 ];
 
 export default async function PermissionsPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "center.settings.edit");
   await requirePermission(ctx, "staff.manage");
 

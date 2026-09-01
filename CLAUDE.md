@@ -48,7 +48,7 @@ If the docs are silent on something that touches **money, permissions, or tenant
    teacherShare = amount - centerShare;
    ```
 
-4. **Identity vs membership.** A `User` is global (one per person). Their center relationship is a `Membership` (staff/teacher) or `StudentProfile`/`Enrollment` (student). Attendance/payments/analytics attach to the scoped record, never the raw `User`. An existing person joining a new center = new membership, not a new user.
+4. **Identity vs membership.** A `User` is global (one per person) and holds only the auth credential (`authId`/`email`/`phone`) plus a platform-wide default name — it is the thing duplicate-matching keys on (verified phone/email only, never name). Their center relationship is a `Membership` (staff/teacher) or `StudentProfile`/`Enrollment` (student), and **that relationship owns its own local name and contact record** (`firstName`/`lastName`/`email`/`phone`/`altPhone`) — seeded from the `User` when the relationship is created, then editable at that center immediately and independently of any other center, with no lock of any kind. Attendance/payments/analytics attach to the scoped record, never the raw `User`. An existing person joining a new center = new membership, not a new user.
 
 5. **i18n / RTL always.** No hardcoded UI strings — everything through `next-intl` (`messages/ar.json`, `messages/en.json`). Logical CSS properties only (`ps-`/`pe-`, `start`/`end`) — never `left`/`right`. Every screen works in both locales.
 

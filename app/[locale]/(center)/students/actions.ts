@@ -1,29 +1,29 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
+import { prisma } from "@/lib/db/client";
 import {
-  countOtherCenterRelations,
   createPerson,
   deletePersonIfOrphaned,
   describeMatch,
   resolveContact,
-  updatePerson,
+  seedLocalName,
 } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
-import { nextStudentCode, studentDeleteBlockers } from "@/lib/db/students";
+import { claimStudentCode, studentDeleteBlockers } from "@/lib/db/students";
+import { scopedData } from "@/lib/db/tenant-scope";
 import {
   removeStoredObject,
   signedUrlFor,
   uploadIdCard,
   uploadStudentPhoto,
 } from "@/lib/db/storage";
-import { canEditGlobalProfile, fullName } from "@/lib/identity";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import {
   AVATARS_BUCKET,
@@ -43,13 +43,20 @@ import {
 } from "@/lib/validation/people";
 
 /**
- * Students (M3). Every action follows docs/02 §7: getTenantContext() →
- * permission check → zod → scoped write → audit if sensitive → revalidate.
+ * Students (M3, revised). Every action follows docs/02 §7: getTenantContext()
+ * → permission check → zod → scoped write → audit if sensitive → revalidate.
  *
  * A student is a **StudentProfile** at this center, hanging off one global
  * `User` (CLAUDE.md rule 4). Registering someone who already exists links a
  * profile to that person and says so in the UI — it never creates a second
  * identity and never merges silently (spec §5).
+ *
+ * Name and contact details (firstName/lastName/email/phone/altPhone) are
+ * **this center's own local record** for the student (docs/01-data-model.md
+ * §6) — seeded from the global `User` at creation, then always editable here,
+ * independently of any other center, with no lock of any kind. The student
+ * code is never typed: it is claimed race-free from a per-center counter
+ * (`lib/db/students.ts`) in the same transaction that creates the record.
  */
 
 const FORBIDDEN: PeopleActionState = { error: "forbidden" };
@@ -59,32 +66,24 @@ type Scope = { ctx: TenantContext; db: ScopedDb };
 
 /** Receptionists register students; only Manager/Owner delete them (spec §3). */
 async function studentScope(): Promise<Scope | null> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "student.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
 
-function revalidateStudents(locale: string, studentId?: string): void {
+function revalidateStudentList(locale: string): void {
   revalidatePath(`/${locale}${ROUTES.centerStudents}`);
-  if (studentId) {
-    revalidatePath(`/${locale}${ROUTES.centerStudent(studentId)}`);
-    revalidatePath(`/${locale}${ROUTES.centerStudentCard(studentId)}`);
-    revalidatePath(`/${locale}${ROUTES.centerStudentPaper(studentId)}`);
-  }
 }
 
-function isUniqueViolation(error: unknown, target?: string): boolean {
-  if (
-    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-    error.code !== "P2002"
-  ) {
-    return false;
-  }
-  if (!target) return true;
-  const fields = (error.meta?.target ?? []) as string[] | string;
-  return Array.isArray(fields)
-    ? fields.includes(target)
-    : String(fields).includes(target);
+/** List + detail — the two views that show name, grade, code and status. */
+function revalidateStudentDetail(locale: string, studentId: string): void {
+  revalidatePath(`/${locale}${ROUTES.centerStudent(studentId)}`);
+}
+
+/** Card + paper only — the views affected by a photo or a printable field. */
+function revalidateStudentPrintables(locale: string, studentId: string): void {
+  revalidatePath(`/${locale}${ROUTES.centerStudentCard(studentId)}`);
+  revalidatePath(`/${locale}${ROUTES.centerStudentPaper(studentId)}`);
 }
 
 /** Re-resolves a form-supplied grade inside this center. */
@@ -116,23 +115,16 @@ export async function createStudentAction(
     phone,
     altPhone,
     gradeId,
-    studentCode,
     parentFirstName,
     parentLastName,
     parentPhone,
     parentAltPhone,
     linkUserId,
   } = parsed.data;
+  const centerId = scope.ctx.center.id;
 
   const grade = await resolveGrade(scope.db, gradeId);
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
-
-  if (
-    studentCode &&
-    (await scope.db.students.count({ studentCode })) > 0
-  ) {
-    return { fieldErrors: { studentCode: "duplicateStudentCode" } };
-  }
 
   const contact = { email, phone };
   const resolution = await resolveContact(contact);
@@ -141,88 +133,87 @@ export async function createStudentAction(
   // audited admin action (docs/02 §3), not something this form decides.
   if (resolution.kind === "conflict") return { error: "contactConflict" };
 
-  let userId: string;
+  let userId: string | null = null;
 
   if (resolution.kind === "matched") {
-    const match = await describeMatch(
-      scope.ctx.center.id,
-      resolution.user,
-      contact,
-    );
+    const match = await describeMatch(centerId, resolution.match, contact);
 
     // Show the person before linking anything (spec §5).
-    if (linkUserId !== resolution.user.id) {
+    if (linkUserId !== resolution.match.user.id) {
       return { status: "matchFound", match };
     }
     if (match.existingHere === "student") {
       return { error: "alreadyStudent", match };
     }
-    userId = resolution.user.id;
-  } else {
-    if (linkUserId) return { error: "matchGone" };
-    try {
-      const person = await createPerson({
-        firstName,
-        lastName,
-        email,
-        phone,
-        altPhone,
-        locale,
-      });
-      userId = person.id;
-    } catch (error) {
-      if (isUniqueViolation(error)) return { error: "contactInUse" };
-      throw error;
-    }
+    userId = resolution.match.user.id;
+  } else if (linkUserId) {
+    return { error: "matchGone" };
   }
 
-  const profileData = {
-    userId,
-    gradeId: grade.id,
-    parentFirstName,
-    parentLastName,
-    parentPhone,
-    parentAltPhone,
-  };
+  // The name to seed onto this center's record: the existing person's real
+  // name when linking to a match, or the form's own input for a brand-new
+  // person (docs/01 §6) — editable here immediately either way, no lock.
+  const name = seedLocalName(resolution, { firstName, lastName });
 
-  // Two receptionists registering at once can land on the same auto code, so
-  // the unique index is the arbiter and a collision simply retries.
-  let created;
-  for (let attempt = 0; attempt < 3 && !created; attempt += 1) {
-    const code = studentCode ?? (await nextStudentCode(scope.db));
-    try {
-      created = await scope.db.students.create({
-        ...profileData,
-        studentCode: code,
+  // The code claim, the (possible) new person, and the profile all happen in
+  // one transaction: a rollback for any reason undoes the claim too, so a
+  // crash never burns a code into a permanent gap (docs/01 §6).
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const personId =
+        userId ??
+        (
+          await createPerson(
+            { firstName, lastName, email, phone, altPhone, locale },
+            tx,
+          )
+        ).id;
+
+      const code = await claimStudentCode(tx, centerId);
+
+      return tx.studentProfile.create({
+        data: scopedData(centerId, {
+          userId: personId,
+          studentCode: code,
+          gradeId: grade.id,
+          firstName: name.firstName,
+          lastName: name.lastName,
+          email,
+          phone,
+          altPhone,
+          parentFirstName,
+          parentLastName,
+          parentPhone,
+          parentAltPhone,
+        }),
       });
-    } catch (error) {
-      if (isUniqueViolation(error, "userId")) return { error: "alreadyStudent" };
-      if (isUniqueViolation(error, "studentCode")) {
-        if (studentCode) {
-          return { fieldErrors: { studentCode: "duplicateStudentCode" } };
-        }
-        continue;
-      }
-      throw error;
+    });
+
+    await writeAuditLog({
+      centerId,
+      actorUserId: scope.ctx.user.id,
+      action: "student.create",
+      entityType: "StudentProfile",
+      entityId: created.id,
+      after: {
+        userId: created.userId,
+        studentCode: created.studentCode,
+        linked: resolution.kind === "matched",
+      },
+    });
+
+    revalidateStudentList(locale);
+    return { status: "created" };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2002"
+    ) {
+      return { error: "contactInUse" };
     }
+    throw error;
   }
-  if (!created) return { fieldErrors: { studentCode: "duplicateStudentCode" } };
-
-  await writeAuditLog({
-    centerId: scope.ctx.center.id,
-    actorUserId: scope.ctx.user.id,
-    action: "student.create",
-    entityType: "StudentProfile",
-    entityId: created.id,
-    after: {
-      userId,
-      studentCode: created.studentCode,
-      linked: resolution.kind === "matched",
-    },
-  });
-
-  revalidateStudents(locale, created.id);
-  return { status: "created" };
 }
 
 // ── Edit ───────────────────────────────────────────────────────────────────
@@ -246,7 +237,6 @@ export async function updateStudentAction(
     phone,
     altPhone,
     gradeId,
-    studentCode,
     parentFirstName,
     parentLastName,
     parentPhone,
@@ -259,56 +249,25 @@ export async function updateStudentAction(
   const grade = await resolveGrade(scope.db, gradeId);
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
 
-  const code = studentCode ?? student.studentCode;
-  if (
-    code !== student.studentCode &&
-    (await scope.db.students.count({ studentCode: code })) > 0
-  ) {
-    return { fieldErrors: { studentCode: "duplicateStudentCode" } };
-  }
-
-  try {
-    await scope.db.students.update(student.id, {
-      studentCode: code,
-      gradeId: grade.id,
-      parentFirstName,
-      parentLastName,
-      parentPhone,
-      parentAltPhone,
-    });
-  } catch (error) {
-    if (isUniqueViolation(error, "studentCode")) {
-      return { fieldErrors: { studentCode: "duplicateStudentCode" } };
-    }
-    throw error;
-  }
-
-  // The person's own name/email/phone are global. This center may only rewrite
-  // them for someone it created who exists nowhere else (lib/identity.ts).
-  const editable = canEditGlobalProfile({
-    authId: student.user.authId,
-    otherCenterRelations: await countOtherCenterRelations(
-      student.userId,
-      scope.ctx.center.id,
-    ),
+  // This center's own record — name included — is always editable, with no
+  // lock of any kind (docs/01 §6). The student code is never part of this
+  // form; it was assigned once, at creation.
+  await scope.db.students.update(student.id, {
+    firstName,
+    lastName,
+    gradeId: grade.id,
+    email,
+    phone,
+    altPhone,
+    parentFirstName,
+    parentLastName,
+    parentPhone,
+    parentAltPhone,
   });
 
-  if (editable) {
-    try {
-      await updatePerson(student.userId, {
-        firstName,
-        lastName,
-        email,
-        phone,
-        altPhone,
-      });
-    } catch (error) {
-      if (isUniqueViolation(error)) return { error: "contactInUse" };
-      throw error;
-    }
-  }
-
-  revalidateStudents(locale, student.id);
+  revalidateStudentDetail(locale, student.id);
+  revalidateStudentPrintables(locale, student.id);
+  revalidateStudentList(locale);
   return { status: "saved" };
 }
 
@@ -329,7 +288,9 @@ export async function setStudentActiveAction(
 
   await scope.db.students.update(student.id, { active });
 
-  revalidateStudents(locale, student.id);
+  // Active/inactive shows on the list row and the detail header only.
+  revalidateStudentList(locale);
+  revalidateStudentDetail(locale, student.id);
   return { status: "saved" };
 }
 
@@ -339,7 +300,7 @@ export async function deleteStudentAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   // Delete is a Manager/Owner action, never a receptionist's (spec §3).
   if (!ctxCan(ctx, "student.delete")) return FORBIDDEN;
   const db = scoped(ctx);
@@ -388,12 +349,12 @@ export async function deleteStudentAction(
     before: {
       userId: student.userId,
       studentCode: student.studentCode,
-      name: fullName(student.user),
+      name: fullName(localName(student, student.user)),
     },
     after: { personDeleted, blocksRemoved: blocks.length },
   });
 
-  revalidateStudents(locale, student.id);
+  revalidateStudentList(locale);
   return { status: "deleted" };
 }
 
@@ -403,7 +364,7 @@ export async function promoteGradeAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
   const db = scoped(ctx);
 
@@ -433,7 +394,7 @@ export async function promoteGradeAction(
     after: { gradeId: to.id, gradeName: to.name, students: result.count },
   });
 
-  revalidateStudents(locale);
+  revalidateStudentList(locale);
   return { status: "saved" };
 }
 
@@ -442,7 +403,7 @@ export async function setStudentGradeAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
   const db = scoped(ctx);
 
@@ -469,7 +430,8 @@ export async function setStudentGradeAction(
     after: { gradeId: grade.id },
   });
 
-  revalidateStudents(locale, student.id);
+  revalidateStudentList(locale);
+  revalidateStudentDetail(locale, student.id);
   return { status: "saved" };
 }
 
@@ -509,7 +471,7 @@ export async function uploadStudentPhotoAction(
     );
   }
 
-  revalidateStudents(parsed.data.locale, student.id);
+  revalidateStudentPrintables(parsed.data.locale, student.id);
   return { status: "saved" };
 }
 
@@ -534,7 +496,7 @@ export async function removeStudentPhotoAction(
   ).catch(() => undefined);
   await scope.db.students.update(student.id, { photoUrl: null });
 
-  revalidateStudents(parsed.data.locale, student.id);
+  revalidateStudentPrintables(parsed.data.locale, student.id);
   return { status: "deleted" };
 }
 
@@ -574,7 +536,7 @@ export async function generateIdCardAction(
     stored.path,
   );
 
-  revalidateStudents(locale, student.id);
+  revalidateStudentPrintables(locale, student.id);
   return downloadUrl
     ? { status: "generated", downloadUrl }
     : { error: "storage" };

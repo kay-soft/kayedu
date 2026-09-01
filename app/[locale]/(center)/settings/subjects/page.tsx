@@ -17,7 +17,7 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 
 export default async function SubjectsPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "center.settings.edit");
 
   const db = scoped(ctx);

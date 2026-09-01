@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { getTenantContext } from "@/lib/auth/tenant";
 
 export default async function StudentSchedulePage() {
-  const ctx = await getTenantContext({ experience: "student" });
+  const ctx = await getTenantContext("student");
   const t = await getTranslations("StudentSchedule");
 
   return (

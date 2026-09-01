@@ -6,33 +6,26 @@ import { Field } from "@/components/shared/field";
 import { Input } from "@/components/ui/input";
 
 /**
- * The five fields every person carries on their **global** `User` row: name and
- * contact details (docs/01-data-model.md §2). Teachers and students share this
- * component so the two forms cannot drift apart.
- *
- * When `readOnly` is set the inputs render disabled with an explanation: the
- * person is shared with another center, or has signed in and owns their own
- * profile, so this center may not rewrite their identity (lib/identity.ts).
+ * A person's name **as this center has it on file** — a center-local field on
+ * `StudentProfile`/`Membership`, exactly like the contact fields in
+ * `components/center/contact-fields.tsx` (docs/01-data-model.md §6). Seeded
+ * from the global `User` when this center's record is created, then always
+ * editable here, independently of any other center, with no lock of any kind.
  */
 export type PersonValues = {
   firstName?: string;
   lastName?: string;
-  email?: string;
-  phone?: string;
-  altPhone?: string;
 };
 
 export function PersonFields({
   idPrefix,
   values,
   fieldErrors,
-  readOnly,
   autoFocus,
 }: {
   idPrefix: string;
   values?: PersonValues;
   fieldErrors?: Record<string, string>;
-  readOnly?: boolean;
   autoFocus?: boolean;
 }) {
   const t = useTranslations("People.fields");
@@ -54,8 +47,8 @@ export function PersonFields({
           defaultValue={values?.firstName ?? ""}
           maxLength={60}
           required
-          disabled={readOnly}
           autoFocus={autoFocus}
+          placeholder={t("firstNamePlaceholder")}
           aria-invalid={fieldErrors?.firstName ? true : undefined}
         />
       </Field>
@@ -71,60 +64,8 @@ export function PersonFields({
           defaultValue={values?.lastName ?? ""}
           maxLength={60}
           required
-          disabled={readOnly}
+          placeholder={t("lastNamePlaceholder")}
           aria-invalid={fieldErrors?.lastName ? true : undefined}
-        />
-      </Field>
-
-      <Field id={`${idPrefix}-email`} label={t("email")} error={error("email")}>
-        <Input
-          id={`${idPrefix}-email`}
-          name="email"
-          type="email"
-          inputMode="email"
-          // Addresses and numbers read left-to-right in both locales.
-          dir="ltr"
-          defaultValue={values?.email ?? ""}
-          maxLength={254}
-          disabled={readOnly}
-          aria-invalid={fieldErrors?.email ? true : undefined}
-        />
-      </Field>
-
-      <Field
-        id={`${idPrefix}-phone`}
-        label={t("phone")}
-        hint={t("phoneHint")}
-        error={error("phone")}
-      >
-        <Input
-          id={`${idPrefix}-phone`}
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          dir="ltr"
-          defaultValue={values?.phone ?? ""}
-          maxLength={20}
-          disabled={readOnly}
-          aria-invalid={fieldErrors?.phone ? true : undefined}
-        />
-      </Field>
-
-      <Field
-        id={`${idPrefix}-altPhone`}
-        label={t("altPhone")}
-        error={error("altPhone")}
-      >
-        <Input
-          id={`${idPrefix}-altPhone`}
-          name="altPhone"
-          type="tel"
-          inputMode="tel"
-          dir="ltr"
-          defaultValue={values?.altPhone ?? ""}
-          maxLength={20}
-          disabled={readOnly}
-          aria-invalid={fieldErrors?.altPhone ? true : undefined}
         />
       </Field>
     </div>

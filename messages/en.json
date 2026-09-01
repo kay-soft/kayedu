@@ -4,6 +4,16 @@
     "ar": "العربية",
     "en": "English"
   },
+  "Shared": {
+    "optional": " (optional)",
+    "pagination": {
+      "label": "Pagination",
+      "range": "{from}–{to} of {total}",
+      "previous": "Previous",
+      "next": "Next",
+      "pageOf": "Page {page} of {totalPages}"
+    }
+  },
   "Shell": {
     "productName": "KayEdu",
     "primaryNav": "Primary navigation",
@@ -11,7 +21,9 @@
     "closeMenu": "Close menu",
     "switchCenter": "Switch center",
     "signOut": "Sign out",
-    "soon": "Soon"
+    "soon": "Soon",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "Nav": {
     "dashboard": "Dashboard",
@@ -155,7 +167,12 @@
       "email": "Email",
       "phone": "Phone",
       "phoneHint": "Egyptian mobile, e.g. 01012345678.",
-      "altPhone": "Alternative phone"
+      "altPhone": "Alternative phone",
+      "firstNamePlaceholder": "Ahmed",
+      "lastNamePlaceholder": "Hassan",
+      "emailPlaceholder": "name@example.com",
+      "phonePlaceholder": "01012345678",
+      "phoneOrEmailHint": "Provide a phone or an email — at least one is needed to match this person and to reach them."
     },
     "match": {
       "title": "This person already exists",
@@ -183,8 +200,6 @@
       "invalidEmail": "Enter a valid email address.",
       "invalidPhone": "Enter a valid Egyptian mobile number.",
       "contactRequired": "Add a phone number or an email — a teacher needs one to be matched and to sign in later.",
-      "invalidStudentCode": "A student code may only contain letters, numbers and dashes.",
-      "duplicateStudentCode": "Another student at this center already has that code.",
       "samePromotionGrade": "Choose a different grade to promote to.",
       "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
       "contactInUse": "Those contact details already belong to someone else.",
@@ -217,14 +232,11 @@
       "blocked": "Block-list"
     },
     "blockedCount": "{count} blocked",
-    "canSeeEarnings": "Can see their earnings",
-    "canSeeEarningsHint": "What this center lets the teacher see financially in their own portal.",
     "linkAsTeacher": "Link this person as a teacher",
     "detailSubtitle": "Their record at this center, their classes and their block-list.",
     "backToList": "All teachers",
     "profileTitle": "Teacher record",
     "profileDescription": "Name and contact details belong to the person; financial visibility belongs to this center.",
-    "profileLocked": "This person has their own KayEdu account or works at another center too, so their name and contact details are theirs to change — not this center's. Everything below still is.",
     "identityTitle": "Identity",
     "identityDescription": "How this person is connected across KayEdu.",
     "classesTitle": "Classes",
@@ -249,7 +261,9 @@
       "noCandidates": "No students match that search.",
       "unknownStudent": "Former student",
       "unknownTeacher": "Former teacher"
-    }
+    },
+    "contactTitle": "This center's record",
+    "contactDescription": "This center's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other center's record."
   },
   "Students": {
     "title": "Students",
@@ -257,8 +271,8 @@
     "add": "Register student",
     "addTitle": "Register a student",
     "addDescription": "Register a student once and connect them to this center. A phone or email that already exists links to that person instead of creating a duplicate.",
-    "centerSectionTitle": "This center's details",
-    "centerSectionDescription": "Grade, ID-card number and parent contacts belong to this center.",
+    "centerSectionTitle": "This center's record",
+    "centerSectionDescription": "This center's own name, contact record, grade and parent details — seeded from the student's KayEdu identity and always editable here. The student code is assigned automatically.",
     "linkAsStudent": "Link this person as a student",
     "listTitle": "Registered students",
     "listDescription": "Search by name, student code, or a student's or parent's phone.",
@@ -279,14 +293,12 @@
     "backToList": "All students",
     "profileTitle": "Student record",
     "profileDescription": "The person's own details, then everything this center owns.",
-    "profileLocked": "This person has their own KayEdu account or is registered at another center too, so their name and contact details are theirs to change — not this center's. Everything below still is.",
     "deleteConfirm": "This removes them from this center. It cannot be undone.",
     "parentTitle": "Parent & guardian",
     "parentDescription": "Who this center calls.",
     "fields": {
       "grade": "Grade",
       "studentCode": "Student code",
-      "studentCodeHint": "The number on the ID card. Leave blank to assign the next one.",
       "parentFirstName": "Parent first name",
       "parentLastName": "Parent last name",
       "parentPhone": "Parent phone",
@@ -470,7 +482,8 @@
       "empty": "No branches yet. Add the first one above.",
       "fields": {
         "name": "Name",
-        "address": "Address"
+        "address": "Address",
+        "addressPlaceholder": "12 Nile St"
       }
     },
     "rooms": {

@@ -7,8 +7,8 @@ import { localeSchema } from "./auth.ts";
 import { normalizeEmail, normalizePhone } from "../identity.ts";
 
 /**
- * Teacher & student schemas (M3). Every Server Action parses its input
- * through one of these before touching the database (docs/02 §7).
+ * Teacher & student schemas (M3, revised). Every Server Action parses its
+ * input through one of these before touching the database (docs/02 §7).
  *
  * Messages are **i18n keys** under `People.errors`, never user-facing copy.
  */
@@ -32,7 +32,7 @@ const optionalPersonName = z
   .optional()
   .transform((value) => (value && value.length > 0 ? value : null));
 
-/** Optional email, normalized so one person is one identity. */
+/** Optional email, normalized so the same address always matches the same way. */
 const optionalEmail = z
   .string()
   .trim()
@@ -80,20 +80,25 @@ const linkUserId = optionalRecordId;
 
 // ── Teachers ───────────────────────────────────────────────────────────────
 
+/**
+ * `firstName`/`lastName` are the person's **global** identity — applied only
+ * when creating a brand-new person (docs/01 §6). `email`/`phone`/`altPhone`
+ * are this **center's own local contact record** for them — always editable
+ * here, seeded onto the global `User` only at first creation.
+ */
 const teacherFields = {
   firstName: personName,
   lastName: personName,
   email: optionalEmail,
   phone: optionalPhone,
   altPhone: optionalPhone,
-  canSeeEarnings: checkbox,
 };
 
 /**
- * A teacher needs at least one contact: it is what a duplicate match keys on,
- * and it is how they eventually claim their cross-center portal account
- * (docs/00 §4.2). Students may legitimately have neither — they are minors,
- * and the parent's phone is the contact.
+ * A teacher needs at least one contact on file at this center: it is what a
+ * duplicate match keys on, and it is how they eventually claim their
+ * cross-center portal account (docs/00 §4.2). Students may legitimately have
+ * neither — they are minors, and the parent's phone is the contact.
  */
 function requireContact(
   value: { email: string | null; phone: string | null },
@@ -125,18 +130,6 @@ export const membershipActiveSchema = z.object({
 
 // ── Students ───────────────────────────────────────────────────────────────
 
-/** The ID-card number. Unique per center — `@@unique([centerId, studentCode])`. */
-const studentCode = z
-  .string()
-  .trim()
-  .max(24, "tooLong")
-  .optional()
-  .transform((value) => (value && value.length > 0 ? value : null))
-  .refine(
-    (value) => value === null || /^[A-Za-z0-9-]+$/.test(value),
-    "invalidStudentCode",
-  );
-
 const studentFields = {
   firstName: personName,
   lastName: personName,
@@ -144,7 +137,6 @@ const studentFields = {
   phone: optionalPhone,
   altPhone: optionalPhone,
   gradeId: optionalRecordId,
-  studentCode,
   parentFirstName: optionalPersonName,
   parentLastName: optionalPersonName,
   parentPhone: optionalPhone,
@@ -220,6 +212,27 @@ export const studentPhotoSchema = z.object({
   studentProfileId: recordId,
 });
 
+// ── List pagination (students & teachers dashboards) ───────────────────────
+
+export const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 100;
+
+/**
+ * A page number from the URL — never trusted raw. Clamped rather than
+ * rejected, since a stale/bookmarked `?page=` is a UX papercut, not an error.
+ */
+export function parsePageParam(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function parsePageSizeParam(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= MAX_PAGE_SIZE
+    ? parsed
+    : DEFAULT_PAGE_SIZE;
+}
+
 // ── Action state ───────────────────────────────────────────────────────────
 
 /**
@@ -230,6 +243,11 @@ export const studentPhotoSchema = z.object({
 export type MatchCandidate = {
   userId: string;
   name: string;
+  /**
+   * The contact value(s) as typed into *this* form — echoed back so staff can
+   * sanity-check the match, not pulled from another center's local record
+   * (which this center has no business displaying verbatim).
+   */
   email: string | null;
   phone: string | null;
   /** Which contact field matched — shown so staff can sanity-check it. */

@@ -11,7 +11,7 @@ import { scoped } from "@/lib/db/scoped";
  * still renders — the form saves through an upsert.
  */
 export default async function GeneralSettingsPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "center.settings.edit");
 
   const settings = await scoped(ctx).settings.get();

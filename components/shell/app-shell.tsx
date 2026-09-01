@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Link, usePathname } from "@/lib/i18n/navigation";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
@@ -9,6 +9,7 @@ import { NavItem } from "@/components/shell/nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { ROUTES } from "@/lib/routes";
+import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 import { cn } from "@/lib/utils";
 
 export type ShellBrand = {
@@ -29,8 +30,12 @@ type AppShellProps = {
   brand: ShellBrand;
   user: ShellUser;
   canSwitchCenter: boolean;
+  /** Read server-side from the cookie, so the first paint is already correct. */
+  defaultCollapsed: boolean;
   children: ReactNode;
 };
+
+const COLLAPSED_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -40,11 +45,16 @@ function SidebarContent({
   nav,
   brand,
   user,
+  collapsed,
+  onToggleCollapsed,
   onNavigate,
 }: {
   nav: ShellNavItem[];
   brand: ShellBrand;
   user: ShellUser;
+  /** Omitted entirely on the mobile drawer — a full-screen sheet has no rail. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
@@ -54,7 +64,12 @@ function SidebarContent({
 
   return (
     <>
-      <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
+      <div
+        className={cn(
+          "flex items-center gap-3 border-b border-sidebar-border px-4 py-4",
+          collapsed && "justify-center px-2",
+        )}
+      >
         {brand.logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- remote center logos; Storage wiring lands in M3
           <img
@@ -70,14 +85,16 @@ function SidebarContent({
             {brand.name.trim().charAt(0)}
           </span>
         )}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-white">
-            {brand.name}
+        {collapsed ? null : (
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-white">
+              {brand.name}
+            </span>
+            <span className="block truncate text-xs text-text-muted">
+              {tShell("productName")}
+            </span>
           </span>
-          <span className="block truncate text-xs text-text-muted">
-            {tShell("productName")}
-          </span>
-        </span>
+        )}
       </div>
 
       <nav
@@ -92,6 +109,7 @@ function SidebarContent({
                 active={isActive(pathname, item.href)}
                 label={tNav(item.labelKey)}
                 soonLabel={tShell("soon")}
+                collapsed={collapsed}
                 onNavigate={onNavigate}
               />
             </li>
@@ -99,24 +117,57 @@ function SidebarContent({
         </ul>
       </nav>
 
+      {onToggleCollapsed ? (
+        <div className="border-t border-sidebar-border p-3">
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            title={collapsed ? tShell("expandSidebar") : tShell("collapseSidebar")}
+            aria-pressed={collapsed}
+            className={cn(
+              "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent",
+              collapsed && "justify-center px-0",
+            )}
+          >
+            {/* The panel flips edge with the toggle direction, so it mirrors
+                correctly in RTL (docs/04 §7) — collapsing always "closes
+                toward the start" regardless of locale. */}
+            {collapsed ? (
+              <PanelLeftOpen className="size-4 shrink-0 rtl:-scale-x-100" />
+            ) : (
+              <PanelLeftClose className="size-4 shrink-0 rtl:-scale-x-100" />
+            )}
+            {collapsed ? null : <span>{tShell("collapseSidebar")}</span>}
+          </button>
+        </div>
+      ) : null}
+
       <div className="border-t border-sidebar-border p-3">
-        <div className="flex items-center gap-3 px-1 py-2">
+        <div
+          className={cn(
+            "flex items-center gap-3 px-1 py-2",
+            collapsed && "justify-center px-0",
+          )}
+        >
           <span
             aria-hidden
+            title={collapsed ? user.name : undefined}
             className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground"
           >
             {user.initials}
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-white">
-              {user.name}
+          {collapsed ? null : (
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-white">
+                {user.name}
+              </span>
+              <span className="block truncate text-xs text-text-muted">
+                {tRoles(user.roleKey)}
+              </span>
             </span>
-            <span className="block truncate text-xs text-text-muted">
-              {tRoles(user.roleKey)}
-            </span>
-          </span>
+          )}
         </div>
-        <SignOutButton />
+        <SignOutButton collapsed={collapsed} />
       </div>
     </>
   );
@@ -127,9 +178,11 @@ export function AppShell({
   brand,
   user,
   canSwitchCenter,
+  defaultCollapsed,
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const tShell = useTranslations("Shell");
 
   useEffect(() => {
@@ -145,16 +198,38 @@ export function AppShell({
     };
   }, [drawerOpen]);
 
+  function toggleCollapsed() {
+    const next = !collapsed;
+    setCollapsed(next);
+    // A UI preference, not a security concern — written directly so the next
+    // server render (a fresh tab, a reload) starts already collapsed, with
+    // no expand-then-snap-shut flash (docs/02-architecture.md §14).
+    document.cookie = `${SIDEBAR_COLLAPSED_COOKIE}=${next ? "1" : "0"}; path=/; max-age=${COLLAPSED_COOKIE_MAX_AGE}`;
+  }
+
   const brandStyle = { "--brand": brand.themeColor } as CSSProperties;
 
   return (
     <div style={brandStyle} className="min-h-dvh bg-canvas text-text-primary">
-      {/* Desktop sidebar — 240px, fixed, dark navy (docs/04 §5). */}
-      <aside className="fixed inset-y-0 start-0 z-30 hidden w-60 flex-col bg-sidebar lg:flex">
-        <SidebarContent nav={nav} brand={brand} user={user} />
+      {/* Desktop sidebar — 240px, or a 72px icon rail when collapsed
+          (docs/04 §5). */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 start-0 z-30 hidden flex-col bg-sidebar transition-[width] duration-200 lg:flex",
+          collapsed ? "w-18" : "w-60",
+        )}
+      >
+        <SidebarContent
+          nav={nav}
+          brand={brand}
+          user={user}
+          collapsed={collapsed}
+          onToggleCollapsed={toggleCollapsed}
+        />
       </aside>
 
-      {/* Below lg the sidebar becomes a drawer (docs/04 §6). */}
+      {/* Below lg the sidebar becomes a drawer (docs/04 §6) — always
+          expanded, since a full-screen sheet has no need for a rail. */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-slate-900/50 transition-opacity lg:hidden",
@@ -190,7 +265,12 @@ export function AppShell({
         />
       </aside>
 
-      <div className="flex min-h-dvh flex-col lg:ps-60">
+      <div
+        className={cn(
+          "flex min-h-dvh flex-col transition-[padding] duration-200",
+          collapsed ? "lg:ps-18" : "lg:ps-60",
+        )}
+      >
         <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-surface px-3 sm:px-6">
           <button
             type="button"

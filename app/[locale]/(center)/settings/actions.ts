@@ -43,7 +43,7 @@ type Scope = { ctx: TenantContext; db: ScopedDb };
 
 /** Resolves the context and enforces `center.settings.edit`. */
 async function editorScope(): Promise<Scope | null> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "center.settings.edit")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -654,7 +654,7 @@ export async function savePermissionGrantsAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   // Widening a role is a permission change, so it needs staff authority on
   // top of settings authority.
   if (!ctxCan(ctx, "center.settings.edit") || !ctxCan(ctx, "staff.manage")) {

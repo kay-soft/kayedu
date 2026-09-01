@@ -1,31 +1,37 @@
 /**
- * People check — the M3 acceptance gate:
+ * People check — the M3 acceptance gate, revised for center-local contacts
+ * and system-assigned student codes:
  * "a student can be registered once and connected to the center; a printable
  *  QR ID card generates; a teacher can block-list a student; a duplicate
- *  phone/email triggers the match workflow instead of a duplicate person."
+ *  phone/email — global OR another center's local record — triggers the
+ *  match workflow instead of a duplicate person; each center keeps its own
+ *  contact record, editable independently; student codes are claimed
+ *  race-free with no duplicates and no gaps."
  *
  * Run with:  npm run check:people
  *
  * `check:isolation` proves the scoping primitives; `check:config` proves the
  * configuration surface. This one covers the paths M3 added — teachers,
- * students, blocks, identity matching and Storage — using the same predicates,
- * schemas and renderers the Server Actions use, so a cross-center leak on a
- * *new* path is caught rather than assumed.
+ * students, blocks, identity matching and Storage — using the same
+ * predicates, schemas and renderers the Server Actions use, so a cross-center
+ * leak on a *new* path is caught rather than assumed.
  *
  * It needs a reachable database and cleans up after itself.
  */
 import { PrismaClient, type BlockScope, type Role } from "@prisma/client";
 import {
   MissingCenterScopeError,
+  scopedData,
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
 import {
-  canEditGlobalProfile,
-  contactMatchWhere,
-  matchedFields,
+  fullName,
+  localName,
+  normalizeContact,
   normalizePhone,
 } from "../lib/identity.ts";
+import { claimStudentCode } from "../lib/db/students.ts";
 import {
   StoragePathError,
   assertPathInCenter,
@@ -58,10 +64,13 @@ const TEACHER_SCOPE: BlockScope = "TEACHER";
 
 const SLUG_A = "people-check-a";
 const SLUG_B = "people-check-b";
+const SLUG_C = "people-check-c";
 const SHARED_EMAIL = "people-check-shared@kayedu.test";
 const SHARED_PHONE = "01012345678";
 const TEACHER_EMAIL = "people-check-teacher@kayedu.test";
+const LOCAL_ONLY_EMAIL = "people-check-local-only@kayedu.test";
 const LOCAL_EMAIL = "people-check-local@kayedu.test";
+const RACE_EMAIL_PREFIX = "people-check-race";
 
 let failures = 0;
 
@@ -88,57 +97,111 @@ function parse<T>(
 }
 
 async function cleanup() {
-  await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
+  await prisma.center.deleteMany({
+    where: { slug: { in: [SLUG_A, SLUG_B, SLUG_C] } },
+  });
   await prisma.user.deleteMany({
     where: {
       OR: [
-        { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_EMAIL] } },
+        { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_ONLY_EMAIL, LOCAL_EMAIL] } },
         { phone: SHARED_PHONE },
+        { email: { startsWith: RACE_EMAIL_PREFIX } },
       ],
     },
   });
 }
 
 /**
- * Registers a student the way `createStudentAction` does: parse the form,
- * match on verified contact, then either link the existing person or create
- * one. Takes a centerId and nothing else — same "zero code changes for a
- * second center" claim the M2 gate makes.
+ * Finds a match the way `resolveContact()` does at the DB layer: across the
+ * global `User` and every center's local `StudentProfile`/`Membership`
+ * record (`lib/db/identity.ts`). Reimplemented here at the query level (not
+ * imported) so the gate exercises the actual tables/columns rather than
+ * trusting the app module imported it correctly. Returns the matched
+ * person's **real** name too — that's what a linked record's local name is
+ * seeded from, never the (possibly mistyped) form input.
+ */
+async function findMatch(
+  input: { email: string | null; phone: string | null },
+): Promise<{ userId: string; firstName: string; lastName: string } | "conflict" | null> {
+  const { email, phone } = normalizeContact(input);
+  if (!email && !phone) return null;
+
+  const userOr = [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])];
+  const [users, students, memberships] = await Promise.all([
+    prisma.user.findMany({ where: { OR: userOr } }),
+    prisma.studentProfile.findMany({ where: { OR: userOr }, include: { user: true } }),
+    prisma.membership.findMany({ where: { OR: userOr }, include: { user: true } }),
+  ]);
+
+  const byId = new Map<string, { firstName: string; lastName: string }>();
+  for (const u of users) byId.set(u.id, u);
+  for (const s of students) byId.set(s.userId, s.user);
+  for (const m of memberships) byId.set(m.userId, m.user);
+
+  if (byId.size === 0) return null;
+  if (byId.size > 1) return "conflict";
+  const [userId, name] = [...byId.entries()][0];
+  return { userId, ...name };
+}
+
+/**
+ * Registers a student the way `createStudentAction` does: resolve the match
+ * across global + local contacts, then claim a code and create the profile in
+ * one transaction, seeding the local name from the matched person's real name
+ * (or the form input for a brand-new person). Takes a centerId and nothing
+ * else — same "zero code changes for a second center" claim the M2 gate makes.
  */
 async function registerStudent(
   centerId: string,
   form: Record<string, string>,
-): Promise<{ userId: string; profileId: string; linked: boolean }> {
+): Promise<{ userId: string; profileId: string; studentCode: string; linked: boolean }> {
   const input = parse(studentCreateSchema, form, "studentCreate");
+  const matched = await findMatch({ email: input.email, phone: input.phone });
+  if (matched === "conflict") throw new Error("unexpected contact conflict in fixture");
 
-  const where = contactMatchWhere({ email: input.email, phone: input.phone });
-  const existing = where ? await prisma.user.findFirst({ where }) : null;
+  const name = matched
+    ? { firstName: matched.firstName, lastName: matched.lastName }
+    : { firstName: input.firstName, lastName: input.lastName };
 
-  const userId =
-    existing?.id ??
-    (
-      await prisma.user.create({
-        data: {
-          firstName: input.firstName,
-          lastName: input.lastName,
-          email: input.email,
-          phone: input.phone,
-          locale: input.locale,
-        },
-      })
-    ).id;
+  const created = await prisma.$transaction(async (tx) => {
+    const userId =
+      matched?.userId ??
+      (
+        await tx.user.create({
+          data: {
+            firstName: input.firstName,
+            lastName: input.lastName,
+            email: input.email,
+            phone: input.phone,
+            locale: input.locale,
+          },
+        })
+      ).id;
 
-  const profile = await prisma.studentProfile.create({
-    data: {
-      centerId,
-      userId,
-      studentCode: input.studentCode ?? "1001",
-      parentFirstName: input.parentFirstName,
-      parentPhone: input.parentPhone,
-    },
+    const code = await claimStudentCode(tx, centerId);
+
+    const profile = await tx.studentProfile.create({
+      data: scopedData(centerId, {
+        userId,
+        studentCode: code,
+        firstName: name.firstName,
+        lastName: name.lastName,
+        email: input.email,
+        phone: input.phone,
+        parentFirstName: input.parentFirstName,
+        parentPhone: input.parentPhone,
+      }),
+    });
+
+    return { userId, profile };
   });
 
-  return { userId, profileId: profile.id, linked: existing !== null };
+  return {
+    userId: created.userId,
+    profileId: created.profile.id,
+    studentCode: created.profile.studentCode,
+    linked: matched !== null,
+  };
 }
 
 async function main() {
@@ -161,7 +224,7 @@ async function main() {
     data: { centerId: centerB.id, name: "Grade 10" },
   });
 
-  console.log("People check (M3 — teachers, students, blocks, identity, storage)");
+  console.log("People check (M3 revised — center-local contacts, system-assigned codes)");
 
   // ── 1. One person, registered at two centers ───────────────────────────
   const sharedForm = {
@@ -170,7 +233,6 @@ async function main() {
     lastName: "Hassan",
     email: SHARED_EMAIL,
     phone: SHARED_PHONE,
-    studentCode: "1001",
     parentFirstName: "Hassan",
     parentPhone: "01112345678",
   };
@@ -200,42 +262,96 @@ async function main() {
       (await prisma.studentProfile.count({ where: { userId: inA.userId } })) === 2,
   );
   check(
-    "The match reports which contact field matched",
-    matchedFields(
-      { email: SHARED_EMAIL, phone: "+201012345678" },
-      { email: SHARED_EMAIL, phone: SHARED_PHONE },
-    ).join(",") === "email,phone",
-  );
-  check(
     "Nothing matchable means no match at all (a blank form matches nobody)",
-    contactMatchWhere({ email: null, phone: null }) === null,
+    (await findMatch({ email: null, phone: null })) === null,
   );
 
-  // ── 2. Student codes are a center's own numbering ──────────────────────
-  check(
-    "The same student code may exist in a second center",
-    (await prisma.studentProfile.count({ where: { studentCode: "1001" } })) === 2,
-  );
-
-  const local = await registerStudent(centerA.id, {
-    locale: "en",
-    firstName: "Youssef",
-    lastName: "Adel",
-    email: LOCAL_EMAIL,
-    studentCode: "1002",
+  // ── 1b. Contact details are center-local, not global ───────────────────
+  // The seed above wrote SHARED_EMAIL/SHARED_PHONE onto the *global* User
+  // (this was a brand-new person) AND onto centerA's local StudentProfile.
+  // Center A now edits its own copy; Center B's copy — and the global User —
+  // must be untouched.
+  const localOnlyContact = { email: LOCAL_ONLY_EMAIL, phone: "01099999999" };
+  await prisma.studentProfile.update({
+    where: { id: inA.profileId },
+    data: localOnlyContact,
   });
 
-  let duplicateCodeRejected = false;
-  try {
-    await prisma.studentProfile.create({
-      data: { centerId: centerA.id, userId: local.userId, studentCode: "1002" },
-    });
-  } catch {
-    duplicateCodeRejected = true;
-  }
+  const [globalAfterEdit, profileB, profileA] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: inA.userId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inB.profileId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inA.profileId } }),
+  ]);
   check(
-    "A duplicate student code inside one center is refused",
-    duplicateCodeRejected,
+    "Editing a center's local contact does not touch the global User",
+    globalAfterEdit.email === SHARED_EMAIL && globalAfterEdit.phone === SHARED_PHONE,
+  );
+  check(
+    "Editing Center A's local contact does not touch Center B's local record",
+    profileB.email === SHARED_EMAIL.toLowerCase() && profileB.phone === SHARED_PHONE,
+  );
+  check(
+    "Center A's local record reflects its own edit",
+    profileA.email === LOCAL_ONLY_EMAIL && profileA.phone === "01099999999",
+  );
+
+  // A third center registers someone new, entering only a contact that lives
+  // on Center A's *local* record (never the global User, never seen by B).
+  // The match must still find them — this is the reason local records are
+  // searched at all, not just the global User.
+  const centerC = await prisma.center.create({
+    data: { slug: SLUG_C, name: "People C", themeColor: "#f59e0b" },
+  });
+  const matchedFromLocalOnly = await findMatch({ email: LOCAL_ONLY_EMAIL, phone: null });
+  check(
+    "A contact that exists only on another center's local record still matches",
+    matchedFromLocalOnly !== "conflict" && matchedFromLocalOnly?.userId === inA.userId,
+  );
+  await prisma.center.delete({ where: { id: centerC.id } });
+
+  // ── 2. Student codes are system-assigned, per-center, race-free ────────
+  check(
+    "The first two students in a fresh center get codes 1001 and 1002",
+    inA.studentCode === "1001" &&
+      (
+        await registerStudent(centerA.id, {
+          locale: "en",
+          firstName: "Youssef",
+          lastName: "Adel",
+          email: LOCAL_EMAIL,
+        })
+      ).studentCode === "1002",
+  );
+  check(
+    "The same numbering starts fresh in a second center — zero code changes",
+    inB.studentCode === "1001",
+  );
+
+  const RACE_SIZE = 12;
+  const raceResults = await Promise.all(
+    Array.from({ length: RACE_SIZE }, (_, i) =>
+      registerStudent(centerA.id, {
+        locale: "en",
+        firstName: "Race",
+        lastName: String(i),
+        email: `${RACE_EMAIL_PREFIX}-${i}@kayedu.test`,
+      }),
+    ),
+  );
+  const raceCodes = raceResults.map((r) => Number(r.studentCode)).sort((a, b) => a - b);
+  const uniqueCodes = new Set(raceCodes);
+  const isContiguous = raceCodes.every(
+    (code, i) => i === 0 || code === raceCodes[i - 1] + 1,
+  );
+  check(
+    `${RACE_SIZE} concurrent registrations produce ${RACE_SIZE} unique codes (no duplicates)`,
+    uniqueCodes.size === RACE_SIZE,
+    `got ${uniqueCodes.size} unique of ${raceCodes.length}`,
+  );
+  check(
+    "Concurrent registrations produce contiguous codes (no gaps)",
+    isContiguous,
+    JSON.stringify(raceCodes),
   );
 
   // ── 3. Cross-center reads on every path M3 added ───────────────────────
@@ -243,10 +359,20 @@ async function main() {
     data: { firstName: "Sara", lastName: "Nabil", email: TEACHER_EMAIL },
   });
   const teacherInA = await prisma.membership.create({
-    data: { userId: teacher.id, centerId: centerA.id, role: "TEACHER" },
+    data: {
+      userId: teacher.id,
+      centerId: centerA.id,
+      role: "TEACHER",
+      email: TEACHER_EMAIL,
+    },
   });
   const teacherInB = await prisma.membership.create({
-    data: { userId: teacher.id, centerId: centerB.id, role: "TEACHER" },
+    data: {
+      userId: teacher.id,
+      centerId: centerB.id,
+      role: "TEACHER",
+      email: TEACHER_EMAIL,
+    },
   });
 
   const blockInA = await prisma.studentBlock.create({
@@ -277,22 +403,18 @@ async function main() {
     check(`Center A cannot read Center B's ${label} by id`, leaked === null);
   }
 
-  const studentsInA = await prisma.studentProfile.findMany({
-    where: scopedWhere(centerA.id),
-  });
-  check(
-    "A scoped student list contains only the active center's rows",
-    studentsInA.length === 2 &&
-      studentsInA.every((row) => row.centerId === centerA.id),
-    `got ${studentsInA.length}`,
-  );
-
   const teachersInB = await prisma.membership.findMany({
     where: scopedWhere(centerB.id, { role: TEACHER_ROLE }),
   });
   check(
     "A scoped teacher list excludes the other center's membership",
     teachersInB.length === 1 && teachersInB[0].id === teacherInB.id,
+  );
+  check(
+    "The shared teacher's local email is independent per center",
+    (
+      await prisma.membership.findUniqueOrThrow({ where: { id: teacherInA.id } })
+    ).email === TEACHER_EMAIL,
   );
 
   // ── 4. Blocking is per center, for a teacher shared by two ─────────────
@@ -372,7 +494,11 @@ async function main() {
     data: { gradeId: promotion.toGradeId },
   });
 
-  check("Promotion moves this center's students", promoted.count === 2);
+  check(
+    "Promotion moves this center's students",
+    promoted.count === 2 + RACE_SIZE,
+    `got ${promoted.count}`,
+  );
   check(
     "Promotion leaves the other center's students where they were",
     (await prisma.studentProfile.count({
@@ -471,11 +597,12 @@ async function main() {
     resolveCardLayout("not json at all").elements.qr.x === 74,
   );
 
-  const payload = studentQrPayload(centerA.id, "1001");
+  const payload = studentQrPayload(centerA.id, inA.studentCode);
   const parsedPayload = parseStudentQrPayload(payload);
   check(
     "The QR payload round-trips to the center and the student code",
-    parsedPayload?.centerId === centerA.id && parsedPayload.studentCode === "1001",
+    parsedPayload?.centerId === centerA.id &&
+      parsedPayload.studentCode === inA.studentCode,
   );
   check(
     "A foreign QR payload does not parse as a student card",
@@ -487,7 +614,7 @@ async function main() {
     brandColor: centerA.themeColor,
     studentName: "Mona Hassan",
     gradeName: "Grade 11",
-    studentCode: "1001",
+    studentCode: inA.studentCode,
     qrPayload: payload,
     labels: { code: "Student code" },
     dir: "ltr",
@@ -498,7 +625,7 @@ async function main() {
     "A printable card renders with the student's name, code and a QR block",
     svg.startsWith("<svg") &&
       svg.includes("Mona Hassan") &&
-      svg.includes(">1001<") &&
+      svg.includes(`>${inA.studentCode}<`) &&
       /<path d="M\d/.test(svg),
   );
   check(
@@ -518,7 +645,7 @@ async function main() {
     brandColor: "#2563eb",
     studentName: "Mona Hassan",
     gradeName: "Grade 11",
-    studentCode: "1001",
+    studentCode: inA.studentCode,
     qrPayload: payload,
     labels: { code: "Student code" },
     dir: "ltr",
@@ -561,7 +688,7 @@ async function main() {
     centerName: "مركز",
     brandColor: centerA.themeColor,
     studentName: "منى حسن",
-    studentCode: "1001",
+    studentCode: inA.studentCode,
     qrPayload: payload,
     labels: { code: "كود الطالب" },
     dir: "rtl",
@@ -574,18 +701,89 @@ async function main() {
       rtl !== svg,
   );
 
-  // ── 8. Identity ownership ──────────────────────────────────────────────
+  // ── 8. Name is center-local too, exactly like the other contact fields ──
+  // Revised: name is no longer global-locked. It is seeded from the User at
+  // creation (register / add-existing-person) and then editable per center,
+  // independently, with no lock of any kind — mirroring §1b's contact
+  // independence assertions.
+  const studentBeforeRename = await prisma.studentProfile.findUniqueOrThrow({
+    where: { id: inA.profileId },
+  });
   check(
-    "A center may edit a person it created who exists nowhere else",
-    canEditGlobalProfile({ authId: null, otherCenterRelations: 0 }),
+    "A new registration seeds the local name from the form input",
+    studentBeforeRename.firstName === "Mona" && studentBeforeRename.lastName === "Hassan",
+  );
+
+  const profileBBeforeRename = await prisma.studentProfile.findUniqueOrThrow({
+    where: { id: inB.profileId },
+  });
+  check(
+    "A linked registration seeds the local name from the matched person's real name",
+    profileBBeforeRename.firstName === "Mona" && profileBBeforeRename.lastName === "Hassan",
+  );
+
+  await prisma.studentProfile.update({
+    where: { id: inA.profileId },
+    data: { firstName: "Mona-CenterA", lastName: "Hassan-CenterA" },
+  });
+
+  const [userAfterRename, studentAAfterRename, studentBAfterRename] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: inA.userId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inA.profileId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inB.profileId } }),
+  ]);
+  check(
+    "Renaming a center's local record does not touch the global User",
+    userAfterRename.firstName === "Mona" && userAfterRename.lastName === "Hassan",
   );
   check(
-    "A center may NOT rewrite a person shared with another center",
-    !canEditGlobalProfile({ authId: null, otherCenterRelations: 1 }),
+    "Renaming Center A's local record does not touch Center B's local record",
+    studentBAfterRename.firstName === "Mona" && studentBAfterRename.lastName === "Hassan",
   );
   check(
-    "A center may NOT rewrite a person who owns their own account",
-    !canEditGlobalProfile({ authId: "auth-uid", otherCenterRelations: 0 }),
+    "Center A's local record reflects its own rename, immediately — no lock",
+    studentAAfterRename.firstName === "Mona-CenterA" &&
+      studentAAfterRename.lastName === "Hassan-CenterA",
+  );
+  check(
+    "The display name for Center A now reflects the rename",
+    fullName(localName(studentAAfterRename, userAfterRename)) === "Mona-CenterA Hassan-CenterA",
+  );
+  check(
+    "Center B's display name is unaffected by Center A's rename",
+    fullName(localName(studentBAfterRename, userAfterRename)) === "Mona Hassan",
+  );
+
+  // The same independence holds for the teacher shared by both centers.
+  await prisma.membership.update({
+    where: { id: teacherInA.id },
+    data: { firstName: "Sara-CenterA", lastName: "Nabil-CenterA" },
+  });
+  const [teacherUserAfterRename, teacherAAfterRename, teacherBAfterRename] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: teacher.id } }),
+    prisma.membership.findUniqueOrThrow({ where: { id: teacherInA.id } }),
+    prisma.membership.findUniqueOrThrow({ where: { id: teacherInB.id } }),
+  ]);
+  check(
+    "Renaming a shared teacher's Center A record does not touch the global User",
+    teacherUserAfterRename.firstName === "Sara" && teacherUserAfterRename.lastName === "Nabil",
+  );
+  check(
+    "Renaming a shared teacher's Center A record does not touch Center B's",
+    teacherBAfterRename.firstName === null && teacherBAfterRename.lastName === null,
+  );
+  check(
+    "A shared teacher's name is independently editable per center, immediately",
+    teacherAAfterRename.firstName === "Sara-CenterA" &&
+      teacherAAfterRename.lastName === "Nabil-CenterA",
+  );
+
+  // A record whose local name was never seeded (the older staff-invite path,
+  // untouched by this change) still displays something sensible: the fallback
+  // to the global User's name (lib/identity.ts `localName()`).
+  check(
+    "A record with no local name falls back to the global User's name",
+    fullName(localName(teacherBAfterRename, teacherUserAfterRename)) === "Sara Nabil",
   );
 
   // ── 9. The schemas reject what the UI must not store ───────────────────
@@ -612,13 +810,12 @@ async function main() {
     }).success,
   );
   check(
-    "A student code with punctuation is rejected",
-    !studentCreateSchema.safeParse({
+    "The student schema carries no studentCode field at all — it is never typed",
+    !("studentCode" in studentCreateSchema.parse({
       locale: "en",
       firstName: "A",
       lastName: "B",
-      studentCode: "10/01",
-    }).success,
+    })),
   );
   check(
     "A student may be registered with no contact details at all (a minor)",
@@ -644,6 +841,15 @@ async function main() {
       lastName: "B",
       email: TEACHER_EMAIL,
     }).success,
+  );
+  check(
+    "The teacher schema carries no canSeeEarnings field — earnings are visible by default",
+    !("canSeeEarnings" in teacherCreateSchema.parse({
+      locale: "en",
+      firstName: "A",
+      lastName: "B",
+      email: TEACHER_EMAIL,
+    })),
   );
 
   // Deleting the center takes its memberships with it; the person does not.

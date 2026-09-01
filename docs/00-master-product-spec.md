@@ -68,6 +68,7 @@ These are settled. They shape the schema and the whole build.
 - [ ] **Error monitoring** (e.g. Sentry) wired before the pilot.
 - [ ] **Session-generation cron** configured on Vercel (`02-architecture.md` §11) — the rolling window does not materialize itself. Lands with M4.
 - [ ] **Data import/export** paths for onboarding and responsible offboarding (§7 criterion set / M10).
+- [ ] **Manually verify live cross-center identity behavior once 2+ real centers exist.** `npm run check:people` proves duplicate-matching (including matching on a contact that lives only on another center's local record) and independent per-center name/contact editing against throwaway fixture centers — but only one real center is seeded today (`prisma/seed.ts`), so this has never been exercised with real staff, real data, or real timing. Once a second real center is onboarded: register/add a person already known to the first center and confirm the match panel finds them and links correctly; rename or re-contact that person at one center and confirm the other center's record — and the person's own portal login — is unaffected (`01-data-model.md` §6).
 
 ### D. Code-level shortcuts
 
@@ -87,12 +88,12 @@ Six roles. Start them **hardcoded** (not a fully dynamic permission engine) with
 | **Owner** | One center | Full control of their center: money, staff, config, everything a Manager can do + ownership actions. |
 | **Manager** | One center | Runs the center: teachers, classes, students, sessions, analytics, expenses, config, approvals, delete rights, teacher-edit deadlines. |
 | **Receptionist** | One center | Daily ops: reception desk, check-in, record attendance + payment, add students, view today's sessions. **Cannot** see center profit/settlement unless granted. |
-| **Teacher** | One or more centers | Their own schedule, sessions, students, analytics/earnings **per center per permission**, request new classes/sessions, block students. Only sees data for centers they belong to. |
+| **Teacher** | One or more centers | Their own schedule, sessions, students, analytics/earnings, request new classes/sessions, block students. Only sees data for centers they belong to. |
 | **Student** | One or more centers | Discover/reserve classes, see personal schedule, enrollments, own attendance history. |
 
 **Permission rules that matter (Phase 1):**
 - A Receptionist seeing **center profit** is **denied by default**.
-- A Teacher sees earnings/analytics **only within the visibility that center granted**.
+- A Teacher sees their **own earnings/analytics by default** (M3) — no center grant needed. `Membership.canSeeEarnings` exists as schema flexibility for a possible future per-center toggle, defaults `true`, and nothing currently reads it to gate anything.
 - Attendance **corrections** and **financial corrections** require elevated permission and are **audited**.
 - Teacher's **deadline to edit a session** is set by the center manager (a center setting).
 - **Delete** of teachers/students is a Manager/Owner action, not Receptionist.
@@ -145,6 +146,8 @@ Create/activate/suspend center tenants; manage plans/onboarding metadata; contro
 ## 5. Resolved business rules (Phase 1)
 
 **Identity & duplicates.** One `User` per person, keyed on verified phone/email. Registering an existing person at a new center creates a **new membership/enrollment**, never a duplicate person. Duplicate-matching + merge is a defined workflow (details in data model).
+
+**Contact details are center-local (revised, M3).** `User.email`/`User.phone` are the person's **global auth credentials** — how they sign in, set once. What a center has on file for a teacher or student (their phone, alt phone, email as *that center* knows them) is a **separate, center-local record** on `StudentProfile`/`Membership`, always editable by that center regardless of whether the person is shared elsewhere. Duplicate-matching on add/register checks **both**: the global `User` contacts and every center's existing local contact record, because a person may have been entered somewhere with a contact that never made it onto their global `User`. No match → create the person (the entered contact seeds the global `User` at that one moment) and the center's own local record. A match → link a new membership/profile to the existing person and write the entered contact as this center's local record only, touching nothing global. Full detail in `01-data-model.md` §6.
 
 **Money — the sacred rules.**
 - Charge basis = **one session**. Price comes from the class (or session override).

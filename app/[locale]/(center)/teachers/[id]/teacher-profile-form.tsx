@@ -8,33 +8,31 @@ import {
   deleteTeacherAction,
   updateTeacherAction,
 } from "@/app/[locale]/(center)/teachers/actions";
+import { ContactFields, type ContactValues } from "@/components/center/contact-fields";
 import { PersonFields, type PersonValues } from "@/components/center/person-fields";
 import { FormMessage } from "@/components/shared/form-message";
+import { SectionHeader } from "@/components/shared/section-header";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { ToggleRow } from "@/components/settings/toggle-row";
 import { Button } from "@/components/ui/button";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
 
 /**
  * Edit one teacher's record at this center.
  *
- * `profileEditable` is false when the person has signed in (they own their
- * account) or belongs to another center too — renaming them here would rename
- * them everywhere, which is exactly what the global-identity model forbids
- * (CLAUDE.md rule 4). The center-owned parts — financial visibility, active
- * status, the block-list — stay editable either way.
+ * Name and contact details are this **center's own local record**
+ * (docs/01-data-model.md §6) — seeded from the global `User` when this center
+ * added the teacher, then always editable here, independently of any other
+ * center, with no lock of any kind.
  */
 export function TeacherProfileForm({
   membershipId,
-  values,
-  canSeeEarnings,
-  profileEditable,
+  name,
+  contact,
   canDelete,
 }: {
   membershipId: string;
-  values: PersonValues;
-  canSeeEarnings: boolean;
-  profileEditable: boolean;
+  name: PersonValues;
+  contact: ContactValues;
   canDelete: boolean;
 }) {
   const t = useTranslations("Teachers");
@@ -65,34 +63,20 @@ export function TeacherProfileForm({
         <FormMessage tone="success">{tCommon("saved")}</FormMessage>
       ) : null}
 
-      {profileEditable ? null : (
-        <FormMessage tone="info">{t("profileLocked")}</FormMessage>
-      )}
-
+      <SectionHeader
+        title={t("contactTitle")}
+        description={t("contactDescription")}
+      />
       <PersonFields
         idPrefix={`teacher-${membershipId}`}
-        values={values}
+        values={name}
         fieldErrors={state.fieldErrors}
-        readOnly={!profileEditable}
       />
-
-      {/* Disabled inputs are not submitted, so the action re-reads the stored
-          person instead — the values below still need to reach it. */}
-      {profileEditable ? null : (
-        <>
-          <input type="hidden" name="firstName" value={values.firstName ?? ""} />
-          <input type="hidden" name="lastName" value={values.lastName ?? ""} />
-          <input type="hidden" name="email" value={values.email ?? ""} />
-          <input type="hidden" name="phone" value={values.phone ?? ""} />
-          <input type="hidden" name="altPhone" value={values.altPhone ?? ""} />
-        </>
-      )}
-
-      <ToggleRow
-        name="canSeeEarnings"
-        label={t("canSeeEarnings")}
-        description={t("canSeeEarningsHint")}
-        defaultChecked={canSeeEarnings}
+      <ContactFields
+        idPrefix={`teacher-${membershipId}`}
+        values={contact}
+        fieldErrors={state.fieldErrors}
+        atLeastOneRequired
       />
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

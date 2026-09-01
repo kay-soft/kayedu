@@ -2,7 +2,7 @@ import type { Grade, StudentProfile, User } from "@prisma/client";
 
 import type { TenantContext } from "@/lib/auth/tenant";
 import { objectAsDataUri, remoteImageAsDataUri } from "@/lib/db/storage";
-import { fullName } from "@/lib/identity";
+import { fullName, localName } from "@/lib/identity";
 import {
   renderIdCardSvg,
   resolveCardLayout,
@@ -46,7 +46,7 @@ export async function studentCardSvg(
     brandColor: ctx.center.themeColor,
     logoDataUri,
     photoDataUri,
-    studentName: fullName(student.user),
+    studentName: fullName(localName(student, student.user)),
     gradeName: student.grade?.name ?? null,
     studentCode: student.studentCode,
     qrPayload: studentQrPayload(centerId, student.studentCode),

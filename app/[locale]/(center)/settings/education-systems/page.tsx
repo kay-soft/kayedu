@@ -18,7 +18,7 @@ import { formatMoney } from "@/lib/format";
 import { piastresToInputValue } from "@/lib/money";
 
 export default async function EducationSystemsPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "center.settings.edit");
 
   const locale = await getLocale();

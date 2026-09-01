@@ -86,7 +86,8 @@ const ROLE_PERMISSIONS: Record<TenantRole, readonly Permission[]> = {
     "payment.record",
     "student.manage",
   ],
-  // Teachers act on their own data; the center grants financial visibility.
+  // Teachers see their own earnings/analytics by default (spec §3, M3) — no
+  // grant needed, and `Membership.canSeeEarnings` gates nothing.
   TEACHER: ["analytics.own.view", "changeRequest.create", "student.block"],
   STUDENT: [],
   PLATFORM_ADMIN: ["platform.manage", "audit.view"],
@@ -99,7 +100,6 @@ const ROLE_PERMISSIONS: Record<TenantRole, readonly Permission[]> = {
  */
 const GRANTABLE_PERMISSIONS: Partial<Record<TenantRole, readonly Permission[]>> = {
   RECEPTIONIST: ["attendance.correct", "center.profit.view"],
-  TEACHER: ["analytics.own.view"],
 };
 
 export type PermissionGrants = Partial<Record<Permission, boolean>>;

@@ -157,55 +157,63 @@ async function redirectTo(href: string): Promise<never> {
  * Resolves who is asking, which center they are in, and what they may do.
  * Called at the top of every protected loader and every Server Action.
  * Redirects (never returns) when there is no valid user/center relationship.
+ *
+ * A layout and the page(s) it wraps both call this on every request, so it is
+ * wrapped in React's `cache()` (docs/02-architecture.md §14) — one request
+ * resolves the user, the relations and the settings row **once**, no matter
+ * how many components ask. It takes `experience` as a plain optional string
+ * rather than an options object on purpose: `cache()` keys object arguments
+ * by reference, so a fresh `{ experience: "center" }` literal at every call
+ * site would never hit the cache — a primitive keys by value instead.
  */
-export async function getTenantContext(options?: {
-  experience?: Experience;
-}): Promise<TenantContext> {
-  const user = await getCurrentUser();
-  if (!user) return redirectTo(ROUTES.login);
+export const getTenantContext = cache(
+  async (experience?: Experience): Promise<TenantContext> => {
+    const user = await getCurrentUser();
+    if (!user) return redirectTo(ROUTES.login);
 
-  const relations = await getUserCenterRelations(user.id);
+    const relations = await getUserCenterRelations(user.id);
 
-  if (relations.length === 0) {
-    if (user.isPlatformAdmin) return redirectTo(ROUTES.adminCenters);
-    return redirectTo(ROUTES.selectCenter);
-  }
-
-  const activeCenterId = await getActiveCenterId();
-  let relation = activeCenterId
-    ? relations.find((item) => item.center.id === activeCenterId)
-    : undefined;
-
-  if (!relation) {
-    // Auto-select when there is exactly one center; otherwise go pick one.
-    // (A Server Component cannot write the cookie — selecting persists it.)
-    if (relations.length === 1) {
-      relation = relations[0];
-    } else {
+    if (relations.length === 0) {
+      if (user.isPlatformAdmin) return redirectTo(ROUTES.adminCenters);
       return redirectTo(ROUTES.selectCenter);
     }
-  }
 
-  const settings = await prisma.centerSettings.findUnique({
-    where: { centerId: relation.center.id },
-  });
+    const activeCenterId = await getActiveCenterId();
+    let relation = activeCenterId
+      ? relations.find((item) => item.center.id === activeCenterId)
+      : undefined;
 
-  const role = roleForExperience(relation, options?.experience);
-  const membership =
-    relation.memberships.find((item) => item.role === role) ?? null;
+    if (!relation) {
+      // Auto-select when there is exactly one center; otherwise go pick one.
+      // (A Server Component cannot write the cookie — selecting persists it.)
+      if (relations.length === 1) {
+        relation = relations[0];
+      } else {
+        return redirectTo(ROUTES.selectCenter);
+      }
+    }
 
-  return {
-    user,
-    center: relation.center,
-    settings,
-    membership,
-    studentProfile: relation.studentProfile,
-    role,
-    roles: relation.roles,
-    grants: permissionGrantsFromSettings(settings),
-    isPlatformAdmin: user.isPlatformAdmin,
-  };
-}
+    const settings = await prisma.centerSettings.findUnique({
+      where: { centerId: relation.center.id },
+    });
+
+    const role = roleForExperience(relation, experience);
+    const membership =
+      relation.memberships.find((item) => item.role === role) ?? null;
+
+    return {
+      user,
+      center: relation.center,
+      settings,
+      membership,
+      studentProfile: relation.studentProfile,
+      role,
+      roles: relation.roles,
+      grants: permissionGrantsFromSettings(settings),
+      isPlatformAdmin: user.isPlatformAdmin,
+    };
+  },
+);
 
 export function hasExperience(ctx: TenantContext, experience: Experience): boolean {
   switch (experience) {
@@ -222,7 +230,7 @@ export function hasExperience(ctx: TenantContext, experience: Experience): boole
 export async function requireExperience(
   experience: Experience,
 ): Promise<TenantContext> {
-  const ctx = await getTenantContext({ experience });
+  const ctx = await getTenantContext(experience);
   if (!hasExperience(ctx, experience)) {
     return redirectTo(homePathForRole(ctx.role));
   }

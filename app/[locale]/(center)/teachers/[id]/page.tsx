@@ -23,7 +23,7 @@ import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { countOtherCenterRelations } from "@/lib/db/identity";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
-import { canEditGlobalProfile, fullName } from "@/lib/identity";
+import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 
@@ -44,7 +44,7 @@ export default async function TeacherDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ q?: string }>;
 }) {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "teacher.manage");
 
   const { id } = await params;
@@ -80,7 +80,9 @@ export default async function TeacherDetailPage({
     return {
       blockId: block.id,
       studentProfileId: profile?.id ?? null,
-      name: profile ? fullName(profile.user) : t("blocks.unknownStudent"),
+      name: profile
+        ? fullName(localName(profile, profile.user))
+        : t("blocks.unknownStudent"),
       studentCode: profile?.studentCode ?? null,
       reason: block.reason,
     };
@@ -101,20 +103,15 @@ export default async function TeacherDetailPage({
           })
         ).map((profile) => ({
           studentProfileId: profile.id,
-          name: fullName(profile.user),
+          name: fullName(localName(profile, profile.user)),
           studentCode: profile.studentCode,
         }))
       : [];
 
-  const profileEditable = canEditGlobalProfile({
-    authId: teacher.user.authId,
-    otherCenterRelations: otherRelations,
-  });
-
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={fullName(teacher.user)}
+        title={fullName(localName(teacher, teacher.user))}
         description={t("detailSubtitle")}
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -140,15 +137,12 @@ export default async function TeacherDetailPage({
           <CardContent>
             <TeacherProfileForm
               membershipId={teacher.id}
-              values={{
-                firstName: teacher.user.firstName,
-                lastName: teacher.user.lastName,
-                email: teacher.user.email ?? "",
-                phone: teacher.user.phone ?? "",
-                altPhone: teacher.user.altPhone ?? "",
+              name={localName(teacher, teacher.user)}
+              contact={{
+                email: teacher.email ?? "",
+                phone: teacher.phone ?? "",
+                altPhone: teacher.altPhone ?? "",
               }}
-              canSeeEarnings={teacher.canSeeEarnings}
-              profileEditable={profileEditable}
               canDelete={ctxCan(ctx, "teacher.delete")}
             />
           </CardContent>
@@ -169,12 +163,6 @@ export default async function TeacherDetailPage({
                 label={t("fields.accountClaimed")}
                 value={
                   teacher.user.authId ? tCommon("active") : tCommon("inactive")
-                }
-              />
-              <DetailRow
-                label={t("canSeeEarnings")}
-                value={
-                  teacher.canSeeEarnings ? tCommon("active") : tCommon("inactive")
                 }
               />
             </CardContent>

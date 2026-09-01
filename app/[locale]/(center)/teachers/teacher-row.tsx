@@ -17,7 +17,6 @@ export type TeacherRowData = {
   email: string | null;
   phone: string | null;
   active: boolean;
-  canSeeEarnings: boolean;
   /** Blocked students on this teacher's list, shown as a count. */
   blockCount: number;
 };

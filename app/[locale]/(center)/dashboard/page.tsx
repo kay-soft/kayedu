@@ -10,7 +10,7 @@ import { scoped } from "@/lib/db/scoped";
 import { formatNumber } from "@/lib/format";
 
 export default async function CenterDashboardPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   const db = scoped(ctx);
   const locale = await getLocale();
   const t = await getTranslations("CenterDashboard");

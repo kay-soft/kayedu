@@ -1,17 +1,17 @@
 import type { Prisma, User } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import {
-  contactMatchWhere,
   fullName,
-  matchedFields,
+  normalizeContact,
   normalizeEmail,
   normalizePhone,
   type ContactInput,
+  type ContactMatchField,
 } from "@/lib/identity";
 import type { MatchCandidate } from "@/lib/validation/people";
 
 /**
- * The global identity layer (docs/01-data-model.md §1, spec §5).
+ * The global identity layer (docs/01-data-model.md §1, §6, spec §5).
  *
  * `User` is the one table with no `centerId` — it is a person, not a tenant
  * row — so it is reached through this module rather than `scoped(ctx)`. What
@@ -19,19 +19,73 @@ import type { MatchCandidate } from "@/lib/validation/people";
  * this person already exist?" and "are they already connected to *this*
  * center?", and every center-scoped read around it still goes through
  * `lib/db/scoped.ts`.
+ *
+ * Contact details are **center-local** (docs/01 §6): a center's own record of
+ * a person's email/phone/altPhone lives on `StudentProfile`/`Membership`, not
+ * on the global `User`. So the duplicate match has to search three tables —
+ * the global identity plus every center's local record — because a person
+ * may have been entered with a contact that never made it onto their global
+ * `User` (it only seeds `User` at the moment a brand-new person is created).
  */
 
+type ContactMatch = { user: User; matchedOn: ContactMatchField[] };
+
 /**
- * People matching the submitted contact details. Returns up to two, because a
- * form can legitimately hit two different people (this email is A's, this
- * phone is B's) — that is a conflict a human resolves, not something to merge.
+ * People matching the submitted contact details, searched across the global
+ * `User` and every center's local `StudentProfile`/`Membership` record.
+ * Returns up to two distinct people, because a form can legitimately hit two
+ * different humans (this email is A's, this phone is B's) — that is a
+ * conflict a human resolves, not something to merge.
  */
 export async function findPeopleByContact(
   input: ContactInput,
-): Promise<User[]> {
-  const where = contactMatchWhere(input);
-  if (!where) return [];
-  return prisma.user.findMany({ where, take: 2 });
+): Promise<ContactMatch[]> {
+  const { email, phone } = normalizeContact(input);
+  if (!email && !phone) return [];
+
+  const userOr: Prisma.UserWhereInput[] = [];
+  const localOr: ({ email: string } | { phone: string })[] = [];
+  if (email) {
+    userOr.push({ email });
+    localOr.push({ email });
+  }
+  if (phone) {
+    userOr.push({ phone });
+    localOr.push({ phone });
+  }
+
+  const [globalUsers, localStudents, localTeachers] = await Promise.all([
+    prisma.user.findMany({ where: { OR: userOr } }),
+    prisma.studentProfile.findMany({
+      where: { OR: localOr },
+      include: { user: true },
+    }),
+    prisma.membership.findMany({
+      where: { OR: localOr },
+      include: { user: true },
+    }),
+  ]);
+
+  const byUser = new Map<string, { user: User; matchedOn: Set<ContactMatchField> }>();
+  const record = (user: User, contactEmail: string | null, contactPhone: string | null) => {
+    const existing = byUser.get(user.id);
+    const matchedOn = existing?.matchedOn ?? new Set<ContactMatchField>();
+    if (email && contactEmail === email) matchedOn.add("email");
+    if (phone && contactPhone === phone) matchedOn.add("phone");
+    if (matchedOn.size === 0) return;
+    byUser.set(user.id, { user: existing?.user ?? user, matchedOn });
+  };
+
+  for (const user of globalUsers) record(user, user.email, user.phone);
+  for (const profile of localStudents) record(profile.user, profile.email, profile.phone);
+  for (const membership of localTeachers) {
+    record(membership.user, membership.email, membership.phone);
+  }
+
+  return [...byUser.values()].map(({ user, matchedOn }) => ({
+    user,
+    matchedOn: [...matchedOn],
+  }));
 }
 
 /** Memberships + student profiles this person holds at *other* centers. */
@@ -48,13 +102,17 @@ export async function countOtherCenterRelations(
 
 /**
  * Turns a matched person into what the UI shows before anything is linked:
- * who they are, which field matched, and whether they are already here.
+ * who they are, the contact *this form* was typed with (never another
+ * center's stored local record — this center has no business displaying
+ * that verbatim), and whether they are already connected here.
  */
 export async function describeMatch(
   centerId: string,
-  user: User,
+  match: ContactMatch,
   input: ContactInput,
 ): Promise<MatchCandidate> {
+  const { user, matchedOn } = match;
+  const { email, phone } = normalizeContact(input);
   const [studentProfile, membership] = await Promise.all([
     prisma.studentProfile.findFirst({ where: { userId: user.id, centerId } }),
     prisma.membership.findFirst({ where: { userId: user.id, centerId } }),
@@ -69,9 +127,9 @@ export async function describeMatch(
   return {
     userId: user.id,
     name: fullName(user),
-    email: user.email,
-    phone: user.phone,
-    matchedOn: matchedFields(input, user),
+    email,
+    phone,
+    matchedOn,
     existingHere,
     ...(studentProfile ? { existingProfileId: studentProfile.id } : {}),
   };
@@ -84,11 +142,12 @@ export async function describeMatch(
  *   only links once staff confirm (never a silent merge, spec §5).
  * - `conflict` — the email and the phone belong to two different people.
  *   Merging identities is a manual, audited admin action (docs/02 §3).
- * - `none` — nobody matches; create a new person.
+ * - `none` — nobody matches; create a new person, seeding the global `User`
+ *   from the entered contact (docs/01 §6).
  */
 export type ContactResolution =
   | { kind: "none" }
-  | { kind: "matched"; user: User }
+  | { kind: "matched"; match: ContactMatch }
   | { kind: "conflict" };
 
 export async function resolveContact(
@@ -96,8 +155,28 @@ export async function resolveContact(
 ): Promise<ContactResolution> {
   const people = await findPeopleByContact(input);
   if (people.length === 0) return { kind: "none" };
-  if (people.length === 1) return { kind: "matched", user: people[0] };
+  if (people.length === 1) return { kind: "matched", match: people[0] };
   return { kind: "conflict" };
+}
+
+/**
+ * The local name to seed onto a new center record (docs/01 §6): when linking
+ * to a match, the existing person's **actual** name — not whatever staff
+ * happened to type into the form before the match was found — otherwise the
+ * form's own input, which at that point *is* the brand-new `User`'s name.
+ * Seeded once, at creation; editable locally and independently right after,
+ * never locked (`components/center/person-fields.tsx`).
+ */
+export function seedLocalName(
+  resolution: ContactResolution,
+  formName: { firstName: string; lastName: string },
+): { firstName: string; lastName: string } {
+  return resolution.kind === "matched"
+    ? {
+        firstName: resolution.match.user.firstName,
+        lastName: resolution.match.user.lastName,
+      }
+    : formName;
 }
 
 export type PersonInput = {
@@ -110,9 +189,11 @@ export type PersonInput = {
 };
 
 /**
- * Creates a person. Contact details are stored normalized so the next
- * duplicate check matches, and the unique columns are written as null rather
- * than "" — Postgres allows many nulls, and "" would collide.
+ * Creates a **new** person. Only called when nothing matched — the entered
+ * contact becomes the global `User`'s email/phone/altPhone at this one
+ * moment (the "seed"), and the caller separately writes the same values onto
+ * the center-local record. Later edits at any center touch only that
+ * center's local copy, never this row again (docs/01 §6).
  */
 export function createPerson(
   data: PersonInput,
@@ -126,23 +207,6 @@ export function createPerson(
       phone: normalizePhone(data.phone),
       altPhone: data.altPhone,
       locale: data.locale,
-    },
-  });
-}
-
-export function updatePerson(
-  userId: string,
-  data: Omit<PersonInput, "locale">,
-  tx: Prisma.TransactionClient = prisma,
-): Promise<User> {
-  return tx.user.update({
-    where: { id: userId },
-    data: {
-      firstName: data.firstName,
-      lastName: data.lastName,
-      email: normalizeEmail(data.email),
-      phone: normalizePhone(data.phone),
-      altPhone: data.altPhone,
     },
   });
 }

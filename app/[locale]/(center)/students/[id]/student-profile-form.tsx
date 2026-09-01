@@ -8,6 +8,7 @@ import {
   deleteStudentAction,
   updateStudentAction,
 } from "@/app/[locale]/(center)/students/actions";
+import { ContactFields, type ContactValues } from "@/components/center/contact-fields";
 import { PersonFields, type PersonValues } from "@/components/center/person-fields";
 import {
   StudentFields,
@@ -23,26 +24,27 @@ import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
 /**
  * Edit one student.
  *
- * The person's own name and contact details are **global**: this center may
- * rewrite them only for someone it created who exists nowhere else, otherwise
- * they render read-only (CLAUDE.md rule 4). Grade, ID-card number and parent
- * details belong to this center and are always editable.
+ * Name, contact details, grade and parent info are all this **center's own
+ * local record** (docs/01-data-model.md §6) — seeded from the global `User`
+ * when this center registered the student, then always editable here,
+ * independently of any other center, with no lock of any kind. The student
+ * code is never edited here — it was assigned once, at registration.
  */
 export function StudentProfileForm({
   studentProfileId,
-  person,
+  name,
+  contact,
   student,
   grades,
   noneLabel,
-  profileEditable,
   canDelete,
 }: {
   studentProfileId: string;
-  person: PersonValues;
+  name: PersonValues;
+  contact: ContactValues;
   student: StudentValues;
   grades: GradeOption[];
   noneLabel: string;
-  profileEditable: boolean;
   canDelete: boolean;
 }) {
   const t = useTranslations("Students");
@@ -73,32 +75,19 @@ export function StudentProfileForm({
         <FormMessage tone="success">{tCommon("saved")}</FormMessage>
       ) : null}
 
-      {profileEditable ? null : (
-        <FormMessage tone="info">{t("profileLocked")}</FormMessage>
-      )}
-
-      <PersonFields
-        idPrefix={`student-${studentProfileId}`}
-        values={person}
-        fieldErrors={state.fieldErrors}
-        readOnly={!profileEditable}
-      />
-
-      {/* Disabled inputs are not submitted; these keep the stored values
-          flowing through the action unchanged. */}
-      {profileEditable ? null : (
-        <>
-          <input type="hidden" name="firstName" value={person.firstName ?? ""} />
-          <input type="hidden" name="lastName" value={person.lastName ?? ""} />
-          <input type="hidden" name="email" value={person.email ?? ""} />
-          <input type="hidden" name="phone" value={person.phone ?? ""} />
-          <input type="hidden" name="altPhone" value={person.altPhone ?? ""} />
-        </>
-      )}
-
       <SectionHeader
         title={t("centerSectionTitle")}
         description={t("centerSectionDescription")}
+      />
+      <PersonFields
+        idPrefix={`student-${studentProfileId}`}
+        values={name}
+        fieldErrors={state.fieldErrors}
+      />
+      <ContactFields
+        idPrefix={`student-${studentProfileId}`}
+        values={contact}
+        fieldErrors={state.fieldErrors}
       />
       <StudentFields
         idPrefix={`student-${studentProfileId}`}

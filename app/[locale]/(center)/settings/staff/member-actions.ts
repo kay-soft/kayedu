@@ -29,7 +29,7 @@ function staffPath(locale: string): string {
 }
 
 async function staffScope(): Promise<{ ctx: TenantContext; db: ScopedDb } | null> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "staff.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }

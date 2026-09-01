@@ -16,7 +16,7 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 
 export default async function BranchesPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "center.settings.edit");
 
   const t = await getTranslations("Settings.branches");
@@ -29,6 +29,7 @@ export default async function BranchesPage() {
       kind: "text",
       label: t("fields.address"),
       maxLength: 160,
+      placeholder: t("fields.addressPlaceholder"),
     },
   ];
 

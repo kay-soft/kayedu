@@ -194,8 +194,20 @@ model Membership {
   center         Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
   role           Role
   active         Boolean   @default(true)
-  // Teacher-only: what this center lets the teacher see financially.
+  // Teacher-only: schema flexibility for a future per-center visibility
+  // toggle. Defaults true and nothing currently gates on it — teachers see
+  // their own earnings by default (docs/00-master-product-spec.md §3).
   canSeeEarnings Boolean   @default(true)
+  // Center-local record for this person (docs/01-data-model.md §6). Identity
+  // stays global on User (the auth credential + the platform-wide default),
+  // but name and contact are what *this* center has on file — seeded from
+  // User at creation, then editable here independently of what any other
+  // center stores, and never written back to User.
+  firstName      String?
+  lastName       String?
+  email          String?
+  phone          String?
+  altPhone       String?
   invitedAt      DateTime  @default(now())
   joinedAt       DateTime?
   createdAt      DateTime  @default(now())
@@ -203,6 +215,7 @@ model Membership {
 
   @@unique([userId, centerId, role])
   @@index([centerId])
+  @@index([centerId, role])
   @@index([userId])
 }
 
@@ -354,9 +367,17 @@ model StudentProfile {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   centerId        String
   center          Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  studentCode     String // unique per center (ID-card number)
+  studentCode     String // system-assigned per center via StudentCodeCounter — never typed
   gradeId         String?
   grade           Grade?   @relation(fields: [gradeId], references: [id])
+  // Center-local record for the student themselves — see the note on
+  // Membership above. `User` stays the auth credential + platform default;
+  // these are this center's own name/contact and never write back to it.
+  firstName       String?
+  lastName        String?
+  email           String?
+  phone           String?
+  altPhone        String?
   parentFirstName String?
   parentLastName  String?
   parentPhone     String?
@@ -376,6 +397,19 @@ model StudentProfile {
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
   @@index([centerId])
+  @@index([centerId, active])
+}
+
+/**
+ * A race-free per-center sequence for `StudentProfile.studentCode`
+ * (docs/01-data-model.md §6). One row per center; `next` is the code that
+ * will be handed out next. Claimed with a single atomic
+ * `INSERT … ON CONFLICT DO UPDATE … RETURNING` inside the same transaction
+ * that creates the `StudentProfile` — see `lib/db/students.ts`.
+ */
+model StudentCodeCounter {
+  centerId String @id
+  next     Int    @default(1001)
 }
 
 model Enrollment {

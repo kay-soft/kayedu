@@ -95,18 +95,26 @@ export function fullName(user: Pick<IdentityUser, "firstName" | "lastName">): st
 }
 
 /**
- * May this center edit the person's **global** profile (name, email, phone)?
+ * The name to show/edit for a person **at this center** — a
+ * `StudentProfile`/`Membership` local record (docs/01-data-model.md §2, §6).
  *
- * Identity is global (CLAUDE.md rule 4): renaming a teacher who also works at
- * another center, or who has signed in and owns their account, would rewrite
- * them everywhere. So the global fields are editable only for a person this
- * center created and who exists nowhere else. Center-owned fields (parent
- * details, grade, student code, photo, membership flags) are always editable.
+ * Name is center-local, exactly like email/phone/altPhone: it is seeded from
+ * the global `User` the moment this center's record is created (`register`
+ * or `add-existing-person`), then editable here immediately and
+ * independently of what any other center stores or what the global `User`
+ * says — never locked, and never written back to `User`.
+ *
+ * The fallback to `global` only matters for a record whose local name was
+ * never seeded (a Membership created by the older staff-invite path, which
+ * does not go through the people screens this module supports) — everything
+ * created via `register`/`add-existing-person` always has a local name.
  */
-export function canEditGlobalProfile(input: {
-  authId: string | null;
-  /** Memberships + student profiles the person holds outside this center. */
-  otherCenterRelations: number;
-}): boolean {
-  return input.authId === null && input.otherCenterRelations === 0;
+export function localName(
+  local: { firstName: string | null; lastName: string | null },
+  global: Pick<IdentityUser, "firstName" | "lastName">,
+): { firstName: string; lastName: string } {
+  return {
+    firstName: local.firstName ?? global.firstName,
+    lastName: local.lastName ?? global.lastName,
+  };
 }

@@ -38,7 +38,7 @@ export async function createInvitationAction(
   _prevState: InviteFormState,
   formData: FormData,
 ): Promise<InviteFormState> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "staff.invite")) return { error: "forbidden" };
 
   const parsed = createInvitationSchema.safeParse(Object.fromEntries(formData));
@@ -92,7 +92,7 @@ export async function createInvitationAction(
 export async function revokeInvitationAction(
   formData: FormData,
 ): Promise<void> {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "staff.invite")) return;
 
   const parsed = invitationIdSchema.safeParse(Object.fromEntries(formData));

@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 
 import { FieldError } from "@/components/shared/form-message";
 import { Label } from "@/components/ui/label";
@@ -7,10 +10,17 @@ import { Label } from "@/components/ui/label";
  * One labelled form control with its hint and error. Every people form is
  * built from these, so spacing, label size and error placement stay identical
  * across screens instead of being re-invented per form (docs/04 §4).
+ *
+ * `optional` is the mandatory form convention (docs/04 §5 "Form fields"): a
+ * field that is genuinely always optional gets a dimmed "(optional)" beside
+ * its label, so staff never have to guess or hit a validation error to find
+ * out. Never set it on a field that is *conditionally* required (e.g. "phone
+ * or email") — a hint sentence says that better than a wrong "(optional)" tag.
  */
 export function Field({
   id,
   label,
+  optional,
   hint,
   error,
   className,
@@ -18,15 +28,23 @@ export function Field({
 }: {
   id: string;
   label: string;
+  optional?: boolean;
   hint?: string;
   /** Already-translated message; the caller owns the i18n lookup. */
   error?: string;
   className?: string;
   children: ReactNode;
 }) {
+  const t = useTranslations("Shared");
+
   return (
     <div className={`flex min-w-0 flex-col gap-1.5 ${className ?? ""}`}>
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>
+        {label}
+        {optional ? (
+          <span className="font-normal text-text-muted">{t("optional")}</span>
+        ) : null}
+      </Label>
       {children}
       {hint ? <p className="text-xs text-text-muted">{hint}</p> : null}
       {error ? <FieldError>{error}</FieldError> : null}

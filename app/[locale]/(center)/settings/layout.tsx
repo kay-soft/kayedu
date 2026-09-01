@@ -21,7 +21,7 @@ export default async function SettingsLayout({
 }: {
   children: ReactNode;
 }) {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   const t = await getTranslations("Settings");
 
   const items: SettingsNavItem[] = [];

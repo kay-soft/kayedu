@@ -56,35 +56,40 @@ app/
     (admin)/admin/              # /admin/centers, /admin/platform
   api/                          # webhooks / edge handlers if needed
 components/
-  ui/                           # shadcn primitives
-  shell/                        # app shell: sidebar, drawer, header, nav config
+  ui/                           # shadcn primitives, incl. dialog.tsx (docs/04 §5)
+  shell/                        # app shell: sidebar (collapsible, docs/04 §5), drawer, header, nav config
   settings/                     # entity-manager (shared config CRUD), settings nav
-  center/  teacher/  student/   # experience-specific composed components
-  shared/                       # tables, filters, receipt, id-card, kpi-card
+  center/                       # person-fields, contact-fields, student-fields, pagination, add-entity dialogs
+  teacher/  student/            # experience-specific composed components
+  shared/                       # tables, filters, receipt, id-card, kpi-card, field.tsx
 lib/
   auth/
     session.ts                  # Supabase auth user + User mirror
     active-center.ts            # the active-center cookie
-    tenant.ts                   # getTenantContext(), route-group gates
+    tenant.ts                   # getTenantContext() (request-cached, §14), route-group gates
     permissions.ts              # can(role, action) map
   supabase/
     server.ts  client.ts  proxy.ts  env.ts
+  ui/
+    sidebar-cookie.ts           # the sidebar-collapsed cookie name (docs/04 §5)
   db/
     client.ts                   # Prisma singleton
     tenant-scope.ts             # pure scoping primitives (no runtime imports)
     scoped.ts                   # tenant-scoped query helpers
     audit.ts                    # writeAuditLog()
-    students.ts  classes.ts  sessions.ts  payments.ts  analytics.ts ...
+    identity.ts                 # global-identity reads/writes (findPeopleByContact, createPerson, …)
+    students.ts                 # lean list selects, search, claimStudentCode, delete-blockers
+    classes.ts  sessions.ts  payments.ts  analytics.ts ...
   money.ts                      # the ONLY center-cut math + piastre helpers
   card-layout.ts                # the default ID-card layout the editor offers
   id-card.ts                    # renders the card SVG from that layout
   qr.ts                         # QR modules -> an SVG path
-  identity.ts                   # duplicate-match predicate + contact normalizing
+  identity.ts                   # duplicate-match predicate + contact normalizing (pure)
   storage-paths.ts              # pure storage-path primitives (no runtime imports)
   routes.ts                     # locale-less pathnames + role home paths
   format.ts                     # locale-aware number/date formatting
   i18n/  request.ts  routing.ts  navigation.ts
-  validation/                   # zod schemas per entity
+  validation/                   # zod schemas per entity, incl. pagination helpers (people.ts, §14)
   utils.ts
 messages/
   ar.json  en.json
@@ -125,13 +130,15 @@ As of **M3** this is real on the add-teacher and add-student forms. `lib/identit
 | **matched** | The action writes **nothing** and returns the candidate. The UI shows who they are and what matched ("this person already exists"), and only a confirmed submit — now carrying `linkUserId` — attaches this center's record to them. Already connected here? The panel points at the existing record instead of offering to link. |
 | **conflict** | The email belongs to one person and the phone to another. Refused with an explanation: merging two identities is the manual admin action above, not something an add form decides. |
 
+**Name is center-local too — nothing about a person's record stays global-locked.** `matched`/`none` above decide *which* `User` a center's `StudentProfile`/`Membership` attaches to; they never decide who may rename anyone, because renaming isn't gated at all as of the identity-model revision. Whichever outcome fires, the local `firstName`/`lastName` is seeded once — from the form for a brand-new person, from the matched person's actual name otherwise (`seedLocalName()` in `lib/db/identity.ts`) — and is then editable at that center immediately, independently of any other center, exactly like `email`/`phone`/`altPhone` (`01-data-model.md` §6). The global `User.firstName`/`User.lastName` stay the platform-wide default and are never written back to.
+
 ---
 
 ## 4. Tenant resolution & `getTenantContext()`
 
 **URL strategy:** path-based for simplicity now — `app.kayedu.com` with the active center in the session, and center branding applied from it. (Subdomains like `centerx.kayedu.com` can be layered on later via middleware without schema change; both resolve to the same `centerId`.)
 
-`getTenantContext()` is called at the top of every Server Action and protected loader. It returns:
+`getTenantContext()` is called at the top of every Server Action and protected loader — often several times in one request (a layout, then the page it wraps). It is wrapped in React's `cache()`, so one request resolves the user, the center relations and the `CenterSettings` row **once** no matter how many call sites ask (§14). It takes `experience` as a plain optional string (`getTenantContext("center")`), not an options object — `cache()` keys object arguments by reference, so a fresh `{ experience: "center" }` literal at every call site would never hit the cache. It returns:
 ```ts
 type TenantContext = {
   user: User;
@@ -183,7 +190,7 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:isolation` (`scripts/isolation-check.ts`) is the cross-center-by-ID gate: it creates two throwaway centers, asserts that Center A cannot read a Center B row by id through the scoping primitives, that `requireScopedById` throws, that scoped lists never contain foreign rows, and that an unscoped `where` fails loudly — then cleans up. It needs a reachable database. The shared-teacher no-leak test arrives with the teacher portal in M7.
 
-`npm run check:people` (`scripts/people-check.ts`) is the M3 gate, covering the paths that milestone added. It registers **one person at two throwaway centers** and asserts a single `User` with two `StudentProfile` rows; that a `+20`-prefixed phone and a capitalised email still match that person; that a student code repeats across centers but never inside one; that Center A resolves neither Center B's `StudentProfile`, teacher `Membership` nor `StudentBlock` by id; that a **teacher shared by both centers** who blocks a student at one has not blocked them at the other; that grade promotion moves only its own center's students; that the storage primitives refuse an unscoped path, a traversal segment, a prefix collision and a foreign center's path; that a card renders with its QR, escapes its text and mirrors in Arabic; and that the schemas reject what the UI must not store. Then it cleans up.
+`npm run check:people` (`scripts/people-check.ts`) is the M3 gate, covering the paths that milestone added (revised for the center-local-contacts and system-assigned-codes rework). It registers **one person at two throwaway centers** and asserts a single `User` with two `StudentProfile` rows; that a `+20`-prefixed phone and a capitalised email still match that person; that editing one center's local contact leaves the global `User` and every other center's local record untouched; that a contact which exists **only** on another center's local record (never the global `User`) still produces a match, proving the search covers all three tables; that **12 concurrent registrations** in one center produce 12 unique, contiguous student codes — no duplicates, no gaps; that Center A resolves neither Center B's `StudentProfile`, teacher `Membership` nor `StudentBlock` by id; that a **teacher shared by both centers** who blocks a student at one has not blocked them at the other, and that their local contact is independent per center too; that grade promotion moves only its own center's students; that the storage primitives refuse an unscoped path, a traversal segment, a prefix collision and a foreign center's path; that a card renders with its QR, escapes its text and mirrors in Arabic; and that the schemas reject what the UI must not store (including asserting the student schema carries no `studentCode` field and the teacher schema carries no `canSeeEarnings` field at all). Then it cleans up.
 
 `npm run check:config` (`scripts/config-check.ts`) is the M2 gate. It configures **two** throwaway centers through one `configureCenter(centerId)` — no per-center branching anywhere — using the same zod schemas the settings actions parse with and the same scoping primitives, then asserts the two configurations are independent, that neither center resolves the other center's config rows by id, that the permission-grant seam widens a receptionist and nobody else, and that the center-cut split is right in both modes. That is the "a second center needs zero code changes" claim, executed.
 
@@ -201,14 +208,14 @@ can(role, "attendance.correct")   // OWNER, MANAGER          (RECEPTIONIST: gran
 can(role, "payment.void")         // OWNER, MANAGER
 can(role, "center.settings.edit") // OWNER, MANAGER
 can(role, "reception.use")        // OWNER, MANAGER, RECEPTIONIST
-can(role, "analytics.own.view")   // TEACHER
+can(role, "analytics.own.view")   // TEACHER (baseline — see the note below)
 ```
 - **OWNER** = MANAGER + `center.ownership.manage` (the only owner-exclusive action).
 - **RECEPTIONIST** = `reception.use`, `attendance.record`, `payment.record`, `student.manage`. Profit and corrections are **denied by default** (spec §3).
-- **TEACHER** = `analytics.own.view`, `changeRequest.create`, `student.block`.
+- **TEACHER** = `analytics.own.view`, `changeRequest.create`, `student.block`. `analytics.own.view` is a **baseline** permission, not a grant — a teacher sees their own earnings/analytics by default (spec §3, M3). `Membership.canSeeEarnings` exists in the schema for a possible future per-center toggle, defaults `true`, and `can()` never reads it.
 - **PLATFORM_ADMIN** = `platform.manage`, `audit.view`.
 
-**Grants (the configurable edge cases).** `can(role, permission, grants)` can only *widen* a role, never narrow it, and only for permissions listed as grantable for that role (`RECEPTIONIST → attendance.correct, center.profit.view`). Grants come from `permissionGrantsFromSettings(ctx.settings)` — the single seam. Nothing else reads the toggle columns.
+**Grants (the configurable edge cases).** `can(role, permission, grants)` can only *widen* a role, never narrow it, and only for permissions listed as grantable for that role (`RECEPTIONIST → attendance.correct, center.profit.view`). Grants come from `permissionGrantsFromSettings(ctx.settings)` — the single seam. Nothing else reads the toggle columns. (An earlier draft also listed `TEACHER → analytics.own.view` here — removed as of M3, since that permission was already unconditionally true in `TEACHER`'s baseline and the grant entry could never fire.)
 
 As of **M2** that function is real. It lives in `lib/auth/permissions.ts` (beside the map it feeds, and free of runtime imports so the acceptance gates can exercise it) and is re-exported from `lib/auth/tenant.ts`, where the context is assembled. It maps two `CenterSettings` columns:
 
@@ -284,3 +291,23 @@ Security by design + least privilege · strict tenant isolation (§5) · audit l
 Vercel (Frankfurt) + Supabase (Frankfurt). Preview deploys for demos; **production only after the first center contract**. Migrations via `prisma migrate deploy` in CI. Secrets in Vercel env. Cron for session generation. Add error monitoring (e.g. Sentry) before pilot.
 
 **Before the first production deploy, work the [Pre-deployment checklist](./00-master-product-spec.md#21-pre-deployment-checklist) (`00-master-product-spec.md` §2.1).** It is the standing inventory of every deliberate dev-only shortcut currently standing in for a production requirement — disabled email confirmation, manually shared invite links, the seeded owner credential, the RLS policies this document's §5 layer 2 calls for, monitoring, backups. Add to it whenever a new shortcut is taken.
+
+---
+
+## 14. Performance & pagination conventions
+
+Introduced during the M3 hardening pass, after navigation had grown noticeably slow. These are standing rules for every later milestone, not a one-off fix — a list screen or a data loader that skips them is a bug.
+
+**List pages are paginated, never "load everything."** A center can have 5,000+ students. Every list screen (`/students`, `/teachers`, and every future one — sessions, payments, expenses) takes `page`/`pageSize` from the URL (`lib/validation/people.ts`: `parsePageParam`, `parsePageSizeParam`, `DEFAULT_PAGE_SIZE = 25`), bounds the query with `take`/`skip`, and renders `components/center/pagination.tsx` — prev/next driven by real `<Link>` hrefs, not client state, so a page is shareable and back-button-safe. Search narrows the same paginated query; it never fetches the full table into memory to filter client-side.
+
+**List queries `select` only what a row renders — never `include` a whole related row.** `lib/db/students.ts` exports `STUDENT_LIST_SELECT`/`TEACHER_LIST_SELECT`, lean field lists the `scoped(ctx).students.search()` / `.teachers.search()` helpers use; the detail-page loaders (`findDetailById`) are the ones allowed a full `include`, because a detail page actually renders every field. Aggregate counts needed by a list (e.g. a teacher's block count) come from one grouped query — `scoped(ctx).studentBlocks.countByRef()` uses Prisma `groupBy` — scoped to just the rows on that page, never "fetch every block in the center and count in memory."
+
+**`getTenantContext()` is request-cached.** It is wrapped in React's `cache()` (§4) so the user, the center relations, and the `CenterSettings` row are resolved once per request no matter how many layouts/pages call it. This is why it takes `experience` as a primitive argument rather than an options object — `cache()` keys object arguments by reference, and a fresh literal at every call site would defeat it. `getUserCenterRelations()` and `getCurrentUser()`/`getAuthUser()` are cached the same way, for the same reason.
+
+**Money/identity writes that must not leave a gap run in one transaction.** The clearest example is student registration: claiming the next `studentCode` (a race-free atomic counter, `01-data-model.md` §6) and creating the `StudentProfile` (and the `User`, when there is one) happen inside a single `prisma.$transaction()`, so any failure rolls back the claim too — a crash never burns a code into a permanent gap. Reach for this pattern whenever a sequence or a uniqueness guarantee is involved, not just for payments.
+
+**`revalidatePath` is targeted, not broad.** Every mutation revalidates only the paths it actually changed — a list, a detail page, and (for students) the card/paper printables are three separate helpers (`revalidateStudentList`, `revalidateStudentDetail`, `revalidateStudentPrintables` in `app/[locale]/(center)/students/actions.ts`) rather than one function every action calls unconditionally. Deactivating a student, for instance, doesn't touch the printables — nothing on the card or the paper sheet depends on active/inactive.
+
+**Indexes exist for the query shapes actually run.** Every hot scoped lookup is `centerId`-first (`01-data-model.md` §2); compound indexes are added when a second column is filtered or ordered on in the same query — `Membership(centerId, role)` for the teacher list, `StudentProfile(centerId, active)` for status filtering. Substring search (`contains`, used for name/phone/code search) cannot use a plain btree index — that is a known limitation for now; a `pg_trgm` trigram index is the documented upgrade path if search latency becomes a problem at real center scale, not yet built because it isn't yet needed.
+
+**Prefetching stays on.** Next.js `<Link>` (via `next-intl`'s wrapper) prefetches viewport-visible destinations by default — list rows linking to detail pages get this for free. Don't pass `prefetch={false}` without a specific reason; the default is the right behavior for this app's navigation-heavy UI.

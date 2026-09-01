@@ -6,7 +6,7 @@ import { PrintToolbar } from "@/components/center/print-toolbar";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped } from "@/lib/db/scoped";
-import { fullName } from "@/lib/identity";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 
 /**
@@ -21,7 +21,7 @@ export default async function StudentCardPrintPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "student.manage");
 
   const { id } = await params;
@@ -43,7 +43,7 @@ export default async function StudentCardPrintPage({
 
       <PrintToolbar
         backHref={ROUTES.centerStudent(student.id)}
-        title={fullName(student.user)}
+        title={fullName(localName(student, student.user))}
       />
 
       <div className="flex justify-center p-4 sm:p-8 print:p-0">

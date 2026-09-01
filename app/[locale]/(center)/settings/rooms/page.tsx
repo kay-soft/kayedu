@@ -18,7 +18,7 @@ import { scoped } from "@/lib/db/scoped";
 import { formatNumber } from "@/lib/format";
 
 export default async function RoomsPage() {
-  const ctx = await getTenantContext({ experience: "center" });
+  const ctx = await getTenantContext("center");
   await requirePermission(ctx, "center.settings.edit");
 
   const db = scoped(ctx);

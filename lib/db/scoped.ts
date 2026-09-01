@@ -2,6 +2,10 @@ import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import type { TenantContext } from "@/lib/auth/tenant";
 import {
+  STUDENT_LIST_SELECT,
+  TEACHER_LIST_SELECT,
+} from "@/lib/db/students";
+import {
   requireScopedById,
   scopedData,
   scopedFindById,
@@ -112,6 +116,20 @@ export function scoped(ctx: TenantContext) {
           include: { user: true },
         }),
 
+      /** The list screen: a lean select (never the whole User row), paged. */
+      search: (args: {
+        where?: Prisma.MembershipWhereInput;
+        take: number;
+        skip?: number;
+      }) =>
+        prisma.membership.findMany({
+          where: scopedWhere(centerId, { ...args.where, role: TEACHER }),
+          orderBy: [{ active: "desc" }, { createdAt: "desc" }],
+          select: TEACHER_LIST_SELECT,
+          take: args.take,
+          skip: args.skip,
+        }),
+
       count: (where?: Prisma.MembershipWhereInput) =>
         prisma.membership.count({
           where: scopedWhere(centerId, { ...where, role: TEACHER }),
@@ -158,7 +176,11 @@ export function scoped(ctx: TenantContext) {
           include: { user: true },
         }),
 
-      /** The list screen: filtered, ordered and paged in the database. */
+      /**
+       * The list screen: filtered, ordered and paged in the database, with a
+       * lean `select` — never the whole `User`/`Grade` row for a list of
+       * potentially thousands (docs/02-architecture.md §14).
+       */
       search: (args: {
         where?: Prisma.StudentProfileWhereInput;
         take: number;
@@ -167,7 +189,7 @@ export function scoped(ctx: TenantContext) {
         prisma.studentProfile.findMany({
           where: scopedWhere(centerId, args.where),
           orderBy: [{ active: "desc" }, { studentCode: "asc" }],
-          include: { user: true, grade: true },
+          select: STUDENT_LIST_SELECT,
           take: args.take,
           skip: args.skip,
         }),
@@ -244,6 +266,24 @@ export function scoped(ctx: TenantContext) {
         (await prisma.studentBlock.count({
           where: scopedWhere(centerId, { scope, refId, blockedUserId }),
         })) > 0,
+
+      /**
+       * How many blocks each of these refs (teacher User ids) carries — one
+       * grouped query instead of fetching every block row in the center just
+       * to count them in memory (docs/02-architecture.md §14).
+       */
+      countByRef: async (
+        scope: "TEACHER" | "CLASS",
+        refIds: string[],
+      ): Promise<Map<string, number>> => {
+        if (refIds.length === 0) return new Map();
+        const rows = await prisma.studentBlock.groupBy({
+          by: ["refId"],
+          where: scopedWhere(centerId, { scope, refId: { in: refIds } }),
+          _count: { refId: true },
+        });
+        return new Map(rows.map((row) => [row.refId, row._count.refId]));
+      },
 
       create: (data: Omit<Prisma.StudentBlockUncheckedCreateInput, "centerId">) =>
         prisma.studentBlock.create({ data: scopedData(centerId, data) }),
