@@ -82,7 +82,7 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 
 **No debt:** there is no balance table. If a student didn't pay, there's simply no `Payment` row — they're an unpaid/absent attendee. Nothing owes anything.
 
-**Rounding rule:** percentage cuts round to the nearest whole EGP (`Math.round`); document any change here because it affects totals.
+**Rounding rule:** percentage cuts round to the nearest piastre (`Math.round`); document any change here because it affects totals.
 
 ---
 

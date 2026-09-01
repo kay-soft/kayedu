@@ -71,7 +71,7 @@ These are settled. They shape the schema and the whole build.
 
 ### D. Code-level shortcuts
 
-- [ ] **`.dark` block in `app/globals.css` is stock shadcn placeholder values**, not KayEdu tokens, and nothing in the app ever sets `.dark`. Dark mode is not part of `04-design-system.md`. Either build it against the §2 tokens or delete the block — do not ship an unreviewed theme.
+- [x] ~~`.dark` block in `app/globals.css` is stock shadcn placeholder values~~ — removed (2026-09-01). Dark mode is not part of `04-design-system.md`; `@custom-variant dark` stays only because the stock `components/ui/button.tsx` still carries inert `dark:` utility classes.
 - [ ] **Nav items marked `disabled: true`** in `components/shell/nav.ts` are milestone placeholders that render as "Soon". Every one must be either implemented or removed before a center sees the app.
 - [ ] **Run through all 15 acceptance criteria in §7** (M10) — this checklist is the *infrastructure* gate; §7 is the *product* gate. Both must pass.
 
