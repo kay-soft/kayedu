@@ -63,16 +63,27 @@ export default async function StudentDetailPage({
       hasStorage ? idCardGeneratedAt(ctx.center.id, student.id) : null,
     ]);
 
-  // A block names the teacher by their User id; resolve it inside this center.
+  // A TEACHER block names the teacher by their User id; a CLASS block names
+  // the class by its ClassGroup id — both resolved inside this center.
   const teacherRefIds = blocks
     .filter((block) => block.scope === "TEACHER")
     .map((block) => block.refId);
-  const blockingTeachers =
+  const classRefIds = blocks
+    .filter((block) => block.scope === "CLASS")
+    .map((block) => block.refId);
+  const [blockingTeachers, blockingClasses] = await Promise.all([
     teacherRefIds.length > 0
-      ? await db.teachers.list({ userId: { in: teacherRefIds } })
-      : [];
+      ? db.teachers.list({ userId: { in: teacherRefIds } })
+      : Promise.resolve([]),
+    classRefIds.length > 0
+      ? db.classGroups.list({ id: { in: classRefIds } })
+      : Promise.resolve([]),
+  ]);
   const teacherByUserId = new Map(
     blockingTeachers.map((teacher) => [teacher.userId, teacher]),
+  );
+  const classById = new Map(
+    blockingClasses.map((classGroup) => [classGroup.id, classGroup]),
   );
 
   const cardSvg = await studentCardSvg(ctx, student, {
@@ -208,23 +219,31 @@ export default async function StudentDetailPage({
             <CardDescription>{t("enrollments.description")}</CardDescription>
           </CardHeader>
           <CardContent>
-            {enrollments.length === 0 ? (
+            {enrollments.filter((e) => e.status !== "REMOVED").length === 0 ? (
               <FormMessage tone="info">{t("enrollments.empty")}</FormMessage>
             ) : (
               <ul className="flex flex-col gap-2">
-                {enrollments.map((enrollment) => (
-                  <li
-                    key={enrollment.id}
-                    className="flex flex-col gap-1 rounded-xl border border-border p-3"
-                  >
-                    <span className="text-sm font-medium text-text-primary">
-                      {enrollment.classGroup.subject?.name ?? tCommon("none")}
-                    </span>
-                    <span className="text-xs text-text-muted">
-                      {fullName(enrollment.classGroup.teacher)}
-                    </span>
-                  </li>
-                ))}
+                {enrollments
+                  .filter((enrollment) => enrollment.status !== "REMOVED")
+                  .map((enrollment) => (
+                    <li
+                      key={enrollment.id}
+                      className="flex flex-col gap-1 rounded-xl border border-border p-3"
+                    >
+                      <Link
+                        href={ROUTES.centerClass(enrollment.classGroupId)}
+                        className="text-sm font-medium text-brand hover:underline"
+                      >
+                        {enrollment.classGroup.subject?.name ?? tCommon("none")}
+                      </Link>
+                      <span className="text-xs text-text-muted">
+                        {fullName(enrollment.classGroup.teacher)}
+                        {enrollment.status === "BLOCKED"
+                          ? ` · ${t("enrollments.blocked")}`
+                          : ""}
+                      </span>
+                    </li>
+                  ))}
               </ul>
             )}
           </CardContent>
@@ -241,22 +260,40 @@ export default async function StudentDetailPage({
             ) : (
               <ul className="flex flex-col gap-2">
                 {blocks.map((block) => {
-                  const teacher = teacherByUserId.get(block.refId);
+                  const teacher =
+                    block.scope === "TEACHER"
+                      ? teacherByUserId.get(block.refId)
+                      : undefined;
+                  const classGroup =
+                    block.scope === "CLASS" ? classById.get(block.refId) : undefined;
                   return (
                     <li
                       key={block.id}
                       className="flex flex-col gap-1 rounded-xl border border-border p-3"
                     >
                       <span className="text-sm font-medium text-text-primary">
-                        {teacher ? (
+                        {block.scope === "TEACHER" ? (
+                          teacher ? (
+                            <Link
+                              href={ROUTES.centerTeacher(teacher.id)}
+                              className="text-brand hover:underline"
+                            >
+                              {fullName(localName(teacher, teacher.user))}
+                            </Link>
+                          ) : (
+                            tTeachers("blocks.unknownTeacher")
+                          )
+                        ) : classGroup ? (
                           <Link
-                            href={ROUTES.centerTeacher(teacher.id)}
+                            href={ROUTES.centerClass(classGroup.id)}
                             className="text-brand hover:underline"
                           >
-                            {fullName(localName(teacher, teacher.user))}
+                            {[classGroup.subject?.name, classGroup.grade?.name]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </Link>
                         ) : (
-                          tTeachers("blocks.unknownTeacher")
+                          t("blockedBy.unknownClass")
                         )}
                       </span>
                       {block.reason ? (

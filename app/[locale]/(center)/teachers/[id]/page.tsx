@@ -183,9 +183,12 @@ export default async function TeacherDetailPage({
                       key={classGroup.id}
                       className="flex flex-col gap-1 rounded-xl border border-border p-3"
                     >
-                      <span className="text-sm font-medium text-text-primary">
+                      <Link
+                        href={ROUTES.centerClass(classGroup.id)}
+                        className="text-sm font-medium text-brand hover:underline"
+                      >
                         {classGroup.subject?.name ?? tCommon("none")}
-                      </span>
+                      </Link>
                       <span className="text-xs text-text-muted">
                         {[classGroup.grade?.name, classGroup.room?.name]
                           .filter(Boolean)

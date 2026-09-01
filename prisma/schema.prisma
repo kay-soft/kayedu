@@ -79,6 +79,11 @@ enum ChangeRequestStatus {
   DECLINED
 }
 
+enum ConflictPolicy {
+  WARN // save/generate anyway; surface the conflict in the UI
+  DENY // refuse the conflicting slot/session
+}
+
 enum InvitationStatus {
   PENDING
   ACCEPTED
@@ -148,26 +153,30 @@ model Center {
   reservations      Reservation[]
   changeRequests    ChangeRequest[]
   studentBlocks     StudentBlock[]
+  holidays          Holiday[]
   auditLogs         AuditLog[]
 }
 
 model CenterSettings {
-  id                               String    @id @default(uuid())
-  centerId                         String    @unique
-  center                           Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  defaultShareType                 ShareType @default(PERCENTAGE)
-  defaultShareValue                Int       @default(15) // percent OR piastres per defaultShareType
+  id                               String         @id @default(uuid())
+  centerId                         String         @unique
+  center                           Center         @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  defaultShareType                 ShareType      @default(PERCENTAGE)
+  defaultShareValue                Int            @default(15) // percent OR piastres per defaultShareType
   teacherTimeoutDays               Int? // null = disabled
-  defaultLateThreshold             Int       @default(10) // minutes
+  defaultLateThreshold             Int            @default(10) // minutes
   cardLayout                       Json? // ID-card customization (positions of name/id/logo…)
-  timezone                         String    @default("Africa/Cairo")
+  timezone                         String         @default("Africa/Cairo")
   // Permission grants — these only *widen* a role, never narrow it, and are
   // read through permissionGrantsFromSettings() (docs/02-architecture.md §6).
   // Receptionists are denied profit + corrections by default (spec §3).
-  receptionistCanViewProfit        Boolean   @default(false)
-  receptionistCanCorrectAttendance Boolean   @default(false)
-  createdAt                        DateTime  @default(now())
-  updatedAt                        DateTime  @updatedAt
+  receptionistCanViewProfit        Boolean        @default(false)
+  receptionistCanCorrectAttendance Boolean        @default(false)
+  // Teacher/room double-booking (docs/02-architecture.md §11): WARN saves the
+  // conflicting slot/session and surfaces it in the UI; DENY refuses it.
+  scheduleConflictPolicy           ConflictPolicy @default(WARN)
+  createdAt                        DateTime       @default(now())
+  updatedAt                        DateTime       @updatedAt
 }
 
 model Branch {
@@ -478,9 +487,14 @@ model Session {
   attendees SessionAttendee[]
   payments  Payment[]
 
+  // The idempotency key the session generator relies on (docs/02 §11):
+  // regenerating a window is a `createMany({ skipDuplicates: true })` against
+  // this constraint, so a class's own slot is never duplicated across runs.
+  @@unique([classGroupId, date, startTime])
   @@index([centerId])
   @@index([centerId, date])
   @@index([centerId, teacherId, date])
+  @@index([centerId, roomId, date])
 }
 
 model SessionAttendee {
@@ -533,6 +547,25 @@ model Payment {
 
   @@index([centerId])
   @@index([centerId, recordedAt])
+}
+
+/**
+ * A center's holiday calendar (docs/02-architecture.md §11): a date the
+ * session generator skips when materializing `Session` rows from a
+ * `ClassSchedule`. Deliberately just a date + label — not a recurring rule —
+ * so a center adds "Eid al-Fitr, 2026-03-20" once and every class's window
+ * skips it, without touching the schedule itself.
+ */
+model Holiday {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  date      DateTime
+  name      String?
+  createdAt DateTime @default(now())
+
+  @@unique([centerId, date])
+  @@index([centerId])
 }
 
 // ─────────────────────────────────────────────────────────────

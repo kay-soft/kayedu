@@ -245,7 +245,7 @@
     "identityDescription": "How this person is connected across KayEdu.",
     "classesTitle": "Classes",
     "classesDescription": "The classes this teacher carries at this center.",
-    "classesEmpty": "No classes yet — classes and schedules arrive with the next milestone.",
+    "classesEmpty": "No classes assigned to this teacher yet.",
     "deleteConfirm": "This removes them from this center. It cannot be undone.",
     "fields": {
       "otherCenters": "Other centers",
@@ -345,19 +345,168 @@
     "enrollments": {
       "title": "Enrolments",
       "description": "The classes this student is in at this center.",
-      "empty": "Not enrolled in any class yet — classes and enrolment arrive with the next milestone.",
-      "emptyPrint": "Not enrolled in any class yet."
+      "empty": "Not enrolled in any class yet.",
+      "emptyPrint": "Not enrolled in any class yet.",
+      "blocked": "blocked from this class"
     },
     "blockedBy": {
       "title": "Blocked by",
-      "description": "Teachers who have blocked this student.",
-      "empty": "No teacher has blocked this student."
+      "description": "Teachers and classes that have blocked this student.",
+      "empty": "No teacher or class has blocked this student.",
+      "unknownClass": "Former class"
     },
     "print": {
       "print": "Print",
       "back": "Back to the student",
       "hint": "Only the sheet below is printed.",
       "printedOn": "Printed {date}"
+    }
+  },
+  "Classes": {
+    "title": "Classes",
+    "subtitle": "{count} classes at this center.",
+    "add": "Add class",
+    "addTitle": "Add a class",
+    "addDescription": "A teacher teaching one subject to one grade — its price, center cut, capacity and enrollment rules.",
+    "listTitle": "Classes",
+    "listDescription": "Deactivated classes stay listed — their history and any generated sessions keep resolving.",
+    "empty": "No classes yet.",
+    "noMatches": "No classes match these filters.",
+    "open": "Open",
+    "backToList": "All classes",
+    "deleteConfirm": "This removes the class. It cannot be undone.",
+    "profileTitle": "Class record",
+    "profileDescription": "Price and center-cut changes never rewrite money already recorded — only new sessions use the new numbers.",
+    "columns": {
+      "subject": "Subject · Grade",
+      "teacher": "Teacher",
+      "room": "Room",
+      "price": "Price",
+      "enrolled": "Enrolled",
+      "untitled": "Untitled class"
+    },
+    "filters": {
+      "teacher": "Teacher",
+      "subject": "Subject",
+      "grade": "Grade",
+      "all": "All"
+    },
+    "fields": {
+      "teacher": "Teacher",
+      "teacherPlaceholder": "Choose a teacher",
+      "subject": "Subject",
+      "grade": "Grade",
+      "educationSystem": "Education system",
+      "room": "Room",
+      "capacity": "Capacity",
+      "capacityHint": "Students. Use 0 for no limit.",
+      "moneyTitle": "Price & center cut",
+      "price": "Price per session",
+      "shareType": "Cut type",
+      "percentage": "Percentage of the amount",
+      "fixed": "Fixed amount (EGP)",
+      "shareValuePct": "Percentage",
+      "shareValueEgp": "Amount (EGP)",
+      "centerShare": "Center keeps",
+      "teacherShare": "Teacher gets",
+      "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
+      "attendanceRequired": "Attendance is required for this class",
+      "attendanceRequiredHint": "Turn off for a class that doesn't track attendance per session.",
+      "lateThreshold": "Late threshold (minutes)",
+      "lateThresholdHint": "Minutes after the start time before a student counts as late.",
+      "acceptsNewStudents": "Accepting new students",
+      "acceptsNewStudentsHint": "Turn off to hide this class from new enrollment while keeping it running.",
+      "requiresConfirmation": "New enrollments need confirmation",
+      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate."
+    },
+    "context": {
+      "title": "Class context",
+      "description": "Read-only — edit these from the record on the left."
+    },
+    "dayNames": [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday"
+    ],
+    "schedule": {
+      "title": "Weekly schedule",
+      "description": "One row per recurring slot. A conflict banner appears directly beneath a slot that double-books this class's teacher or room.",
+      "slotsHeading": "Weekly time slots",
+      "slotCount": "{count, plural, one {# slot} other {# slots}} this week",
+      "empty": "No time slots yet — add the first one below.",
+      "day": "Day",
+      "start": "Start",
+      "end": "End",
+      "save": "Save",
+      "remove": "Remove slot",
+      "addSlot": "Add time slot",
+      "cancel": "Cancel",
+      "summary": "{day}",
+      "roomConflictWith": "Room conflict with {className}.",
+      "teacherConflictWith": "Teacher conflict with {className}."
+    },
+    "holidays": {
+      "title": "Holiday calendar",
+      "description": "Dates the session generator skips, for every class.",
+      "empty": "No holidays added yet.",
+      "date": "Date",
+      "name": "Name",
+      "namePlaceholder": "Eid al-Fitr",
+      "add": "Add holiday",
+      "remove": "Remove holiday"
+    },
+    "generate": {
+      "title": "Session generator",
+      "description": "Materializes upcoming sessions from every active class's schedule, skipping holidays, for the next six weeks.",
+      "classDescription": "Materializes this class's upcoming sessions for the next six weeks, skipping holidays.",
+      "generateForClass": "Generate sessions for this class",
+      "generateForCenter": "Generate sessions for the whole center",
+      "result": "{created, plural, one {# session} other {# sessions}} created. {conflicts, plural, =0 {No conflicts.} one {# conflict flagged.} other {# conflicts flagged.}}",
+      "roomConflict": "Room conflict with {className}.",
+      "teacherConflict": "Teacher conflict with {className}."
+    },
+    "roster": {
+      "title": "Roster",
+      "description": "Who is enrolled, who is blocked from this class, and who to add next.",
+      "searchLabel": "Enroll a student",
+      "searchPlaceholder": "Search by name, code or phone",
+      "searchSubmit": "Search",
+      "activeTitle": "Enrolled ({count})",
+      "empty": "No students enrolled yet.",
+      "remove": "Remove",
+      "block": "Block",
+      "blockedTitle": "Blocked from this class ({count})",
+      "blockedEmpty": "No students are blocked from this class.",
+      "unblock": "Unblock",
+      "candidatesTitle": "Search results",
+      "noCandidates": "No students match that search.",
+      "enroll": "Enroll",
+      "unknownStudent": "Former student"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists in this center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidNumber": "Enter a whole number.",
+      "invalidAmount": "Enter a valid amount in EGP.",
+      "invalidPercent": "Enter a whole percentage between 0 and 100.",
+      "invalidShareType": "Choose fixed EGP or a percentage.",
+      "invalidDay": "Choose a day of the week.",
+      "invalidTime": "Enter a valid time.",
+      "invalidTimeRange": "The end time must be after the start time.",
+      "invalidDate": "Enter a valid date.",
+      "duplicateDate": "That date is already on the holiday calendar.",
+      "scheduleConflict": "This center denies double-booked slots. Choose a different day, time or teacher.",
+      "classInUse": "This class still has enrollments or generated sessions, so it cannot be deleted. Deactivate it instead.",
+      "classFull": "This class is at capacity.",
+      "alreadyEnrolled": "This student is already enrolled in this class.",
+      "studentBlocked": "This student is blocked from this class.",
+      "alreadyBlocked": "This student is already blocked from this class."
     }
   },
   "Settings": {
@@ -432,7 +581,11 @@
       "timeoutDays": "Days",
       "lateThreshold": "Default late threshold (minutes)",
       "lateThresholdHint": "A class can set its own; this is what a new class starts with.",
-      "timezone": "Timezone"
+      "timezone": "Timezone",
+      "schedulingTitle": "Scheduling conflicts",
+      "schedulingDescription": "What happens when a class schedule or a generated session double-books a teacher or a room.",
+      "denyConflictsLabel": "Deny double-booked slots and sessions",
+      "denyConflictsDescription": "Off by default: a conflict is saved and flagged so staff can review it. On: the conflicting slot or session is refused instead."
     },
     "educationSystems": {
       "title": "Education systems",

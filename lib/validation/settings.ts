@@ -134,6 +134,10 @@ export const generalSettingsSchema = z
     teacherTimeoutDays: z.string().trim().optional(),
     defaultLateThreshold: wholeNumber(MAX_LATE_THRESHOLD),
     timezone: z.string().trim().min(1, "required").max(64, "tooLong"),
+    // Whether a teacher/room double-booking is denied outright or merely
+    // saved-and-flagged (docs/02-architecture.md §11). Off (WARN) by default —
+    // the same "widen carefully" spirit as the permission grants.
+    denyScheduleConflicts: checkbox,
   })
   .transform((value, ctx) => {
     // The share value means two different things depending on the mode, so it
@@ -185,6 +189,9 @@ export const generalSettingsSchema = z
       teacherTimeoutDays,
       defaultLateThreshold: value.defaultLateThreshold,
       timezone: value.timezone,
+      scheduleConflictPolicy: value.denyScheduleConflicts
+        ? ("DENY" as const)
+        : ("WARN" as const),
     };
   });
 

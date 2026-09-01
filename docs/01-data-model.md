@@ -28,7 +28,7 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 ### Organization layer
 - **Center** — the tenant. `slug` (for subdomain/branding), `name`, `logoUrl`, theme color, `active`, plan/onboarding metadata.
 - **Branch** — physical location under a center.
-- **CenterSettings** — one row per center: default center-cut mode/value, teacher-timeout days (`null` = disabled, never `0`), card-layout JSON, timezone, late-threshold default, and the **permission-grant toggles** (`receptionistCanViewProfit`, `receptionistCanCorrectAttendance`) — both `false` by default and read only through `permissionGrantsFromSettings()` (`02-architecture.md` §6). Configured from the Settings screens (M2); the row is upserted, so a center provisioned without one is still configurable.
+- **CenterSettings** — one row per center: default center-cut mode/value, teacher-timeout days (`null` = disabled, never `0`), card-layout JSON, timezone, late-threshold default, **`scheduleConflictPolicy`** (`WARN` default | `DENY` — whether a teacher/room double-booking is saved-and-flagged or refused outright, docs/02 §11), and the **permission-grant toggles** (`receptionistCanViewProfit`, `receptionistCanCorrectAttendance`) — both `false` by default and read only through `permissionGrantsFromSettings()` (`02-architecture.md` §6). Configured from the Settings screens (M2/M4); the row is upserted, so a center provisioned without one is still configurable.
 - **Membership** — `userId × centerId × role` for **Owner / Manager / Receptionist / Teacher**. `active`, invite metadata, a (currently unused) financial-visibility flag, and a **center-local name + contact record** (`firstName`/`lastName`/`email`/`phone`/`altPhone`, see §6).
 - **Invitation** — pending email invite: `centerId`, email, role, token, status, expiry.
 
@@ -37,17 +37,18 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 - **Grade** — name + educationSystem link.
 - **Subject** — name + grade link.
 - **Room** — belongs to a branch; name/number + capacity.
-- **ClassGroup** — the class: teacher, subject, grade, educationSystem, room, price, **centerShareType (FIXED|PERCENTAGE) + centerShareValue**, capacity, `attendanceRequired`, `lateThresholdMinutes`, `acceptsNewStudents`, `requiresConfirmation`, `active`.
-- **ClassSchedule** — recurring slot(s) for a class: dayOfWeek, startTime, endTime. (A class can have several.)
+- **ClassGroup** — the class: teacher, subject, grade, educationSystem, room, price, **centerShareType (FIXED|PERCENTAGE) + centerShareValue**, capacity (`0` = unlimited, same convention as `Room.capacity`), `attendanceRequired`, `lateThresholdMinutes`, `acceptsNewStudents`, `requiresConfirmation`, `active`. One room per class — not one per slot (see the `ClassSchedule` note below).
+- **ClassSchedule** — recurring slot(s) for a class: dayOfWeek, startTime, endTime. (A class can have several.) No `roomId` of its own: the class's single `ClassGroup.roomId` is what teacher/room conflict detection checks against every other class's slots (`lib/scheduling.ts`'s `findScheduleConflicts`), and it's what the class detail page shows in its read-only context panel (docs/04 §9, revised from the original per-slot-room mockup).
 
 ### People-in-center layer
 - **StudentProfile** — a student's per-center record: `userId × centerId`, grade, a **center-local name + contact record** (`firstName`/`lastName`/`email`/`phone`/`altPhone` — see §6), parent name/phone/altPhone, `studentCode` (the ID-card number, unique per center, **system-assigned** — see §6), `photoUrl`, active. (Per-center so centers own their data and grade taxonomy is center-local.) The **photo lives here, not on `User.avatarUrl`**: a picture a center took for its own ID card is that center's data, is stored under `avatars/{centerId}/…`, and must not follow the person to another center. `User.avatarUrl` stays the person's own global avatar.
 - **StudentCodeCounter** — `centerId` (PK), `next`. One row per center; the race-free source of the next `studentCode` (§6). Not a business entity a screen shows — a plumbing table for `lib/db/students.ts`.
-- **Enrollment** — `studentProfile × classGroup`: status (ACTIVE/REMOVED/BLOCKED), enrolledAt.
-- **StudentBlock** — a teacher or class blocking a student: `centerId`, scope (TEACHER|CLASS), refId, blockedUserId, reason. Unique on `(centerId, scope, refId, blockedUserId)` — blocking the same student twice is a bug — and indexed on `(centerId, scope, refId)` because "is this student blocked here?" is a hot lookup on the enrol/add path. A block is **per center**: a teacher shared by two centers who blocks a student at one has not blocked them at the other.
+- **Enrollment** — `studentProfile × classGroup`: status (ACTIVE/REMOVED/BLOCKED), enrolledAt. Unique on `(studentProfileId, classGroupId)` — the row is reused across its lifecycle rather than recreated: REMOVED frees the seat, BLOCKED means a `StudentBlock` (scope CLASS) currently sits on top of what was an active enrollment, and un-blocking restores it to ACTIVE rather than creating a fresh row (M4, `app/[locale]/(center)/classes/actions.ts`).
+- **StudentBlock** — a teacher or class blocking a student: `centerId`, scope (TEACHER|CLASS), refId, blockedUserId, reason. Unique on `(centerId, scope, refId, blockedUserId)` — blocking the same student twice is a bug — and indexed on `(centerId, scope, refId)` because "is this student blocked here?" is a hot lookup on the enrol/add path. A block is **per center**: a teacher shared by two centers who blocks a student at one has not blocked them at the other. Scope CLASS (`refId` = a `ClassGroup` id, M4) is enforced at enrollment time exactly like scope TEACHER already was at M3 — the same `studentBlocks.isBlocked()` helper, just a different scope/refId pair.
 
 ### Session & attendance layer (all `centerId`-scoped)
-- **Session** — one dated instance: classGroup, teacher, room, date, start/end, status (SCHEDULED/LIVE/COMPLETED/CANCELLED), `priceSnapshot`, description.
+- **Session** — one dated instance: classGroup, teacher, room, date, start/end, status (SCHEDULED/LIVE/COMPLETED/CANCELLED), `priceSnapshot`, description. Unique on `(classGroupId, date, startTime)` — the key the session generator's idempotent regeneration (M4, `lib/db/sessions.ts`) relies on: a `createMany({ skipDuplicates: true })` against it never creates a second row for a slot a previous run already materialized.
+- **Holiday** — a center's own holiday calendar (M4): `centerId`, `date`, an optional `name`. Unique on `(centerId, date)`. Not itself a business screen a role opens daily — it's the input the session generator (`lib/db/sessions.ts`) skips dates against, edited from a small panel on `/classes` (docs/02 §11).
 - **SessionAttendee** — roster row: session, `studentProfileId?` (null-safe for pure drop-ins), `enrollmentId?` (null for drop-ins), `attendanceStatus` (PRESENT/LATE/ABSENT/EXCUSED), `isDropIn`, recordedBy, recordedAt.
 - **Payment** — the ledger row (see §3): session, sessionAttendee, studentProfile, amount, method, **priceSnapshot, centerShareSnapshot, teacherShareSnapshot**, receiptRef, recordedBy, recordedAt.
 
@@ -114,6 +115,7 @@ StudentProfile 1─* Enrollment *─1 ClassGroup
 Session 1─* SessionAttendee *─0..1 StudentProfile
 SessionAttendee 1─0..1 Payment
 Center 1─* Expense *─1 ExpenseCategory
+Center 1─* Holiday
 ```
 
 ---

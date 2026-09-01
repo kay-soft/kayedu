@@ -145,11 +145,13 @@ When building any of these, match this structure and these tokens. Deviations ne
 
 ---
 
-## 9. Class Schedule Builder (M4 reference)
+## 9. Class Schedule Builder (M4 reference, revised)
 
-Used when editing a `ClassGroup`'s `ClassSchedule` rows. Header shows read-only class context (subject icon+name, teacher icon+name, grade, active-status badge) in a bordered panel above the slot list — same panel style as a KPI card border, not a data table.
+Used when editing a `ClassGroup`'s `ClassSchedule` rows. Header shows read-only class context (subject+grade, teacher, room, active-status badge) in a bordered panel above the slot list — same panel style as a KPI card border, not a data table.
 
-**Weekly Time Slots list:** one row per slot — day dropdown, start/end time pickers, room dropdown, remove (×) icon at the row end. A slot-count + conflict-count summary sits top-right of the section header (e.g. "1 conflict · 3 slots this week"), conflict count in `--warning`.
+**No per-slot room picker.** The original mockup showed a room dropdown on every row; the shipped data model keeps one room per class (`ClassGroup.roomId`, docs/01 §2) rather than adding one to `ClassSchedule`, so the room is fixed context in the header panel above, not a per-row field. Conflict detection checks it there — the class's single room against every other class's slots — rather than per slot.
+
+**Weekly Time Slots list:** one row per slot — day dropdown, start/end time pickers, remove (×) icon at the row end. A slot-count summary sits top-right of the section header (e.g. "3 slots this week"); a conflict, when one exists, is shown as the banner below the row it belongs to rather than a header count.
 
 **Conflict display:** when a slot's room/teacher is double-booked, an inline amber banner (`--warning-bg` background, `--warning` text/icon, ⚠ icon) renders directly beneath that slot's row — never a modal or toast. Text pattern: "Room conflict with [Class Name]."
 

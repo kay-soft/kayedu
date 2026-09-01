@@ -38,7 +38,7 @@ const CENTER_NAV: NavDef[] = [
   { href: ROUTES.centerDashboard, labelKey: "dashboard", icon: "dashboard" },
   { href: "/reception", labelKey: "reception", icon: "reception", permission: "reception.use", disabled: true },
   { href: "/sessions", labelKey: "sessions", icon: "sessions", disabled: true },
-  { href: "/classes", labelKey: "classes", icon: "classes", permission: "class.manage", disabled: true },
+  { href: ROUTES.centerClasses, labelKey: "classes", icon: "classes", permission: "class.manage" },
   { href: ROUTES.centerStudents, labelKey: "students", icon: "students", permission: "student.manage" },
   { href: ROUTES.centerTeachers, labelKey: "teachers", icon: "teachers", permission: "teacher.manage" },
   { href: "/analytics", labelKey: "analytics", icon: "analytics", permission: "analytics.center.view", disabled: true },

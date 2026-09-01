@@ -30,6 +30,7 @@ export default async function GeneralSettingsPage() {
           teacherTimeoutDays: settings?.teacherTimeoutDays ?? null,
           defaultLateThreshold: settings?.defaultLateThreshold ?? 10,
           timezone: settings?.timezone ?? "Africa/Cairo",
+          scheduleConflictPolicy: settings?.scheduleConflictPolicy ?? "WARN",
         }}
       />
     </div>

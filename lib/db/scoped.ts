@@ -1,10 +1,14 @@
-import type { Prisma, Role } from "@prisma/client";
+import type { EnrollmentStatus, Prisma, Role } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import type { TenantContext } from "@/lib/auth/tenant";
 import {
   STUDENT_LIST_SELECT,
   TEACHER_LIST_SELECT,
 } from "@/lib/db/students";
+import {
+  CLASS_DETAIL_INCLUDE,
+  CLASS_LIST_SELECT,
+} from "@/lib/db/classes";
 import {
   requireScopedById,
   scopedData,
@@ -14,6 +18,8 @@ import {
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
+const ACTIVE_ENROLLMENT: EnrollmentStatus = "ACTIVE";
+const EXISTING_ENROLLMENT_STATUSES: EnrollmentStatus[] = ["ACTIVE", "BLOCKED"];
 
 /**
  * Tenant-scoped data access (docs/02-architecture.md §5).
@@ -292,10 +298,23 @@ export function scoped(ctx: TenantContext) {
         prisma.studentBlock.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
-    /** M4 owns enrolment; M3 reads it for the student's enrolment view. */
+    /**
+     * A student's link to a class (M4). Capacity and duplicate-enrollment
+     * checks live in the Server Action, right beside the `StudentBlock`
+     * (scope CLASS) check — both are re-verified against this center, never
+     * trusted from the form.
+     */
     enrollments: {
       count: (where?: Prisma.EnrollmentWhereInput) =>
         prisma.enrollment.count({ where: scopedWhere(centerId, where) }),
+
+      countActive: (classGroupId: string) =>
+        prisma.enrollment.count({
+          where: scopedWhere(centerId, {
+            classGroupId,
+            status: ACTIVE_ENROLLMENT,
+          }),
+        }),
 
       listForStudent: (studentProfileId: string) =>
         prisma.enrollment.findMany({
@@ -306,6 +325,37 @@ export function scoped(ctx: TenantContext) {
               include: { subject: true, grade: true, teacher: true },
             },
           },
+        }),
+
+      /** The roster a class detail page renders — lean, this page's own students. */
+      listForClass: (classGroupId: string) =>
+        prisma.enrollment.findMany({
+          where: scopedWhere(centerId, { classGroupId }),
+          orderBy: { enrolledAt: "asc" },
+          include: {
+            studentProfile: { include: { user: true } },
+          },
+        }),
+
+      /** Active or blocked — what "already on this roster" actually means. */
+      findExisting: (classGroupId: string, studentProfileId: string) =>
+        prisma.enrollment.findFirst({
+          where: scopedWhere(centerId, {
+            classGroupId,
+            studentProfileId,
+            status: { in: EXISTING_ENROLLMENT_STATUSES },
+          }),
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.enrollment, centerId, id),
+
+      create: (data: Omit<Prisma.EnrollmentUncheckedCreateInput, "centerId">) =>
+        prisma.enrollment.create({ data: scopedData(centerId, data) }),
+
+      setStatus: (id: string, status: Prisma.EnrollmentUncheckedUpdateManyInput["status"]) =>
+        prisma.enrollment.updateMany({
+          where: scopedWhere(centerId, { id }),
+          data: { status },
         }),
     },
 
@@ -450,8 +500,11 @@ export function scoped(ctx: TenantContext) {
         prisma.subject.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
-    // M4 owns class CRUD. M3 reads them for the teacher detail page, and
-    // settings counts references before allowing a delete.
+    /**
+     * Classes (M4). The teacher detail page and settings' reference counts
+     * already used `count`/`list` before this milestone — extended here with
+     * the full CRUD the classes screens need.
+     */
     classGroups: {
       count: (where?: Prisma.ClassGroupWhereInput) =>
         prisma.classGroup.count({ where: scopedWhere(centerId, where) }),
@@ -462,11 +515,118 @@ export function scoped(ctx: TenantContext) {
           orderBy: [{ active: "desc" }, { createdAt: "desc" }],
           include: { subject: true, grade: true, room: true },
         }),
+
+      /** The list screen: a lean select, filtered, ordered and paged. */
+      search: (args: {
+        where?: Prisma.ClassGroupWhereInput;
+        take: number;
+        skip?: number;
+      }) =>
+        prisma.classGroup.findMany({
+          where: scopedWhere(centerId, args.where),
+          orderBy: [{ active: "desc" }, { createdAt: "desc" }],
+          select: CLASS_LIST_SELECT,
+          take: args.take,
+          skip: args.skip,
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.classGroup, centerId, id),
+
+      findDetailById: (id: string) =>
+        prisma.classGroup.findFirst({
+          where: scopedWhere(centerId, { id }),
+          include: CLASS_DETAIL_INCLUDE,
+        }),
+
+      create: (data: Omit<Prisma.ClassGroupUncheckedCreateInput, "centerId">) =>
+        prisma.classGroup.create({ data: scopedData(centerId, data) }),
+
+      update: (
+        id: string,
+        data: Omit<Prisma.ClassGroupUncheckedUpdateManyInput, "centerId">,
+      ) =>
+        prisma.classGroup.updateMany({
+          where: scopedWhere(centerId, { id }),
+          data,
+        }),
+
+      remove: (id: string) =>
+        prisma.classGroup.deleteMany({ where: scopedWhere(centerId, { id }) }),
+    },
+
+    /**
+     * Recurring weekly slots for a class — the Schedule Builder (docs/04 §9).
+     * `listForConflictCheck` is every *other* class's slots in the center, the
+     * candidate universe `lib/scheduling.ts`'s `findScheduleConflicts` checks
+     * against; it excludes the class being edited so a class never "conflicts"
+     * with its own other slots.
+     */
+    classSchedules: {
+      list: (classGroupId: string) =>
+        prisma.classSchedule.findMany({
+          where: scopedWhere(centerId, { classGroupId }),
+          orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+        }),
+
+      listForConflictCheck: (excludeClassGroupId: string) =>
+        prisma.classSchedule.findMany({
+          where: scopedWhere(centerId, {
+            classGroupId: { not: excludeClassGroupId },
+          }),
+          select: {
+            classGroupId: true,
+            dayOfWeek: true,
+            startTime: true,
+            endTime: true,
+            classGroup: {
+              select: {
+                teacherId: true,
+                roomId: true,
+                subject: { select: { name: true } },
+                grade: { select: { name: true } },
+              },
+            },
+          },
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.classSchedule, centerId, id),
+
+      create: (data: Omit<Prisma.ClassScheduleUncheckedCreateInput, "centerId">) =>
+        prisma.classSchedule.create({ data: scopedData(centerId, data) }),
+
+      update: (
+        id: string,
+        data: Omit<Prisma.ClassScheduleUncheckedUpdateManyInput, "centerId">,
+      ) =>
+        prisma.classSchedule.updateMany({
+          where: scopedWhere(centerId, { id }),
+          data,
+        }),
+
+      remove: (id: string) =>
+        prisma.classSchedule.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     sessions: {
       count: (where?: Prisma.SessionWhereInput) =>
         prisma.session.count({ where: scopedWhere(centerId, where) }),
+    },
+
+    /** The center's holiday calendar (docs/02 §11) — dates the generator skips. */
+    holidays: {
+      list: () =>
+        prisma.holiday.findMany({
+          where: scopedWhere(centerId),
+          orderBy: { date: "asc" },
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.holiday, centerId, id),
+
+      create: (data: Omit<Prisma.HolidayUncheckedCreateInput, "centerId">) =>
+        prisma.holiday.create({ data: scopedData(centerId, data) }),
+
+      remove: (id: string) =>
+        prisma.holiday.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     settings: {

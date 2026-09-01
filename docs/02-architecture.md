@@ -37,7 +37,7 @@ app/
     (center)/                   # Owner / Manager / Receptionist — owns the root
       dashboard/
       teachers/  teachers/[id]/
-      classes/   classes/[id]/
+      classes/   classes/[id]/     # CRUD, Schedule Builder, roster, session generator (M4)
       students/  students/[id]/
       sessions/  sessions/[id]/
       reception/
@@ -55,6 +55,7 @@ app/
     (student)/student/          # /student/schedule, /student/discover, ...
     (admin)/admin/              # /admin/centers, /admin/platform
   api/                          # webhooks / edge handlers if needed
+    cron/generate-sessions/       # Vercel Cron entry point for lib/db/sessions.ts (M4, §11)
 components/
   ui/                           # shadcn primitives, incl. dialog.tsx (docs/04 §5)
   shell/                        # app shell: sidebar (collapsible, docs/04 §5), drawer, header, nav config
@@ -79,8 +80,11 @@ lib/
     audit.ts                    # writeAuditLog()
     identity.ts                 # global-identity reads/writes (findPeopleByContact, createPerson, …)
     students.ts                 # lean list selects, search, claimStudentCode, delete-blockers
-    classes.ts  sessions.ts  payments.ts  analytics.ts ...
+    classes.ts                  # lean list select, delete-blockers, conflict-row → pure-slot mapping (M4)
+    sessions.ts                 # the session generator — Prisma client injected, no @/ imports (M4, §11)
+    payments.ts  analytics.ts ...
   money.ts                      # the ONLY center-cut math + piastre helpers
+  scheduling.ts                 # pure time-overlap, conflict-detection and rolling-window date math (M4)
   card-layout.ts                # the default ID-card layout the editor offers
   id-card.ts                    # renders the card SVG from that layout
   qr.ts                         # QR modules -> an SVG path
@@ -99,6 +103,7 @@ scripts/
   isolation-check.ts            # the cross-center acceptance gate (M1)
   config-check.ts               # the center-configuration acceptance gate (M2)
   people-check.ts               # the teachers/students/blocks/storage gate (M3)
+  classes-check.ts              # classes/schedules/conflicts/session-generation gate (M4)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -194,7 +199,9 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:config` (`scripts/config-check.ts`) is the M2 gate. It configures **two** throwaway centers through one `configureCenter(centerId)` — no per-center branching anywhere — using the same zod schemas the settings actions parse with and the same scoping primitives, then asserts the two configurations are independent, that neither center resolves the other center's config rows by id, that the permission-grant seam widens a receptionist and nobody else, and that the center-cut split is right in both modes. That is the "a second center needs zero code changes" claim, executed.
 
-Both gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts` and `lib/validation/settings.ts` are written that way. Keep it so.
+`npm run check:classes` (`scripts/classes-check.ts`) is the M4 gate: "a class with two weekly slots generates correct future sessions; a room/teacher double-book is prevented or warned per rule; enrolling past capacity is blocked." It first exercises `lib/scheduling.ts`'s pure primitives with no database at all (time-overlap, `findScheduleConflicts`, `generateOccurrenceDates`'s rolling-window/holiday math, `findSessionConflicts`), then a database-backed pass against one throwaway center: `classGroupSchema`/`classScheduleSchema` reject an out-of-range percentage, a negative capacity, an inverted time range and an out-of-range day; two classes sharing a teacher (or a room) with overlapping schedules are flagged by `findScheduleConflicts`; `generateSessions` (the real production generator, `lib/db/sessions.ts`, called with the script's own `PrismaClient` since the function takes one as a parameter rather than importing the app singleton) produces exactly 12 sessions for a class with two weekly slots across the 6-week window, snapshotting the class price onto every one; regenerating the identical window a second time creates **zero** new rows (the `(classGroupId, date, startTime)` unique constraint); a date added to the holiday calendar is skipped; a generation-time conflict is created-and-flagged under `WARN` and skipped-and-flagged under `DENY`; a capacity-1 class's second concurrent enrollment attempt is caught by the same count-then-compare the Server Action uses; a duplicate enrollment and a `StudentBlock` (scope CLASS) are both detected before the row would be created; and Center A cannot resolve Center B's `ClassGroup`, `ClassSchedule` or `Enrollment` by id. Then it cleans up.
+
+All four gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts` and `lib/db/sessions.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 
@@ -274,9 +281,24 @@ Buckets: `logos/` (center branding), `avatars/` (users/students), `id-cards/` (g
 
 ---
 
-## 11. Session generation
+## 11. Session generation & scheduling conflicts (M4)
 
-A scheduled job (Vercel Cron or a Supabase scheduled function) materializes `Session` rows from `ClassSchedule` on a rolling ~6-week window, skipping holiday-calendar dates. Each generated session snapshots the class price. Managers can cancel/reschedule/edit individual sessions. Regeneration is idempotent (don't duplicate existing sessions).
+`generateSessions()` (`lib/db/sessions.ts`) materializes `Session` rows from every active `ClassGroup`'s `ClassSchedule`s on a rolling **42-day (`GENERATION_WINDOW_DAYS`) window starting today**, skipping any date on the center's `Holiday` calendar, and snapshotting `Session.priceSnapshot` from the class's current price at generation time (§3's snapshot rule applies here too — a later price change never rewrites an already-generated session). It takes a `PrismaClient` as its first argument rather than importing the app's singleton, so `npm run check:classes` can call the *real* generator with its own client, outside the Next.js runtime (§5's "no `@/` aliases" rule, extended to this module).
+
+**Idempotent regeneration.** `Session` is unique on `(classGroupId, date, startTime)`; the generator inserts with `createMany({ skipDuplicates: true })` against that key, so running it twice over the same window creates zero duplicate rows the second time — the count Prisma reports back **is** the "how many new sessions" answer.
+
+**Conflict detection, twice.** The same shape of check runs at two moments, both via `lib/scheduling.ts`'s pure `findScheduleConflicts`/`findSessionConflicts` (day/date + overlapping time + same teacher, or same non-null room):
+- **At `ClassSchedule` save time** (`createScheduleAction`/`updateScheduleAction`, `app/[locale]/(center)/classes/actions.ts`): the candidate slot is checked against every *other* class's schedule rows in the center (`db.classSchedules.listForConflictCheck`).
+- **At generation time** (`generateSessions`): each candidate occurrence is checked against every other class's already-known sessions in the window — including ones generated earlier in the *same* run, so generating the whole center in one call still catches two classes conflicting with each other.
+
+Which of these **denies** the save/occurrence versus merely **warns and proceeds** is `CenterSettings.scheduleConflictPolicy` (`WARN` default | `DENY`), configured at `/settings` (general) and read fresh on every check — never hardcoded (docs/00 §5 "Scheduling").
+
+**Triggering it.** Three ways, all calling the same `generateSessions()`:
+1. A manual button on a class's detail page (`GenerateSessionsButton`, one class only).
+2. A manual button on `/classes` (the whole center at once).
+3. `app/api/cron/generate-sessions/route.ts` — a `GET` route intended for **Vercel Cron**, guarded by comparing `Authorization: Bearer $CRON_SECRET` (Vercel signs cron-triggered requests this way once `CRON_SECRET` is set as a project env var). It loops every active `Center` and regenerates all of them. **Registering the actual cron schedule** (a `vercel.json`/`vercel.ts` `crons` entry pointing at this route) and setting `CRON_SECRET` are deployment steps, not yet wired — tracked in `00-master-product-spec.md` §2.1.C.
+
+Managers can still cancel/reschedule/edit individual sessions once the daily-loop UI lands (M5) — nothing here prevents a manually-edited session from being touched by a later regeneration, since `skipDuplicates` only ever *adds* rows for occurrences that don't already exist.
 
 ---
 

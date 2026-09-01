@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ShareType } from "@prisma/client";
+import type { ConflictPolicy, ShareType } from "@prisma/client";
 
 import { saveGeneralSettingsAction } from "@/app/[locale]/(center)/settings/actions";
 import { ToggleRow } from "@/components/settings/toggle-row";
@@ -38,6 +38,7 @@ export type GeneralSettingsValues = {
   teacherTimeoutDays: number | null;
   defaultLateThreshold: number;
   timezone: string;
+  scheduleConflictPolicy: ConflictPolicy;
 };
 
 export function GeneralSettingsForm({
@@ -245,6 +246,21 @@ export function GeneralSettingsForm({
               </SelectInput>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("schedulingTitle")}</CardTitle>
+          <CardDescription>{t("schedulingDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ToggleRow
+            name="denyScheduleConflicts"
+            label={t("denyConflictsLabel")}
+            description={t("denyConflictsDescription")}
+            defaultChecked={values.scheduleConflictPolicy === "DENY"}
+          />
         </CardContent>
       </Card>
 
