@@ -23,6 +23,10 @@ export const ROUTES = {
   // Classes, schedules & enrollment (M4).
   centerClasses: "/classes",
   centerClass: (id: string) => `/classes/${id}`,
+  // The daily loop: sessions, attendance & payments (M5).
+  centerSessions: "/sessions",
+  centerSession: (id: string) => `/sessions/${id}`,
+  centerReception: "/reception",
   // Center configuration (M2). The settings shell lives at /settings and every
   // configuration screen is a child of it.
   centerSettings: "/settings",

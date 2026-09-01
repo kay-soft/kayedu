@@ -14,7 +14,8 @@
     "check:isolation": "node --env-file-if-exists=.env scripts/isolation-check.ts",
     "check:config": "node --env-file-if-exists=.env scripts/config-check.ts",
     "check:people": "node --env-file-if-exists=.env scripts/people-check.ts",
-    "check:classes": "node --env-file-if-exists=.env scripts/classes-check.ts"
+    "check:classes": "node --env-file-if-exists=.env scripts/classes-check.ts",
+    "check:payments": "node --env-file-if-exists=.env scripts/payments-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

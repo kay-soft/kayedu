@@ -39,8 +39,8 @@ app/
       teachers/  teachers/[id]/
       classes/   classes/[id]/     # CRUD, Schedule Builder, roster, session generator (M4)
       students/  students/[id]/
-      sessions/  sessions/[id]/
-      reception/
+      sessions/  sessions/[id]/     # Today's Sessions dashboard, roster, attendance, receipt (M5)
+      reception/                 # search/scan, live rail, one-flow check-in (M5)
       analytics/
       expenses/
       approvals/
@@ -81,8 +81,10 @@ lib/
     identity.ts                 # global-identity reads/writes (findPeopleByContact, createPerson, …)
     students.ts                 # lean list selects, search, claimStudentCode, delete-blockers
     classes.ts                  # lean list select, delete-blockers, conflict-row → pure-slot mapping (M4)
-    sessions.ts                 # the session generator — Prisma client injected, no @/ imports (M4, §11)
-    payments.ts  analytics.ts ...
+    sessions.ts                 # the generator + dashboard/detail read-side policy, no @/ imports (M4 §11, M5)
+    attendance.ts                # record/correct writes + consecutive-absence count, no @/ imports (M5)
+    payments.ts                  # recordPayment/voidPayment — the ONLY Payment writes, no @/ imports (M5)
+    analytics.ts ...
   money.ts                      # the ONLY center-cut math + piastre helpers
   scheduling.ts                 # pure time-overlap, conflict-detection and rolling-window date math (M4)
   card-layout.ts                # the default ID-card layout the editor offers
@@ -104,6 +106,7 @@ scripts/
   config-check.ts               # the center-configuration acceptance gate (M2)
   people-check.ts               # the teachers/students/blocks/storage gate (M3)
   classes-check.ts              # classes/schedules/conflicts/session-generation gate (M4)
+  payments-check.ts             # snapshot/void-correct/drop-in/consecutive-absence gate (M5)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -201,7 +204,9 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:classes` (`scripts/classes-check.ts`) is the M4 gate: "a class with two weekly slots generates correct future sessions; a room/teacher double-book is prevented or warned per rule; enrolling past capacity is blocked." It first exercises `lib/scheduling.ts`'s pure primitives with no database at all (time-overlap, `findScheduleConflicts`, `generateOccurrenceDates`'s rolling-window/holiday math, `findSessionConflicts`), then a database-backed pass against one throwaway center: `classGroupSchema`/`classScheduleSchema` reject an out-of-range percentage, a negative capacity, an inverted time range and an out-of-range day; two classes sharing a teacher (or a room) with overlapping schedules are flagged by `findScheduleConflicts`; `generateSessions` (the real production generator, `lib/db/sessions.ts`, called with the script's own `PrismaClient` since the function takes one as a parameter rather than importing the app singleton) produces exactly 12 sessions for a class with two weekly slots across the 6-week window, snapshotting the class price onto every one; regenerating the identical window a second time creates **zero** new rows (the `(classGroupId, date, startTime)` unique constraint); a date added to the holiday calendar is skipped; a generation-time conflict is created-and-flagged under `WARN` and skipped-and-flagged under `DENY`; a capacity-1 class's second concurrent enrollment attempt is caught by the same count-then-compare the Server Action uses; a duplicate enrollment and a `StudentBlock` (scope CLASS) are both detected before the row would be created; and Center A cannot resolve Center B's `ClassGroup`, `ClassSchedule` or `Enrollment` by id. Then it cleans up.
 
-All four gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts` and `lib/db/sessions.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
+`npm run check:payments` (`scripts/payments-check.ts`) is the M5 gate (spec §7 acceptance criteria 3-5, 13): it first exercises `lib/money.ts`'s `splitShare` with no database (FIXED 15 EGP and PERCENTAGE 15% both split a 120 EGP session correctly, and a percentage rounds to the nearest piastre), then a database-backed pass against two throwaway centers, all through `lib/db/attendance.ts`/`lib/db/payments.ts` — the same functions the Server Actions call: a payment recorded now freezes the class's *current* cut, and an already-recorded payment keeps its old `centerShareSnapshot` after the class's cut is changed later, while a payment recorded *after* the change uses the new one; a drop-in (`isDropIn: true`, `enrollmentId: null`) gets attendance and a payment recorded with zero `Enrollment` rows created; `recordPayment` refuses a second active payment for the same attendee (`alreadyPaid`) and refuses one for an ABSENT attendee (`attendanceNotPayable`) — "attend = pay, or not counted" enforced in code, not just the UI; `voidPayment` marks a row voided without touching its money fields, refuses double-voiding, and a corrected `recordPayment` afterward adds a **second** `Payment` row for the same `SessionAttendee` rather than replacing the first, so both survive with exactly one active; `consecutiveAbsenceCount` counts three ABSENT marks in a row as 3, resets to 0 on a PRESENT, and starts a new streak at 1 rather than continuing the old one; and Center B cannot resolve Center A's `SessionAttendee` or `Payment` by id, and cannot record or void a payment against them. Then it cleans up.
+
+All five gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts` and `lib/db/payments.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 
@@ -218,7 +223,7 @@ can(role, "reception.use")        // OWNER, MANAGER, RECEPTIONIST
 can(role, "analytics.own.view")   // TEACHER (baseline — see the note below)
 ```
 - **OWNER** = MANAGER + `center.ownership.manage` (the only owner-exclusive action).
-- **RECEPTIONIST** = `reception.use`, `attendance.record`, `payment.record`, `student.manage`. Profit and corrections are **denied by default** (spec §3).
+- **RECEPTIONIST** = `reception.use`, `session.view`, `attendance.record`, `payment.record`, `student.manage`. Profit and corrections are **denied by default** (spec §3). `session.view` (M5) is deliberately separate from `session.manage` (Owner/Manager only) — spec §3 lists "view today's sessions" as a receptionist capability, but running the session generator or cancelling a session is not.
 - **TEACHER** = `analytics.own.view`, `changeRequest.create`, `student.block`. `analytics.own.view` is a **baseline** permission, not a grant — a teacher sees their own earnings/analytics by default (spec §3, M3). `Membership.canSeeEarnings` exists in the schema for a possible future per-center toggle, defaults `true`, and `can()` never reads it.
 - **PLATFORM_ADMIN** = `platform.manage`, `audit.view`.
 
@@ -298,7 +303,7 @@ Which of these **denies** the save/occurrence versus merely **warns and proceeds
 2. A manual button on `/classes` (the whole center at once).
 3. `app/api/cron/generate-sessions/route.ts` — a `GET` route intended for **Vercel Cron**, guarded by comparing `Authorization: Bearer $CRON_SECRET` (Vercel signs cron-triggered requests this way once `CRON_SECRET` is set as a project env var). It loops every active `Center` and regenerates all of them. **Registering the actual cron schedule** (a `vercel.json`/`vercel.ts` `crons` entry pointing at this route) and setting `CRON_SECRET` are deployment steps, not yet wired — tracked in `00-master-product-spec.md` §2.1.C.
 
-Managers can still cancel/reschedule/edit individual sessions once the daily-loop UI lands (M5) — nothing here prevents a manually-edited session from being touched by a later regeneration, since `skipDuplicates` only ever *adds* rows for occurrences that don't already exist.
+Cancel/reschedule/edit of an individual session is **not yet built** — M5 delivered the roster/attendance/payment daily loop (this section) but not session-level lifecycle edits; that remains a fast-follow. Nothing here prevents it later: a manually-edited session is untouched by a later regeneration, since `skipDuplicates` only ever *adds* rows for occurrences that don't already exist.
 
 ---
 

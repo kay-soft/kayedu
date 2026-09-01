@@ -514,7 +514,10 @@ model SessionAttendee {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-  payment Payment?
+  // A history, not a slot: a voided payment is never deleted, so a corrected
+  // re-payment for the same roster row needs a second Payment row here — see
+  // the note on Payment.sessionAttendeeId below (docs/01-data-model.md §3).
+  payments Payment[]
 
   @@unique([sessionId, studentProfileId])
   @@index([centerId])
@@ -528,7 +531,14 @@ model Payment {
   center               Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
   sessionId            String
   session              Session         @relation(fields: [sessionId], references: [id])
-  sessionAttendeeId    String          @unique
+  // Deliberately NOT @unique (revised at M5): a void never deletes its row
+  // (CLAUDE.md rule 2), and a correction writes a *new* Payment for the same
+  // roster row rather than reusing or replacing the voided one — so one
+  // SessionAttendee can carry more than one Payment over its history, with
+  // the application layer (lib/db/payments.ts `recordPayment`) enforcing "at
+  // most one non-voided Payment per attendee at a time" instead of the
+  // database. See docs/01-data-model.md §3.
+  sessionAttendeeId    String
   sessionAttendee      SessionAttendee @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
   studentProfileId     String
   studentProfile       StudentProfile  @relation(fields: [studentProfileId], references: [id])
@@ -540,11 +550,14 @@ model Payment {
   receiptRef           String?
   voided               Boolean         @default(false)
   voidReason           String?
+  voidedAt             DateTime?
+  voidedBy             String?
   recordedBy           String
   recordedAt           DateTime        @default(now())
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
 
+  @@index([sessionAttendeeId])
   @@index([centerId])
   @@index([centerId, recordedAt])
 }

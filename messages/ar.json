@@ -509,6 +509,148 @@
       "alreadyBlocked": "هذا الطالب محظور بالفعل من هذه المجموعة."
     }
   },
+  "Sessions": {
+    "title": "حصص اليوم",
+    "subtitle": "{count} حصة في هذا العرض.",
+    "open": "فتح",
+    "backToList": "كل الحصص",
+    "detailSubtitle": "{teacher} · {date}",
+    "listTitle": "الحصص",
+    "listDescription": "كل حصة في النطاق المحدَّد، عبر كل المجموعات.",
+    "empty": "لا توجد حصص مطابقة لهذه الفلاتر.",
+    "stats": {
+      "total": "الحصص",
+      "live": "جارية الآن",
+      "marked": "الحضور المُسجَّل",
+      "collected": "المُحصَّل"
+    },
+    "columns": {
+      "time": "الوقت",
+      "class": "المجموعة",
+      "teacher": "المدرّس",
+      "room": "الغرفة",
+      "marked": "المُسجَّل",
+      "price": "السعر",
+      "untitled": "مجموعة بلا عنوان"
+    },
+    "filters": {
+      "date": "التاريخ",
+      "range": "النطاق",
+      "rangeDay": "يوم",
+      "rangeWeek": "أسبوع",
+      "rangeMonth": "شهر",
+      "status": "الحالة",
+      "teacher": "المدرّس",
+      "subject": "المادة",
+      "class": "المجموعة",
+      "all": "الكل"
+    },
+    "status": {
+      "SCHEDULED": "مجدولة",
+      "LIVE": "جارية",
+      "COMPLETED": "منتهية",
+      "CANCELLED": "ملغاة"
+    },
+    "attendance": {
+      "groupLabel": "الحضور",
+      "PRESENT": "حاضر",
+      "LATE": "متأخر",
+      "ABSENT": "غائب",
+      "EXCUSED": "معذور"
+    },
+    "paymentMethod": {
+      "groupLabel": "طريقة الدفع",
+      "CASH": "نقدًا",
+      "INSTAPAY": "إنستاباي",
+      "WALLET": "محفظة",
+      "VISA": "فيزا"
+    },
+    "roster": {
+      "title": "قائمة الحضور",
+      "description": "كل طالب مسجَّل، بالإضافة إلى أي طالب زائر. سجّل الحضور، ثم سجّل الدفع.",
+      "empty": "لا يوجد طلاب مسجَّلون أو مُضافون بعد.",
+      "dropIn": "زائر",
+      "consecutiveAbsentAlert": "غائب {count} مرات متتالية — يُستحسن التواصل مع ولي الأمر.",
+      "paid": "دُفع {amount} · {method}",
+      "method": {
+        "CASH": "نقدًا",
+        "INSTAPAY": "إنستاباي",
+        "WALLET": "محفظة",
+        "VISA": "فيزا"
+      },
+      "recordPayment": "تسجيل الدفع",
+      "void": "إلغاء",
+      "voidReasonPlaceholder": "سبب الإلغاء",
+      "confirmVoid": "تأكيد الإلغاء"
+    },
+    "addAttendee": {
+      "title": "إضافة طالب",
+      "searchLabel": "بحث عن طلاب",
+      "searchPlaceholder": "الاسم أو الكود أو الهاتف",
+      "searchSubmit": "بحث",
+      "noCandidates": "لا يوجد طلاب مطابقون لهذا البحث.",
+      "registerNew": "تسجيل طالب جديد",
+      "add": "إضافة إلى الحصة",
+      "cancel": "إلغاء",
+      "linkAsStudent": "ربط هذا الشخص وإضافته إلى الحصة"
+    },
+    "context": {
+      "title": "الحصة"
+    },
+    "fields": {
+      "time": "الوقت",
+      "room": "الغرفة",
+      "price": "السعر"
+    },
+    "receipt": {
+      "title": "الإيصال",
+      "description": "إجمالي المُحصَّل وتوزيع الحضور لهذه الحصة.",
+      "collected": "إجمالي المُحصَّل",
+      "centerShare": "حصة المركز",
+      "teacherShare": "حصة المدرّس",
+      "present": "حاضر",
+      "late": "متأخر",
+      "absent": "غائب",
+      "excused": "معذور"
+    },
+    "errors": {
+      "forbidden": "غير مسموح لك بفعل هذا.",
+      "notFound": "هذا السجل لم يعد موجودًا في هذا المركز.",
+      "required": "هذا الحقل مطلوب.",
+      "tooLong": "هذه القيمة طويلة جدًا.",
+      "invalidStatus": "اختر حالة حضور.",
+      "invalidMethod": "اختر طريقة دفع.",
+      "alreadyOnRoster": "هذا الطالب موجود بالفعل في قائمة هذه الحصة.",
+      "studentBlocked": "هذا الطالب محظور من هذه المجموعة أو المدرّس.",
+      "attendanceNotPayable": "يمكن تسجيل الدفع فقط لحضور حاضر أو متأخر.",
+      "alreadyPaid": "هذا الحاضر لديه بالفعل دفعة فعّالة. ألغِها أولًا لتسجيل دفعة جديدة.",
+      "alreadyVoided": "هذه الدفعة أُلغيت بالفعل.",
+      "contactConflict": "البريد الإلكتروني والهاتف يخصّان شخصين مختلفين. صحّح أحدهما، أو اطلب من مسؤول المنصة دمج الهويتين.",
+      "contactInUse": "بيانات التواصل هذه تخص شخصًا آخر بالفعل.",
+      "matchGone": "هذا الشخص لم يعد المطابقة لهذه البيانات. راجع النموذج وحاول مرة أخرى."
+    }
+  },
+  "Reception": {
+    "title": "مكتب الاستقبال",
+    "subtitle": "ابحث عن طالب، اختر حصته، وسجّل الحضور والدفع معًا.",
+    "searchTitle": "البحث عن طالب",
+    "searchDescription": "ابحث بكود الطالب أو الاسم أو الهاتف.",
+    "searchLabel": "بحث عن طلاب",
+    "searchPlaceholder": "الكود أو الاسم أو الهاتف",
+    "searchSubmit": "بحث",
+    "noMatches": "لا يوجد طلاب مطابقون لهذا البحث.",
+    "liveRailTitle": "حصص اليوم",
+    "liveRailDescription": "كل ما هو مجدول اليوم في هذا المركز.",
+    "noSessionsToday": "لا توجد حصص اليوم بعد.",
+    "noLiveSessions": "لا توجد حصص اليوم — ولّد حصص اليوم أولًا من لوحة الحصص.",
+    "addSessionShortcut": "كل الحصص",
+    "checkingIn": "تسجيل دخول {name}",
+    "sessionLabel": "الحصة",
+    "statusLabel": "الحضور",
+    "methodLabel": "طريقة الدفع",
+    "submit": "تسجيل الدخول",
+    "checkedIn": "تم تسجيل الدخول."
+  },
   "Settings": {
     "title": "إعدادات المركز",
     "subtitle": "اضبط البيانات الأساسية الأكاديمية والتشغيلية لهذا المركز. كل ما هنا خاص بالمركز — والمركز التالي لا يحتاج أي تعديل برمجي.",

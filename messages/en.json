@@ -509,6 +509,148 @@
       "alreadyBlocked": "This student is already blocked from this class."
     }
   },
+  "Sessions": {
+    "title": "Today's Sessions",
+    "subtitle": "{count} sessions in this view.",
+    "open": "Open",
+    "backToList": "All sessions",
+    "detailSubtitle": "{teacher} · {date}",
+    "listTitle": "Sessions",
+    "listDescription": "Every session in the selected range, across every class.",
+    "empty": "No sessions match these filters.",
+    "stats": {
+      "total": "Sessions",
+      "live": "Live now",
+      "marked": "Attendance marked",
+      "collected": "Collected"
+    },
+    "columns": {
+      "time": "Time",
+      "class": "Class",
+      "teacher": "Teacher",
+      "room": "Room",
+      "marked": "Marked",
+      "price": "Price",
+      "untitled": "Untitled class"
+    },
+    "filters": {
+      "date": "Date",
+      "range": "Range",
+      "rangeDay": "Day",
+      "rangeWeek": "Week",
+      "rangeMonth": "Month",
+      "status": "Status",
+      "teacher": "Teacher",
+      "subject": "Subject",
+      "class": "Class",
+      "all": "All"
+    },
+    "status": {
+      "SCHEDULED": "Scheduled",
+      "LIVE": "Live",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled"
+    },
+    "attendance": {
+      "groupLabel": "Attendance",
+      "PRESENT": "Present",
+      "LATE": "Late",
+      "ABSENT": "Absent",
+      "EXCUSED": "Excused"
+    },
+    "paymentMethod": {
+      "groupLabel": "Payment method",
+      "CASH": "Cash",
+      "INSTAPAY": "InstaPay",
+      "WALLET": "Wallet",
+      "VISA": "Visa"
+    },
+    "roster": {
+      "title": "Roster",
+      "description": "Every enrolled student, plus any drop-ins. Mark attendance, then record the payment.",
+      "empty": "No students enrolled or added yet.",
+      "dropIn": "Drop-in",
+      "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian.",
+      "paid": "Paid {amount} · {method}",
+      "method": {
+        "CASH": "Cash",
+        "INSTAPAY": "InstaPay",
+        "WALLET": "Wallet",
+        "VISA": "Visa"
+      },
+      "recordPayment": "Record payment",
+      "void": "Void",
+      "voidReasonPlaceholder": "Reason for voiding",
+      "confirmVoid": "Confirm void"
+    },
+    "addAttendee": {
+      "title": "Add a student",
+      "searchLabel": "Search students",
+      "searchPlaceholder": "Name, code or phone",
+      "searchSubmit": "Search",
+      "noCandidates": "No students match that search.",
+      "registerNew": "Register a new student",
+      "add": "Add to session",
+      "cancel": "Cancel",
+      "linkAsStudent": "Link this person and add to the session"
+    },
+    "context": {
+      "title": "Session"
+    },
+    "fields": {
+      "time": "Time",
+      "room": "Room",
+      "price": "Price"
+    },
+    "receipt": {
+      "title": "Receipt",
+      "description": "Total collected and the attendance breakdown for this session.",
+      "collected": "Total collected",
+      "centerShare": "Center share",
+      "teacherShare": "Teacher share",
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent",
+      "excused": "Excused"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists in this center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidStatus": "Choose an attendance status.",
+      "invalidMethod": "Choose a payment method.",
+      "alreadyOnRoster": "This student is already on this session's roster.",
+      "studentBlocked": "This student is blocked from this class or teacher.",
+      "attendanceNotPayable": "Only a Present or Late attendee can have a payment recorded.",
+      "alreadyPaid": "This attendee already has an active payment. Void it first to record a new one.",
+      "alreadyVoided": "This payment was already voided.",
+      "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
+      "contactInUse": "Those contact details already belong to someone else.",
+      "matchGone": "That person is no longer the match for these details. Check the form and try again."
+    }
+  },
+  "Reception": {
+    "title": "Reception Desk",
+    "subtitle": "Search a student, pick their session, and record attendance and payment together.",
+    "searchTitle": "Find a student",
+    "searchDescription": "Search by student code, name or phone.",
+    "searchLabel": "Search students",
+    "searchPlaceholder": "Code, name or phone",
+    "searchSubmit": "Search",
+    "noMatches": "No students match that search.",
+    "liveRailTitle": "Today's sessions",
+    "liveRailDescription": "Everything scheduled today at this center.",
+    "noSessionsToday": "No sessions today yet.",
+    "noLiveSessions": "No sessions today — generate today's sessions from the Sessions dashboard first.",
+    "addSessionShortcut": "All sessions",
+    "checkingIn": "Checking in {name}",
+    "sessionLabel": "Session",
+    "statusLabel": "Attendance",
+    "methodLabel": "Payment method",
+    "submit": "Check in",
+    "checkedIn": "Checked in."
+  },
   "Settings": {
     "title": "Center configuration",
     "subtitle": "Set up this center's academic and operational reference data. Everything here is per center — the next center needs no code changes.",

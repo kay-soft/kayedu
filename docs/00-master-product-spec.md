@@ -63,7 +63,7 @@ These are settled. They shape the schema and the whole build.
 
 ### C. Operations & pipeline
 
-- [ ] **Run the acceptance gates in CI**, not by hand: `npm run check:isolation` (cross-center by id, M1), `npm run check:config` (center configuration, M2), `npm run check:people` (teachers, students, blocks, identity matching and storage paths, M3) and `npm run check:classes` (classes, schedules, conflicts, session generation, M4). `02-architecture.md` §5 requires them as gates; today they are manual local commands. The full shared-teacher no-leak test joins them at M7.
+- [ ] **Run the acceptance gates in CI**, not by hand: `npm run check:isolation` (cross-center by id, M1), `npm run check:config` (center configuration, M2), `npm run check:people` (teachers, students, blocks, identity matching and storage paths, M3), `npm run check:classes` (classes, schedules, conflicts, session generation, M4) and `npm run check:payments` (snapshot immutability, FIXED/PERCENTAGE splits, drop-ins, void-then-recreate, consecutive absence, cross-center isolation, M5). `02-architecture.md` §5 requires them as gates; today they are manual local commands. The full shared-teacher no-leak test joins them at M7.
 - [ ] **Migrations via `prisma migrate deploy` in CI** — never `migrate dev` against a deployed database.
 - [ ] **Error monitoring** (e.g. Sentry) wired before the pilot.
 - [ ] **Session-generation cron registered on Vercel.** The generator itself (`lib/db/sessions.ts`) and its HTTP entry point (`app/api/cron/generate-sessions/route.ts`, guarded by a `CRON_SECRET` bearer check) land with M4 — the rolling window does not materialize itself until a `vercel.json`/`vercel.ts` `crons` entry actually calls that route on a schedule (docs/02-architecture.md §11), and `CRON_SECRET` must be set in the Vercel project's env vars. Until then, the manual "Generate sessions" buttons on `/classes` and a class's detail page are the only trigger.
@@ -157,10 +157,10 @@ Create/activate/suspend center tenants; manage plans/onboarding metadata; contro
 - Corrections/refunds are permissioned and audited; a correction writes a **new** audit-tracked change, it does not silently overwrite history.
 
 **Attendance.**
-- Statuses: **Present, Late, Absent, Excused** (Excused configurable per class).
+- Statuses: **Present, Late, Absent, Excused**. *(M5 note: "Excused configurable per class" has no schema field yet — all four statuses are offered on every class today; a per-class toggle is a small fast-follow if a center actually asks for it.)*
 - **Late threshold** (minutes) is per class.
-- Consecutive-absence and total-absence counts are derived from attendance history and surfaced on the session receipt and student profile.
-- Corrections require permission and are audited; sessions have an **edit deadline** for teachers, set by the manager.
+- Consecutive-absence and total-absence counts are derived from attendance history (`lib/db/attendance.ts`'s `consecutiveAbsenceCount`, M5) and surfaced on the session receipt. *(M5 note: not yet surfaced on the student profile page — tracked as a gap, not silently dropped.)*
+- Corrections require permission and are audited; sessions have an **edit deadline** for teachers, set by the manager. *(M5 note: attendance corrections are permissioned and audited as of M5 — `attendance.record` for a first mark, `attendance.correct` for changing an already-marked row; the teacher edit-deadline setting itself is not yet built.)*
 
 **Scheduling.**
 - A class can meet on **multiple days/times**.

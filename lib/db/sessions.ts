@@ -1,4 +1,4 @@
-import type { ConflictPolicy, PrismaClient, SessionStatus } from "@prisma/client";
+import type { ConflictPolicy, Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 
 // Relative imports on purpose: `npm run check:classes` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts
@@ -235,4 +235,125 @@ export async function generateSessions(
   });
 
   return { created: result.count, conflicts };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Read-side session policy (Today's Sessions dashboard + detail, M5).
+// Kept in this file — not lib/db/classes.ts or lib/db/scoped.ts — because
+// `npm run check:classes` already imports this module directly outside the
+// Next.js runtime for `generateSessions`, so everything here stays free of
+// `@/` aliases the same way (docs/02-architecture.md §5).
+// ─────────────────────────────────────────────────────────────────────────
+
+const CANCELLED_STATUS: SessionStatus = "CANCELLED";
+const ACTIVE_ENROLLMENT_STATUS = "ACTIVE" as const;
+
+/** Fields a Today's Sessions dashboard row renders — never a full include. */
+export const SESSION_LIST_SELECT = {
+  id: true,
+  date: true,
+  startTime: true,
+  endTime: true,
+  status: true,
+  priceSnapshot: true,
+  teacherId: true,
+  classGroupId: true,
+  classGroup: {
+    select: {
+      subject: { select: { name: true } },
+      grade: { select: { name: true } },
+      _count: { select: { enrollments: { where: { status: ACTIVE_ENROLLMENT_STATUS } } } },
+    },
+  },
+  room: { select: { id: true, name: true } },
+  _count: { select: { attendees: true } },
+} satisfies Prisma.SessionSelect;
+
+export type SessionListRow = Prisma.SessionGetPayload<{
+  select: typeof SESSION_LIST_SELECT;
+}>;
+
+/** A session detail page — every field it renders, including the roster. */
+export const SESSION_DETAIL_INCLUDE = {
+  teacher: true,
+  room: true,
+  classGroup: { include: { subject: true, grade: true } },
+  attendees: {
+    include: {
+      studentProfile: { include: { user: true } },
+      enrollment: true,
+      payments: { orderBy: { recordedAt: "desc" } },
+    },
+    orderBy: { createdAt: "asc" },
+  },
+} satisfies Prisma.SessionInclude;
+
+export type SessionDetailRow = Prisma.SessionGetPayload<{
+  include: typeof SESSION_DETAIL_INCLUDE;
+}>;
+
+export function sessionListWhere(filters: {
+  from: Date;
+  to: Date;
+  teacherId?: string | null;
+  subjectId?: string | null;
+  classGroupId?: string | null;
+}): Prisma.SessionWhereInput {
+  const where: Prisma.SessionWhereInput = {
+    date: { gte: filters.from, lte: filters.to },
+  };
+  if (filters.teacherId) where.teacherId = filters.teacherId;
+  if (filters.classGroupId) where.classGroupId = filters.classGroupId;
+  if (filters.subjectId) where.classGroup = { subjectId: filters.subjectId };
+  return where;
+}
+
+export type SessionDisplayStatus = "SCHEDULED" | "LIVE" | "COMPLETED" | "CANCELLED";
+
+/**
+ * SCHEDULED/LIVE/COMPLETED are derived from the clock, not stored — nothing
+ * in this codebase transitions `Session.status` between them yet (docs/02
+ * §11 leaves session lifecycle writes, cancel included, to a later
+ * milestone). CANCELLED is the one persisted value this passes through.
+ *
+ * Consistent with `generateOccurrenceDates`/`startOfUtcDay` elsewhere in this
+ * file: `date` is a pure UTC-midnight calendar-day marker and `startTime`/
+ * `endTime` are plain "HH:MM" wall-clock strings, compared here against the
+ * server's current UTC clock with no timezone conversion — the same
+ * simplification the M4 generator already makes (Phase 1 is Egypt-only, one
+ * timezone, per spec §1).
+ */
+export function deriveSessionDisplayStatus(
+  session: { status: SessionStatus; date: Date; startTime: string; endTime: string },
+  now: Date,
+): SessionDisplayStatus {
+  if (session.status === CANCELLED_STATUS) return "CANCELLED";
+
+  const dayKey = session.date.toISOString().slice(0, 10);
+  const nowKey = now.toISOString().slice(0, 10);
+  if (dayKey > nowKey) return "SCHEDULED";
+  if (dayKey < nowKey) return "COMPLETED";
+
+  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const startMinutes = parseTimeToMinutesSafe(session.startTime);
+  const endMinutes = parseTimeToMinutesSafe(session.endTime);
+  if (nowMinutes < startMinutes) return "SCHEDULED";
+  if (nowMinutes >= endMinutes) return "COMPLETED";
+  return "LIVE";
+}
+
+function parseTimeToMinutesSafe(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return (hours || 0) * 60 + (minutes || 0);
+}
+
+/** A short label for the session in a list/receipt ("Math · Grade 10"). */
+export function sessionDisplayName(row: {
+  classGroup: { subject: { name: string } | null; grade: { name: string } | null };
+}): string {
+  return (
+    [row.classGroup.subject?.name, row.classGroup.grade?.name]
+      .filter(Boolean)
+      .join(" · ") || "—"
+  );
 }

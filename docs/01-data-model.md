@@ -49,8 +49,8 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 ### Session & attendance layer (all `centerId`-scoped)
 - **Session** — one dated instance: classGroup, teacher, room, date, start/end, status (SCHEDULED/LIVE/COMPLETED/CANCELLED), `priceSnapshot`, description. Unique on `(classGroupId, date, startTime)` — the key the session generator's idempotent regeneration (M4, `lib/db/sessions.ts`) relies on: a `createMany({ skipDuplicates: true })` against it never creates a second row for a slot a previous run already materialized.
 - **Holiday** — a center's own holiday calendar (M4): `centerId`, `date`, an optional `name`. Unique on `(centerId, date)`. Not itself a business screen a role opens daily — it's the input the session generator (`lib/db/sessions.ts`) skips dates against, edited from a small panel on `/classes` (docs/02 §11).
-- **SessionAttendee** — roster row: session, `studentProfileId?` (null-safe for pure drop-ins), `enrollmentId?` (null for drop-ins), `attendanceStatus` (PRESENT/LATE/ABSENT/EXCUSED), `isDropIn`, recordedBy, recordedAt.
-- **Payment** — the ledger row (see §3): session, sessionAttendee, studentProfile, amount, method, **priceSnapshot, centerShareSnapshot, teacherShareSnapshot**, receiptRef, recordedBy, recordedAt.
+- **SessionAttendee** — roster row: session, `studentProfileId?` (null-safe for pure drop-ins), `enrollmentId?` (null for drop-ins), `attendanceStatus` (PRESENT/LATE/ABSENT/EXCUSED), `isDropIn`, recordedBy, recordedAt. A first-time mark is `attendance.record`; changing an already-marked row is `attendance.correct` and is audited (M5, spec §5 "Attendance", `lib/db/attendance.ts`). One row per `(sessionId, studentProfileId)` — reused across corrections, like `Enrollment`, never recreated. Can carry more than one `Payment` over its history (see below).
+- **Payment** — the ledger row (see §3): session, sessionAttendee, studentProfile, amount, method, **priceSnapshot, centerShareSnapshot, teacherShareSnapshot**, receiptRef, `voided`/`voidReason`/`voidedAt`/`voidedBy`, recordedBy, recordedAt. `sessionAttendeeId` is a plain indexed foreign key, **not** database-unique (revised at M5) — a void never deletes its row, and "void, then optionally write a corrected Payment" (§3) writes a *second* row against the same `SessionAttendee`, not a replacement. `lib/db/payments.ts`'s `recordPayment` is what enforces "at most one **active** (non-voided) payment per attendee at a time" instead, since the database no longer can.
 
 ### Finance-adjacent layer
 - **ExpenseCategory** / **Expense** — center expenses with category, amount, date.
@@ -80,11 +80,13 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 
 **Why snapshots, concretely:** teacher raises their price / center changes its cut in March. February's already-recorded payments must still show February's split, or a teacher will (rightly) dispute the books. Recomputing live is the classic bug that loses a client. Snapshot = the books are always internally consistent and auditable.
 
-**Corrections & refunds:** never `UPDATE` a `Payment`'s money fields. Instead mark it `voided` (with reason + `AuditLog`) and, if needed, write a corrected `Payment`. History stays intact.
+**Corrections & refunds:** never `UPDATE` a `Payment`'s money fields. Instead mark it `voided` (with reason + `AuditLog`) and, if needed, write a corrected `Payment`. History stays intact. This is why `Payment.sessionAttendeeId` is **not** database-unique (revised at M5, `lib/db/payments.ts`): a void keeps its row and a correction adds a second `Payment` against the same `SessionAttendee`, rather than replacing anything. "At most one **active** payment per attendee" is enforced by `recordPayment()` — it checks for an existing `voided: false` row before inserting — not by a database constraint.
 
-**No debt:** there is no balance table. If a student didn't pay, there's simply no `Payment` row — they're an unpaid/absent attendee. Nothing owes anything.
+**No debt:** there is no balance table. If a student didn't pay, there's simply no `Payment` row — they're an unpaid/absent attendee. Nothing owes anything. Concretely (M5): a payment can only ever be recorded for a **PRESENT/LATE** `SessionAttendee` — "attend = pay, or not counted" (spec §2) is enforced in `recordPayment()`, not just hinted at in the UI.
 
 **Rounding rule:** percentage cuts round to the nearest piastre (`Math.round`); document any change here because it affects totals.
+
+**Consecutive-absence counting (M5, spec §7 acceptance criterion 13):** `lib/db/attendance.ts`'s `consecutiveAbsenceCount()` walks a student's `SessionAttendee` history for one `classGroupId`, most-recent-first, counting `ABSENT` rows until the streak breaks — capped at 50 rows. Shown today on the session receipt (`app/[locale]/(center)/sessions/[id]/session-receipt.tsx`); the spec also calls for it on the student's own profile page, which is not yet built (tracked as a gap, not silently dropped).
 
 ---
 
@@ -113,7 +115,7 @@ ClassGroup 1─* ClassSchedule
 ClassGroup 1─* Session
 StudentProfile 1─* Enrollment *─1 ClassGroup
 Session 1─* SessionAttendee *─0..1 StudentProfile
-SessionAttendee 1─0..1 Payment
+SessionAttendee 1─* Payment          (history — at most one non-voided at a time, M5)
 Center 1─* Expense *─1 ExpenseCategory
 Center 1─* Holiday
 ```

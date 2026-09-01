@@ -35,6 +35,7 @@
 **Goal:** the beating heart — what a center opens every day. **This is the milestone that sells.**
 **Build:** Today's Sessions dashboard (filters). Session detail: enrolled roster + add student (existing/new, drop-in or enroll) + mark attendance (Present/Late/Absent/Excused). **Reception Desk**: search by code/name/phone (+ QR scan), select session, method, status. Payment recording that **freezes the snapshots** via `lib/money.ts` in a transaction. Session receipt (total, center share, teacher share, present/absent, consecutive-absence counts). Void/correct with audit.
 **Done when:** all money acceptance tests pass — fixed *and* percentage cuts compute correctly; a recorded payment is unchanged after the class cut changes; a drop-in records attendance+payment with no enrollment; consecutive-absence shows on the receipt.
+**Delivered:** all of the above, gated by `npm run check:payments`. QR "scan" is a hardware barcode-scanner-friendly text match on Reception's search box (`lib/id-card.ts`'s `parseStudentQrPayload`), not a camera — no camera code exists in this app. **Not built in M5** (tracked as fast-follows, not silently dropped): session cancel/reschedule/edit (docs/02 §11); consecutive-absence surfaced on the student profile page (session receipt only for now); a per-class "Excused" toggle (all four statuses are offered on every class).
 
 ## M6 — Analytics & expenses
 **Goal:** owners see the money and the trends.

@@ -28,6 +28,7 @@ export const PERMISSIONS = [
   "session.manage",
   "session.cancel",
   // Daily loop
+  "session.view",
   "reception.use",
   "attendance.record",
   "attendance.correct",
@@ -64,6 +65,7 @@ const MANAGER_PERMISSIONS: readonly Permission[] = [
   "class.delete",
   "session.manage",
   "session.cancel",
+  "session.view",
   "reception.use",
   "attendance.record",
   "attendance.correct",
@@ -82,6 +84,7 @@ const ROLE_PERMISSIONS: Record<TenantRole, readonly Permission[]> = {
   // Daily ops only. Profit and corrections are denied by default (spec §3).
   RECEPTIONIST: [
     "reception.use",
+    "session.view",
     "attendance.record",
     "payment.record",
     "student.manage",

@@ -73,6 +73,9 @@ async function studentScope(): Promise<Scope | null> {
 
 function revalidateStudentList(locale: string): void {
   revalidatePath(`/${locale}${ROUTES.centerStudents}`);
+  // A freshly registered student must be findable by the Reception Desk's
+  // search immediately (M5) — not just on the Students list.
+  revalidatePath(`/${locale}${ROUTES.centerReception}`);
 }
 
 /** List + detail — the two views that show name, grade, code and status. */

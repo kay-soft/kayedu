@@ -153,6 +153,23 @@ export function generateOccurrenceDates(
   return dates;
 }
 
+// ── Date-range windows (Today's Sessions dashboard filters, M5) ────────────
+
+/** Sunday-start week containing `date`, as a `[start, end]` UTC-midnight pair. */
+export function weekRangeUtc(date: Date): { start: Date; end: Date } {
+  const start = startOfUtcDay(date);
+  const offset = start.getUTCDay();
+  const weekStart = addDays(start, -offset);
+  return { start: weekStart, end: addDays(weekStart, 6) };
+}
+
+/** Calendar month containing `date`, as a `[start, end]` UTC-midnight pair. */
+export function monthRangeUtc(date: Date): { start: Date; end: Date } {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+  return { start, end };
+}
+
 // ── Session conflicts (generation time) ────────────────────────────────────
 
 export type ExistingSession = {

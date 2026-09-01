@@ -1,4 +1,4 @@
-import type { EnrollmentStatus, Prisma, Role } from "@prisma/client";
+import type { EnrollmentStatus, Prisma, Role, SessionStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import type { TenantContext } from "@/lib/auth/tenant";
 import {
@@ -10,6 +10,10 @@ import {
   CLASS_LIST_SELECT,
 } from "@/lib/db/classes";
 import {
+  SESSION_DETAIL_INCLUDE,
+  SESSION_LIST_SELECT,
+} from "@/lib/db/sessions";
+import {
   requireScopedById,
   scopedData,
   scopedFindById,
@@ -20,6 +24,7 @@ import {
 const TEACHER: Role = "TEACHER";
 const ACTIVE_ENROLLMENT: EnrollmentStatus = "ACTIVE";
 const EXISTING_ENROLLMENT_STATUSES: EnrollmentStatus[] = ["ACTIVE", "BLOCKED"];
+const CANCELLED_STATUS: SessionStatus = "CANCELLED";
 
 /**
  * Tenant-scoped data access (docs/02-architecture.md §5).
@@ -214,6 +219,13 @@ export function scoped(ctx: TenantContext) {
           where: scopedWhere(centerId, { userId }),
         }),
 
+      /** The exact-match lookup a scanned ID-card QR resolves through (M5). */
+      findByCode: (studentCode: string) =>
+        prisma.studentProfile.findFirst({
+          where: scopedWhere(centerId, { studentCode }),
+          include: { user: true },
+        }),
+
       requireById: (id: string) =>
         requireScopedById(prisma.studentProfile, centerId, id, "StudentProfile"),
 
@@ -362,11 +374,32 @@ export function scoped(ctx: TenantContext) {
     attendees: {
       count: (where?: Prisma.SessionAttendeeWhereInput) =>
         prisma.sessionAttendee.count({ where: scopedWhere(centerId, where) }),
+
+      findById: (id: string) =>
+        scopedFindById(prisma.sessionAttendee, centerId, id),
+
+      /** The full row a session-detail action needs to check/audit against. */
+      findDetailById: (id: string) =>
+        prisma.sessionAttendee.findFirst({
+          where: scopedWhere(centerId, { id }),
+          include: {
+            studentProfile: { include: { user: true } },
+            payments: { orderBy: { recordedAt: "desc" } },
+          },
+        }),
+
+      /** Existing roster row for (session, student) — null if never marked. */
+      findExisting: (sessionId: string, studentProfileId: string) =>
+        prisma.sessionAttendee.findFirst({
+          where: scopedWhere(centerId, { sessionId, studentProfileId }),
+        }),
     },
 
     payments: {
       count: (where?: Prisma.PaymentWhereInput) =>
         prisma.payment.count({ where: scopedWhere(centerId, where) }),
+
+      findById: (id: string) => scopedFindById(prisma.payment, centerId, id),
     },
 
     // ── Academic / config master data (docs/01-data-model.md §2) ───────────
@@ -607,9 +640,52 @@ export function scoped(ctx: TenantContext) {
         prisma.classSchedule.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
+    /**
+     * Sessions (M5): the Today's Sessions dashboard, session detail, and
+     * Reception Desk all read through here. Money/attendance *writes* go
+     * through `lib/db/attendance.ts`/`lib/db/payments.ts` instead, inside a
+     * transaction — this object is read-only plus the plain-column session
+     * lookups those actions need first.
+     */
     sessions: {
       count: (where?: Prisma.SessionWhereInput) =>
         prisma.session.count({ where: scopedWhere(centerId, where) }),
+
+      /**
+       * The dashboard: a lean select, filtered and ordered by time of day.
+       * The status filter (SCHEDULED/LIVE/COMPLETED) is derived from the
+       * clock, not a column (`deriveSessionDisplayStatus`), so it is applied
+       * in the page after this query rather than in `where` — `take` here is
+       * a defensive cap, not the real page size; the date-range filter
+       * already bounds this to "one center's day/week/month", never the
+       * whole table (docs/02-architecture.md §14).
+       */
+      search: (args: { where?: Prisma.SessionWhereInput }) =>
+        prisma.session.findMany({
+          where: scopedWhere(centerId, args.where),
+          orderBy: [{ date: "asc" }, { startTime: "asc" }],
+          select: SESSION_LIST_SELECT,
+          take: 1000,
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.session, centerId, id),
+
+      findDetailById: (id: string) =>
+        prisma.session.findFirst({
+          where: scopedWhere(centerId, { id }),
+          include: SESSION_DETAIL_INCLUDE,
+        }),
+
+      /** Today's non-cancelled sessions — the Reception Desk's live rail. */
+      listForDay: (date: Date) =>
+        prisma.session.findMany({
+          where: scopedWhere(centerId, {
+            date,
+            status: { not: CANCELLED_STATUS },
+          }),
+          orderBy: [{ startTime: "asc" }],
+          select: SESSION_LIST_SELECT,
+        }),
     },
 
     /** The center's holiday calendar (docs/02 §11) — dates the generator skips. */
