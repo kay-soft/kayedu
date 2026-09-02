@@ -114,7 +114,15 @@ export const teacherCreateSchema = z
   .superRefine(requireContact);
 
 export const teacherUpdateSchema = z
-  .object({ ...base, ...teacherFields, membershipId: recordId })
+  .object({
+    ...base,
+    ...teacherFields,
+    membershipId: recordId,
+    // Gates the teacher-portal "request a new class/session" forms (M10,
+    // spec §4.2 items 2 & 4). Defaults checked in the UI — a fresh teacher
+    // starts trusted, matching the pre-M10 behavior.
+    isTrustedTeacher: checkbox,
+  })
   .superRefine(requireContact);
 
 export const membershipActionSchema = z.object({

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
+import { SessionLifecycleActions } from "@/app/[locale]/(center)/sessions/[id]/session-lifecycle-actions";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { SessionRoster, type RosterRowData } from "@/app/[locale]/(center)/sessions/[id]/session-roster";
 import { SearchBox } from "@/components/center/search-box";
@@ -183,6 +184,7 @@ export default async function SessionDetailPage({
               canCorrect={ctxCan(ctx, "attendance.correct")}
               canRecordPayment={ctxCan(ctx, "payment.record")}
               canVoid={ctxCan(ctx, "payment.void")}
+              allowExcused={session.classGroup.allowExcused}
             />
 
             <div className="border-t border-border pt-4">
@@ -229,6 +231,17 @@ export default async function SessionDetailPage({
                 <span className="font-medium tabular-nums text-text-primary">
                   {formatMoney(session.priceSnapshot, locale)}
                 </span>
+              </div>
+              <div className="border-t border-border pt-3">
+                <SessionLifecycleActions
+                  sessionId={session.id}
+                  date={session.date.toISOString().slice(0, 10)}
+                  startTime={session.startTime}
+                  endTime={session.endTime}
+                  cancelled={displayStatus === "CANCELLED"}
+                  canCancel={ctxCan(ctx, "session.cancel")}
+                  canReschedule={ctxCan(ctx, "session.manage")}
+                />
               </div>
             </CardContent>
           </Card>

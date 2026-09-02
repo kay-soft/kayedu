@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
-import { resolveChangeRequest } from "@/lib/db/approvals";
+import { resolveChangeRequest, resolveSessionRequest } from "@/lib/db/approvals";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { confirmReservation, rejectReservation } from "@/lib/db/reservations";
@@ -146,6 +146,82 @@ export async function declineReservationAction(
     entityId: id,
     before: { status: "PENDING" },
     after: { status: "REJECTED" },
+  });
+
+  revalidateApprovals(locale);
+  return { status: "declined" };
+}
+
+// ── ChangeRequest type NEW_SESSION (M10) ────────────────────────────────────
+// Unlike NEW_CLASS, accepting immediately creates the `Session` — the
+// request's own `ClassGroup` already has its price/cut decided, so there is
+// no missing-money problem to defer (see the decision record in
+// lib/db/approvals.ts).
+
+export async function approveSessionRequestAction(
+  _state: ApprovalsActionState,
+  formData: FormData,
+): Promise<ApprovalsActionState> {
+  const ctx = await approvalsScope();
+  if (!ctx) return FORBIDDEN;
+
+  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+  const { locale, id } = parsed.data;
+
+  const result = await resolveSessionRequest(
+    prisma,
+    ctx.center.id,
+    id,
+    "APPROVED",
+    ctx.user.id,
+    ctx.settings?.scheduleConflictPolicy ?? "WARN",
+  );
+  if (!result.ok) return { error: result.error };
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "changeRequest.approve",
+    entityType: "ChangeRequest",
+    entityId: id,
+    before: { status: "PENDING" },
+    after: { status: "APPROVED", sessionId: result.session?.id },
+  });
+
+  revalidateApprovals(locale);
+  return { status: "approved" };
+}
+
+export async function declineSessionRequestAction(
+  _state: ApprovalsActionState,
+  formData: FormData,
+): Promise<ApprovalsActionState> {
+  const ctx = await approvalsScope();
+  if (!ctx) return FORBIDDEN;
+
+  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+  const { locale, id } = parsed.data;
+
+  const result = await resolveSessionRequest(
+    prisma,
+    ctx.center.id,
+    id,
+    "DECLINED",
+    ctx.user.id,
+    ctx.settings?.scheduleConflictPolicy ?? "WARN",
+  );
+  if (!result.ok) return { error: result.error };
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "changeRequest.decline",
+    entityType: "ChangeRequest",
+    entityId: id,
+    before: { status: "PENDING" },
+    after: { status: "DECLINED" },
   });
 
   revalidateApprovals(locale);

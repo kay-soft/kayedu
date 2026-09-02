@@ -139,6 +139,37 @@ export const voidPaymentSchema = z.object({
   reason: z.string().trim().min(1, "required").max(200, "tooLong"),
 });
 
+// ── Session lifecycle: cancel / reschedule (M10) ────────────────────────────
+
+export const cancelSessionSchema = z.object({
+  ...base,
+  sessionId: recordId,
+});
+
+const sessionDate = z
+  .string()
+  .trim()
+  .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate")
+  .transform((value) => new Date(`${value.slice(0, 10)}T00:00:00.000Z`));
+
+const sessionTime = z
+  .string()
+  .trim()
+  .refine((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value), "invalidTime");
+
+export const rescheduleSessionSchema = z
+  .object({
+    ...base,
+    sessionId: recordId,
+    date: sessionDate,
+    startTime: sessionTime,
+    endTime: sessionTime,
+  })
+  .refine((value) => value.startTime < value.endTime, {
+    path: ["endTime"],
+    message: "invalidTimeRange",
+  });
+
 // ── Reception Desk (attendance + payment in one submit) ────────────────────
 
 export const receptionCheckInSchema = z.object({
@@ -170,8 +201,16 @@ export type SessionMatchCandidate = {
 export type SessionActionState = {
   error?: string;
   fieldErrors?: Record<string, string>;
-  status?: "created" | "saved" | "deleted" | "matchFound" | "voided";
+  status?:
+    | "created"
+    | "saved"
+    | "deleted"
+    | "matchFound"
+    | "voided"
+    | "cancelled"
+    | "rescheduled";
   match?: SessionMatchCandidate;
+  conflicts?: { type: "teacher" | "room"; className: string }[];
 };
 
 export const IDLE_SESSION_STATE: SessionActionState = {};

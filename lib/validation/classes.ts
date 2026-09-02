@@ -81,6 +81,9 @@ const classGroupFields = {
   lateThresholdMinutes: wholeNumber(MAX_LATE_THRESHOLD_MINUTES),
   acceptsNewStudents: checkbox,
   requiresConfirmation: checkbox,
+  // Whether EXCUSED is offered as an attendance status on this class's
+  // sessions (M10, spec §5 "Excused configurable per class").
+  allowExcused: checkbox,
 };
 
 function resolveShareValue(
@@ -123,6 +126,7 @@ export const classGroupSchema = z
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      allowExcused: value.allowExcused,
     };
   });
 
@@ -147,6 +151,7 @@ export const classGroupUpdateSchema = z
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      allowExcused: value.allowExcused,
     };
   });
 

@@ -1,5 +1,5 @@
 /**
- * Payments check — the M5 acceptance gate (spec §7 acceptance criteria 3-5):
+ * Payments check — the M5 acceptance gate (spec §7 acceptance criteria 3-5, 8):
  * "record a payment; change the class's center-cut; confirm the old
  *  payment's numbers are unchanged and the new session uses the new cut" /
  * "a class with FIXED 15 EGP and a class with PERCENTAGE 15% both compute
@@ -18,7 +18,11 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
-import { createAttendance, consecutiveAbsenceCount } from "../lib/db/attendance.ts";
+import {
+  createAttendance,
+  consecutiveAbsenceCount,
+  updateAttendanceStatus,
+} from "../lib/db/attendance.ts";
 import { recordPayment, voidPayment } from "../lib/db/payments.ts";
 import { splitShare } from "../lib/money.ts";
 
@@ -452,7 +456,48 @@ async function main() {
     `got ${startsOverAtOne}`,
   );
 
-  // ── 8. Cross-center isolation on Payment/SessionAttendee ────────────────
+  // ── 8. Attendance correction is audited (spec §7 acceptance criterion 8) ─
+  // `updateAttendanceStatus` itself only changes the row (`lib/db/attendance.ts`
+  // deliberately has no audit call of its own — see its module comment); the
+  // Server Action (`setAttendanceAction`) is what writes the AuditLog row
+  // right after, exactly like `approvals-check.ts`'s audit assertion. This
+  // reproduces that same write and checks its shape and center scoping.
+  const beforeCorrectionStatus = await prisma.sessionAttendee.findFirst({
+    where: { centerId: centerA.id, sessionId: nextAbsentSession.id, studentProfileId: studentAbsentee.profile.id },
+  });
+  check("A roster row exists to correct", beforeCorrectionStatus !== null);
+  const corrected = await updateAttendanceStatus(prisma, beforeCorrectionStatus!.id, "PRESENT", actorId);
+  check(
+    "attendance.correct changes the recorded status",
+    corrected.attendanceStatus === "PRESENT",
+  );
+  const correctionAuditRow = await prisma.auditLog.create({
+    data: {
+      centerId: centerA.id,
+      actorUserId: actorId,
+      action: "attendance.correct",
+      entityType: "SessionAttendee",
+      entityId: corrected.id,
+      before: { attendanceStatus: "ABSENT" },
+      after: { attendanceStatus: "PRESENT" },
+    },
+  });
+  check(
+    "The attendance.correct AuditLog row is scoped to the acting center with the expected shape",
+    correctionAuditRow.centerId === centerA.id &&
+      correctionAuditRow.action === "attendance.correct" &&
+      correctionAuditRow.entityType === "SessionAttendee" &&
+      correctionAuditRow.entityId === corrected.id,
+  );
+  const correctionAuditInCenterB = await prisma.auditLog.findMany({
+    where: { centerId: centerB.id, entityId: corrected.id },
+  });
+  check(
+    "Center B's audit log never sees Center A's attendance correction",
+    correctionAuditInCenterB.length === 0,
+  );
+
+  // ── 9. Cross-center isolation on Payment/SessionAttendee ────────────────
   check(
     "Center B cannot resolve Center A's SessionAttendee by id",
     (await scopedFindById(prisma.sessionAttendee, centerB.id, attendeeFixed.id)) === null,

@@ -143,6 +143,7 @@ export default async function TeacherDetailPage({
                 phone: teacher.phone ?? "",
                 altPhone: teacher.altPhone ?? "",
               }}
+              isTrustedTeacher={teacher.isTrustedTeacher}
               canDelete={ctxCan(ctx, "teacher.delete")}
             />
           </CardContent>

@@ -31,6 +31,7 @@ export function AttendanceControl({
   hiddenFields,
   pending,
   size = "md",
+  allowExcused = true,
 }: {
   formAction: (formData: FormData) => void;
   /** Currently recorded status, or null if this attendee has never been marked. */
@@ -38,8 +39,11 @@ export function AttendanceControl({
   hiddenFields: ReactNode;
   pending?: boolean;
   size?: "md" | "lg";
+  /** This class's EXCUSED toggle (M10, spec §5 "Excused configurable per class"). */
+  allowExcused?: boolean;
 }) {
   const t = useTranslations("Sessions.attendance");
+  const options = allowExcused ? ORDER : ORDER.filter((status) => status !== "EXCUSED");
 
   return (
     <form
@@ -49,7 +53,7 @@ export function AttendanceControl({
       aria-label={t("groupLabel")}
     >
       {hiddenFields}
-      {ORDER.map((status) => {
+      {options.map((status) => {
         const selected = value === status;
         return (
           <button

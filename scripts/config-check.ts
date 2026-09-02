@@ -349,6 +349,28 @@ async function main() {
       timezone: "Africa/Cairo",
     }).data?.teacherTimeoutDays === null,
   );
+  check(
+    "Teacher edit-deadline off is stored as null, not 0 (M10)",
+    generalSettingsSchema.safeParse({
+      locale: "en",
+      defaultShareType: "FIXED",
+      shareValue: "15",
+      defaultLateThreshold: "10",
+      timezone: "Africa/Cairo",
+    }).data?.teacherEditDeadlineHours === null,
+  );
+  check(
+    "Teacher edit-deadline on, with a value, is stored as that many hours (M10)",
+    generalSettingsSchema.safeParse({
+      locale: "en",
+      defaultShareType: "FIXED",
+      shareValue: "15",
+      defaultLateThreshold: "10",
+      timezone: "Africa/Cairo",
+      teacherEditDeadlineEnabled: "on",
+      teacherEditDeadlineHours: "48",
+    }).data?.teacherEditDeadlineHours === 48,
+  );
 }
 
 main()

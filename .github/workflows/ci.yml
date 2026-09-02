@@ -1,0 +1,70 @@
+name: CI
+
+# The acceptance gates (docs/00-master-product-spec.md §2.1.C, docs/02-architecture.md
+# §5): typecheck/lint/schema validity need no database, but every `check:*`
+# gate and the "migrations apply cleanly" step need a real reachable Postgres.
+# Point DATABASE_URL/DIRECT_URL (repo secrets) at a dedicated CI/staging
+# Supabase project or branch — never at production, and never run
+# `npm run db:seed` here (CLAUDE.md, docs/00 §2.1.A: the seeded owner
+# credential is a dev-only shortcut).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+jobs:
+  static:
+    name: Typecheck, lint, schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma validate
+      - run: npm run typecheck
+      - run: npm run lint
+
+  gates:
+    name: Migrations + acceptance gates
+    runs-on: ubuntu-latest
+    needs: static
+    # Skip on forks / PRs from outside the repo, where secrets are unavailable.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+
+      # docs/00 §2.1.C: "Migrations via `prisma migrate deploy` in CI — never
+      # `migrate dev` against a deployed database."
+      - name: Apply migrations (prisma migrate deploy)
+        run: npx prisma migrate deploy
+
+      # Every gate below is the "Delivered" claim for its milestone
+      # (docs/02-architecture.md §5) — a failure here means a milestone's own
+      # acceptance criteria regressed, not just "a test broke".
+      - run: npm run check:isolation
+      - run: npm run check:config
+      - run: npm run check:people
+      - run: npm run check:classes
+      - run: npm run check:payments
+      - run: npm run check:analytics
+      - run: npm run check:teacher-portal
+      - run: npm run check:student-portal
+      - run: npm run check:approvals
+      - run: npm run check:admin
+      - run: npm run check:performance
+      - run: npm run check:rtl

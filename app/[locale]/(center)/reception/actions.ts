@@ -58,6 +58,10 @@ export async function checkInAction(
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
+  if (status === "EXCUSED") {
+    const classGroup = await db.classGroups.findById(session.classGroupId);
+    if (!(classGroup?.allowExcused ?? true)) return { error: "excusedNotAllowed" };
+  }
 
   const existing = await findAttendee(prisma, centerId, sessionId, studentProfileId);
   let attendeeId: string;

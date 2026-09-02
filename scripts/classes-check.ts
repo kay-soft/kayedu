@@ -17,6 +17,13 @@
  * primitives, since a Server Action itself needs a request context this
  * script does not have.
  *
+ * Also covers M10's session lifecycle (spec §7 acceptance criterion 11):
+ * `cancelSession`/`rescheduleSession` (`lib/db/sessions.ts`) — cancel,
+ * double-cancel refusal, reschedule with no conflict, WARN/DENY conflict
+ * handling, the same-class duplicate-slot refusal, and cross-center
+ * isolation — plus a spot-check that a fresh `Membership` defaults
+ * `isTrustedTeacher=true`.
+ *
  * It needs a reachable database and cleans up after itself.
  */
 import {
@@ -44,7 +51,7 @@ import {
   classGroupSchema,
   classScheduleSchema,
 } from "../lib/validation/classes.ts";
-import { generateSessions } from "../lib/db/sessions.ts";
+import { cancelSession, generateSessions, rescheduleSession } from "../lib/db/sessions.ts";
 
 const prisma = new PrismaClient();
 
@@ -247,6 +254,31 @@ function checkPurePrimitives() {
       startTime: "16:00",
       endTime: "18:00",
     }).success,
+  );
+  check(
+    "The class schema parses allowExcused=on as true (M10, spec §5 'Excused configurable per class')",
+    classGroupSchema.safeParse({
+      locale: "en",
+      teacherId: "t",
+      price: "120",
+      centerShareType: "FIXED",
+      shareValue: "15",
+      capacity: "0",
+      lateThresholdMinutes: "10",
+      allowExcused: "on",
+    }).data?.allowExcused === true,
+  );
+  check(
+    "The class schema parses a missing allowExcused as false (an unchecked checkbox)",
+    classGroupSchema.safeParse({
+      locale: "en",
+      teacherId: "t",
+      price: "120",
+      centerShareType: "FIXED",
+      shareValue: "15",
+      capacity: "0",
+      lateThresholdMinutes: "10",
+    }).data?.allowExcused === false,
   );
 }
 
@@ -576,7 +608,145 @@ async function main() {
     otherClassBlock === 0,
   );
 
-  // ── 7. Cross-center isolation ────────────────────────────────────────────
+  // ── 7. Trusted teacher (M10) ──────────────────────────────────────────────
+  const trustedMembership = await prisma.membership.findUnique({
+    where: { id: teacherA.membership.id },
+  });
+  check(
+    "A new teacher membership defaults isTrustedTeacher=true (M10, matches the pre-M10 'every active teacher is trusted' behavior)",
+    trustedMembership?.isTrustedTeacher === true,
+  );
+
+  // ── 8. Session lifecycle: cancel / reschedule (M10, spec §7 criterion 11) ─
+  const classASessions = await prisma.session.findMany({
+    where: scopedWhere(centerA.id, { classGroupId: classA.id }),
+    orderBy: { date: "asc" },
+  });
+  check(
+    "classA has the 6 sessions from its clean regeneration, fixtures for the lifecycle checks below",
+    classASessions.length === 6,
+    `got ${classASessions.length}`,
+  );
+
+  const sessionToCancel = classASessions[0];
+  const cancelled = await cancelSession(prisma, centerA.id, sessionToCancel.id);
+  check(
+    "cancelSession flips a SCHEDULED session to CANCELLED",
+    cancelled.ok && cancelled.session.status === "CANCELLED",
+    JSON.stringify(cancelled),
+  );
+  const cancelledAgain = await cancelSession(prisma, centerA.id, sessionToCancel.id);
+  check(
+    "Cancelling an already-cancelled session is refused as alreadyCancelled",
+    !cancelledAgain.ok && cancelledAgain.error === "alreadyCancelled",
+    JSON.stringify(cancelledAgain),
+  );
+  const rescheduleCancelled = await rescheduleSession(
+    prisma,
+    centerA.id,
+    sessionToCancel.id,
+    { date: sessionToCancel.date, startTime: "10:00", endTime: "11:00" },
+    "WARN",
+  );
+  check(
+    "Rescheduling a cancelled session is refused",
+    !rescheduleCancelled.ok && rescheduleCancelled.error === "cancelled",
+    JSON.stringify(rescheduleCancelled),
+  );
+
+  const farDate = addDays(startOfUtcDay(new Date()), 300);
+  const sessionToReschedule = classASessions[1];
+  const rescheduled = await rescheduleSession(
+    prisma,
+    centerA.id,
+    sessionToReschedule.id,
+    { date: farDate, startTime: "12:00", endTime: "13:00" },
+    "WARN",
+  );
+  check(
+    "rescheduleSession moves date/startTime/endTime with no conflicts",
+    rescheduled.ok &&
+      rescheduled.session.startTime === "12:00" &&
+      rescheduled.session.date.getTime() === farDate.getTime() &&
+      rescheduled.conflicts.length === 0,
+    JSON.stringify(rescheduled),
+  );
+
+  // A same-teacher session on a different class, at a specific slot, to
+  // reschedule other classA sessions into conflict with.
+  const conflictDate = addDays(startOfUtcDay(new Date()), 305);
+  await prisma.session.create({
+    data: scopedData(centerA.id, {
+      classGroupId: classB.id,
+      teacherId: teacherA.user.id,
+      roomId: null,
+      date: conflictDate,
+      startTime: "14:00",
+      endTime: "15:00",
+      priceSnapshot: classB.price,
+    }),
+  });
+
+  const rescheduleIntoWarnConflict = await rescheduleSession(
+    prisma,
+    centerA.id,
+    classASessions[2].id,
+    { date: conflictDate, startTime: "14:30", endTime: "15:30" },
+    "WARN",
+  );
+  check(
+    "Under WARN, rescheduling into a teacher conflict still succeeds, flagged",
+    rescheduleIntoWarnConflict.ok && rescheduleIntoWarnConflict.conflicts.length > 0,
+    JSON.stringify(rescheduleIntoWarnConflict),
+  );
+
+  const rescheduleIntoDenyConflict = await rescheduleSession(
+    prisma,
+    centerA.id,
+    classASessions[3].id,
+    { date: conflictDate, startTime: "14:15", endTime: "15:15" },
+    "DENY",
+  );
+  check(
+    "Under DENY, rescheduling into a teacher conflict is refused",
+    !rescheduleIntoDenyConflict.ok && rescheduleIntoDenyConflict.error === "conflict",
+    JSON.stringify(rescheduleIntoDenyConflict),
+  );
+
+  const duplicateTarget = classASessions[5];
+  const rescheduleIntoDuplicateSlot = await rescheduleSession(
+    prisma,
+    centerA.id,
+    classASessions[4].id,
+    { date: duplicateTarget.date, startTime: duplicateTarget.startTime, endTime: duplicateTarget.endTime },
+    "WARN",
+  );
+  check(
+    "Rescheduling onto another session's exact slot on the same class is refused as duplicateSlot",
+    !rescheduleIntoDuplicateSlot.ok && rescheduleIntoDuplicateSlot.error === "duplicateSlot",
+    JSON.stringify(rescheduleIntoDuplicateSlot),
+  );
+
+  const crossCenterCancel = await cancelSession(prisma, centerB.id, sessionToReschedule.id);
+  check(
+    "Center B cannot cancel Center A's session by id",
+    !crossCenterCancel.ok && crossCenterCancel.error === "notFound",
+    JSON.stringify(crossCenterCancel),
+  );
+  const crossCenterReschedule = await rescheduleSession(
+    prisma,
+    centerB.id,
+    classASessions[2].id,
+    { date: farDate, startTime: "09:00", endTime: "10:00" },
+    "WARN",
+  );
+  check(
+    "Center B cannot reschedule Center A's session by id",
+    !crossCenterReschedule.ok && crossCenterReschedule.error === "notFound",
+    JSON.stringify(crossCenterReschedule),
+  );
+
+  // ── 9. Cross-center isolation ────────────────────────────────────────────
   check(
     "Center B cannot read Center A's ClassGroup by id",
     (await scopedFindById(prisma.classGroup, centerB.id, classA.id)) === null,

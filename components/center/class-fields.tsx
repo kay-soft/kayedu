@@ -28,6 +28,7 @@ export type ClassFieldsValues = {
   lateThresholdMinutes: string;
   acceptsNewStudents: boolean;
   requiresConfirmation: boolean;
+  allowExcused: boolean;
 };
 
 /**
@@ -330,6 +331,13 @@ export function ClassFields({
           label={t("requiresConfirmation")}
           description={t("requiresConfirmationHint")}
           defaultChecked={values.requiresConfirmation}
+        />
+
+        <ToggleRow
+          name="allowExcused"
+          label={t("allowExcused")}
+          description={t("allowExcusedHint")}
+          defaultChecked={values.allowExcused}
         />
       </div>
     </div>

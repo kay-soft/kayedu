@@ -20,7 +20,9 @@
     "check:teacher-portal": "node --env-file-if-exists=.env scripts/teacher-portal-check.ts",
     "check:student-portal": "node --env-file-if-exists=.env scripts/student-portal-check.ts",
     "check:approvals": "node --env-file-if-exists=.env scripts/approvals-check.ts",
-    "check:admin": "node --env-file-if-exists=.env scripts/admin-check.ts"
+    "check:admin": "node --env-file-if-exists=.env scripts/admin-check.ts",
+    "check:performance": "node --env-file-if-exists=.env scripts/rush-performance-check.ts",
+    "check:rtl": "node --env-file-if-exists=.env scripts/rtl-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

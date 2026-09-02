@@ -1,4 +1,10 @@
-import type { ConflictPolicy, Prisma, PrismaClient, SessionStatus } from "@prisma/client";
+import type {
+  ConflictPolicy,
+  Prisma,
+  PrismaClient,
+  Session,
+  SessionStatus,
+} from "@prisma/client";
 
 // Relative imports on purpose: `npm run check:classes` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts
@@ -242,6 +248,119 @@ export async function generateSessions(
   });
 
   return { created: result.count, conflicts };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Session lifecycle: cancel / reschedule (M10, spec §7 acceptance criterion
+// 11, closing the gap flagged since M5/docs §11: "Cancel/reschedule/edit of
+// an individual session is not yet built"). Kept in this file beside the
+// generator, for the same "no @/ imports" reason the rest of this module is
+// written that way (docs/02 §5).
+// ─────────────────────────────────────────────────────────────────────────
+
+type SessionDb = PrismaClient | Prisma.TransactionClient;
+
+const CANCELLED_ENUM: SessionStatus = "CANCELLED";
+
+export type CancelSessionResult =
+  | { ok: true; session: Session }
+  | { ok: false; error: "notFound" | "alreadyCancelled" };
+
+/**
+ * Cancels one session. Money is never touched here (CLAUDE.md rule 2) — a
+ * cancelled session's existing attendance/payment rows stay exactly as
+ * recorded; if a payment needs undoing, that is `voidPayment`'s job, a
+ * separate, explicit, audited action. "Roster and schedule update
+ * correctly" (spec §7 criterion 11) is true by construction: `SessionAttendee`
+ * rows are never deleted, and `deriveSessionDisplayStatus` already treats
+ * `CANCELLED` as terminal regardless of the clock.
+ */
+export async function cancelSession(
+  db: SessionDb,
+  centerId: string,
+  sessionId: string,
+): Promise<CancelSessionResult> {
+  const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
+  if (!session) return { ok: false, error: "notFound" };
+  if (session.status === CANCELLED_ENUM) return { ok: false, error: "alreadyCancelled" };
+
+  const updated = await db.session.update({
+    where: { id: sessionId },
+    data: { status: CANCELLED_ENUM },
+  });
+  return { ok: true, session: updated };
+}
+
+export type RescheduleSessionResult =
+  | { ok: true; session: Session; conflicts: GenerationConflict[] }
+  | { ok: false; error: "notFound" | "cancelled" | "conflict" | "duplicateSlot" };
+
+/**
+ * Moves one session to a new date/time, re-running the same teacher/room
+ * conflict check the generator itself uses (`findSessionConflicts`, docs/02
+ * §11) against every other class's sessions on the target date — WARN saves
+ * it flagged, DENY refuses. `findSessionConflicts` already skips a session's
+ * own class (`session.classGroupId === candidate.classGroupId`), so the
+ * session being moved never "conflicts with itself".
+ *
+ * The `(classGroupId, date, startTime)` unique constraint still applies — if
+ * this class already has another session at the target slot, the write
+ * fails with `duplicateSlot` rather than silently merging two sessions.
+ */
+export async function rescheduleSession(
+  db: SessionDb,
+  centerId: string,
+  sessionId: string,
+  next: { date: Date; startTime: string; endTime: string },
+  conflictPolicy: ConflictPolicy,
+): Promise<RescheduleSessionResult> {
+  const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
+  if (!session) return { ok: false, error: "notFound" };
+  if (session.status === CANCELLED_ENUM) return { ok: false, error: "cancelled" };
+
+  const existing = await loadExistingSessions(
+    db as PrismaClient,
+    centerId,
+    startOfUtcDay(next.date),
+    startOfUtcDay(next.date),
+  );
+
+  const found = findSessionConflicts(
+    {
+      classGroupId: session.classGroupId,
+      teacherId: session.teacherId,
+      roomId: session.roomId,
+      date: next.date,
+      startTime: next.startTime,
+      endTime: next.endTime,
+    },
+    existing,
+  );
+  const conflicts: GenerationConflict[] = found.map((conflict) => ({
+    ...conflict,
+    date: next.date.toISOString().slice(0, 10),
+  }));
+
+  if (conflicts.length > 0 && conflictPolicy === "DENY") {
+    return { ok: false, error: "conflict" };
+  }
+
+  try {
+    const updated = await db.session.update({
+      where: { id: sessionId },
+      data: { date: next.date, startTime: next.startTime, endTime: next.endTime },
+    });
+    return { ok: true, session: updated, conflicts };
+  } catch (error) {
+    if (
+      error instanceof Object &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2002"
+    ) {
+      return { ok: false, error: "duplicateSlot" };
+    }
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

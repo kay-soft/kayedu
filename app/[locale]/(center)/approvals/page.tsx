@@ -2,6 +2,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { ChangeRequestActions } from "@/app/[locale]/(center)/approvals/change-request-actions";
 import { ReservationActions } from "@/app/[locale]/(center)/approvals/reservation-actions";
+import { SessionRequestActions } from "@/app/[locale]/(center)/approvals/session-request-actions";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   Card,
@@ -27,23 +28,33 @@ type ChangeRequestPayload = {
   note?: string | null;
 };
 
+type SessionRequestPayload = {
+  classGroupId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  note?: string | null;
+};
+
 /**
- * The Approvals queue (spec §4.1 item 9, closing the gap flagged at M6/M7/M8):
- * every PENDING `ChangeRequest` (type NEW_CLASS) and PENDING `Reservation` at
- * the active center, combined into one screen. OWNER/MANAGER only —
- * `approvals.manage` is not in RECEPTIONIST's baseline or grantable set
- * (`lib/auth/permissions.ts`), so a receptionist cannot reach this by UI or
- * URL, the same pattern as Analytics/Expenses (spec §7 acceptance criterion
- * 9, M6).
+ * The Approvals queue (spec §4.1 item 9): every PENDING `ChangeRequest`
+ * (types NEW_CLASS and NEW_SESSION) and PENDING `Reservation` at the active
+ * center, combined into one screen. OWNER/MANAGER only — `approvals.manage`
+ * is not in RECEPTIONIST's baseline or grantable set (`lib/auth/permissions.ts`),
+ * so a receptionist cannot reach this by UI or URL, the same pattern as
+ * Analytics/Expenses (spec §7 acceptance criterion 9, M6).
  *
- * Accepting a `ChangeRequest` only flips its status — it does not
+ * Accepting a NEW_CLASS `ChangeRequest` only flips its status — it does not
  * auto-create a `ClassGroup`. The request payload has no price, center-cut,
  * or room (`lib/validation/teacher.ts`'s `classRequestSchema`), all of which
  * only a center decides; auto-creating a class would mean guessing at money,
  * which CLAUDE.md rule 2 forbids outright. An approved request is staff's
  * cue to create the real class at `/classes`, reading these details off this
  * screen — see `docs/00-master-product-spec.md` §4.1 item 9 for the decision
- * record.
+ * record. A NEW_SESSION request (M10) is different: its `ClassGroup` already
+ * exists with a decided price/cut, so accepting immediately creates the
+ * `Session` (`lib/db/approvals.ts`'s `resolveSessionRequest`) — no money to
+ * guess at, the same "approve == act" shape M8's `confirmReservation` uses.
  */
 export default async function ApprovalsPage() {
   const ctx = await getTenantContext("center");
@@ -56,14 +67,21 @@ export default async function ApprovalsPage() {
   const locale = await getLocale();
   const dayNames = tDays.raw("dayNames") as string[];
 
-  const [changeRequests, reservations, subjects, grades] = await Promise.all([
-    db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }),
-    db.reservations.listPending(),
-    db.subjects.list(),
-    db.grades.list(),
-  ]);
+  const [changeRequests, sessionRequests, reservations, subjects, grades, classGroups] =
+    await Promise.all([
+      db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }),
+      db.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }),
+      db.reservations.listPending(),
+      db.subjects.list(),
+      db.grades.list(),
+      db.classGroups.list(),
+    ]);
 
-  const teacherIds = [...new Set(changeRequests.map((request) => request.requestedBy))];
+  const teacherIds = [
+    ...new Set(
+      [...changeRequests, ...sessionRequests].map((request) => request.requestedBy),
+    ),
+  ];
   const teacherMemberships = teacherIds.length > 0 ? await db.teachers.list({ userId: { in: teacherIds } }) : [];
   const teacherNameById = new Map(
     teacherMemberships.map((membership) => [
@@ -73,8 +91,9 @@ export default async function ApprovalsPage() {
   );
   const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));
   const gradeNameById = new Map(grades.map((grade) => [grade.id, grade.name]));
+  const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
-  const totalPending = changeRequests.length + reservations.length;
+  const totalPending = changeRequests.length + sessionRequests.length + reservations.length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -148,6 +167,61 @@ export default async function ApprovalsPage() {
                         ) : null}
                       </div>
                       <ChangeRequestActions id={request.id} />
+                    </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("sessionRequests.title")}</CardTitle>
+              <CardDescription>{t("sessionRequests.description")}</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {sessionRequests.length === 0 ? (
+                <p className="text-sm text-text-muted">{t("sessionRequests.empty")}</p>
+              ) : (
+                sessionRequests.map((request) => {
+                  const payload = request.payload as unknown as SessionRequestPayload;
+                  const classGroup = classGroupById.get(payload.classGroupId);
+                  return (
+                    <div
+                      key={request.id}
+                      className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-text-primary">
+                          {teacherNameById.get(request.requestedBy) ?? tCommon("none")}
+                        </p>
+                        <p className="mt-1 text-xs text-text-secondary">
+                          {classGroup
+                            ? [classGroup.subject?.name, classGroup.grade?.name]
+                                .filter(Boolean)
+                                .join(" · ")
+                            : t("sessionRequests.classGone")}
+                        </p>
+                        <p className="mt-1 text-xs text-text-muted">
+                          {t("changeRequests.requestedOn", { date: formatDate(request.createdAt, locale) })}
+                        </p>
+                        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-3">
+                          <div>
+                            <dt className="text-text-muted">{t("sessionRequests.fields.date")}</dt>
+                            <dd>{formatDate(new Date(`${payload.date}T00:00:00.000Z`), locale)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-text-muted">{t("changeRequests.fields.time")}</dt>
+                            <dd dir="ltr">
+                              {payload.startTime}–{payload.endTime}
+                            </dd>
+                          </div>
+                        </dl>
+                        {payload.note ? (
+                          <p className="mt-2 text-xs text-text-secondary">{payload.note}</p>
+                        ) : null}
+                      </div>
+                      <SessionRequestActions id={request.id} />
                     </div>
                   );
                 })

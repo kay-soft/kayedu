@@ -10,6 +10,7 @@ import {
 } from "@/app/[locale]/(center)/teachers/actions";
 import { ContactFields, type ContactValues } from "@/components/center/contact-fields";
 import { PersonFields, type PersonValues } from "@/components/center/person-fields";
+import { ToggleRow } from "@/components/settings/toggle-row";
 import { FormMessage } from "@/components/shared/form-message";
 import { SectionHeader } from "@/components/shared/section-header";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -28,11 +29,13 @@ export function TeacherProfileForm({
   membershipId,
   name,
   contact,
+  isTrustedTeacher,
   canDelete,
 }: {
   membershipId: string;
   name: PersonValues;
   contact: ContactValues;
+  isTrustedTeacher: boolean;
   canDelete: boolean;
 }) {
   const t = useTranslations("Teachers");
@@ -77,6 +80,13 @@ export function TeacherProfileForm({
         values={contact}
         fieldErrors={state.fieldErrors}
         atLeastOneRequired
+      />
+
+      <ToggleRow
+        name="isTrustedTeacher"
+        label={t("trusted.label")}
+        description={t("trusted.description")}
+        defaultChecked={isTrustedTeacher}
       />
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

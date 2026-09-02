@@ -22,6 +22,7 @@ import { formatMoney } from "@/lib/format";
 import { piastresToInputValue, splitShare } from "@/lib/money";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 import {
+  MAX_EDIT_DEADLINE_HOURS,
   MAX_LATE_THRESHOLD,
   MAX_TIMEOUT_DAYS,
 } from "@/lib/validation/settings";
@@ -39,6 +40,7 @@ export type GeneralSettingsValues = {
   defaultLateThreshold: number;
   timezone: string;
   scheduleConflictPolicy: ConflictPolicy;
+  teacherEditDeadlineHours: number | null;
 };
 
 export function GeneralSettingsForm({
@@ -63,6 +65,9 @@ export function GeneralSettingsForm({
   );
   const [timeoutEnabled, setTimeoutEnabled] = useState(
     values.teacherTimeoutDays !== null,
+  );
+  const [editDeadlineEnabled, setEditDeadlineEnabled] = useState(
+    values.teacherEditDeadlineHours !== null,
   );
 
   // The same split lib/money.ts freezes onto a payment, previewed live so an
@@ -246,6 +251,41 @@ export function GeneralSettingsForm({
               </SelectInput>
             </div>
           </div>
+
+          <ToggleRow
+            name="teacherEditDeadlineEnabled"
+            label={t("editDeadlineLabel")}
+            description={t("editDeadlineDescription")}
+            checked={editDeadlineEnabled}
+            onCheckedChange={setEditDeadlineEnabled}
+            note={
+              <div className="flex min-w-0 flex-col gap-1.5 sm:max-w-56">
+                <Label htmlFor="teacherEditDeadlineHours">
+                  {t("editDeadlineHours")}
+                </Label>
+                <Input
+                  id="teacherEditDeadlineHours"
+                  name="teacherEditDeadlineHours"
+                  type="number"
+                  dir="ltr"
+                  inputMode="numeric"
+                  min={1}
+                  max={MAX_EDIT_DEADLINE_HOURS}
+                  step={1}
+                  disabled={!editDeadlineEnabled}
+                  defaultValue={values.teacherEditDeadlineHours ?? 48}
+                  aria-invalid={
+                    state.fieldErrors?.teacherEditDeadlineHours ? true : undefined
+                  }
+                />
+                {state.fieldErrors?.teacherEditDeadlineHours ? (
+                  <FieldError>
+                    {tErrors(state.fieldErrors.teacherEditDeadlineHours)}
+                  </FieldError>
+                ) : null}
+              </div>
+            }
+          />
         </CardContent>
       </Card>
 

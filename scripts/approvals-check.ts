@@ -7,16 +7,18 @@
  * Run with:  npm run check:approvals
  *
  * Exercises the real production functions — `lib/db/approvals.ts`'s
- * `resolveChangeRequest` (the ChangeRequest status flip the Approvals
- * actions call) and `lib/db/reservations.ts`'s `confirmReservation`/
- * `rejectReservation` (M8, reused as-is) — against two throwaway centers,
- * plus a direct assertion against `lib/auth/permissions.ts` that
- * RECEPTIONIST cannot reach `approvals.manage`. Needs a reachable database
- * and cleans up after itself.
+ * `resolveChangeRequest` (the NEW_CLASS status flip), `resolveSessionRequest`
+ * (M10, the NEW_SESSION status flip that also creates the `Session` —
+ * approve/decline, duplicate-slot, WARN/DENY conflict handling and
+ * cross-center isolation) and `lib/db/reservations.ts`'s
+ * `confirmReservation`/`rejectReservation` (M8, reused as-is) — against two
+ * throwaway centers, plus a direct assertion against
+ * `lib/auth/permissions.ts` that RECEPTIONIST cannot reach `approvals.manage`.
+ * Needs a reachable database and cleans up after itself.
  */
 import { PrismaClient, type ChangeRequestStatus, type ReservationStatus } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
-import { resolveChangeRequest } from "../lib/db/approvals.ts";
+import { resolveChangeRequest, resolveSessionRequest } from "../lib/db/approvals.ts";
 import { confirmReservation, rejectReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { can } from "../lib/auth/permissions.ts";
 
@@ -124,7 +126,139 @@ async function main() {
     JSON.stringify(declined),
   );
 
-  // ── 2. Reservation accept/decline (reusing M8's confirm/reject) ─────────
+  // ── 2. ChangeRequest type NEW_SESSION (M10): accepting creates a Session ──
+  const subjectS = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Physics" }) });
+  const classForSession = await prisma.classGroup.create({
+    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+  });
+  const sessionRequestDate = "2026-11-16"; // a Monday, arbitrary and far enough out not to collide
+
+  async function makeSessionRequest(classGroupId: string, startTime = "09:00", endTime = "10:00") {
+    return prisma.changeRequest.create({
+      data: scopedData(centerA.id, {
+        type: "NEW_SESSION",
+        requestedBy: teacherA.id,
+        payload: { classGroupId, date: sessionRequestDate, startTime, endTime, note: null },
+        status: "PENDING",
+      }),
+    });
+  }
+
+  const sessionRequestToApprove = await makeSessionRequest(classForSession.id);
+  const sessionApproved = await resolveSessionRequest(
+    prisma,
+    centerA.id,
+    sessionRequestToApprove.id,
+    "APPROVED",
+    managerA.id,
+    "WARN",
+  );
+  check(
+    "resolveSessionRequest(APPROVED) creates a Session and flips the request to APPROVED",
+    sessionApproved.ok &&
+      sessionApproved.changeRequest.status === "APPROVED" &&
+      sessionApproved.session !== null &&
+      sessionApproved.session.classGroupId === classForSession.id &&
+      sessionApproved.session.priceSnapshot === 5_000,
+    JSON.stringify(sessionApproved),
+  );
+
+  const sessionAlreadyResolved = await resolveSessionRequest(
+    prisma,
+    centerA.id,
+    sessionRequestToApprove.id,
+    "APPROVED",
+    managerA.id,
+    "WARN",
+  );
+  check(
+    "Re-resolving an already-resolved NEW_SESSION request is refused as notPending",
+    !sessionAlreadyResolved.ok && sessionAlreadyResolved.error === "notPending",
+    JSON.stringify(sessionAlreadyResolved),
+  );
+
+  const sessionRequestToDecline = await makeSessionRequest(classForSession.id, "11:00", "12:00");
+  const sessionDeclined = await resolveSessionRequest(
+    prisma,
+    centerA.id,
+    sessionRequestToDecline.id,
+    "DECLINED",
+    managerA.id,
+    "WARN",
+  );
+  check(
+    "resolveSessionRequest(DECLINED) flips the request to DECLINED and creates no Session",
+    sessionDeclined.ok && sessionDeclined.changeRequest.status === "DECLINED" && sessionDeclined.session === null,
+    JSON.stringify(sessionDeclined),
+  );
+
+  const sessionRequestDuplicateSlot = await makeSessionRequest(classForSession.id);
+  const sessionDuplicate = await resolveSessionRequest(
+    prisma,
+    centerA.id,
+    sessionRequestDuplicateSlot.id,
+    "APPROVED",
+    managerA.id,
+    "WARN",
+  );
+  check(
+    "Approving a second request for the exact same class/date/time is refused as duplicateSlot",
+    !sessionDuplicate.ok && sessionDuplicate.error === "duplicateSlot",
+    JSON.stringify(sessionDuplicate),
+  );
+
+  // A second class, sharing teacherA and overlapping the already-approved slot.
+  const classConflicting = await prisma.classGroup.create({
+    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+  });
+  const sessionRequestConflictWarn = await makeSessionRequest(classConflicting.id, "09:30", "10:30");
+  const sessionConflictWarn = await resolveSessionRequest(
+    prisma,
+    centerA.id,
+    sessionRequestConflictWarn.id,
+    "APPROVED",
+    managerA.id,
+    "WARN",
+  );
+  check(
+    "Under WARN, a teacher-conflicting session request is still approved, flagged with the conflict",
+    sessionConflictWarn.ok && sessionConflictWarn.session !== null && sessionConflictWarn.conflicts.length > 0,
+    JSON.stringify(sessionConflictWarn),
+  );
+
+  const classConflictingDeny = await prisma.classGroup.create({
+    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+  });
+  const sessionRequestConflictDeny = await makeSessionRequest(classConflictingDeny.id, "09:15", "09:45");
+  const sessionConflictDeny = await resolveSessionRequest(
+    prisma,
+    centerA.id,
+    sessionRequestConflictDeny.id,
+    "APPROVED",
+    managerA.id,
+    "DENY",
+  );
+  check(
+    "Under DENY, a teacher-conflicting session request is refused as conflict, no Session created",
+    !sessionConflictDeny.ok && sessionConflictDeny.error === "conflict",
+    JSON.stringify(sessionConflictDeny),
+  );
+
+  const crossCenterSessionApprove = await resolveSessionRequest(
+    prisma,
+    centerB.id,
+    sessionRequestConflictDeny.id, // still PENDING at Center A — the DENY refusal above left it untouched
+    "APPROVED",
+    managerA.id,
+    "WARN",
+  );
+  check(
+    "Center B cannot approve Center A's NEW_SESSION request by id — resolves to notFound",
+    !crossCenterSessionApprove.ok && crossCenterSessionApprove.error === "notFound",
+    JSON.stringify(crossCenterSessionApprove),
+  );
+
+  // ── 3. Reservation accept/decline (reusing M8's confirm/reject) ─────────
   const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
   const classConfirm = await prisma.classGroup.create({
     data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
@@ -157,7 +291,7 @@ async function main() {
     JSON.stringify(rejected),
   );
 
-  // ── 3. Audited: the exact write the Server Action performs lands correctly ─
+  // ── 4. Audited: the exact write the Server Action performs lands correctly ─
   const auditRow = await prisma.auditLog.create({
     data: {
       centerId: centerA.id,
@@ -176,7 +310,7 @@ async function main() {
   const auditInCenterB = await prisma.auditLog.findMany({ where: { centerId: centerB.id, entityId: reservationIdToApprove } });
   check("Center B's audit log never sees Center A's approval decisions", auditInCenterB.length === 0);
 
-  // ── 4. Cross-center isolation on the Approvals queue itself ─────────────
+  // ── 5. Cross-center isolation on the Approvals queue itself ─────────────
   const requestB = await makeChangeRequest(centerB.id, teacherB.id);
   const pendingListA = await prisma.changeRequest.findMany({ where: scopedWhere(centerA.id, { status: PENDING_CHANGE_REQUEST }) });
   const pendingListB = await prisma.changeRequest.findMany({ where: scopedWhere(centerB.id, { status: PENDING_CHANGE_REQUEST }) });

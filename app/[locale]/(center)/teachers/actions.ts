@@ -219,8 +219,16 @@ export async function updateTeacherAction(
   const parsed = teacherUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { locale, membershipId, firstName, lastName, email, phone, altPhone } =
-    parsed.data;
+  const {
+    locale,
+    membershipId,
+    firstName,
+    lastName,
+    email,
+    phone,
+    altPhone,
+    isTrustedTeacher,
+  } = parsed.data;
 
   const teacher = await scope.db.teachers.findById(membershipId);
   if (!teacher) return NOT_FOUND;
@@ -233,6 +241,7 @@ export async function updateTeacherAction(
     email,
     phone,
     altPhone,
+    isTrustedTeacher,
   });
 
   revalidateTeacherDetail(locale, teacher.id);

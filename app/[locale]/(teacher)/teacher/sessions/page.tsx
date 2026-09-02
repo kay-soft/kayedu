@@ -2,6 +2,7 @@ import { CalendarClock } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeacherSessionFilters } from "@/app/[locale]/(teacher)/teacher/sessions/session-filters";
+import { SessionRequestForm } from "@/app/[locale]/(teacher)/teacher/sessions/session-request-form";
 import { Pagination } from "@/components/center/pagination";
 import { SearchBox } from "@/components/center/search-box";
 import { PageHeader } from "@/components/shared/page-header";
@@ -14,7 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
@@ -65,7 +66,7 @@ export default async function TeacherSessionsPage({
   const tStatus = await getTranslations("Sessions.status");
   const locale = await getLocale();
 
-  const [rows, grades] = await Promise.all([
+  const [rows, grades, ownClasses] = await Promise.all([
     db.sessions.search({
       where: teacherSessionListWhere({
         teacherId: ctx.user.id,
@@ -76,7 +77,15 @@ export default async function TeacherSessionsPage({
       }),
     }),
     db.grades.list({ active: true }),
+    db.classGroups.list({ teacherId: ctx.user.id, active: true }),
   ]);
+
+  const canRequestSession =
+    ctxCan(ctx, "changeRequest.create") && (ctx.membership?.isTrustedTeacher ?? false);
+  const classOptions = ownClasses.map((classGroup) => ({
+    value: classGroup.id,
+    label: [classGroup.subject?.name, classGroup.grade?.name].filter(Boolean).join(" · ") || tCommon("none"),
+  }));
 
   const now = new Date();
   const withStatus = rows.map((row) => ({
@@ -126,6 +135,18 @@ export default async function TeacherSessionsPage({
           accent="info"
         />
       </div>
+
+      {canRequestSession ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("request.title")}</CardTitle>
+            <CardDescription>{t("request.description")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SessionRequestForm classes={classOptions} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

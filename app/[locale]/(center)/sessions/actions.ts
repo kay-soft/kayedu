@@ -18,6 +18,7 @@ import {
 } from "@/lib/db/identity";
 import { recordPayment, voidPayment } from "@/lib/db/payments";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { cancelSession, rescheduleSession } from "@/lib/db/sessions";
 import { claimStudentCode } from "@/lib/db/students";
 import { scopedData } from "@/lib/db/tenant-scope";
 import { ROUTES } from "@/lib/routes";
@@ -25,7 +26,9 @@ import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   addExistingAttendeeSchema,
   addNewAttendeeSchema,
+  cancelSessionSchema,
   recordPaymentSchema,
+  rescheduleSessionSchema,
   setAttendanceSchema,
   voidPaymentSchema,
   type SessionActionState,
@@ -80,6 +83,12 @@ async function resolveEnrollment(
   return { enrollmentId: active ? enrollment!.id : null, isDropIn: !active };
 }
 
+/** EXCUSED is offered only when the session's class allows it (M10). */
+async function excusedAllowed(db: ScopedDb, classGroupId: string): Promise<boolean> {
+  const classGroup = await db.classGroups.findById(classGroupId);
+  return classGroup?.allowExcused ?? true;
+}
+
 async function isBlockedFromSession(
   db: ScopedDb,
   classGroupId: string,
@@ -109,6 +118,9 @@ export async function setAttendanceAction(
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
+  if (status === "EXCUSED" && !(await excusedAllowed(db, session.classGroupId))) {
+    return { error: "excusedNotAllowed" };
+  }
 
   const existing = await findAttendee(prisma, ctx.center.id, sessionId, studentProfileId);
 
@@ -170,6 +182,9 @@ export async function addExistingAttendeeAction(
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
+  if (status === "EXCUSED" && !(await excusedAllowed(db, session.classGroupId))) {
+    return { error: "excusedNotAllowed" };
+  }
 
   if (await db.attendees.findExisting(sessionId, studentProfileId)) {
     return { error: "alreadyOnRoster" };
@@ -225,6 +240,9 @@ export async function addNewAttendeeAction(
 
   const session = await db.sessions.findById(sessionId);
   if (!session) return NOT_FOUND;
+  if (status === "EXCUSED" && !(await excusedAllowed(db, session.classGroupId))) {
+    return { error: "excusedNotAllowed" };
+  }
 
   const contact = { email, phone };
   const resolution = await resolveContact(contact);
@@ -390,5 +408,78 @@ export async function voidPaymentAction(
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);
   return { status: "voided" };
+}
+
+// ── Session lifecycle: cancel / reschedule (spec §7 acceptance criterion 11) ─
+
+export async function cancelSessionAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "session.cancel")) return FORBIDDEN;
+
+  const parsed = cancelSessionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+  const { locale, sessionId } = parsed.data;
+
+  const result = await cancelSession(prisma, ctx.center.id, sessionId);
+  if (!result.ok) return { error: result.error };
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "session.cancel",
+    entityType: "Session",
+    entityId: sessionId,
+    before: { status: "SCHEDULED" },
+    after: { status: "CANCELLED" },
+  });
+
+  revalidateSessionDetail(locale, sessionId);
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  return { status: "cancelled" };
+}
+
+export async function rescheduleSessionAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
+
+  const parsed = rescheduleSessionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const { locale, sessionId, date, startTime, endTime } = parsed.data;
+
+  const before = await prisma.session.findFirst({
+    where: { centerId: ctx.center.id, id: sessionId },
+    select: { date: true, startTime: true, endTime: true },
+  });
+
+  const result = await rescheduleSession(
+    prisma,
+    ctx.center.id,
+    sessionId,
+    { date, startTime, endTime },
+    ctx.settings?.scheduleConflictPolicy ?? "WARN",
+  );
+  if (!result.ok) return { error: result.error };
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "session.reschedule",
+    entityType: "Session",
+    entityId: sessionId,
+    before,
+    after: { date: result.session.date, startTime, endTime },
+  });
+
+  revalidateSessionDetail(locale, sessionId);
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  return { status: "rescheduled", conflicts: result.conflicts };
 }
 

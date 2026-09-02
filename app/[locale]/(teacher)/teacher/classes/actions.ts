@@ -10,16 +10,16 @@ import { classRequestSchema, type TeacherActionState } from "@/lib/validation/te
 
 /**
  * "Request a new class" (spec §4.2 item 4): writes a `ChangeRequest` at the
- * teacher's active center. There is no separate "trusted teacher" flag in
- * the schema (docs/01 §2) — every active TEACHER membership at a center is
- * treated as trusted for now, a flagged gap like the M5 edit-deadline note.
+ * teacher's active center. Gated on `Membership.isTrustedTeacher` (M10,
+ * closing the gap flagged at M7 — every active TEACHER membership was
+ * treated as trusted until a manager could flip the flag off for one).
  *
- * This only writes the request and lists the teacher's own — the Approvals
- * screen that would review it is not built yet (docs/03 M6/M7 notes), a
- * deliberate scope boundary for this milestone.
+ * This writes the request and lists the teacher's own — a manager reviews it
+ * at `/approvals` (built as its own milestone after M8).
  */
 
 const FORBIDDEN: TeacherActionState = { error: "forbidden" };
+const NOT_TRUSTED: TeacherActionState = { error: "notTrusted" };
 
 export async function createClassRequestAction(
   _state: TeacherActionState,
@@ -27,6 +27,7 @@ export async function createClassRequestAction(
 ): Promise<TeacherActionState> {
   const ctx = await getTenantContext("teacher");
   if (!ctxCan(ctx, "changeRequest.create")) return FORBIDDEN;
+  if (!(ctx.membership?.isTrustedTeacher ?? false)) return NOT_TRUSTED;
   const db = scoped(ctx);
 
   const parsed = classRequestSchema.safeParse(Object.fromEntries(formData));

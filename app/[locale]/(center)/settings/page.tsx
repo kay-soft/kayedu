@@ -31,6 +31,7 @@ export default async function GeneralSettingsPage() {
           defaultLateThreshold: settings?.defaultLateThreshold ?? 10,
           timezone: settings?.timezone ?? "Africa/Cairo",
           scheduleConflictPolicy: settings?.scheduleConflictPolicy ?? "WARN",
+          teacherEditDeadlineHours: settings?.teacherEditDeadlineHours ?? null,
         }}
       />
     </div>

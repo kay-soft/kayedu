@@ -34,10 +34,10 @@ type RequestPayload = {
 
 /**
  * "Request a new class at a center where they're a trusted teacher" (spec
- * §4.2 item 4). Writes a `ChangeRequest` and lists the teacher's own — the
- * Approvals screen that would review these across a center's staff is not
- * built yet (docs/03 M6 note), so a request sits PENDING here until a later
- * milestone adds that review UI. Flagged, not silently dropped.
+ * §4.2 item 4). Writes a `ChangeRequest` and lists the teacher's own — a
+ * center manager reviews it at `/approvals`. The form is hidden (and the
+ * action refuses) when this center has not marked the teacher trusted
+ * (M10, `Membership.isTrustedTeacher`).
  */
 export default async function TeacherClassesPage() {
   const ctx = await getTenantContext("teacher");
@@ -59,7 +59,8 @@ export default async function TeacherClassesPage() {
   const gradeOptions = grades.map((grade) => ({ value: grade.id, label: grade.name }));
   const dayNames = tDays.raw("dayNames") as string[];
 
-  const canRequest = ctxCan(ctx, "changeRequest.create");
+  const canRequest =
+    ctxCan(ctx, "changeRequest.create") && (ctx.membership?.isTrustedTeacher ?? false);
 
   return (
     <div className="flex flex-col gap-6">

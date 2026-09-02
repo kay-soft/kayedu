@@ -211,6 +211,7 @@ export default async function ClassDetailPage({
                 lateThresholdMinutes: String(classGroup.lateThresholdMinutes),
                 acceptsNewStudents: classGroup.acceptsNewStudents,
                 requiresConfirmation: classGroup.requiresConfirmation,
+                allowExcused: classGroup.allowExcused,
               }}
               teachers={teacherOptions}
               subjects={optionList(subjects)}

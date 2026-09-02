@@ -10,9 +10,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
 
 /**
- * Session-description edit (spec §4.2 item 2). No teacher edit-deadline
- * setting exists yet (docs/03 M7 note) — always editable for now, a flagged
- * gap rather than a silently-invented rule.
+ * Session-description edit (spec §4.2 item 2). Editable up to the center's
+ * `teacherEditDeadlineHours` setting (M10, closing the gap flagged at M7) —
+ * unconditional when the center leaves that setting off.
  */
 export function SessionDescriptionForm({
   sessionId,

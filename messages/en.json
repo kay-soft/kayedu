@@ -268,7 +268,11 @@
       "unknownTeacher": "Former teacher"
     },
     "contactTitle": "This center's record",
-    "contactDescription": "This center's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other center's record."
+    "contactDescription": "This center's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other center's record.",
+    "trusted": {
+      "label": "Trusted teacher",
+      "description": "Lets this teacher request a new class or session from their portal at this center. Off hides those request forms for them."
+    }
   },
   "Students": {
     "title": "Students",
@@ -348,7 +352,8 @@
       "description": "The classes this student is in at this center.",
       "empty": "Not enrolled in any class yet.",
       "emptyPrint": "Not enrolled in any class yet.",
-      "blocked": "blocked from this class"
+      "blocked": "blocked from this class",
+      "consecutiveAbsentAlert": "{className}: absent {count} times in a row."
     },
     "blockedBy": {
       "title": "Blocked by",
@@ -418,7 +423,9 @@
       "acceptsNewStudents": "Accepting new students",
       "acceptsNewStudentsHint": "Turn off to hide this class from new enrollment while keeping it running.",
       "requiresConfirmation": "New enrollments need confirmation",
-      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate."
+      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate.",
+      "allowExcused": "Allow Excused status",
+      "allowExcusedHint": "Turn off to offer only Present, Late and Absent on this class's sessions."
     },
     "context": {
       "title": "Class context",
@@ -603,6 +610,18 @@
       "room": "Room",
       "price": "Price"
     },
+    "lifecycle": {
+      "cancel": "Cancel session",
+      "reschedule": "Reschedule",
+      "save": "Save new time",
+      "rescheduled": "Session rescheduled.",
+      "rescheduledWithConflict": "Session rescheduled, but it now conflicts with {count, plural, one {# other class} other {# other classes}} — review it.",
+      "fields": {
+        "date": "Date",
+        "startTime": "Start time",
+        "endTime": "End time"
+      }
+    },
     "receipt": {
       "title": "Receipt",
       "description": "Total collected and the attendance breakdown for this session.",
@@ -628,7 +647,14 @@
       "alreadyVoided": "This payment was already voided.",
       "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
       "contactInUse": "Those contact details already belong to someone else.",
-      "matchGone": "That person is no longer the match for these details. Check the form and try again."
+      "matchGone": "That person is no longer the match for these details. Check the form and try again.",
+      "alreadyCancelled": "This session is already cancelled.",
+      "cancelled": "This session is cancelled and can no longer be edited.",
+      "conflict": "That time conflicts with another class's teacher or room, and this center denies conflicting slots.",
+      "duplicateSlot": "This class already has a session at that exact date and time.",
+      "excusedNotAllowed": "This class does not allow the Excused status.",
+      "invalidDate": "Enter a valid date.",
+      "invalidTimeRange": "The end time must be after the start time."
     }
   },
   "Reception": {
@@ -781,6 +807,15 @@
         "no": "No"
       }
     },
+    "sessionRequests": {
+      "title": "Session requests",
+      "description": "One-off sessions teachers have asked to add to a class they already teach. Approving creates the session right away.",
+      "empty": "No pending session requests.",
+      "classGone": "That class no longer exists.",
+      "fields": {
+        "date": "Date"
+      }
+    },
     "reservations": {
       "title": "Class reservations",
       "description": "Students waiting to join a class that requires confirmation. Approving enrolls them immediately.",
@@ -794,7 +829,10 @@
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is at capacity."
+      "classFull": "This class is at capacity.",
+      "classNotFound": "The class this request was for no longer exists.",
+      "conflict": "That time conflicts with another class's teacher or room, and this center denies conflicting slots.",
+      "duplicateSlot": "This class already has a session at that exact date and time."
     }
   },
   "Settings": {
@@ -870,6 +908,9 @@
       "lateThreshold": "Default late threshold (minutes)",
       "lateThresholdHint": "A class can set its own; this is what a new class starts with.",
       "timezone": "Timezone",
+      "editDeadlineLabel": "Set a deadline for teachers to edit a session description",
+      "editDeadlineDescription": "Counted from the session's date. Leave this off to let a teacher edit any of their own sessions at any time.",
+      "editDeadlineHours": "Hours after the session",
       "schedulingTitle": "Scheduling conflicts",
       "schedulingDescription": "What happens when a class schedule or a generated session double-books a teacher or a room.",
       "denyConflictsLabel": "Deny double-booked slots and sessions",
@@ -1047,6 +1088,20 @@
       "grade": "Grade",
       "all": "All"
     },
+    "request": {
+      "title": "Request a new session",
+      "description": "A one-off session on one of your classes at this center. A center manager reviews it before it's added to the calendar.",
+      "class": "Class",
+      "classPlaceholder": "Choose a class",
+      "noClasses": "You do not teach any class at this center yet.",
+      "date": "Date",
+      "start": "Start",
+      "end": "End",
+      "note": "Note to the center",
+      "notePlaceholder": "Anything else the center should know",
+      "submit": "Send request",
+      "submitted": "Request sent."
+    },
     "roster": {
       "title": "Roster",
       "description": "{absent, plural, =0 {No absences.} one {# absent.} other {# absent.}}",
@@ -1094,7 +1149,11 @@
       "forbidden": "You are not allowed to do this.",
       "notFound": "That session no longer exists, or is not yours.",
       "required": "This field is required.",
-      "tooLong": "This value is too long."
+      "tooLong": "This value is too long.",
+      "editDeadlinePassed": "The deadline to edit this session's description has passed.",
+      "invalidDate": "Enter a valid date.",
+      "invalidTimeRange": "The end time must be after the start time.",
+      "notTrusted": "This center has not marked you as a trusted teacher, so you cannot request a new class or session here."
     }
   },
   "TeacherStudents": {
@@ -1168,7 +1227,8 @@
       "invalidDay": "Choose a day of the week.",
       "invalidTime": "Enter a valid time.",
       "invalidTimeRange": "The end time must be after the start time.",
-      "invalidNumber": "Enter a whole number."
+      "invalidNumber": "Enter a whole number.",
+      "notTrusted": "This center has not marked you as a trusted teacher, so you cannot request a new class or session here."
     }
   },
   "StudentSchedule": {

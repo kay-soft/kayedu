@@ -80,6 +80,7 @@ export function ClassForm({
           lateThresholdMinutes: String(defaults.lateThresholdMinutes),
           acceptsNewStudents: true,
           requiresConfirmation: false,
+          allowExcused: true,
         }}
         teachers={teachers}
         subjects={subjects}

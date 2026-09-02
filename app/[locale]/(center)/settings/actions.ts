@@ -581,6 +581,7 @@ export async function saveGeneralSettingsAction(
     defaultLateThreshold,
     timezone,
     scheduleConflictPolicy,
+    teacherEditDeadlineHours,
   } = parsed.data;
 
   const before = await scope.db.settings.get();
@@ -591,6 +592,7 @@ export async function saveGeneralSettingsAction(
     defaultLateThreshold,
     timezone,
     scheduleConflictPolicy,
+    teacherEditDeadlineHours,
   });
 
   // The default center cut is money configuration, so the change is audited

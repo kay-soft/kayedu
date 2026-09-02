@@ -49,12 +49,14 @@ export function SessionRoster({
   canCorrect,
   canRecordPayment,
   canVoid,
+  allowExcused,
 }: {
   sessionId: string;
   rows: RosterRowData[];
   canCorrect: boolean;
   canRecordPayment: boolean;
   canVoid: boolean;
+  allowExcused: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
 
@@ -72,6 +74,7 @@ export function SessionRoster({
           canCorrect={canCorrect}
           canRecordPayment={canRecordPayment}
           canVoid={canVoid}
+          allowExcused={allowExcused}
         />
       ))}
     </ul>
@@ -84,12 +87,14 @@ function AttendeeRow({
   canCorrect,
   canRecordPayment,
   canVoid,
+  allowExcused,
 }: {
   sessionId: string;
   row: RosterRowData;
   canCorrect: boolean;
   canRecordPayment: boolean;
   canVoid: boolean;
+  allowExcused: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
   const tErrors = useTranslations("Sessions.errors");
@@ -141,6 +146,7 @@ function AttendeeRow({
         formAction={attendanceFormAction}
         value={row.status}
         pending={attendancePending || attendanceLocked}
+        allowExcused={allowExcused}
         hiddenFields={
           <>
             <input type="hidden" name="locale" value={locale} />

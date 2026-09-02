@@ -137,6 +137,28 @@ export const classRequestSchema = z
     message: "invalidTimeRange",
   });
 
+// ── Sessions: request a new one-off session (ChangeRequest, spec §4.2 item 2) ─
+
+const sessionDate = z
+  .string()
+  .trim()
+  .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate")
+  .transform((value) => value.slice(0, 10));
+
+export const sessionRequestSchema = z
+  .object({
+    ...base,
+    classGroupId: recordId,
+    date: sessionDate,
+    startTime: timeValue,
+    endTime: timeValue,
+    note: optionalText(300),
+  })
+  .refine((value) => value.startTime < value.endTime, {
+    path: ["endTime"],
+    message: "invalidTimeRange",
+  });
+
 // ── Action state ────────────────────────────────────────────────────────────
 
 export type TeacherActionState = {

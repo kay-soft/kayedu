@@ -121,6 +121,7 @@ export const recordDeleteSchema = z.object({ ...base, id: recordId });
 
 export const MAX_TIMEOUT_DAYS = 3650;
 export const MAX_LATE_THRESHOLD = 240;
+export const MAX_EDIT_DEADLINE_HOURS = 24 * 365;
 
 export const generalSettingsSchema = z
   .object({
@@ -138,6 +139,11 @@ export const generalSettingsSchema = z
     // saved-and-flagged (docs/02-architecture.md §11). Off (WARN) by default —
     // the same "widen carefully" spirit as the permission grants.
     denyScheduleConflicts: checkbox,
+    // A teacher's deadline to edit their own session description, in hours
+    // after the session date (M10, closing the gap flagged at M5/M7). Off by
+    // default — editable any time, the M7 behavior.
+    teacherEditDeadlineEnabled: checkbox,
+    teacherEditDeadlineHours: z.string().trim().optional(),
   })
   .transform((value, ctx) => {
     // The share value means two different things depending on the mode, so it
@@ -182,6 +188,21 @@ export const generalSettingsSchema = z
       teacherTimeoutDays = days;
     }
 
+    // "Teacher edit deadline: off" is stored as null, not as 0 hours.
+    let teacherEditDeadlineHours: number | null = null;
+    if (value.teacherEditDeadlineEnabled) {
+      const hours = Number(value.teacherEditDeadlineHours ?? "");
+      if (!Number.isInteger(hours) || hours < 1 || hours > MAX_EDIT_DEADLINE_HOURS) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["teacherEditDeadlineHours"],
+          message: "invalidNumber",
+        });
+        return z.NEVER;
+      }
+      teacherEditDeadlineHours = hours;
+    }
+
     return {
       locale: value.locale,
       defaultShareType: value.defaultShareType,
@@ -192,6 +213,7 @@ export const generalSettingsSchema = z
       scheduleConflictPolicy: value.denyScheduleConflicts
         ? ("DENY" as const)
         : ("WARN" as const),
+      teacherEditDeadlineHours,
     };
   });
 

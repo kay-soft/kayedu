@@ -17,6 +17,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { consecutiveAbsenceCount } from "@/lib/db/attendance";
+import { prisma } from "@/lib/db/client";
 import { countOtherCenterRelations } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped } from "@/lib/db/scoped";
@@ -90,6 +92,30 @@ export default async function StudentDetailPage({
     dir: locale === "ar" ? "rtl" : "ltr",
     codeLabel: t("card.codeLabel"),
   });
+
+  // Consecutive-absence per active enrollment (spec §7 acceptance criterion
+  // 13, closing the gap flagged at M5 — the session receipt already showed
+  // this; the student profile did not). `consecutiveAbsenceCount` is
+  // class-scoped, so a student enrolled in two classes gets two independent
+  // streaks, not one blended count.
+  const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
+  const absenceStreaks = await Promise.all(
+    activeEnrollments.map(async (enrollment) => ({
+      classGroupId: enrollment.classGroupId,
+      className:
+        [enrollment.classGroup.subject?.name, enrollment.classGroup.grade?.name]
+          .filter(Boolean)
+          .join(" · ") || tCommon("none"),
+      count: await consecutiveAbsenceCount(
+        prisma,
+        ctx.center.id,
+        enrollment.classGroupId,
+        student.id,
+        new Date(),
+      ),
+    })),
+  );
+  const activeStreaks = absenceStreaks.filter((streak) => streak.count > 0);
 
   const gradeOptions = grades.map((grade) => ({
     value: grade.id,
@@ -218,7 +244,21 @@ export default async function StudentDetailPage({
             <CardTitle>{t("enrollments.title")}</CardTitle>
             <CardDescription>{t("enrollments.description")}</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-3">
+            {activeStreaks.length > 0 ? (
+              <ul className="flex flex-col gap-2">
+                {activeStreaks.map((streak) => (
+                  <li key={streak.classGroupId}>
+                    <FormMessage tone="warning">
+                      {t("enrollments.consecutiveAbsentAlert", {
+                        className: streak.className,
+                        count: streak.count,
+                      })}
+                    </FormMessage>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {enrollments.filter((e) => e.status !== "REMOVED").length === 0 ? (
               <FormMessage tone="info">{t("enrollments.empty")}</FormMessage>
             ) : (

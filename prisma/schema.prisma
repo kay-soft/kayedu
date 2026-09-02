@@ -175,6 +175,10 @@ model CenterSettings {
   // Teacher/room double-booking (docs/02-architecture.md §11): WARN saves the
   // conflicting slot/session and surfaces it in the UI; DENY refuses it.
   scheduleConflictPolicy           ConflictPolicy @default(WARN)
+  // A teacher's deadline to edit their own session description, in hours
+  // after the session date (M10, closing the gap flagged at M5/M7). Null =
+  // no deadline, editable any time — the M7 default.
+  teacherEditDeadlineHours         Int?
   createdAt                        DateTime       @default(now())
   updatedAt                        DateTime       @updatedAt
 }
@@ -217,6 +221,11 @@ model Membership {
   email          String?
   phone          String?
   altPhone       String?
+  // Teacher-only (M10): gates the "request a new class/session" forms
+  // (spec §4.2 items 2 & 4 say "a trusted teacher"). Defaults true so the
+  // M7/M9 behavior ("every active TEACHER membership is trusted") is
+  // unchanged until a manager deliberately revokes trust for one teacher.
+  isTrustedTeacher Boolean @default(true)
   invitedAt      DateTime  @default(now())
   joinedAt       DateTime?
   createdAt      DateTime  @default(now())
@@ -339,6 +348,11 @@ model ClassGroup {
   lateThresholdMinutes Int              @default(10)
   acceptsNewStudents   Boolean          @default(true)
   requiresConfirmation Boolean          @default(false)
+  // Whether EXCUSED is offered as an attendance status on this class's
+  // sessions (M10, closing the gap flagged at M5 — spec §5 "Excused
+  // configurable per class"). Defaults true, matching the M5 behavior where
+  // all four statuses were offered on every class.
+  allowExcused         Boolean          @default(true)
   active               Boolean          @default(true)
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
