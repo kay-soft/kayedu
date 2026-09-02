@@ -53,7 +53,7 @@ app/
         staff/                  # users & roles: invite, change role, deactivate
     (teacher)/teacher/          # /teacher/dashboard, /teacher/sessions, /teacher/students, /teacher/classes (M7)
     (student)/student/          # /student/schedule, /student/discover, /student/reservations (M8)
-    (admin)/admin/              # /admin/centers, /admin/platform
+    (admin)/admin/              # /admin/centers, /admin/centers/[id], /admin/platform (M9)
     (print)/                    # role-gated print views, no app shell — students/[id]/{card,paper} (M3),
                                  # teacher/sessions/[id]/print (M7); layout accepts "center" or "teacher"
                                  # experience, then each page resolves its own tighter context
@@ -93,6 +93,7 @@ lib/
     student-portal.ts            # a student's own blocks/reservations/enrollments/schedule, no @/ imports — identity-scoped by studentId, mirroring getUserCenterRelations (M8, §4)
     reservations.ts              # the ONLY Reservation/Enrollment writes for the student portal — reserveOrEnroll/confirmReservation/rejectReservation/cancelReservation, no @/ imports (M8)
     approvals.ts                  # the ONLY ChangeRequest status-flip write — resolveChangeRequest, no @/ imports (Approvals)
+    platform.ts                   # platform-admin cross-center reads/writes — deliberately not centerId-scoped, no @/ imports (M9)
   money.ts                      # the ONLY center-cut math + piastre helpers
   scheduling.ts                 # pure time-overlap, conflict-detection and rolling-window date math (M4)
   card-layout.ts                # the default ID-card layout the editor offers
@@ -122,6 +123,7 @@ scripts/
   teacher-portal-check.ts       # shared-teacher two-center zero-leakage + combined-dashboard union gate (M7)
   student-portal-check.ts       # instant-enroll/pending branching, capacity, blocking (both scopes), duplicate-reservation, cross-center isolation gate (M8)
   approvals-check.ts            # ChangeRequest/Reservation accept-decline correctness, permission denial, cross-center isolation gate (Approvals)
+  admin-check.ts                 # center provisioning/activate-suspend/plan-edit, platform-KPI reconciliation, support-access audit gate (M9)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -231,7 +233,9 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:approvals` (`scripts/approvals-check.ts`) is the Approvals gate: against two throwaway centers, it asserts that `lib/db/approvals.ts`'s `resolveChangeRequest` flips a PENDING `ChangeRequest` to APPROVED or DECLINED, stamping `resolvedBy`/`resolvedAt`, refuses to re-resolve an already-resolved one (`notPending`), and — the decision record at `00-master-product-spec.md` §4.1 item 9 — never creates a `ClassGroup` as a side effect of approving; that `confirmReservation`/`rejectReservation` (M8, reused as-is by the Approvals actions) behave identically when called from this screen's write path; that the exact `AuditLog` shape the Server Actions write (`action: "changeRequest.approve"`/`"changeRequest.decline"`/`"reservation.confirm"`/`"reservation.reject"`) lands correctly `centerId`-scoped; that neither center can resolve or act on the other's `ChangeRequest`/`Reservation` by id, and each center's pending queue contains only its own rows; and, from a database-free permission-map pass, that RECEPTIONIST cannot reach `approvals.manage` while OWNER/MANAGER can — the same denial shape M6 established for `analytics.center.view`/`expense.manage`. Then it cleans up.
 
-All nine gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/analytics.ts`, `lib/db/teacher-portal.ts`, `lib/db/discover.ts`, `lib/db/student-portal.ts`, `lib/db/reservations.ts` and `lib/db/approvals.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
+`npm run check:admin` (`scripts/admin-check.ts`) is the M9 gate: it asserts the exact condition `requirePlatformAdmin()` gates on (`User.isPlatformAdmin`) directly, since `requirePlatformAdmin()` itself calls Next's `redirect()`/cookies and cannot run outside the Next.js runtime — the same constraint every other gate works around by testing the underlying pure condition rather than rendering a route. Then, against two throwaway centers, all through `lib/db/platform.ts` — the same functions `app/[locale]/(admin)/admin/centers/actions.ts` and the admin pages call — it asserts that `createCenterWithSettings` provisions a Center + its CenterSettings row + a founding-Owner `Invitation` in one call, refuses a duplicate slug (`slugTaken`) rather than silently colliding, that `setCenterActive`/`updateCenterPlan` write exactly what they're asked, and that `recordSupportAccess` writes exactly one `AuditLog` row per call with the expected shape. Platform KPIs (`platformCenterCounts`/`platformTeacherCount`/`platformStudentCount`/`platformSessionCount`/`platformAdoptionTrend`) are deliberately **not** `centerId`-scoped — a platform admin spans every tenant on purpose (spec §3) — so, unlike every other gate here, this one asserts on the *delta* those functions report across seeding the two throwaway centers rather than an absolute count, since a real database may already hold other centers; `platformCenterList`/`platformCenterDetailStats` filter their own result down to just the throwaway centers instead, which stays exact regardless of what else exists. Then it cleans up.
+
+All ten gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/analytics.ts`, `lib/db/teacher-portal.ts`, `lib/db/discover.ts`, `lib/db/student-portal.ts`, `lib/db/reservations.ts`, `lib/db/approvals.ts` and `lib/db/platform.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 

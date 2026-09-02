@@ -53,6 +53,8 @@ export const ROUTES = {
   studentDiscover: "/student/discover",
   studentReservations: "/student/reservations",
   adminCenters: "/admin/centers",
+  adminCenter: (id: string) => `/admin/centers/${id}`,
+  adminPlatform: "/admin/platform",
 } as const;
 
 export function homePathForRole(role: TenantRole): string {

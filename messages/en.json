@@ -1238,11 +1238,93 @@
   "AdminCenters": {
     "title": "Centers",
     "subtitle": "Every tenant on the platform.",
-    "empty": "No centers yet. Run the seed script to create one.",
+    "listTitle": "All centers",
+    "empty": "No centers yet — create the first one above.",
     "active": "Active",
     "suspended": "Suspended",
-    "members": "{count} members",
-    "students": "{count} students",
-    "milestoneNote": "Creating, activating and suspending tenants from here arrives in M9."
+    "activate": "Activate",
+    "suspend": "Suspend",
+    "staffCount": "{count} staff",
+    "teacherCount": "{count} teachers",
+    "studentCount": "{count} students",
+    "openDetail": "Open",
+    "create": {
+      "title": "Create a center",
+      "description": "Provisions the Center and its default settings in one step, and invites its founding Owner — the same invite link mechanism as any other staff invite.",
+      "fields": {
+        "name": "Name",
+        "nameEn": "Name (English)",
+        "slug": "Slug",
+        "slugHint": "Lowercase letters, digits and hyphens only. Used as this center's identifier.",
+        "themeColor": "Theme color",
+        "logoUrl": "Logo URL",
+        "plan": "Plan",
+        "ownerEmail": "Founding owner's email",
+        "ownerEmailHint": "They accept the invite link below to become this center's first Owner."
+      },
+      "submit": "Create center",
+      "created": "Center created. Share the owner invite link below.",
+      "inviteLinkLabel": "Owner invitation link",
+      "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
+      "copy": "Copy",
+      "copied": "Copied"
+    },
+    "detail": {
+      "subtitle": "/{slug}",
+      "stats": {
+        "staff": "Staff",
+        "teachers": "Teachers",
+        "students": "Students",
+        "sessions": "Sessions"
+      },
+      "planTitle": "Plan",
+      "planDescription": "Onboarding/plan metadata — a free-text label, not a billing system.",
+      "planLabel": "Plan",
+      "planPlaceholder": "e.g. pilot, standard",
+      "savePlan": "Save",
+      "planSaved": "Saved.",
+      "auditTitle": "Recent activity",
+      "auditDescription": "Every visit to this page — and every tenant-management action taken here — writes an audit row (privileged support access, spec §4.4).",
+      "auditEmpty": "No activity recorded yet.",
+      "unknownActor": "Unknown"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That center no longer exists.",
+      "slugTaken": "That slug is already used by another center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidSlug": "Use lowercase letters, digits and hyphens only.",
+      "invalidColor": "Enter a color as #RRGGBB.",
+      "invalidEmail": "Enter a valid email address."
+    }
+  },
+  "AdminPlatform": {
+    "title": "Platform",
+    "subtitle": "Adoption and usage across every center on KayEdu.",
+    "activeCenters": "Active centers",
+    "suspendedHint": "{count} suspended",
+    "totalTeachers": "Total teachers",
+    "totalStudents": "Total students",
+    "totalSessions": "Total sessions",
+    "adoption": {
+      "title": "Adoption trend",
+      "description": "Centers created per month, most recent six months.",
+      "newCenters": "{count} new"
+    },
+    "months": {
+      "jan": "January",
+      "feb": "February",
+      "mar": "March",
+      "apr": "April",
+      "may": "May",
+      "jun": "June",
+      "jul": "July",
+      "aug": "August",
+      "sep": "September",
+      "oct": "October",
+      "nov": "November",
+      "dec": "December"
+    }
   }
 }

@@ -67,7 +67,7 @@ const STUDENT_NAV: NavDef[] = [
 
 const ADMIN_NAV: NavDef[] = [
   { href: ROUTES.adminCenters, labelKey: "centers", icon: "centers" },
-  { href: "/admin/platform", labelKey: "platform", icon: "platform", disabled: true },
+  { href: ROUTES.adminPlatform, labelKey: "platform", icon: "platform" },
 ];
 
 function visible(
