@@ -16,7 +16,8 @@
     "check:people": "node --env-file-if-exists=.env scripts/people-check.ts",
     "check:classes": "node --env-file-if-exists=.env scripts/classes-check.ts",
     "check:payments": "node --env-file-if-exists=.env scripts/payments-check.ts",
-    "check:analytics": "node --env-file-if-exists=.env scripts/analytics-check.ts"
+    "check:analytics": "node --env-file-if-exists=.env scripts/analytics-check.ts",
+    "check:teacher-portal": "node --env-file-if-exists=.env scripts/teacher-portal-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

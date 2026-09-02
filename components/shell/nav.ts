@@ -50,9 +50,12 @@ const CENTER_NAV: NavDef[] = [
 
 const TEACHER_NAV: NavDef[] = [
   { href: ROUTES.teacherDashboard, labelKey: "dashboard", icon: "dashboard" },
-  { href: "/teacher/sessions", labelKey: "sessions", icon: "sessions", disabled: true },
-  { href: "/teacher/students", labelKey: "students", icon: "students", disabled: true },
-  { href: "/teacher/classes", labelKey: "classes", icon: "classes", disabled: true },
+  { href: ROUTES.teacherSessions, labelKey: "sessions", icon: "sessions" },
+  { href: ROUTES.teacherStudents, labelKey: "students", icon: "students" },
+  { href: ROUTES.teacherClasses, labelKey: "classes", icon: "classes" },
+  // Spec §4.2 item 1's filterable earnings/sessions/students analytics screen
+  // is still a gap beyond the Dashboard's combined/per-center summary (M7) —
+  // docs/03-build-order.md M7 note.
   { href: "/teacher/analytics", labelKey: "analytics", icon: "analytics", disabled: true },
 ];
 

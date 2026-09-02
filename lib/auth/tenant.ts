@@ -154,6 +154,38 @@ async function redirectTo(href: string): Promise<never> {
 }
 
 /**
+ * Resolves one relation into a full `TenantContext` for a given experience —
+ * the piece `getTenantContext` and `getTeacherContexts` share. Pulled out on
+ * its own because the teacher portal (M7) needs a *context per center*, not
+ * just the single active one the `kayedu_center` cookie names (docs/01 §4:
+ * "combined views are unions of permitted per-center data").
+ */
+async function buildContext(
+  user: User,
+  relation: CenterRelation,
+  experience: Experience | undefined,
+): Promise<TenantContext> {
+  const settings = await prisma.centerSettings.findUnique({
+    where: { centerId: relation.center.id },
+  });
+
+  const role = roleForExperience(relation, experience);
+  const membership = relation.memberships.find((item) => item.role === role) ?? null;
+
+  return {
+    user,
+    center: relation.center,
+    settings,
+    membership,
+    studentProfile: relation.studentProfile,
+    role,
+    roles: relation.roles,
+    grants: permissionGrantsFromSettings(settings),
+    isPlatformAdmin: user.isPlatformAdmin,
+  };
+}
+
+/**
  * Resolves who is asking, which center they are in, and what they may do.
  * Called at the top of every protected loader and every Server Action.
  * Redirects (never returns) when there is no valid user/center relationship.
@@ -193,25 +225,34 @@ export const getTenantContext = cache(
       }
     }
 
-    const settings = await prisma.centerSettings.findUnique({
-      where: { centerId: relation.center.id },
-    });
+    return buildContext(user, relation, experience);
+  },
+);
 
-    const role = roleForExperience(relation, experience);
-    const membership =
-      relation.memberships.find((item) => item.role === role) ?? null;
+/**
+ * Every center this user teaches at, each resolved into its own full
+ * `TenantContext` — not just the single center the active-center cookie
+ * names. This is the seam the teacher portal's cross-center dashboard reads
+ * through (M7, docs/01-data-model.md §4 "Teacher cross-center visibility"):
+ * the caller loops over the returned contexts and runs the *same* scoped
+ * queries (`scoped(ctx)`) it would for a single center, then unions the
+ * results in memory — never a query that spans centers at the database
+ * layer. Ignores the active-center cookie entirely; it is not "which one is
+ * active", it is "every one this teacher belongs to".
+ */
+export const getTeacherContexts = cache(
+  async (userId: string): Promise<TenantContext[]> => {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return [];
 
-    return {
-      user,
-      center: relation.center,
-      settings,
-      membership,
-      studentProfile: relation.studentProfile,
-      role,
-      roles: relation.roles,
-      grants: permissionGrantsFromSettings(settings),
-      isPlatformAdmin: user.isPlatformAdmin,
-    };
+    const relations = await getUserCenterRelations(userId);
+    const teacherRelations = relations.filter((relation) =>
+      relation.roles.includes("TEACHER"),
+    );
+
+    return Promise.all(
+      teacherRelations.map((relation) => buildContext(user, relation, "teacher")),
+    );
   },
 );
 

@@ -42,6 +42,12 @@ export const ROUTES = {
   centerSettingsPermissions: "/settings/permissions",
   centerStaff: "/settings/staff",
   teacherDashboard: "/teacher/dashboard",
+  teacherSessions: "/teacher/sessions",
+  teacherSession: (id: string) => `/teacher/sessions/${id}`,
+  teacherSessionPrint: (id: string) => `/teacher/sessions/${id}/print`,
+  teacherStudents: "/teacher/students",
+  teacherStudent: (id: string) => `/teacher/students/${id}`,
+  teacherClasses: "/teacher/classes",
   studentSchedule: "/student/schedule",
   adminCenters: "/admin/centers",
 } as const;

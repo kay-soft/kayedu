@@ -58,7 +58,7 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 
 ### Workflow layer
 - **Reservation** — student's request to join a class: status (PENDING/CONFIRMED/REJECTED/CANCELLED). (Fast-follow feature.)
-- **ChangeRequest** — teacher's request to add a class/session at a center: type, payload JSON, status, resolvedBy. Feeds the Approvals screen.
+- **ChangeRequest** — teacher's request to add a class/session at a center: type, payload JSON, status, resolvedBy. Feeds the Approvals screen. As of **M7**, the write path and a teacher's own "my requests" list are real (`scoped(ctx).changeRequests` in `lib/db/scoped.ts`, written from `/teacher/classes`) — only `NEW_CLASS` payloads are produced today (subject/grade/timing/capacity/attendance settings), and every request sits `PENDING` until the Approvals screen itself is built (still a gap, flagged since M6). `payload` is untyped `Json` on purpose: it is read back only by the review UI that does not exist yet, so no schema is locked in early.
 
 ### Platform / trust layer
 - **AuditLog** — `centerId?`, actorUserId, action, entityType, entityId, before/after JSON, createdAt. Written for financial, permission, and attendance-correction changes.
@@ -98,7 +98,9 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 
 **Teacher cross-center visibility.** A teacher's portal queries span the centers they're a member of, but each center's rows are still filtered by that membership's granted visibility. Combined views are unions of permitted per-center data — never a bypass of scoping.
 
-**The two isolation tests that must pass** (from the spec's acceptance criteria): shared-teacher no-leak, and Center-X-can't-read-Center-Y-by-ID. Write these as automated tests early.
+As of **M7** this is real: `getTeacherContexts(userId)` (`lib/auth/tenant.ts`) resolves *every* center a user has a `TEACHER` membership at — ignoring the single-center `kayedu_center` active-center cookie entirely — into one full `TenantContext` per center (its own `CenterSettings`, its own `grants`). The teacher dashboard loops over these contexts and calls `lib/db/teacher-portal.ts`'s `teacherCenterSummary(db, centerId, teacherId, …)` once per center — each call still just a `centerId`-scoped `where`, identical in shape to any single-center query — and only combines the results in memory (`combineTeacherSummaries`, a pure sum with no query of its own). The per-center pages (`/teacher/sessions`, `/teacher/students`, `/teacher/classes`) stay single-center, reading through the *active* center's context exactly like the center-staff pages do; switching which center is active reuses the existing `/select-center` cookie flow rather than adding a second switching mechanism.
+
+**The two isolation tests that must pass** (from the spec's acceptance criteria): shared-teacher no-leak, and Center-X-can't-read-Center-Y-by-ID. Both are automated: `npm run check:isolation` (M1) for the by-ID case, `npm run check:teacher-portal` (M7, `scripts/teacher-portal-check.ts`) for the shared-teacher scenario — one teacher User with two `TEACHER` `Membership` rows, independently seeded sessions/payments/students at each center, asserting the combined dashboard total is exactly the sum of two independently-scoped per-center summaries and that neither center's session/student/payment/block/`ChangeRequest` rows resolve from the other center's scope.
 
 ---
 

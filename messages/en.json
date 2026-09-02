@@ -963,7 +963,173 @@
   "TeacherDashboard": {
     "title": "Teacher dashboard",
     "subtitle": "Your work at {center}.",
-    "milestoneNote": "Your schedule, sessions, students and earnings land in M7."
+    "stats": {
+      "centers": "Centers",
+      "sessionsToday": "Sessions today",
+      "sessionsThisWeek": "Sessions this week",
+      "earningsThisMonth": "Earnings this month"
+    },
+    "centers": {
+      "title": "Your centers",
+      "description": "Each center's schedule and earnings, scoped to that center only.",
+      "active": "Active",
+      "summary": "{today} today · {week} this week · {earnings} this month",
+      "viewSchedule": "View schedule",
+      "switchTo": "Switch to this center"
+    }
+  },
+  "TeacherSessions": {
+    "title": "My sessions",
+    "subtitle": "{count} sessions in this view.",
+    "detailSubtitle": "{grade} · {date}",
+    "print": "Print",
+    "backToList": "All sessions",
+    "listTitle": "Sessions",
+    "listDescription": "Every session you teach at this center in the selected range.",
+    "empty": "No sessions match these filters.",
+    "searchLabel": "Search by student",
+    "searchPlaceholder": "Name or student code",
+    "searchSubmit": "Search",
+    "stats": {
+      "inRange": "In range",
+      "upcoming": "Upcoming"
+    },
+    "columns": {
+      "marked": "{count, plural, one {# marked} other {# marked}}"
+    },
+    "filters": {
+      "date": "Date",
+      "range": "Range",
+      "rangeDay": "Day",
+      "rangeWeek": "Next 7 days",
+      "rangeMonth": "Next 30 days",
+      "status": "Status",
+      "grade": "Grade",
+      "all": "All"
+    },
+    "roster": {
+      "title": "Roster",
+      "description": "{absent, plural, =0 {No absences.} one {# absent.} other {# absent.}}",
+      "empty": "No students on the roster yet.",
+      "dropIn": "Drop-in",
+      "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian."
+    },
+    "description": {
+      "title": "Session note",
+      "hint": "Visible to this center's staff. No edit deadline is enforced yet.",
+      "label": "Description",
+      "placeholder": "What was covered, homework assigned, anything worth noting",
+      "save": "Save note",
+      "saved": "Saved."
+    },
+    "uploads": {
+      "title": "Files",
+      "comingSoon": "Uploading files for a session is coming in a later milestone."
+    },
+    "context": {
+      "title": "Session"
+    },
+    "fields": {
+      "time": "Time",
+      "room": "Room",
+      "grade": "Grade",
+      "price": "Price"
+    },
+    "receipt": {
+      "title": "Your earnings",
+      "description": "This session's total, your share and the center's share."
+    },
+    "print": {
+      "hint": "Only the sheet below is printed.",
+      "print": "Print",
+      "back": "Back to the session",
+      "printedOn": "Printed {date}",
+      "collected": "Total collected",
+      "centerShare": "Center share",
+      "teacherShare": "Your share",
+      "attendanceSummary": "Attendance",
+      "attendanceCounts": "{present} present · {late} late · {absent} absent · {excused} excused"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That session no longer exists, or is not yours.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long."
+    }
+  },
+  "TeacherStudents": {
+    "title": "My students",
+    "subtitle": "{count} students you have taught at this center.",
+    "detailSubtitle": "Their sessions with you at this center only.",
+    "backToList": "All students",
+    "listTitle": "Students",
+    "listDescription": "Search by name, code or phone — only students you have taught here.",
+    "empty": "You have not taught any students at this center yet.",
+    "noMatches": "No students match that search.",
+    "searchLabel": "Search students",
+    "searchPlaceholder": "Name or student code",
+    "searchSubmit": "Search",
+    "sessionsTitle": "Sessions with you",
+    "sessionsDescription": "Every session this student attended with you — not their history with other teachers.",
+    "fields": {
+      "grade": "Grade"
+    },
+    "block": {
+      "title": "Block this student",
+      "description": "A blocked student cannot be enrolled with, or added to a session of, you.",
+      "blocked": "You have blocked this student.",
+      "blockedWithReason": "You have blocked this student: {reason}",
+      "unblock": "Remove block",
+      "block": "Block",
+      "reason": "Reason",
+      "reasonPlaceholder": "Optional — why they are blocked"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists, or is not one of your students.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "alreadyBlocked": "You have already blocked this student."
+    }
+  },
+  "TeacherClasses": {
+    "title": "My classes",
+    "subtitle": "Request a new class at {center}.",
+    "listTitle": "Your requests",
+    "listDescription": "Requests you have sent to this center. A center manager reviews and confirms them.",
+    "empty": "You have not requested a class yet.",
+    "status": {
+      "PENDING": "Pending review",
+      "APPROVED": "Approved",
+      "DECLINED": "Declined"
+    },
+    "request": {
+      "title": "Request a new class",
+      "description": "Subject, grade, timing, capacity and attendance settings — a center manager reviews this before it becomes a real class.",
+      "subject": "Subject",
+      "grade": "Grade",
+      "none": "Not set",
+      "day": "Day",
+      "start": "Start",
+      "end": "End",
+      "capacity": "Capacity",
+      "capacityHint": "Students. Use 0 for no limit.",
+      "lateThreshold": "Late threshold (minutes)",
+      "attendanceRequired": "Attendance is required for this class",
+      "note": "Note to the center",
+      "notePlaceholder": "Anything else the center should know",
+      "submit": "Send request",
+      "submitted": "Request sent."
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidDay": "Choose a day of the week.",
+      "invalidTime": "Enter a valid time.",
+      "invalidTimeRange": "The end time must be after the start time.",
+      "invalidNumber": "Enter a whole number."
+    }
   },
   "StudentSchedule": {
     "title": "My schedule",

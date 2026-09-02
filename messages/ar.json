@@ -963,7 +963,173 @@
   "TeacherDashboard": {
     "title": "لوحة المدرس",
     "subtitle": "عملك في {center}.",
-    "milestoneNote": "جدولك وحصصك وطلابك وأرباحك تأتي في المرحلة M7."
+    "stats": {
+      "centers": "المراكز",
+      "sessionsToday": "حصص اليوم",
+      "sessionsThisWeek": "حصص هذا الأسبوع",
+      "earningsThisMonth": "أرباح هذا الشهر"
+    },
+    "centers": {
+      "title": "مراكزك",
+      "description": "جدول وأرباح كل مركز، مقتصرة على هذا المركز فقط.",
+      "active": "نشط",
+      "summary": "{today} اليوم · {week} هذا الأسبوع · {earnings} هذا الشهر",
+      "viewSchedule": "عرض الجدول",
+      "switchTo": "التبديل إلى هذا المركز"
+    }
+  },
+  "TeacherSessions": {
+    "title": "حصصي",
+    "subtitle": "{count} حصة في هذا العرض.",
+    "detailSubtitle": "{grade} · {date}",
+    "print": "طباعة",
+    "backToList": "كل الحصص",
+    "listTitle": "الحصص",
+    "listDescription": "كل حصة تدرّسها في هذا المركز خلال المدى المحدد.",
+    "empty": "لا توجد حصص مطابقة لهذه الفلاتر.",
+    "searchLabel": "البحث باسم الطالب",
+    "searchPlaceholder": "الاسم أو كود الطالب",
+    "searchSubmit": "بحث",
+    "stats": {
+      "inRange": "ضمن المدى",
+      "upcoming": "القادمة"
+    },
+    "columns": {
+      "marked": "{count} مسجَّل"
+    },
+    "filters": {
+      "date": "التاريخ",
+      "range": "المدى",
+      "rangeDay": "يوم",
+      "rangeWeek": "٧ أيام القادمة",
+      "rangeMonth": "٣٠ يومًا القادمة",
+      "status": "الحالة",
+      "grade": "الصف",
+      "all": "الكل"
+    },
+    "roster": {
+      "title": "الكشف",
+      "description": "{absent, plural, =0 {لا غياب.} other {# غائب.}}",
+      "empty": "لا يوجد طلاب في الكشف بعد.",
+      "dropIn": "زيارة عابرة",
+      "consecutiveAbsentAlert": "غائب {count} مرات متتالية — ربما تحتاج للتواصل مع ولي الأمر."
+    },
+    "description": {
+      "title": "ملاحظة الحصة",
+      "hint": "مرئية لموظفي هذا المركز. لا يوجد موعد نهائي للتعديل بعد.",
+      "label": "الوصف",
+      "placeholder": "ما تم تغطيته، الواجب، أو أي ملاحظة مهمة",
+      "save": "حفظ الملاحظة",
+      "saved": "تم الحفظ."
+    },
+    "uploads": {
+      "title": "الملفات",
+      "comingSoon": "رفع ملفات الحصة سيتوفر في مرحلة لاحقة."
+    },
+    "context": {
+      "title": "الحصة"
+    },
+    "fields": {
+      "time": "الوقت",
+      "room": "القاعة",
+      "grade": "الصف",
+      "price": "السعر"
+    },
+    "receipt": {
+      "title": "أرباحك",
+      "description": "إجمالي هذه الحصة، ونصيبك، ونصيب المركز."
+    },
+    "print": {
+      "hint": "يُطبع الجدول أدناه فقط.",
+      "print": "طباعة",
+      "back": "العودة إلى الحصة",
+      "printedOn": "طُبع في {date}",
+      "collected": "الإجمالي المُحصَّل",
+      "centerShare": "نصيب المركز",
+      "teacherShare": "نصيبك",
+      "attendanceSummary": "الحضور",
+      "attendanceCounts": "{present} حاضر · {late} متأخر · {absent} غائب · {excused} معذور"
+    },
+    "errors": {
+      "forbidden": "غير مسموح لك بهذا الإجراء.",
+      "notFound": "هذه الحصة لم تعد موجودة، أو ليست حصتك.",
+      "required": "هذا الحقل مطلوب.",
+      "tooLong": "هذه القيمة طويلة جدًا."
+    }
+  },
+  "TeacherStudents": {
+    "title": "طلابي",
+    "subtitle": "{count} طالب درّستهم في هذا المركز.",
+    "detailSubtitle": "حصصهم معك في هذا المركز فقط.",
+    "backToList": "كل الطلاب",
+    "listTitle": "الطلاب",
+    "listDescription": "ابحث بالاسم أو الكود أو الهاتف — الطلاب الذين درّستهم هنا فقط.",
+    "empty": "لم تدرّس أي طالب في هذا المركز بعد.",
+    "noMatches": "لا يوجد طلاب مطابقون لهذا البحث.",
+    "searchLabel": "البحث عن طالب",
+    "searchPlaceholder": "الاسم أو كود الطالب",
+    "searchSubmit": "بحث",
+    "sessionsTitle": "الحصص معك",
+    "sessionsDescription": "كل حصة حضرها هذا الطالب معك — وليس سجله مع مدرسين آخرين.",
+    "fields": {
+      "grade": "الصف"
+    },
+    "block": {
+      "title": "حظر هذا الطالب",
+      "description": "الطالب المحظور لا يمكن تسجيله معك أو إضافته إلى إحدى حصصك.",
+      "blocked": "لقد حظرت هذا الطالب.",
+      "blockedWithReason": "لقد حظرت هذا الطالب: {reason}",
+      "unblock": "إزالة الحظر",
+      "block": "حظر",
+      "reason": "السبب",
+      "reasonPlaceholder": "اختياري — سبب الحظر"
+    },
+    "errors": {
+      "forbidden": "غير مسموح لك بهذا الإجراء.",
+      "notFound": "هذا السجل لم يعد موجودًا، أو ليس أحد طلابك.",
+      "required": "هذا الحقل مطلوب.",
+      "tooLong": "هذه القيمة طويلة جدًا.",
+      "alreadyBlocked": "لقد حظرت هذا الطالب بالفعل."
+    }
+  },
+  "TeacherClasses": {
+    "title": "مجموعاتي",
+    "subtitle": "اطلب مجموعة جديدة في {center}.",
+    "listTitle": "طلباتك",
+    "listDescription": "الطلبات التي أرسلتها لهذا المركز. يراجعها مدير المركز ويؤكدها.",
+    "empty": "لم تطلب مجموعة بعد.",
+    "status": {
+      "PENDING": "قيد المراجعة",
+      "APPROVED": "مقبول",
+      "DECLINED": "مرفوض"
+    },
+    "request": {
+      "title": "طلب مجموعة جديدة",
+      "description": "المادة والصف والتوقيت والسعة وإعدادات الحضور — يراجعها مدير المركز قبل أن تصبح مجموعة فعلية.",
+      "subject": "المادة",
+      "grade": "الصف",
+      "none": "غير محدد",
+      "day": "اليوم",
+      "start": "البداية",
+      "end": "النهاية",
+      "capacity": "السعة",
+      "capacityHint": "عدد الطلاب. استخدم ٠ لعدم وجود حد.",
+      "lateThreshold": "حد التأخير (دقائق)",
+      "attendanceRequired": "الحضور مطلوب لهذه المجموعة",
+      "note": "ملاحظة للمركز",
+      "notePlaceholder": "أي شيء آخر يجب أن يعرفه المركز",
+      "submit": "إرسال الطلب",
+      "submitted": "تم إرسال الطلب."
+    },
+    "errors": {
+      "forbidden": "غير مسموح لك بهذا الإجراء.",
+      "required": "هذا الحقل مطلوب.",
+      "tooLong": "هذه القيمة طويلة جدًا.",
+      "invalidDay": "اختر يومًا من الأسبوع.",
+      "invalidTime": "أدخل وقتًا صحيحًا.",
+      "invalidTimeRange": "يجب أن يكون وقت النهاية بعد وقت البداية.",
+      "invalidNumber": "أدخل رقمًا صحيحًا."
+    }
   },
   "StudentSchedule": {
     "title": "جدولي",

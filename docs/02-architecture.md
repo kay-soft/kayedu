@@ -43,7 +43,7 @@ app/
       reception/                 # search/scan, live rail, one-flow check-in (M5)
       analytics/                 # date filters + by-teacher breakdown, reads lib/db/analytics.ts (M6)
       expenses/                  # category CRUD + append-and-audit ledger, same date filters (M6)
-      approvals/
+      approvals/                 # nav entry only — still not built (M6/M7 notes, §11)
       settings/                 # the configuration shell + its sub-nav
         branches/  rooms/       # general (default cut, timeout, late, tz) is /settings
         education-systems/
@@ -51,9 +51,12 @@ app/
         card/                   # cardLayout JSON editor
         permissions/            # receptionist grant toggles
         staff/                  # users & roles: invite, change role, deactivate
-    (teacher)/teacher/          # /teacher/dashboard, /teacher/sessions, ...
+    (teacher)/teacher/          # /teacher/dashboard, /teacher/sessions, /teacher/students, /teacher/classes (M7)
     (student)/student/          # /student/schedule, /student/discover, ...
     (admin)/admin/              # /admin/centers, /admin/platform
+    (print)/                    # role-gated print views, no app shell — students/[id]/{card,paper} (M3),
+                                 # teacher/sessions/[id]/print (M7); layout accepts "center" or "teacher"
+                                 # experience, then each page resolves its own tighter context
   api/                          # webhooks / edge handlers if needed
     cron/generate-sessions/       # Vercel Cron entry point for lib/db/sessions.ts (M4, §11)
 components/
@@ -67,7 +70,7 @@ lib/
   auth/
     session.ts                  # Supabase auth user + User mirror
     active-center.ts            # the active-center cookie
-    tenant.ts                   # getTenantContext() (request-cached, §14), route-group gates
+    tenant.ts                   # getTenantContext() (request-cached, §14) + getTeacherContexts() (M7, §4), route-group gates
     permissions.ts              # can(role, action) map
   supabase/
     server.ts  client.ts  proxy.ts  env.ts
@@ -85,6 +88,7 @@ lib/
     attendance.ts                # record/correct writes + consecutive-absence count, no @/ imports (M5)
     payments.ts                  # recordPayment/voidPayment — the ONLY Payment writes, no @/ imports (M5)
     analytics.ts                 # revenue/expense/user aggregates, no @/ imports; /dashboard + /analytics both call it (M6, §14)
+    teacher-portal.ts            # cross-center read helpers, no @/ imports — one centerId-scoped query per center, unioned by the caller (M7, §4)
   money.ts                      # the ONLY center-cut math + piastre helpers
   scheduling.ts                 # pure time-overlap, conflict-detection and rolling-window date math (M4)
   card-layout.ts                # the default ID-card layout the editor offers
@@ -96,6 +100,7 @@ lib/
   format.ts                     # locale-aware number/date formatting
   i18n/  request.ts  routing.ts  navigation.ts
   validation/                   # zod schemas per entity, incl. pagination helpers (people.ts, §14)
+    teacher.ts                   # session-description edit, teacher block-list, class-request schemas, no @/ imports (M7)
   utils.ts
 messages/
   ar.json  en.json
@@ -108,6 +113,7 @@ scripts/
   classes-check.ts              # classes/schedules/conflicts/session-generation gate (M4)
   payments-check.ts             # snapshot/void-correct/drop-in/consecutive-absence gate (M5)
   analytics-check.ts            # revenue/expense reconciliation + cross-center + profit-denial gate (M6)
+  teacher-portal-check.ts       # shared-teacher two-center zero-leakage + combined-dashboard union gate (M7)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -197,7 +203,7 @@ Enable RLS on every tenant table. Policy shape: a row is visible only if its `ce
 
 Either way, **write the two isolation tests early** (shared-teacher no-leak; cross-center-by-ID denied) and run them in CI.
 
-`npm run check:isolation` (`scripts/isolation-check.ts`) is the cross-center-by-ID gate: it creates two throwaway centers, asserts that Center A cannot read a Center B row by id through the scoping primitives, that `requireScopedById` throws, that scoped lists never contain foreign rows, and that an unscoped `where` fails loudly — then cleans up. It needs a reachable database. The shared-teacher no-leak test arrives with the teacher portal in M7.
+`npm run check:isolation` (`scripts/isolation-check.ts`) is the cross-center-by-ID gate: it creates two throwaway centers, asserts that Center A cannot read a Center B row by id through the scoping primitives, that `requireScopedById` throws, that scoped lists never contain foreign rows, and that an unscoped `where` fails loudly — then cleans up. It needs a reachable database.
 
 `npm run check:people` (`scripts/people-check.ts`) is the M3 gate, covering the paths that milestone added (revised for the center-local-contacts and system-assigned-codes rework). It registers **one person at two throwaway centers** and asserts a single `User` with two `StudentProfile` rows; that a `+20`-prefixed phone and a capitalised email still match that person; that editing one center's local contact leaves the global `User` and every other center's local record untouched; that a contact which exists **only** on another center's local record (never the global `User`) still produces a match, proving the search covers all three tables; that **12 concurrent registrations** in one center produce 12 unique, contiguous student codes — no duplicates, no gaps; that Center A resolves neither Center B's `StudentProfile`, teacher `Membership` nor `StudentBlock` by id; that a **teacher shared by both centers** who blocks a student at one has not blocked them at the other, and that their local contact is independent per center too; that grade promotion moves only its own center's students; that the storage primitives refuse an unscoped path, a traversal segment, a prefix collision and a foreign center's path; that a card renders with its QR, escapes its text and mirrors in Arabic; and that the schemas reject what the UI must not store (including asserting the student schema carries no `studentCode` field and the teacher schema carries no `canSeeEarnings` field at all). Then it cleans up.
 
@@ -209,7 +215,9 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:analytics` (`scripts/analytics-check.ts`) is the M6 gate (docs/03-build-order.md M6 "Done when"): against two throwaway centers, all through `lib/db/analytics.ts` — the same module `/dashboard` and `/analytics` both call — it seeds payments (via the real `recordPayment`/`createAttendance`) and expenses spanning an in-range window and two out-of-range dates, then asserts `revenueTotals` sums exactly the in-range payments (never the out-of-range ones, and never recomputed from the live class config — docs/01 §3), that a `teacherId` filter narrows it correctly, that `revenueByTeacher`'s single `groupBy` reconciles per teacher, that `expenseTotals` feeds the net figure (`centerShare − expenses`) exactly, that `studentCounts`/`teacherCounts` correctly separate total/active/new within the range, and that Center B's calls against every one of these functions see zero of Center A's rows. It also asserts directly against `lib/auth/permissions.ts`'s `can()` that RECEPTIONIST holds neither `analytics.center.view` nor `expense.manage` — grantable or not — so the profit-denial (spec §7 acceptance criterion 9) is a page-level redirect with no code path around it, not a hidden button. Then it cleans up.
 
-All six gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts` and `lib/db/analytics.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
+`npm run check:teacher-portal` (`scripts/teacher-portal-check.ts`) is the M7 gate — the shared-teacher no-leak test flagged as outstanding since M1: it creates two throwaway centers and **one** teacher `User` with a `TEACHER` `Membership` at both, seeds sessions/payments/students independently at each (through the same `createAttendance`/`recordPayment` functions M5's gate exercises), then asserts through `lib/db/teacher-portal.ts` — the module the dashboard/sessions/students pages call — that: a per-center session query (`teacherSessionListWhere`, filterable by grade and by student search) returns only that center's sessions; `teacherCenterSummary` (today's/this-week's session counts + this-range earnings) sees only that center's rows, and `combineTeacherSummaries` of both centers' summaries is exactly their sum — the "combined view is a union of independently-scoped per-center queries" claim, executed; `teacherStudentProfileIds`/`studentSessionsWithTeacher` return only the roster and history this teacher has *at that center*; the same shared teacher blocking a student at Center A (`StudentBlock` scope `TEACHER`) has not blocked them at Center B (the M3 regression the task instructions call out by name); and neither center can resolve the other's `Session`, `StudentProfile`, `Payment`, `StudentBlock` or `ChangeRequest` by id. A separate permission-map pass (no database) confirms `TEACHER` still cannot reach `center.profit.view`/`analytics.center.view` — M7 must not widen the role. Then it cleans up.
+
+All seven gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/analytics.ts` and `lib/db/teacher-portal.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 
@@ -227,7 +235,7 @@ can(role, "analytics.own.view")   // TEACHER (baseline — see the note below)
 ```
 - **OWNER** = MANAGER + `center.ownership.manage` (the only owner-exclusive action).
 - **RECEPTIONIST** = `reception.use`, `session.view`, `attendance.record`, `payment.record`, `student.manage`. Profit and corrections are **denied by default** (spec §3). `session.view` (M5) is deliberately separate from `session.manage` (Owner/Manager only) — spec §3 lists "view today's sessions" as a receptionist capability, but running the session generator or cancelling a session is not.
-- **TEACHER** = `analytics.own.view`, `changeRequest.create`, `student.block`. `analytics.own.view` is a **baseline** permission, not a grant — a teacher sees their own earnings/analytics by default (spec §3, M3). `Membership.canSeeEarnings` exists in the schema for a possible future per-center toggle, defaults `true`, and `can()` never reads it.
+- **TEACHER** = `analytics.own.view`, `changeRequest.create`, `student.block`. `analytics.own.view` is a **baseline** permission, not a grant — a teacher sees their own earnings/analytics by default (spec §3, M3). `Membership.canSeeEarnings` exists in the schema for a possible future per-center toggle, defaults `true`, and `can()` never reads it. As of **M7**, all three baseline permissions are exercised by real screens (`changeRequest.create` gates `/teacher/classes`'s request form, `student.block` gates the teacher block-list) — `TEACHER` is deliberately **not** widened by the teacher portal: `center.profit.view`/`analytics.center.view` stay center-staff-only (and un-grantable to `TEACHER` — `GRANTABLE_PERMISSIONS` has no `TEACHER` entry at all). A teacher seeing "earning, center earning" on their **own** session (spec §4.2 item 2) is not `center.profit.view` at all — it is an unconditional field on that one screen, verified by ownership (`session.teacherId === ctx.user.id`) rather than by a permission, since it is not the same thing as viewing the center's aggregate profit.
 - **PLATFORM_ADMIN** = `platform.manage`, `audit.view`.
 
 **Grants (the configurable edge cases).** `can(role, permission, grants)` can only *widen* a role, never narrow it, and only for permissions listed as grantable for that role (`RECEPTIONIST → attendance.correct, center.profit.view`). Grants come from `permissionGrantsFromSettings(ctx.settings)` — the single seam. Nothing else reads the toggle columns. (An earlier draft also listed `TEACHER → analytics.own.view` here — removed as of M3, since that permission was already unconditionally true in `TEACHER`'s baseline and the grant entry could never fire.)

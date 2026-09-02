@@ -686,6 +686,19 @@ export function scoped(ctx: TenantContext) {
           orderBy: [{ startTime: "asc" }],
           select: SESSION_LIST_SELECT,
         }),
+
+      /**
+       * The one session field a teacher may edit from their own portal (M7,
+       * spec §4.2 item 2). Pinned to `teacherId` as well as `centerId`, so a
+       * teacher can never touch another teacher's session even within a
+       * center they both belong to — no teacher edit-deadline setting exists
+       * yet (docs/00 §5 "Attendance" M5 note), so this is unconditional.
+       */
+      updateDescription: (id: string, teacherId: string, description: string | null) =>
+        prisma.session.updateMany({
+          where: scopedWhere(centerId, { id, teacherId }),
+          data: { description },
+        }),
     },
 
     /** The center's holiday calendar (docs/02 §11) — dates the generator skips. */
@@ -796,6 +809,34 @@ export function scoped(ctx: TenantContext) {
           orderBy: { createdAt: "desc" },
           take,
           include: { actor: true },
+        }),
+    },
+
+    /**
+     * A teacher's request to add a class/session at this center (M7, docs/01
+     * §2 "Workflow layer"). Feeds the Approvals screen — not yet built
+     * (docs/03-build-order.md M6 note); this is the write path + a read a
+     * teacher's own "my requests" list uses today.
+     */
+    changeRequests: {
+      list: (where?: Prisma.ChangeRequestWhereInput) =>
+        prisma.changeRequest.findMany({
+          where: scopedWhere(centerId, where),
+          orderBy: { createdAt: "desc" },
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.changeRequest, centerId, id),
+
+      create: (data: Omit<Prisma.ChangeRequestUncheckedCreateInput, "centerId">) =>
+        prisma.changeRequest.create({ data: scopedData(centerId, data) }),
+
+      update: (
+        id: string,
+        data: Omit<Prisma.ChangeRequestUncheckedUpdateManyInput, "centerId">,
+      ) =>
+        prisma.changeRequest.updateMany({
+          where: scopedWhere(centerId, { id }),
+          data,
         }),
     },
   };
