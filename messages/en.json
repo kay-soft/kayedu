@@ -81,7 +81,8 @@
       "title": "Choose a center",
       "subtitle": "You are connected to more than one center. Pick where you want to work.",
       "emptySubtitle": "Your account is not connected to a center yet.",
-      "emptyHelp": "Ask a center owner or manager to invite you by email, or open the invitation link you were sent.",
+      "emptyHelp": "Ask a center owner or manager to invite you by email, or open the invitation link you were sent — or browse classes to join a center as a student.",
+      "browseClasses": "Browse classes",
       "platformAdminLink": "Go to the platform admin"
     },
     "invite": {
@@ -1133,8 +1134,67 @@
   },
   "StudentSchedule": {
     "title": "My schedule",
-    "subtitle": "Your classes at {center}.",
-    "milestoneNote": "Your schedule and class discovery arrive in M8."
+    "subtitle": "Every class you're enrolled in, across every center you've joined.",
+    "filterDate": "Filter by date",
+    "clearDate": "Clear",
+    "upcomingTitle": "Upcoming",
+    "upcomingEmpty": "No upcoming sessions.",
+    "upcomingBadge": "Upcoming",
+    "pastTitle": "Past",
+    "pastEmpty": "No past sessions yet.",
+    "dropIn": "Drop-in"
+  },
+  "StudentDiscover": {
+    "title": "Discover",
+    "subtitle": "{count, plural, one {# class found} other {# classes found}}.",
+    "empty": "No classes match these filters yet.",
+    "filters": {
+      "subject": "Subject",
+      "grade": "Grade",
+      "day": "Day",
+      "all": "All"
+    },
+    "status": {
+      "open": "Open",
+      "requiresApproval": "Requires approval",
+      "pending": "Pending",
+      "enrolled": "Enrolled",
+      "full": "Full"
+    },
+    "card": {
+      "enroll": "Enroll",
+      "requestToJoin": "Request to join",
+      "pending": "Pending",
+      "enrolled": "Enrolled",
+      "full": "Class full",
+      "noSchedule": "Schedule not set yet"
+    },
+    "errors": {
+      "forbidden": "You need to sign in to reserve a class.",
+      "notFound": "That class is no longer available.",
+      "notAcceptingStudents": "This class is not accepting new students right now.",
+      "studentBlocked": "You cannot join this class.",
+      "alreadyEnrolled": "You are already enrolled in this class.",
+      "alreadyRequested": "You already have a pending request for this class.",
+      "classFull": "This class is at capacity."
+    }
+  },
+  "StudentReservations": {
+    "title": "My reservations",
+    "subtitle": "{count, plural, one {# request} other {# requests}}, across every center.",
+    "empty": "You haven't requested to join any classes yet.",
+    "cancel": "Cancel request",
+    "status": {
+      "PENDING": "Pending",
+      "CONFIRMED": "Confirmed",
+      "REJECTED": "Declined",
+      "CANCELLED": "Cancelled"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That request no longer exists.",
+      "notPending": "That request has already been resolved."
+    }
   },
   "AdminCenters": {
     "title": "Centers",

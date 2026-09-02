@@ -49,7 +49,15 @@ export default async function SelectCenterPage({
 
         <CardContent className="flex flex-col gap-3">
           {relations.length === 0 ? (
-            <FormMessage tone="info">{t("emptyHelp")}</FormMessage>
+            <>
+              <FormMessage tone="info">{t("emptyHelp")}</FormMessage>
+              <a
+                href={`/${locale}${ROUTES.studentDiscover}`}
+                className="flex min-h-11 items-center justify-center rounded-lg bg-brand px-3 py-2 text-sm font-medium text-brand-foreground hover:opacity-90"
+              >
+                {t("browseClasses")}
+              </a>
+            </>
           ) : null}
 
           {relations.map((relation) => (

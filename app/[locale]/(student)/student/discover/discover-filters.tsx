@@ -1,0 +1,98 @@
+"use client";
+
+import { useTranslations } from "next-intl";
+
+import { SelectInput } from "@/components/ui/select-input";
+
+/**
+ * Grade/subject/day filter pills (docs/04-design-system.md §10). A plain GET
+ * form — state lives in the URL, exactly like every other list filter in this
+ * app (`TeacherSessionFilters`, `SessionFilters`). Options are subject/grade
+ * *names*, not ids: `Subject`/`Grade` are center-local master data
+ * (docs/01-data-model.md §2), so a single id has no meaning once results span
+ * more than one center — the page derives these options from the names
+ * actually present in the combined result set.
+ */
+export function DiscoverFilters({
+  subject,
+  grade,
+  day,
+  subjects,
+  grades,
+  dayNames,
+  allLabel,
+}: {
+  subject: string;
+  grade: string;
+  day: string;
+  subjects: string[];
+  grades: string[];
+  dayNames: string[];
+  allLabel: string;
+}) {
+  const t = useTranslations("StudentDiscover.filters");
+
+  return (
+    <form className="grid gap-3 sm:grid-cols-3">
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor="filter-subject" className="text-xs font-medium text-text-secondary">
+          {t("subject")}
+        </label>
+        <SelectInput
+          id="filter-subject"
+          name="subject"
+          defaultValue={subject}
+          className="rounded-full"
+          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+        >
+          <option value="">{allLabel}</option>
+          {subjects.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </SelectInput>
+      </div>
+
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor="filter-grade" className="text-xs font-medium text-text-secondary">
+          {t("grade")}
+        </label>
+        <SelectInput
+          id="filter-grade"
+          name="grade"
+          defaultValue={grade}
+          className="rounded-full"
+          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+        >
+          <option value="">{allLabel}</option>
+          {grades.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </SelectInput>
+      </div>
+
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor="filter-day" className="text-xs font-medium text-text-secondary">
+          {t("day")}
+        </label>
+        <SelectInput
+          id="filter-day"
+          name="day"
+          defaultValue={day}
+          className="rounded-full"
+          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+        >
+          <option value="">{allLabel}</option>
+          {dayNames.map((name, index) => (
+            <option key={name} value={index}>
+              {name}
+            </option>
+          ))}
+        </SelectInput>
+      </div>
+    </form>
+  );
+}

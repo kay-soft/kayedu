@@ -256,6 +256,83 @@ export const getTeacherContexts = cache(
   },
 );
 
+/**
+ * Every center this user has an active `StudentProfile` at, each resolved
+ * into its own full `TenantContext` — the student-portal mirror of
+ * `getTeacherContexts` (M7), used for the Schedule page's per-center
+ * `scoped(ctx)` queries, unioned in memory (docs/01-data-model.md §4).
+ *
+ * Deliberately narrower than the student *experience* itself: a student can
+ * have a PENDING `Reservation` at a center with no `StudentProfile` there yet
+ * (M8, `lib/db/reservations.ts`) — that center has nothing to loop over here
+ * until the request is confirmed or instantly enrolled. "My reservations"
+ * reads across every center by `studentId` directly instead
+ * (`lib/db/student-portal.ts`), the same identity-scoped shape
+ * `getUserCenterRelations` already uses.
+ */
+export const getStudentContexts = cache(
+  async (userId: string): Promise<TenantContext[]> => {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return [];
+
+    const relations = await getUserCenterRelations(userId);
+    const studentRelations = relations.filter((relation) =>
+      relation.roles.includes("STUDENT"),
+    );
+
+    return Promise.all(
+      studentRelations.map((relation) => buildContext(user, relation, "student")),
+    );
+  },
+);
+
+/** The platform default before a student has connected anywhere (docs/04 §2). */
+const DEFAULT_STUDENT_BRAND = {
+  name: "KayEdu",
+  logoUrl: null as string | null,
+  themeColor: "#2563EB",
+};
+
+export type StudentSession = {
+  user: User;
+  /** Every center this user is connected to, in any role — for "switch center". */
+  relations: CenterRelation[];
+  /** The relation to brand the student shell with — the first STUDENT one, if any. */
+  studentRelation: CenterRelation | null;
+};
+
+/**
+ * The (student) route group's gate — deliberately **not**
+ * `requireExperience("student")`. Discover is the mechanism by which a
+ * brand-new sign-up becomes a student at all (spec §4.3, docs/02 §3 "students
+ * by discovery/enroll"): requiring an existing `StudentProfile`/role before a
+ * user can even reach Discover would make that self-serve path unreachable —
+ * `getTenantContext` redirects a zero-relation user to `/select-center`
+ * before any role check runs. This only requires a signed-in `User`; a person
+ * with zero relations anywhere still gets a `StudentSession` (with
+ * `studentRelation: null`), rendered with the platform default brand instead
+ * of a center's theme, so they can browse and make their first reservation.
+ */
+export async function requireStudentUser(): Promise<StudentSession> {
+  const user = await getCurrentUser();
+  if (!user) return redirectTo(ROUTES.login);
+
+  const relations = await getUserCenterRelations(user.id);
+  const studentRelation =
+    relations.find((relation) => relation.roles.includes("STUDENT")) ?? null;
+
+  return { user, relations, studentRelation };
+}
+
+export function studentBrand(session: StudentSession) {
+  if (!session.studentRelation) return DEFAULT_STUDENT_BRAND;
+  return {
+    name: session.studentRelation.center.name,
+    logoUrl: session.studentRelation.center.logoUrl,
+    themeColor: session.studentRelation.center.themeColor,
+  };
+}
+
 export function hasExperience(ctx: TenantContext, experience: Experience): boolean {
   switch (experience) {
     case "center":

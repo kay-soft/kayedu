@@ -49,6 +49,8 @@ export const ROUTES = {
   teacherStudent: (id: string) => `/teacher/students/${id}`,
   teacherClasses: "/teacher/classes",
   studentSchedule: "/student/schedule",
+  studentDiscover: "/student/discover",
+  studentReservations: "/student/reservations",
   adminCenters: "/admin/centers",
 } as const;
 

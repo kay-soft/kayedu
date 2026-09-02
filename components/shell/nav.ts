@@ -61,8 +61,8 @@ const TEACHER_NAV: NavDef[] = [
 
 const STUDENT_NAV: NavDef[] = [
   { href: ROUTES.studentSchedule, labelKey: "schedule", icon: "schedule" },
-  { href: "/student/discover", labelKey: "discover", icon: "discover", disabled: true },
-  { href: "/student/reservations", labelKey: "reservations", icon: "sessions", disabled: true },
+  { href: ROUTES.studentDiscover, labelKey: "discover", icon: "discover" },
+  { href: ROUTES.studentReservations, labelKey: "reservations", icon: "sessions" },
 ];
 
 const ADMIN_NAV: NavDef[] = [

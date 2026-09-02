@@ -52,7 +52,7 @@ app/
         permissions/            # receptionist grant toggles
         staff/                  # users & roles: invite, change role, deactivate
     (teacher)/teacher/          # /teacher/dashboard, /teacher/sessions, /teacher/students, /teacher/classes (M7)
-    (student)/student/          # /student/schedule, /student/discover, ...
+    (student)/student/          # /student/schedule, /student/discover, /student/reservations (M8)
     (admin)/admin/              # /admin/centers, /admin/platform
     (print)/                    # role-gated print views, no app shell — students/[id]/{card,paper} (M3),
                                  # teacher/sessions/[id]/print (M7); layout accepts "center" or "teacher"
@@ -70,7 +70,7 @@ lib/
   auth/
     session.ts                  # Supabase auth user + User mirror
     active-center.ts            # the active-center cookie
-    tenant.ts                   # getTenantContext() (request-cached, §14) + getTeacherContexts() (M7, §4), route-group gates
+    tenant.ts                   # getTenantContext() (request-cached, §14) + getTeacherContexts() (M7, §4) + getStudentContexts()/requireStudentUser() (M8, §4), route-group gates
     permissions.ts              # can(role, action) map
   supabase/
     server.ts  client.ts  proxy.ts  env.ts
@@ -89,6 +89,9 @@ lib/
     payments.ts                  # recordPayment/voidPayment — the ONLY Payment writes, no @/ imports (M5)
     analytics.ts                 # revenue/expense/user aggregates, no @/ imports; /dashboard + /analytics both call it (M6, §14)
     teacher-portal.ts            # cross-center read helpers, no @/ imports — one centerId-scoped query per center, unioned by the caller (M7, §4)
+    discover.ts                  # cross-center Discover reads, no @/ imports — one centerId-scoped query per active center, unioned by the caller (M8, §4)
+    student-portal.ts            # a student's own blocks/reservations/enrollments/schedule, no @/ imports — identity-scoped by studentId, mirroring getUserCenterRelations (M8, §4)
+    reservations.ts              # the ONLY Reservation/Enrollment writes for the student portal — reserveOrEnroll/confirmReservation/rejectReservation/cancelReservation, no @/ imports (M8)
   money.ts                      # the ONLY center-cut math + piastre helpers
   scheduling.ts                 # pure time-overlap, conflict-detection and rolling-window date math (M4)
   card-layout.ts                # the default ID-card layout the editor offers
@@ -101,6 +104,7 @@ lib/
   i18n/  request.ts  routing.ts  navigation.ts
   validation/                   # zod schemas per entity, incl. pagination helpers (people.ts, §14)
     teacher.ts                   # session-description edit, teacher block-list, class-request schemas, no @/ imports (M7)
+    student.ts                   # reserve-class / cancel-reservation schemas (M8)
   utils.ts
 messages/
   ar.json  en.json
@@ -114,6 +118,7 @@ scripts/
   payments-check.ts             # snapshot/void-correct/drop-in/consecutive-absence gate (M5)
   analytics-check.ts            # revenue/expense reconciliation + cross-center + profit-denial gate (M6)
   teacher-portal-check.ts       # shared-teacher two-center zero-leakage + combined-dashboard union gate (M7)
+  student-portal-check.ts       # instant-enroll/pending branching, capacity, blocking (both scopes), duplicate-reservation, cross-center isolation gate (M8)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -171,7 +176,9 @@ It redirects (never returns) when there is no valid relationship: to `/login` wi
 
 **Active center resolution.** The chosen `centerId` lives in an httpOnly cookie (`kayedu_center`). Exactly one center → auto-selected, no hub. Cookies can only be *written* from a Server Action or Route Handler, so selecting persists the cookie while a Server Component simply resolves the single relation on the fly.
 
-**Route-group gates.** Each group layout calls `requireExperience("center" | "teacher" | "student")` (or `requirePlatformAdmin()`), which resolves the context and bounces anyone whose roles don't include that experience to their own home path.
+**Route-group gates.** Each group layout calls `requireExperience("center" | "teacher" | "student")` (or `requirePlatformAdmin()`), which resolves the context and bounces anyone whose roles don't include that experience to their own home path. The `(student)` layout is the one exception (M8): it calls `requireStudentUser()` instead, not `requireExperience("student")` — see the note below.
+
+**`getStudentContexts(userId)`** (M8, mirroring `getTeacherContexts`) resolves one full `TenantContext` per center this user has an active `StudentProfile` at, for the Schedule page's per-center queries. **`requireStudentUser()`** is a deliberately looser gate than `requireExperience`: it requires only a signed-in `User`, never an existing `StudentProfile`/`STUDENT` role. A brand-new sign-up has zero relations anywhere until they discover and reserve/enroll in their first class (docs/00 §5 "Reservations / enrollment"), and `getTenantContext`/`requireExperience` redirect a zero-relation user to `/select-center` before any role check runs — which would make that self-serve path unreachable. `requireStudentUser()` returns a `StudentSession` (`{ user, relations, studentRelation }`) instead of a `TenantContext`; `studentRelation` is the first relation with role STUDENT, or `null` for someone who hasn't connected anywhere yet, in which case the `(student)` shell renders with the platform default brand (`studentBrand()`) rather than a center's theme. `/select-center`'s empty state (zero relations at all) links to `/student/discover` as the way out of that dead end.
 
 ---
 
@@ -217,7 +224,9 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:teacher-portal` (`scripts/teacher-portal-check.ts`) is the M7 gate — the shared-teacher no-leak test flagged as outstanding since M1: it creates two throwaway centers and **one** teacher `User` with a `TEACHER` `Membership` at both, seeds sessions/payments/students independently at each (through the same `createAttendance`/`recordPayment` functions M5's gate exercises), then asserts through `lib/db/teacher-portal.ts` — the module the dashboard/sessions/students pages call — that: a per-center session query (`teacherSessionListWhere`, filterable by grade and by student search) returns only that center's sessions; `teacherCenterSummary` (today's/this-week's session counts + this-range earnings) sees only that center's rows, and `combineTeacherSummaries` of both centers' summaries is exactly their sum — the "combined view is a union of independently-scoped per-center queries" claim, executed; `teacherStudentProfileIds`/`studentSessionsWithTeacher` return only the roster and history this teacher has *at that center*; the same shared teacher blocking a student at Center A (`StudentBlock` scope `TEACHER`) has not blocked them at Center B (the M3 regression the task instructions call out by name); and neither center can resolve the other's `Session`, `StudentProfile`, `Payment`, `StudentBlock` or `ChangeRequest` by id. A separate permission-map pass (no database) confirms `TEACHER` still cannot reach `center.profit.view`/`analytics.center.view` — M7 must not widen the role. Then it cleans up.
 
-All seven gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/analytics.ts` and `lib/db/teacher-portal.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
+`npm run check:student-portal` (`scripts/student-portal-check.ts`) is the M8 gate: against two throwaway centers, all through `lib/db/reservations.ts`/`lib/db/student-portal.ts` — the same functions Discover's Server Action, the Schedule page and a future Approvals screen call — it asserts that: `reserveOrEnroll` on a `requiresConfirmation = false` class writes an ACTIVE `Enrollment` directly with no `Reservation` row and no `StudentProfile` created before that instant (only at that instant); the same class's second concurrent-style enrollment at capacity 1 is refused `classFull`, and a duplicate submission for an already-enrolled student is refused `alreadyEnrolled`; a `requiresConfirmation = true` class writes a PENDING `Reservation` with **no** `StudentProfile` yet, a second request for the same PENDING class/student is refused `alreadyRequested`, and a `StudentBlock` of either scope (TEACHER *or* CLASS) refuses the request outright; `acceptsNewStudents = false` and a `centerId`/`classGroupId` pair that doesn't actually match (a spoofed cross-center id) both resolve the way `notFound`/`notAcceptingStudents` should; `confirmReservation` creates the `StudentProfile` + ACTIVE `Enrollment` and marks the row CONFIRMED; `rejectReservation` followed by a re-request reuses the **same** `Reservation` row (the `(classGroupId, studentId)` unique constraint, docs/01 §2) rather than erroring, and exactly one row exists across that whole reject/re-request lifecycle; `cancelReservation` only lets a student cancel their own PENDING row, refusing both someone else's and an already-resolved one; and — the flagship isolation scenario, mirroring M7's shared-teacher test — a student active at both centers has their own active-enrollment/reservation-status maps span exactly the centers they actually touched, a block placed at Center A does not leak into Center B's per-center block map, and neither center can resolve the other's `Reservation`/`StudentProfile`/`Enrollment` by id. Then it cleans up.
+
+All eight gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/analytics.ts`, `lib/db/teacher-portal.ts`, `lib/db/discover.ts`, `lib/db/student-portal.ts` and `lib/db/reservations.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 
@@ -349,6 +358,8 @@ Introduced during the M3 hardening pass, after navigation had grown noticeably s
 **Indexes exist for the query shapes actually run.** Every hot scoped lookup is `centerId`-first (`01-data-model.md` §2); compound indexes are added when a second column is filtered or ordered on in the same query — `Membership(centerId, role)` for the teacher list, `StudentProfile(centerId, active)` for status filtering. Substring search (`contains`, used for name/phone/code search) cannot use a plain btree index — that is a known limitation for now; a `pg_trgm` trigram index is the documented upgrade path if search latency becomes a problem at real center scale, not yet built because it isn't yet needed.
 
 **Analytics never fetches rows to sum them in memory (M6).** `lib/db/analytics.ts` — the module `/dashboard` and `/analytics` both call, with different date-range defaults, rather than each duplicating the aggregation — reads revenue exclusively through `Prisma.aggregate`/`groupBy`: `revenueTotals` is one `payment.aggregate` per date range (optionally narrowed by `teacherId`), and `revenueByTeacher` is one `payment.groupBy(['teacherId'])`. Prisma cannot `groupBy` on a related model's column, so `Payment.teacherId` (`01-data-model.md` §2) is a denormalized snapshot of `session.teacherId`, written once by `recordPayment` — not a money field, so it carries none of the "never recompute" weight the share snapshots do, but it is what keeps the by-teacher breakdown a single indexed query (`@@index([centerId, teacherId, recordedAt])`) instead of a fetch-every-payment-and-reduce-in-JS loop.
+
+**Discover is a deliberate exception to "never load everything" (M8).** Every other list page bounds its query with `take`/`skip` in the database; Discover instead fetches every discoverable class from every active center (bounded per center by `discoverClassesForCenter`'s `take: 200`) and filters/paginates the *combined* result in the application layer, because the subject/grade filters match on center-local master-data *names*, not ids (docs/01-data-model.md §4), so they cannot be pushed into any single center's `where`. Acceptable at Phase 1's pilot scale (a handful of centers); if the platform grows, add a name→id lookup per filter value and push the `where` back down before this becomes the loader the rest of this section warns against.
 
 **Prefetching stays on.** Next.js `<Link>` (via `next-intl`'s wrapper) prefetches viewport-visible destinations by default — list rows linking to detail pages get this for free. Don't pass `prefetch={false}` without a specific reason; the default is the right behavior for this app's navigation-heavy UI.
 
