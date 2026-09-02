@@ -154,7 +154,14 @@ export async function generateSessions(
   classGroupId?: string,
 ): Promise<GenerateSessionsResult> {
   const windowStart = startOfUtcDay(new Date());
-  const windowEnd = addDays(windowStart, GENERATION_WINDOW_DAYS);
+  // generateOccurrenceDates treats both ends inclusively (its own doc-comment
+  // contract, `lib/scheduling.ts`), so a window of GENERATION_WINDOW_DAYS
+  // calendar days is [windowStart, windowStart + (GENERATION_WINDOW_DAYS - 1)]
+  // — 42 distinct days, not 43. Off-by-one here previously made the window
+  // inclusive of a 43rd day, which silently added a bonus 7th occurrence of
+  // whichever weekday happened to equal "today"'s weekday on the day the
+  // generator ran — a date-dependent bug, not just a date-dependent test.
+  const windowEnd = addDays(windowStart, GENERATION_WINDOW_DAYS - 1);
 
   const [classes, holidayKeys, existing] = await Promise.all([
     loadClassesForGeneration(db, centerId, classGroupId),
