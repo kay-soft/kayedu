@@ -18,7 +18,8 @@
     "check:payments": "node --env-file-if-exists=.env scripts/payments-check.ts",
     "check:analytics": "node --env-file-if-exists=.env scripts/analytics-check.ts",
     "check:teacher-portal": "node --env-file-if-exists=.env scripts/teacher-portal-check.ts",
-    "check:student-portal": "node --env-file-if-exists=.env scripts/student-portal-check.ts"
+    "check:student-portal": "node --env-file-if-exists=.env scripts/student-portal-check.ts",
+    "check:approvals": "node --env-file-if-exists=.env scripts/approvals-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

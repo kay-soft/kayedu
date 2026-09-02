@@ -1,4 +1,10 @@
-import type { EnrollmentStatus, Prisma, Role, SessionStatus } from "@prisma/client";
+import type {
+  EnrollmentStatus,
+  Prisma,
+  ReservationStatus,
+  Role,
+  SessionStatus,
+} from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import type { TenantContext } from "@/lib/auth/tenant";
 import {
@@ -25,6 +31,7 @@ const TEACHER: Role = "TEACHER";
 const ACTIVE_ENROLLMENT: EnrollmentStatus = "ACTIVE";
 const EXISTING_ENROLLMENT_STATUSES: EnrollmentStatus[] = ["ACTIVE", "BLOCKED"];
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
+const PENDING_RESERVATION: ReservationStatus = "PENDING";
 
 /**
  * Tenant-scoped data access (docs/02-architecture.md §5).
@@ -838,6 +845,30 @@ export function scoped(ctx: TenantContext) {
           where: scopedWhere(centerId, { id }),
           data,
         }),
+    },
+
+    /**
+     * A student's request to join a class (M8, `lib/db/reservations.ts`).
+     * Read-only here — the Approvals screen's queue (M8.5) — because the
+     * actual confirm/reject *writes* re-check blocking/capacity and touch
+     * `Enrollment`/`StudentProfile` too, so they stay in
+     * `lib/db/reservations.ts`'s `confirmReservation`/`rejectReservation`
+     * (called with `centerId` directly, exactly like `recordPayment`/
+     * `voidPayment`, not through this object).
+     */
+    reservations: {
+      /** The Approvals queue's own section: this center's PENDING requests. */
+      listPending: () =>
+        prisma.reservation.findMany({
+          where: scopedWhere(centerId, { status: PENDING_RESERVATION }),
+          orderBy: { requestedAt: "asc" },
+          include: {
+            student: true,
+            classGroup: { include: { subject: true, grade: true } },
+          },
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.reservation, centerId, id),
     },
   };
 }

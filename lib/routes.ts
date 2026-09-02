@@ -30,6 +30,7 @@ export const ROUTES = {
   // Analytics & expenses (M6).
   centerAnalytics: "/analytics",
   centerExpenses: "/expenses",
+  centerApprovals: "/approvals",
   // Center configuration (M2). The settings shell lives at /settings and every
   // configuration screen is a child of it.
   centerSettings: "/settings",

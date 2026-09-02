@@ -758,6 +758,45 @@
       "tooLong": "This value is too long."
     }
   },
+  "Approvals": {
+    "title": "Approvals",
+    "subtitle": "{count, plural, =0 {Nothing pending} one {# pending request} other {# pending requests}}.",
+    "empty": "Nothing is waiting for your review right now.",
+    "approve": "Approve",
+    "decline": "Decline",
+    "changeRequests": {
+      "title": "Class requests",
+      "description": "New classes teachers have asked to open at this center. Approving does not create the class — create it at Classes using these details.",
+      "empty": "No pending class requests.",
+      "requestedOn": "Requested {date}",
+      "approved": "Approved",
+      "declined": "Declined",
+      "fields": {
+        "day": "Day",
+        "time": "Time",
+        "capacity": "Capacity",
+        "attendance": "Attendance required",
+        "lateThreshold": "Late threshold (min)",
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "reservations": {
+      "title": "Class reservations",
+      "description": "Students waiting to join a class that requires confirmation. Approving enrolls them immediately.",
+      "empty": "No pending reservations.",
+      "requestedOn": "Requested {date}",
+      "approved": "Approved",
+      "declined": "Declined"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That request no longer exists.",
+      "notPending": "That request has already been resolved.",
+      "studentBlocked": "This student cannot be enrolled in this class.",
+      "classFull": "This class is at capacity."
+    }
+  },
   "Settings": {
     "title": "Center configuration",
     "subtitle": "Set up this center's academic and operational reference data. Everything here is per center — the next center needs no code changes.",
