@@ -170,6 +170,41 @@ export function monthRangeUtc(date: Date): { start: Date; end: Date } {
   return { start, end };
 }
 
+/** Calendar year containing `date`, as a `[start, end]` UTC-midnight pair (M6 Analytics). */
+export function yearRangeUtc(date: Date): { start: Date; end: Date } {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const end = new Date(Date.UTC(date.getUTCFullYear(), 11, 31));
+  return { start, end };
+}
+
+export type DateRangeKind = "day" | "week" | "month" | "year" | "all";
+
+/**
+ * Resolves one of Analytics/Expenses' date-range filters (spec §4.1 items 5
+ * & 6) to a `[start, end]` UTC-midnight bound around `anchor` — or `null`
+ * bounds for "all-time", which `lib/db/analytics.ts` treats as unbounded
+ * rather than a fabricated epoch date.
+ */
+export function resolveDateRangeUtc(
+  kind: DateRangeKind,
+  anchor: Date,
+): { start: Date | null; end: Date | null } {
+  switch (kind) {
+    case "day": {
+      const day = startOfUtcDay(anchor);
+      return { start: day, end: day };
+    }
+    case "week":
+      return weekRangeUtc(anchor);
+    case "month":
+      return monthRangeUtc(anchor);
+    case "year":
+      return yearRangeUtc(anchor);
+    case "all":
+      return { start: null, end: null };
+  }
+}
+
 // ── Session conflicts (generation time) ────────────────────────────────────
 
 export type ExistingSession = {

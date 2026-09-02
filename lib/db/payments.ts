@@ -98,6 +98,10 @@ export async function recordPayment(
       sessionId: attendee.sessionId,
       sessionAttendeeId: attendee.id,
       studentProfileId: attendee.studentProfileId,
+      // Denormalized from the session for the M6 by-teacher analytics
+      // groupBy (docs/02 §14) — not a money field, so it carries none of the
+      // "never recompute" weight the share snapshots do.
+      teacherId: attendee.session.teacherId,
       amount,
       method,
       priceSnapshot: amount,

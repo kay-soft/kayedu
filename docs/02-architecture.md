@@ -41,8 +41,8 @@ app/
       students/  students/[id]/
       sessions/  sessions/[id]/     # Today's Sessions dashboard, roster, attendance, receipt (M5)
       reception/                 # search/scan, live rail, one-flow check-in (M5)
-      analytics/
-      expenses/
+      analytics/                 # date filters + by-teacher breakdown, reads lib/db/analytics.ts (M6)
+      expenses/                  # category CRUD + append-and-audit ledger, same date filters (M6)
       approvals/
       settings/                 # the configuration shell + its sub-nav
         branches/  rooms/       # general (default cut, timeout, late, tz) is /settings
@@ -84,7 +84,7 @@ lib/
     sessions.ts                 # the generator + dashboard/detail read-side policy, no @/ imports (M4 §11, M5)
     attendance.ts                # record/correct writes + consecutive-absence count, no @/ imports (M5)
     payments.ts                  # recordPayment/voidPayment — the ONLY Payment writes, no @/ imports (M5)
-    analytics.ts ...
+    analytics.ts                 # revenue/expense/user aggregates, no @/ imports; /dashboard + /analytics both call it (M6, §14)
   money.ts                      # the ONLY center-cut math + piastre helpers
   scheduling.ts                 # pure time-overlap, conflict-detection and rolling-window date math (M4)
   card-layout.ts                # the default ID-card layout the editor offers
@@ -107,6 +107,7 @@ scripts/
   people-check.ts               # the teachers/students/blocks/storage gate (M3)
   classes-check.ts              # classes/schedules/conflicts/session-generation gate (M4)
   payments-check.ts             # snapshot/void-correct/drop-in/consecutive-absence gate (M5)
+  analytics-check.ts            # revenue/expense reconciliation + cross-center + profit-denial gate (M6)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -206,7 +207,9 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:payments` (`scripts/payments-check.ts`) is the M5 gate (spec §7 acceptance criteria 3-5, 13): it first exercises `lib/money.ts`'s `splitShare` with no database (FIXED 15 EGP and PERCENTAGE 15% both split a 120 EGP session correctly, and a percentage rounds to the nearest piastre), then a database-backed pass against two throwaway centers, all through `lib/db/attendance.ts`/`lib/db/payments.ts` — the same functions the Server Actions call: a payment recorded now freezes the class's *current* cut, and an already-recorded payment keeps its old `centerShareSnapshot` after the class's cut is changed later, while a payment recorded *after* the change uses the new one; a drop-in (`isDropIn: true`, `enrollmentId: null`) gets attendance and a payment recorded with zero `Enrollment` rows created; `recordPayment` refuses a second active payment for the same attendee (`alreadyPaid`) and refuses one for an ABSENT attendee (`attendanceNotPayable`) — "attend = pay, or not counted" enforced in code, not just the UI; `voidPayment` marks a row voided without touching its money fields, refuses double-voiding, and a corrected `recordPayment` afterward adds a **second** `Payment` row for the same `SessionAttendee` rather than replacing the first, so both survive with exactly one active; `consecutiveAbsenceCount` counts three ABSENT marks in a row as 3, resets to 0 on a PRESENT, and starts a new streak at 1 rather than continuing the old one; and Center B cannot resolve Center A's `SessionAttendee` or `Payment` by id, and cannot record or void a payment against them. Then it cleans up.
 
-All five gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts` and `lib/db/payments.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
+`npm run check:analytics` (`scripts/analytics-check.ts`) is the M6 gate (docs/03-build-order.md M6 "Done when"): against two throwaway centers, all through `lib/db/analytics.ts` — the same module `/dashboard` and `/analytics` both call — it seeds payments (via the real `recordPayment`/`createAttendance`) and expenses spanning an in-range window and two out-of-range dates, then asserts `revenueTotals` sums exactly the in-range payments (never the out-of-range ones, and never recomputed from the live class config — docs/01 §3), that a `teacherId` filter narrows it correctly, that `revenueByTeacher`'s single `groupBy` reconciles per teacher, that `expenseTotals` feeds the net figure (`centerShare − expenses`) exactly, that `studentCounts`/`teacherCounts` correctly separate total/active/new within the range, and that Center B's calls against every one of these functions see zero of Center A's rows. It also asserts directly against `lib/auth/permissions.ts`'s `can()` that RECEPTIONIST holds neither `analytics.center.view` nor `expense.manage` — grantable or not — so the profit-denial (spec §7 acceptance criterion 9) is a page-level redirect with no code path around it, not a hidden button. Then it cleans up.
+
+All six gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts` and `lib/db/analytics.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 
@@ -336,5 +339,7 @@ Introduced during the M3 hardening pass, after navigation had grown noticeably s
 **`revalidatePath` is targeted, not broad.** Every mutation revalidates only the paths it actually changed — a list, a detail page, and (for students) the card/paper printables are three separate helpers (`revalidateStudentList`, `revalidateStudentDetail`, `revalidateStudentPrintables` in `app/[locale]/(center)/students/actions.ts`) rather than one function every action calls unconditionally. Deactivating a student, for instance, doesn't touch the printables — nothing on the card or the paper sheet depends on active/inactive.
 
 **Indexes exist for the query shapes actually run.** Every hot scoped lookup is `centerId`-first (`01-data-model.md` §2); compound indexes are added when a second column is filtered or ordered on in the same query — `Membership(centerId, role)` for the teacher list, `StudentProfile(centerId, active)` for status filtering. Substring search (`contains`, used for name/phone/code search) cannot use a plain btree index — that is a known limitation for now; a `pg_trgm` trigram index is the documented upgrade path if search latency becomes a problem at real center scale, not yet built because it isn't yet needed.
+
+**Analytics never fetches rows to sum them in memory (M6).** `lib/db/analytics.ts` — the module `/dashboard` and `/analytics` both call, with different date-range defaults, rather than each duplicating the aggregation — reads revenue exclusively through `Prisma.aggregate`/`groupBy`: `revenueTotals` is one `payment.aggregate` per date range (optionally narrowed by `teacherId`), and `revenueByTeacher` is one `payment.groupBy(['teacherId'])`. Prisma cannot `groupBy` on a related model's column, so `Payment.teacherId` (`01-data-model.md` §2) is a denormalized snapshot of `session.teacherId`, written once by `recordPayment` — not a money field, so it carries none of the "never recompute" weight the share snapshots do, but it is what keeps the by-teacher breakdown a single indexed query (`@@index([centerId, teacherId, recordedAt])`) instead of a fetch-every-payment-and-reduce-in-JS loop.
 
 **Prefetching stays on.** Next.js `<Link>` (via `next-intl`'s wrapper) prefetches viewport-visible destinations by default — list rows linking to detail pages get this for free. Don't pass `prefetch={false}` without a specific reason; the default is the right behavior for this app's navigation-heavy UI.

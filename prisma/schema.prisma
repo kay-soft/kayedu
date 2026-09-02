@@ -531,6 +531,12 @@ model Payment {
   center               Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
   sessionId            String
   session              Session         @relation(fields: [sessionId], references: [id])
+  // Denormalized from session.teacherId at record time (M6, docs/02 §14): the
+  // by-teacher analytics breakdown needs a single-table `groupBy`, and Prisma
+  // cannot `groupBy` on a related model's scalar column. Not a money field —
+  // just a reference snapshot, like `recordedBy` — so it carries none of the
+  // "never recompute" weight CLAUDE.md rule 2 puts on the share snapshots.
+  teacherId            String
   // Deliberately NOT @unique (revised at M5): a void never deletes its row
   // (CLAUDE.md rule 2), and a correction writes a *new* Payment for the same
   // roster row rather than reusing or replacing the voided one — so one
@@ -560,6 +566,7 @@ model Payment {
   @@index([sessionAttendeeId])
   @@index([centerId])
   @@index([centerId, recordedAt])
+  @@index([centerId, teacherId, recordedAt])
 }
 
 /**
@@ -590,6 +597,9 @@ model ExpenseCategory {
   centerId  String
   center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
   name      String
+  // Deactivates rather than hard-deletes while expenses still reference it —
+  // the same convention as the other master-data entities (docs/01 §6).
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
   expenses Expense[]

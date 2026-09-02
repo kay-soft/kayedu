@@ -705,6 +705,71 @@ export function scoped(ctx: TenantContext) {
         prisma.holiday.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
+    /** Expense categories (M6) — same shape as the other master-data entities. */
+    expenseCategories: {
+      list: (where?: Prisma.ExpenseCategoryWhereInput) =>
+        prisma.expenseCategory.findMany({
+          where: scopedWhere(centerId, where),
+          orderBy: [{ active: "desc" }, { name: "asc" }],
+        }),
+
+      count: (where?: Prisma.ExpenseCategoryWhereInput) =>
+        prisma.expenseCategory.count({ where: scopedWhere(centerId, where) }),
+
+      findById: (id: string) =>
+        scopedFindById(prisma.expenseCategory, centerId, id),
+
+      create: (
+        data: Omit<Prisma.ExpenseCategoryUncheckedCreateInput, "centerId">,
+      ) => prisma.expenseCategory.create({ data: scopedData(centerId, data) }),
+
+      update: (
+        id: string,
+        data: Omit<Prisma.ExpenseCategoryUncheckedUpdateManyInput, "centerId">,
+      ) =>
+        prisma.expenseCategory.updateMany({
+          where: scopedWhere(centerId, { id }),
+          data,
+        }),
+
+      remove: (id: string) =>
+        prisma.expenseCategory.deleteMany({ where: scopedWhere(centerId, { id }) }),
+    },
+
+    /**
+     * Expenses (M6, spec §4.1 item 6). Create-and-audit, never edited in
+     * place — a mistaken entry is deleted (also audited) and re-added, the
+     * same "financial changes are audited" spirit as Payment/void
+     * (CLAUDE.md rule 7), without the append-only ledger machinery Payment
+     * needs (an Expense carries no downstream snapshot that must survive it).
+     */
+    expenses: {
+      count: (where?: Prisma.ExpenseWhereInput) =>
+        prisma.expense.count({ where: scopedWhere(centerId, where) }),
+
+      /** The list screen: lean, filtered, ordered and paged. */
+      search: (args: {
+        where?: Prisma.ExpenseWhereInput;
+        take: number;
+        skip?: number;
+      }) =>
+        prisma.expense.findMany({
+          where: scopedWhere(centerId, args.where),
+          orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+          include: { category: true },
+          take: args.take,
+          skip: args.skip,
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.expense, centerId, id),
+
+      create: (data: Omit<Prisma.ExpenseUncheckedCreateInput, "centerId">) =>
+        prisma.expense.create({ data: scopedData(centerId, data) }),
+
+      remove: (id: string) =>
+        prisma.expense.deleteMany({ where: scopedWhere(centerId, { id }) }),
+    },
+
     settings: {
       get: () => prisma.centerSettings.findUnique({ where: { centerId } }),
 
