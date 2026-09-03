@@ -366,10 +366,27 @@ export function scoped(ctx: TenantContext) {
           }),
         }),
 
+      /**
+       * Any row for this pair, any status — including REMOVED. The table has
+       * a hard @@unique([studentProfileId, classGroupId]), so a student who
+       * was removed from a class still owns that row forever; re-enrolling
+       * must reactivate it rather than insert a second one.
+       */
+      findAny: (classGroupId: string, studentProfileId: string) =>
+        prisma.enrollment.findFirst({
+          where: scopedWhere(centerId, { classGroupId, studentProfileId }),
+        }),
+
       findById: (id: string) => scopedFindById(prisma.enrollment, centerId, id),
 
       create: (data: Omit<Prisma.EnrollmentUncheckedCreateInput, "centerId">) =>
         prisma.enrollment.create({ data: scopedData(centerId, data) }),
+
+      reactivate: (id: string) =>
+        prisma.enrollment.updateMany({
+          where: scopedWhere(centerId, { id }),
+          data: { status: ACTIVE_ENROLLMENT, enrolledAt: new Date() },
+        }),
 
       setStatus: (id: string, status: Prisma.EnrollmentUncheckedUpdateManyInput["status"]) =>
         prisma.enrollment.updateMany({

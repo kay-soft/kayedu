@@ -469,11 +469,19 @@ export async function enrollStudentAction(
     if (active >= classGroup.capacity) return { error: "classFull" };
   }
 
-  await scope.db.enrollments.create({
-    classGroupId,
-    studentProfileId,
-    status: "ACTIVE",
-  });
+  // @@unique([studentProfileId, classGroupId]) means a previously removed
+  // enrollment still owns this pair's row — reactivate it instead of
+  // inserting a second one, which would violate the unique constraint.
+  const existing = await scope.db.enrollments.findAny(classGroupId, studentProfileId);
+  if (existing) {
+    await scope.db.enrollments.reactivate(existing.id);
+  } else {
+    await scope.db.enrollments.create({
+      classGroupId,
+      studentProfileId,
+      status: "ACTIVE",
+    });
+  }
 
   revalidateClassDetail(locale, classGroupId);
   revalidateStudentDetail(locale, studentProfileId);
