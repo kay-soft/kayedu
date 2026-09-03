@@ -1,12 +1,16 @@
 /**
- * Seed: one center, its CenterSettings, and one owner (M1).
+ * Seed: one center, its CenterSettings, and one owner (M1), plus a demo
+ * roster with one login per role so every experience (center, teacher,
+ * student) can be signed into and tested (M10).
  *
  * Run with:  npm run db:seed
  *
  * If SUPABASE_SERVICE_ROLE_KEY is set, this also creates the matching
- * **Supabase Auth** user (email confirmed) and links it to the User row, so the
- * owner can sign in immediately. Without that key it creates the app-side User
- * only — the mirror in lib/auth/session.ts then links by email on first login.
+ * **Supabase Auth** user (email confirmed) for the owner, the manager, the
+ * receptionist, the first demo teacher, and the first demo student — all
+ * sharing the owner's password — and links each to its User row so they can
+ * sign in immediately. Without that key it creates the app-side Users only —
+ * the mirror in lib/auth/session.ts then links each by email on first login.
  *
  * Override the defaults with env vars:
  *   SEED_CENTER_NAME, SEED_CENTER_SLUG, SEED_CENTER_THEME,
@@ -33,11 +37,23 @@ const OWNER_FIRST_NAME = process.env.SEED_OWNER_FIRST_NAME ?? "محمد";
 const OWNER_LAST_NAME = process.env.SEED_OWNER_LAST_NAME ?? "الكيالي";
 const OWNER_PHONE = process.env.SEED_OWNER_PHONE ?? null;
 
+// Every account the seed gives a real login shares this password, so the
+// user only has to remember one credential to test each role.
+const DEMO_LOGIN_PASSWORD = OWNER_PASSWORD;
+
+/** Role → email, collected as logins are created, for the summary printed at the end. */
+const seededLogins: { role: string; email: string }[] = [];
+
 /**
- * Creates (or finds) the Supabase Auth user for the owner and returns its id.
- * Returns null when the service-role key isn't configured.
+ * Creates (or finds) a Supabase Auth user for the given person and returns
+ * its id. Returns null when the service-role key isn't configured.
  */
-async function ensureAuthUser(): Promise<string | null> {
+async function ensureAuthUserFor(params: {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+}): Promise<string | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -45,23 +61,20 @@ async function ensureAuthUser(): Promise<string | null> {
     return null;
   }
 
+  const { email, password, firstName, lastName } = params;
   const admin = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
   const { data, error } = await admin.auth.admin.createUser({
-    email: OWNER_EMAIL,
-    password: OWNER_PASSWORD,
+    email,
+    password,
     email_confirm: true,
-    user_metadata: {
-      first_name: OWNER_FIRST_NAME,
-      last_name: OWNER_LAST_NAME,
-      locale: "ar",
-    },
+    user_metadata: { first_name: firstName, last_name: lastName, locale: "ar" },
   });
 
   if (!error && data.user) {
-    console.log(`  Auth user    created — password: ${OWNER_PASSWORD}`);
+    console.log(`  Auth user    ${email} created`);
     return data.user.id;
   }
 
@@ -73,17 +86,15 @@ async function ensureAuthUser(): Promise<string | null> {
     });
     if (listError) throw listError;
 
-    const match = list.users.find(
-      (user) => user.email?.toLowerCase() === OWNER_EMAIL,
-    );
+    const match = list.users.find((user) => user.email?.toLowerCase() === email);
     if (match) {
-      console.log("  Auth user    already existed — password unchanged");
+      console.log(`  Auth user    ${email} already existed`);
       return match.id;
     }
     if (list.users.length < 200) break;
   }
 
-  throw error ?? new Error(`Could not create or find auth user ${OWNER_EMAIL}`);
+  throw error ?? new Error(`Could not create or find auth user ${email}`);
 }
 
 /**
@@ -161,18 +172,30 @@ async function seedDemoData(centerId: string, branchId: string) {
     );
   }
 
+  // The first teacher gets a real login so the teacher experience can be
+  // tested end to end; the rest stay app-side-only roster filler.
   const teacherDefs = [
-    { first: "أحمد", last: "حسن", email: "demo-teacher1@alnoor-demo.test" },
+    { first: "أحمد", last: "حسن", email: "demo-teacher1@alnoor-demo.test", login: true },
     { first: "منى", last: "سليم", email: "demo-teacher2@alnoor-demo.test" },
     { first: "خالد", last: "عبدالله", email: "demo-teacher3@alnoor-demo.test" },
     { first: "سارة", last: "يوسف", email: "demo-teacher4@alnoor-demo.test" },
   ];
   const teachers = [];
   for (const def of teacherDefs) {
+    const authId = def.login
+      ? await ensureAuthUserFor({
+          email: def.email,
+          password: DEMO_LOGIN_PASSWORD,
+          firstName: def.first,
+          lastName: def.last,
+        })
+      : null;
+    if (def.login) seededLogins.push({ role: "Teacher", email: def.email });
+
     const user = await prisma.user.upsert({
       where: { email: def.email },
-      update: {},
-      create: { firstName: def.first, lastName: def.last, email: def.email, locale: "ar" },
+      update: authId ? { authId } : {},
+      create: { firstName: def.first, lastName: def.last, email: def.email, locale: "ar", authId },
     });
     await prisma.membership.upsert({
       where: { userId_centerId_role: { userId: user.id, centerId, role: "TEACHER" } },
@@ -191,18 +214,28 @@ async function seedDemoData(centerId: string, branchId: string) {
     teachers.push(user);
   }
 
-  // A manager and a receptionist for role variety in the demo — app-side
-  // only (no Auth user), the same as any staff member who has not yet
-  // accepted their invite; not the seed's job to provision logins for them.
+  // A manager and a receptionist for role variety in the demo — both get a
+  // real login so center-staff access can be tested for more than the owner.
   const staffDefs = [
     { first: "ليلى", last: "مراد", email: "demo-manager@alnoor-demo.test", role: "MANAGER" as const },
     { first: "عمر", last: "فتحي", email: "demo-receptionist@alnoor-demo.test", role: "RECEPTIONIST" as const },
   ];
   for (const def of staffDefs) {
+    const authId = await ensureAuthUserFor({
+      email: def.email,
+      password: DEMO_LOGIN_PASSWORD,
+      firstName: def.first,
+      lastName: def.last,
+    });
+    seededLogins.push({
+      role: def.role === "MANAGER" ? "Manager" : "Receptionist",
+      email: def.email,
+    });
+
     const user = await prisma.user.upsert({
       where: { email: def.email },
-      update: {},
-      create: { firstName: def.first, lastName: def.last, email: def.email, locale: "ar" },
+      update: authId ? { authId } : {},
+      create: { firstName: def.first, lastName: def.last, email: def.email, locale: "ar", authId },
     });
     await prisma.membership.upsert({
       where: { userId_centerId_role: { userId: user.id, centerId, role: def.role } },
@@ -227,8 +260,23 @@ async function seedDemoData(centerId: string, branchId: string) {
   const students: { userId: string; profileId: string }[] = [];
   for (let i = 0; i < studentFirstNames.length; i++) {
     const email = `demo-student${i + 1}@alnoor-demo.test`;
+    // Only the first student gets a real login, to test the student portal.
+    const wantsLogin = i === 0;
+    const authId = wantsLogin
+      ? await ensureAuthUserFor({
+          email,
+          password: DEMO_LOGIN_PASSWORD,
+          firstName: studentFirstNames[i],
+          lastName: "الطالب",
+        })
+      : null;
+    if (wantsLogin) seededLogins.push({ role: "Student", email });
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
+      if (authId && existingUser.authId !== authId) {
+        await prisma.user.update({ where: { id: existingUser.id }, data: { authId } });
+      }
       const profile = await prisma.studentProfile.findFirst({ where: { userId: existingUser.id, centerId } });
       if (profile) {
         students.push({ userId: existingUser.id, profileId: profile.id });
@@ -237,7 +285,7 @@ async function seedDemoData(centerId: string, branchId: string) {
     }
     const { user, profile } = await prisma.$transaction(async (tx) => {
       const user = existingUser ?? (await tx.user.create({
-        data: { firstName: studentFirstNames[i], lastName: "الطالب", email, locale: "ar" },
+        data: { firstName: studentFirstNames[i], lastName: "الطالب", email, locale: "ar", authId },
       }));
       const code = await claimStudentCode(tx, centerId);
       const gradeForStudent = grades[i % grades.length];
@@ -467,7 +515,12 @@ async function main() {
     await seedDemoData(center.id, branch.id);
   }
 
-  const authId = await ensureAuthUser();
+  const authId = await ensureAuthUserFor({
+    email: OWNER_EMAIL,
+    password: OWNER_PASSWORD,
+    firstName: OWNER_FIRST_NAME,
+    lastName: OWNER_LAST_NAME,
+  });
 
   const owner = await prisma.user.upsert({
     where: { email: OWNER_EMAIL },
@@ -502,13 +555,21 @@ async function main() {
   console.log("");
 
   if (authId) {
-    console.log(`Sign in at /en/login with ${OWNER_EMAIL} / ${OWNER_PASSWORD}`);
-    console.log("This is a development credential — change it before any real use.");
+    console.log(`Password for every account below: ${OWNER_PASSWORD}`);
+    console.log("Sign in at /en/login with any of:");
+    console.log(`  Owner         ${OWNER_EMAIL}`);
+    for (const login of seededLogins) {
+      console.log(`  ${login.role.padEnd(12)}  ${login.email}`);
+    }
+    console.log("These are development credentials — change them before any real use.");
   } else {
-    console.log("SUPABASE_SERVICE_ROLE_KEY is not set, so no Auth user was created.");
-    console.log("Create one manually: Supabase dashboard → Authentication → Users →");
-    console.log(`Add user → ${OWNER_EMAIL} (tick \"Auto Confirm User\").`);
-    console.log("The User mirror links to it by email on first login.");
+    console.log("SUPABASE_SERVICE_ROLE_KEY is not set, so no Auth users were created.");
+    console.log("Create them manually: Supabase dashboard → Authentication → Users →");
+    console.log(`Add user → ${OWNER_EMAIL}, and any of these to test other roles (tick \"Auto Confirm User\"):`);
+    for (const login of seededLogins) {
+      console.log(`  ${login.role.padEnd(12)}  ${login.email}`);
+    }
+    console.log("The User mirror links each to its Auth user by email on first login.");
   }
 }
 
