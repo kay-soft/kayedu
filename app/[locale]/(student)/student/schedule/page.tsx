@@ -9,6 +9,7 @@ import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
 import { formatDate, formatMoney } from "@/lib/format";
 import { startOfUtcDay } from "@/lib/scheduling";
+import { ScheduleDateFilter } from "./schedule-date-filter";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
@@ -139,29 +140,7 @@ export default async function StudentSchedulePage({
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle")} />
 
-      <form className="flex flex-col gap-1.5 sm:w-64">
-        <label htmlFor="schedule-date" className="text-xs font-medium text-text-secondary">
-          {t("filterDate")}
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="schedule-date"
-            name="date"
-            type="date"
-            defaultValue={dateFilter}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
-            className="h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
-          />
-          {dateFilter ? (
-            <a
-              href="?"
-              className="flex h-11 shrink-0 items-center justify-center rounded-lg border border-border px-3 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
-              {t("clearDate")}
-            </a>
-          ) : null}
-        </div>
-      </form>
+      <ScheduleDateFilter date={dateFilter} dateLabel={t("filterDate")} clearLabel={t("clearDate")} />
 
       <Card>
         <CardHeader>

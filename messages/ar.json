@@ -1063,7 +1063,7 @@
     "title": "حصصي",
     "subtitle": "{count} حصة في هذا العرض.",
     "detailSubtitle": "{grade} · {date}",
-    "print": "طباعة",
+    "printAction": "طباعة",
     "backToList": "كل الحصص",
     "listTitle": "الحصص",
     "listDescription": "كل حصة تدرّسها في هذا المركز خلال المدى المحدد.",

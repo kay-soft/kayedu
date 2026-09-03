@@ -110,7 +110,7 @@ export default async function TeacherSessionDetailPage({
               href={ROUTES.teacherSessionPrint(session.id)}
               className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
             >
-              {t("print")}
+              {t("printAction")}
             </Link>
             <Link
               href={ROUTES.teacherSessions}
