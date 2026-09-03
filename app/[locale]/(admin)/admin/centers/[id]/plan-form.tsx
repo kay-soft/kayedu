@@ -3,10 +3,8 @@
 import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
-import {
-  IDLE_ADMIN_ACTION_STATE,
-  updateCenterPlanAction,
-} from "@/app/[locale]/(admin)/admin/centers/actions";
+import { IDLE_ADMIN_ACTION_STATE } from "@/app/[locale]/(admin)/admin/centers/action-state";
+import { updateCenterPlanAction } from "@/app/[locale]/(admin)/admin/centers/actions";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";

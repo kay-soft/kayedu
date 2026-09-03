@@ -18,6 +18,7 @@ import {
   centerPlanSchema,
   createCenterSchema,
 } from "@/lib/validation/admin";
+import type { AdminActionState } from "@/app/[locale]/(admin)/admin/centers/action-state";
 
 /**
  * The admin panel's write path (M9, docs/00-master-product-spec.md §4.4).
@@ -30,17 +31,6 @@ import {
  * some other center — cannot reach any of these actions at all, the same
  * shape every other route-group gate in this app already relies on.
  */
-
-export type AdminActionState = {
-  /** Message key under `AdminCenters.errors`. */
-  error?: string;
-  fieldErrors?: Record<string, string>;
-  status?: "created" | "saved";
-  /** Set on a successful create — the founding owner's invite link. */
-  invitationToken?: string;
-};
-
-export const IDLE_ADMIN_ACTION_STATE: AdminActionState = {};
 
 const INVITE_TTL_DAYS = 7;
 

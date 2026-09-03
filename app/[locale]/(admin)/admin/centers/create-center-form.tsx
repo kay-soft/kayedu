@@ -4,10 +4,8 @@ import { useActionState, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
-import {
-  createCenterAction,
-  IDLE_ADMIN_ACTION_STATE,
-} from "@/app/[locale]/(admin)/admin/centers/actions";
+import { IDLE_ADMIN_ACTION_STATE } from "@/app/[locale]/(admin)/admin/centers/action-state";
+import { createCenterAction } from "@/app/[locale]/(admin)/admin/centers/actions";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
