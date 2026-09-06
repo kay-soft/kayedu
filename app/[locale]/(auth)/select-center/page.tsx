@@ -73,11 +73,10 @@ export default async function SelectCenterPage({
           {orgGroups.map((group) => (
             <form key={group.organizationId} action={selectCenterAction}>
               <input type="hidden" name="locale" value={locale} />
-              <input type="hidden" name="scope" value="all" />
               <input
                 type="hidden"
-                name="centerId"
-                value={group.branches[0].id}
+                name="selectionId"
+                value={group.organizationId}
               />
               <button
                 type="submit"
@@ -112,7 +111,7 @@ export default async function SelectCenterPage({
               <input type="hidden" name="locale" value={locale} />
               <input
                 type="hidden"
-                name="centerId"
+                name="selectionId"
                 value={relation.center.id}
               />
               <button

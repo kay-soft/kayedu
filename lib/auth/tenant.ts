@@ -46,6 +46,14 @@ export type TenantContext = {
   /** Center-configurable permission grants on top of the role baseline. */
   grants: PermissionGrants;
   isPlatformAdmin: boolean;
+  /**
+   * Set when the active-selection cookie named an Organization rather than a
+   * branch — an Owner's "Whole Management" choice (M11). `center` above is
+   * still one real, resolved branch (a representative one) that every
+   * operational query scopes on unchanged; only a consumer that wants the
+   * roll-up (Analytics) reads this field. `null` for every other request.
+   */
+  rollupOrganizationId: string | null;
 };
 
 export type CenterRelation = {
@@ -283,6 +291,7 @@ async function buildContext(
     roles: relation.roles,
     grants: permissionGrantsFromSettings(settings),
     isPlatformAdmin: user.isPlatformAdmin,
+    rollupOrganizationId: null,
   };
 }
 
@@ -311,10 +320,30 @@ export const getTenantContext = cache(
       return redirectTo(ROUTES.selectCenter);
     }
 
-    const activeCenterId = await getActiveCenterId();
-    let relation = activeCenterId
-      ? relations.find((item) => item.center.id === activeCenterId)
+    const selectionId = await getActiveCenterId();
+    let relation = selectionId
+      ? relations.find((item) => item.center.id === selectionId)
       : undefined;
+
+    // Not a branch id this user holds — it may be an Organization id from an
+    // Owner's "Whole Management" choice (M11). One cookie, one value, two
+    // things it can name; this is the one place that distinction is made
+    // (lib/auth/active-center.ts's doc comment). `getOwnerOrgGroups` already
+    // only returns organizations this user is actually an Owner of, so
+    // finding a match here is itself the authorization check — nothing here
+    // trusts the cookie value beyond that lookup.
+    let rollupOrganizationId: string | null = null;
+    if (!relation && selectionId) {
+      const orgGroups = await getOwnerOrgGroups(user.id);
+      const group = orgGroups.find((item) => item.organizationId === selectionId);
+      if (group) {
+        // A representative branch — sorted deterministically by
+        // getOwnerOrgGroups — is what every operational query still scopes
+        // on; the roll-up is Analytics' own concern, read off the flag below.
+        relation = relations.find((item) => item.center.id === group.branches[0].id);
+        rollupOrganizationId = selectionId;
+      }
+    }
 
     if (!relation) {
       // Auto-select when there is exactly one center; otherwise go pick one.
@@ -326,7 +355,8 @@ export const getTenantContext = cache(
       }
     }
 
-    return buildContext(user, relation, experience);
+    const ctx = await buildContext(user, relation, experience);
+    return { ...ctx, rollupOrganizationId };
   },
 );
 

@@ -10,7 +10,6 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { getActiveCenterScope } from "@/lib/auth/active-center";
 import {
   ctxCan,
   getOwnerOrgGroups,
@@ -73,17 +72,19 @@ export default async function AnalyticsPage({
   const range = { from, to };
 
   // "Whole Management" (M11): an Owner viewing every branch under their
-  // organization instead of just the active one. This never widens
-  // centerId-scoping — it is a union of independent per-branch scoped queries
-  // summed in memory (lib/db/organizations.ts), exactly like the teacher
-  // portal's combined dashboard (docs/01-data-model.md §4).
-  const scopeCookie = await getActiveCenterScope();
-  const orgGroups =
-    scopeCookie === "all" && ctx.role === "OWNER"
-      ? await getOwnerOrgGroups(ctx.user.id)
-      : [];
-  const orgGroup = orgGroups.find((group) =>
-    group.branches.some((branch) => branch.id === centerId),
+  // organization instead of just the active one. `ctx.rollupOrganizationId`
+  // is set by `getTenantContext()` when the active-selection cookie named an
+  // Organization rather than a branch (lib/auth/active-center.ts) — the same
+  // single cookie/flow `/select-center` always used, just resolving to two
+  // different kinds of id. This never widens centerId-scoping — it is a
+  // union of independent per-branch scoped queries summed in memory
+  // (lib/db/organizations.ts), exactly like the teacher portal's combined
+  // dashboard (docs/01-data-model.md §4).
+  const orgGroups = ctx.rollupOrganizationId
+    ? await getOwnerOrgGroups(ctx.user.id)
+    : [];
+  const orgGroup = orgGroups.find(
+    (group) => group.organizationId === ctx.rollupOrganizationId,
   );
   const rollupBranchIds = orgGroup?.branches.map((branch) => branch.id) ?? null;
 

@@ -9,6 +9,7 @@ import {
   setActiveCenterId,
 } from "@/lib/auth/active-center";
 import {
+  getOwnerOrgGroups,
   getUserCenterRelations,
   primaryRole,
   type CenterRelation,
@@ -170,26 +171,37 @@ export async function selectCenterAction(formData: FormData): Promise<void> {
     return;
   }
 
-  // Never trust a client-sent centerId — it must be one of the user's own.
+  // Never trust a client-sent id blindly — it must resolve to one of the
+  // user's own branches, or (M11) one of their own multi-branch
+  // organizations. One cookie value, two things it can name; this mirrors
+  // the exact same resolution `getTenantContext()` does on every later
+  // request (lib/auth/active-center.ts).
   const relations = await getUserCenterRelations(user.id);
   const relation = relations.find(
-    (item) => item.center.id === parsed.data.centerId,
+    (item) => item.center.id === parsed.data.selectionId,
   );
-  if (!relation) {
-    redirect({ href: `${ROUTES.selectCenter}?switch=1`, locale });
+  if (relation) {
+    await setActiveCenterId(relation.center.id);
+    redirect({ href: homePathForRole(primaryRole(relation)), locale });
     return;
   }
 
-  // "Whole Management" is only meaningful for an Owner whose organization
-  // actually has more than one branch — never trust the client's scope flag
-  // beyond that (lib/auth/tenant.ts's getOwnerOrgGroups is the same check
-  // Analytics re-runs when it reads the cookie back).
-  const wantsRollup = parsed.data.scope === "all";
-  const scope =
-    wantsRollup && relation.roles.includes("OWNER") ? "all" : null;
+  const orgGroups = await getOwnerOrgGroups(user.id);
+  const group = orgGroups.find(
+    (item) => item.organizationId === parsed.data.selectionId,
+  );
+  if (group) {
+    const representative = relations.find(
+      (item) => item.center.id === group.branches[0].id,
+    );
+    if (representative) {
+      await setActiveCenterId(group.organizationId);
+      redirect({ href: homePathForRole(primaryRole(representative)), locale });
+      return;
+    }
+  }
 
-  await setActiveCenterId(relation.center.id, scope);
-  redirect({ href: homePathForRole(primaryRole(relation)), locale });
+  redirect({ href: `${ROUTES.selectCenter}?switch=1`, locale });
 }
 
 export async function acceptInvitationAction(

@@ -43,14 +43,16 @@ export const signUpSchema = z
     message: "passwordMismatch",
   });
 
+/**
+ * A Center id for almost every submission — or, for an Owner picking "Whole
+ * Management" (M11), an Organization id. One field, one cookie value; which
+ * one it names is resolved server-side in `selectCenterAction`/
+ * `getTenantContext()`, never trusted from the client beyond that lookup
+ * (lib/auth/active-center.ts).
+ */
 export const selectCenterSchema = z.object({
-  centerId: z.string().uuid("invalidCenter"),
+  selectionId: z.string().uuid("invalidCenter"),
   locale: localeSchema,
-  // "Whole Management" (M11): an Owner picking the org-level roll-up instead
-  // of one branch. `centerId` still names a real branch — the one every
-  // operational screen keeps reading — this only flags Analytics to sum
-  // every branch under the same organization (lib/auth/active-center.ts).
-  scope: z.enum(["all"]).optional(),
 });
 
 export const createInvitationSchema = z.object({
