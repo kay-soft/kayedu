@@ -165,7 +165,7 @@ Used when editing a `ClassGroup`'s `ClassSchedule` rows. Header shows read-only 
 
 Marketplace-style grid for browsing published classes. Filter bar: grade / subject / day as pill-style dropdowns, result count right-aligned ("N classes found").
 
-**Class card:** white surface, `12px` radius, a 4px colored top border using the rotating subject-accent palette from §2 (assigned per subject, consistent app-wide — not per center). Contents: subject name (bold) + subject name in second locale beneath in muted text, status badge top-right (`Open` = info blue, `Requires Approval` = amber, `Pending` = amber, matching `ReservationStatus`), teacher avatar (initials, subject-accent color) + name, grade as a small outline chip, price right-aligned (never colored — money display rule from §2 still applies), schedule summary line with a calendar icon.
+**Class card:** white surface, `12px` radius, a 4px colored top border using the rotating subject-accent palette from §2 (assigned per subject, consistent app-wide — not per center). Contents: subject name (bold) + subject name in second locale beneath in muted text, status badge top-right (`Open` = info blue, `Requires Approval` = amber, `Pending` = amber, matching `ReservationStatus`), teacher avatar (initials, subject-accent color) + name, grade as a small outline chip, price right-aligned (never colored — money display rule from §2 still applies), schedule summary line with a calendar icon. **As of M17, the teacher's rating** sits beside their name as `4.6 ★` — an **average out of 5 only**, with **no count and no distribution**, and omitted entirely when the teacher has no ratings yet (§11.5).
 
 **Action button (bottom of card, full width):**
 
@@ -176,3 +176,100 @@ Marketplace-style grid for browsing published classes. Filter bar: grade / subje
 **Grid:** 3-up desktop, collapses to single column below `md` per §6. Filter bar collapses to a single "Filters" trigger opening a bottom sheet on mobile, per the existing modal→sheet rule.
 
 > **Note:** currency in all mockups must read **EGP**, not SAR — Phase 1 is Egypt-only per `00-master-product-spec.md` §1. Money still displays via `lib/format.ts`, never inline formatting.
+
+---
+
+## 11. New and changed surfaces (M11–M19)
+
+Every pattern here inherits §2's tokens, §6's responsive rules and §7's RTL rules without exception. What follows is only what is *specific* to each surface — where a rule is not restated, the general one applies unchanged.
+
+### 11.1 Branch switcher (M11)
+
+Lives in the header, beside the centre logo, **not** in the sidebar — it changes the scope of everything below it, so it must stay visible when the sidebar collapses to a rail or a drawer (§5).
+
+- A single control: the active branch name plus a chevron. Opens a list of the branches this user resolves to (`02-architecture.md` §4), with **"Whole Management"** pinned at the top when the user holds more than one.
+- **Hidden entirely for a single-branch user.** No disabled control, no dropdown with one item — the same reasoning `/select-center` already follows for a single-centre user.
+- **"Whole Management" must look different from a branch, not merely be first.** It is a scope, not a place: give it an icon and a divider below it, so nobody reads it as another branch name.
+- **Roll-up is analytics-only** (`00-master-product-spec.md` §4.1). When "Whole Management" is active, operational nav items (Reception, Sessions, Approvals) are **disabled with a one-line reason** — "pick a branch to use the desk" — never silently missing. A nav item that vanishes reads as a permission problem.
+- Mobile: the switcher moves into the drawer header, full-width, 44px minimum.
+
+### 11.2 Permissions matrix screen (M12)
+
+The densest screen in the product, and the one most likely to become an unreadable grid.
+
+- **Roles as columns, actions as rows**, grouped by area (People / Classes / Money / Settings / Approvals) with sticky group headers. The role header row is sticky too — a matrix you have to scroll blind is a matrix that gets misconfigured.
+- A cell is a checkbox with three visual states: **granted**, **denied**, and **not grantable** (the platform ceiling, `02-architecture.md` §6.1). Not-grantable renders as a dimmed dash with a `title` explaining why — **never an unchecked box**, which would imply an Owner could tick it.
+- **OWNER-only screen.** Anyone else does not see the nav item and is redirected at the loader.
+- **Below `md` the grid becomes one card per action**, listing the roles as label→value toggle rows — the standard table→card rule (§6), applied to a matrix. Do **not** horizontally scroll it; this is primary data.
+- Changes save explicitly (an Apply button with a dirty-state count), never per-cell-on-click: a permission grid that writes on every tick is a grid where a mis-click is a silent privilege change.
+
+### 11.3 Teacher approvals (M15)
+
+Same card queue as the centre `/approvals` screen — deliberately, since a teacher and a manager are reading the same kind of request and should not have to learn two layouts.
+
+- One card per pending student: avatar + local name, class, requested-at, and the two actions.
+- **A refusal states its reason in the card, not in a toast.** "Blocked from this class", "class is full — change the room or increase its capacity", "rejected 3 days ago, can re-request in 4 days" (§11.7's copy rule). A toast disappears; the reason needs to stay next to the thing it explains.
+- Empty state is a real state, not a blank panel — most teachers have an empty queue most days.
+
+### 11.4 Parent portal (M16)
+
+Visually the **student portal**, with exactly one addition and one subtraction.
+
+- **Addition: the child selector**, in the header where the branch switcher sits for staff. Avatar + name per child; if a parent has one child, **the selector is hidden** and the child's name appears as plain header context.
+- **Subtraction: every write control.** No enrol button, no cancel, no rating prompt. Do not render them disabled — remove them. A disabled control tells a parent the feature exists for them and is broken.
+- Where a child attends more than one centre, the per-centre grouping the student portal already uses carries over unchanged.
+
+### 11.5 Rating pop-up (M17)
+
+A modal on login (full-screen sheet below `sm`, per §6), and the interaction most at risk of being annoying.
+
+- One row per session from the **last 7 days**: subject + teacher + date, and a 5-star control with 44px targets.
+- **Skip is a first-class action, not a dismissal.** A visible "Skip" button of equal weight to "Submit", plus the standard close affordance. It must never be re-shown in the same session after a skip.
+- **Partial submission is allowed** — rate two of five, submit, done. Never gate submit on completeness.
+- **Never show a count anywhere** — not in the prompt, not in the confirmation. Where an aggregate appears (the Discover class card, §10, and the teacher's own view), it is `4.6 ★` and nothing else. No "(23 ratings)", no distribution bar: a count is what lets a teacher infer who rated them from a small sample.
+
+### 11.6 ID-card layout editor (M18)
+
+Replaces the raw `cardLayout` JSON textarea. **A centre never sees JSON** — that is the whole point of the change.
+
+- **Direct manipulation on a live card preview** at true proportions (85.6 × 54 mm, matching §5's ID card): drag to move, handles to resize, an element **palette** to add from, an **×** to remove.
+- Selection shows a small properties strip (font size, alignment) — not a separate panel that hides the card.
+- **Snap and bounds:** elements snap to a light grid and cannot be dragged off the face. The M3 gate already asserts the default layout has no collisions; the editor should make a colliding layout hard to produce rather than merely detectable.
+- **`x` stays a logical start offset** (§5, `02-architecture.md` §10) — an Arabic card mirrors the whole layout, so the editor previews in the **active locale** and says so.
+- Below `md`, editing is a stacked list of elements with numeric position controls rather than a drag surface. Dragging a 320-unit card on a 375px screen is not editing.
+
+### 11.7 Date filter (M18) — one component, everywhere
+
+Replaces every ad-hoc date filter in the product. Analytics, Expenses, Sessions and every later screen use **this** and nothing else.
+
+- A segmented button row: **Day** · **Week** (today −7) · **Month** (1st → today), plus a **specific-date** picker and a **range** picker, an **Apply**, and a **reset to today's default**.
+- **Buttons apply immediately; the pickers wait for Apply.** A range that re-queries on the first of the two dates is a range that queries a nonsense window.
+- The active selection is always readable as text next to the control ("1–6 Sep") — a highlighted segment alone is not enough once a specific date or range is in play.
+- **State lives in the URL** (`02-architecture.md` §14), like pagination, so a filtered view is shareable and back-button-safe.
+- Below `md` the segments stay a row (they are short) and the two pickers stack.
+
+### 11.8 Live search dropdown (M18)
+
+Every search input in the product becomes a type-ahead. This is the most-used interaction in the app after attendance, so the details matter more than usual.
+
+- Results appear in a panel below the input: avatar + local name + the matched field (code / phone), **highlighting the matched substring**.
+- **Minimum query length before anything fires**, debounced, and bounded to a small result count (`02-architecture.md` §14). A dropdown that loads every student to filter in the browser is the loader that section warns about, in nicer clothes.
+- Three states are all real and all need a design: **loading** (a subtle inline spinner in the input, never a layout shift), **no results** (with the "add new" action inline, since at Reception that is the likely next step), and **too short** (silent — no panel at all).
+- **Full keyboard support**: ↑/↓ to move, Enter to select, Escape to close. Reception uses a hardware barcode scanner, which types fast and presses Enter — the dropdown must not swallow or reorder that.
+- **The QR/scan path bypasses the dropdown entirely**: a scanned `KAYEDU|…` payload resolves straight to the selected-student panel (`lib/id-card.ts`'s `parseStudentQrPayload`), and that panel **must show the student's photo** — it is the anti-impersonation control the static-QR decision rests on (`00-master-product-spec.md` §5.1), and it is currently missing (§7.1).
+- Below `md`, the dropdown becomes a full-width sheet under the input, not a floating panel.
+
+### 11.9 Settlements & refunds (M14)
+
+- **Settlement status** uses the existing semantic set (§2) and adds no new colours: `DRAFT` = neutral/muted, `APPROVED` = info blue, `PAID` = success green. There is **no partially-paid state** and therefore no amber — do not invent one.
+- **A refund is shown alongside its original payment, never in place of it.** The original row stays legible with a `REFUNDED` badge (danger tint, matching Void's treatment) and the refund appears as a linked child row. Replacing the original would misrepresent an append-only ledger as an editable one.
+- **Void and refund must never look the same.** They are different events with different analytics effects (`00-master-product-spec.md` §5); give the badges distinct labels and keep both visible.
+- Money figures stay uncoloured (§2) — the badge carries the meaning, not the number.
+
+### 11.10 Out-of-window empty state (M19)
+
+When a read is refused because it falls outside the data-visibility window, the screen shows a **named** empty state, not a blank chart or a zero.
+
+- Copy pattern: *"Data older than 30 days isn't shown at this centre."* Plus, for a role that can change it, a link to `/settings/visibility`.
+- **A zero is the wrong answer here** — a chart rendering 0 EGP for last quarter reads as "we earned nothing", not "you can't see this", and that is a genuinely dangerous ambiguity on a money screen.
+- Uses the **Alert note** pattern (§5), info-tinted rather than amber: nothing is wrong, something is simply out of view.

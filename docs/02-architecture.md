@@ -44,16 +44,23 @@ app/
       analytics/                 # date filters + by-teacher breakdown, reads lib/db/analytics.ts (M6)
       expenses/                  # category CRUD + append-and-audit ledger, same date filters (M6)
       approvals/                 # combined ChangeRequest/Reservation review queue, OWNER/MANAGER only
+      settlements/              # teacher payout register, DRAFT→APPROVED→PAID (M14)
       settings/                 # the configuration shell + its sub-nav
-        branches/  rooms/       # general (default cut, timeout, late, tz) is /settings
-        education-systems/
-        grades/  subjects/
-        card/                   # cardLayout JSON editor
-        permissions/            # receptionist grant toggles
+        rooms/                  # general (default cut, timeout, late, tz) is /settings
+        catalog/                # pick global subjects/grades/systems, suggest new ones (M13)
+                                #   (replaces education-systems/ grades/ subjects/)
+        card/                   # visual ID-card layout editor — no JSON shown (M18)
+        permissions/            # the action × role matrix + role/branch grants, OWNER only (M12)
         staff/                  # users & roles: invite, change role, deactivate
+        visibility/             # the per-centre data-visibility window (M19)
     (teacher)/teacher/          # /teacher/dashboard, /teacher/sessions, /teacher/students, /teacher/classes (M7)
+                                #   + /teacher/approvals, /teacher/centers (directory, M15),
+                                #     /teacher/settlements (M14)
     (student)/student/          # /student/schedule, /student/discover, /student/reservations (M8)
+                                #   + the skippable rating prompt (M17)
+    (parent)/parent/            # child selector + per-child mirror of the student portal (M16)
     (admin)/admin/              # /admin/centers, /admin/centers/[id], /admin/platform (M9)
+                                #   + /admin/catalog (global entries + suggestion queue, M13)
     (print)/                    # role-gated print views, no app shell — students/[id]/{card,paper} (M3),
                                  # teacher/sessions/[id]/print (M7); layout accepts "center" or "teacher"
                                  # experience, then each page resolves its own tighter context
@@ -94,7 +101,17 @@ lib/
     reservations.ts              # the ONLY Reservation/Enrollment writes for the student portal — reserveOrEnroll/confirmReservation/rejectReservation/cancelReservation, no @/ imports (M8)
     approvals.ts                  # the ONLY ChangeRequest status-flip write — resolveChangeRequest, no @/ imports (Approvals)
     platform.ts                   # platform-admin cross-center reads/writes — deliberately not centerId-scoped, no @/ imports (M9)
+    permissions.ts                # the ONLY PermissionGrant/role/branch-grant writes, OWNER-gated + audited (M12)
+    catalog.ts                    # global catalog reads + a centre's selections/suggestions (M13)
+    settlements.ts                # the ONLY Settlement writes — DRAFT→APPROVED→PAID, totals derived from
+                                  #   frozen snapshots, never recomputed (M14)
+    refunds.ts                    # the ONLY Refund writes — original Payment row never touched (M14)
+    ratings.ts                    # SessionRating writes + the average-only aggregate; never exposes a rater (M17)
+    parents.ts                    # ParentLink resolution — refuses privileged phones, inert until verified (M16)
+    visibility.ts                 # the data-visibility window bound + its Settlement/AuditLog carve-outs (M19)
   money.ts                      # the ONLY center-cut math + piastre helpers
+  phone.ts                      # the ONE phone normalizer, 11–15 digits, +20…/20…/0… → 01…;
+                                #   used by validation, duplicate-matching AND search alike (M18)
   scheduling.ts                 # pure time-overlap, conflict-detection and rolling-window date math (M4)
   card-layout.ts                # the default ID-card layout the editor offers
   id-card.ts                    # renders the card SVG from that layout
@@ -123,7 +140,15 @@ scripts/
   teacher-portal-check.ts       # shared-teacher two-center zero-leakage + combined-dashboard union gate (M7)
   student-portal-check.ts       # instant-enroll/pending branching, capacity, blocking (both scopes), duplicate-reservation, cross-center isolation gate (M8)
   approvals-check.ts            # ChangeRequest/Reservation accept-decline correctness, permission denial, cross-center isolation gate (Approvals)
-  admin-check.ts                 # center provisioning/activate-suspend/plan-edit, platform-KPI reconciliation, support-access audit gate (M9)
+  admin-check.ts                 # center provisioning/lifecycle transitions, platform-KPI reconciliation, support-access audit gate (M9; the plan-edit assertion is removed at M19 with the column)
+  branches-check.ts              # org roll-up = exact sum of per-branch scoped queries; branch-A-can't-read-branch-B (M11)
+  permissions-check.ts           # matrix resolution, deny-by-default, OWNER-only granting, grantable ceiling, session invalidation, teacher-detail leak (M12)
+  catalog-check.ts               # catalog is global, a centre edits only its own display name/prices, suggestion queue, bilingual names (M13)
+  settlements-check.ts           # settlement totals derive from frozen snapshots; refund arithmetic on revenue + both shares (M14)
+  enrollment-check.ts            # block scopes, 7-day cooling-off, capacity cap vs. uncapped attendance, full-window reschedule (M15)
+  parent-check.ts                # privileged-phone refusal, inert-until-verified, parent sees no more than the child (M16)
+  ratings-check.ts               # average-only aggregate, rater identity never exposed, 7-day window (M17)
+  visibility-check.ts            # out-of-window denial in the data layer; Settlement/AuditLog carve-outs; nothing deleted (M19)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -145,7 +170,18 @@ docs/
 
 **Invites (staff):** Owner/Manager creates an invite → `Invitation` row + unguessable token link → invitee registers/logs in with the invited email → membership created on accept (audited as `membership.create`). Only an Owner may invite another Owner, and an outstanding invite for the same email+role is superseded. **Email delivery is out of Phase 1 scope** (notifications are deferred), so the accept link is shown to the inviter to share manually; it expires after 7 days. Teachers & students self-register and connect to centers (teachers by center invite/trust; students by discovery/enroll).
 
-**Duplicate prevention:** on register, match on verified phone/email. If found, link a new membership/enrollment to the existing `User` instead of creating a person. Merge is a manual, audited admin action.
+**Zero-relation landing, per role (M15).** `requireStudentUser()` (§4) deliberately lets a signed-in user with **no relations anywhere** reach `/student/discover`, because discovery is how a student makes their first connection. That fall-through is **wrong for a teacher**: a teacher who belongs to no centre currently lands on a shopping list of classes to enrol in as a student. M15 routes them to a **centre directory** instead (`/teacher/centers`), from which they request to teach a session or a class at a centre, pending that centre's approval — the teacher-side counterpart to Discover. The role is known before the relations are: a user who registered as a teacher gets the directory, not Discover.
+
+**Parent accounts (M16).** A parent account originates from a phone number students have listed as their parent phone, and two rules live on the **write path**, never in the UI:
+
+- **Refuse a phone that already belongs to a teacher, staff member or platform admin.** Those numbers appear on student records routinely — a teacher's own child attends the centre — and silently minting a parent account for someone who already holds a privileged role is a privilege-escalation path wearing a convenience's clothes.
+- **A phone match alone never grants access.** The `ParentLink` row is **inert until verified**; an explicit verification/approval step stands between the match and any read. The mechanism (staff approval, OTP, or a centre-issued code) is **OD-6** in `00-master-product-spec.md` §2.2 and is not settled, so M16 builds the role, the child selector and the portal and stops at that step.
+
+The parent experience is read-only and **never a superset of the child's** — no write path of any kind, and no screen the student portal does not have.
+
+**Duplicate prevention:** on register, match on verified phone/email. If found, link a new membership/enrollment to the existing `User` instead of creating a person. Merge is a manual, audited admin action. **Phone comparison goes through the one normalizer** (`lib/phone.ts`, M18) shared by validation, matching and search — see §14's note; three implementations of "is this the same number" would be three answers to "is this the same person."
+
+**Receptionist phone lookup is the duplicate-match panel, not an endpoint (M18).** Looking a phone number up during registration reuses M3's match panel — it returns only the minimum needed to confirm identity, requires an **explicit link action**, is **rate-limited**, and **never exposes another centre's private fields**. What it must never become is a raw "phone → full record" route: that is a people-enumeration API with a friendly name, and it would hand a full record back on a guessed number.
 
 As of **M3** this is real on the add-teacher and add-student forms. `lib/identity.ts` owns the predicate (`contactMatchWhere()`), free of runtime imports so the acceptance gate exercises it, and normalizes contact details first — email lower-cased, Egyptian mobiles to `01XXXXXXXXX` — so `+201012345678` and `01012345678` are one person. `lib/db/identity.ts` resolves it into one of three outcomes:
 
@@ -181,6 +217,14 @@ It redirects (never returns) when there is no valid relationship: to `/login` wi
 
 **Active center resolution.** The chosen `centerId` lives in an httpOnly cookie (`kayedu_center`). Exactly one center → auto-selected, no hub. Cookies can only be *written* from a Server Action or Route Handler, so selecting persists the cookie while a Server Component simply resolves the single relation on the fly.
 
+**Organizations and branches (M11) — an additive layer, not a new isolation model.** `Organization` is the paying customer and `Center` is the branch-level tenant carrying an `organizationId` (`01-data-model.md`, Organization layer). Everything below follows from one commitment: **`center_id` stays the sole isolation key**, so `lib/db/scoped.ts`, `lib/db/tenant-scope.ts`, `getTenantContext()`'s scoping behavior and `npm run check:isolation` are **untouched by M11**.
+
+- **Resolution returns a set, not a wider scope.** An **Owner** holds an org-level membership resolving to **every** `Center` under the organization; a **Manager / Receptionist / Accountant** resolves to the one branch their membership names, plus any `MembershipBranchGrant` rows the Owner has added. `getTenantContext()` still returns **one active centre** — the resolved set is what `/select-center` and the branch switcher choose *from*, and what a multi-branch loader iterates. A **Teacher**'s memberships are unchanged.
+- **The branch switcher is the existing cookie flow.** "Whole Management" (all branches) vs. a specific branch is a choice of which `centerId` is active, or — for the roll-up — a decision to loop the resolved set. No second switching mechanism, exactly as M7 reused `/select-center` for the teacher centre switcher rather than inventing one.
+- **The roll-up is a union, computed in memory.** Org-level analytics runs **one `centerId`-scoped query per branch** and sums the results in the application layer, the shape `getTeacherContexts` (M7) and `lib/db/discover.ts` (M8) already established. There is no `where: { centerId: { in: [...] } }` anywhere in the data layer, deliberately: the moment a scoped helper accepts a list, "is this query isolated?" stops being answerable by inspection.
+- **Roll-up is analytics only.** No operational screen — reception, roster, attendance, payments — ever spans branches. A receptionist works one desk at one branch.
+- **`Branch` is retired**, with `Room.branchId` / `Session.branchId` dropped; rooms and sessions belong to the centre directly. The migration is a column drop, not a data move, since the tenant is now the location.
+
 **Route-group gates.** Each group layout calls `requireExperience("center" | "teacher" | "student")` (or `requirePlatformAdmin()`), which resolves the context and bounces anyone whose roles don't include that experience to their own home path. The `(student)` layout is the one exception (M8): it calls `requireStudentUser()` instead, not `requireExperience("student")` — see the note below.
 
 **`getStudentContexts(userId)`** (M8, mirroring `getTeacherContexts`) resolves one full `TenantContext` per center this user has an active `StudentProfile` at, for the Schedule page's per-center queries. **`requireStudentUser()`** is a deliberately looser gate than `requireExperience`: it requires only a signed-in `User`, never an existing `StudentProfile`/`STUDENT` role. A brand-new sign-up has zero relations anywhere until they discover and reserve/enroll in their first class (docs/00 §5 "Reservations / enrollment"), and `getTenantContext`/`requireExperience` redirect a zero-relation user to `/select-center` before any role check runs — which would make that self-serve path unreachable. `requireStudentUser()` returns a `StudentSession` (`{ user, relations, studentRelation }`) instead of a `TenantContext`; `studentRelation` is the first relation with role STUDENT, or `null` for someone who hasn't connected anywhere yet, in which case the `(student)` shell renders with the platform default brand (`studentBrand()`) rather than a center's theme. `/select-center`'s empty state (zero relations at all) links to `/student/discover` as the way out of that dead end.
@@ -207,6 +251,13 @@ await db.memberships.count({ active: true });   // where: { centerId, active: tr
 await db.invitations.findById(id);              // null if it belongs elsewhere
 ```
 **Never `findUnique({ where: { id } })` on a tenant table** — an id from another center must resolve to "not found", not to a row. That is what `scopedFindById` guarantees.
+
+**Layer 1b (M19): the data-visibility window rides the same seam.** The 1-calendar-month read horizon (`01-data-model.md` §7) is injected by the scoped helpers **alongside `centerId`**, at the same point and for the same reason: a rule enforced anywhere else is a rule a direct URL or API call walks around. Four things about how it is wired:
+
+- **It bounds reads only.** Nothing is deleted, pruned or archived — widening the window restores everything instantly, because nothing was lost. Writes are unaffected: recording today's attendance is not a read of old data.
+- **The carve-outs are explicit, not incidental.** `Settlement` and `AuditLog` reads bypass the window (a teacher must be able to verify an old payout; an audit trail that stops at last month is not one). Implement the carve-out as a named opt-out on those helpers, not as a forgotten omission — an unbounded query should have to say so.
+- **Platform admin bypasses entirely** — `lib/db/platform.ts` is already deliberately un-scoped by `centerId` (M9) and the window follows the same exception.
+- **Model it on the profit denial, not on a UI filter.** The receptionist profit-denial (spec §7 criterion 9) is the reference shape: a loader-level refusal plus a scoped query, asserted directly in a gate script against the permission/data layer rather than by rendering a page. `check:visibility` does the same.
 
 **Layer 2 (backstop): Postgres RLS.**
 Enable RLS on every tenant table. Policy shape: a row is visible only if its `center_id` is in the caller's memberships. The catch: **Prisma connects as a role that can bypass RLS unless configured.** Two acceptable setups:
@@ -241,11 +292,15 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 `npm run check:rtl` (`scripts/rtl-check.ts`) is the M10 gate for spec §7 acceptance criterion 15 ("every screen renders correctly in Arabic RTL and English LTR"). Also static-only, for the same reason: it asserts every `messages/en.json` key exists in `messages/ar.json` and vice versa (a missing Arabic string is the most common way a screen "renders wrong" in RTL), that no physical-direction Tailwind utility (`pl-`/`pr-`/`ml-`/`mr-`/`left-`/`right-`/`text-left`/`text-right`/`float-left`/`float-right`/`border-l*`/`border-r*`/`rounded-l*`/`rounded-r*`/`rounded-t[lr]*`/`rounded-b[lr]*`) appears anywhere under `app/` or `components/` (CLAUDE.md rule 5, docs §8 — logical properties only), that no inline `toLocaleString`/`toLocaleDateString`/`toLocaleTimeString` call exists outside `lib/format.ts`, and that `app/[locale]/layout.tsx` actually wires `dir`/`lang` from the locale. No database needed.
 
-All twelve gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/analytics.ts`, `lib/db/teacher-portal.ts`, `lib/db/discover.ts`, `lib/db/student-portal.ts`, `lib/db/reservations.ts`, `lib/db/approvals.ts` and `lib/db/platform.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
+**M11–M19 add nine more gates** (`check:branches`, `check:permissions`, `check:catalog`, `check:settlements`, `check:enrollment`, `check:parent`, `check:ratings`, `check:visibility`, and updates to `check:admin`/`check:classes`) — listed with their milestones in `03-build-order.md`, and built to the same rules as the twelve below. Every gate touching money, permissions or isolation asserts the **denial** shape as well as the happy path, the way `check:analytics` asserts on `can()` directly rather than on a rendered page.
+
+All gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/analytics.ts`, `lib/db/teacher-portal.ts`, `lib/db/discover.ts`, `lib/db/student-portal.ts`, `lib/db/reservations.ts`, `lib/db/approvals.ts` and `lib/db/platform.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 
 ## 6. Permissions
+
+> **M12 replaces the map below with a stored, configurable, action-level matrix.** The rest of this section documents what exists today, because it is still the shape everything is built against and the invariants survive the change. Read §6.1 for what M12 changes and — more importantly — what it deliberately does not.
 
 Hardcoded map, not a dynamic engine. `lib/auth/permissions.ts` owns one `Permission` union and one `Record<TenantRole, Permission[]>`:
 ```ts
@@ -275,6 +330,21 @@ Both default to `false` (spec §3). The grants object is keyed by *permission*, 
 
 Server-side is authoritative (`requirePermission(ctx, perm)` in a loader, `ctxCan(ctx, perm)` in an action); client-side `can()` only hides controls.
 
+### 6.1 The configurable permission matrix (M12)
+
+**What changes.** The hardcoded `Record<TenantRole, Permission[]>` and the two `CenterSettings` grant booleans are replaced by **`PermissionGrant` rows** — `centerId × role × action × allowed` (`01-data-model.md`, Permissions layer) — covering **every role and effectively every action in the app**. A centre configures its own matrix; a new **`ACCOUNTANT`** role joins the `Role` enum with a baseline of **analytics + expenses** and nothing else, then becomes configurable like every other role.
+
+**What does not change, and must not.**
+
+- **`can()` keeps its signature and its call sites.** Loaders still call `requirePermission(ctx, perm)`, actions still call `ctxCan(ctx, perm)`, the client still only hides controls. M12 swaps what `can()` *reads*, not where it is *asked*. A migration that also moved the checkpoints would be two risky changes wearing one milestone's name.
+- **Deny by default.** An action with no row is denied. This is stronger than it sounds: a permission newly added to the `Permission` union is denied to **everyone**, including OWNER's non-ownership actions, until granted — so shipping a new action can never accidentally open it. The seed and the centre-provisioning path write a sensible starting matrix; nothing else is implicit.
+- **A hardcoded grantable ceiling still exists.** The matrix widens a role **only within what the platform allows that role**. `TEACHER` can never be granted `center.profit.view` or `analytics.center.view` no matter what a centre writes, and `OWNER` can never be stripped of `center.ownership.manage`. This is the same idea as today's `GRANTABLE_PERMISSIONS`, kept deliberately in code rather than in data: a centre misconfiguring its own matrix must not be able to invent a privilege escalation, and an owner must not be able to lock themselves out.
+- **Only OWNER writes.** Granting a role, editing the matrix, and granting a branch-scoped member access to additional branches (`MembershipBranchGrant`) are OWNER-only, each audited (`permission.grant` / `permission.revoke` / `membership.role.change` / `membership.branch.grant`).
+
+**Resolution order** for `can(role, action, ctx)`: platform ceiling (is this action grantable to this role at all?) → the centre's stored `PermissionGrant` row → deny. Baselines are seeded rows, not a second code path — one lookup, one answer, no "baseline OR grant" branch to get wrong.
+
+**Session invalidation is part of this milestone, not a follow-up.** Changing a user's role or their grants **must invalidate or re-resolve their session immediately** (`00-master-product-spec.md` §7 criterion 20). `getTenantContext()` is wrapped in React's `cache()` (§14), which is per-request and therefore not the problem; the problem is the resolved role riding along in a cookie/session that outlives the change. The fix belongs at the resolution seam — re-read the membership and its grants per request, and/or bump a per-user session epoch the context checks — never at the UI. A demoted user keeping their old rights until a cookie expires is a permission system with a grace period nobody agreed to.
+
 ---
 
 ## 7. Data access, actions & validation
@@ -294,6 +364,14 @@ Server-side is authoritative (`requirePermission(ctx, perm)` in a loader, `ctxCa
 - Arabic-Indic vs Latin numerals: Arabic-Indic in `ar` (`ar-EG-u-nu-arab`), Latin in `en`. Always format through `lib/format.ts` (`formatNumber`, `formatDate`) — never `toLocaleString()` inline.
 - Fonts: Cairo (Arabic + Latin) via `next/font`, bound to `--font-sans`.
 - **Routing:** Next 16 names the middleware file `proxy.ts`. It runs the next-intl middleware first, then refreshes the Supabase session onto that same response (`lib/supabase/proxy.ts`), so the i18n rewrite/redirect survives.
+
+**The naming layer (M11) — the UI vocabulary is an i18n concern, not a schema one.** The DB says `Center` where the business says *branch*, and `Organization` where the business says *centre*. That mismatch is resolved **here and nowhere else**: the message keys carry the business words, so `Center.name` renders under a label that reads "Branch" and `Organization.name` under one that reads "Center" (Arabic likewise). Three rules keep this from becoming a mess:
+
+1. **No code renames.** Models, columns, variables, route segments and helper names keep the schema vocabulary. A developer reading `centerId` in a loader and "Branch" on the screen is the intended, documented state — `00-master-product-spec.md` §9's glossary is the mapping, and the full DB rename is `05-phase-2-backlog.md` entry 18, to be done alone or not at all.
+2. **No hardcoded strings, as always** (CLAUDE.md rule 5). This is the existing rule doing the work: because every label already comes from `messages/*.json`, the naming decision is a translation edit, not a refactor.
+3. **One key per concept, never per model.** `Nav.branchSwitcher`, `Branch.title`, `Organization.title` — do not introduce a `Center.title` that sometimes means one and sometimes the other, or the layer that was supposed to remove the confusion becomes the source of it.
+
+**Catalog entries are bilingual; person names are not (M13).** Every `Catalog*` row carries `nameAr` and `nameEn` and renders in the active locale, so "IGCSE Physics" reads correctly in both. **A person's name is single-valued** — one name per relationship (`01-data-model.md` §6), not one per locale. This is a modelling decision, not an i18n gap: a human's name is not a translatable string, and storing two produces two records of the same person that drift apart. Render a name as stored, in either locale.
 
 ---
 
@@ -340,6 +418,11 @@ Which of these **denies** the save/occurrence versus merely **warns and proceeds
 
 **Cancel/reschedule (M10, spec §7 acceptance criterion 11).** `lib/db/sessions.ts`'s `cancelSession`/`rescheduleSession` close the gap this section used to flag as not-yet-built. `cancelSession` flips `Session.status` to `CANCELLED` and nothing else — it never touches attendance or payment rows (CLAUDE.md rule 2); an existing payment that needs undoing is `voidPayment`'s job, a separate, explicit, audited action. `rescheduleSession` moves `date`/`startTime`/`endTime` and re-runs the exact same `findSessionConflicts` check the generator uses against every other class's sessions on the target date — WARN saves it flagged, DENY refuses; the `(classGroupId, date, startTime)` unique constraint still applies, so moving onto another of the same class's own sessions fails as `duplicateSlot` rather than merging two sessions. Gated by `npm run check:classes`. A manually-edited or cancelled session is untouched by a later regeneration either way, since `skipDuplicates` only ever *adds* rows for occurrences that don't already exist.
 
+**Two changes at M15, both closing real gaps.**
+
+- **A cancelled session must refuse attendance and payment.** `cancelSession` flips the status and returns — correctly, since it must not touch money — but **nothing downstream re-reads that status**. `setAttendanceAction`, `addStudentToSessionAction`, `addNewStudentToSessionAction` and `recordPaymentAction` (`app/[locale]/(center)/sessions/actions.ts`), `checkInAction` (`.../reception/actions.ts`), and `recordPayment` itself all load the session or the attendee and check existence, `allowExcused`, and the attendee's attendance status — never `session.status`. The result is that **a cancelled session accepts a full, snapshotted payment**, and the UI is no barrier (the session detail page passes `cancelled` only to `SessionLifecycleActions`, while the roster below renders live controls). The fix is a **server-side refusal in the write paths** plus a read-only roster — not a hidden button, the same discipline every other denial in this codebase follows. Verified as failing in a static check this session; recorded as `00-master-product-spec.md` §7 criterion 17 and §7.1.
+- **Reschedule links to its replacement, and checks the whole window.** `rescheduleSession` gains `Session.rescheduledToId`, written **immediately**, so history reads "this session moved to that one" instead of the original silently acquiring a new date. The room-free check widens from the start instant to the **entire start→end window** — `startTime`/`endTime` already exist on both `ClassSchedule` and `Session`, so this is a wider comparison, not a schema change. The target may be a future date **or the same day at a different time**, and the rule is **identical whether a teacher or centre staff initiates** it: there is no looser staff path.
+
 ---
 
 ## 12. Non-functional checklist (from the blueprint)
@@ -352,7 +435,23 @@ Security by design + least privilege · strict tenant isolation (§5) · audit l
 
 Vercel (Frankfurt) + Supabase (Frankfurt). Preview deploys for demos; **production only after the first center contract**. Migrations via `prisma migrate deploy` in CI. Secrets in Vercel env. Cron for session generation. Add error monitoring (e.g. Sentry) before pilot.
 
-**Before the first production deploy, work the [Pre-deployment checklist](./00-master-product-spec.md#21-pre-deployment-checklist) (`00-master-product-spec.md` §2.1).** It is the standing inventory of every deliberate dev-only shortcut currently standing in for a production requirement — disabled email confirmation, manually shared invite links, the seeded owner credential, the RLS policies this document's §5 layer 2 calls for, monitoring, backups. Add to it whenever a new shortcut is taken.
+**Before the first production deploy, work the [Pre-deployment checklist](./00-master-product-spec.md#21-pre-deployment-checklist) (`00-master-product-spec.md` §2.1).** It is the standing inventory of every deliberate dev-only shortcut currently standing in for a production requirement — disabled email confirmation, manually shared invite links, the seeded owner credential, the RLS policies this document's §5 layer 2 calls for, monitoring, backups. Add to it whenever a new shortcut is taken. **M20 is the milestone that owns closing it**, including the domain (blocked on OD-1), transactional email, SMS/WhatsApp provider accounts (the *channel*, not the deferred notification features), Sentry, the Vercel cron registration, applying the RLS SQL, backups with a tested restore, and data export (scope blocked on OD-4).
+
+---
+
+## 15. Offline resilience for the reception loop (M21, post-pilot)
+
+Not built, and deliberately not started before the pilot produces evidence — **OD-7** in `00-master-product-spec.md` §2.2 is whether Center 60's real connectivity justifies it at all. Recorded here so the design constraints are settled before anyone writes the first line, because this is the milestone most likely to be built badly under time pressure.
+
+**Honest cost first.** This app has **no client data layer today** — every read is a Server Component and every write is a Server Action. Scoped offline support means **building one**: a client store, a queue, a sync path, and a conflict story. That is the real price, and it should be stated plainly whenever this milestone is discussed rather than discovered halfway through.
+
+**Design constraints (non-negotiable if it is built at all):**
+
+- **The client never computes money.** A queued item stores **intent only** — this student, this session, this attendance status, this payment method. **The server computes every snapshot at sync time**, through the same `lib/money.ts` and `recordPayment` path a live write uses. A client that computed a share would be a second implementation of the center-cut math, which CLAUDE.md rule 3 forbids outright, and it would freeze numbers no server ever agreed to.
+- **Every queued action carries a client-generated UUID, and the server dedupes on it.** A queue that retries — and it will — must be safe to replay. This is the same idempotency primitive an eventual payment webhook would need (`05-phase-2-backlog.md` entry 7).
+- **Scoped to the reception loop only.** Check-in, attendance, payment. Not analytics, not configuration, not enrolment, not the portals. A general offline mode is a different, much larger product.
+- **Graduated behaviour, with a 60-minute threshold.** Full function offline for **0–60 minutes**; at 60 minutes **block new writes** rather than accumulating an unbounded queue of money the server has never seen; and **never auto-discard the queue** — the only way a queue is thrown away is a deliberate, audited **Owner** action.
+- **IndexedDB, surviving a tab close.** A queue that lives in memory is a queue that a phone locking its screen destroys.
 
 ---
 
@@ -374,7 +473,9 @@ Introduced during the M3 hardening pass, after navigation had grown noticeably s
 
 **Analytics never fetches rows to sum them in memory (M6).** `lib/db/analytics.ts` — the module `/dashboard` and `/analytics` both call, with different date-range defaults, rather than each duplicating the aggregation — reads revenue exclusively through `Prisma.aggregate`/`groupBy`: `revenueTotals` is one `payment.aggregate` per date range (optionally narrowed by `teacherId`), and `revenueByTeacher` is one `payment.groupBy(['teacherId'])`. Prisma cannot `groupBy` on a related model's column, so `Payment.teacherId` (`01-data-model.md` §2) is a denormalized snapshot of `session.teacherId`, written once by `recordPayment` — not a money field, so it carries none of the "never recompute" weight the share snapshots do, but it is what keeps the by-teacher breakdown a single indexed query (`@@index([centerId, teacherId, recordedAt])`) instead of a fetch-every-payment-and-reduce-in-JS loop.
 
-**Discover is a deliberate exception to "never load everything" (M8).** Every other list page bounds its query with `take`/`skip` in the database; Discover instead fetches every discoverable class from every active center (bounded per center by `discoverClassesForCenter`'s `take: 200`) and filters/paginates the *combined* result in the application layer, because the subject/grade filters match on center-local master-data *names*, not ids (docs/01-data-model.md §4), so they cannot be pushed into any single center's `where`. Acceptable at Phase 1's pilot scale (a handful of centers); if the platform grows, add a name→id lookup per filter value and push the `where` back down before this becomes the loader the rest of this section warns against.
+**Discover is a deliberate exception to "never load everything" (M8).** Every other list page bounds its query with `take`/`skip` in the database; Discover instead fetches every discoverable class from every active center (bounded per center by `discoverClassesForCenter`'s `take: 200`) and filters/paginates the *combined* result in the application layer, because the subject/grade filters match on center-local master-data *names*, not ids (docs/01-data-model.md §4), so they cannot be pushed into any single center's `where`. Acceptable at Phase 1's pilot scale (a handful of centers); if the platform grows, add a name→id lookup per filter value and push the `where` back down before this becomes the loader the rest of this section warns against. **M13 removes the reason this exception exists**: once subjects and grades are platform-owned catalog entries, a subject id means the same thing at every centre, so the filter pushes straight into each centre's `where` and Discover stops being an exception at all. Do that as part of M13 rather than leaving a workaround whose justification has expired.
+
+**Live type-ahead search does not become a load-everything screen (M18).** Every search input becomes a live dropdown, which multiplies query volume by every keystroke — so the existing rules tighten rather than relax: the query stays the **same bounded, `select`-lean, paginated** one the list page already runs (a small `take`, never the full table), it is **debounced** on the client, and a query below a minimum length returns nothing rather than the first page of everything. A dropdown that fetches all students to filter in the browser is the loader this section warns about, wearing a nicer interaction. The **shared date-filter component** (Day / Week / Month + specific-date + range + Apply + reset) keeps its state in the **URL**, like pagination does, so a filtered view stays shareable and back-button-safe and does not become client state a Server Component cannot read.
 
 **Prefetching stays on.** Next.js `<Link>` (via `next-intl`'s wrapper) prefetches viewport-visible destinations by default — list rows linking to detail pages get this for free. Don't pass `prefetch={false}` without a specific reason; the default is the right behavior for this app's navigation-heavy UI.
 
