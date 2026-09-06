@@ -3,6 +3,7 @@ import type { Center, Prisma, PrismaClient, Role } from "@prisma/client";
 // Relative imports on purpose — `npm run check:admin` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/payments.ts,
 // lib/db/approvals.ts, lib/db/analytics.ts).
+import { DEFAULT_ROLE_GRANTS } from "../auth/permissions.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -17,7 +18,7 @@ import type { Center, Prisma, PrismaClient, Role } from "@prisma/client";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const STAFF_ROLES: readonly Role[] = ["OWNER", "MANAGER", "RECEPTIONIST"];
+const STAFF_ROLES: readonly Role[] = ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"];
 const TEACHER_ROLE: Role = "TEACHER";
 
 // ── Center tenant management ────────────────────────────────────────────
@@ -101,6 +102,17 @@ export async function createCenterWithSettings(
           invitedBy: input.invite.invitedBy,
           expiresAt: input.invite.expiresAt,
         },
+      },
+      // The M12 permission matrix (docs/02-architecture.md §6.1) is
+      // deny-by-default, so a fresh center needs its baseline grant rows
+      // seeded here — the same baseline every pre-existing center already
+      // carries from the M12 migration's backfill — or its founding Owner
+      // would be unable to do anything beyond the ceiling-forced ownership
+      // actions the moment they accept the invite above.
+      permissionGrants: {
+        create: Object.entries(DEFAULT_ROLE_GRANTS).flatMap(([role, actions]) =>
+          actions.map((action) => ({ role: role as Role, action, allowed: true })),
+        ),
       },
     },
   });

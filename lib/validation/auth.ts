@@ -57,7 +57,7 @@ export const selectCenterSchema = z.object({
 
 export const createInvitationSchema = z.object({
   email,
-  role: z.enum(["OWNER", "MANAGER", "RECEPTIONIST", "TEACHER"]),
+  role: z.enum(["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"]),
   locale: localeSchema,
 });
 

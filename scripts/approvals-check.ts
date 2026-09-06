@@ -81,8 +81,14 @@ async function main() {
     "RECEPTIONIST cannot reach approvals.manage — same denial shape as analytics.center.view/expense.manage (M6)",
     !can("RECEPTIONIST", "approvals.manage"),
   );
-  check("MANAGER can reach approvals.manage", can("MANAGER", "approvals.manage"));
-  check("OWNER can reach approvals.manage", can("OWNER", "approvals.manage"));
+  check(
+    "MANAGER can reach approvals.manage (seeded baseline grant)",
+    can("MANAGER", "approvals.manage", { "approvals.manage": true }),
+  );
+  check(
+    "OWNER can reach approvals.manage (seeded baseline grant)",
+    can("OWNER", "approvals.manage", { "approvals.manage": true }),
+  );
 
   console.log("\nDatabase-backed checks");
 

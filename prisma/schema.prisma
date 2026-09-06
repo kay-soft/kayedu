@@ -21,6 +21,7 @@ enum Role {
   OWNER
   MANAGER
   RECEPTIONIST
+  ACCOUNTANT
   TEACHER
 }
 
@@ -176,6 +177,8 @@ model Center {
   studentBlocks     StudentBlock[]
   holidays          Holiday[]
   auditLogs         AuditLog[]
+  permissionGrants  PermissionGrant[]
+  branchGrants      MembershipBranchGrant[] @relation("MembershipBranchGrantCenter")
 
   @@index([organizationId])
 }
@@ -190,11 +193,6 @@ model CenterSettings {
   defaultLateThreshold             Int            @default(10) // minutes
   cardLayout                       Json? // ID-card customization (positions of name/id/logo…)
   timezone                         String         @default("Africa/Cairo")
-  // Permission grants — these only *widen* a role, never narrow it, and are
-  // read through permissionGrantsFromSettings() (docs/02-architecture.md §6).
-  // Receptionists are denied profit + corrections by default (spec §3).
-  receptionistCanViewProfit        Boolean        @default(false)
-  receptionistCanCorrectAttendance Boolean        @default(false)
   // Teacher/room double-booking (docs/02-architecture.md §11): WARN saves the
   // conflicting slot/session and surfaces it in the UI; DENY refuses it.
   scheduleConflictPolicy           ConflictPolicy @default(WARN)
@@ -214,10 +212,6 @@ model Membership {
   center         Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
   role           Role
   active         Boolean   @default(true)
-  // Teacher-only: schema flexibility for a future per-center visibility
-  // toggle. Defaults true and nothing currently gates on it — teachers see
-  // their own earnings by default (docs/00-master-product-spec.md §3).
-  canSeeEarnings Boolean   @default(true)
   // Center-local record for this person (docs/01-data-model.md §6). Identity
   // stays global on User (the auth credential + the platform-wide default),
   // but name and contact are what *this* center has on file — seeded from
@@ -237,6 +231,8 @@ model Membership {
   joinedAt       DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  branchGrants MembershipBranchGrant[]
 
   @@unique([userId, centerId, role])
   @@index([centerId])
@@ -258,6 +254,65 @@ model Invitation {
 
   @@index([centerId])
   @@index([email])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PERMISSIONS (M12)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * The stored, action-level permission matrix (docs/02-architecture.md §6.1)
+ * that replaces the hardcoded role→permission map and the two
+ * `CenterSettings` booleans it grew out of. `action` is a `Permission` union
+ * member (`lib/auth/permissions.ts`) stored as a plain string so a new action
+ * needs no migration to become grantable.
+ *
+ * Deny by default: an action with no row here is denied to that role,
+ * including a brand-new action nobody has granted yet. A hardcoded ceiling
+ * (`lib/auth/permissions.ts`) still overrides this table both ways — an
+ * OWNER's ownership actions are always true regardless of rows here, and a
+ * few actions (e.g. a TEACHER holding `center.profit.view`) can never be
+ * granted no matter what row exists — so a bad or malicious row can never
+ * itself create a privilege escalation. Only OWNER may write these rows
+ * (`lib/db/permissions.ts`), and every write is audited.
+ */
+model PermissionGrant {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  role      Role
+  action    String
+  allowed   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([centerId, role, action])
+  @@index([centerId])
+}
+
+/**
+ * An Owner-granted widening of a branch-scoped membership's reach to an
+ * additional branch (docs/01-data-model.md "Organization layer"). Only
+ * MANAGER/RECEPTIONIST/ACCOUNTANT memberships are ever widened this way: an
+ * OWNER already resolves every branch under their organization
+ * (`getUserCenterRelations()`), and a TEACHER's multi-center reach is a
+ * second real `Membership` row at that center, not a widening of one.
+ * Resolution is additive and never subtractive — a grant can never remove
+ * the membership's own home branch. Only OWNER may write one, and every
+ * write is audited (`membership.branch.grant` / `membership.branch.revoke`).
+ */
+model MembershipBranchGrant {
+  id           String     @id @default(uuid())
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  centerId     String
+  center       Center     @relation("MembershipBranchGrantCenter", fields: [centerId], references: [id], onDelete: Cascade)
+  grantedBy    String
+  createdAt    DateTime   @default(now())
+
+  @@unique([membershipId, centerId])
+  @@index([membershipId])
+  @@index([centerId])
 }
 
 // ─────────────────────────────────────────────────────────────

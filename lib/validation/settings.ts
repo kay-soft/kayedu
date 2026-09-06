@@ -239,12 +239,23 @@ export const cardLayoutSchema = z
     return { locale: value.locale, cardLayout: parsed as Record<string, unknown> };
   });
 
-// ── Receptionist permission grants ─────────────────────────────────────────
+// ── The permission matrix (M12) ────────────────────────────────────────────
 
-export const permissionGrantsSchema = z.object({
+/**
+ * The matrix screen submits its whole grid at once as `grant__<role>__<action>`
+ * checkboxes (`permissions-form.tsx`) — a dynamic field set zod can't type as
+ * a fixed object shape, so the action parses `locale` through this and reads
+ * the `grant__` fields directly off the raw `FormData`. Which (role, action)
+ * pairs are actually writable is decided server-side by `editableActionsFor()`
+ * (`lib/auth/permissions.ts`), never trusted from the field name alone: a
+ * forged extra field for a forbidden pair is silently dropped, not written.
+ */
+export const permissionMatrixSchema = z.object(base);
+
+export const membershipBranchGrantSchema = z.object({
   ...base,
-  receptionistCanViewProfit: checkbox,
-  receptionistCanCorrectAttendance: checkbox,
+  membershipId: recordId,
+  centerId: recordId,
 });
 
 // ── Users & roles ──────────────────────────────────────────────────────────
@@ -252,7 +263,7 @@ export const permissionGrantsSchema = z.object({
 export const memberRoleSchema = z.object({
   ...base,
   membershipId: recordId,
-  role: z.enum(["OWNER", "MANAGER", "RECEPTIONIST", "TEACHER"], {
+  role: z.enum(["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"], {
     error: "notFound",
   }),
 });

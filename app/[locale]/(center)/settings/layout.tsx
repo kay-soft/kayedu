@@ -38,7 +38,7 @@ export default async function SettingsLayout({
       { href: ROUTES.centerSettingsSubjects, labelKey: "subjects" },
       { href: ROUTES.centerSettingsCard, labelKey: "card" },
     );
-    if (ctxCan(ctx, "staff.manage")) {
+    if (ctxCan(ctx, "permission.manage")) {
       items.push({
         href: ROUTES.centerSettingsPermissions,
         labelKey: "permissions",

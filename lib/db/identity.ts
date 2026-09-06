@@ -88,7 +88,14 @@ export async function findPeopleByContact(
   }));
 }
 
-/** Memberships + student profiles this person holds at *other* centers. */
+/**
+ * Memberships + student profiles this person holds at *other* centers. Used
+ * by the student detail page's own "other branches" field — a different
+ * concern from the teacher-detail leak M12 closes (docs/00-master-product-spec.md
+ * §5 "Teacher detail leak"), which is specifically about a centre Owner/
+ * Manager seeing which *other centres a teacher works at*. Nothing in M12
+ * touches this student-facing count; it is out of that milestone's scope.
+ */
 export async function countOtherCenterRelations(
   userId: string,
   centerId: string,

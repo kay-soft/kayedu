@@ -18,6 +18,7 @@ const ROLE_OPTIONS: Role[] = [
   "OWNER",
   "MANAGER",
   "RECEPTIONIST",
+  "ACCOUNTANT",
   "TEACHER",
 ];
 
@@ -29,8 +30,13 @@ export type MemberRowData = {
   active: boolean;
   /** The signed-in user's own membership — nobody edits their own access. */
   isSelf: boolean;
-  /** False for a manager looking at an owner: the controls render disabled. */
-  canEdit: boolean;
+  /**
+   * Assigning/changing a role is OWNER-only (M12, `membership.role.assign`) —
+   * a MANAGER sees the role as a read-only badge, never an editable select.
+   */
+  canChangeRole: boolean;
+  /** False for a manager looking at an owner: activate/deactivate is disabled. */
+  canToggleActive: boolean;
 };
 
 export function MemberRow({ member }: { member: MemberRowData }) {
@@ -49,7 +55,8 @@ export function MemberRow({ member }: { member: MemberRowData }) {
     IDLE_ACTION_STATE,
   );
 
-  const locked = member.isSelf || !member.canEdit;
+  const roleLocked = member.isSelf || !member.canChangeRole;
+  const activeLocked = member.isSelf || !member.canToggleActive;
   const error = roleState.error ?? activeState.error;
 
   return (
@@ -76,7 +83,7 @@ export function MemberRow({ member }: { member: MemberRowData }) {
         <span className="text-xs text-text-muted md:hidden">
           {t("columns.role")}
         </span>
-        {locked ? (
+        {roleLocked ? (
           <Badge variant="brand">{tRoles(member.role)}</Badge>
         ) : (
           <form action={roleAction} className="flex items-center gap-2">
@@ -112,7 +119,7 @@ export function MemberRow({ member }: { member: MemberRowData }) {
       </div>
 
       <div className="shrink-0 md:w-32 md:text-end">
-        {locked ? (
+        {activeLocked ? (
           <span className="text-xs text-text-muted">
             {member.isSelf ? t("selfRow") : t("ownerRow")}
           </span>

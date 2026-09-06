@@ -47,6 +47,7 @@
     "OWNER": "Owner",
     "MANAGER": "Manager",
     "RECEPTIONIST": "Receptionist",
+    "ACCOUNTANT": "Accountant",
     "TEACHER": "Teacher",
     "STUDENT": "Student",
     "PLATFORM_ADMIN": "Super admin"
@@ -161,7 +162,15 @@
       "invalidInvitation": "Unknown invitation."
     },
     "selfRow": "You",
-    "ownerRow": "Owner-only"
+    "ownerRow": "Owner-only",
+    "branchGrants": {
+      "title": "Branch access",
+      "description": "Owner-only: widen a manager, receptionist or accountant's reach to an extra branch in this organization. Additive only — it never removes their home branch.",
+      "grantLabel": "Add a branch",
+      "grant": "Grant",
+      "revoke": "Remove access to {branch}",
+      "noBranches": "No extra branches granted yet."
+    }
   },
   "People": {
     "fields": {
@@ -251,7 +260,6 @@
     "classesEmpty": "No classes assigned to this teacher yet.",
     "deleteConfirm": "This removes them from this branch. It cannot be undone.",
     "fields": {
-      "otherCenters": "Other branches",
       "accountClaimed": "Signed in before"
     },
     "blocks": {
@@ -1001,18 +1009,40 @@
     },
     "permissions": {
       "title": "Permissions",
-      "description": "The few role edges this branch can widen. A grant can only add — it never takes away what a role already has.",
-      "receptionistTitle": "Receptionist grants",
-      "receptionistDescription": "Both are denied by default. Turn one on only if this branch's front desk genuinely needs it.",
-      "viewProfitLabel": "Can see branch profit and settlement figures",
-      "viewProfitDescription": "Off by default: the desk records money but does not see what the branch keeps.",
-      "correctAttendanceLabel": "Can correct an already-recorded attendance",
-      "correctAttendanceDescription": "Corrections are always written to the audit log, whoever makes them.",
-      "effectiveTitle": "In effect now",
-      "effectiveDescription": "What a {role} at this branch can do right now, resolved through the same check the server enforces.",
-      "allowed": "Allowed",
-      "denied": "Denied",
-      "widenOnlyNote": "Owners and managers always have both; these toggles apply to receptionists only."
+      "description": "The action-level matrix for this branch: every role, every action, denied unless you grant it. Owner-only — an owner's own actions and role/branch grants are never part of this grid because they can never be taken away.",
+      "ownerOnlyNote": "Only an owner may view or edit this matrix.",
+      "actionColumn": "Action",
+      "lockedNote": "Greyed-out cells can never be granted to that role, however the matrix is edited — a platform-level safeguard, not this branch's choice.",
+      "saveMatrix": "Save matrix",
+      "actions": {
+        "center_settings_edit": "Edit branch settings",
+        "center_branding_edit": "Edit branch branding",
+        "center_profit_view": "View branch profit",
+        "staff_invite": "Invite staff",
+        "staff_manage": "Manage staff",
+        "teacher_manage": "Manage teachers",
+        "teacher_delete": "Delete teachers",
+        "student_manage": "Manage students",
+        "student_delete": "Delete students",
+        "student_promote": "Promote students",
+        "student_block": "Block students",
+        "class_manage": "Manage classes",
+        "class_delete": "Delete classes",
+        "session_manage": "Manage sessions",
+        "session_cancel": "Cancel sessions",
+        "session_view": "View sessions",
+        "reception_use": "Use reception desk",
+        "attendance_record": "Record attendance",
+        "attendance_correct": "Correct attendance",
+        "payment_record": "Record payments",
+        "payment_void": "Void payments",
+        "expense_manage": "Manage expenses",
+        "analytics_center_view": "View branch analytics",
+        "analytics_own_view": "View own analytics",
+        "approvals_manage": "Manage approvals",
+        "changeRequest_create": "Submit class/session requests",
+        "audit_view": "View audit log"
+      }
     }
   },
   "CenterDashboard": {

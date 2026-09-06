@@ -17,7 +17,13 @@ import { ROUTES } from "@/lib/routes";
 
 const initialState: InviteFormState = {};
 
-const ROLE_OPTIONS = ["MANAGER", "RECEPTIONIST", "TEACHER", "OWNER"] as const;
+const ROLE_OPTIONS = [
+  "MANAGER",
+  "RECEPTIONIST",
+  "ACCOUNTANT",
+  "TEACHER",
+  "OWNER",
+] as const;
 
 function InviteLink({ token }: { token: string }) {
   const t = useTranslations("Staff");

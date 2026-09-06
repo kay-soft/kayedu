@@ -39,18 +39,18 @@ export async function createInvitationAction(
   formData: FormData,
 ): Promise<InviteFormState> {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "staff.invite")) return { error: "forbidden" };
+  // Inviting someone assigns them a role, so this is an OWNER-only action
+  // (docs/00-master-product-spec.md §3: "the only role that may grant roles
+  // or permissions") — `membership.role.assign` is ceiling-forced to OWNER
+  // (lib/auth/permissions.ts), so this can never be satisfied by any stored
+  // grant, only by actually being OWNER.
+  if (!ctxCan(ctx, "membership.role.assign")) return { error: "forbidden" };
 
   const parsed = createInvitationSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
   const { email, role, locale } = parsed.data;
   const db = scoped(ctx);
-
-  // Only an Owner may mint another Owner.
-  if (role === "OWNER" && !ctxCan(ctx, "center.ownership.manage")) {
-    return { error: "ownerOnly" };
-  }
 
   const existingMember = await db.memberships.list({
     where: { role, active: true, user: { email } },

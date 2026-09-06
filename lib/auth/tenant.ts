@@ -15,11 +15,12 @@ import {
   ROLE_PRECEDENCE,
   can,
   isCenterStaffRole,
-  permissionGrantsFromSettings,
+  isBranchGrantableRole,
   type Permission,
   type PermissionGrants,
   type TenantRole,
 } from "@/lib/auth/permissions";
+import { loadPermissionGrants, membershipBranchGrantsFor } from "@/lib/db/permissions";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 
@@ -62,13 +63,6 @@ export type CenterRelation = {
   studentProfile: StudentProfile | null;
   roles: TenantRole[];
 };
-
-/**
- * The permission-grant seam is re-exported here because this is where the
- * TenantContext is assembled; the function itself lives in
- * lib/auth/permissions.ts so it stays free of runtime imports.
- */
-export { permissionGrantsFromSettings };
 
 /** Drops the joined `center` relation so the row matches its Prisma model type. */
 function withoutCenter<T extends { center: unknown }>(row: T): Omit<T, "center"> {
@@ -129,7 +123,11 @@ export const getUserCenterRelations = cache(
       ),
     ];
 
-    const [studentProfiles, siblingBranches] = await Promise.all([
+    const branchGrantableMembershipIds = memberships
+      .filter((membership) => isBranchGrantableRole(membership.role))
+      .map((membership) => membership.id);
+
+    const [studentProfiles, siblingBranches, branchGrantsByMembership] = await Promise.all([
       prisma.studentProfile.findMany({
         where: { userId, active: true, center: { active: true } },
         include: { center: true },
@@ -139,6 +137,7 @@ export const getUserCenterRelations = cache(
             where: { organizationId: { in: ownerOrgIds }, active: true },
           })
         : Promise.resolve([]),
+      membershipBranchGrantsFor(prisma, branchGrantableMembershipIds),
     ]);
 
     const byCenter = new Map<string, CenterRelation>();
@@ -182,6 +181,23 @@ export const getUserCenterRelations = cache(
         if (relation.roles.includes(OWNER_ROLE)) continue;
         relation.memberships.push({ ...withoutCenter(membership), centerId: branch.id });
         relation.roles.push(OWNER_ROLE);
+      }
+    }
+
+    // Widen again: an Owner-granted MembershipBranchGrant lets a
+    // MANAGER/RECEPTIONIST/ACCOUNTANT membership additionally reach specific
+    // extra branches (M12) — additive only, and bounded to exactly the
+    // branches an Owner explicitly granted, unlike the Owner's own
+    // every-sibling-branch widening above.
+    for (const membership of memberships) {
+      if (!isBranchGrantableRole(membership.role)) continue;
+      const grantedBranches = branchGrantsByMembership.get(membership.id) ?? [];
+      for (const branch of grantedBranches) {
+        if (branch.id === membership.centerId) continue;
+        const relation = ensure(branch);
+        if (relation.roles.includes(membership.role)) continue;
+        relation.memberships.push({ ...withoutCenter(membership), centerId: branch.id });
+        relation.roles.push(membership.role);
       }
     }
 
@@ -244,7 +260,7 @@ export const getOwnerOrgGroups = cache(
 function roleForExperience(
   relation: CenterRelation,
   experience?: Experience,
-): TenantRole {
+): Role | "STUDENT" {
   const staff = relation.roles.find((role) => isCenterStaffRole(role));
   const teacher = relation.roles.find((role) => role === "TEACHER");
   const student = relation.roles.find((role) => role === "STUDENT");
@@ -281,6 +297,12 @@ async function buildContext(
   const role = roleForExperience(relation, experience);
   const membership = relation.memberships.find((item) => item.role === role) ?? null;
 
+  // STUDENT is a resolved role, not a Membership — it never has PermissionGrant
+  // rows (docs/01-data-model.md "Permissions layer" is centerId × Role × action,
+  // and Role has no STUDENT value), so there is nothing to load.
+  const grants =
+    role === "STUDENT" ? {} : await loadPermissionGrants(prisma, relation.center.id, role);
+
   return {
     user,
     center: relation.center,
@@ -289,7 +311,7 @@ async function buildContext(
     studentProfile: relation.studentProfile,
     role,
     roles: relation.roles,
-    grants: permissionGrantsFromSettings(settings),
+    grants,
     isPlatformAdmin: user.isPlatformAdmin,
     rollupOrganizationId: null,
   };
@@ -307,6 +329,20 @@ async function buildContext(
  * rather than an options object on purpose: `cache()` keys object arguments
  * by reference, so a fresh `{ experience: "center" }` literal at every call
  * site would never hit the cache — a primitive keys by value instead.
+ *
+ * Security fix 17 (M12, docs/00-master-product-spec.md §5, criterion 20):
+ * a role/grant change must take effect on the very next request, never on the
+ * next login. React's `cache()` here is per-request only — it never survives
+ * past the response — and no cookie or JWT anywhere in this app carries a
+ * role, a permission, or a grant: `kayedu_center` (`lib/auth/active-center.ts`)
+ * holds only a center/organization selection, and Supabase's own session
+ * cookie holds only the auth identity. `role`/`grants` are re-derived from
+ * `Membership`/`PermissionGrant` fresh on every request via
+ * `getUserCenterRelations()`/`loadPermissionGrants()` above, so there is no
+ * snapshot to invalidate — the very next request already reads the changed
+ * row. This is the mechanism `check:permissions` asserts directly: writing a
+ * `PermissionGrant`/`Membership.role` change and re-resolving immediately
+ * (no fresh login, no cache warm-up) must show the new value.
  */
 export const getTenantContext = cache(
   async (experience?: Experience): Promise<TenantContext> => {

@@ -61,6 +61,7 @@ export function homePathForRole(role: TenantRole): string {
     case "OWNER":
     case "MANAGER":
     case "RECEPTIONIST":
+    case "ACCOUNTANT":
       return ROUTES.centerDashboard;
     case "TEACHER":
       return ROUTES.teacherDashboard;

@@ -10,8 +10,8 @@
  * same zod schemas the settings Server Actions parse with and the same
  * tenant-scoping primitives lib/db/scoped.ts is built on. Then it asserts the
  * two configurations are independent, that neither center can see the other's
- * config rows, that the permission-grant seam widens a receptionist and
- * nobody else, and that the center-cut split is right in both modes.
+ * config rows, and that the center-cut split is right in both modes. The
+ * permission matrix itself (M12) has its own dedicated gate, `check:permissions`.
  *
  * It needs a reachable database and cleans up after itself.
  */
@@ -21,14 +21,12 @@ import {
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
-import { can, permissionGrantsFromSettings } from "../lib/auth/permissions.ts";
 import { splitShare } from "../lib/money.ts";
 import {
   cardLayoutSchema,
   educationSystemSchema,
   generalSettingsSchema,
   gradeSchema,
-  permissionGrantsSchema,
   roomSchema,
   subjectSchema,
 } from "../lib/validation/settings.ts";
@@ -136,16 +134,6 @@ async function configureCenter(centerId: string) {
     "cardLayout",
   );
 
-  const grants = parse(
-    permissionGrantsSchema,
-    {
-      locale: "en",
-      receptionistCanViewProfit: "on",
-      receptionistCanCorrectAttendance: "on",
-    },
-    "permissionGrants",
-  );
-
   const cardLayout = (card.cardLayout ?? undefined) as
     | Prisma.InputJsonValue
     | undefined;
@@ -159,8 +147,6 @@ async function configureCenter(centerId: string) {
       defaultLateThreshold: general.defaultLateThreshold,
       timezone: general.timezone,
       cardLayout,
-      receptionistCanViewProfit: grants.receptionistCanViewProfit,
-      receptionistCanCorrectAttendance: grants.receptionistCanCorrectAttendance,
     },
     create: {
       centerId,
@@ -170,8 +156,6 @@ async function configureCenter(centerId: string) {
       defaultLateThreshold: general.defaultLateThreshold,
       timezone: general.timezone,
       cardLayout,
-      receptionistCanViewProfit: grants.receptionistCanViewProfit,
-      receptionistCanCorrectAttendance: grants.receptionistCanCorrectAttendance,
     },
   });
 
@@ -242,39 +226,7 @@ async function main() {
     systemsInA.length === 1 && systemsInA[0].id === a.systemRow.id,
   );
 
-  // ── 4. The permission-grant seam ───────────────────────────────────────
-  const noGrants = permissionGrantsFromSettings({
-    receptionistCanViewProfit: false,
-    receptionistCanCorrectAttendance: false,
-  });
-  check(
-    "Receptionist is denied profit by default",
-    !can("RECEPTIONIST", "center.profit.view", noGrants),
-  );
-  check(
-    "Receptionist is denied attendance correction by default",
-    !can("RECEPTIONIST", "attendance.correct", noGrants),
-  );
-
-  const granted = permissionGrantsFromSettings(a.settingsRow);
-  check(
-    "Granting profit in settings lets a receptionist view profit",
-    can("RECEPTIONIST", "center.profit.view", granted),
-  );
-  check(
-    "Granting corrections in settings lets a receptionist correct attendance",
-    can("RECEPTIONIST", "attendance.correct", granted),
-  );
-  check(
-    "A grant cannot widen a role it is not grantable for (TEACHER + profit)",
-    !can("TEACHER", "center.profit.view", granted),
-  );
-  check(
-    "A grant never removes a baseline permission (OWNER keeps profit)",
-    can("OWNER", "center.profit.view", noGrants),
-  );
-
-  // ── 5. Center-cut math (the default this screen configures) ────────────
+  // ── 4. Center-cut math (the default this screen configures) ────────────
   const percentage = splitShare(12_000, "PERCENTAGE", 15);
   const fixed = splitShare(12_000, "FIXED", 1_500);
   check(
@@ -288,7 +240,7 @@ async function main() {
     JSON.stringify(fixed),
   );
 
-  // ── 6. The schemas reject what the UI must not store ───────────────────
+  // ── 5. The schemas reject what the UI must not store ───────────────────
   check(
     "A percentage above 100 is rejected",
     !generalSettingsSchema.safeParse({

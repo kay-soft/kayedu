@@ -4,12 +4,17 @@ import { revalidatePath } from "next/cache";
 import type { Role } from "@prisma/client";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import { isBranchGrantableRole } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/db/audit";
+import { prisma } from "@/lib/db/client";
+import { organizationBranches } from "@/lib/db/organizations";
+import { grantMembershipBranch, revokeMembershipBranch } from "@/lib/db/permissions";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   memberActiveSchema,
+  membershipBranchGrantSchema,
   memberRoleSchema,
 } from "@/lib/validation/settings";
 
@@ -71,6 +76,11 @@ export async function changeMemberRoleAction(
 ): Promise<ActionState> {
   const scope = await staffScope();
   if (!scope) return FORBIDDEN;
+  // Changing a role is granting a role (docs/00-master-product-spec.md §3):
+  // OWNER only, by UI and by direct call. `membership.role.assign` is
+  // ceiling-forced to OWNER (lib/auth/permissions.ts), so `staff.manage`
+  // alone (which a MANAGER also holds) is never enough here.
+  if (!ctxCan(scope.ctx, "membership.role.assign")) return FORBIDDEN;
 
   const parsed = memberRoleSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
@@ -149,4 +159,69 @@ export async function setMemberActiveAction(
 
   revalidatePath(staffPath(locale));
   return { status: "saved" };
+}
+
+/**
+ * Widens a MANAGER/RECEPTIONIST/ACCOUNTANT membership's reach to one more
+ * branch under this organization (M12, docs/01-data-model.md "Organization
+ * layer") — OWNER only, by UI and by direct call: `membership.branch.grant`
+ * is ceiling-forced to OWNER, so `staff.manage` alone is never enough.
+ */
+export async function grantMembershipBranchAction(formData: FormData): Promise<void> {
+  const ctx = await getTenantContext("center");
+  if (!ctxCan(ctx, "membership.branch.grant")) return;
+
+  const parsed = membershipBranchGrantSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return;
+  const { membershipId, centerId: targetCenterId, locale } = parsed.data;
+
+  const db = scoped(ctx);
+  const membership = await db.memberships.findById(membershipId);
+  if (!membership) return;
+  if (!isBranchGrantableRole(membership.role)) return;
+
+  // The target must be a real sibling branch under this organization — never
+  // trusted from the form beyond that.
+  const siblings = await organizationBranches(prisma, ctx.center.organizationId);
+  const target = siblings.find((branch) => branch.id === targetCenterId);
+  if (!target || target.id === ctx.center.id) return;
+
+  await grantMembershipBranch(prisma, membership.id, target.id, ctx.user.id);
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "membership.branch.grant",
+    entityType: "Membership",
+    entityId: membership.id,
+    after: { centerId: target.id },
+  });
+
+  revalidatePath(staffPath(locale));
+}
+
+export async function revokeMembershipBranchAction(formData: FormData): Promise<void> {
+  const ctx = await getTenantContext("center");
+  if (!ctxCan(ctx, "membership.branch.grant")) return;
+
+  const parsed = membershipBranchGrantSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return;
+  const { membershipId, centerId: targetCenterId, locale } = parsed.data;
+
+  const db = scoped(ctx);
+  const membership = await db.memberships.findById(membershipId);
+  if (!membership) return;
+
+  await revokeMembershipBranch(prisma, membership.id, targetCenterId);
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "membership.branch.revoke",
+    entityType: "Membership",
+    entityId: membership.id,
+    before: { centerId: targetCenterId },
+  });
+
+  revalidatePath(staffPath(locale));
 }

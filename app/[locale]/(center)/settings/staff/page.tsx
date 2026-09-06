@@ -1,6 +1,7 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { revokeInvitationAction } from "@/app/[locale]/(center)/settings/staff/actions";
+import { BranchGrants, type BranchGrantMember } from "@/app/[locale]/(center)/settings/staff/branch-grants";
 import { InviteForm } from "@/app/[locale]/(center)/settings/staff/invite-form";
 import {
   MemberRow,
@@ -17,6 +18,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { isBranchGrantableRole } from "@/lib/auth/permissions";
+import { prisma } from "@/lib/db/client";
+import { organizationBranches } from "@/lib/db/organizations";
+import { membershipBranchGrantsFor } from "@/lib/db/permissions";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
 
@@ -39,6 +44,9 @@ export default async function StaffSettingsPage() {
 
   const canManage = ctxCan(ctx, "staff.manage");
   const canManageOwners = ctxCan(ctx, "center.ownership.manage");
+  // Assigning/changing a role is OWNER-only (M12) — a MANAGER's staff.manage
+  // still lets them activate/deactivate, never touch the role itself.
+  const canAssignRole = ctxCan(ctx, "membership.role.assign");
 
   const rows: MemberRowData[] = members.map((member) => ({
     membershipId: member.id,
@@ -47,23 +55,51 @@ export default async function StaffSettingsPage() {
     role: member.role,
     active: member.active,
     isSelf: member.userId === ctx.user.id,
-    // Only an owner may retitle or suspend another owner (docs/02 §3).
-    canEdit: canManage && (member.role !== "OWNER" || canManageOwners),
+    canChangeRole: canAssignRole,
+    // Only an owner may suspend another owner (docs/02 §3).
+    canToggleActive: canManage && (member.role !== "OWNER" || canManageOwners),
   }));
+
+  // Cross-branch grants (M12) — OWNER only, and only meaningful when this
+  // organization actually has a second branch to grant.
+  const canGrantBranch = ctxCan(ctx, "membership.branch.grant");
+  let branchGrantMembers: BranchGrantMember[] = [];
+  let siblingBranches: { id: string; name: string }[] = [];
+  if (canGrantBranch) {
+    const eligible = members.filter(
+      (member) => member.active && isBranchGrantableRole(member.role),
+    );
+    const [siblings, grantsByMembership] = await Promise.all([
+      organizationBranches(prisma, ctx.center.organizationId),
+      membershipBranchGrantsFor(prisma, eligible.map((member) => member.id)),
+    ]);
+    siblingBranches = siblings.filter((branch) => branch.id !== ctx.center.id);
+    branchGrantMembers = eligible.map((member) => ({
+      membershipId: member.id,
+      name: `${member.user.firstName} ${member.user.lastName}`.trim(),
+      role: member.role,
+      grantedBranches: (grantsByMembership.get(member.id) ?? []).map((branch) => ({
+        id: branch.id,
+        name: branch.name,
+      })),
+    }));
+  }
 
   return (
     <div className="flex flex-col gap-6">
       <SectionHeader title={t("title")} description={t("subtitle")} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("inviteTitle")}</CardTitle>
-          <CardDescription>{t("inviteSubtitle")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <InviteForm />
-        </CardContent>
-      </Card>
+      {canAssignRole ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("inviteTitle")}</CardTitle>
+            <CardDescription>{t("inviteSubtitle")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <InviteForm />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -149,6 +185,14 @@ export default async function StaffSettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {canGrantBranch ? (
+        <BranchGrants
+          locale={locale}
+          members={branchGrantMembers}
+          branches={siblingBranches}
+        />
+      ) : null}
     </div>
   );
 }

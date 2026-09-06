@@ -139,6 +139,21 @@ async function main() {
       ownerInvitation?.email === "admin-check-ownera@kayedu.test",
       JSON.stringify(ownerInvitation),
     );
+
+    // M12: the matrix is deny-by-default, so a fresh center needs its
+    // baseline PermissionGrant rows seeded in this same flow — otherwise the
+    // founding Owner could do nothing beyond the ceiling-forced ownership
+    // actions the moment they accept the invite above.
+    const ownerGrants = await prisma.permissionGrant.findMany({
+      where: { centerId: centerA.id, role: "OWNER" },
+    });
+    check(
+      "A fresh center's founding Owner has real baseline PermissionGrant rows, not zero",
+      ownerGrants.length > 0 &&
+        ownerGrants.every((row) => row.allowed) &&
+        ownerGrants.some((row) => row.action === "student.manage"),
+      JSON.stringify(ownerGrants.map((row) => row.action)),
+    );
   }
 
   const duplicate = await createCenterWithSettings(prisma, {

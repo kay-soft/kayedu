@@ -47,6 +47,7 @@
     "OWNER": "المالك",
     "MANAGER": "المدير",
     "RECEPTIONIST": "موظف الاستقبال",
+    "ACCOUNTANT": "محاسب",
     "TEACHER": "مدرس",
     "STUDENT": "طالب",
     "PLATFORM_ADMIN": "مشرف المنصة"
@@ -161,7 +162,15 @@
       "invalidInvitation": "دعوة غير معروفة."
     },
     "selfRow": "أنت",
-    "ownerRow": "للمالك فقط"
+    "ownerRow": "للمالك فقط",
+    "branchGrants": {
+      "title": "الوصول إلى فروع أخرى",
+      "description": "للمالك فقط: توسيع نطاق مدير أو موظف استقبال أو محاسب ليشمل فرعًا إضافيًا في هذه المنظمة. إضافة فقط — لا يزيل هذا فرعه الأساسي أبدًا.",
+      "grantLabel": "إضافة فرع",
+      "grant": "منح",
+      "revoke": "إزالة الوصول إلى {branch}",
+      "noBranches": "لا توجد فروع إضافية ممنوحة بعد."
+    }
   },
   "People": {
     "fields": {
@@ -251,7 +260,6 @@
     "classesEmpty": "لا توجد فصول مسندة لهذا المدرّس بعد.",
     "deleteConfirm": "سيؤدي هذا إلى إزالته من هذا الفرع، ولا يمكن التراجع.",
     "fields": {
-      "otherCenters": "فروع أخرى",
       "accountClaimed": "سجّل الدخول من قبل"
     },
     "blocks": {
@@ -1001,18 +1009,40 @@
     },
     "permissions": {
       "title": "الصلاحيات",
-      "description": "الحالات القليلة التي يمكن للفرع توسيعها. المنح يضيف فقط — ولا يسحب أي صلاحية أصلية للدور.",
-      "receptionistTitle": "منح موظف الاستقبال",
-      "receptionistDescription": "الاثنتان مغلقتان افتراضيًا. فعّل أيًا منهما فقط إذا كان الاستقبال في هذا الفرع يحتاجها فعلًا.",
-      "viewProfitLabel": "الاطلاع على أرباح الفرع وتسويات المدرسين",
-      "viewProfitDescription": "مغلقة افتراضيًا: الاستقبال يسجّل المدفوعات ولا يرى ما يبقى للفرع.",
-      "correctAttendanceLabel": "تعديل حضور تم تسجيله بالفعل",
-      "correctAttendanceDescription": "كل تعديل للحضور يُسجَّل في سجل التدقيق، أيًا كان من قام به.",
-      "effectiveTitle": "المطبَّق الآن",
-      "effectiveDescription": "ما يستطيع {role} في هذا الفرع فعله الآن، محسوبًا بنفس الفحص الذي يطبّقه الخادم.",
-      "allowed": "مسموح",
-      "denied": "ممنوع",
-      "widenOnlyNote": "المالك والمدير لديهما الصلاحيتان دائمًا؛ وهذه المفاتيح تخص موظف الاستقبال فقط."
+      "description": "مصفوفة الصلاحيات على مستوى الإجراء لهذا الفرع: كل دور، كل إجراء، ممنوع ما لم تمنحه. للمالك فقط — صلاحيات المالك نفسه ومنح الأدوار/الفروع ليست جزءًا من هذه الشبكة لأنها لا يمكن سحبها أبدًا.",
+      "ownerOnlyNote": "المالك وحده يمكنه عرض هذه المصفوفة أو تعديلها.",
+      "actionColumn": "الإجراء",
+      "lockedNote": "الخلايا الرمادية لا يمكن منحها لهذا الدور مهما عُدِّلت المصفوفة — إجراء وقائي على مستوى المنصة، وليس خيارًا لهذا الفرع.",
+      "saveMatrix": "حفظ المصفوفة",
+      "actions": {
+        "center_settings_edit": "تعديل إعدادات الفرع",
+        "center_branding_edit": "تعديل هوية الفرع",
+        "center_profit_view": "عرض أرباح الفرع",
+        "staff_invite": "دعوة موظفين",
+        "staff_manage": "إدارة الموظفين",
+        "teacher_manage": "إدارة المدرّسين",
+        "teacher_delete": "حذف المدرّسين",
+        "student_manage": "إدارة الطلاب",
+        "student_delete": "حذف الطلاب",
+        "student_promote": "ترقية الطلاب",
+        "student_block": "حظر الطلاب",
+        "class_manage": "إدارة الفصول",
+        "class_delete": "حذف الفصول",
+        "session_manage": "إدارة الحصص",
+        "session_cancel": "إلغاء الحصص",
+        "session_view": "عرض الحصص",
+        "reception_use": "استخدام مكتب الاستقبال",
+        "attendance_record": "تسجيل الحضور",
+        "attendance_correct": "تصحيح الحضور",
+        "payment_record": "تسجيل المدفوعات",
+        "payment_void": "إلغاء المدفوعات",
+        "expense_manage": "إدارة المصروفات",
+        "analytics_center_view": "عرض تحليلات الفرع",
+        "analytics_own_view": "عرض التحليلات الشخصية",
+        "approvals_manage": "إدارة الموافقات",
+        "changeRequest_create": "تقديم طلبات فصل/حصة",
+        "audit_view": "عرض سجل التدقيق"
+      }
     }
   },
   "CenterDashboard": {

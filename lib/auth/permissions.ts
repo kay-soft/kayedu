@@ -1,15 +1,27 @@
-import type { CenterSettings, Role } from "@prisma/client";
+import type { Role } from "@prisma/client";
 
 /**
- * Hardcoded permission map (docs/02-architecture.md §6, spec §3).
- * Not a dynamic permission engine — Phase 1 keeps roles fixed.
+ * The configurable, action-level permission matrix (M12,
+ * docs/02-architecture.md §6.1, docs/00-master-product-spec.md §3).
+ *
+ * Phase 1 shipped a hardcoded `Record<TenantRole, Permission[]>` plus two
+ * `CenterSettings` boolean grants. M12 replaces both with stored
+ * `PermissionGrant` rows (`centerId × role × action × allowed`,
+ * `lib/db/permissions.ts`) — this module stays the single place the
+ * `Permission` union and the resolution algorithm live, and it stays free of
+ * runtime imports so the acceptance gates can exercise it outside Next.
  */
 
 export type TenantRole = Role | "STUDENT" | "PLATFORM_ADMIN";
 
 export const PERMISSIONS = [
+  // Ownership — OWNER only, forced true for OWNER and forbidden to every
+  // other role regardless of any stored grant (see the ceiling below).
+  "center.ownership.manage", // transfer / close the center
+  "permission.manage", // edit the permission matrix (M12)
+  "membership.role.assign", // grant/change a member's role (M12)
+  "membership.branch.grant", // widen a member's branch access (M12)
   // Center-level
-  "center.ownership.manage", // transfer / close the center — Owner only
   "center.settings.edit",
   "center.branding.edit",
   "center.profit.view",
@@ -49,103 +61,71 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-const MANAGER_PERMISSIONS: readonly Permission[] = [
-  "center.settings.edit",
-  "center.branding.edit",
-  "center.profit.view",
-  "staff.invite",
-  "staff.manage",
-  "teacher.manage",
-  "teacher.delete",
-  "student.manage",
-  "student.delete",
-  "student.promote",
-  "student.block",
-  "class.manage",
-  "class.delete",
-  "session.manage",
-  "session.cancel",
-  "session.view",
-  "reception.use",
-  "attendance.record",
-  "attendance.correct",
-  "payment.record",
-  "payment.void",
-  "expense.manage",
-  "analytics.center.view",
-  "approvals.manage",
-  "audit.view",
+/**
+ * Ownership actions: forced true for OWNER regardless of any stored
+ * `PermissionGrant` row, and forbidden to every other role regardless of any
+ * row (docs/02-architecture.md §6.1 "a hardcoded grantable ceiling still
+ * exists"). This is what keeps "an OWNER can never be stripped of ownership
+ * actions" and "a MANAGER cannot reach the matrix, assign a role, or grant a
+ * branch — by UI or by direct action call" true even against a bad or
+ * malicious `PermissionGrant` row, not merely against the UI.
+ */
+const OWNER_ONLY_ACTIONS: readonly Permission[] = [
+  "center.ownership.manage",
+  "permission.manage",
+  "membership.role.assign",
+  "membership.branch.grant",
 ];
 
-const ROLE_PERMISSIONS: Record<TenantRole, readonly Permission[]> = {
-  // Owner = Manager + ownership actions.
-  OWNER: ["center.ownership.manage", ...MANAGER_PERMISSIONS],
-  MANAGER: MANAGER_PERMISSIONS,
-  // Daily ops only. Profit and corrections are denied by default (spec §3).
-  RECEPTIONIST: [
-    "reception.use",
-    "session.view",
-    "attendance.record",
-    "payment.record",
-    "student.manage",
-  ],
-  // Teachers see their own earnings/analytics by default (spec §3, M3) — no
-  // grant needed, and `Membership.canSeeEarnings` gates nothing.
-  TEACHER: ["analytics.own.view", "changeRequest.create", "student.block"],
-  STUDENT: [],
-  PLATFORM_ADMIN: ["platform.manage", "audit.view"],
+/**
+ * A hard denylist on top of the open matrix: actions a role can never be
+ * granted, however a centre configures its matrix (docs/00-master-product-spec.md
+ * §3: "a TEACHER can never be granted center.profit.view"). Everything else is
+ * genuinely configurable — M12 deliberately opens the matrix beyond the old
+ * narrow per-role allowlist (`GRANTABLE_PERMISSIONS`), so a centre may now
+ * grant, say, RECEPTIONIST `analytics.center.view` if it wants to.
+ */
+const FORBIDDEN_CEILING: Partial<Record<TenantRole, readonly Permission[]>> = {
+  TEACHER: ["center.profit.view", "analytics.center.view"],
 };
+
+/** Resolved-role actions that are not Memberships and never go through the matrix. */
+const PLATFORM_ADMIN_ACTIONS: readonly Permission[] = ["platform.manage", "audit.view"];
 
 /**
- * Permissions a center may *additionally* grant to a role via center settings.
- * Grants can only add; they can never take away a role's baseline.
- * The settings UI that flips these lands in M2 (center configuration).
+ * Platform-level actions no centre's matrix may ever grant to any Membership
+ * role, OWNER included — these belong to `User.isPlatformAdmin`, a wholly
+ * separate axis from a centre's own role matrix.
  */
-const GRANTABLE_PERMISSIONS: Partial<Record<TenantRole, readonly Permission[]>> = {
-  RECEPTIONIST: ["attendance.correct", "center.profit.view"],
-};
+const PLATFORM_ONLY_ACTIONS: readonly Permission[] = ["platform.manage"];
 
+/**
+ * The resolved grant map for one role at one center — loaded fresh per
+ * request from `PermissionGrant` rows (`lib/db/permissions.ts`), the direct
+ * replacement for the old `permissionGrantsFromSettings()` seam. Deny by
+ * default: a permission with no entry here is denied.
+ */
 export type PermissionGrants = Partial<Record<Permission, boolean>>;
 
 /**
- * Center settings that widen a role's baseline (docs/02-architecture.md §6).
- * This is the single seam — nothing else reads the toggle columns.
- *
- * A grant only *adds*, and only for a permission listed as grantable for that
- * role above. Both toggles below are receptionist-only there, so flipping one
- * cannot widen anyone else: a TEACHER carrying `center.profit.view` in grants
- * still fails `can()`, because profit is not in TEACHER's grantable set.
- *
- * Both default to false — spec §3 denies a receptionist profit and
- * corrections until a center deliberately grants them.
- *
- * It lives here, beside the map it feeds, rather than in lib/auth/tenant.ts:
- * this module has no runtime imports, so the check can be exercised outside
- * the Next.js runtime (same reasoning as lib/db/tenant-scope.ts).
+ * Resolution order (docs/02-architecture.md §6.1): platform ceiling → the
+ * centre's stored grant → deny. `STUDENT`/`PLATFORM_ADMIN` are resolved roles,
+ * not `Role` enum values — they never have `PermissionGrant` rows, so they are
+ * settled before the matrix is even consulted.
  */
-export function permissionGrantsFromSettings(
-  settings: Pick<
-    CenterSettings,
-    "receptionistCanViewProfit" | "receptionistCanCorrectAttendance"
-  > | null,
-): PermissionGrants {
-  const grants: PermissionGrants = {};
-  if (!settings) return grants;
-  if (settings.receptionistCanViewProfit) grants["center.profit.view"] = true;
-  if (settings.receptionistCanCorrectAttendance) {
-    grants["attendance.correct"] = true;
-  }
-  return grants;
-}
-
 export function can(
   role: TenantRole,
   permission: Permission,
   grants?: PermissionGrants,
 ): boolean {
-  if (ROLE_PERMISSIONS[role]?.includes(permission)) return true;
-  if (grants?.[permission] !== true) return false;
-  return GRANTABLE_PERMISSIONS[role]?.includes(permission) ?? false;
+  if (PLATFORM_ONLY_ACTIONS.includes(permission)) return role === "PLATFORM_ADMIN";
+  if (role === "PLATFORM_ADMIN") return PLATFORM_ADMIN_ACTIONS.includes(permission);
+  if (role === "STUDENT") return false;
+
+  if (OWNER_ONLY_ACTIONS.includes(permission)) return role === "OWNER";
+  if (FORBIDDEN_CEILING[role]?.includes(permission)) return false;
+
+  return grants?.[permission] === true;
 }
 
 export class PermissionError extends Error {
@@ -173,16 +153,118 @@ export function permissionsFor(role: TenantRole, grants?: PermissionGrants): Per
   return PERMISSIONS.filter((permission) => can(role, permission, grants));
 }
 
-export const CENTER_STAFF_ROLES: readonly Role[] = ["OWNER", "MANAGER", "RECEPTIONIST"];
+/**
+ * Every action a centre's matrix screen may actually edit for a given role —
+ * the ownership actions are excluded (they are never stored rows, see
+ * `OWNER_ONLY_ACTIONS` above) and a role's own forbidden ceiling is excluded
+ * too, since no toggle there could ever take effect.
+ */
+export function editableActionsFor(role: Role): Permission[] {
+  const forbidden = FORBIDDEN_CEILING[role] ?? [];
+  return PERMISSIONS.filter(
+    (permission) =>
+      !OWNER_ONLY_ACTIONS.includes(permission) &&
+      !PLATFORM_ONLY_ACTIONS.includes(permission) &&
+      !forbidden.includes(permission),
+  );
+}
+
+/**
+ * The roles the `/settings/permissions` matrix screen actually edits. OWNER
+ * is excluded — its actions are forced/ceiling-protected, never a stored row
+ * (see `OWNER_ONLY_ACTIONS` above and docs/02-architecture.md §6.1).
+ */
+export const MATRIX_ROLES: readonly Role[] = [
+  "MANAGER",
+  "RECEPTIONIST",
+  "ACCOUNTANT",
+  "TEACHER",
+];
+
+/**
+ * The baseline `PermissionGrant` rows a freshly provisioned center starts
+ * with — seeded once at creation (`lib/db/platform.ts`'s
+ * `createCenterWithSettings`), then freely reconfigurable through the matrix
+ * from that point on. This is the same baseline the M12 migration backfilled
+ * onto every pre-existing center (`prisma/migrations/20260906224000_m12_permission_matrix`),
+ * kept here as the one canonical list so a brand-new center's provisioning
+ * path can never quietly drift from what that one-time migration established.
+ */
+const MANAGER_BASELINE: readonly Permission[] = [
+  "center.settings.edit",
+  "center.branding.edit",
+  "center.profit.view",
+  "staff.invite",
+  "staff.manage",
+  "teacher.manage",
+  "teacher.delete",
+  "student.manage",
+  "student.delete",
+  "student.promote",
+  "student.block",
+  "class.manage",
+  "class.delete",
+  "session.manage",
+  "session.cancel",
+  "session.view",
+  "reception.use",
+  "attendance.record",
+  "attendance.correct",
+  "payment.record",
+  "payment.void",
+  "expense.manage",
+  "analytics.center.view",
+  "approvals.manage",
+  "audit.view",
+];
+
+export const DEFAULT_ROLE_GRANTS: Record<Role, readonly Permission[]> = {
+  OWNER: MANAGER_BASELINE,
+  MANAGER: MANAGER_BASELINE,
+  RECEPTIONIST: [
+    "reception.use",
+    "session.view",
+    "attendance.record",
+    "payment.record",
+    "student.manage",
+  ],
+  ACCOUNTANT: ["analytics.center.view", "expense.manage"],
+  TEACHER: ["analytics.own.view", "changeRequest.create", "student.block"],
+};
+
+export const CENTER_STAFF_ROLES: readonly Role[] = [
+  "OWNER",
+  "MANAGER",
+  "RECEPTIONIST",
+  "ACCOUNTANT",
+];
 
 /** Highest-authority role first — used to resolve a user's role at a center. */
 export const ROLE_PRECEDENCE: readonly Role[] = [
   "OWNER",
   "MANAGER",
   "RECEPTIONIST",
+  "ACCOUNTANT",
   "TEACHER",
 ];
 
 export function isCenterStaffRole(role: TenantRole): role is Role {
   return (CENTER_STAFF_ROLES as readonly string[]).includes(role);
+}
+
+/**
+ * Branch-scoped roles a `MembershipBranchGrant` may widen (M12,
+ * docs/01-data-model.md "Organization layer"). OWNER already resolves every
+ * branch under its organization; TEACHER's multi-center reach is a second
+ * real `Membership` row, not a widening of one — so neither is grantable
+ * here.
+ */
+export const BRANCH_GRANTABLE_ROLES: readonly Role[] = [
+  "MANAGER",
+  "RECEPTIONIST",
+  "ACCOUNTANT",
+];
+
+export function isBranchGrantableRole(role: Role): boolean {
+  return (BRANCH_GRANTABLE_ROLES as readonly string[]).includes(role);
 }

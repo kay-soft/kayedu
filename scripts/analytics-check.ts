@@ -146,10 +146,14 @@ async function main() {
     !can("RECEPTIONIST", "expense.manage"),
   );
   check(
-    "RECEPTIONIST cannot be granted analytics.center.view even via settings grants",
-    !can("RECEPTIONIST", "analytics.center.view", { "analytics.center.view": true }),
+    "A centre CAN now grant RECEPTIONIST analytics.center.view via the matrix (M12 opens this beyond the old narrow allowlist)",
+    can("RECEPTIONIST", "analytics.center.view", { "analytics.center.view": true }),
   );
-  check("OWNER can view analytics and expenses", can("OWNER", "analytics.center.view") && can("OWNER", "expense.manage"));
+  check(
+    "OWNER can view analytics and expenses (seeded baseline grants)",
+    can("OWNER", "analytics.center.view", { "analytics.center.view": true }) &&
+      can("OWNER", "expense.manage", { "expense.manage": true }),
+  );
 
   console.log("\nDatabase-backed checks");
 

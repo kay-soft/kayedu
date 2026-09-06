@@ -105,10 +105,24 @@ async function payFor(
 async function main() {
   await cleanup();
 
+  // The seeded baseline a fresh center's TEACHER matrix rows carry
+  // (docs/03-build-order.md M12's backfill) — passed explicitly here so this
+  // stays a database-free resolution-logic check, the matrix's own DB-backed
+  // behavior is `check:permissions`'s job.
+  const TEACHER_BASELINE_GRANTS = {
+    "analytics.own.view": true,
+    "changeRequest.create": true,
+    "student.block": true,
+  } as const;
+
   console.log("Permission map (no database needed)");
   check(
     "TEACHER cannot view center.profit.view — M7 must not widen this",
     !can("TEACHER", "center.profit.view"),
+  );
+  check(
+    "TEACHER's profit-view ceiling holds even against a stray grant (M12)",
+    !can("TEACHER", "center.profit.view", { "center.profit.view": true }),
   );
   check(
     "TEACHER cannot view analytics.center.view — center-wide analytics stays center-staff only",
@@ -116,9 +130,9 @@ async function main() {
   );
   check(
     "TEACHER keeps its baseline: analytics.own.view, changeRequest.create, student.block",
-    can("TEACHER", "analytics.own.view") &&
-      can("TEACHER", "changeRequest.create") &&
-      can("TEACHER", "student.block"),
+    can("TEACHER", "analytics.own.view", TEACHER_BASELINE_GRANTS) &&
+      can("TEACHER", "changeRequest.create", TEACHER_BASELINE_GRANTS) &&
+      can("TEACHER", "student.block", TEACHER_BASELINE_GRANTS),
   );
 
   console.log("\nDatabase-backed checks");

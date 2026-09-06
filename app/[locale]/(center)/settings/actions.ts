@@ -4,8 +4,15 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import { MATRIX_ROLES, PERMISSIONS, editableActionsFor } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/db/audit";
+import { prisma } from "@/lib/db/client";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import {
+  listPermissionGrants,
+  savePermissionGrants,
+  type PermissionGrantWrite,
+} from "@/lib/db/permissions";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   cardLayoutSchema,
@@ -14,7 +21,7 @@ import {
   generalSettingsSchema,
   gradeSchema,
   gradeUpdateSchema,
-  permissionGrantsSchema,
+  permissionMatrixSchema,
   recordDeleteSchema,
   recordToggleSchema,
   roomSchema,
@@ -563,51 +570,59 @@ export async function saveCardLayoutAction(
   return { status: "saved" };
 }
 
-// ── Receptionist permission grants ─────────────────────────────────────────
+// ── The permission matrix (M12) ────────────────────────────────────────────
 
-export async function savePermissionGrantsAction(
+/**
+ * `/settings/permissions` — OWNER only, by UI (the page redirects a non-owner
+ * away) **and** here, by direct action call (docs/03-build-order.md M12
+ * "Done when"). `permission.manage` is one of the ceiling-forced ownership
+ * actions (`lib/auth/permissions.ts`), so this `ctxCan` check can never be
+ * satisfied by any stored grant — only by actually being OWNER.
+ */
+export async function savePermissionMatrixAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await getTenantContext("center");
-  // Widening a role is a permission change, so it needs staff authority on
-  // top of settings authority.
-  if (!ctxCan(ctx, "center.settings.edit") || !ctxCan(ctx, "staff.manage")) {
-    return FORBIDDEN;
-  }
-  const db = scoped(ctx);
+  if (!ctxCan(ctx, "permission.manage")) return FORBIDDEN;
 
-  const parsed = permissionGrantsSchema.safeParse(
-    Object.fromEntries(formData),
-  );
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const {
-    locale,
-    receptionistCanViewProfit,
-    receptionistCanCorrectAttendance,
-  } = parsed.data;
-
-  const before = await db.settings.get();
-  await db.settings.save({
-    receptionistCanViewProfit,
-    receptionistCanCorrectAttendance,
+  const parsed = permissionMatrixSchema.safeParse({
+    locale: formData.get("locale"),
   });
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const { locale } = parsed.data;
+
+  const before = await listPermissionGrants(prisma, ctx.center.id);
+
+  // The grid submits one `grant__<role>__<action>` checkbox per editable
+  // cell. Which cells are editable is decided here, server-side, from the
+  // same `editableActionsFor()` the page rendered the grid from — a forged
+  // field for a role/action pair outside that set (an owner-only action, or
+  // one on that role's forbidden ceiling) is silently dropped, never written,
+  // so the ceiling holds even against a hand-crafted POST.
+  const writes: PermissionGrantWrite[] = [];
+  for (const role of MATRIX_ROLES) {
+    const editable = new Set(editableActionsFor(role));
+    for (const action of PERMISSIONS) {
+      if (!editable.has(action)) continue;
+      writes.push({
+        role,
+        action,
+        allowed: formData.get(`grant__${role}__${action}`) === "on",
+      });
+    }
+  }
+
+  await savePermissionGrants(prisma, ctx.center.id, writes);
 
   await writeAuditLog({
     centerId: ctx.center.id,
     actorUserId: ctx.user.id,
-    action: "center.permissions.update",
-    entityType: "CenterSettings",
+    action: "permission.matrix.update",
+    entityType: "PermissionGrant",
     entityId: ctx.center.id,
-    before: before
-      ? {
-          receptionistCanViewProfit: before.receptionistCanViewProfit,
-          receptionistCanCorrectAttendance:
-            before.receptionistCanCorrectAttendance,
-        }
-      : null,
-    after: { receptionistCanViewProfit, receptionistCanCorrectAttendance },
+    before,
+    after: writes,
   });
 
   revalidateSettings(locale);

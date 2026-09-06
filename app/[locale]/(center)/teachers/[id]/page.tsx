@@ -20,7 +20,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { countOtherCenterRelations } from "@/lib/db/identity";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
@@ -58,10 +57,13 @@ export default async function TeacherDetailPage({
   const t = await getTranslations("Teachers");
   const tCommon = await getTranslations("Settings.common");
 
-  const [classes, blocks, otherRelations] = await Promise.all([
+  // Security fix 16 (M12, docs/00-master-product-spec.md §5 "Teacher detail
+  // leak"): this page must never reveal which other centres this teacher
+  // works at, so nothing here queries across centres — everything below is
+  // scoped to this center alone.
+  const [classes, blocks] = await Promise.all([
     db.classGroups.list({ teacherId: teacher.userId }),
     db.studentBlocks.list({ scope: "TEACHER", refId: teacher.userId }),
-    countOtherCenterRelations(teacher.userId, ctx.center.id),
   ]);
 
   // A block stores the student's *User* id; the name shown is this center's
@@ -156,10 +158,6 @@ export default async function TeacherDetailPage({
               <CardDescription>{t("identityDescription")}</CardDescription>
             </CardHeader>
             <CardContent>
-              <DetailRow
-                label={t("fields.otherCenters")}
-                value={String(otherRelations)}
-              />
               <DetailRow
                 label={t("fields.accountClaimed")}
                 value={
