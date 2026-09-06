@@ -129,8 +129,12 @@ async function main() {
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Payments A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Payments B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Payments A", organization: { create: { name: "Payments A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Payments B", organization: { create: { name: "Payments B" } } },
+  });
 
   const teacherA = await makeTeacher(centerA.id, "payments-check-teacher-a@kayedu.test");
   const actorId = teacherA.id; // stands in for a recording staff member's userId

@@ -29,7 +29,6 @@ export default async function SettingsLayout({
   if (ctxCan(ctx, "center.settings.edit")) {
     items.push(
       { href: ROUTES.centerSettings, labelKey: "general" },
-      { href: ROUTES.centerSettingsBranches, labelKey: "branches" },
       { href: ROUTES.centerSettingsRooms, labelKey: "rooms" },
       {
         href: ROUTES.centerSettingsEducationSystems,

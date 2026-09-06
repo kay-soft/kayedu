@@ -44,10 +44,10 @@ async function main() {
   await cleanup();
 
   const centerA = await prisma.center.create({
-    data: { slug: SLUG_A, name: "Isolation A" },
+    data: { slug: SLUG_A, name: "Isolation A", organization: { create: { name: "Isolation A" } } },
   });
   const centerB = await prisma.center.create({
-    data: { slug: SLUG_B, name: "Isolation B" },
+    data: { slug: SLUG_B, name: "Isolation B", organization: { create: { name: "Isolation B" } } },
   });
 
   const userA = await prisma.user.create({
@@ -72,35 +72,41 @@ async function main() {
     data: { userId: userB.id, centerId: centerB.id, role: "OWNER" },
   });
 
-  const branchA = await prisma.branch.create({
+  // Branch (the old location-under-a-tenant model) was retired at M11 — a
+  // room now belongs to the centre directly, the same non-money,
+  // centerId-scoped shape Branch used to have, so it exercises this gate
+  // exactly as before (docs/03-build-order.md M11: "check:isolation passes
+  // with ZERO changes to its assertions" — the fixture model changed because
+  // the old one no longer exists, the assertions below did not).
+  const roomA = await prisma.room.create({
     data: { centerId: centerA.id, name: "A main" },
   });
-  const branchB = await prisma.branch.create({
+  const roomB = await prisma.room.create({
     data: { centerId: centerB.id, name: "B main" },
   });
 
   console.log("Tenant isolation check");
 
   // 1. The happy path still works inside the active center.
-  const ownBranch = await scopedFindById(prisma.branch, centerA.id, branchA.id);
-  check("Center A reads its own branch by id", ownBranch?.id === branchA.id);
+  const ownRoom = await scopedFindById(prisma.room, centerA.id, roomA.id);
+  check("Center A reads its own room by id", ownRoom?.id === roomA.id);
 
   // 2. The acceptance gate: another center's id must not resolve.
-  const foreignBranch = await scopedFindById(
-    prisma.branch,
+  const foreignRoom = await scopedFindById(
+    prisma.room,
     centerA.id,
-    branchB.id,
+    roomB.id,
   );
   check(
-    "Center A cannot read a Center B branch by id",
-    foreignBranch === null,
-    foreignBranch ? `leaked branch ${foreignBranch.id}` : "",
+    "Center A cannot read a Center B room by id",
+    foreignRoom === null,
+    foreignRoom ? `leaked room ${foreignRoom.id}` : "",
   );
 
   // 3. requireScopedById turns the same attempt into a hard error.
   let threwScopeError = false;
   try {
-    await requireScopedById(prisma.branch, centerA.id, branchB.id, "Branch");
+    await requireScopedById(prisma.room, centerA.id, roomB.id, "Room");
   } catch (error) {
     threwScopeError = error instanceof TenantScopeError;
   }
@@ -120,7 +126,7 @@ async function main() {
   //    silent unscoped read.
   let threwMissingScope = false;
   try {
-    scopedWhere("", { id: branchB.id });
+    scopedWhere("", { id: roomB.id });
   } catch (error) {
     threwMissingScope = error instanceof MissingCenterScopeError;
   }

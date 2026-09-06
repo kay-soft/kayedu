@@ -167,7 +167,6 @@ export async function resolveSessionRequest(
           classGroupId: classGroup.id,
           teacherId: classGroup.teacherId,
           roomId: classGroup.roomId,
-          branchId: classGroup.room?.branchId ?? null,
           date,
           startTime: payload.startTime,
           endTime: payload.endTime,

@@ -431,34 +431,11 @@ export function scoped(ctx: TenantContext) {
     // `update`/`remove` go through updateMany/deleteMany with a scoped where so
     // an id from another center matches zero rows instead of the wrong one.
 
-    branches: {
-      list: (where?: Prisma.BranchWhereInput) =>
-        prisma.branch.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-        }),
-
-      count: (where?: Prisma.BranchWhereInput) =>
-        prisma.branch.count({ where: scopedWhere(centerId, where) }),
-
-      findById: (id: string) => scopedFindById(prisma.branch, centerId, id),
-
-      create: (data: Omit<Prisma.BranchUncheckedCreateInput, "centerId">) =>
-        prisma.branch.create({ data: scopedData(centerId, data) }),
-
-      update: (id: string, data: Omit<Prisma.BranchUncheckedUpdateManyInput, "centerId">) =>
-        prisma.branch.updateMany({ where: scopedWhere(centerId, { id }), data }),
-
-      remove: (id: string) =>
-        prisma.branch.deleteMany({ where: scopedWhere(centerId, { id }) }),
-    },
-
     rooms: {
       list: (where?: Prisma.RoomWhereInput) =>
         prisma.room.findMany({
           where: scopedWhere(centerId, where),
           orderBy: [{ active: "desc" }, { name: "asc" }],
-          include: { branch: true },
         }),
 
       count: (where?: Prisma.RoomWhereInput) =>

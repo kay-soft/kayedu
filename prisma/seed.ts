@@ -109,7 +109,7 @@ async function ensureAuthUserFor(params: {
  *
  * Skip with `SEED_DEMO_DATA=false` for a bare owner-only seed.
  */
-async function seedDemoData(centerId: string, branchId: string) {
+async function seedDemoData(centerId: string) {
   console.log("\nSeeding demo reference data, people, classes and history…");
 
   async function findOrCreateByName<T extends { id: string }>(
@@ -167,7 +167,7 @@ async function seedDemoData(centerId: string, branchId: string) {
       await findOrCreateByName(
         `Room: ${name}`,
         () => prisma.room.findFirst({ where: { centerId, name } }),
-        () => prisma.room.create({ data: { centerId, branchId, name, capacity: 20 } }),
+        () => prisma.room.create({ data: { centerId, name, capacity: 20 } }),
       ),
     );
   }
@@ -476,6 +476,11 @@ async function main() {
       themeColor: CENTER_THEME,
       active: true,
       plan: "pilot",
+      // One organization per seeded center (M11) — a single-branch org, the
+      // same shape the migration's backfill gave every pre-existing center.
+      organization: {
+        create: { name: CENTER_NAME, nameEn: "Al-Noor Education Center" },
+      },
     },
   });
 
@@ -493,26 +498,14 @@ async function main() {
     },
   });
 
-  const branch = await prisma.branch.upsert({
-    where: { id: `${center.id}-main` },
-    update: {},
-    create: {
-      id: `${center.id}-main`,
-      centerId: center.id,
-      name: "الفرع الرئيسي",
-      active: true,
-    },
-  });
-
   console.log("Seed complete:");
   console.log(`  Center       ${center.name} (${center.slug}) — ${center.id}`);
   console.log(
     `  Settings     share ${settings.defaultShareType} ${settings.defaultShareValue}`,
   );
-  console.log(`  Branch       ${branch.name}`);
 
   if (process.env.SEED_DEMO_DATA !== "false") {
-    await seedDemoData(center.id, branch.id);
+    await seedDemoData(center.id);
   }
 
   const authId = await ensureAuthUserFor({

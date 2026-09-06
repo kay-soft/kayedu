@@ -13,7 +13,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
-import { getUserCenterRelations, primaryRole } from "@/lib/auth/tenant";
+import {
+  getOwnerOrgGroups,
+  getUserCenterRelations,
+  primaryRole,
+} from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 
@@ -30,10 +34,16 @@ export default async function SelectCenterPage({
   const tRoles = await getTranslations("Roles");
 
   const { switch: switchMode } = await searchParams;
-  const relations = await getUserCenterRelations(user!.id);
+  const [relations, orgGroups] = await Promise.all([
+    getUserCenterRelations(user!.id),
+    getOwnerOrgGroups(user!.id),
+  ]);
 
-  // Exactly one center → skip the hub entirely (docs/02 §3).
-  if (relations.length === 1 && switchMode !== "1") {
+  // Exactly one center and no "Whole Management" option → skip the hub
+  // entirely (docs/02 §3). An Owner of a multi-branch organization always
+  // sees the hub, even with one branch resolved today, because the roll-up
+  // option lives here.
+  if (relations.length === 1 && orgGroups.length === 0 && switchMode !== "1") {
     redirect({ href: homePathForRole(primaryRole(relations[0])), locale });
   }
 
@@ -59,6 +69,43 @@ export default async function SelectCenterPage({
               </a>
             </>
           ) : null}
+
+          {orgGroups.map((group) => (
+            <form key={group.organizationId} action={selectCenterAction}>
+              <input type="hidden" name="locale" value={locale} />
+              <input type="hidden" name="scope" value="all" />
+              <input
+                type="hidden"
+                name="centerId"
+                value={group.branches[0].id}
+              />
+              <button
+                type="submit"
+                className="flex w-full min-h-16 items-center gap-3 rounded-xl border-2 border-brand bg-surface p-3 text-start transition-shadow hover:shadow-card-hover sm:p-4"
+              >
+                <span
+                  aria-hidden
+                  className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground"
+                >
+                  <Building2 className="size-5" />
+                </span>
+
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">
+                    {t("wholeManagement", { organization: group.organizationName })}
+                  </span>
+                  <span className="block truncate text-xs text-text-muted">
+                    {t("wholeManagementHint", { count: group.branches.length })}
+                  </span>
+                </span>
+
+                <ChevronLeft
+                  aria-hidden
+                  className="size-4 shrink-0 text-text-muted ltr:-scale-x-100"
+                />
+              </button>
+            </form>
+          ))}
 
           {relations.map((relation) => (
             <form key={relation.center.id} action={selectCenterAction}>

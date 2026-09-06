@@ -23,14 +23,6 @@ const recordId = z.string().trim().min(1, "notFound").max(64, "notFound");
 
 const entityName = z.string().trim().min(1, "required").max(80, "tooLong");
 
-const optionalText = (max: number) =>
-  z
-    .string()
-    .trim()
-    .max(max, "tooLong")
-    .optional()
-    .transform((value) => (value && value.length > 0 ? value : null));
-
 /** An optional foreign-key select — "" (the placeholder option) means null. */
 const optionalRef = z
   .string()
@@ -87,17 +79,10 @@ export const subjectSchema = z.object({
   gradeId: optionalRef,
 });
 
-export const branchSchema = z.object({
-  ...base,
-  name: entityName,
-  address: optionalText(160),
-});
-
 export const roomSchema = z.object({
   ...base,
   name: entityName,
   capacity: wholeNumber(10_000),
-  branchId: optionalRef,
 });
 
 /** Every master-data update carries the id of the row being edited. */
@@ -106,7 +91,6 @@ export const educationSystemUpdateSchema = educationSystemSchema.extend({
 });
 export const gradeUpdateSchema = gradeSchema.extend({ id: recordId });
 export const subjectUpdateSchema = subjectSchema.extend({ id: recordId });
-export const branchUpdateSchema = branchSchema.extend({ id: recordId });
 export const roomUpdateSchema = roomSchema.extend({ id: recordId });
 
 export const recordToggleSchema = z.object({

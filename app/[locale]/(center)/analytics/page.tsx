@@ -1,14 +1,22 @@
 import { Banknote, GraduationCap, TrendingUp, UserPlus, Users, Wallet } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { BranchRevenueTable } from "@/app/[locale]/(center)/analytics/branch-revenue-table";
 import { TeacherFilter } from "@/app/[locale]/(center)/analytics/teacher-filter";
 import { TeacherRevenueTable } from "@/app/[locale]/(center)/analytics/teacher-revenue-table";
 import { DateRangeFilters } from "@/components/shared/date-range-filters";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { getActiveCenterScope } from "@/lib/auth/active-center";
+import {
+  ctxCan,
+  getOwnerOrgGroups,
+  getTenantContext,
+  requirePermission,
+} from "@/lib/auth/tenant";
 import {
   expenseTotals,
   revenueByTeacher,
@@ -17,6 +25,13 @@ import {
   teacherCounts,
 } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
+import {
+  expenseTotalsRollup,
+  revenueByBranch,
+  revenueTotalsRollup,
+  studentCountsRollup,
+  teacherCountsRollup,
+} from "@/lib/db/organizations";
 import { scoped } from "@/lib/db/scoped";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
@@ -57,14 +72,42 @@ export default async function AnalyticsPage({
   const centerId = ctx.center.id;
   const range = { from, to };
 
-  const [revenue, expenses, students, teachers, byTeacher, teacherMemberships] =
+  // "Whole Management" (M11): an Owner viewing every branch under their
+  // organization instead of just the active one. This never widens
+  // centerId-scoping — it is a union of independent per-branch scoped queries
+  // summed in memory (lib/db/organizations.ts), exactly like the teacher
+  // portal's combined dashboard (docs/01-data-model.md §4).
+  const scopeCookie = await getActiveCenterScope();
+  const orgGroups =
+    scopeCookie === "all" && ctx.role === "OWNER"
+      ? await getOwnerOrgGroups(ctx.user.id)
+      : [];
+  const orgGroup = orgGroups.find((group) =>
+    group.branches.some((branch) => branch.id === centerId),
+  );
+  const rollupBranchIds = orgGroup?.branches.map((branch) => branch.id) ?? null;
+
+  const [revenue, expenses, students, teachers, byTeacher, teacherMemberships, byBranch] =
     await Promise.all([
-      revenueTotals(prisma, centerId, range, filters.teacherId),
-      expenseTotals(prisma, centerId, range),
-      studentCounts(prisma, centerId, range),
-      teacherCounts(prisma, centerId, range),
-      filters.teacherId ? Promise.resolve([]) : revenueByTeacher(prisma, centerId, range),
+      rollupBranchIds
+        ? revenueTotalsRollup(prisma, rollupBranchIds, range, filters.teacherId)
+        : revenueTotals(prisma, centerId, range, filters.teacherId),
+      rollupBranchIds
+        ? expenseTotalsRollup(prisma, rollupBranchIds, range)
+        : expenseTotals(prisma, centerId, range),
+      rollupBranchIds
+        ? studentCountsRollup(prisma, rollupBranchIds, range)
+        : studentCounts(prisma, centerId, range),
+      rollupBranchIds
+        ? teacherCountsRollup(prisma, rollupBranchIds, range)
+        : teacherCounts(prisma, centerId, range),
+      filters.teacherId || rollupBranchIds
+        ? Promise.resolve([])
+        : revenueByTeacher(prisma, centerId, range),
       scoped(ctx).teachers.list({ active: true }),
+      rollupBranchIds
+        ? revenueByBranch(prisma, orgGroup!.branches, range)
+        : Promise.resolve([]),
     ]);
 
   const net = revenue.centerShare - expenses.total;
@@ -87,7 +130,17 @@ export default async function AnalyticsPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} description={t("subtitle")} />
+      <PageHeader
+        title={t("title")}
+        description={t("subtitle")}
+        action={
+          orgGroup ? (
+            <Badge variant="brand">
+              {t("rollup.badge", { organization: orgGroup.organizationName })}
+            </Badge>
+          ) : undefined
+        }
+      />
 
       <Card>
         <CardContent className="pt-6">
@@ -157,7 +210,18 @@ export default async function AnalyticsPage({
         <StatCard label={t("users.newTeachers")} value={formatNumber(teachers.new, locale)} />
       </div>
 
-      {!filters.teacherId ? (
+      {orgGroup ? (
+        <>
+          <SectionHeader title={t("byBranch.title")} description={t("byBranch.description")} />
+          <Card>
+            <CardContent className="pt-6">
+              <BranchRevenueTable rows={byBranch} showProfit={showProfit} locale={locale} />
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+
+      {!filters.teacherId && !orgGroup ? (
         <>
           <SectionHeader title={t("byTeacher.title")} description={t("byTeacher.description")} />
           <Card>

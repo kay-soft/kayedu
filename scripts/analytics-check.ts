@@ -153,8 +153,12 @@ async function main() {
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Analytics A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Analytics B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Analytics A", organization: { create: { name: "Analytics A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Analytics B", organization: { create: { name: "Analytics B" } } },
+  });
 
   const { user: teacher1, membership: membership1 } = await makeTeacher(
     centerA.id,

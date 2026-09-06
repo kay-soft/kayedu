@@ -85,18 +85,52 @@ export function primaryRole(relation: CenterRelation): TenantRole {
   return relation.roles[0] ?? "STUDENT";
 }
 
-/** Every center this user is connected to, as staff/teacher and/or as a student. */
+const OWNER_ROLE: Role = "OWNER";
+
+/**
+ * Every center this user is connected to, as staff/teacher and/or as a
+ * student — plus, for an OWNER, every *other* branch under the same
+ * organization as a branch they already hold (M11, docs/01-data-model.md §4
+ * "Branch (organization) visibility").
+ *
+ * This is the "widened by organizationId" resolution the milestone chose over
+ * a nullable `Membership.centerId` (see docs/02-architecture.md §4): an
+ * Owner's real `Membership` row is untouched — same `centerId`, same
+ * `@@unique([userId, centerId, role])` — so every non-Owner role and every
+ * existing Owner-at-their-own-branch behavior is provably unchanged. The only
+ * new thing is that an Owner membership at branch A additionally resolves a
+ * *synthetic* relation for every sibling branch B under A's organization,
+ * carrying a per-branch view of the same membership row (same `id`, `centerId`
+ * swapped to B). `buildContext()` still just reads `relation.center.id` as the
+ * centerId to scope on, so a sibling relation scopes to B's real data exactly
+ * like a real Membership at B would — `lib/db/scoped.ts` needs no changes at
+ * all to support it.
+ */
 export const getUserCenterRelations = cache(
   async (userId: string): Promise<CenterRelation[]> => {
-    const [memberships, studentProfiles] = await Promise.all([
-      prisma.membership.findMany({
-        where: { userId, active: true, center: { active: true } },
-        include: { center: true },
-      }),
+    const memberships = await prisma.membership.findMany({
+      where: { userId, active: true, center: { active: true } },
+      include: { center: true },
+    });
+
+    const ownerOrgIds = [
+      ...new Set(
+        memberships
+          .filter((membership) => membership.role === OWNER_ROLE)
+          .map((membership) => membership.center.organizationId),
+      ),
+    ];
+
+    const [studentProfiles, siblingBranches] = await Promise.all([
       prisma.studentProfile.findMany({
         where: { userId, active: true, center: { active: true } },
         include: { center: true },
       }),
+      ownerOrgIds.length > 0
+        ? prisma.center.findMany({
+            where: { organizationId: { in: ownerOrgIds }, active: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const byCenter = new Map<string, CenterRelation>();
@@ -120,6 +154,29 @@ export const getUserCenterRelations = cache(
       relation.roles.push(membership.role);
     }
 
+    // Widen: every Owner membership's organization reaches every branch under
+    // it, even branches with no real Membership row. A branch this user
+    // already holds a real membership at (its own branch, or one they also
+    // happen to be TEACHER/STUDENT at) is skipped — the real row above is
+    // never shadowed by a synthetic one.
+    const branchesByOrg = new Map<string, Center[]>();
+    for (const branch of siblingBranches) {
+      const list = branchesByOrg.get(branch.organizationId) ?? [];
+      list.push(branch);
+      branchesByOrg.set(branch.organizationId, list);
+    }
+    for (const membership of memberships) {
+      if (membership.role !== OWNER_ROLE) continue;
+      const siblings = branchesByOrg.get(membership.center.organizationId) ?? [];
+      for (const branch of siblings) {
+        if (branch.id === membership.centerId) continue;
+        const relation = ensure(branch);
+        if (relation.roles.includes(OWNER_ROLE)) continue;
+        relation.memberships.push({ ...withoutCenter(membership), centerId: branch.id });
+        relation.roles.push(OWNER_ROLE);
+      }
+    }
+
     for (const profile of studentProfiles) {
       const relation = ensure(profile.center);
       relation.studentProfile = withoutCenter(profile);
@@ -129,6 +186,50 @@ export const getUserCenterRelations = cache(
     return [...byCenter.values()]
       .map((relation) => ({ ...relation, roles: sortRoles(relation.roles) }))
       .sort((a, b) => a.center.name.localeCompare(b.center.name));
+  },
+);
+
+export type OwnerOrgGroup = {
+  organizationId: string;
+  organizationName: string;
+  branches: Center[];
+};
+
+/**
+ * The organizations this user is an Owner of, where the organization actually
+ * has more than one branch — the set the "Whole Management" option in the
+ * branch switcher offers (M11, spec §4.1). A single-branch organization has
+ * nothing for a roll-up to sum, so it never appears here; the switcher still
+ * lists that one branch as an ordinary card via `getUserCenterRelations`.
+ */
+export const getOwnerOrgGroups = cache(
+  async (userId: string): Promise<OwnerOrgGroup[]> => {
+    const relations = await getUserCenterRelations(userId);
+    const branchesByOrg = new Map<string, Center[]>();
+    for (const relation of relations) {
+      if (!relation.roles.includes("OWNER")) continue;
+      const orgId = relation.center.organizationId;
+      const list = branchesByOrg.get(orgId) ?? [];
+      list.push(relation.center);
+      branchesByOrg.set(orgId, list);
+    }
+
+    const multiOrgIds = [...branchesByOrg.entries()]
+      .filter(([, branches]) => branches.length > 1)
+      .map(([orgId]) => orgId);
+    if (multiOrgIds.length === 0) return [];
+
+    const organizations = await prisma.organization.findMany({
+      where: { id: { in: multiOrgIds } },
+    });
+
+    return organizations.map((organization) => ({
+      organizationId: organization.id,
+      organizationName: organization.name,
+      branches: (branchesByOrg.get(organization.id) ?? []).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    }));
   },
 );
 

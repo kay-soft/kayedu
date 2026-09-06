@@ -11,7 +11,6 @@ import {
   EntityManager,
   type EntityRecord,
 } from "@/components/settings/entity-manager";
-import { FormMessage } from "@/components/shared/form-message";
 import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
@@ -24,8 +23,6 @@ export default async function RoomsPage() {
   const db = scoped(ctx);
   const locale = await getLocale();
   const t = await getTranslations("Settings.rooms");
-  const tCommon = await getTranslations("Settings.common");
-  const branches = await db.branches.list();
   const rooms = await db.rooms.list();
 
   const fields: EntityField[] = [
@@ -37,18 +34,6 @@ export default async function RoomsPage() {
       max: 10_000,
       hint: t("fields.capacityHint"),
     },
-    {
-      name: "branchId",
-      kind: "select",
-      label: t("fields.branch"),
-      emptyLabel: tCommon("none"),
-      options: branches.map((branch) => ({
-        value: branch.id,
-        label: branch.active
-          ? branch.name
-          : `${branch.name} · ${tCommon("inactive")}`,
-      })),
-    },
   ];
 
   const records: EntityRecord[] = rooms.map((room) => ({
@@ -57,22 +42,13 @@ export default async function RoomsPage() {
     values: {
       name: room.name,
       capacity: String(room.capacity),
-      branchId: room.branchId ?? "",
     },
-    cells: [
-      room.name,
-      formatNumber(room.capacity, locale),
-      room.branch?.name ?? tCommon("none"),
-    ],
+    cells: [room.name, formatNumber(room.capacity, locale)],
   }));
 
   return (
     <div className="flex flex-col gap-6">
       <SectionHeader title={t("title")} description={t("description")} />
-
-      {branches.length === 0 ? (
-        <FormMessage tone="info">{t("noBranchesHint")}</FormMessage>
-      ) : null}
 
       <EntityManager
         fields={fields}

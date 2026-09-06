@@ -34,7 +34,6 @@ export const ROUTES = {
   // Center configuration (M2). The settings shell lives at /settings and every
   // configuration screen is a child of it.
   centerSettings: "/settings",
-  centerSettingsBranches: "/settings/branches",
   centerSettingsRooms: "/settings/rooms",
   centerSettingsEducationSystems: "/settings/education-systems",
   centerSettingsGrades: "/settings/grades",

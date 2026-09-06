@@ -180,7 +180,15 @@ export async function selectCenterAction(formData: FormData): Promise<void> {
     return;
   }
 
-  await setActiveCenterId(relation.center.id);
+  // "Whole Management" is only meaningful for an Owner whose organization
+  // actually has more than one branch — never trust the client's scope flag
+  // beyond that (lib/auth/tenant.ts's getOwnerOrgGroups is the same check
+  // Analytics re-runs when it reads the cookie back).
+  const wantsRollup = parsed.data.scope === "all";
+  const scope =
+    wantsRollup && relation.roles.includes("OWNER") ? "all" : null;
+
+  await setActiveCenterId(relation.center.id, scope);
   redirect({ href: homePathForRole(primaryRole(relation)), locale });
 }
 

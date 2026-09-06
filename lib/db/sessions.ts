@@ -45,7 +45,6 @@ type ClassForGeneration = {
   id: string;
   teacherId: string;
   roomId: string | null;
-  branchId: string | null;
   price: number;
   schedules: { dayOfWeek: number; startTime: string; endTime: string }[];
   className: string;
@@ -66,7 +65,6 @@ async function loadClassesForGeneration(
       id: true,
       teacherId: true,
       roomId: true,
-      room: { select: { branchId: true } },
       price: true,
       schedules: {
         select: { dayOfWeek: true, startTime: true, endTime: true },
@@ -82,7 +80,6 @@ async function loadClassesForGeneration(
       id: row.id,
       teacherId: row.teacherId,
       roomId: row.roomId,
-      branchId: row.room?.branchId ?? null,
       price: row.price,
       schedules: row.schedules,
       className: [row.subject?.name, row.grade?.name].filter(Boolean).join(" · ") || "—",
@@ -183,7 +180,6 @@ export async function generateSessions(
     classGroupId: string;
     teacherId: string;
     roomId: string | null;
-    branchId: string | null;
     date: Date;
     startTime: string;
     endTime: string;
@@ -221,7 +217,6 @@ export async function generateSessions(
           classGroupId: classGroup.id,
           teacherId: classGroup.teacherId,
           roomId: classGroup.roomId,
-          branchId: classGroup.branchId,
           date,
           startTime: schedule.startTime,
           endTime: schedule.endTime,

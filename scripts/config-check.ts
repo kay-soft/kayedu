@@ -24,7 +24,6 @@ import {
 import { can, permissionGrantsFromSettings } from "../lib/auth/permissions.ts";
 import { splitShare } from "../lib/money.ts";
 import {
-  branchSchema,
   cardLayoutSchema,
   educationSystemSchema,
   generalSettingsSchema,
@@ -105,28 +104,15 @@ async function configureCenter(centerId: string) {
     }),
   });
 
-  const branch = parse(
-    branchSchema,
-    { locale: "en", name: "Main branch", address: "12 Nile St" },
-    "branch",
-  );
-  const branchRow = await prisma.branch.create({
-    data: scopedData(centerId, {
-      name: branch.name,
-      address: branch.address,
-    }),
-  });
-
   const room = parse(
     roomSchema,
-    { locale: "en", name: "Room 1", capacity: "30", branchId: branchRow.id },
+    { locale: "en", name: "Room 1", capacity: "30" },
     "room",
   );
   const roomRow = await prisma.room.create({
     data: scopedData(centerId, {
       name: room.name,
       capacity: room.capacity,
-      branchId: room.branchId,
     }),
   });
 
@@ -189,7 +175,7 @@ async function configureCenter(centerId: string) {
     },
   });
 
-  return { systemRow, gradeRow, subjectRow, branchRow, roomRow, settingsRow };
+  return { systemRow, gradeRow, subjectRow, roomRow, settingsRow };
 }
 
 async function cleanup() {
@@ -200,10 +186,10 @@ async function main() {
   await cleanup();
 
   const centerA = await prisma.center.create({
-    data: { slug: SLUG_A, name: "Config A" },
+    data: { slug: SLUG_A, name: "Config A", organization: { create: { name: "Config A" } } },
   });
   const centerB = await prisma.center.create({
-    data: { slug: SLUG_B, name: "Config B" },
+    data: { slug: SLUG_B, name: "Config B", organization: { create: { name: "Config B" } } },
   });
 
   console.log("Center configuration check");
@@ -214,11 +200,11 @@ async function main() {
 
   check(
     "One configureCenter() fully configures a fresh center",
-    Boolean(a.systemRow && a.gradeRow && a.subjectRow && a.branchRow && a.roomRow && a.settingsRow),
+    Boolean(a.systemRow && a.gradeRow && a.subjectRow && a.roomRow && a.settingsRow),
   );
   check(
     "The identical call configures a second center — no code changes",
-    Boolean(b.systemRow && b.gradeRow && b.subjectRow && b.branchRow && b.roomRow && b.settingsRow) &&
+    Boolean(b.systemRow && b.gradeRow && b.subjectRow && b.roomRow && b.settingsRow) &&
       b.systemRow.id !== a.systemRow.id,
   );
 
@@ -241,7 +227,6 @@ async function main() {
       "Subject",
       await scopedFindById(prisma.subject, centerA.id, b.subjectRow.id),
     ],
-    ["Branch", await scopedFindById(prisma.branch, centerA.id, b.branchRow.id)],
     ["Room", await scopedFindById(prisma.room, centerA.id, b.roomRow.id)],
   ];
 
@@ -324,7 +309,7 @@ async function main() {
   );
   check(
     "A blank name is rejected",
-    !branchSchema.safeParse({ locale: "en", name: "   " }).success,
+    !roomSchema.safeParse({ locale: "en", name: "   " }).success,
   );
   check(
     "A non-JSON card layout is rejected",

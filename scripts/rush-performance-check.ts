@@ -117,7 +117,13 @@ async function main() {
 
   console.log("\nRush simulation (real createAttendance + recordPayment writes)");
 
-  const center = await prisma.center.create({ data: { slug: SLUG, name: "Rush Performance Check" } });
+  const center = await prisma.center.create({
+    data: {
+      slug: SLUG,
+      name: "Rush Performance Check",
+      organization: { create: { name: "Rush Performance Check" } },
+    },
+  });
   await prisma.centerSettings.create({
     data: { centerId: center.id, defaultShareType: "PERCENTAGE", defaultShareValue: 15 },
   });

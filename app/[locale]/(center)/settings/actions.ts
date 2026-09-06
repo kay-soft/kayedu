@@ -8,8 +8,6 @@ import { writeAuditLog } from "@/lib/db/audit";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
-  branchSchema,
-  branchUpdateSchema,
   cardLayoutSchema,
   educationSystemSchema,
   educationSystemUpdateSchema,
@@ -55,12 +53,7 @@ function revalidateSettings(locale: string): void {
 
 // ── Generic master-data plumbing ───────────────────────────────────────────
 
-type MasterDataKind =
-  | "educationSystem"
-  | "grade"
-  | "subject"
-  | "branch"
-  | "room";
+type MasterDataKind = "educationSystem" | "grade" | "subject" | "room";
 
 /**
  * The slice of a scoped collection the shared toggle/delete paths need.
@@ -80,8 +73,6 @@ function collectionFor(db: ScopedDb, kind: MasterDataKind): ManagedCollection {
       return db.grades;
     case "subject":
       return db.subjects;
-    case "branch":
-      return db.branches;
     case "room":
       return db.rooms;
   }
@@ -115,13 +106,6 @@ async function referenceCount(
     }
     case "subject":
       return db.classGroups.count({ subjectId: id });
-    case "branch": {
-      const [rooms, sessions] = await Promise.all([
-        db.rooms.count({ branchId: id }),
-        db.sessions.count({ branchId: id }),
-      ]);
-      return rooms + sessions;
-    }
     case "room": {
       const [classes, sessions] = await Promise.all([
         db.classGroups.count({ roomId: id }),
@@ -153,8 +137,6 @@ async function nameTaken(
       return (await db.grades.count(where)) > 0;
     case "subject":
       return (await db.subjects.count(where)) > 0;
-    case "branch":
-      return (await db.branches.count(where)) > 0;
     case "room":
       return (await db.rooms.count(where)) > 0;
   }
@@ -427,63 +409,6 @@ export async function deleteSubjectAction(
   return deleteRecord("subject", formData);
 }
 
-// ── Branches ───────────────────────────────────────────────────────────────
-
-export async function createBranchAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = branchSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const { name, address, locale } = parsed.data;
-  if (await nameTaken(scope.db, "branch", name)) {
-    return { fieldErrors: { name: "duplicateName" } };
-  }
-
-  await scope.db.branches.create({ name, address });
-  revalidateSettings(locale);
-  return { status: "created" };
-}
-
-export async function updateBranchAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = branchUpdateSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const { id, name, address, locale } = parsed.data;
-  if (!(await scope.db.branches.findById(id))) return NOT_FOUND;
-  if (await nameTaken(scope.db, "branch", name, id)) {
-    return { fieldErrors: { name: "duplicateName" } };
-  }
-
-  await scope.db.branches.update(id, { name, address });
-  revalidateSettings(locale);
-  return { status: "saved" };
-}
-
-export async function toggleBranchAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return toggleRecord("branch", formData);
-}
-
-export async function deleteBranchAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return deleteRecord("branch", formData);
-}
-
 // ── Rooms ──────────────────────────────────────────────────────────────────
 
 export async function createRoomAction(
@@ -496,22 +421,13 @@ export async function createRoomAction(
   const parsed = roomSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { name, capacity, branchId, locale } = parsed.data;
-  const ref = await resolveRef(
-    (id) => scope.db.branches.findById(id),
-    branchId,
-  );
-  if (!ref.ok) return { fieldErrors: { branchId: "notFound" } };
-
-  // Room names repeat across branches ("Room 1" in each), so scope the clash
-  // check to the branch the room sits in.
+  const { name, capacity, locale } = parsed.data;
   const clash = await scope.db.rooms.count({
     name: { equals: name, mode: "insensitive" },
-    branchId: ref.id,
   });
   if (clash > 0) return { fieldErrors: { name: "duplicateName" } };
 
-  await scope.db.rooms.create({ name, capacity, branchId: ref.id });
+  await scope.db.rooms.create({ name, capacity });
   revalidateSettings(locale);
   return { status: "created" };
 }
@@ -526,23 +442,16 @@ export async function updateRoomAction(
   const parsed = roomUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { id, name, capacity, branchId, locale } = parsed.data;
+  const { id, name, capacity, locale } = parsed.data;
   if (!(await scope.db.rooms.findById(id))) return NOT_FOUND;
-
-  const ref = await resolveRef(
-    (refId) => scope.db.branches.findById(refId),
-    branchId,
-  );
-  if (!ref.ok) return { fieldErrors: { branchId: "notFound" } };
 
   const clash = await scope.db.rooms.count({
     name: { equals: name, mode: "insensitive" },
-    branchId: ref.id,
     NOT: { id },
   });
   if (clash > 0) return { fieldErrors: { name: "duplicateName" } };
 
-  await scope.db.rooms.update(id, { name, capacity, branchId: ref.id });
+  await scope.db.rooms.update(id, { name, capacity });
   revalidateSettings(locale);
   return { status: "saved" };
 }

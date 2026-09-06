@@ -123,8 +123,12 @@ async function main() {
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Teacher Portal A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Teacher Portal B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Teacher Portal A", organization: { create: { name: "Teacher Portal A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Teacher Portal B", organization: { create: { name: "Teacher Portal B" } } },
+  });
 
   // One teacher, shared by both centers — the flagship scenario.
   const teacher = await prisma.user.create({

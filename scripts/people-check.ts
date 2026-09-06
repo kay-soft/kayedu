@@ -208,10 +208,20 @@ async function main() {
   await cleanup();
 
   const centerA = await prisma.center.create({
-    data: { slug: SLUG_A, name: "People A", themeColor: "#2563eb" },
+    data: {
+      slug: SLUG_A,
+      name: "People A",
+      themeColor: "#2563eb",
+      organization: { create: { name: "People A" } },
+    },
   });
   const centerB = await prisma.center.create({
-    data: { slug: SLUG_B, name: "People B", themeColor: "#16a34a" },
+    data: {
+      slug: SLUG_B,
+      name: "People B",
+      themeColor: "#16a34a",
+      organization: { create: { name: "People B" } },
+    },
   });
 
   const gradeA1 = await prisma.grade.create({
@@ -300,7 +310,12 @@ async function main() {
   // The match must still find them — this is the reason local records are
   // searched at all, not just the global User.
   const centerC = await prisma.center.create({
-    data: { slug: SLUG_C, name: "People C", themeColor: "#f59e0b" },
+    data: {
+      slug: SLUG_C,
+      name: "People C",
+      themeColor: "#f59e0b",
+      organization: { create: { name: "People C" } },
+    },
   });
   const matchedFromLocalOnly = await findMatch({ email: LOCAL_ONLY_EMAIL, phone: null });
   check(

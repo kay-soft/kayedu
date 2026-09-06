@@ -1,6 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import {
-  Building2,
   CalendarClock,
   CircleAlert,
   GraduationCap,
@@ -59,7 +58,6 @@ export default async function CenterDashboardPage() {
     staffCount,
     teacherCount,
     studentCount,
-    branchCount,
     todaySessions,
     teacherMemberships,
     todayRevenue,
@@ -71,7 +69,6 @@ export default async function CenterDashboardPage() {
     }),
     db.memberships.count({ active: true, role: "TEACHER" }),
     db.students.count({ active: true }),
-    db.branches.count({ active: true }),
     db.sessions.listForDay(today),
     db.teachers.list({ active: true }),
     revenueTotals(prisma, ctx.center.id, todayRange),
@@ -197,11 +194,6 @@ export default async function CenterDashboardPage() {
           label={t("stats.students")}
           value={formatNumber(studentCount, locale)}
           icon={<Users className="size-4" />}
-        />
-        <StatCard
-          label={t("stats.branches")}
-          value={formatNumber(branchCount, locale)}
-          icon={<Building2 className="size-4" />}
         />
       </div>
     </div>

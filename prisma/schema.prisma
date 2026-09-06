@@ -119,23 +119,44 @@ model User {
 }
 
 // ─────────────────────────────────────────────────────────────
-// ORGANIZATION
+// ORGANIZATION (M11)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * The paying customer (docs/00-master-product-spec.md §5.1 "Branch
+ * architecture"). Global — no `centerId`, isolates nothing, and is
+ * deliberately not a tenant. In the UI this reads as "Center"; the DB name
+ * and the screen label differ on purpose (docs/02-architecture.md §8).
+ */
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  nameEn    String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  centers Center[]
+}
+
 model Center {
-  id         String   @id @default(uuid())
-  slug       String   @unique // subdomain / branding key
-  name       String
-  nameEn     String?
-  logoUrl    String?
-  themeColor String   @default("#2563EB")
-  active     Boolean  @default(true)
-  plan       String? // onboarding/plan metadata
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String       @id @default(uuid())
+  slug           String       @unique // subdomain / branding key
+  name           String
+  nameEn         String?
+  logoUrl        String?
+  themeColor     String       @default("#2563EB")
+  active         Boolean      @default(true)
+  plan           String? // onboarding/plan metadata
+  // The organization (paying customer) this branch belongs to (M11). The
+  // tenant, and the sole isolation key, stays Center/centerId — this is an
+  // additive parent, not a rewrite of scoping (docs/01-data-model.md §4).
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   settings          CenterSettings?
-  branches          Branch[]
   memberships       Membership[]
   invitations       Invitation[]
   educationSystems  EducationSystem[]
@@ -155,6 +176,8 @@ model Center {
   studentBlocks     StudentBlock[]
   holidays          Holiday[]
   auditLogs         AuditLog[]
+
+  @@index([organizationId])
 }
 
 model CenterSettings {
@@ -181,22 +204,6 @@ model CenterSettings {
   teacherEditDeadlineHours         Int?
   createdAt                        DateTime       @default(now())
   updatedAt                        DateTime       @updatedAt
-}
-
-model Branch {
-  id        String   @id @default(uuid())
-  centerId  String
-  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  name      String
-  address   String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  rooms    Room[]
-  sessions Session[]
-
-  @@index([centerId])
 }
 
 model Membership {
@@ -311,8 +318,6 @@ model Room {
   id        String   @id @default(uuid())
   centerId  String
   center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  branchId  String?
-  branch    Branch?  @relation(fields: [branchId], references: [id])
   name      String
   capacity  Int      @default(0)
   active    Boolean  @default(true)
@@ -485,8 +490,6 @@ model Session {
   classGroup    ClassGroup    @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
   teacherId     String
   teacher       User          @relation("SessionTeacher", fields: [teacherId], references: [id])
-  branchId      String?
-  branch        Branch?       @relation(fields: [branchId], references: [id])
   roomId        String?
   room          Room?         @relation(fields: [roomId], references: [id])
   date          DateTime // the calendar day of the session

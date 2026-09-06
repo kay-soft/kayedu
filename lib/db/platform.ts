@@ -74,6 +74,17 @@ export async function createCenterWithSettings(
       themeColor: input.themeColor,
       plan: input.plan ?? null,
       active: true,
+      // A platform-created center starts as its own single-branch
+      // organization (M11) — the same shape the M11 migration's backfill
+      // gave every pre-existing center. Turning it into a real multi-branch
+      // organization later is an Owner-side action, not something this
+      // provisioning step decides.
+      organization: {
+        create: {
+          name: input.name,
+          nameEn: input.nameEn ?? null,
+        },
+      },
       settings: {
         create: {
           defaultShareType: "PERCENTAGE",

@@ -46,6 +46,11 @@ export const signUpSchema = z
 export const selectCenterSchema = z.object({
   centerId: z.string().uuid("invalidCenter"),
   locale: localeSchema,
+  // "Whole Management" (M11): an Owner picking the org-level roll-up instead
+  // of one branch. `centerId` still names a real branch — the one every
+  // operational screen keeps reading — this only flags Analytics to sum
+  // every branch under the same organization (lib/auth/active-center.ts).
+  scope: z.enum(["all"]).optional(),
 });
 
 export const createInvitationSchema = z.object({

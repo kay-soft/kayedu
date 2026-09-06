@@ -19,7 +19,7 @@
     "primaryNav": "Primary navigation",
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
-    "switchCenter": "Switch center",
+    "switchCenter": "Switch branch",
     "signOut": "Sign out",
     "soon": "Soon",
     "collapseSidebar": "Collapse sidebar",
@@ -39,7 +39,7 @@
     "schedule": "My schedule",
     "discover": "Discover",
     "reservations": "My reservations",
-    "centers": "Centers",
+    "centers": "Branches",
     "platform": "Platform",
     "settings": "Settings"
   },
@@ -63,14 +63,14 @@
     },
     "login": {
       "title": "Sign in",
-      "subtitle": "One KayEdu account, every center you belong to.",
+      "subtitle": "One KayEdu account, every branch you belong to.",
       "submit": "Sign in",
       "noAccount": "No account yet?",
       "registerLink": "Create one"
     },
     "register": {
       "title": "Create your account",
-      "subtitle": "One account connects you to every center you work or study with.",
+      "subtitle": "One account connects you to every branch you work or study with.",
       "submit": "Create account",
       "haveAccount": "Already have an account?",
       "loginLink": "Sign in",
@@ -78,17 +78,19 @@
       "confirmEmail": "Check your inbox, confirm your email address, then sign in."
     },
     "selectCenter": {
-      "title": "Choose a center",
-      "subtitle": "You are connected to more than one center. Pick where you want to work.",
-      "emptySubtitle": "Your account is not connected to a center yet.",
-      "emptyHelp": "Ask a center owner or manager to invite you by email, or open the invitation link you were sent — or browse classes to join a center as a student.",
+      "title": "Choose a branch",
+      "subtitle": "You are connected to more than one branch. Pick where you want to work.",
+      "emptySubtitle": "Your account is not connected to a branch yet.",
+      "emptyHelp": "Ask a branch owner or manager to invite you by email, or open the invitation link you were sent — or browse classes to join a branch as a student.",
       "browseClasses": "Browse classes",
-      "platformAdminLink": "Go to the platform admin"
+      "platformAdminLink": "Go to the platform admin",
+      "wholeManagement": "Whole Management — {organization}",
+      "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}"
     },
     "invite": {
       "title": "Staff invitation",
       "subtitle": "You have been invited to join {center} on KayEdu.",
-      "centerLabel": "Center",
+      "centerLabel": "Branch",
       "roleLabel": "Role",
       "emailLabel": "Invited email",
       "accept": "Accept invitation",
@@ -115,23 +117,23 @@
       "inviteExpired": "This invitation has expired. Ask for a new one.",
       "inviteAlreadyAccepted": "This invitation was already accepted.",
       "inviteEmailMismatch": "This invitation was sent to a different email address.",
-      "centerInactive": "This center is not active.",
-      "invalidCenter": "Unknown center.",
+      "centerInactive": "This branch is not active.",
+      "invalidCenter": "Unknown branch.",
       "invalidInvitation": "Unknown invitation."
     }
   },
   "Staff": {
     "title": "Users & roles",
-    "subtitle": "Invite staff and teachers to this center and manage who has access.",
+    "subtitle": "Invite staff and teachers to this branch and manage who has access.",
     "inviteTitle": "Invite by email",
-    "inviteSubtitle": "The invitee accepts with the link below and gets a membership at this center.",
+    "inviteSubtitle": "The invitee accepts with the link below and gets a membership at this branch.",
     "sendInvite": "Create invitation",
     "fields": {
       "email": "Email",
       "role": "Role"
     },
     "membersTitle": "Members",
-    "membersSubtitle": "Everyone connected to this center. Change a role or suspend access here.",
+    "membersSubtitle": "Everyone connected to this branch. Change a role or suspend access here.",
     "noMembers": "No members yet.",
     "columns": {
       "name": "Name",
@@ -149,13 +151,13 @@
     "copy": "Copy",
     "copied": "Copied",
     "errors": {
-      "forbidden": "You are not allowed to invite people to this center.",
-      "alreadyMember": "That person already has this role at this center.",
+      "forbidden": "You are not allowed to invite people to this branch.",
+      "alreadyMember": "That person already has this role at this branch.",
       "ownerOnly": "Only an owner can invite another owner.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "invalidEmail": "Enter a valid email address.",
-      "invalidCenter": "Unknown center.",
+      "invalidCenter": "Unknown branch.",
       "invalidInvitation": "Unknown invitation."
     },
     "selfRow": "You",
@@ -177,7 +179,7 @@
     },
     "match": {
       "title": "This person already exists",
-      "description": "They already have a KayEdu identity. Confirm to connect them to this center — a new record here, linked to the same person.",
+      "description": "They already have a KayEdu identity. Confirm to connect them to this branch — a new record here, linked to the same person.",
       "person": "Person",
       "matchedBy": "Matched on {fields}.",
       "matchedOnSeparator": " and ",
@@ -186,16 +188,16 @@
         "phone": "Phone"
       },
       "alreadyHere": {
-        "student": "They are already registered as a student at this center.",
-        "teacher": "They already teach at this center.",
-        "staff": "They are already a staff member at this center."
+        "student": "They are already registered as a student at this branch.",
+        "teacher": "They already teach at this branch.",
+        "staff": "They are already a staff member at this branch."
       },
       "openProfile": "Open their profile",
       "cancel": "Use different details"
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
-      "notFound": "That record no longer exists in this center.",
+      "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "invalidEmail": "Enter a valid email address.",
@@ -205,8 +207,8 @@
       "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
       "contactInUse": "Those contact details already belong to someone else.",
       "matchGone": "That person is no longer the match for these details. Check the form and try again.",
-      "alreadyTeacher": "They already teach at this center.",
-      "alreadyStudent": "They are already registered as a student at this center.",
+      "alreadyTeacher": "They already teach at this branch.",
+      "alreadyStudent": "They are already registered as a student at this branch.",
       "alreadyBlocked": "This student is already on that teacher's block-list.",
       "teacherInUse": "This teacher still has classes or sessions here, so they cannot be deleted. Deactivate them instead.",
       "studentInUse": "This student has attendance or payment history, so they cannot be deleted. Deactivate them instead.",
@@ -219,12 +221,12 @@
   },
   "Teachers": {
     "title": "Teachers",
-    "subtitle": "The teachers who work at this center, and who each of them will not take.",
+    "subtitle": "The teachers who work at this branch, and who each of them will not take.",
     "add": "Add teacher",
     "addTitle": "Add a teacher",
     "addDescription": "One person, one KayEdu identity. If they already teach elsewhere on KayEdu, you will be asked to link to them instead of creating a duplicate.",
-    "listTitle": "Teachers at this center",
-    "listDescription": "Deactivated teachers stay listed — hiding a former teacher is how a center loses track of its schedule.",
+    "listTitle": "Teachers at this branch",
+    "listDescription": "Deactivated teachers stay listed — hiding a former teacher is how a branch loses track of its schedule.",
     "empty": "No teachers yet.",
     "noMatches": "No teachers match that search.",
     "searchLabel": "Search teachers",
@@ -238,18 +240,18 @@
     },
     "blockedCount": "{count} blocked",
     "linkAsTeacher": "Link this person as a teacher",
-    "detailSubtitle": "Their record at this center, their classes and their block-list.",
+    "detailSubtitle": "Their record at this branch, their classes and their block-list.",
     "backToList": "All teachers",
     "profileTitle": "Teacher record",
-    "profileDescription": "Name and contact details belong to the person; financial visibility belongs to this center.",
+    "profileDescription": "Name and contact details belong to the person; financial visibility belongs to this branch.",
     "identityTitle": "Identity",
     "identityDescription": "How this person is connected across KayEdu.",
     "classesTitle": "Classes",
-    "classesDescription": "The classes this teacher carries at this center.",
+    "classesDescription": "The classes this teacher carries at this branch.",
     "classesEmpty": "No classes assigned to this teacher yet.",
-    "deleteConfirm": "This removes them from this center. It cannot be undone.",
+    "deleteConfirm": "This removes them from this branch. It cannot be undone.",
     "fields": {
-      "otherCenters": "Other centers",
+      "otherCenters": "Other branches",
       "accountClaimed": "Signed in before"
     },
     "blocks": {
@@ -267,21 +269,21 @@
       "unknownStudent": "Former student",
       "unknownTeacher": "Former teacher"
     },
-    "contactTitle": "This center's record",
-    "contactDescription": "This center's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other center's record.",
+    "contactTitle": "This branch's record",
+    "contactDescription": "This branch's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other branch's record.",
     "trusted": {
       "label": "Trusted teacher",
-      "description": "Lets this teacher request a new class or session from their portal at this center. Off hides those request forms for them."
+      "description": "Lets this teacher request a new class or session from their portal at this branch. Off hides those request forms for them."
     }
   },
   "Students": {
     "title": "Students",
-    "subtitle": "{count} registered at this center.",
+    "subtitle": "{count} registered at this branch.",
     "add": "Register student",
     "addTitle": "Register a student",
-    "addDescription": "Register a student once and connect them to this center. A phone or email that already exists links to that person instead of creating a duplicate.",
-    "centerSectionTitle": "This center's record",
-    "centerSectionDescription": "This center's own name, contact record, grade and parent details — seeded from the student's KayEdu identity and always editable here. The student code is assigned automatically.",
+    "addDescription": "Register a student once and connect them to this branch. A phone or email that already exists links to that person instead of creating a duplicate.",
+    "centerSectionTitle": "This branch's record",
+    "centerSectionDescription": "This branch's own name, contact record, grade and parent details — seeded from the student's KayEdu identity and always editable here. The student code is assigned automatically.",
     "linkAsStudent": "Link this person as a student",
     "listTitle": "Registered students",
     "listDescription": "Search by name, student code, or a student's or parent's phone.",
@@ -298,13 +300,13 @@
       "grade": "Grade",
       "contact": "Contact"
     },
-    "detailSubtitle": "Their record at this center, their enrolments and their ID card.",
+    "detailSubtitle": "Their record at this branch, their enrolments and their ID card.",
     "backToList": "All students",
     "profileTitle": "Student record",
-    "profileDescription": "The person's own details, then everything this center owns.",
-    "deleteConfirm": "This removes them from this center. It cannot be undone.",
+    "profileDescription": "The person's own details, then everything this branch owns.",
+    "deleteConfirm": "This removes them from this branch. It cannot be undone.",
     "parentTitle": "Parent & guardian",
-    "parentDescription": "Who this center calls.",
+    "parentDescription": "Who this branch calls.",
     "fields": {
       "grade": "Grade",
       "studentCode": "Student code",
@@ -315,7 +317,7 @@
       "parentName": "Parent name",
       "phone": "Phone",
       "email": "Email",
-      "otherCenters": "Other centers"
+      "otherCenters": "Other branches"
     },
     "promote": {
       "title": "Promote a grade",
@@ -329,7 +331,7 @@
     },
     "photo": {
       "title": "Photo",
-      "description": "Used on the ID card. Stored for this center only.",
+      "description": "Used on the ID card. Stored for this branch only.",
       "label": "Student photo",
       "hint": "PNG, JPEG or WebP, up to 5 MB.",
       "upload": "Upload photo",
@@ -337,7 +339,7 @@
     },
     "card": {
       "title": "ID card",
-      "description": "Laid out from this center's card customization, with a QR code the reception desk can scan.",
+      "description": "Laid out from this branch's card customization, with a QR code the reception desk can scan.",
       "codeLabel": "Student code",
       "printCard": "Print as ID card",
       "printPaper": "Print as paper",
@@ -349,7 +351,7 @@
     },
     "enrollments": {
       "title": "Enrolments",
-      "description": "The classes this student is in at this center.",
+      "description": "The classes this student is in at this branch.",
       "empty": "Not enrolled in any class yet.",
       "emptyPrint": "Not enrolled in any class yet.",
       "blocked": "blocked from this class",
@@ -370,10 +372,10 @@
   },
   "Classes": {
     "title": "Classes",
-    "subtitle": "{count} classes at this center.",
+    "subtitle": "{count} classes at this branch.",
     "add": "Add class",
     "addTitle": "Add a class",
-    "addDescription": "A teacher teaching one subject to one grade — its price, center cut, capacity and enrollment rules.",
+    "addDescription": "A teacher teaching one subject to one grade — its price, branch cut, capacity and enrollment rules.",
     "listTitle": "Classes",
     "listDescription": "Deactivated classes stay listed — their history and any generated sessions keep resolving.",
     "empty": "No classes yet.",
@@ -382,7 +384,7 @@
     "backToList": "All classes",
     "deleteConfirm": "This removes the class. It cannot be undone.",
     "profileTitle": "Class record",
-    "profileDescription": "Price and center-cut changes never rewrite money already recorded — only new sessions use the new numbers.",
+    "profileDescription": "Price and branch-cut changes never rewrite money already recorded — only new sessions use the new numbers.",
     "columns": {
       "subject": "Subject · Grade",
       "teacher": "Teacher",
@@ -406,14 +408,14 @@
       "room": "Room",
       "capacity": "Capacity",
       "capacityHint": "Students. Use 0 for no limit.",
-      "moneyTitle": "Price & center cut",
+      "moneyTitle": "Price & branch cut",
       "price": "Price per session",
       "shareType": "Cut type",
       "percentage": "Percentage of the amount",
       "fixed": "Fixed amount (EGP)",
       "shareValuePct": "Percentage",
       "shareValueEgp": "Amount (EGP)",
-      "centerShare": "Center keeps",
+      "centerShare": "Branch keeps",
       "teacherShare": "Teacher gets",
       "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
       "attendanceRequired": "Attendance is required for this class",
@@ -472,7 +474,7 @@
       "description": "Materializes upcoming sessions from every active class's schedule, skipping holidays, for the next six weeks.",
       "classDescription": "Materializes this class's upcoming sessions for the next six weeks, skipping holidays.",
       "generateForClass": "Generate sessions for this class",
-      "generateForCenter": "Generate sessions for the whole center",
+      "generateForCenter": "Generate sessions for the whole branch",
       "result": "{created, plural, one {# session} other {# sessions}} created. {conflicts, plural, =0 {No conflicts.} one {# conflict flagged.} other {# conflicts flagged.}}",
       "roomConflict": "Room conflict with {className}.",
       "teacherConflict": "Teacher conflict with {className}."
@@ -497,7 +499,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
-      "notFound": "That record no longer exists in this center.",
+      "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "invalidNumber": "Enter a whole number.",
@@ -509,7 +511,7 @@
       "invalidTimeRange": "The end time must be after the start time.",
       "invalidDate": "Enter a valid date.",
       "duplicateDate": "That date is already on the holiday calendar.",
-      "scheduleConflict": "This center denies double-booked slots. Choose a different day, time or teacher.",
+      "scheduleConflict": "This branch denies double-booked slots. Choose a different day, time or teacher.",
       "classInUse": "This class still has enrollments or generated sessions, so it cannot be deleted. Deactivate it instead.",
       "classFull": "This class is at capacity.",
       "alreadyEnrolled": "This student is already enrolled in this class.",
@@ -626,7 +628,7 @@
       "title": "Receipt",
       "description": "Total collected and the attendance breakdown for this session.",
       "collected": "Total collected",
-      "centerShare": "Center share",
+      "centerShare": "Branch share",
       "teacherShare": "Teacher share",
       "present": "Present",
       "late": "Late",
@@ -635,7 +637,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
-      "notFound": "That record no longer exists in this center.",
+      "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "invalidStatus": "Choose an attendance status.",
@@ -650,7 +652,7 @@
       "matchGone": "That person is no longer the match for these details. Check the form and try again.",
       "alreadyCancelled": "This session is already cancelled.",
       "cancelled": "This session is cancelled and can no longer be edited.",
-      "conflict": "That time conflicts with another class's teacher or room, and this center denies conflicting slots.",
+      "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time.",
       "excusedNotAllowed": "This class does not allow the Excused status.",
       "invalidDate": "Enter a valid date.",
@@ -667,7 +669,7 @@
     "searchSubmit": "Search",
     "noMatches": "No students match that search.",
     "liveRailTitle": "Today's sessions",
-    "liveRailDescription": "Everything scheduled today at this center.",
+    "liveRailDescription": "Everything scheduled today at this branch.",
     "noSessionsToday": "No sessions today yet.",
     "noLiveSessions": "No sessions today — generate today's sessions from the Sessions dashboard first.",
     "addSessionShortcut": "All sessions",
@@ -695,7 +697,7 @@
     "revenue": {
       "title": "Revenue",
       "collected": "Collected",
-      "centerShare": "Center share",
+      "centerShare": "Branch share",
       "teacherShare": "Teacher share",
       "expenses": "Expenses",
       "net": "Net",
@@ -718,15 +720,30 @@
       "columns": {
         "teacher": "Teacher",
         "collected": "Collected",
-        "centerShare": "Center share",
+        "centerShare": "Branch share",
         "teacherShare": "Teacher share",
         "payments": "Payments"
       }
+    },
+    "byBranch": {
+      "title": "By branch",
+      "description": "Revenue collected per branch in this period — the figures above are exactly the sum of these rows.",
+      "empty": "No payments recorded in this period.",
+      "columns": {
+        "branch": "Branch",
+        "collected": "Collected",
+        "centerShare": "Branch share",
+        "teacherShare": "Teacher share",
+        "payments": "Payments"
+      }
+    },
+    "rollup": {
+      "badge": "Whole Management — {organization}"
     }
   },
   "Expenses": {
     "title": "Expenses",
-    "subtitle": "Track center costs — this feeds Analytics' net figure.",
+    "subtitle": "Track branch costs — this feeds Analytics' net figure.",
     "addTitle": "Add an expense",
     "listTitle": "Expenses",
     "empty": "No expenses recorded in this period.",
@@ -777,7 +794,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to manage expenses.",
-      "notFound": "That record no longer exists in this center.",
+      "notFound": "That record no longer exists in this branch.",
       "invalidAmount": "Enter a valid amount in EGP.",
       "invalidDate": "Enter a valid date.",
       "required": "This field is required.",
@@ -792,7 +809,7 @@
     "decline": "Decline",
     "changeRequests": {
       "title": "Class requests",
-      "description": "New classes teachers have asked to open at this center. Approving does not create the class — create it at Classes using these details.",
+      "description": "New classes teachers have asked to open at this branch. Approving does not create the class — create it at Classes using these details.",
       "empty": "No pending class requests.",
       "requestedOn": "Requested {date}",
       "approved": "Approved",
@@ -831,17 +848,16 @@
       "studentBlocked": "This student cannot be enrolled in this class.",
       "classFull": "This class is at capacity.",
       "classNotFound": "The class this request was for no longer exists.",
-      "conflict": "That time conflicts with another class's teacher or room, and this center denies conflicting slots.",
+      "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time."
     }
   },
   "Settings": {
-    "title": "Center configuration",
-    "subtitle": "Set up this center's academic and operational reference data. Everything here is per center — the next center needs no code changes.",
+    "title": "Branch configuration",
+    "subtitle": "Set up this branch's academic and operational reference data. Everything here is per branch — the next branch needs no code changes.",
     "nav": {
       "label": "Settings sections",
       "general": "General",
-      "branches": "Branches",
       "rooms": "Rooms",
       "educationSystems": "Education systems",
       "grades": "Grades",
@@ -868,8 +884,8 @@
       "saved": "Changes saved."
     },
     "errors": {
-      "forbidden": "You are not allowed to change this center's configuration.",
-      "notFound": "That record no longer exists in this center.",
+      "forbidden": "You are not allowed to change this branch's configuration.",
+      "notFound": "That record no longer exists in this branch.",
       "inUse": "Something still uses this record, so it cannot be deleted. Deactivate it instead.",
       "duplicateName": "That name is already used here.",
       "required": "This field is required.",
@@ -881,15 +897,15 @@
       "invalidJson": "This is not valid JSON.",
       "cardLayoutNotObject": "The card layout must be a JSON object.",
       "ownerOnly": "Only an owner can change another owner.",
-      "lastOwner": "This is the center's only owner. Add another owner first.",
+      "lastOwner": "This is the branch's only owner. Add another owner first.",
       "selfEdit": "You cannot change your own role or access.",
-      "alreadyMember": "That person already holds this role at this center."
+      "alreadyMember": "That person already holds this role at this branch."
     },
     "general": {
       "title": "General",
-      "description": "The defaults a new class starts from, and how this center runs day to day.",
-      "cutTitle": "Default center cut",
-      "cutDescription": "The share this center takes from a session payment. Each class can override it; this is the starting point.",
+      "description": "The defaults a new class starts from, and how this branch runs day to day.",
+      "cutTitle": "Default branch cut",
+      "cutDescription": "The share this branch takes from a session payment. Each class can override it; this is the starting point.",
       "shareType": "Cut type",
       "percentage": "Percentage of the amount",
       "fixed": "Fixed amount (EGP)",
@@ -897,11 +913,11 @@
       "shareValueEgp": "Amount (EGP)",
       "previewLabel": "On a {amount} session",
       "previewEmpty": "Enter a value to see the split.",
-      "centerShare": "Center keeps",
+      "centerShare": "Branch keeps",
       "teacherShare": "Teacher gets",
       "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
       "operationsTitle": "Daily operations",
-      "operationsDescription": "Teacher inactivity, the default late threshold, and the clock this center runs on.",
+      "operationsDescription": "Teacher inactivity, the default late threshold, and the clock this branch runs on.",
       "timeoutLabel": "Mark a teacher inactive after a period with no sessions",
       "timeoutDescription": "Counted from their last completed session. Leave this off to never auto-deactivate a teacher.",
       "timeoutDays": "Days",
@@ -918,7 +934,7 @@
     },
     "educationSystems": {
       "title": "Education systems",
-      "description": "The curricula this center teaches (National, Languages, IG…) and the price each one starts from.",
+      "description": "The curricula this branch teaches (National, Languages, IG…) and the price each one starts from.",
       "addTitle": "Add an education system",
       "addDescription": "Grades and classes are organised under these.",
       "listTitle": "Education systems",
@@ -932,7 +948,7 @@
     },
     "grades": {
       "title": "Grades",
-      "description": "The year groups this center teaches, optionally tied to an education system.",
+      "description": "The year groups this branch teaches, optionally tied to an education system.",
       "addTitle": "Add a grade",
       "addDescription": "Subjects, students and classes all hang off a grade.",
       "listTitle": "Grades",
@@ -958,20 +974,6 @@
         "grade": "Grade"
       }
     },
-    "branches": {
-      "title": "Branches",
-      "description": "The physical locations this center runs. Rooms and sessions belong to a branch.",
-      "addTitle": "Add a branch",
-      "addDescription": "A single-location center needs just one.",
-      "listTitle": "Branches",
-      "listDescription": "Deactivate a branch that has closed; its history stays intact.",
-      "empty": "No branches yet. Add the first one above.",
-      "fields": {
-        "name": "Name",
-        "address": "Address",
-        "addressPlaceholder": "12 Nile St"
-      }
-    },
     "rooms": {
       "title": "Rooms",
       "description": "Where sessions physically happen. Capacity is used to warn about over-booking.",
@@ -980,17 +982,15 @@
       "listTitle": "Rooms",
       "listDescription": "Deactivate a room that is out of service.",
       "empty": "No rooms yet. Add the first one above.",
-      "noBranchesHint": "You have no branches yet. Rooms work without one, but assigning a branch keeps multi-location scheduling straight.",
       "fields": {
         "name": "Name",
         "capacity": "Capacity",
-        "capacityHint": "Seats. Use 0 if you do not want a limit.",
-        "branch": "Branch"
+        "capacityHint": "Seats. Use 0 if you do not want a limit."
       }
     },
     "card": {
       "title": "ID card",
-      "description": "Where the logo, photo, name, grade, student code and QR block sit on this center's printed student card.",
+      "description": "Where the logo, photo, name, grade, student code and QR block sit on this branch's printed student card.",
       "rendererNote": "The card itself is generated in a later milestone (M3). This screen stores the layout it will use.",
       "editorTitle": "Card layout",
       "editorDescription": "A JSON object. Positions are percentages of the card face, so the same layout works on screen and at print size.",
@@ -1001,15 +1001,15 @@
     },
     "permissions": {
       "title": "Permissions",
-      "description": "The few role edges this center can widen. A grant can only add — it never takes away what a role already has.",
+      "description": "The few role edges this branch can widen. A grant can only add — it never takes away what a role already has.",
       "receptionistTitle": "Receptionist grants",
-      "receptionistDescription": "Both are denied by default. Turn one on only if this center's front desk genuinely needs it.",
-      "viewProfitLabel": "Can see center profit and settlement figures",
-      "viewProfitDescription": "Off by default: the desk records money but does not see what the center keeps.",
+      "receptionistDescription": "Both are denied by default. Turn one on only if this branch's front desk genuinely needs it.",
+      "viewProfitLabel": "Can see branch profit and settlement figures",
+      "viewProfitDescription": "Off by default: the desk records money but does not see what the branch keeps.",
       "correctAttendanceLabel": "Can correct an already-recorded attendance",
       "correctAttendanceDescription": "Corrections are always written to the audit log, whoever makes them.",
       "effectiveTitle": "In effect now",
-      "effectiveDescription": "What a {role} at this center can do right now, resolved through the same check the server enforces.",
+      "effectiveDescription": "What a {role} at this branch can do right now, resolved through the same check the server enforces.",
       "allowed": "Allowed",
       "denied": "Denied",
       "widenOnlyNote": "Owners and managers always have both; these toggles apply to receptionists only."
@@ -1026,37 +1026,36 @@
       "marked": "Attendance marked",
       "markedHint": "{absent} absent",
       "collected": "Collected today",
-      "centerShare": "Center share today",
+      "centerShare": "Branch share today",
       "sessionsListTitle": "Today's sessions",
       "viewAll": "View all sessions",
       "empty": "No sessions scheduled today."
     },
     "center": {
-      "title": "Center"
+      "title": "Branch"
     },
     "stats": {
       "staff": "Staff",
       "teachers": "Teachers",
-      "students": "Students",
-      "branches": "Branches"
+      "students": "Students"
     }
   },
   "TeacherDashboard": {
     "title": "Teacher dashboard",
     "subtitle": "Your work at {center}.",
     "stats": {
-      "centers": "Centers",
+      "centers": "Branches",
       "sessionsToday": "Sessions today",
       "sessionsThisWeek": "Sessions this week",
       "earningsThisMonth": "Earnings this month"
     },
     "centers": {
-      "title": "Your centers",
-      "description": "Each center's schedule and earnings, scoped to that center only.",
+      "title": "Your branches",
+      "description": "Each branch's schedule and earnings, scoped to that branch only.",
       "active": "Active",
       "summary": "{today} today · {week} this week · {earnings} this month",
       "viewSchedule": "View schedule",
-      "switchTo": "Switch to this center"
+      "switchTo": "Switch to this branch"
     }
   },
   "TeacherSessions": {
@@ -1066,7 +1065,7 @@
     "printAction": "Print",
     "backToList": "All sessions",
     "listTitle": "Sessions",
-    "listDescription": "Every session you teach at this center in the selected range.",
+    "listDescription": "Every session you teach at this branch in the selected range.",
     "empty": "No sessions match these filters.",
     "searchLabel": "Search by student",
     "searchPlaceholder": "Name or student code",
@@ -1090,15 +1089,15 @@
     },
     "request": {
       "title": "Request a new session",
-      "description": "A one-off session on one of your classes at this center. A center manager reviews it before it's added to the calendar.",
+      "description": "A one-off session on one of your classes at this branch. A branch manager reviews it before it's added to the calendar.",
       "class": "Class",
       "classPlaceholder": "Choose a class",
-      "noClasses": "You do not teach any class at this center yet.",
+      "noClasses": "You do not teach any class at this branch yet.",
       "date": "Date",
       "start": "Start",
       "end": "End",
-      "note": "Note to the center",
-      "notePlaceholder": "Anything else the center should know",
+      "note": "Note to the branch",
+      "notePlaceholder": "Anything else the branch should know",
       "submit": "Send request",
       "submitted": "Request sent."
     },
@@ -1111,7 +1110,7 @@
     },
     "description": {
       "title": "Session note",
-      "hint": "Visible to this center's staff. No edit deadline is enforced yet.",
+      "hint": "Visible to this branch's staff. No edit deadline is enforced yet.",
       "label": "Description",
       "placeholder": "What was covered, homework assigned, anything worth noting",
       "save": "Save note",
@@ -1132,7 +1131,7 @@
     },
     "receipt": {
       "title": "Your earnings",
-      "description": "This session's total, your share and the center's share."
+      "description": "This session's total, your share and the branch's share."
     },
     "print": {
       "hint": "Only the sheet below is printed.",
@@ -1140,7 +1139,7 @@
       "back": "Back to the session",
       "printedOn": "Printed {date}",
       "collected": "Total collected",
-      "centerShare": "Center share",
+      "centerShare": "Branch share",
       "teacherShare": "Your share",
       "attendanceSummary": "Attendance",
       "attendanceCounts": "{present} present · {late} late · {absent} absent · {excused} excused"
@@ -1153,17 +1152,17 @@
       "editDeadlinePassed": "The deadline to edit this session's description has passed.",
       "invalidDate": "Enter a valid date.",
       "invalidTimeRange": "The end time must be after the start time.",
-      "notTrusted": "This center has not marked you as a trusted teacher, so you cannot request a new class or session here."
+      "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here."
     }
   },
   "TeacherStudents": {
     "title": "My students",
-    "subtitle": "{count} students you have taught at this center.",
-    "detailSubtitle": "Their sessions with you at this center only.",
+    "subtitle": "{count} students you have taught at this branch.",
+    "detailSubtitle": "Their sessions with you at this branch only.",
     "backToList": "All students",
     "listTitle": "Students",
     "listDescription": "Search by name, code or phone — only students you have taught here.",
-    "empty": "You have not taught any students at this center yet.",
+    "empty": "You have not taught any students at this branch yet.",
     "noMatches": "No students match that search.",
     "searchLabel": "Search students",
     "searchPlaceholder": "Name or student code",
@@ -1195,7 +1194,7 @@
     "title": "My classes",
     "subtitle": "Request a new class at {center}.",
     "listTitle": "Your requests",
-    "listDescription": "Requests you have sent to this center. A center manager reviews and confirms them.",
+    "listDescription": "Requests you have sent to this branch. A branch manager reviews and confirms them.",
     "empty": "You have not requested a class yet.",
     "status": {
       "PENDING": "Pending review",
@@ -1204,7 +1203,7 @@
     },
     "request": {
       "title": "Request a new class",
-      "description": "Subject, grade, timing, capacity and attendance settings — a center manager reviews this before it becomes a real class.",
+      "description": "Subject, grade, timing, capacity and attendance settings — a branch manager reviews this before it becomes a real class.",
       "subject": "Subject",
       "grade": "Grade",
       "none": "Not set",
@@ -1215,8 +1214,8 @@
       "capacityHint": "Students. Use 0 for no limit.",
       "lateThreshold": "Late threshold (minutes)",
       "attendanceRequired": "Attendance is required for this class",
-      "note": "Note to the center",
-      "notePlaceholder": "Anything else the center should know",
+      "note": "Note to the branch",
+      "notePlaceholder": "Anything else the branch should know",
       "submit": "Send request",
       "submitted": "Request sent."
     },
@@ -1228,12 +1227,12 @@
       "invalidTime": "Enter a valid time.",
       "invalidTimeRange": "The end time must be after the start time.",
       "invalidNumber": "Enter a whole number.",
-      "notTrusted": "This center has not marked you as a trusted teacher, so you cannot request a new class or session here."
+      "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here."
     }
   },
   "StudentSchedule": {
     "title": "My schedule",
-    "subtitle": "Every class you're enrolled in, across every center you've joined.",
+    "subtitle": "Every class you're enrolled in, across every branch you've joined.",
     "filterDate": "Filter by date",
     "clearDate": "Clear",
     "upcomingTitle": "Upcoming",
@@ -1280,7 +1279,7 @@
   },
   "StudentReservations": {
     "title": "My reservations",
-    "subtitle": "{count, plural, one {# request} other {# requests}}, across every center.",
+    "subtitle": "{count, plural, one {# request} other {# requests}}, across every branch.",
     "empty": "You haven't requested to join any classes yet.",
     "cancel": "Cancel request",
     "status": {
@@ -1296,10 +1295,10 @@
     }
   },
   "AdminCenters": {
-    "title": "Centers",
+    "title": "Branches",
     "subtitle": "Every tenant on the platform.",
-    "listTitle": "All centers",
-    "empty": "No centers yet — create the first one above.",
+    "listTitle": "All branches",
+    "empty": "No branches yet — create the first one above.",
     "active": "Active",
     "suspended": "Suspended",
     "activate": "Activate",
@@ -1309,21 +1308,21 @@
     "studentCount": "{count} students",
     "openDetail": "Open",
     "create": {
-      "title": "Create a center",
-      "description": "Provisions the Center and its default settings in one step, and invites its founding Owner — the same invite link mechanism as any other staff invite.",
+      "title": "Create a branch",
+      "description": "Provisions the Branch and its default settings in one step, and invites its founding Owner — the same invite link mechanism as any other staff invite.",
       "fields": {
         "name": "Name",
         "nameEn": "Name (English)",
         "slug": "Slug",
-        "slugHint": "Lowercase letters, digits and hyphens only. Used as this center's identifier.",
+        "slugHint": "Lowercase letters, digits and hyphens only. Used as this branch's identifier.",
         "themeColor": "Theme color",
         "logoUrl": "Logo URL",
         "plan": "Plan",
         "ownerEmail": "Founding owner's email",
-        "ownerEmailHint": "They accept the invite link below to become this center's first Owner."
+        "ownerEmailHint": "They accept the invite link below to become this branch's first Owner."
       },
-      "submit": "Create center",
-      "created": "Center created. Share the owner invite link below.",
+      "submit": "Create branch",
+      "created": "Branch created. Share the owner invite link below.",
       "inviteLinkLabel": "Owner invitation link",
       "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
       "copy": "Copy",
@@ -1350,8 +1349,8 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
-      "notFound": "That center no longer exists.",
-      "slugTaken": "That slug is already used by another center.",
+      "notFound": "That branch no longer exists.",
+      "slugTaken": "That slug is already used by another branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "invalidSlug": "Use lowercase letters, digits and hyphens only.",
@@ -1361,15 +1360,15 @@
   },
   "AdminPlatform": {
     "title": "Platform",
-    "subtitle": "Adoption and usage across every center on KayEdu.",
-    "activeCenters": "Active centers",
+    "subtitle": "Adoption and usage across every branch on KayEdu.",
+    "activeCenters": "Active branches",
     "suspendedHint": "{count} suspended",
     "totalTeachers": "Total teachers",
     "totalStudents": "Total students",
     "totalSessions": "Total sessions",
     "adoption": {
       "title": "Adoption trend",
-      "description": "Centers created per month, most recent six months.",
+      "description": "Branches created per month, most recent six months.",
       "newCenters": "{count} new"
     },
     "months": {
