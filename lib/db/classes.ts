@@ -1,0 +1,136 @@
+import type { Prisma } from "@prisma/client";
+// Relative import on purpose — `npm run check:classes` exercises this module
+// directly, outside the Next.js runtime (same reasoning as lib/db/students.ts).
+import type { ExistingScheduleSlot, ScheduleConflict } from "../scheduling.ts";
+import type { ScopedDb } from "@/lib/db/scoped";
+
+/**
+ * Class-group policy that is neither a scoping primitive nor UI: the lean
+ * list select, the search/filter `where`, and what makes a class undeletable.
+ */
+
+/**
+ * Fields a class row on the list page actually renders. `teacherId` only —
+ * not the `teacher` relation — because the name shown is this center's own
+ * local record on the teacher's `Membership` (docs/01-data-model.md §6), not
+ * the raw global `User`; the page batches that lookup once per page of rows,
+ * the same way the teacher block-counts are batched (docs/02 §14).
+ */
+export const CLASS_LIST_SELECT = {
+  id: true,
+  active: true,
+  price: true,
+  capacity: true,
+  centerShareType: true,
+  centerShareValue: true,
+  teacherId: true,
+  subject: { select: { id: true, name: true } },
+  grade: { select: { id: true, name: true } },
+  room: { select: { id: true, name: true } },
+  _count: {
+    select: {
+      schedules: true,
+      enrollments: { where: { status: "ACTIVE" } },
+    },
+  },
+} satisfies Prisma.ClassGroupSelect;
+
+export type ClassListRow = Prisma.ClassGroupGetPayload<{
+  select: typeof CLASS_LIST_SELECT;
+}>;
+
+/** A class detail page — every field it actually renders, plus its schedules. */
+export const CLASS_DETAIL_INCLUDE = {
+  teacher: true,
+  subject: true,
+  grade: true,
+  educationSystem: true,
+  room: true,
+  schedules: { orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }] },
+} satisfies Prisma.ClassGroupInclude;
+
+export type ClassDetailRow = Prisma.ClassGroupGetPayload<{
+  include: typeof CLASS_DETAIL_INCLUDE;
+}>;
+
+export function classListWhere(filters: {
+  teacherId?: string | null;
+  subjectId?: string | null;
+  gradeId?: string | null;
+}): Prisma.ClassGroupWhereInput | undefined {
+  const where: Prisma.ClassGroupWhereInput = {};
+  if (filters.teacherId) where.teacherId = filters.teacherId;
+  if (filters.subjectId) where.subjectId = filters.subjectId;
+  if (filters.gradeId) where.gradeId = filters.gradeId;
+  return Object.keys(where).length > 0 ? where : undefined;
+}
+
+/**
+ * A class that already carries enrollments or generated sessions is
+ * deactivated, not deleted — the roster and the calendar must keep resolving
+ * (CLAUDE.md rule 2, docs/01-data-model.md §6 "config master data …
+ * deactivates by default").
+ */
+export async function classDeleteBlockers(
+  db: ScopedDb,
+  classGroupId: string,
+): Promise<number> {
+  const [enrollments, sessions] = await Promise.all([
+    db.enrollments.count({ classGroupId }),
+    db.sessions.count({ classGroupId }),
+  ]);
+  return enrollments + sessions;
+}
+
+/** A short label for the class in a conflict message ("Math · Grade 10"). */
+export function classDisplayName(
+  row: Pick<ClassListRow, "subject" | "grade">,
+): string {
+  return [row.subject?.name, row.grade?.name].filter(Boolean).join(" · ") || "—";
+}
+
+/** Renders the conflict list into i18n-safe pieces the UI can format. */
+export function summarizeConflicts(
+  conflicts: ScheduleConflict[],
+): { type: "teacher" | "room"; className: string }[] {
+  return conflicts.map((conflict) => ({
+    type: conflict.type,
+    className: conflict.className,
+  }));
+}
+
+/** The Prisma row shape `db.classSchedules.listForConflictCheck` returns. */
+export type ConflictCheckRow = {
+  classGroupId: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  classGroup: {
+    teacherId: string;
+    roomId: string | null;
+    subject: { name: string } | null;
+    grade: { name: string } | null;
+  };
+};
+
+/**
+ * Flattens `listForConflictCheck`'s joined rows into the plain slots
+ * `lib/scheduling.ts`'s `findScheduleConflicts` compares against — the
+ * boundary between the Prisma shape and the pure primitive.
+ */
+export function toExistingScheduleSlots(
+  rows: ConflictCheckRow[],
+): ExistingScheduleSlot[] {
+  return rows.map((row) => ({
+    classGroupId: row.classGroupId,
+    dayOfWeek: row.dayOfWeek,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    teacherId: row.classGroup.teacherId,
+    roomId: row.classGroup.roomId,
+    className:
+      [row.classGroup.subject?.name, row.classGroup.grade?.name]
+        .filter(Boolean)
+        .join(" · ") || "—",
+  }));
+}

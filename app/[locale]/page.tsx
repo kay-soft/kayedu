@@ -1,35 +1,36 @@
-import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { LocaleSwitcher } from "@/components/shared/locale-switcher";
+import { getLocale } from "next-intl/server";
 
-export default function HomePage() {
-  const t = useTranslations("HomePage");
+import { getCurrentUser } from "@/lib/auth/session";
+import { getActiveCenterId } from "@/lib/auth/active-center";
+import { getUserCenterRelations, primaryRole } from "@/lib/auth/tenant";
+import { redirect } from "@/lib/i18n/navigation";
+import { ROUTES, homePathForRole } from "@/lib/routes";
 
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-8 bg-background p-8">
-      <div className="flex w-full max-w-md justify-end">
-        <LocaleSwitcher />
-      </div>
-      <Card className="w-full max-w-md border-t-4 border-t-brand">
-        <CardHeader>
-          <CardTitle>{t("title")}</CardTitle>
-          <CardDescription>{t("description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">{t("body")}</p>
-        </CardContent>
-        <CardFooter>
-          <Button>{t("cta")}</Button>
-        </CardFooter>
-      </Card>
-    </div>
-  );
+/**
+ * Entry point: send everyone to the surface they belong in
+ * (docs/02 §3 — resolve identity → memberships → center → role).
+ */
+export default async function HomePage() {
+  const locale = await getLocale();
+  const user = await getCurrentUser();
+
+  if (!user) redirect({ href: ROUTES.login, locale });
+
+  const relations = await getUserCenterRelations(user!.id);
+
+  if (relations.length === 0) {
+    redirect({
+      href: user!.isPlatformAdmin ? ROUTES.adminCenters : ROUTES.selectCenter,
+      locale,
+    });
+  }
+
+  const activeCenterId = await getActiveCenterId();
+  const relation =
+    relations.find((item) => item.center.id === activeCenterId) ??
+    (relations.length === 1 ? relations[0] : null);
+
+  if (!relation) redirect({ href: ROUTES.selectCenter, locale });
+
+  redirect({ href: homePathForRole(primaryRole(relation!)), locale });
 }

@@ -6,7 +6,23 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:seed": "prisma db seed",
+    "check:isolation": "node --env-file-if-exists=.env scripts/isolation-check.ts",
+    "check:config": "node --env-file-if-exists=.env scripts/config-check.ts",
+    "check:people": "node --env-file-if-exists=.env scripts/people-check.ts",
+    "check:classes": "node --env-file-if-exists=.env scripts/classes-check.ts",
+    "check:payments": "node --env-file-if-exists=.env scripts/payments-check.ts",
+    "check:analytics": "node --env-file-if-exists=.env scripts/analytics-check.ts",
+    "check:teacher-portal": "node --env-file-if-exists=.env scripts/teacher-portal-check.ts",
+    "check:student-portal": "node --env-file-if-exists=.env scripts/student-portal-check.ts",
+    "check:approvals": "node --env-file-if-exists=.env scripts/approvals-check.ts",
+    "check:admin": "node --env-file-if-exists=.env scripts/admin-check.ts",
+    "check:performance": "node --env-file-if-exists=.env scripts/rush-performance-check.ts",
+    "check:rtl": "node --env-file-if-exists=.env scripts/rtl-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -19,6 +35,7 @@
     "next": "16.3.4",
     "next-intl": "^4.14.1",
     "prisma": "^6.19.3",
+    "qrcode-generator": "^2.0.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "shadcn": "^4.19.1",
@@ -35,5 +52,8 @@
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "prisma": {
+    "seed": "node --env-file-if-exists=.env prisma/seed.ts"
   }
 }

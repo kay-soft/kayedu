@@ -1,13 +1,1390 @@
 {
-  "HomePage": {
-    "title": "KayEdu",
-    "description": "Education center management platform",
-    "body": "This starter screen verifies locale routing, page direction, and the base UI primitives are wired up correctly.",
-    "cta": "Get started"
-  },
   "LocaleSwitcher": {
     "label": "Language",
     "ar": "العربية",
     "en": "English"
+  },
+  "Shared": {
+    "optional": " (optional)",
+    "pagination": {
+      "label": "Pagination",
+      "range": "{from}–{to} of {total}",
+      "previous": "Previous",
+      "next": "Next",
+      "pageOf": "Page {page} of {totalPages}"
+    }
+  },
+  "Shell": {
+    "productName": "KayEdu",
+    "primaryNav": "Primary navigation",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "switchCenter": "Switch center",
+    "signOut": "Sign out",
+    "soon": "Soon",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
+  },
+  "Nav": {
+    "dashboard": "Dashboard",
+    "reception": "Reception desk",
+    "sessions": "Sessions",
+    "classes": "Classes",
+    "students": "Students",
+    "teachers": "Teachers",
+    "analytics": "Analytics",
+    "expenses": "Expenses",
+    "approvals": "Approvals",
+    "staff": "Users & roles",
+    "schedule": "My schedule",
+    "discover": "Discover",
+    "reservations": "My reservations",
+    "centers": "Centers",
+    "platform": "Platform",
+    "settings": "Settings"
+  },
+  "Roles": {
+    "OWNER": "Owner",
+    "MANAGER": "Manager",
+    "RECEPTIONIST": "Receptionist",
+    "TEACHER": "Teacher",
+    "STUDENT": "Student",
+    "PLATFORM_ADMIN": "Super admin"
+  },
+  "Auth": {
+    "fields": {
+      "email": "Email",
+      "password": "Password",
+      "confirmPassword": "Confirm password",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "phone": "Phone",
+      "optional": "optional"
+    },
+    "login": {
+      "title": "Sign in",
+      "subtitle": "One KayEdu account, every center you belong to.",
+      "submit": "Sign in",
+      "noAccount": "No account yet?",
+      "registerLink": "Create one"
+    },
+    "register": {
+      "title": "Create your account",
+      "subtitle": "One account connects you to every center you work or study with.",
+      "submit": "Create account",
+      "haveAccount": "Already have an account?",
+      "loginLink": "Sign in",
+      "passwordHint": "At least 8 characters.",
+      "confirmEmail": "Check your inbox, confirm your email address, then sign in."
+    },
+    "selectCenter": {
+      "title": "Choose a center",
+      "subtitle": "You are connected to more than one center. Pick where you want to work.",
+      "emptySubtitle": "Your account is not connected to a center yet.",
+      "emptyHelp": "Ask a center owner or manager to invite you by email, or open the invitation link you were sent — or browse classes to join a center as a student.",
+      "browseClasses": "Browse classes",
+      "platformAdminLink": "Go to the platform admin"
+    },
+    "invite": {
+      "title": "Staff invitation",
+      "subtitle": "You have been invited to join {center} on KayEdu.",
+      "centerLabel": "Center",
+      "roleLabel": "Role",
+      "emailLabel": "Invited email",
+      "accept": "Accept invitation",
+      "signInToAccept": "Sign in with the invited email address to accept.",
+      "createAccount": "Create an account",
+      "signIn": "I already have an account",
+      "signedInAs": "You are signed in as {email}.",
+      "expiresAt": "This invitation expires on {date}.",
+      "goToLogin": "Go to sign in"
+    },
+    "errors": {
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidPhone": "Enter a valid Egyptian mobile number.",
+      "passwordTooShort": "Password must be at least 8 characters.",
+      "passwordMismatch": "The two passwords do not match.",
+      "invalidCredentials": "Wrong email or password.",
+      "emailInUse": "An account already uses this email. Sign in instead.",
+      "phoneInUse": "This phone number belongs to another account.",
+      "signUpFailed": "We could not create the account. Try again.",
+      "invalidToken": "This invitation link is not valid.",
+      "inviteNotFound": "This invitation no longer exists.",
+      "inviteExpired": "This invitation has expired. Ask for a new one.",
+      "inviteAlreadyAccepted": "This invitation was already accepted.",
+      "inviteEmailMismatch": "This invitation was sent to a different email address.",
+      "centerInactive": "This center is not active.",
+      "invalidCenter": "Unknown center.",
+      "invalidInvitation": "Unknown invitation."
+    }
+  },
+  "Staff": {
+    "title": "Users & roles",
+    "subtitle": "Invite staff and teachers to this center and manage who has access.",
+    "inviteTitle": "Invite by email",
+    "inviteSubtitle": "The invitee accepts with the link below and gets a membership at this center.",
+    "sendInvite": "Create invitation",
+    "fields": {
+      "email": "Email",
+      "role": "Role"
+    },
+    "membersTitle": "Members",
+    "membersSubtitle": "Everyone connected to this center. Change a role or suspend access here.",
+    "noMembers": "No members yet.",
+    "columns": {
+      "name": "Name",
+      "email": "Email",
+      "role": "Role"
+    },
+    "pendingTitle": "Pending invitations",
+    "pendingSubtitle": "Invitations that have not been accepted yet.",
+    "noInvitations": "No pending invitations.",
+    "revoke": "Revoke",
+    "expiresOn": "Expires {date}",
+    "inviteCreated": "Invitation created. Share the link below with the invitee.",
+    "inviteLinkLabel": "Invitation link",
+    "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "errors": {
+      "forbidden": "You are not allowed to invite people to this center.",
+      "alreadyMember": "That person already has this role at this center.",
+      "ownerOnly": "Only an owner can invite another owner.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidCenter": "Unknown center.",
+      "invalidInvitation": "Unknown invitation."
+    },
+    "selfRow": "You",
+    "ownerRow": "Owner-only"
+  },
+  "People": {
+    "fields": {
+      "firstName": "First name",
+      "lastName": "Last name",
+      "email": "Email",
+      "phone": "Phone",
+      "phoneHint": "Egyptian mobile, e.g. 01012345678.",
+      "altPhone": "Alternative phone",
+      "firstNamePlaceholder": "Ahmed",
+      "lastNamePlaceholder": "Hassan",
+      "emailPlaceholder": "name@example.com",
+      "phonePlaceholder": "01012345678",
+      "phoneOrEmailHint": "Provide a phone or an email — at least one is needed to match this person and to reach them."
+    },
+    "match": {
+      "title": "This person already exists",
+      "description": "They already have a KayEdu identity. Confirm to connect them to this center — a new record here, linked to the same person.",
+      "person": "Person",
+      "matchedBy": "Matched on {fields}.",
+      "matchedOnSeparator": " and ",
+      "matchedOn": {
+        "email": "Email",
+        "phone": "Phone"
+      },
+      "alreadyHere": {
+        "student": "They are already registered as a student at this center.",
+        "teacher": "They already teach at this center.",
+        "staff": "They are already a staff member at this center."
+      },
+      "openProfile": "Open their profile",
+      "cancel": "Use different details"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists in this center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidPhone": "Enter a valid Egyptian mobile number.",
+      "contactRequired": "Add a phone number or an email — a teacher needs one to be matched and to sign in later.",
+      "samePromotionGrade": "Choose a different grade to promote to.",
+      "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
+      "contactInUse": "Those contact details already belong to someone else.",
+      "matchGone": "That person is no longer the match for these details. Check the form and try again.",
+      "alreadyTeacher": "They already teach at this center.",
+      "alreadyStudent": "They are already registered as a student at this center.",
+      "alreadyBlocked": "This student is already on that teacher's block-list.",
+      "teacherInUse": "This teacher still has classes or sessions here, so they cannot be deleted. Deactivate them instead.",
+      "studentInUse": "This student has attendance or payment history, so they cannot be deleted. Deactivate them instead.",
+      "noStudentsToPromote": "No active students are in that grade.",
+      "photoMissing": "Choose a photo first.",
+      "photoType": "Photos must be PNG, JPEG or WebP.",
+      "photoTooLarge": "That photo is larger than 5 MB.",
+      "storage": "File storage is unavailable right now. Try again in a moment."
+    }
+  },
+  "Teachers": {
+    "title": "Teachers",
+    "subtitle": "The teachers who work at this center, and who each of them will not take.",
+    "add": "Add teacher",
+    "addTitle": "Add a teacher",
+    "addDescription": "One person, one KayEdu identity. If they already teach elsewhere on KayEdu, you will be asked to link to them instead of creating a duplicate.",
+    "listTitle": "Teachers at this center",
+    "listDescription": "Deactivated teachers stay listed — hiding a former teacher is how a center loses track of its schedule.",
+    "empty": "No teachers yet.",
+    "noMatches": "No teachers match that search.",
+    "searchLabel": "Search teachers",
+    "searchPlaceholder": "Name, email or phone",
+    "searchSubmit": "Search",
+    "open": "Open",
+    "columns": {
+      "name": "Name",
+      "contact": "Contact",
+      "blocked": "Block-list"
+    },
+    "blockedCount": "{count} blocked",
+    "linkAsTeacher": "Link this person as a teacher",
+    "detailSubtitle": "Their record at this center, their classes and their block-list.",
+    "backToList": "All teachers",
+    "profileTitle": "Teacher record",
+    "profileDescription": "Name and contact details belong to the person; financial visibility belongs to this center.",
+    "identityTitle": "Identity",
+    "identityDescription": "How this person is connected across KayEdu.",
+    "classesTitle": "Classes",
+    "classesDescription": "The classes this teacher carries at this center.",
+    "classesEmpty": "No classes assigned to this teacher yet.",
+    "deleteConfirm": "This removes them from this center. It cannot be undone.",
+    "fields": {
+      "otherCenters": "Other centers",
+      "accountClaimed": "Signed in before"
+    },
+    "blocks": {
+      "title": "Block-list",
+      "description": "A student blocked here cannot be enrolled with, or added to a session of, this teacher.",
+      "empty": "No students are blocked from this teacher.",
+      "block": "Block",
+      "unblock": "Remove block",
+      "reason": "Reason",
+      "reasonPlaceholder": "Optional — why they are blocked",
+      "searchLabel": "Block a student",
+      "searchPlaceholder": "Search by name, code or phone",
+      "searchSubmit": "Search",
+      "noCandidates": "No students match that search.",
+      "unknownStudent": "Former student",
+      "unknownTeacher": "Former teacher"
+    },
+    "contactTitle": "This center's record",
+    "contactDescription": "This center's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other center's record.",
+    "trusted": {
+      "label": "Trusted teacher",
+      "description": "Lets this teacher request a new class or session from their portal at this center. Off hides those request forms for them."
+    }
+  },
+  "Students": {
+    "title": "Students",
+    "subtitle": "{count} registered at this center.",
+    "add": "Register student",
+    "addTitle": "Register a student",
+    "addDescription": "Register a student once and connect them to this center. A phone or email that already exists links to that person instead of creating a duplicate.",
+    "centerSectionTitle": "This center's record",
+    "centerSectionDescription": "This center's own name, contact record, grade and parent details — seeded from the student's KayEdu identity and always editable here. The student code is assigned automatically.",
+    "linkAsStudent": "Link this person as a student",
+    "listTitle": "Registered students",
+    "listDescription": "Search by name, student code, or a student's or parent's phone.",
+    "empty": "No students yet.",
+    "noMatches": "No students match that search.",
+    "moreResults": "Showing {shown} of {total}. Narrow the search to see the rest.",
+    "searchLabel": "Search students",
+    "searchPlaceholder": "Name, code or phone",
+    "searchSubmit": "Search",
+    "open": "Open",
+    "columns": {
+      "code": "Code",
+      "name": "Name",
+      "grade": "Grade",
+      "contact": "Contact"
+    },
+    "detailSubtitle": "Their record at this center, their enrolments and their ID card.",
+    "backToList": "All students",
+    "profileTitle": "Student record",
+    "profileDescription": "The person's own details, then everything this center owns.",
+    "deleteConfirm": "This removes them from this center. It cannot be undone.",
+    "parentTitle": "Parent & guardian",
+    "parentDescription": "Who this center calls.",
+    "fields": {
+      "grade": "Grade",
+      "studentCode": "Student code",
+      "parentFirstName": "Parent first name",
+      "parentLastName": "Parent last name",
+      "parentPhone": "Parent phone",
+      "parentAltPhone": "Parent alternative phone",
+      "parentName": "Parent name",
+      "phone": "Phone",
+      "email": "Email",
+      "otherCenters": "Other centers"
+    },
+    "promote": {
+      "title": "Promote a grade",
+      "description": "At the end of a term, move every active student in one grade to the next.",
+      "from": "From grade",
+      "to": "To grade",
+      "warning": "This moves every active student in the chosen grade. The change is recorded in the audit log.",
+      "submit": "Promote students",
+      "done": "Students promoted.",
+      "needsGrades": "Add at least two grades in settings before promoting."
+    },
+    "photo": {
+      "title": "Photo",
+      "description": "Used on the ID card. Stored for this center only.",
+      "label": "Student photo",
+      "hint": "PNG, JPEG or WebP, up to 5 MB.",
+      "upload": "Upload photo",
+      "remove": "Remove photo"
+    },
+    "card": {
+      "title": "ID card",
+      "description": "Laid out from this center's card customization, with a QR code the reception desk can scan.",
+      "codeLabel": "Student code",
+      "printCard": "Print as ID card",
+      "printPaper": "Print as paper",
+      "generate": "Generate and store",
+      "download": "Download the generated card",
+      "generatedAt": "Last generated {date}.",
+      "notStored": "No card has been generated for this student yet.",
+      "noStorage": "File storage is not configured, so cards cannot be stored. Printing still works."
+    },
+    "enrollments": {
+      "title": "Enrolments",
+      "description": "The classes this student is in at this center.",
+      "empty": "Not enrolled in any class yet.",
+      "emptyPrint": "Not enrolled in any class yet.",
+      "blocked": "blocked from this class",
+      "consecutiveAbsentAlert": "{className}: absent {count} times in a row."
+    },
+    "blockedBy": {
+      "title": "Blocked by",
+      "description": "Teachers and classes that have blocked this student.",
+      "empty": "No teacher or class has blocked this student.",
+      "unknownClass": "Former class"
+    },
+    "print": {
+      "print": "Print",
+      "back": "Back to the student",
+      "hint": "Only the sheet below is printed.",
+      "printedOn": "Printed {date}"
+    }
+  },
+  "Classes": {
+    "title": "Classes",
+    "subtitle": "{count} classes at this center.",
+    "add": "Add class",
+    "addTitle": "Add a class",
+    "addDescription": "A teacher teaching one subject to one grade — its price, center cut, capacity and enrollment rules.",
+    "listTitle": "Classes",
+    "listDescription": "Deactivated classes stay listed — their history and any generated sessions keep resolving.",
+    "empty": "No classes yet.",
+    "noMatches": "No classes match these filters.",
+    "open": "Open",
+    "backToList": "All classes",
+    "deleteConfirm": "This removes the class. It cannot be undone.",
+    "profileTitle": "Class record",
+    "profileDescription": "Price and center-cut changes never rewrite money already recorded — only new sessions use the new numbers.",
+    "columns": {
+      "subject": "Subject · Grade",
+      "teacher": "Teacher",
+      "room": "Room",
+      "price": "Price",
+      "enrolled": "Enrolled",
+      "untitled": "Untitled class"
+    },
+    "filters": {
+      "teacher": "Teacher",
+      "subject": "Subject",
+      "grade": "Grade",
+      "all": "All"
+    },
+    "fields": {
+      "teacher": "Teacher",
+      "teacherPlaceholder": "Choose a teacher",
+      "subject": "Subject",
+      "grade": "Grade",
+      "educationSystem": "Education system",
+      "room": "Room",
+      "capacity": "Capacity",
+      "capacityHint": "Students. Use 0 for no limit.",
+      "moneyTitle": "Price & center cut",
+      "price": "Price per session",
+      "shareType": "Cut type",
+      "percentage": "Percentage of the amount",
+      "fixed": "Fixed amount (EGP)",
+      "shareValuePct": "Percentage",
+      "shareValueEgp": "Amount (EGP)",
+      "centerShare": "Center keeps",
+      "teacherShare": "Teacher gets",
+      "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
+      "attendanceRequired": "Attendance is required for this class",
+      "attendanceRequiredHint": "Turn off for a class that doesn't track attendance per session.",
+      "lateThreshold": "Late threshold (minutes)",
+      "lateThresholdHint": "Minutes after the start time before a student counts as late.",
+      "acceptsNewStudents": "Accepting new students",
+      "acceptsNewStudentsHint": "Turn off to hide this class from new enrollment while keeping it running.",
+      "requiresConfirmation": "New enrollments need confirmation",
+      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate.",
+      "allowExcused": "Allow Excused status",
+      "allowExcusedHint": "Turn off to offer only Present, Late and Absent on this class's sessions."
+    },
+    "context": {
+      "title": "Class context",
+      "description": "Read-only — edit these from the record on the left."
+    },
+    "dayNames": [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday"
+    ],
+    "schedule": {
+      "title": "Weekly schedule",
+      "description": "One row per recurring slot. A conflict banner appears directly beneath a slot that double-books this class's teacher or room.",
+      "slotsHeading": "Weekly time slots",
+      "slotCount": "{count, plural, one {# slot} other {# slots}} this week",
+      "empty": "No time slots yet — add the first one below.",
+      "day": "Day",
+      "start": "Start",
+      "end": "End",
+      "save": "Save",
+      "remove": "Remove slot",
+      "addSlot": "Add time slot",
+      "cancel": "Cancel",
+      "summary": "{day}",
+      "roomConflictWith": "Room conflict with {className}.",
+      "teacherConflictWith": "Teacher conflict with {className}."
+    },
+    "holidays": {
+      "title": "Holiday calendar",
+      "description": "Dates the session generator skips, for every class.",
+      "empty": "No holidays added yet.",
+      "date": "Date",
+      "name": "Name",
+      "namePlaceholder": "Eid al-Fitr",
+      "add": "Add holiday",
+      "remove": "Remove holiday"
+    },
+    "generate": {
+      "title": "Session generator",
+      "description": "Materializes upcoming sessions from every active class's schedule, skipping holidays, for the next six weeks.",
+      "classDescription": "Materializes this class's upcoming sessions for the next six weeks, skipping holidays.",
+      "generateForClass": "Generate sessions for this class",
+      "generateForCenter": "Generate sessions for the whole center",
+      "result": "{created, plural, one {# session} other {# sessions}} created. {conflicts, plural, =0 {No conflicts.} one {# conflict flagged.} other {# conflicts flagged.}}",
+      "roomConflict": "Room conflict with {className}.",
+      "teacherConflict": "Teacher conflict with {className}."
+    },
+    "roster": {
+      "title": "Roster",
+      "description": "Who is enrolled, who is blocked from this class, and who to add next.",
+      "searchLabel": "Enroll a student",
+      "searchPlaceholder": "Search by name, code or phone",
+      "searchSubmit": "Search",
+      "activeTitle": "Enrolled ({count})",
+      "empty": "No students enrolled yet.",
+      "remove": "Remove",
+      "block": "Block",
+      "blockedTitle": "Blocked from this class ({count})",
+      "blockedEmpty": "No students are blocked from this class.",
+      "unblock": "Unblock",
+      "candidatesTitle": "Search results",
+      "noCandidates": "No students match that search.",
+      "enroll": "Enroll",
+      "unknownStudent": "Former student"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists in this center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidNumber": "Enter a whole number.",
+      "invalidAmount": "Enter a valid amount in EGP.",
+      "invalidPercent": "Enter a whole percentage between 0 and 100.",
+      "invalidShareType": "Choose fixed EGP or a percentage.",
+      "invalidDay": "Choose a day of the week.",
+      "invalidTime": "Enter a valid time.",
+      "invalidTimeRange": "The end time must be after the start time.",
+      "invalidDate": "Enter a valid date.",
+      "duplicateDate": "That date is already on the holiday calendar.",
+      "scheduleConflict": "This center denies double-booked slots. Choose a different day, time or teacher.",
+      "classInUse": "This class still has enrollments or generated sessions, so it cannot be deleted. Deactivate it instead.",
+      "classFull": "This class is at capacity.",
+      "alreadyEnrolled": "This student is already enrolled in this class.",
+      "studentBlocked": "This student is blocked from this class.",
+      "alreadyBlocked": "This student is already blocked from this class."
+    }
+  },
+  "Sessions": {
+    "title": "Today's Sessions",
+    "subtitle": "{count} sessions in this view.",
+    "open": "Open",
+    "backToList": "All sessions",
+    "detailSubtitle": "{teacher} · {date}",
+    "listTitle": "Sessions",
+    "listDescription": "Every session in the selected range, across every class.",
+    "empty": "No sessions match these filters.",
+    "stats": {
+      "total": "Sessions",
+      "live": "Live now",
+      "marked": "Attendance marked",
+      "collected": "Collected"
+    },
+    "columns": {
+      "time": "Time",
+      "class": "Class",
+      "teacher": "Teacher",
+      "room": "Room",
+      "marked": "Marked",
+      "price": "Price",
+      "untitled": "Untitled class"
+    },
+    "filters": {
+      "date": "Date",
+      "range": "Range",
+      "rangeDay": "Day",
+      "rangeWeek": "Week",
+      "rangeMonth": "Month",
+      "status": "Status",
+      "teacher": "Teacher",
+      "subject": "Subject",
+      "class": "Class",
+      "all": "All"
+    },
+    "status": {
+      "SCHEDULED": "Scheduled",
+      "LIVE": "Live",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled"
+    },
+    "attendance": {
+      "groupLabel": "Attendance",
+      "PRESENT": "Present",
+      "LATE": "Late",
+      "ABSENT": "Absent",
+      "EXCUSED": "Excused"
+    },
+    "paymentMethod": {
+      "groupLabel": "Payment method",
+      "CASH": "Cash",
+      "INSTAPAY": "InstaPay",
+      "WALLET": "Wallet",
+      "VISA": "Visa"
+    },
+    "roster": {
+      "title": "Roster",
+      "description": "Every enrolled student, plus any drop-ins. Mark attendance, then record the payment.",
+      "empty": "No students enrolled or added yet.",
+      "dropIn": "Drop-in",
+      "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian.",
+      "paid": "Paid {amount} · {method}",
+      "method": {
+        "CASH": "Cash",
+        "INSTAPAY": "InstaPay",
+        "WALLET": "Wallet",
+        "VISA": "Visa"
+      },
+      "recordPayment": "Record payment",
+      "void": "Void",
+      "voidReasonPlaceholder": "Reason for voiding",
+      "confirmVoid": "Confirm void"
+    },
+    "addAttendee": {
+      "title": "Add a student",
+      "searchLabel": "Search students",
+      "searchPlaceholder": "Name, code or phone",
+      "searchSubmit": "Search",
+      "noCandidates": "No students match that search.",
+      "registerNew": "Register a new student",
+      "add": "Add to session",
+      "cancel": "Cancel",
+      "linkAsStudent": "Link this person and add to the session"
+    },
+    "context": {
+      "title": "Session"
+    },
+    "fields": {
+      "time": "Time",
+      "room": "Room",
+      "price": "Price"
+    },
+    "lifecycle": {
+      "cancel": "Cancel session",
+      "reschedule": "Reschedule",
+      "save": "Save new time",
+      "rescheduled": "Session rescheduled.",
+      "rescheduledWithConflict": "Session rescheduled, but it now conflicts with {count, plural, one {# other class} other {# other classes}} — review it.",
+      "fields": {
+        "date": "Date",
+        "startTime": "Start time",
+        "endTime": "End time"
+      }
+    },
+    "receipt": {
+      "title": "Receipt",
+      "description": "Total collected and the attendance breakdown for this session.",
+      "collected": "Total collected",
+      "centerShare": "Center share",
+      "teacherShare": "Teacher share",
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent",
+      "excused": "Excused"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists in this center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidStatus": "Choose an attendance status.",
+      "invalidMethod": "Choose a payment method.",
+      "alreadyOnRoster": "This student is already on this session's roster.",
+      "studentBlocked": "This student is blocked from this class or teacher.",
+      "attendanceNotPayable": "Only a Present or Late attendee can have a payment recorded.",
+      "alreadyPaid": "This attendee already has an active payment. Void it first to record a new one.",
+      "alreadyVoided": "This payment was already voided.",
+      "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
+      "contactInUse": "Those contact details already belong to someone else.",
+      "matchGone": "That person is no longer the match for these details. Check the form and try again.",
+      "alreadyCancelled": "This session is already cancelled.",
+      "cancelled": "This session is cancelled and can no longer be edited.",
+      "conflict": "That time conflicts with another class's teacher or room, and this center denies conflicting slots.",
+      "duplicateSlot": "This class already has a session at that exact date and time.",
+      "excusedNotAllowed": "This class does not allow the Excused status.",
+      "invalidDate": "Enter a valid date.",
+      "invalidTimeRange": "The end time must be after the start time."
+    }
+  },
+  "Reception": {
+    "title": "Reception Desk",
+    "subtitle": "Search a student, pick their session, and record attendance and payment together.",
+    "searchTitle": "Find a student",
+    "searchDescription": "Search by student code, name or phone.",
+    "searchLabel": "Search students",
+    "searchPlaceholder": "Code, name or phone",
+    "searchSubmit": "Search",
+    "noMatches": "No students match that search.",
+    "liveRailTitle": "Today's sessions",
+    "liveRailDescription": "Everything scheduled today at this center.",
+    "noSessionsToday": "No sessions today yet.",
+    "noLiveSessions": "No sessions today — generate today's sessions from the Sessions dashboard first.",
+    "addSessionShortcut": "All sessions",
+    "checkingIn": "Checking in {name}",
+    "sessionLabel": "Session",
+    "statusLabel": "Attendance",
+    "methodLabel": "Payment method",
+    "submit": "Check in",
+    "checkedIn": "Checked in."
+  },
+  "Analytics": {
+    "title": "Analytics",
+    "subtitle": "Revenue and growth, read from recorded payments — never recomputed from current settings.",
+    "filters": {
+      "range": "Period",
+      "date": "Date",
+      "rangeDay": "Day",
+      "rangeWeek": "Week",
+      "rangeMonth": "Month",
+      "rangeYear": "Year",
+      "rangeAll": "All time",
+      "teacher": "Teacher",
+      "allTeachers": "All teachers"
+    },
+    "revenue": {
+      "title": "Revenue",
+      "collected": "Collected",
+      "centerShare": "Center share",
+      "teacherShare": "Teacher share",
+      "expenses": "Expenses",
+      "net": "Net",
+      "avgPerPayment": "Average per payment",
+      "avgPerDay": "Average per day"
+    },
+    "users": {
+      "title": "People",
+      "totalStudents": "Total students",
+      "newStudents": "New students",
+      "totalTeachers": "Total teachers",
+      "activeTeachers": "Active teachers",
+      "newTeachers": "New teachers"
+    },
+    "byTeacher": {
+      "title": "By teacher",
+      "description": "Revenue collected per teacher in this period.",
+      "empty": "No payments recorded in this period.",
+      "unknown": "Unknown teacher",
+      "columns": {
+        "teacher": "Teacher",
+        "collected": "Collected",
+        "centerShare": "Center share",
+        "teacherShare": "Teacher share",
+        "payments": "Payments"
+      }
+    }
+  },
+  "Expenses": {
+    "title": "Expenses",
+    "subtitle": "Track center costs — this feeds Analytics' net figure.",
+    "addTitle": "Add an expense",
+    "listTitle": "Expenses",
+    "empty": "No expenses recorded in this period.",
+    "add": "Add expense",
+    "delete": "Delete",
+    "deleteYes": "Delete",
+    "cancel": "Cancel",
+    "stats": {
+      "total": "Total in period",
+      "count": "Entries"
+    },
+    "filters": {
+      "range": "Period",
+      "date": "Date",
+      "rangeDay": "Day",
+      "rangeWeek": "Week",
+      "rangeMonth": "Month",
+      "rangeYear": "Year",
+      "rangeAll": "All time"
+    },
+    "columns": {
+      "date": "Date",
+      "category": "Category",
+      "note": "Note",
+      "amount": "Amount",
+      "actions": "Actions"
+    },
+    "fields": {
+      "category": "Category",
+      "categoryNone": "No category",
+      "amount": "Amount (EGP)",
+      "amountHint": "Stored as piastres — never a float.",
+      "date": "Date",
+      "note": "Note",
+      "notePlaceholder": "Optional note"
+    },
+    "categories": {
+      "title": "Expense categories",
+      "description": "Manage the categories expenses are recorded under.",
+      "addTitle": "Add a category",
+      "addDescription": "Categories group expenses for reporting.",
+      "listTitle": "Categories",
+      "listDescription": "Deactivate a category still referenced by expenses instead of deleting it.",
+      "empty": "No categories yet.",
+      "fields": {
+        "name": "Name"
+      }
+    },
+    "errors": {
+      "forbidden": "You are not allowed to manage expenses.",
+      "notFound": "That record no longer exists in this center.",
+      "invalidAmount": "Enter a valid amount in EGP.",
+      "invalidDate": "Enter a valid date.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long."
+    }
+  },
+  "Approvals": {
+    "title": "Approvals",
+    "subtitle": "{count, plural, =0 {Nothing pending} one {# pending request} other {# pending requests}}.",
+    "empty": "Nothing is waiting for your review right now.",
+    "approve": "Approve",
+    "decline": "Decline",
+    "changeRequests": {
+      "title": "Class requests",
+      "description": "New classes teachers have asked to open at this center. Approving does not create the class — create it at Classes using these details.",
+      "empty": "No pending class requests.",
+      "requestedOn": "Requested {date}",
+      "approved": "Approved",
+      "declined": "Declined",
+      "fields": {
+        "day": "Day",
+        "time": "Time",
+        "capacity": "Capacity",
+        "attendance": "Attendance required",
+        "lateThreshold": "Late threshold (min)",
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "sessionRequests": {
+      "title": "Session requests",
+      "description": "One-off sessions teachers have asked to add to a class they already teach. Approving creates the session right away.",
+      "empty": "No pending session requests.",
+      "classGone": "That class no longer exists.",
+      "fields": {
+        "date": "Date"
+      }
+    },
+    "reservations": {
+      "title": "Class reservations",
+      "description": "Students waiting to join a class that requires confirmation. Approving enrolls them immediately.",
+      "empty": "No pending reservations.",
+      "requestedOn": "Requested {date}",
+      "approved": "Approved",
+      "declined": "Declined"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That request no longer exists.",
+      "notPending": "That request has already been resolved.",
+      "studentBlocked": "This student cannot be enrolled in this class.",
+      "classFull": "This class is at capacity.",
+      "classNotFound": "The class this request was for no longer exists.",
+      "conflict": "That time conflicts with another class's teacher or room, and this center denies conflicting slots.",
+      "duplicateSlot": "This class already has a session at that exact date and time."
+    }
+  },
+  "Settings": {
+    "title": "Center configuration",
+    "subtitle": "Set up this center's academic and operational reference data. Everything here is per center — the next center needs no code changes.",
+    "nav": {
+      "label": "Settings sections",
+      "general": "General",
+      "branches": "Branches",
+      "rooms": "Rooms",
+      "educationSystems": "Education systems",
+      "grades": "Grades",
+      "subjects": "Subjects",
+      "card": "ID card",
+      "permissions": "Permissions",
+      "staff": "Users & roles"
+    },
+    "common": {
+      "add": "Add",
+      "save": "Save",
+      "cancel": "Cancel",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteYes": "Delete permanently",
+      "deleteConfirm": "This cannot be undone.",
+      "activate": "Activate",
+      "deactivate": "Deactivate",
+      "active": "Active",
+      "inactive": "Inactive",
+      "status": "Status",
+      "actions": "Actions",
+      "none": "Not set",
+      "saved": "Changes saved."
+    },
+    "errors": {
+      "forbidden": "You are not allowed to change this center's configuration.",
+      "notFound": "That record no longer exists in this center.",
+      "inUse": "Something still uses this record, so it cannot be deleted. Deactivate it instead.",
+      "duplicateName": "That name is already used here.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidNumber": "Enter a whole number.",
+      "invalidAmount": "Enter a valid amount in EGP.",
+      "invalidPercent": "Enter a whole percentage between 0 and 100.",
+      "invalidShareType": "Choose fixed EGP or a percentage.",
+      "invalidJson": "This is not valid JSON.",
+      "cardLayoutNotObject": "The card layout must be a JSON object.",
+      "ownerOnly": "Only an owner can change another owner.",
+      "lastOwner": "This is the center's only owner. Add another owner first.",
+      "selfEdit": "You cannot change your own role or access.",
+      "alreadyMember": "That person already holds this role at this center."
+    },
+    "general": {
+      "title": "General",
+      "description": "The defaults a new class starts from, and how this center runs day to day.",
+      "cutTitle": "Default center cut",
+      "cutDescription": "The share this center takes from a session payment. Each class can override it; this is the starting point.",
+      "shareType": "Cut type",
+      "percentage": "Percentage of the amount",
+      "fixed": "Fixed amount (EGP)",
+      "shareValuePct": "Percentage",
+      "shareValueEgp": "Amount (EGP)",
+      "previewLabel": "On a {amount} session",
+      "previewEmpty": "Enter a value to see the split.",
+      "centerShare": "Center keeps",
+      "teacherShare": "Teacher gets",
+      "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
+      "operationsTitle": "Daily operations",
+      "operationsDescription": "Teacher inactivity, the default late threshold, and the clock this center runs on.",
+      "timeoutLabel": "Mark a teacher inactive after a period with no sessions",
+      "timeoutDescription": "Counted from their last completed session. Leave this off to never auto-deactivate a teacher.",
+      "timeoutDays": "Days",
+      "lateThreshold": "Default late threshold (minutes)",
+      "lateThresholdHint": "A class can set its own; this is what a new class starts with.",
+      "timezone": "Timezone",
+      "editDeadlineLabel": "Set a deadline for teachers to edit a session description",
+      "editDeadlineDescription": "Counted from the session's date. Leave this off to let a teacher edit any of their own sessions at any time.",
+      "editDeadlineHours": "Hours after the session",
+      "schedulingTitle": "Scheduling conflicts",
+      "schedulingDescription": "What happens when a class schedule or a generated session double-books a teacher or a room.",
+      "denyConflictsLabel": "Deny double-booked slots and sessions",
+      "denyConflictsDescription": "Off by default: a conflict is saved and flagged so staff can review it. On: the conflicting slot or session is refused instead."
+    },
+    "educationSystems": {
+      "title": "Education systems",
+      "description": "The curricula this center teaches (National, Languages, IG…) and the price each one starts from.",
+      "addTitle": "Add an education system",
+      "addDescription": "Grades and classes are organised under these.",
+      "listTitle": "Education systems",
+      "listDescription": "Deactivate one to keep it out of new classes without losing its history.",
+      "empty": "No education systems yet. Add the first one above.",
+      "fields": {
+        "name": "Name",
+        "basePrice": "Base price",
+        "basePriceHint": "Per session, in EGP. A class can charge something different."
+      }
+    },
+    "grades": {
+      "title": "Grades",
+      "description": "The year groups this center teaches, optionally tied to an education system.",
+      "addTitle": "Add a grade",
+      "addDescription": "Subjects, students and classes all hang off a grade.",
+      "listTitle": "Grades",
+      "listDescription": "Deactivate a grade to retire it without touching the students already in it.",
+      "empty": "No grades yet. Add the first one above.",
+      "noSystemsHint": "You have no education systems yet. Grades work without one, but adding systems first keeps the taxonomy tidy.",
+      "fields": {
+        "name": "Name",
+        "educationSystem": "Education system"
+      }
+    },
+    "subjects": {
+      "title": "Subjects",
+      "description": "What is taught, per grade. The same subject name can repeat across grades.",
+      "addTitle": "Add a subject",
+      "addDescription": "A class is a teacher teaching one subject to one grade.",
+      "listTitle": "Subjects",
+      "listDescription": "Deactivate a subject to stop new classes using it.",
+      "empty": "No subjects yet. Add the first one above.",
+      "noGradesHint": "You have no grades yet. Add grades first so each subject can sit under one.",
+      "fields": {
+        "name": "Name",
+        "grade": "Grade"
+      }
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "The physical locations this center runs. Rooms and sessions belong to a branch.",
+      "addTitle": "Add a branch",
+      "addDescription": "A single-location center needs just one.",
+      "listTitle": "Branches",
+      "listDescription": "Deactivate a branch that has closed; its history stays intact.",
+      "empty": "No branches yet. Add the first one above.",
+      "fields": {
+        "name": "Name",
+        "address": "Address",
+        "addressPlaceholder": "12 Nile St"
+      }
+    },
+    "rooms": {
+      "title": "Rooms",
+      "description": "Where sessions physically happen. Capacity is used to warn about over-booking.",
+      "addTitle": "Add a room",
+      "addDescription": "Name it the way staff say it out loud — that is what they will pick from.",
+      "listTitle": "Rooms",
+      "listDescription": "Deactivate a room that is out of service.",
+      "empty": "No rooms yet. Add the first one above.",
+      "noBranchesHint": "You have no branches yet. Rooms work without one, but assigning a branch keeps multi-location scheduling straight.",
+      "fields": {
+        "name": "Name",
+        "capacity": "Capacity",
+        "capacityHint": "Seats. Use 0 if you do not want a limit.",
+        "branch": "Branch"
+      }
+    },
+    "card": {
+      "title": "ID card",
+      "description": "Where the logo, photo, name, grade, student code and QR block sit on this center's printed student card.",
+      "rendererNote": "The card itself is generated in a later milestone (M3). This screen stores the layout it will use.",
+      "editorTitle": "Card layout",
+      "editorDescription": "A JSON object. Positions are percentages of the card face, so the same layout works on screen and at print size.",
+      "jsonLabel": "Layout JSON",
+      "emptyHint": "Leave this empty to use the built-in default card.",
+      "loadDefault": "Load the default",
+      "clear": "Clear"
+    },
+    "permissions": {
+      "title": "Permissions",
+      "description": "The few role edges this center can widen. A grant can only add — it never takes away what a role already has.",
+      "receptionistTitle": "Receptionist grants",
+      "receptionistDescription": "Both are denied by default. Turn one on only if this center's front desk genuinely needs it.",
+      "viewProfitLabel": "Can see center profit and settlement figures",
+      "viewProfitDescription": "Off by default: the desk records money but does not see what the center keeps.",
+      "correctAttendanceLabel": "Can correct an already-recorded attendance",
+      "correctAttendanceDescription": "Corrections are always written to the audit log, whoever makes them.",
+      "effectiveTitle": "In effect now",
+      "effectiveDescription": "What a {role} at this center can do right now, resolved through the same check the server enforces.",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "widenOnlyNote": "Owners and managers always have both; these toggles apply to receptionists only."
+    }
+  },
+  "CenterDashboard": {
+    "title": "{center}",
+    "subtitle": "Today at a glance.",
+    "today": {
+      "title": "Today",
+      "sessions": "Sessions today",
+      "live": "Live now",
+      "notStarted": "Not started yet",
+      "marked": "Attendance marked",
+      "markedHint": "{absent} absent",
+      "collected": "Collected today",
+      "centerShare": "Center share today",
+      "sessionsListTitle": "Today's sessions",
+      "viewAll": "View all sessions",
+      "empty": "No sessions scheduled today."
+    },
+    "center": {
+      "title": "Center"
+    },
+    "stats": {
+      "staff": "Staff",
+      "teachers": "Teachers",
+      "students": "Students",
+      "branches": "Branches"
+    }
+  },
+  "TeacherDashboard": {
+    "title": "Teacher dashboard",
+    "subtitle": "Your work at {center}.",
+    "stats": {
+      "centers": "Centers",
+      "sessionsToday": "Sessions today",
+      "sessionsThisWeek": "Sessions this week",
+      "earningsThisMonth": "Earnings this month"
+    },
+    "centers": {
+      "title": "Your centers",
+      "description": "Each center's schedule and earnings, scoped to that center only.",
+      "active": "Active",
+      "summary": "{today} today · {week} this week · {earnings} this month",
+      "viewSchedule": "View schedule",
+      "switchTo": "Switch to this center"
+    }
+  },
+  "TeacherSessions": {
+    "title": "My sessions",
+    "subtitle": "{count} sessions in this view.",
+    "detailSubtitle": "{grade} · {date}",
+    "printAction": "Print",
+    "backToList": "All sessions",
+    "listTitle": "Sessions",
+    "listDescription": "Every session you teach at this center in the selected range.",
+    "empty": "No sessions match these filters.",
+    "searchLabel": "Search by student",
+    "searchPlaceholder": "Name or student code",
+    "searchSubmit": "Search",
+    "stats": {
+      "inRange": "In range",
+      "upcoming": "Upcoming"
+    },
+    "columns": {
+      "marked": "{count, plural, one {# marked} other {# marked}}"
+    },
+    "filters": {
+      "date": "Date",
+      "range": "Range",
+      "rangeDay": "Day",
+      "rangeWeek": "Next 7 days",
+      "rangeMonth": "Next 30 days",
+      "status": "Status",
+      "grade": "Grade",
+      "all": "All"
+    },
+    "request": {
+      "title": "Request a new session",
+      "description": "A one-off session on one of your classes at this center. A center manager reviews it before it's added to the calendar.",
+      "class": "Class",
+      "classPlaceholder": "Choose a class",
+      "noClasses": "You do not teach any class at this center yet.",
+      "date": "Date",
+      "start": "Start",
+      "end": "End",
+      "note": "Note to the center",
+      "notePlaceholder": "Anything else the center should know",
+      "submit": "Send request",
+      "submitted": "Request sent."
+    },
+    "roster": {
+      "title": "Roster",
+      "description": "{absent, plural, =0 {No absences.} one {# absent.} other {# absent.}}",
+      "empty": "No students on the roster yet.",
+      "dropIn": "Drop-in",
+      "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian."
+    },
+    "description": {
+      "title": "Session note",
+      "hint": "Visible to this center's staff. No edit deadline is enforced yet.",
+      "label": "Description",
+      "placeholder": "What was covered, homework assigned, anything worth noting",
+      "save": "Save note",
+      "saved": "Saved."
+    },
+    "uploads": {
+      "title": "Files",
+      "comingSoon": "Uploading files for a session is coming in a later milestone."
+    },
+    "context": {
+      "title": "Session"
+    },
+    "fields": {
+      "time": "Time",
+      "room": "Room",
+      "grade": "Grade",
+      "price": "Price"
+    },
+    "receipt": {
+      "title": "Your earnings",
+      "description": "This session's total, your share and the center's share."
+    },
+    "print": {
+      "hint": "Only the sheet below is printed.",
+      "print": "Print",
+      "back": "Back to the session",
+      "printedOn": "Printed {date}",
+      "collected": "Total collected",
+      "centerShare": "Center share",
+      "teacherShare": "Your share",
+      "attendanceSummary": "Attendance",
+      "attendanceCounts": "{present} present · {late} late · {absent} absent · {excused} excused"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That session no longer exists, or is not yours.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "editDeadlinePassed": "The deadline to edit this session's description has passed.",
+      "invalidDate": "Enter a valid date.",
+      "invalidTimeRange": "The end time must be after the start time.",
+      "notTrusted": "This center has not marked you as a trusted teacher, so you cannot request a new class or session here."
+    }
+  },
+  "TeacherStudents": {
+    "title": "My students",
+    "subtitle": "{count} students you have taught at this center.",
+    "detailSubtitle": "Their sessions with you at this center only.",
+    "backToList": "All students",
+    "listTitle": "Students",
+    "listDescription": "Search by name, code or phone — only students you have taught here.",
+    "empty": "You have not taught any students at this center yet.",
+    "noMatches": "No students match that search.",
+    "searchLabel": "Search students",
+    "searchPlaceholder": "Name or student code",
+    "searchSubmit": "Search",
+    "sessionsTitle": "Sessions with you",
+    "sessionsDescription": "Every session this student attended with you — not their history with other teachers.",
+    "fields": {
+      "grade": "Grade"
+    },
+    "block": {
+      "title": "Block this student",
+      "description": "A blocked student cannot be enrolled with, or added to a session of, you.",
+      "blocked": "You have blocked this student.",
+      "blockedWithReason": "You have blocked this student: {reason}",
+      "unblock": "Remove block",
+      "block": "Block",
+      "reason": "Reason",
+      "reasonPlaceholder": "Optional — why they are blocked"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That record no longer exists, or is not one of your students.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "alreadyBlocked": "You have already blocked this student."
+    }
+  },
+  "TeacherClasses": {
+    "title": "My classes",
+    "subtitle": "Request a new class at {center}.",
+    "listTitle": "Your requests",
+    "listDescription": "Requests you have sent to this center. A center manager reviews and confirms them.",
+    "empty": "You have not requested a class yet.",
+    "status": {
+      "PENDING": "Pending review",
+      "APPROVED": "Approved",
+      "DECLINED": "Declined"
+    },
+    "request": {
+      "title": "Request a new class",
+      "description": "Subject, grade, timing, capacity and attendance settings — a center manager reviews this before it becomes a real class.",
+      "subject": "Subject",
+      "grade": "Grade",
+      "none": "Not set",
+      "day": "Day",
+      "start": "Start",
+      "end": "End",
+      "capacity": "Capacity",
+      "capacityHint": "Students. Use 0 for no limit.",
+      "lateThreshold": "Late threshold (minutes)",
+      "attendanceRequired": "Attendance is required for this class",
+      "note": "Note to the center",
+      "notePlaceholder": "Anything else the center should know",
+      "submit": "Send request",
+      "submitted": "Request sent."
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidDay": "Choose a day of the week.",
+      "invalidTime": "Enter a valid time.",
+      "invalidTimeRange": "The end time must be after the start time.",
+      "invalidNumber": "Enter a whole number.",
+      "notTrusted": "This center has not marked you as a trusted teacher, so you cannot request a new class or session here."
+    }
+  },
+  "StudentSchedule": {
+    "title": "My schedule",
+    "subtitle": "Every class you're enrolled in, across every center you've joined.",
+    "filterDate": "Filter by date",
+    "clearDate": "Clear",
+    "upcomingTitle": "Upcoming",
+    "upcomingEmpty": "No upcoming sessions.",
+    "upcomingBadge": "Upcoming",
+    "pastTitle": "Past",
+    "pastEmpty": "No past sessions yet.",
+    "dropIn": "Drop-in"
+  },
+  "StudentDiscover": {
+    "title": "Discover",
+    "subtitle": "{count, plural, one {# class found} other {# classes found}}.",
+    "empty": "No classes match these filters yet.",
+    "filters": {
+      "subject": "Subject",
+      "grade": "Grade",
+      "day": "Day",
+      "all": "All"
+    },
+    "status": {
+      "open": "Open",
+      "requiresApproval": "Requires approval",
+      "pending": "Pending",
+      "enrolled": "Enrolled",
+      "full": "Full"
+    },
+    "card": {
+      "enroll": "Enroll",
+      "requestToJoin": "Request to join",
+      "pending": "Pending",
+      "enrolled": "Enrolled",
+      "full": "Class full",
+      "noSchedule": "Schedule not set yet"
+    },
+    "errors": {
+      "forbidden": "You need to sign in to reserve a class.",
+      "notFound": "That class is no longer available.",
+      "notAcceptingStudents": "This class is not accepting new students right now.",
+      "studentBlocked": "You cannot join this class.",
+      "alreadyEnrolled": "You are already enrolled in this class.",
+      "alreadyRequested": "You already have a pending request for this class.",
+      "classFull": "This class is at capacity."
+    }
+  },
+  "StudentReservations": {
+    "title": "My reservations",
+    "subtitle": "{count, plural, one {# request} other {# requests}}, across every center.",
+    "empty": "You haven't requested to join any classes yet.",
+    "cancel": "Cancel request",
+    "status": {
+      "PENDING": "Pending",
+      "CONFIRMED": "Confirmed",
+      "REJECTED": "Declined",
+      "CANCELLED": "Cancelled"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That request no longer exists.",
+      "notPending": "That request has already been resolved."
+    }
+  },
+  "AdminCenters": {
+    "title": "Centers",
+    "subtitle": "Every tenant on the platform.",
+    "listTitle": "All centers",
+    "empty": "No centers yet — create the first one above.",
+    "active": "Active",
+    "suspended": "Suspended",
+    "activate": "Activate",
+    "suspend": "Suspend",
+    "staffCount": "{count} staff",
+    "teacherCount": "{count} teachers",
+    "studentCount": "{count} students",
+    "openDetail": "Open",
+    "create": {
+      "title": "Create a center",
+      "description": "Provisions the Center and its default settings in one step, and invites its founding Owner — the same invite link mechanism as any other staff invite.",
+      "fields": {
+        "name": "Name",
+        "nameEn": "Name (English)",
+        "slug": "Slug",
+        "slugHint": "Lowercase letters, digits and hyphens only. Used as this center's identifier.",
+        "themeColor": "Theme color",
+        "logoUrl": "Logo URL",
+        "plan": "Plan",
+        "ownerEmail": "Founding owner's email",
+        "ownerEmailHint": "They accept the invite link below to become this center's first Owner."
+      },
+      "submit": "Create center",
+      "created": "Center created. Share the owner invite link below.",
+      "inviteLinkLabel": "Owner invitation link",
+      "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
+      "copy": "Copy",
+      "copied": "Copied"
+    },
+    "detail": {
+      "subtitle": "/{slug}",
+      "stats": {
+        "staff": "Staff",
+        "teachers": "Teachers",
+        "students": "Students",
+        "sessions": "Sessions"
+      },
+      "planTitle": "Plan",
+      "planDescription": "Onboarding/plan metadata — a free-text label, not a billing system.",
+      "planLabel": "Plan",
+      "planPlaceholder": "e.g. pilot, standard",
+      "savePlan": "Save",
+      "planSaved": "Saved.",
+      "auditTitle": "Recent activity",
+      "auditDescription": "Every visit to this page — and every tenant-management action taken here — writes an audit row (privileged support access, spec §4.4).",
+      "auditEmpty": "No activity recorded yet.",
+      "unknownActor": "Unknown"
+    },
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That center no longer exists.",
+      "slugTaken": "That slug is already used by another center.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidSlug": "Use lowercase letters, digits and hyphens only.",
+      "invalidColor": "Enter a color as #RRGGBB.",
+      "invalidEmail": "Enter a valid email address."
+    }
+  },
+  "AdminPlatform": {
+    "title": "Platform",
+    "subtitle": "Adoption and usage across every center on KayEdu.",
+    "activeCenters": "Active centers",
+    "suspendedHint": "{count} suspended",
+    "totalTeachers": "Total teachers",
+    "totalStudents": "Total students",
+    "totalSessions": "Total sessions",
+    "adoption": {
+      "title": "Adoption trend",
+      "description": "Centers created per month, most recent six months.",
+      "newCenters": "{count} new"
+    },
+    "months": {
+      "jan": "January",
+      "feb": "February",
+      "mar": "March",
+      "apr": "April",
+      "may": "May",
+      "jun": "June",
+      "jul": "July",
+      "aug": "August",
+      "sep": "September",
+      "oct": "October",
+      "nov": "November",
+      "dec": "December"
+    }
   }
 }

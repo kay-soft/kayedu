@@ -1,0 +1,877 @@
+/**
+ * People check — the M3 acceptance gate, revised for center-local contacts
+ * and system-assigned student codes:
+ * "a student can be registered once and connected to the center; a printable
+ *  QR ID card generates; a teacher can block-list a student; a duplicate
+ *  phone/email — global OR another center's local record — triggers the
+ *  match workflow instead of a duplicate person; each center keeps its own
+ *  contact record, editable independently; student codes are claimed
+ *  race-free with no duplicates and no gaps."
+ *
+ * Run with:  npm run check:people
+ *
+ * `check:isolation` proves the scoping primitives; `check:config` proves the
+ * configuration surface. This one covers the paths M3 added — teachers,
+ * students, blocks, identity matching and Storage — using the same
+ * predicates, schemas and renderers the Server Actions use, so a cross-center
+ * leak on a *new* path is caught rather than assumed.
+ *
+ * It needs a reachable database and cleans up after itself.
+ */
+import { PrismaClient, type BlockScope, type Role } from "@prisma/client";
+import {
+  MissingCenterScopeError,
+  scopedData,
+  scopedFindById,
+  scopedWhere,
+} from "../lib/db/tenant-scope.ts";
+import {
+  fullName,
+  localName,
+  normalizeContact,
+  normalizePhone,
+} from "../lib/identity.ts";
+import { claimStudentCode } from "../lib/db/students.ts";
+import {
+  StoragePathError,
+  assertPathInCenter,
+  centerObjectPath,
+  isPathInCenter,
+  photoExtensionFor,
+  studentIdCardPath,
+  studentPhotoPath,
+} from "../lib/storage-paths.ts";
+import {
+  CARD_HEIGHT,
+  CARD_WIDTH,
+  parseStudentQrPayload,
+  renderIdCardSvg,
+  resolveCardLayout,
+  studentQrPayload,
+} from "../lib/id-card.ts";
+import {
+  blockCreateSchema,
+  gradePromotionSchema,
+  studentCreateSchema,
+  teacherCreateSchema,
+} from "../lib/validation/people.ts";
+
+const prisma = new PrismaClient();
+
+// Typed so a spread into a Prisma `where` keeps the enum, not `string`.
+const TEACHER_ROLE: Role = "TEACHER";
+const TEACHER_SCOPE: BlockScope = "TEACHER";
+
+const SLUG_A = "people-check-a";
+const SLUG_B = "people-check-b";
+const SLUG_C = "people-check-c";
+const SHARED_EMAIL = "people-check-shared@kayedu.test";
+const SHARED_PHONE = "01012345678";
+const TEACHER_EMAIL = "people-check-teacher@kayedu.test";
+const LOCAL_ONLY_EMAIL = "people-check-local-only@kayedu.test";
+const LOCAL_EMAIL = "people-check-local@kayedu.test";
+const RACE_EMAIL_PREFIX = "people-check-race";
+
+let failures = 0;
+
+function check(name: string, passed: boolean, detail = "") {
+  if (passed) {
+    console.log(`  PASS  ${name}`);
+  } else {
+    failures += 1;
+    console.error(`  FAIL  ${name}${detail ? ` — ${detail}` : ""}`);
+  }
+}
+
+/** Parses like a Server Action does, and shouts if the fixture is wrong. */
+function parse<T>(
+  schema: { safeParse: (input: unknown) => { success: boolean; data?: T; error?: unknown } },
+  input: Record<string, string>,
+  label: string,
+): T {
+  const result = schema.safeParse(input);
+  if (!result.success || result.data === undefined) {
+    throw new Error(`${label} failed validation: ${JSON.stringify(result.error)}`);
+  }
+  return result.data;
+}
+
+async function cleanup() {
+  await prisma.center.deleteMany({
+    where: { slug: { in: [SLUG_A, SLUG_B, SLUG_C] } },
+  });
+  await prisma.user.deleteMany({
+    where: {
+      OR: [
+        { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_ONLY_EMAIL, LOCAL_EMAIL] } },
+        { phone: SHARED_PHONE },
+        { email: { startsWith: RACE_EMAIL_PREFIX } },
+      ],
+    },
+  });
+}
+
+/**
+ * Finds a match the way `resolveContact()` does at the DB layer: across the
+ * global `User` and every center's local `StudentProfile`/`Membership`
+ * record (`lib/db/identity.ts`). Reimplemented here at the query level (not
+ * imported) so the gate exercises the actual tables/columns rather than
+ * trusting the app module imported it correctly. Returns the matched
+ * person's **real** name too — that's what a linked record's local name is
+ * seeded from, never the (possibly mistyped) form input.
+ */
+async function findMatch(
+  input: { email: string | null; phone: string | null },
+): Promise<{ userId: string; firstName: string; lastName: string } | "conflict" | null> {
+  const { email, phone } = normalizeContact(input);
+  if (!email && !phone) return null;
+
+  const userOr = [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])];
+  const [users, students, memberships] = await Promise.all([
+    prisma.user.findMany({ where: { OR: userOr } }),
+    prisma.studentProfile.findMany({ where: { OR: userOr }, include: { user: true } }),
+    prisma.membership.findMany({ where: { OR: userOr }, include: { user: true } }),
+  ]);
+
+  const byId = new Map<string, { firstName: string; lastName: string }>();
+  for (const u of users) byId.set(u.id, u);
+  for (const s of students) byId.set(s.userId, s.user);
+  for (const m of memberships) byId.set(m.userId, m.user);
+
+  if (byId.size === 0) return null;
+  if (byId.size > 1) return "conflict";
+  const [userId, name] = [...byId.entries()][0];
+  return { userId, ...name };
+}
+
+/**
+ * Registers a student the way `createStudentAction` does: resolve the match
+ * across global + local contacts, then claim a code and create the profile in
+ * one transaction, seeding the local name from the matched person's real name
+ * (or the form input for a brand-new person). Takes a centerId and nothing
+ * else — same "zero code changes for a second center" claim the M2 gate makes.
+ */
+async function registerStudent(
+  centerId: string,
+  form: Record<string, string>,
+): Promise<{ userId: string; profileId: string; studentCode: string; linked: boolean }> {
+  const input = parse(studentCreateSchema, form, "studentCreate");
+  const matched = await findMatch({ email: input.email, phone: input.phone });
+  if (matched === "conflict") throw new Error("unexpected contact conflict in fixture");
+
+  const name = matched
+    ? { firstName: matched.firstName, lastName: matched.lastName }
+    : { firstName: input.firstName, lastName: input.lastName };
+
+  const created = await prisma.$transaction(async (tx) => {
+    const userId =
+      matched?.userId ??
+      (
+        await tx.user.create({
+          data: {
+            firstName: input.firstName,
+            lastName: input.lastName,
+            email: input.email,
+            phone: input.phone,
+            locale: input.locale,
+          },
+        })
+      ).id;
+
+    const code = await claimStudentCode(tx, centerId);
+
+    const profile = await tx.studentProfile.create({
+      data: scopedData(centerId, {
+        userId,
+        studentCode: code,
+        firstName: name.firstName,
+        lastName: name.lastName,
+        email: input.email,
+        phone: input.phone,
+        parentFirstName: input.parentFirstName,
+        parentPhone: input.parentPhone,
+      }),
+    });
+
+    return { userId, profile };
+  });
+
+  return {
+    userId: created.userId,
+    profileId: created.profile.id,
+    studentCode: created.profile.studentCode,
+    linked: matched !== null,
+  };
+}
+
+async function main() {
+  await cleanup();
+
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "People A", themeColor: "#2563eb" },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "People B", themeColor: "#16a34a" },
+  });
+
+  const gradeA1 = await prisma.grade.create({
+    data: { centerId: centerA.id, name: "Grade 10" },
+  });
+  const gradeA2 = await prisma.grade.create({
+    data: { centerId: centerA.id, name: "Grade 11" },
+  });
+  const gradeB1 = await prisma.grade.create({
+    data: { centerId: centerB.id, name: "Grade 10" },
+  });
+
+  console.log("People check (M3 revised — center-local contacts, system-assigned codes)");
+
+  // ── 1. One person, registered at two centers ───────────────────────────
+  const sharedForm = {
+    locale: "en",
+    firstName: "Mona",
+    lastName: "Hassan",
+    email: SHARED_EMAIL,
+    phone: SHARED_PHONE,
+    parentFirstName: "Hassan",
+    parentPhone: "01112345678",
+  };
+
+  const inA = await registerStudent(centerA.id, sharedForm);
+  check(
+    "A student registers once and is connected to the center",
+    inA.linked === false && Boolean(inA.profileId),
+  );
+
+  // The same human walks into the second center. Typed with a +20 prefix and
+  // a capitalised email — the same identity either way.
+  const inB = await registerStudent(centerB.id, {
+    ...sharedForm,
+    email: SHARED_EMAIL.toUpperCase(),
+    phone: "+201012345678",
+  });
+
+  check(
+    "A duplicate phone/email matches the existing person instead of creating one",
+    inB.linked === true && inB.userId === inA.userId,
+    `A=${inA.userId} B=${inB.userId}`,
+  );
+  check(
+    "One identity, two center profiles (no duplicate person)",
+    (await prisma.user.count({ where: { email: SHARED_EMAIL } })) === 1 &&
+      (await prisma.studentProfile.count({ where: { userId: inA.userId } })) === 2,
+  );
+  check(
+    "Nothing matchable means no match at all (a blank form matches nobody)",
+    (await findMatch({ email: null, phone: null })) === null,
+  );
+
+  // ── 1b. Contact details are center-local, not global ───────────────────
+  // The seed above wrote SHARED_EMAIL/SHARED_PHONE onto the *global* User
+  // (this was a brand-new person) AND onto centerA's local StudentProfile.
+  // Center A now edits its own copy; Center B's copy — and the global User —
+  // must be untouched.
+  const localOnlyContact = { email: LOCAL_ONLY_EMAIL, phone: "01099999999" };
+  await prisma.studentProfile.update({
+    where: { id: inA.profileId },
+    data: localOnlyContact,
+  });
+
+  const [globalAfterEdit, profileB, profileA] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: inA.userId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inB.profileId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inA.profileId } }),
+  ]);
+  check(
+    "Editing a center's local contact does not touch the global User",
+    globalAfterEdit.email === SHARED_EMAIL && globalAfterEdit.phone === SHARED_PHONE,
+  );
+  check(
+    "Editing Center A's local contact does not touch Center B's local record",
+    profileB.email === SHARED_EMAIL.toLowerCase() && profileB.phone === SHARED_PHONE,
+  );
+  check(
+    "Center A's local record reflects its own edit",
+    profileA.email === LOCAL_ONLY_EMAIL && profileA.phone === "01099999999",
+  );
+
+  // A third center registers someone new, entering only a contact that lives
+  // on Center A's *local* record (never the global User, never seen by B).
+  // The match must still find them — this is the reason local records are
+  // searched at all, not just the global User.
+  const centerC = await prisma.center.create({
+    data: { slug: SLUG_C, name: "People C", themeColor: "#f59e0b" },
+  });
+  const matchedFromLocalOnly = await findMatch({ email: LOCAL_ONLY_EMAIL, phone: null });
+  check(
+    "A contact that exists only on another center's local record still matches",
+    matchedFromLocalOnly !== "conflict" && matchedFromLocalOnly?.userId === inA.userId,
+  );
+  await prisma.center.delete({ where: { id: centerC.id } });
+
+  // ── 2. Student codes are system-assigned, per-center, race-free ────────
+  check(
+    "The first two students in a fresh center get codes 1001 and 1002",
+    inA.studentCode === "1001" &&
+      (
+        await registerStudent(centerA.id, {
+          locale: "en",
+          firstName: "Youssef",
+          lastName: "Adel",
+          email: LOCAL_EMAIL,
+        })
+      ).studentCode === "1002",
+  );
+  check(
+    "The same numbering starts fresh in a second center — zero code changes",
+    inB.studentCode === "1001",
+  );
+
+  const RACE_SIZE = 12;
+  const raceResults = await Promise.all(
+    Array.from({ length: RACE_SIZE }, (_, i) =>
+      registerStudent(centerA.id, {
+        locale: "en",
+        firstName: "Race",
+        lastName: String(i),
+        email: `${RACE_EMAIL_PREFIX}-${i}@kayedu.test`,
+      }),
+    ),
+  );
+  const raceCodes = raceResults.map((r) => Number(r.studentCode)).sort((a, b) => a - b);
+  const uniqueCodes = new Set(raceCodes);
+  const isContiguous = raceCodes.every(
+    (code, i) => i === 0 || code === raceCodes[i - 1] + 1,
+  );
+  check(
+    `${RACE_SIZE} concurrent registrations produce ${RACE_SIZE} unique codes (no duplicates)`,
+    uniqueCodes.size === RACE_SIZE,
+    `got ${uniqueCodes.size} unique of ${raceCodes.length}`,
+  );
+  check(
+    "Concurrent registrations produce contiguous codes (no gaps)",
+    isContiguous,
+    JSON.stringify(raceCodes),
+  );
+
+  // ── 3. Cross-center reads on every path M3 added ───────────────────────
+  const teacher = await prisma.user.create({
+    data: { firstName: "Sara", lastName: "Nabil", email: TEACHER_EMAIL },
+  });
+  const teacherInA = await prisma.membership.create({
+    data: {
+      userId: teacher.id,
+      centerId: centerA.id,
+      role: "TEACHER",
+      email: TEACHER_EMAIL,
+    },
+  });
+  const teacherInB = await prisma.membership.create({
+    data: {
+      userId: teacher.id,
+      centerId: centerB.id,
+      role: "TEACHER",
+      email: TEACHER_EMAIL,
+    },
+  });
+
+  const blockInA = await prisma.studentBlock.create({
+    data: {
+      centerId: centerA.id,
+      scope: "TEACHER",
+      refId: teacher.id,
+      blockedUserId: inA.userId,
+      reason: "check",
+    },
+  });
+
+  const leaks: [string, unknown][] = [
+    [
+      "StudentProfile",
+      await scopedFindById(prisma.studentProfile, centerA.id, inB.profileId),
+    ],
+    [
+      "teacher Membership",
+      await scopedFindById(prisma.membership, centerA.id, teacherInB.id),
+    ],
+    [
+      "StudentBlock",
+      await scopedFindById(prisma.studentBlock, centerB.id, blockInA.id),
+    ],
+  ];
+  for (const [label, leaked] of leaks) {
+    check(`Center A cannot read Center B's ${label} by id`, leaked === null);
+  }
+
+  const teachersInB = await prisma.membership.findMany({
+    where: scopedWhere(centerB.id, { role: TEACHER_ROLE }),
+  });
+  check(
+    "A scoped teacher list excludes the other center's membership",
+    teachersInB.length === 1 && teachersInB[0].id === teacherInB.id,
+  );
+  check(
+    "The shared teacher's local email is independent per center",
+    (
+      await prisma.membership.findUniqueOrThrow({ where: { id: teacherInA.id } })
+    ).email === TEACHER_EMAIL,
+  );
+
+  // ── 4. Blocking is per center, for a teacher shared by two ─────────────
+  // The flagship risk on this path: the same teacher and the same student
+  // exist in both centers, so a block must not follow them across.
+  const blockedInA = await prisma.studentBlock.count({
+    where: scopedWhere(centerA.id, {
+      scope: TEACHER_SCOPE,
+      refId: teacher.id,
+      blockedUserId: inA.userId,
+    }),
+  });
+  const blockedInB = await prisma.studentBlock.count({
+    where: scopedWhere(centerB.id, {
+      scope: TEACHER_SCOPE,
+      refId: teacher.id,
+      blockedUserId: inA.userId,
+    }),
+  });
+  check("A block applies in the center that made it", blockedInA === 1);
+  check(
+    "A shared teacher's block does NOT follow the student to another center",
+    blockedInB === 0,
+  );
+
+  let duplicateBlockRejected = false;
+  try {
+    await prisma.studentBlock.create({
+      data: {
+        centerId: centerA.id,
+        scope: "TEACHER",
+        refId: teacher.id,
+        blockedUserId: inA.userId,
+      },
+    });
+  } catch {
+    duplicateBlockRejected = true;
+  }
+  check("The same student cannot be blocked twice", duplicateBlockRejected);
+
+  const blockForm = parse(
+    blockCreateSchema,
+    {
+      locale: "en",
+      teacherUserId: teacher.id,
+      studentProfileId: inA.profileId,
+      reason: "Repeated disruption",
+    },
+    "blockCreate",
+  );
+  check(
+    "The block schema keeps the teacher and student ids it was given",
+    blockForm.teacherUserId === teacher.id &&
+      blockForm.studentProfileId === inA.profileId,
+  );
+
+  // ── 5. Grade promotion stays inside its center ─────────────────────────
+  await prisma.studentProfile.updateMany({
+    where: scopedWhere(centerA.id),
+    data: { gradeId: gradeA1.id },
+  });
+  await prisma.studentProfile.updateMany({
+    where: scopedWhere(centerB.id),
+    data: { gradeId: gradeB1.id },
+  });
+
+  const promotion = parse(
+    gradePromotionSchema,
+    { locale: "en", fromGradeId: gradeA1.id, toGradeId: gradeA2.id },
+    "gradePromotion",
+  );
+  const promoted = await prisma.studentProfile.updateMany({
+    where: scopedWhere(centerA.id, {
+      gradeId: promotion.fromGradeId,
+      active: true,
+    }),
+    data: { gradeId: promotion.toGradeId },
+  });
+
+  check(
+    "Promotion moves this center's students",
+    promoted.count === 2 + RACE_SIZE,
+    `got ${promoted.count}`,
+  );
+  check(
+    "Promotion leaves the other center's students where they were",
+    (await prisma.studentProfile.count({
+      where: scopedWhere(centerB.id, { gradeId: gradeB1.id }),
+    })) === 1,
+  );
+  check(
+    "Promoting into the same grade is rejected",
+    !gradePromotionSchema.safeParse({
+      locale: "en",
+      fromGradeId: gradeA1.id,
+      toGradeId: gradeA1.id,
+    }).success,
+  );
+
+  // ── 6. Storage paths are the tenant boundary for files ─────────────────
+  const photoPath = studentPhotoPath(centerA.id, inA.profileId, "png", "abc");
+  const cardPath = studentIdCardPath(centerA.id, inA.profileId);
+
+  check(
+    "Every object path is namespaced by centerId",
+    photoPath.startsWith(`${centerA.id}/`) &&
+      cardPath === `${centerA.id}/${inA.profileId}.svg`,
+    photoPath,
+  );
+  check(
+    "The filename stem stays the profile id, so the read policy still matches",
+    photoPath.split("/")[1].split(".")[0] === inA.profileId,
+  );
+  check(
+    "A path built for one center is refused by another",
+    !isPathInCenter(centerB.id, cardPath),
+  );
+
+  let assertRejected = false;
+  try {
+    assertPathInCenter(centerB.id, cardPath);
+  } catch (error) {
+    assertRejected = error instanceof StoragePathError;
+  }
+  check("assertPathInCenter throws across centers", assertRejected);
+
+  let unscopedPathRejected = false;
+  try {
+    centerObjectPath("", "anything.png");
+  } catch (error) {
+    unscopedPathRejected = error instanceof StoragePathError;
+  }
+  check(
+    "A storage path cannot be built without a centerId",
+    unscopedPathRejected,
+  );
+
+  let traversalRejected = false;
+  try {
+    centerObjectPath(centerA.id, "../../etc/passwd");
+  } catch (error) {
+    traversalRejected = error instanceof StoragePathError;
+  }
+  check("A traversal segment is refused", traversalRejected);
+  check(
+    "A prefix collision is not a match (centerA vs centerA-extra)",
+    !isPathInCenter(centerA.id, `${centerA.id}-extra/${inA.profileId}.svg`),
+  );
+  check(
+    "Only the allowed image types get an extension",
+    photoExtensionFor("image/png") === "png" &&
+      photoExtensionFor("image/svg+xml") === null,
+  );
+
+  // The query primitive and the storage primitive fail the same way.
+  let unscopedWhereRejected = false;
+  try {
+    scopedWhere("", { id: inB.profileId });
+  } catch (error) {
+    unscopedWhereRejected = error instanceof MissingCenterScopeError;
+  }
+  check(
+    "scopedWhere still refuses to build an unscoped where",
+    unscopedWhereRejected,
+  );
+
+  // ── 7. The ID card ─────────────────────────────────────────────────────
+  const layout = resolveCardLayout({
+    version: 1,
+    elements: { qr: { x: 70, width: 22 } },
+  });
+  check(
+    "A center's card layout merges over the built-in one",
+    layout.elements.qr.x === 70 &&
+      layout.elements.qr.width === 22 &&
+      layout.elements.studentName.x === 36,
+  );
+  check(
+    "A malformed layout falls back to the built-in one",
+    resolveCardLayout("not json at all").elements.qr.x === 74,
+  );
+
+  const payload = studentQrPayload(centerA.id, inA.studentCode);
+  const parsedPayload = parseStudentQrPayload(payload);
+  check(
+    "The QR payload round-trips to the center and the student code",
+    parsedPayload?.centerId === centerA.id &&
+      parsedPayload.studentCode === inA.studentCode,
+  );
+  check(
+    "A foreign QR payload does not parse as a student card",
+    parseStudentQrPayload("1001") === null,
+  );
+
+  const svg = renderIdCardSvg({
+    centerName: 'Center "A" & Co',
+    brandColor: centerA.themeColor,
+    studentName: "Mona Hassan",
+    gradeName: "Grade 11",
+    studentCode: inA.studentCode,
+    qrPayload: payload,
+    labels: { code: "Student code" },
+    dir: "ltr",
+    layout,
+  });
+
+  check(
+    "A printable card renders with the student's name, code and a QR block",
+    svg.startsWith("<svg") &&
+      svg.includes("Mona Hassan") &&
+      svg.includes(`>${inA.studentCode}<`) &&
+      /<path d="M\d/.test(svg),
+  );
+  check(
+    "The card is landscape credit-card sized for print",
+    svg.includes('width="85.6mm"') && svg.includes('height="54mm"'),
+  );
+  check(
+    "Card text is escaped, so a name can never inject markup",
+    svg.includes("Center &quot;A&quot; &amp; Co") && !svg.includes('"A" & Co'),
+  );
+
+  // The built-in layout must lay out cleanly on its own: an element that falls
+  // off the face, or a logo that sits on top of the photo, is a card a center
+  // prints and throws away.
+  const defaultSvg = renderIdCardSvg({
+    centerName: "Al-Noor",
+    brandColor: "#2563eb",
+    studentName: "Mona Hassan",
+    gradeName: "Grade 11",
+    studentCode: inA.studentCode,
+    qrPayload: payload,
+    labels: { code: "Student code" },
+    dir: "ltr",
+    layout: resolveCardLayout(null),
+  });
+
+  const boxes = [
+    ...defaultSvg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/g),
+  ]
+    .map((match) => match.slice(1, 5).map(Number) as [number, number, number, number])
+    // Drop the full-bleed background and the bottom brand band.
+    .filter(([, , width]) => width < CARD_WIDTH);
+
+  const outOfBounds = boxes.filter(
+    ([x, y, width, height]) =>
+      x < 0 || y < 0 || x + width > CARD_WIDTH || y + height > CARD_HEIGHT,
+  );
+  let overlapping = 0;
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const [ax, ay, aw, ah] = boxes[i];
+      const [bx, by, bw, bh] = boxes[j];
+      if (ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah) {
+        overlapping += 1;
+      }
+    }
+  }
+  check(
+    "Every card element stays on the card face",
+    outOfBounds.length === 0,
+    JSON.stringify(outOfBounds),
+  );
+  check(
+    "No two card elements overlap in the built-in layout",
+    overlapping === 0,
+    `${overlapping} overlapping pair(s)`,
+  );
+
+  const rtl = renderIdCardSvg({
+    centerName: "مركز",
+    brandColor: centerA.themeColor,
+    studentName: "منى حسن",
+    studentCode: inA.studentCode,
+    qrPayload: payload,
+    labels: { code: "كود الطالب" },
+    dir: "rtl",
+    layout,
+  });
+  check(
+    "An Arabic card mirrors the layout and sets its direction",
+    rtl.includes('direction="rtl"') &&
+      rtl.includes('text-anchor="end"') &&
+      rtl !== svg,
+  );
+
+  // ── 8. Name is center-local too, exactly like the other contact fields ──
+  // Revised: name is no longer global-locked. It is seeded from the User at
+  // creation (register / add-existing-person) and then editable per center,
+  // independently, with no lock of any kind — mirroring §1b's contact
+  // independence assertions.
+  const studentBeforeRename = await prisma.studentProfile.findUniqueOrThrow({
+    where: { id: inA.profileId },
+  });
+  check(
+    "A new registration seeds the local name from the form input",
+    studentBeforeRename.firstName === "Mona" && studentBeforeRename.lastName === "Hassan",
+  );
+
+  const profileBBeforeRename = await prisma.studentProfile.findUniqueOrThrow({
+    where: { id: inB.profileId },
+  });
+  check(
+    "A linked registration seeds the local name from the matched person's real name",
+    profileBBeforeRename.firstName === "Mona" && profileBBeforeRename.lastName === "Hassan",
+  );
+
+  await prisma.studentProfile.update({
+    where: { id: inA.profileId },
+    data: { firstName: "Mona-CenterA", lastName: "Hassan-CenterA" },
+  });
+
+  const [userAfterRename, studentAAfterRename, studentBAfterRename] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: inA.userId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inA.profileId } }),
+    prisma.studentProfile.findUniqueOrThrow({ where: { id: inB.profileId } }),
+  ]);
+  check(
+    "Renaming a center's local record does not touch the global User",
+    userAfterRename.firstName === "Mona" && userAfterRename.lastName === "Hassan",
+  );
+  check(
+    "Renaming Center A's local record does not touch Center B's local record",
+    studentBAfterRename.firstName === "Mona" && studentBAfterRename.lastName === "Hassan",
+  );
+  check(
+    "Center A's local record reflects its own rename, immediately — no lock",
+    studentAAfterRename.firstName === "Mona-CenterA" &&
+      studentAAfterRename.lastName === "Hassan-CenterA",
+  );
+  check(
+    "The display name for Center A now reflects the rename",
+    fullName(localName(studentAAfterRename, userAfterRename)) === "Mona-CenterA Hassan-CenterA",
+  );
+  check(
+    "Center B's display name is unaffected by Center A's rename",
+    fullName(localName(studentBAfterRename, userAfterRename)) === "Mona Hassan",
+  );
+
+  // The same independence holds for the teacher shared by both centers.
+  await prisma.membership.update({
+    where: { id: teacherInA.id },
+    data: { firstName: "Sara-CenterA", lastName: "Nabil-CenterA" },
+  });
+  const [teacherUserAfterRename, teacherAAfterRename, teacherBAfterRename] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: teacher.id } }),
+    prisma.membership.findUniqueOrThrow({ where: { id: teacherInA.id } }),
+    prisma.membership.findUniqueOrThrow({ where: { id: teacherInB.id } }),
+  ]);
+  check(
+    "Renaming a shared teacher's Center A record does not touch the global User",
+    teacherUserAfterRename.firstName === "Sara" && teacherUserAfterRename.lastName === "Nabil",
+  );
+  check(
+    "Renaming a shared teacher's Center A record does not touch Center B's",
+    teacherBAfterRename.firstName === null && teacherBAfterRename.lastName === null,
+  );
+  check(
+    "A shared teacher's name is independently editable per center, immediately",
+    teacherAAfterRename.firstName === "Sara-CenterA" &&
+      teacherAAfterRename.lastName === "Nabil-CenterA",
+  );
+
+  // A record whose local name was never seeded (the older staff-invite path,
+  // untouched by this change) still displays something sensible: the fallback
+  // to the global User's name (lib/identity.ts `localName()`).
+  check(
+    "A record with no local name falls back to the global User's name",
+    fullName(localName(teacherBAfterRename, teacherUserAfterRename)) === "Sara Nabil",
+  );
+
+  // ── 9. The schemas reject what the UI must not store ───────────────────
+  check(
+    "A phone is normalized to one canonical form",
+    normalizePhone("+20 101 234 5678") === SHARED_PHONE &&
+      normalizePhone("00201012345678") === SHARED_PHONE,
+  );
+  check(
+    "A non-Egyptian mobile is rejected",
+    !studentCreateSchema.safeParse({
+      locale: "en",
+      firstName: "A",
+      lastName: "B",
+      phone: "12345",
+    }).success,
+  );
+  check(
+    "A blank name is rejected",
+    !studentCreateSchema.safeParse({
+      locale: "en",
+      firstName: "  ",
+      lastName: "B",
+    }).success,
+  );
+  check(
+    "The student schema carries no studentCode field at all — it is never typed",
+    !("studentCode" in studentCreateSchema.parse({
+      locale: "en",
+      firstName: "A",
+      lastName: "B",
+    })),
+  );
+  check(
+    "A student may be registered with no contact details at all (a minor)",
+    studentCreateSchema.safeParse({
+      locale: "en",
+      firstName: "A",
+      lastName: "B",
+    }).success,
+  );
+  check(
+    "A teacher without a phone or an email is rejected",
+    !teacherCreateSchema.safeParse({
+      locale: "en",
+      firstName: "A",
+      lastName: "B",
+    }).success,
+  );
+  check(
+    "A teacher with only an email is accepted",
+    teacherCreateSchema.safeParse({
+      locale: "en",
+      firstName: "A",
+      lastName: "B",
+      email: TEACHER_EMAIL,
+    }).success,
+  );
+  check(
+    "The teacher schema carries no canSeeEarnings field — earnings are visible by default",
+    !("canSeeEarnings" in teacherCreateSchema.parse({
+      locale: "en",
+      firstName: "A",
+      lastName: "B",
+      email: TEACHER_EMAIL,
+    })),
+  );
+
+  // Deleting the center takes its memberships with it; the person does not.
+  await prisma.center.delete({ where: { id: centerA.id } });
+  check(
+    "Removing a center removes its memberships, never the person",
+    (await prisma.membership.count({ where: { id: teacherInA.id } })) === 0 &&
+      (await prisma.user.count({ where: { id: teacher.id } })) === 1,
+  );
+}
+
+main()
+  .catch((error) => {
+    console.error(error);
+    failures += 1;
+  })
+  .finally(async () => {
+    await cleanup();
+    await prisma.$disconnect();
+    if (failures > 0) {
+      console.error(`\n${failures} people check(s) failed.`);
+      process.exit(1);
+    }
+    console.log("\nAll people checks passed.");
+  });
