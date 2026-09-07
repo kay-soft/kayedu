@@ -9,6 +9,10 @@
  * the real predicate outside the Next.js runtime.
  */
 
+// Phone normalization lives in exactly one place: `lib/phone.ts` (M18,
+// CLAUDE.md rule 10) — imported, never redefined, here or anywhere else.
+import { normalizePhone } from "./phone.ts";
+
 /** How a candidate matched — surfaced in the UI so nothing merges silently. */
 export type ContactMatchField = "email" | "phone";
 
@@ -20,23 +24,6 @@ export type ContactInput = {
 export function normalizeEmail(input: string | null | undefined): string | null {
   const value = (input ?? "").trim().toLowerCase();
   return value.length > 0 ? value : null;
-}
-
-/**
- * Egyptian mobile numbers to one canonical `01XXXXXXXXX`, so the same person
- * typed as `+201012345678`, `00201012345678` or `01012345678` is one identity.
- * Returns null for anything that is not an Egyptian mobile.
- */
-export function normalizePhone(input: string | null | undefined): string | null {
-  const digits = (input ?? "").replace(/[^\d]/g, "");
-  if (digits.length === 0) return null;
-
-  let local = digits;
-  if (local.startsWith("0020")) local = local.slice(4);
-  else if (local.startsWith("20") && local.length > 11) local = local.slice(2);
-  if (!local.startsWith("0")) local = `0${local}`;
-
-  return /^01[0125]\d{8}$/.test(local) ? local : null;
 }
 
 /** The normalized pair a match is made on. Nulls mean "nothing to match with". */

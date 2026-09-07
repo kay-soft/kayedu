@@ -54,6 +54,7 @@ export const ROUTES = {
   studentSchedule: "/student/schedule",
   studentDiscover: "/student/discover",
   studentReservations: "/student/reservations",
+  studentProfile: "/student/profile",
   parentHome: "/parent",
   adminCenters: "/admin/centers",
   adminCenter: (id: string) => `/admin/centers/${id}`,

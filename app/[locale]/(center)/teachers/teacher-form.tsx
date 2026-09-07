@@ -3,14 +3,18 @@
 import { useActionState, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { createTeacherAction } from "@/app/[locale]/(center)/teachers/actions";
+import {
+  createTeacherAction,
+  lookupPersonByPhoneAction,
+} from "@/app/[locale]/(center)/teachers/actions";
 import { ContactFields } from "@/components/center/contact-fields";
 import { MatchPanel } from "@/components/center/match-panel";
 import { PersonFields } from "@/components/center/person-fields";
+import { PhoneLookupField } from "@/components/center/phone-lookup-field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SectionHeader } from "@/components/shared/section-header";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { IDLE_PEOPLE_STATE, type MatchCandidate } from "@/lib/validation/people";
 
 /**
  * Add a teacher. Rendered inside the "Add teacher" dialog (docs/04 §5
@@ -30,6 +34,7 @@ export function TeacherForm({ onCreated }: { onCreated: () => void }) {
     IDLE_PEOPLE_STATE,
   );
   const [dismissedMatch, setDismissedMatch] = useState<string | null>(null);
+  const [linkedMatch, setLinkedMatch] = useState<MatchCandidate | null>(null);
 
   useEffect(() => {
     if (state.status === "created") onCreated();
@@ -42,23 +47,40 @@ export function TeacherForm({ onCreated }: { onCreated: () => void }) {
       ? state.match
       : null;
 
+  const linkUserId = linkedMatch?.userId ?? match?.userId ?? null;
+
   return (
     <form action={formAction} className="flex flex-col gap-5" noValidate>
       <input type="hidden" name="locale" value={locale} />
-      {/* Present only after staff confirm the match — this is what links. */}
-      {match ? (
-        <input type="hidden" name="linkUserId" value={match.userId} />
+      {/* Present once staff confirm the match — this is what links. */}
+      {linkUserId ? (
+        <input type="hidden" name="linkUserId" value={linkUserId} />
       ) : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+
+      {!linkedMatch ? (
+        <PhoneLookupField lookup={lookupPersonByPhoneAction} onMatch={setLinkedMatch} />
+      ) : null}
 
       <SectionHeader
         title={t("contactTitle")}
         description={t("contactDescription")}
       />
-      <PersonFields idPrefix="teacher-create" fieldErrors={state.fieldErrors} />
-      <ContactFields
+      <PersonFields
+        key={linkedMatch?.userId ?? "new"}
         idPrefix="teacher-create"
+        values={
+          linkedMatch
+            ? { firstName: linkedMatch.name.split(" ")[0], lastName: linkedMatch.name.split(" ").slice(1).join(" ") }
+            : undefined
+        }
+        fieldErrors={state.fieldErrors}
+      />
+      <ContactFields
+        key={linkedMatch?.userId ?? "new"}
+        idPrefix="teacher-create"
+        values={linkedMatch ? { phone: linkedMatch.phone ?? "", email: linkedMatch.email ?? "" } : undefined}
         fieldErrors={state.fieldErrors}
         atLeastOneRequired
       />

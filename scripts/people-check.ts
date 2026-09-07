@@ -18,6 +18,8 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { join, relative } from "node:path";
 import { PrismaClient, type BlockScope, type Role } from "@prisma/client";
 import {
   MissingCenterScopeError,
@@ -25,12 +27,9 @@ import {
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
-import {
-  fullName,
-  localName,
-  normalizeContact,
-  normalizePhone,
-} from "../lib/identity.ts";
+import { fullName, localName, normalizeContact } from "../lib/identity.ts";
+import { normalizePhone } from "../lib/phone.ts";
+import { checkRateLimit } from "../lib/rate-limit.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 import {
   StoragePathError,
@@ -81,6 +80,146 @@ function check(name: string, passed: boolean, detail = "") {
     failures += 1;
     console.error(`  FAIL  ${name}${detail ? ` — ${detail}` : ""}`);
   }
+}
+
+/**
+ * M18's single-normalizer assertion: `lib/phone.ts` is the ONLY file allowed
+ * to define phone-normalization logic anywhere in the tree. This is an
+ * import-graph/grep-level check (CLAUDE.md rule 10), not a behavioral one —
+ * a second regex that happens to produce the same output today would still
+ * be a second answer to "is this the same person" the moment one of the two
+ * drifts, and a behavioral test alone would never catch that.
+ */
+function checkSingleNormalizer(): void {
+  const root = join(process.cwd());
+  const scanDirs = ["lib", "app", "components", "scripts", "prisma"];
+  const skipDirs = new Set(["node_modules", ".next", ".git"]);
+  const files: string[] = [];
+
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (skipDirs.has(entry)) continue;
+      const stat = statSync(full);
+      if (stat.isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(entry)) files.push(full);
+    }
+  }
+
+  for (const dir of scanDirs) {
+    const full = join(root, dir);
+    if (existsSync(full)) walk(full);
+  }
+
+  const phoneTs = join(root, "lib", "phone.ts");
+  // This gate script itself quotes these very patterns as string literals
+  // (to define them) — exclude it from the scan, or it would flag itself.
+  const selfPath = join(root, "scripts", "people-check.ts");
+  const normalizerDefinitionPattern = /function\s+normalizePhone\s*\(/;
+  // The shape of an inline reimplementation even without that exact name —
+  // stripping to digits then hand-rolling an Egyptian-mobile prefix check.
+  const inlineReimplementationPattern = /01\[0125\]|replace\(\/\[\^\\d\]/;
+
+  const offenders: string[] = [];
+  for (const file of files) {
+    if (file === phoneTs || file === selfPath) continue;
+    const contents = readFileSync(file, "utf8");
+    if (normalizerDefinitionPattern.test(contents)) {
+      offenders.push(`${relative(root, file)} (defines normalizePhone)`);
+    }
+    if (inlineReimplementationPattern.test(contents)) {
+      offenders.push(`${relative(root, file)} (inline phone regex)`);
+    }
+  }
+
+  check(
+    "lib/phone.ts is the only file that defines phone-normalization logic",
+    offenders.length === 0,
+    offenders.join(", "),
+  );
+
+  // Every other file that imports `normalizePhone` must import it from
+  // lib/phone.ts (directly or via a relative path resolving there) — never
+  // from a second module that merely re-exports a redefinition.
+  const importPattern = /normalizePhone.*from\s+["']([^"']+)["']/;
+  const badImports: string[] = [];
+  for (const file of files) {
+    const contents = readFileSync(file, "utf8");
+    const match = contents.match(importPattern);
+    if (!match) continue;
+    const specifier = match[1];
+    const resolvesToPhoneTs =
+      specifier.endsWith("/phone") ||
+      specifier.endsWith("/phone.ts") ||
+      specifier === "./phone" ||
+      specifier === "./phone.ts" ||
+      specifier === "../phone" ||
+      specifier === "../phone.ts";
+    if (!resolvesToPhoneTs) {
+      badImports.push(`${relative(root, file)} imports normalizePhone from "${specifier}"`);
+    }
+  }
+
+  check(
+    "Every normalizePhone import resolves to lib/phone.ts",
+    badImports.length === 0,
+    badImports.join(", "),
+  );
+}
+
+/**
+ * M18's receptionist-phone-lookup shape assertion (spec §5.1): "reuses M3's
+ * duplicate-match panel — not a raw phone-to-record endpoint... minimum
+ * fields returned... rate-limited." Two static/grep checks plus one
+ * behavioral one against the real rate limiter — no database needed for any
+ * of them.
+ */
+function checkPhoneLookupShape(): void {
+  const root = join(process.cwd());
+  const files = [
+    join(root, "app", "[locale]", "(center)", "students", "actions.ts"),
+    join(root, "app", "[locale]", "(center)", "teachers", "actions.ts"),
+  ];
+
+  for (const file of files) {
+    const contents = readFileSync(file, "utf8");
+    const start = contents.indexOf("lookupPersonByPhoneAction");
+    const body = contents.slice(start, start + 800);
+    check(
+      `${relative(root, file)}'s lookupPersonByPhoneAction rate-limits before resolving a match`,
+      start !== -1 && /checkRateLimit\(/.test(body),
+    );
+    check(
+      `${relative(root, file)}'s lookupPersonByPhoneAction reuses describeMatch (never a raw record fetch)`,
+      start !== -1 &&
+        /describeMatch\(/.test(body) &&
+        !/\.findMany\(/.test(body) &&
+        !/prisma\.user\.findUnique/.test(body),
+    );
+  }
+
+  const peopleValidation = readFileSync(
+    join(root, "lib", "validation", "people.ts"),
+    "utf8",
+  );
+  check(
+    "PhoneLookupResult's found case is a MatchCandidate — minimum fields, same shape the match panel already renders",
+    /found";\s*match:\s*MatchCandidate/.test(
+      peopleValidation.replace(/\s+/g, " "),
+    ),
+  );
+
+  // The rate limiter itself, exercised directly (lib/rate-limit.ts) — a
+  // fresh key allows exactly `limit` calls in the window, then refuses.
+  const key = `people-check-${Date.now()}`;
+  let allowed = 0;
+  for (let i = 0; i < 25; i += 1) {
+    if (checkRateLimit(key, 20, 60_000)) allowed += 1;
+  }
+  check(
+    "The rate limiter allows exactly the configured limit, then refuses",
+    allowed === 20 && !checkRateLimit(key, 20, 60_000),
+  );
 }
 
 /** Parses like a Server Action does, and shouts if the fixture is wrong. */
@@ -207,6 +346,11 @@ async function registerStudent(
 }
 
 async function main() {
+  // Database-free static gates first (M18) — no fixtures to clean up either
+  // way, so they run before anything else touches the database.
+  checkSingleNormalizer();
+  checkPhoneLookupShape();
+
   await cleanup();
 
   const centerA = await prisma.center.create({

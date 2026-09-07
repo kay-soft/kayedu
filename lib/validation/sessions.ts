@@ -6,7 +6,9 @@ import { z } from "zod";
 // exercise the real schemas the same way `check:classes` exercises
 // classGroupSchema.
 import { localeSchema } from "./auth.ts";
-import { normalizeEmail, normalizePhone } from "../identity.ts";
+import { normalizeEmail } from "../identity.ts";
+import { optionalPhone } from "./phone-schema.ts";
+import { dateFilterSchema } from "./date-filter.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 
 /**
@@ -39,21 +41,6 @@ const optionalEmail = z
     "invalidEmail",
   );
 
-const optionalPhone = z
-  .string()
-  .trim()
-  .max(20, "tooLong")
-  .optional()
-  .transform((value, ctx) => {
-    if (!value || value.length === 0) return null;
-    const normalized = normalizePhone(value);
-    if (!normalized) {
-      ctx.addIssue({ code: "custom", message: "invalidPhone" });
-      return z.NEVER;
-    }
-    return normalized;
-  });
-
 const base = { locale: localeSchema };
 
 const attendanceStatus = z.enum(["PRESENT", "LATE", "ABSENT", "EXCUSED"], {
@@ -64,21 +51,9 @@ const paymentMethod = z.enum(["CASH", "INSTAPAY", "WALLET", "VISA"], {
   error: "invalidMethod",
 });
 
-// ── Today's Sessions dashboard filters ──────────────────────────────────────
+// ── Today's Sessions dashboard filters (M18: the shared date filter) ───────
 
-export const sessionRangeSchema = z.enum(["day", "week", "month"]);
-
-export const sessionListFilterSchema = z.object({
-  range: sessionRangeSchema.default("day"),
-  /** Anchor date, "YYYY-MM-DD" — absent means today. */
-  date: z
-    .string()
-    .trim()
-    .max(10)
-    .optional()
-    .transform((value) =>
-      value && !Number.isNaN(Date.parse(value)) ? value.slice(0, 10) : null,
-    ),
+export const sessionListFilterSchema = dateFilterSchema.extend({
   teacherId: optionalRef,
   subjectId: optionalRef,
   classGroupId: optionalRef,

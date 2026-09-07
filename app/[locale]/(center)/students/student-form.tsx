@@ -3,10 +3,14 @@
 import { useActionState, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { createStudentAction } from "@/app/[locale]/(center)/students/actions";
+import {
+  createStudentAction,
+  lookupPersonByPhoneAction,
+} from "@/app/[locale]/(center)/students/actions";
 import { ContactFields } from "@/components/center/contact-fields";
 import { MatchPanel } from "@/components/center/match-panel";
 import { PersonFields } from "@/components/center/person-fields";
+import { PhoneLookupField } from "@/components/center/phone-lookup-field";
 import {
   StudentFields,
   type GradeOption,
@@ -14,7 +18,7 @@ import {
 import { FormMessage } from "@/components/shared/form-message";
 import { SectionHeader } from "@/components/shared/section-header";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { IDLE_PEOPLE_STATE, type MatchCandidate } from "@/lib/validation/people";
 
 /**
  * Register a student (spec §4.1 item 4). Rendered inside the "Add student"
@@ -44,6 +48,7 @@ export function StudentForm({
     IDLE_PEOPLE_STATE,
   );
   const [dismissedMatch, setDismissedMatch] = useState<string | null>(null);
+  const [linkedMatch, setLinkedMatch] = useState<MatchCandidate | null>(null);
 
   useEffect(() => {
     if (state.status === "created") onCreated();
@@ -56,22 +61,39 @@ export function StudentForm({
       ? state.match
       : null;
 
+  const linkUserId = linkedMatch?.userId ?? match?.userId ?? null;
+
   return (
     <form action={formAction} className="flex flex-col gap-5" noValidate>
       <input type="hidden" name="locale" value={locale} />
-      {match ? (
-        <input type="hidden" name="linkUserId" value={match.userId} />
+      {linkUserId ? (
+        <input type="hidden" name="linkUserId" value={linkUserId} />
       ) : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+
+      {!linkedMatch ? (
+        <PhoneLookupField lookup={lookupPersonByPhoneAction} onMatch={setLinkedMatch} />
+      ) : null}
 
       <SectionHeader
         title={t("centerSectionTitle")}
         description={t("centerSectionDescription")}
       />
-      <PersonFields idPrefix="student-create" fieldErrors={state.fieldErrors} />
-      <ContactFields
+      <PersonFields
+        key={linkedMatch?.userId ?? "new"}
         idPrefix="student-create"
+        values={
+          linkedMatch
+            ? { firstName: linkedMatch.name.split(" ")[0], lastName: linkedMatch.name.split(" ").slice(1).join(" ") }
+            : undefined
+        }
+        fieldErrors={state.fieldErrors}
+      />
+      <ContactFields
+        key={linkedMatch?.userId ?? "new"}
+        idPrefix="student-create"
+        values={linkedMatch ? { phone: linkedMatch.phone ?? "", email: linkedMatch.email ?? "" } : undefined}
         fieldErrors={state.fieldErrors}
       />
       <StudentFields

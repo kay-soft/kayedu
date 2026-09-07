@@ -1,20 +1,23 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import {
   RatingPopup,
   type PendingRatingSessionView,
 } from "@/app/[locale]/(student)/rating-popup";
+import { ProfileCompletionForm } from "@/app/[locale]/(student)/student/profile/profile-completion-form";
 import { AppShell } from "@/components/shell/app-shell";
 import { shellUser } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireStudentUser, studentBrand } from "@/lib/auth/tenant";
 import { catalogLabel } from "@/lib/catalog";
+import { listCatalogGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { attendedSessionsToRate } from "@/lib/db/ratings";
 import { formatDate } from "@/lib/format";
+import { localName } from "@/lib/identity";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 
 /**
@@ -80,6 +83,60 @@ export default async function StudentLayout({
     (store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1",
   );
   const locale = await getLocale();
+
+  // M18 (spec §4.3 item 4): a self-registered student's `StudentProfile` is
+  // an auto-seeded stub (name/email/phone/altPhone only, from
+  // `ensureStudentProfile`) until they complete it themselves — never a
+  // permanent stub. Every /student/* request goes through this layout, so
+  // gating here (by substituting the form for `children`, not redirecting)
+  // covers the whole route group with no pathname check needed, and a
+  // receptionist-added student (whose profile is already whole,
+  // `profileCompletedAt` stamped at creation) never sees it at all.
+  const incomplete = session.relations.find(
+    (relation) => relation.studentProfile && !relation.studentProfile.profileCompletedAt,
+  );
+
+  if (incomplete?.studentProfile) {
+    const profile = incomplete.studentProfile;
+    const grades = await listCatalogGrades(prisma);
+    const tCommon = await getTranslations("Settings.common");
+    const gradeOptions = grades.map((grade) => ({
+      value: grade.id,
+      label: catalogLabel(locale, grade),
+    }));
+
+    return (
+      <AppShell
+        nav={navForExperience("student", "STUDENT")}
+        brand={studentBrand(session)}
+        user={shellUser(session.user, "STUDENT")}
+        canSwitchCenter={false}
+        defaultCollapsed={defaultCollapsed}
+      >
+        <ProfileCompletionForm
+          centerId={incomplete.center.id}
+          studentProfileId={profile.id}
+          centerName={incomplete.center.name}
+          name={localName(profile, session.user)}
+          contact={{
+            email: profile.email ?? "",
+            phone: profile.phone ?? "",
+            altPhone: profile.altPhone ?? "",
+          }}
+          student={{
+            gradeId: profile.gradeId ?? "",
+            parentFirstName: profile.parentFirstName ?? "",
+            parentLastName: profile.parentLastName ?? "",
+            parentPhone: profile.parentPhone ?? "",
+            parentAltPhone: profile.parentAltPhone ?? "",
+          }}
+          grades={gradeOptions}
+          noneLabel={tCommon("none")}
+        />
+      </AppShell>
+    );
+  }
+
   const pendingRatings = await pendingRatingViews(session.user.id, locale);
 
   return (

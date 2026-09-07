@@ -1,12 +1,13 @@
 import { getTranslations } from "next-intl/server";
 
 import { AddTeacherDialog } from "@/app/[locale]/(center)/teachers/add-teacher-dialog";
+import { searchTeachersTypeAheadAction } from "@/app/[locale]/(center)/teachers/actions";
 import {
   TeacherRow,
   type TeacherRowData,
 } from "@/app/[locale]/(center)/teachers/teacher-row";
 import { Pagination } from "@/components/center/pagination";
-import { SearchBox } from "@/components/center/search-box";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   Card,
@@ -96,11 +97,12 @@ export default async function TeachersPage({
           <CardDescription>{t("listDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SearchBox
+          <TypeAheadSearch
             value={query}
             label={t("searchLabel")}
             placeholder={t("searchPlaceholder")}
             submitLabel={t("searchSubmit")}
+            search={searchTeachersTypeAheadAction}
           />
 
           {rows.length === 0 ? (

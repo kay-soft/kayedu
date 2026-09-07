@@ -184,6 +184,12 @@ export type DateRangeKind = "day" | "week" | "month" | "year" | "all";
  * & 6) to a `[start, end]` UTC-midnight bound around `anchor` — or `null`
  * bounds for "all-time", which `lib/db/analytics.ts` treats as unbounded
  * rather than a fabricated epoch date.
+ *
+ * @deprecated Analytics/Expenses moved to the shared date filter (M18,
+ * `resolveSharedDateFilter` below) — kept only because `weekRangeUtc`/
+ * `monthRangeUtc` (real calendar week/month) are still used by the teacher
+ * dashboard's own KPIs, which this function composed. Do not wire this up to
+ * a new screen.
  */
 export function resolveDateRangeUtc(
   kind: DateRangeKind,
@@ -202,6 +208,71 @@ export function resolveDateRangeUtc(
       return yearRangeUtc(anchor);
     case "all":
       return { start: null, end: null };
+  }
+}
+
+// ── The shared date filter (M18, docs/04-design-system.md §11.7) ──────────
+//
+// One component for every screen: Day / Week (today −7) / Month (1st of the
+// current month → today) — always anchored to the real "now", never a
+// stored anchor date — plus a specific-date pick and a custom range. This is
+// deliberately NOT `weekRangeUtc`/`monthRangeUtc` above: those are real
+// calendar-week/calendar-month windows (still used by the teacher dashboard's
+// KPIs), while "Week"/"Month" here are trailing windows ending today, per the
+// design system's literal definition.
+
+/** The last `days` days up to and including `now`. */
+export function lastNDaysUtc(now: Date, days: number): { start: Date; end: Date } {
+  const end = startOfUtcDay(now);
+  return { start: addDays(end, -days), end };
+}
+
+/** The 1st of `now`'s month through `now` itself — not the full calendar month. */
+export function monthToDateUtc(now: Date): { start: Date; end: Date } {
+  const end = startOfUtcDay(now);
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  return { start, end };
+}
+
+export type SharedDateFilterKind = "day" | "week" | "month" | "date" | "range";
+
+export type SharedDateFilterInput = {
+  kind: SharedDateFilterKind;
+  /** The picked day — only meaningful for `kind === "date"`. */
+  date: Date | null;
+  /** Only meaningful for `kind === "range"`. */
+  from: Date | null;
+  to: Date | null;
+};
+
+/**
+ * Resolves the shared date filter to a `[start, end]` UTC-midnight bound.
+ * Always returns real bounds — there is no "all-time" mode here (§11.7 never
+ * lists one; a custom range is the closest equivalent, and the visibility
+ * window (M19) is the actual mechanism for "how far back can this role see").
+ */
+export function resolveSharedDateFilter(
+  filter: SharedDateFilterInput,
+  now: Date = new Date(),
+): { start: Date; end: Date } {
+  switch (filter.kind) {
+    case "day": {
+      const day = startOfUtcDay(now);
+      return { start: day, end: day };
+    }
+    case "week":
+      return lastNDaysUtc(now, 7);
+    case "month":
+      return monthToDateUtc(now);
+    case "date": {
+      const day = startOfUtcDay(filter.date ?? now);
+      return { start: day, end: day };
+    }
+    case "range": {
+      const a = startOfUtcDay(filter.from ?? filter.to ?? now);
+      const b = startOfUtcDay(filter.to ?? filter.from ?? now);
+      return a.getTime() <= b.getTime() ? { start: a, end: b } : { start: b, end: a };
+    }
   }
 }
 

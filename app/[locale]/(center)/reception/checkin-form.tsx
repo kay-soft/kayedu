@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { UserRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { checkInAction } from "@/app/[locale]/(center)/reception/actions";
@@ -32,10 +33,13 @@ const TINT: Record<AttendanceStatusValue, string> = {
 export function CheckInForm({
   studentProfileId,
   studentName,
+  studentPhotoUrl,
   sessions,
 }: {
   studentProfileId: string;
   studentName: string;
+  /** A short-lived signed URL, or null with no photo on file / Storage unset. */
+  studentPhotoUrl: string | null;
   sessions: LiveSessionOption[];
 }) {
   const t = useTranslations("Reception");
@@ -56,9 +60,24 @@ export function CheckInForm({
       <input type="hidden" name="sessionId" value={sessionId} />
       <input type="hidden" name="status" value={status} />
 
-      <p className="text-sm text-text-secondary">
-        {t("checkingIn", { name: studentName })}
-      </p>
+      <div className="flex items-center gap-3">
+        {studentPhotoUrl ? (
+          // A short-lived signed Storage URL, not a static/remote asset next/image can optimize.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={studentPhotoUrl}
+            alt=""
+            className="size-14 shrink-0 rounded-full border border-border object-cover"
+          />
+        ) : (
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-full border border-border bg-surface-subtle text-text-muted">
+            <UserRound className="size-6" aria-hidden />
+          </span>
+        )}
+        <p className="text-sm text-text-secondary">
+          {t("checkingIn", { name: studentName })}
+        </p>
+      </div>
 
       {sessions.length === 0 ? (
         <FormMessage tone="info">{t("noLiveSessions")}</FormMessage>

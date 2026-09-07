@@ -3,11 +3,12 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
 import { CheckInForm } from "@/app/[locale]/(center)/reception/checkin-form";
+import { searchStudentsForReceptionAction } from "@/app/[locale]/(center)/reception/actions";
 import {
   LiveSessionRail,
   type LiveSessionOption,
 } from "@/app/[locale]/(center)/reception/live-session-rail";
-import { SearchBox } from "@/components/center/search-box";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   Card,
@@ -20,11 +21,14 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { studentSearchWhere } from "@/lib/db/students";
+import { signedUrlFor } from "@/lib/db/storage";
 import { fullName, localName } from "@/lib/identity";
 import { parseStudentQrPayload } from "@/lib/id-card";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { startOfUtcDay } from "@/lib/scheduling";
+import { AVATARS_BUCKET } from "@/lib/storage-paths";
+import { storageConfigured } from "@/lib/supabase/admin";
 
 /**
  * Reception Desk (spec §4.1 item 8): search by code/name/phone — or a
@@ -102,12 +106,15 @@ export default async function ReceptionPage({
         }))
       : [];
 
-  let selectedStudent: { id: string; name: string; code: string } | null = null;
+  let selectedStudent:
+    | { id: string; name: string; code: string; photoUrl: string | null }
+    | null = null;
   if (qrStudent) {
     selectedStudent = {
       id: qrStudent.id,
       name: fullName(localName(qrStudent, qrStudent.user)),
       code: qrStudent.studentCode,
+      photoUrl: qrStudent.photoUrl,
     };
   } else if (studentId) {
     const student = await db.students.findDetailById(studentId);
@@ -116,9 +123,20 @@ export default async function ReceptionPage({
         id: student.id,
         name: fullName(localName(student, student.user)),
         code: student.studentCode,
+        photoUrl: student.photoUrl,
       };
     }
   }
+
+  // The anti-impersonation control the static QR decision rests on (spec
+  // §5.1 "Check-in & the QR payload", closing §7.1's second verified gap): a
+  // human comparing the face on screen to the person in front of them. A
+  // short-lived signed URL, not a data URI — this is a live render, not a
+  // stored artifact that must outlive the request (unlike the ID card SVG).
+  const selectedStudentPhotoUrl =
+    selectedStudent?.photoUrl && storageConfigured()
+      ? await signedUrlFor(ctx.center.id, AVATARS_BUCKET, selectedStudent.photoUrl)
+      : null;
 
   const gradeOptions = grades.map((grade) => ({
     value: grade.id,
@@ -151,11 +169,12 @@ export default async function ReceptionPage({
             <CardDescription>{t("searchDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <SearchBox
+            <TypeAheadSearch
               value={query}
               label={t("searchLabel")}
               placeholder={t("searchPlaceholder")}
               submitLabel={t("searchSubmit")}
+              search={searchStudentsForReceptionAction}
             />
 
             {query.length > 0 && !selectedStudent ? (
@@ -187,6 +206,7 @@ export default async function ReceptionPage({
                 <CheckInForm
                   studentProfileId={selectedStudent.id}
                   studentName={selectedStudent.name}
+                  studentPhotoUrl={selectedStudentPhotoUrl}
                   sessions={liveSessions}
                 />
               </div>

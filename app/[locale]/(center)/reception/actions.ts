@@ -13,11 +13,14 @@ import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { recordPayment } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
+import { studentSearchWhere } from "@/lib/db/students";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import {
   receptionCheckInSchema,
   type SessionActionState,
 } from "@/lib/validation/sessions";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 
 /**
  * Reception Desk (spec §4.1 item 8): search a student, pick today's session,
@@ -40,6 +43,33 @@ function revalidateReception(locale: string): void {
 function revalidateAffectedSession(locale: string, sessionId: string): void {
   revalidatePath(`/${locale}${ROUTES.centerSession(sessionId)}`);
   revalidatePath(`/${locale}${ROUTES.centerSessions}`);
+}
+
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+// The QR/scan path bypasses this entirely — a scanned payload resolves
+// straight to the selected-student panel via the plain form submit
+// (`parseStudentQrPayload`, `app/[locale]/(center)/reception/page.tsx`), not
+// through this dropdown.
+
+export async function searchStudentsForReceptionAction(
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const ctx = await getTenantContext("center");
+  if (!ctxCan(ctx, "reception.use")) return [];
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const rows = await scoped(ctx).students.search({
+    where: { ...studentSearchWhere(trimmed), active: true },
+    take: 8,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    primary: fullName(localName(row, row.user)),
+    secondary: row.studentCode,
+    href: `${ROUTES.centerReception}?studentId=${row.id}`,
+  }));
 }
 
 export async function checkInAction(

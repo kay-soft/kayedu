@@ -10,7 +10,7 @@ import {
 import { ExpenseForm } from "@/app/[locale]/(center)/expenses/expense-form";
 import { ExpenseRow, type ExpenseRowData } from "@/app/[locale]/(center)/expenses/expense-row";
 import { Pagination } from "@/components/center/pagination";
-import { DateRangeFilters } from "@/components/shared/date-range-filters";
+import { DateFilter } from "@/components/shared/date-filter";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
@@ -26,9 +26,10 @@ import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { resolveDateRangeUtc, startOfUtcDay } from "@/lib/scheduling";
+import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { expenseFilterSchema } from "@/lib/validation/analytics";
+import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
 
 /**
  * Expenses (M6, spec §4.1 item 6): category CRUD, add-expense form, and a
@@ -49,13 +50,13 @@ export default async function ExpensesPage({
   const parsedFilters = expenseFilterSchema.safeParse(rawParams);
   const filters = parsedFilters.success
     ? parsedFilters.data
-    : { range: "month" as const, date: null };
+    : { range: "day" as const, date: null, from: null, to: null };
 
-  const anchor = filters.date
-    ? new Date(`${filters.date}T00:00:00.000Z`)
-    : startOfUtcDay(new Date());
-
-  const { start: from, end: to } = resolveDateRangeUtc(filters.range, anchor);
+  const now = new Date();
+  const { start: from, end: to } = resolveSharedDateFilter(
+    toSharedDateFilterInput(filters),
+    now,
+  );
 
   const db = scoped(ctx);
   const t = await getTranslations("Expenses");
@@ -102,8 +103,10 @@ export default async function ExpensesPage({
 
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();
-    if (filters.range !== "month") params.set("range", filters.range);
+    if (filters.range !== "day") params.set("range", filters.range);
     if (filters.date) params.set("date", filters.date);
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
     if (targetPage > 1) params.set("page", String(targetPage));
     const qs = params.toString();
     return qs ? `${ROUTES.centerExpenses}?${qs}` : ROUTES.centerExpenses;
@@ -137,7 +140,18 @@ export default async function ExpensesPage({
           <CardTitle>{t("listTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <DateRangeFilters range={filters.range} date={filters.date ?? anchor.toISOString().slice(0, 10)} namespace="Expenses" />
+          <form>
+            <DateFilter
+              value={{
+                range: filters.range,
+                date: filters.date ?? "",
+                from: filters.from ?? "",
+                to: filters.to ?? "",
+              }}
+              todayIso={startOfUtcDay(now).toISOString().slice(0, 10)}
+              resetHref={ROUTES.centerExpenses}
+            />
+          </form>
 
           {tableRows.length === 0 ? (
             <p className="text-sm text-text-muted">{t("empty")}</p>

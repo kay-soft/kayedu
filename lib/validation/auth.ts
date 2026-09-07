@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { optionalPhone } from "./phone-schema.ts";
+
 export const localeSchema = z.enum(["ar", "en"]);
 
 const email = z
@@ -14,12 +16,6 @@ const password = z.string().min(8, "passwordTooShort").max(72, "tooLong");
 
 const personName = z.string().trim().min(1, "required").max(60, "tooLong");
 
-// Egyptian mobile numbers, optionally +20 / 0020 prefixed.
-const phone = z
-  .string()
-  .trim()
-  .regex(/^(\+?20|0)?1[0125]\d{8}$/, "invalidPhone");
-
 export const signInSchema = z.object({
   email,
   password: z.string().min(1, "required"),
@@ -32,7 +28,7 @@ export const signUpSchema = z
     firstName: personName,
     lastName: personName,
     email,
-    phone: z.union([phone, z.literal("")]).optional(),
+    phone: optionalPhone,
     password,
     confirmPassword: z.string(),
     locale: localeSchema,

@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 // `npm run check:people` outside the Next.js runtime, so this module and
 // everything it pulls in must stay resolvable without the `@/` alias (same
 // reasoning as lib/identity.ts).
-import { normalizePhone } from "../identity.ts";
+import { normalizePhone } from "../phone.ts";
 import type { ScopedDb } from "@/lib/db/scoped";
 
 /**

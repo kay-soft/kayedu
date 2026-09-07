@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient, ParentLinkStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:parent` exercises this module
 // directly, outside the Next.js runtime (same reasoning as
 // lib/db/student-portal.ts and lib/db/reservations.ts).
-import { normalizePhone } from "../identity.ts";
+import { normalizePhone } from "../phone.ts";
 
 /**
  * ParentLink resolution (M16, docs/01-data-model.md "People layer, continued",

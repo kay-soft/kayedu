@@ -4,7 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { BranchRevenueTable } from "@/app/[locale]/(center)/analytics/branch-revenue-table";
 import { TeacherFilter } from "@/app/[locale]/(center)/analytics/teacher-filter";
 import { TeacherRevenueTable } from "@/app/[locale]/(center)/analytics/teacher-revenue-table";
-import { DateRangeFilters } from "@/components/shared/date-range-filters";
+import { DateFilter } from "@/components/shared/date-filter";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
@@ -34,12 +34,14 @@ import {
 import { scoped } from "@/lib/db/scoped";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { resolveDateRangeUtc, startOfUtcDay } from "@/lib/scheduling";
+import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
 import { analyticsFilterSchema } from "@/lib/validation/analytics";
+import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
+import { ROUTES } from "@/lib/routes";
 
 /**
- * Analytics (M6, spec §4.1 item 5): date filters (day/week/month/year/
- * all-time/specific date) + by-teacher breakdown, all read from the frozen
+ * Analytics (M6, spec §4.1 item 5): the shared date filter (M18, day/week/
+ * month/specific date/range) + by-teacher breakdown, all read from the frozen
  * `Payment` snapshots via `lib/db/analytics.ts` (docs/01 §3 — never
  * recomputed from the class's current price/cut). Gated behind
  * `analytics.center.view`, OWNER/MANAGER only — a receptionist has no path to
@@ -58,13 +60,13 @@ export default async function AnalyticsPage({
   const parsedFilters = analyticsFilterSchema.safeParse(rawParams);
   const filters = parsedFilters.success
     ? parsedFilters.data
-    : { range: "month" as const, date: null, teacherId: null };
+    : { range: "day" as const, date: null, from: null, to: null, teacherId: null };
 
-  const anchor = filters.date
-    ? new Date(`${filters.date}T00:00:00.000Z`)
-    : startOfUtcDay(new Date());
-
-  const { start: from, end: to } = resolveDateRangeUtc(filters.range, anchor);
+  const now = new Date();
+  const { start: from, end: to } = resolveSharedDateFilter(
+    toSharedDateFilterInput(filters),
+    now,
+  );
 
   const t = await getTranslations("Analytics");
   const locale = await getLocale();
@@ -145,13 +147,19 @@ export default async function AnalyticsPage({
 
       <Card>
         <CardContent className="pt-6">
-          <DateRangeFilters
-            range={filters.range}
-            date={filters.date ?? anchor.toISOString().slice(0, 10)}
-            namespace="Analytics"
-          >
+          <form className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <DateFilter
+              value={{
+                range: filters.range,
+                date: filters.date ?? "",
+                from: filters.from ?? "",
+                to: filters.to ?? "",
+              }}
+              todayIso={startOfUtcDay(now).toISOString().slice(0, 10)}
+              resetHref={ROUTES.centerAnalytics}
+            />
             <TeacherFilter teacherId={filters.teacherId ?? ""} teachers={teacherOptions} />
-          </DateRangeFilters>
+          </form>
         </CardContent>
       </Card>
 

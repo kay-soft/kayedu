@@ -16,7 +16,12 @@ import {
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { verifyParentLinkPlaceholder } from "@/lib/db/parents";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
-import { claimStudentCode, studentDeleteBlockers } from "@/lib/db/students";
+import {
+  claimStudentCode,
+  studentDeleteBlockers,
+  studentSearchWhere,
+} from "@/lib/db/students";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { scopedData } from "@/lib/db/tenant-scope";
 import {
   removeStoredObject,
@@ -25,6 +30,9 @@ import {
   uploadStudentPhoto,
 } from "@/lib/db/storage";
 import { fullName, localName } from "@/lib/identity";
+import { redirect } from "@/lib/i18n/navigation";
+import { normalizePhone } from "@/lib/phone";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { ROUTES } from "@/lib/routes";
 import {
   AVATARS_BUCKET,
@@ -41,6 +49,7 @@ import {
   studentPhotoSchema,
   studentUpdateSchema,
   type PeopleActionState,
+  type PhoneLookupResult,
 } from "@/lib/validation/people";
 import { verifyParentLinkSchema } from "@/lib/validation/parents";
 
@@ -98,6 +107,65 @@ async function resolveGrade(
 ): Promise<{ ok: true; id: string | null } | { ok: false }> {
   if (gradeId === null) return { ok: true, id: null };
   return (await db.grades.findById(gradeId)) ? { ok: true, id: gradeId } : { ok: false };
+}
+
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+
+/**
+ * Bounded, server-checked results for the Students list's live search — the
+ * exact same `studentSearchWhere` the full-page search already uses, just
+ * capped short for a dropdown instead of paginated. Re-checks permission
+ * itself rather than trusting that the page that rendered the input did —
+ * every action in this file follows that rule.
+ */
+export async function searchStudentsTypeAheadAction(
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const scope = await studentScope();
+  if (!scope) return [];
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const rows = await scope.db.students.search({
+    where: studentSearchWhere(trimmed),
+    take: 8,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    primary: fullName(localName(row, row.user)),
+    secondary: row.studentCode,
+    href: ROUTES.centerStudent(row.id),
+  }));
+}
+
+// ── Receptionist phone lookup (M18, spec §5.1) ──────────────────────────────
+// Explicitly NOT a raw "phone → full record" endpoint: it is the exact same
+// duplicate-match workflow (`resolveContact`/`describeMatch`) the add-student
+// form already runs on submit, just reachable from a phone alone, before the
+// rest of the form is filled in — minimum fields, rate-limited, and a match
+// still requires the form's own explicit "link" submit to attach anything.
+
+export async function lookupPersonByPhoneAction(
+  phone: string,
+): Promise<PhoneLookupResult> {
+  const scope = await studentScope();
+  if (!scope) return { status: "notFound" };
+
+  const normalized = normalizePhone(phone);
+  if (!normalized) return { status: "notFound" };
+
+  if (!checkRateLimit(`people.phoneLookup:${scope.ctx.user.id}`, 20, 60_000)) {
+    return { status: "rateLimited" };
+  }
+
+  const resolution = await resolveContact({ phone: normalized });
+  if (resolution.kind !== "matched") return { status: "notFound" };
+
+  const match = await describeMatch(scope.ctx.center.id, resolution.match, {
+    phone: normalized,
+  });
+  return { status: "found", match };
 }
 
 // ── Add ────────────────────────────────────────────────────────────────────
@@ -190,6 +258,10 @@ export async function createStudentAction(
           parentLastName,
           parentPhone,
           parentAltPhone,
+          // A receptionist fills the same fields a self-registering student
+          // would later complete themselves (M18, spec §4.3 item 4) — this
+          // profile is already whole, so it never triggers that one-time gate.
+          profileCompletedAt: new Date(),
         }),
       });
     });
@@ -360,6 +432,13 @@ export async function deleteStudentAction(
   });
 
   revalidateStudentList(locale);
+  // The delete control lives on this very record's own detail page
+  // (/students/[id]) — without a redirect, Next's automatic post-action
+  // refresh of that same route re-fetches the now-deleted row and 404s
+  // (docs/00-master-product-spec.md §7.1's "student-delete 404" gap). Send
+  // the user back to the list instead of leaving them staring at a 404 for
+  // the record they just removed.
+  redirect({ href: ROUTES.centerStudents, locale });
   return { status: "deleted" };
 }
 

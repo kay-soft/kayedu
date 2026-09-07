@@ -4,6 +4,7 @@ import { z } from "zod";
 // lib/validation/settings.ts: this module stays resolvable outside the
 // Next.js runtime so `npm run check:analytics` can exercise the real schemas.
 import { localeSchema } from "./auth.ts";
+import { dateFilterSchema } from "./date-filter.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 
 /**
@@ -32,26 +33,15 @@ const checkbox = z
 
 const base = { locale: localeSchema };
 
-// ── Date-range filters (Analytics + Expenses share the same shape) ─────────
+// ── Date filters (Analytics + Expenses share the shared date filter, M18) ──
 
-export const analyticsRangeSchema = z.enum(["day", "week", "month", "year", "all"]);
-
-export const analyticsFilterSchema = z.object({
-  range: analyticsRangeSchema.default("month"),
-  /** Anchor date, "YYYY-MM-DD" — absent means today. Ignored when range="all". */
-  date: z
-    .string()
-    .trim()
-    .max(10)
-    .optional()
-    .transform((value) =>
-      value && !Number.isNaN(Date.parse(value)) ? value.slice(0, 10) : null,
-    ),
+/** Analytics adds one dimension (teacher) on top of the shared date filter. */
+export const analyticsFilterSchema = dateFilterSchema.extend({
   teacherId: optionalRef,
 });
 
 /** Expenses reuse the exact same date filter, with no teacher dimension. */
-export const expenseFilterSchema = analyticsFilterSchema.omit({ teacherId: true });
+export const expenseFilterSchema = dateFilterSchema;
 
 // ── Expense categories (master data — same shape as lib/validation/settings.ts) ─
 

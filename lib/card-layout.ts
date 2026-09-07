@@ -27,6 +27,22 @@ export const DEFAULT_CARD_LAYOUT = {
   },
 } as const;
 
-export function defaultCardLayoutJson(): string {
-  return JSON.stringify(DEFAULT_CARD_LAYOUT, null, 2);
-}
+/**
+ * The seven elements the renderer (`lib/id-card.ts`) knows how to draw, in
+ * the order the visual editor's palette offers them (M18). Adding one back
+ * after removal restores exactly this default position/size.
+ */
+export const CARD_ELEMENT_KEYS = [
+  "logo",
+  "centerName",
+  "photo",
+  "studentName",
+  "grade",
+  "studentCode",
+  "qr",
+] as const;
+
+export type CardElementKey = (typeof CARD_ELEMENT_KEYS)[number];
+
+/** Which of the seven elements carry a `width` (images) vs a `fontSize` (text) — the editor's resize handle adjusts the field that actually exists on that element. */
+export const IMAGE_ELEMENT_KEYS: readonly CardElementKey[] = ["logo", "photo", "qr"];

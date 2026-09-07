@@ -25,9 +25,10 @@ import {
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
-import { monthRangeUtc, startOfUtcDay, weekRangeUtc } from "@/lib/scheduling";
+import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { sessionListFilterSchema } from "@/lib/validation/sessions";
+import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
 
 /**
  * Today's Sessions dashboard (spec §4.1 item 7): a KPI row, filters (date/
@@ -50,18 +51,22 @@ export default async function SessionsPage({
   const parsedFilters = sessionListFilterSchema.safeParse(rawParams);
   const filters = parsedFilters.success
     ? parsedFilters.data
-    : { range: "day" as const, date: null, teacherId: null, subjectId: null, classGroupId: null, status: null };
+    : {
+        range: "day" as const,
+        date: null,
+        from: null,
+        to: null,
+        teacherId: null,
+        subjectId: null,
+        classGroupId: null,
+        status: null,
+      };
 
-  const anchor = filters.date
-    ? new Date(`${filters.date}T00:00:00.000Z`)
-    : startOfUtcDay(new Date());
-
-  const { start: from, end: to } =
-    filters.range === "week"
-      ? weekRangeUtc(anchor)
-      : filters.range === "month"
-        ? monthRangeUtc(anchor)
-        : { start: anchor, end: anchor };
+  const now = new Date();
+  const { start: from, end: to } = resolveSharedDateFilter(
+    toSharedDateFilterInput(filters),
+    now,
+  );
 
   const db = scoped(ctx);
   const t = await getTranslations("Sessions");
@@ -91,7 +96,6 @@ export default async function SessionsPage({
     }),
   ]);
 
-  const now = new Date();
   const withStatus = rows.map((row) => ({
     row,
     displayStatus: deriveSessionDisplayStatus(row, now),
@@ -148,6 +152,8 @@ export default async function SessionsPage({
     const params = new URLSearchParams();
     if (filters.range !== "day") params.set("range", filters.range);
     if (filters.date) params.set("date", filters.date);
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
     if (filters.teacherId) params.set("teacherId", filters.teacherId);
     if (filters.subjectId) params.set("subjectId", filters.subjectId);
     if (filters.classGroupId) params.set("classGroupId", filters.classGroupId);
@@ -193,8 +199,14 @@ export default async function SessionsPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <SessionFilters
-            range={filters.range}
-            date={filters.date ?? anchor.toISOString().slice(0, 10)}
+            dateFilter={{
+              range: filters.range,
+              date: filters.date ?? "",
+              from: filters.from ?? "",
+              to: filters.to ?? "",
+            }}
+            todayIso={startOfUtcDay(now).toISOString().slice(0, 10)}
+            resetHref={ROUTES.centerSessions}
             teacherId={filters.teacherId ?? ""}
             subjectId={filters.subjectId ?? ""}
             classGroupId={filters.classGroupId ?? ""}

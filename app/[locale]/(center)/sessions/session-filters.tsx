@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 
+import { DateFilter, type DateFilterValue } from "@/components/shared/date-filter";
 import { SelectInput } from "@/components/ui/select-input";
 
 export type SelectOption = { value: string; label: string };
@@ -10,11 +11,14 @@ export type SelectOption = { value: string; label: string };
  * Today's Sessions dashboard filters (spec §4.1 item 7 "filterable...by
  * date/week/month, teacher, subject, class, status"). A plain GET form —
  * filter state lives in the URL, and changing any control re-submits
- * immediately, matching `ClassFilters`.
+ * immediately, matching `ClassFilters`. The date portion is the one shared
+ * `DateFilter` component (M18, docs/04 §11.7) every other date-filtered
+ * screen in the app also renders.
  */
 export function SessionFilters({
-  range,
-  date,
+  dateFilter,
+  todayIso,
+  resetHref,
   teacherId,
   subjectId,
   classGroupId,
@@ -24,8 +28,9 @@ export function SessionFilters({
   classes,
   allLabel,
 }: {
-  range: "day" | "week" | "month";
-  date: string;
+  dateFilter: DateFilterValue;
+  todayIso: string;
+  resetHref: string;
   teacherId: string;
   subjectId: string;
   classGroupId: string;
@@ -40,37 +45,9 @@ export function SessionFilters({
 
   return (
     <form className="flex flex-col gap-3">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-date" className="text-xs font-medium text-text-secondary">
-            {t("date")}
-          </label>
-          <input
-            id="filter-date"
-            name="date"
-            type="date"
-            defaultValue={date}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
-            className="h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
-          />
-        </div>
+      <DateFilter value={dateFilter} todayIso={todayIso} resetHref={resetHref} />
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-range" className="text-xs font-medium text-text-secondary">
-            {t("range")}
-          </label>
-          <SelectInput
-            id="filter-range"
-            name="range"
-            defaultValue={range}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          >
-            <option value="day">{t("rangeDay")}</option>
-            <option value="week">{t("rangeWeek")}</option>
-            <option value="month">{t("rangeMonth")}</option>
-          </SelectInput>
-        </div>
-
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="filter-status" className="text-xs font-medium text-text-secondary">
             {t("status")}
@@ -88,9 +65,7 @@ export function SessionFilters({
             <option value="CANCELLED">{tStatus("CANCELLED")}</option>
           </SelectInput>
         </div>
-      </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="filter-teacherId" className="text-xs font-medium text-text-secondary">
             {t("teacher")}

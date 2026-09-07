@@ -3,8 +3,9 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeacherSessionFilters } from "@/app/[locale]/(teacher)/teacher/sessions/session-filters";
 import { SessionRequestForm } from "@/app/[locale]/(teacher)/teacher/sessions/session-request-form";
+import { searchOwnSessionStudentsTypeAheadAction } from "@/app/[locale]/(teacher)/teacher/sessions/actions";
 import { Pagination } from "@/components/center/pagination";
-import { SearchBox } from "@/components/center/search-box";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -165,7 +166,7 @@ export default async function TeacherSessionsPage({
           <CardDescription>{t("listDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SearchBox
+          <TypeAheadSearch
             value={filters.q ?? ""}
             label={t("searchLabel")}
             placeholder={t("searchPlaceholder")}
@@ -176,6 +177,15 @@ export default async function TeacherSessionsPage({
               gradeId: filters.gradeId ?? undefined,
               status: filters.status ?? undefined,
             }}
+            search={searchOwnSessionStudentsTypeAheadAction.bind(
+              null,
+              new URLSearchParams({
+                ...(filters.range !== "week" ? { range: filters.range } : {}),
+                ...(filters.date ? { date: filters.date } : {}),
+                ...(filters.gradeId ? { gradeId: filters.gradeId } : {}),
+                ...(filters.status ? { status: filters.status } : {}),
+              }).toString(),
+            )}
           />
 
           <TeacherSessionFilters

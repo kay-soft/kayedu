@@ -12,6 +12,25 @@
       "previous": "Previous",
       "next": "Next",
       "pageOf": "Page {page} of {totalPages}"
+    },
+    "dateFilter": {
+      "groupLabel": "Date range",
+      "day": "Day",
+      "week": "Week",
+      "month": "Month",
+      "pickDate": "Specific date",
+      "pickRange": "Range",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply",
+      "reset": "Reset",
+      "activeDay": "Today",
+      "activeWeek": "Last 7 days",
+      "activeMonth": "This month so far",
+      "activeRange": "{from} – {to}"
+    },
+    "typeAhead": {
+      "noResults": "No matches yet — keep typing, or add a new record."
     }
   },
   "Shell": {
@@ -207,6 +226,13 @@
       },
       "openProfile": "Open their profile",
       "cancel": "Use different details"
+    },
+    "phoneLookup": {
+      "label": "Have their phone number? Look them up first.",
+      "submit": "Look up",
+      "notFound": "No match for that number — fill in the form below to register them.",
+      "rateLimited": "Too many lookups — wait a moment and try again.",
+      "usePerson": "Use this person"
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -573,11 +599,6 @@
       "untitled": "Untitled class"
     },
     "filters": {
-      "date": "Date",
-      "range": "Range",
-      "rangeDay": "Day",
-      "rangeWeek": "Week",
-      "rangeMonth": "Month",
       "status": "Status",
       "teacher": "Teacher",
       "subject": "Subject",
@@ -727,13 +748,6 @@
     "title": "Analytics",
     "subtitle": "Revenue and growth, read from recorded payments — never recomputed from current settings.",
     "filters": {
-      "range": "Period",
-      "date": "Date",
-      "rangeDay": "Day",
-      "rangeWeek": "Week",
-      "rangeMonth": "Month",
-      "rangeYear": "Year",
-      "rangeAll": "All time",
       "teacher": "Teacher",
       "allTeachers": "All teachers"
     },
@@ -798,15 +812,7 @@
       "total": "Total in period",
       "count": "Entries"
     },
-    "filters": {
-      "range": "Period",
-      "date": "Date",
-      "rangeDay": "Day",
-      "rangeWeek": "Week",
-      "rangeMonth": "Month",
-      "rangeYear": "Year",
-      "rangeAll": "All time"
-    },
+    "filters": {},
     "columns": {
       "date": "Date",
       "category": "Category",
@@ -1086,13 +1092,34 @@
     "card": {
       "title": "ID card",
       "description": "Where the logo, photo, name, grade, student code and QR block sit on this branch's printed student card.",
-      "rendererNote": "The card itself is generated in a later milestone (M3). This screen stores the layout it will use.",
       "editorTitle": "Card layout",
-      "editorDescription": "A JSON object. Positions are percentages of the card face, so the same layout works on screen and at print size.",
-      "jsonLabel": "Layout JSON",
-      "emptyHint": "Leave this empty to use the built-in default card.",
-      "loadDefault": "Load the default",
-      "clear": "Clear"
+      "editorDescription": "Drag an element to move it, or add/remove one below. Previewing in {locale}.",
+      "dragHint": "Drag an element on the card to move it. The preview mirrors for {locale}.",
+      "paletteLabel": "Add an element:",
+      "width": "Width",
+      "fontSize": "Font size",
+      "positionX": "Position (start)",
+      "positionY": "Position (top)",
+      "remove": "Remove",
+      "resetDefault": "Reset to default",
+      "localeName": {
+        "en": "English",
+        "ar": "Arabic"
+      },
+      "elements": {
+        "logo": "Logo",
+        "centerName": "Branch name",
+        "photo": "Student photo",
+        "studentName": "Student name",
+        "grade": "Grade",
+        "studentCode": "Student code",
+        "qr": "QR code"
+      },
+      "sample": {
+        "studentName": "Sample Student",
+        "grade": "Grade 10",
+        "codeLabel": "Student code"
+      }
     },
     "permissions": {
       "title": "Permissions",
@@ -1453,6 +1480,11 @@
       "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
       "coolingOff": "Your last request for this class was declined. You can request it again from {date}."
     }
+  },
+  "StudentProfile": {
+    "title": "Complete your profile",
+    "description": "One last step before you use {center} — the same details a receptionist would have filled in for you.",
+    "submit": "Save and continue"
   },
   "StudentReservations": {
     "title": "My reservations",

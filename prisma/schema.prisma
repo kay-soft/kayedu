@@ -610,6 +610,14 @@ model StudentProfile {
   // here, not on User.avatarUrl, because the photo a center takes for its own
   // ID card is that center's data — see docs/01-data-model.md §2.
   photoUrl        String?
+  // M18: null on a self-registered student's auto-seeded profile (only name/
+  // email/phone/altPhone are copied from User — no grade, no parent contact);
+  // stamped the moment that profile is completed (`/student/profile`) or, for
+  // a receptionist-created student, at creation time (already a full form).
+  // A read restriction gate in the (student) layout uses this to send a
+  // self-registered student to complete their profile exactly once — never a
+  // second time, and never at all for a staff-created one.
+  profileCompletedAt DateTime?
   active          Boolean       @default(true)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

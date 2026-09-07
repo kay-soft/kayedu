@@ -10,8 +10,12 @@ import { classDeleteBlockers, toExistingScheduleSlots } from "@/lib/db/classes";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { generateSessions } from "@/lib/db/sessions";
+import { studentSearchWhere } from "@/lib/db/students";
+import { fullName, localName } from "@/lib/identity";
 import { findScheduleConflicts } from "@/lib/scheduling";
+import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { blockRemoveSchema } from "@/lib/validation/people";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -46,6 +50,50 @@ import {
 
 const FORBIDDEN: ClassActionState = { error: "forbidden" };
 const NOT_FOUND: ClassActionState = { error: "notFound" };
+
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+
+/**
+ * Candidates for enrolling a student into this class — not already ACTIVE/
+ * BLOCKED on it. Bound to `classGroupId` via `.bind(null, classGroup.id)`.
+ * Selecting a result re-navigates to this same class page with `?q=<exact
+ * student code>`, reusing the existing candidate-rendering (`ClassRoster`)
+ * unchanged.
+ */
+export async function searchEnrollCandidatesAction(
+  classGroupId: string,
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const scope = await classScope();
+  if (!scope) return [];
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const enrollments = await scope.db.enrollments.listForClass(classGroupId);
+  const excludedStudentIds = new Set(
+    enrollments
+      .filter((enrollment) => enrollment.status !== "REMOVED")
+      .map((enrollment) => enrollment.studentProfileId),
+  );
+
+  const rows = await scope.db.students.search({
+    where: {
+      ...studentSearchWhere(trimmed),
+      active: true,
+      ...(excludedStudentIds.size > 0
+        ? { NOT: { id: { in: [...excludedStudentIds] } } }
+        : {}),
+    },
+    take: 8,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    primary: fullName(localName(row, row.user)),
+    secondary: row.studentCode,
+    href: `${ROUTES.centerClass(classGroupId)}?q=${encodeURIComponent(row.studentCode)}`,
+  }));
+}
 
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
@@ -310,6 +358,10 @@ export async function deleteClassAction(
   });
 
   revalidateClassList(locale);
+  // Same fix as deleteStudentAction (M18, docs/00 §7.1): the delete control
+  // lives on /classes/[id] itself, so without a redirect the implicit
+  // post-action refresh re-fetches the deleted row and 404s.
+  redirect({ href: ROUTES.centerClasses, locale });
   return { status: "deleted" };
 }
 

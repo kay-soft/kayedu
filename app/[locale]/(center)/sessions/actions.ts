@@ -25,9 +25,11 @@ import {
   rescheduleSession,
   updateSessionShareOverride,
 } from "@/lib/db/sessions";
-import { claimStudentCode } from "@/lib/db/students";
+import { claimStudentCode, studentSearchWhere } from "@/lib/db/students";
 import { scopedData } from "@/lib/db/tenant-scope";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   addExistingAttendeeSchema,
@@ -66,6 +68,56 @@ type Scope = { ctx: TenantContext; db: ScopedDb };
 async function sessionScope(): Promise<Scope> {
   const ctx = await getTenantContext("center");
   return { ctx, db: scoped(ctx) };
+}
+
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+
+/**
+ * Candidates for "add student to this session's roster" — a student not
+ * already enrolled or already on the roster. Bound to `sessionId` via
+ * `.bind(null, session.id)`. Selecting a result re-navigates to this same
+ * session page with `?q=<exact student code>`, reusing the existing
+ * candidate-rendering (`AddAttendeePanel`) unchanged.
+ */
+export async function searchAddAttendeeCandidatesAction(
+  sessionId: string,
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const { ctx, db } = await sessionScope();
+  if (!ctxCan(ctx, "attendance.record")) return [];
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const session = await db.sessions.findDetailById(sessionId);
+  if (!session) return [];
+
+  const enrollments = await db.enrollments.listForClass(session.classGroupId);
+  const rosterIds = new Set<string>([
+    ...enrollments
+      .filter((enrollment) => enrollment.status === "ACTIVE")
+      .map((enrollment) => enrollment.studentProfileId),
+    ...session.attendees
+      .filter((attendee): attendee is typeof attendee & { studentProfileId: string } =>
+        Boolean(attendee.studentProfileId),
+      )
+      .map((attendee) => attendee.studentProfileId),
+  ]);
+
+  const rows = await db.students.search({
+    where: {
+      ...studentSearchWhere(trimmed),
+      active: true,
+      ...(rosterIds.size > 0 ? { NOT: { id: { in: [...rosterIds] } } } : {}),
+    },
+    take: 8,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    primary: fullName(localName(row, row.user)),
+    secondary: row.studentCode,
+    href: `${ROUTES.centerSession(sessionId)}?q=${encodeURIComponent(row.studentCode)}`,
+  }));
 }
 
 function revalidateSessionDetail(locale: string, sessionId: string): void {

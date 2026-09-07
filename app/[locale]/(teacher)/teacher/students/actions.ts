@@ -6,8 +6,11 @@ import { getTenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
+import { studentSearchWhere } from "@/lib/db/students";
 import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   teacherBlockStudentSchema,
@@ -24,6 +27,34 @@ import {
  */
 
 const NOT_FOUND: TeacherActionState = { error: "notFound" };
+
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+
+/** Narrowed to students this teacher has actually taught — never the
+ * center's full roster (same scope `teacherStudentProfileIds` already
+ * enforces for the paginated list). */
+export async function searchTaughtStudentsTypeAheadAction(
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const ctx = await getTenantContext("teacher");
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id);
+  if (studentIds.length === 0) return [];
+
+  const rows = await scoped(ctx).students.search({
+    where: { id: { in: studentIds }, ...studentSearchWhere(trimmed) },
+    take: 8,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    primary: fullName(localName(row, row.user)),
+    secondary: row.studentCode,
+    href: ROUTES.teacherStudent(row.id),
+  }));
+}
 
 export async function teacherBlockStudentAction(
   _state: TeacherActionState,

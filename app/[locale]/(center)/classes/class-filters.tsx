@@ -7,9 +7,9 @@ import type { SelectOption } from "@/components/center/class-fields";
 
 /**
  * The classes dashboard's filters (spec §4.1 item 3 "filterable dashboard").
- * A plain GET form, like `SearchBox` — filter state lives in the URL, and
- * changing a select re-submits immediately so there is no separate "Apply"
- * step.
+ * A plain GET form, like `TypeAheadSearch`'s own underlying form — filter
+ * state lives in the URL, and changing a select re-submits immediately so
+ * there is no separate "Apply" step.
  */
 export function ClassFilters({
   teacherId,

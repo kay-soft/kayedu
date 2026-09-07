@@ -228,7 +228,7 @@ A modal on login (full-screen sheet below `sm`, per §6), and the interaction mo
 - **Partial submission is allowed** — rate two of five, submit, done. Never gate submit on completeness.
 - **Never show a count anywhere** — not in the prompt, not in the confirmation. Where an aggregate appears (the Discover class card, §10, and the teacher's own view), it is `4.6 ★` and nothing else. No "(23 ratings)", no distribution bar: a count is what lets a teacher infer who rated them from a small sample.
 
-### 11.6 ID-card layout editor (M18)
+### 11.6 ID-card layout editor (delivered M18)
 
 Replaces the raw `cardLayout` JSON textarea. **A centre never sees JSON** — that is the whole point of the change.
 
@@ -238,7 +238,9 @@ Replaces the raw `cardLayout` JSON textarea. **A centre never sees JSON** — th
 - **`x` stays a logical start offset** (§5, `02-architecture.md` §10) — an Arabic card mirrors the whole layout, so the editor previews in the **active locale** and says so.
 - Below `md`, editing is a stacked list of elements with numeric position controls rather than a drag surface. Dragging a 320-unit card on a 375px screen is not editing.
 
-### 11.7 Date filter (M18) — one component, everywhere
+**Delivered, with two corrections to this section's own draft assumptions.** `app/[locale]/(center)/settings/card/card-form.tsx` — drag-to-move is real pointer-based dragging on the preview, snapped to a 2% grid, clamped 0–100%, using logical `insetInlineStart`/`top` so the RTL mirror needs no special-case code. **"Resize" is the properties strip's numeric field, not a drag handle** — `lib/id-card.ts`'s `CardElement` has no `width` on four of the seven elements (`centerName`/`studentName`/`grade`/`studentCode`), only `fontSize`, so a corner-handle would have nothing to resize on most elements; one shared numeric control (width for the three image elements, font size for the rest) covers all seven the same way. **"Alignment" is not a control at all** — this section's draft assumed one, but nothing in `CardElement` stores an alignment; text anchor is *always* derived from `dir` (`lib/id-card.ts`'s `text()`), so there is nothing for a per-element alignment toggle to write to. The palette/× map onto a real, new distinction in `resolveCardLayout`: a JSON `null` for an element key means "removed" (never rendered), separate from "absent" (still means "use the built-in default") — previously there was no way to express "removed" at all.
+
+### 11.7 Date filter (delivered M18) — one component, everywhere
 
 Replaces every ad-hoc date filter in the product. Analytics, Expenses, Sessions and every later screen use **this** and nothing else.
 
@@ -248,7 +250,9 @@ Replaces every ad-hoc date filter in the product. Analytics, Expenses, Sessions 
 - **State lives in the URL** (`02-architecture.md` §14), like pagination, so a filtered view is shareable and back-button-safe.
 - Below `md` the segments stay a row (they are short) and the two pickers stack.
 
-### 11.8 Live search dropdown (M18)
+**Delivered** as `components/shared/date-filter.tsx`, on Analytics, Expenses and Sessions, exactly as specified above. **One deliberate exception, not an oversight**: the teacher's own session list (`/teacher/sessions`) keeps its own bespoke day/week/month filter rather than adopting this component, because its "week"/"month" are forward-looking (today → today+6/+29, "what's coming up," spec §4.2 item 2) while this component's are backward-looking by definition (today−7 → today, 1st-of-month → today) — the two are answering different questions, and unifying them would have silently turned an upcoming-sessions view into a recent-sessions one.
+
+### 11.8 Live search dropdown (delivered M18)
 
 Every search input in the product becomes a type-ahead. This is the most-used interaction in the app after attendance, so the details matter more than usual.
 
@@ -256,8 +260,10 @@ Every search input in the product becomes a type-ahead. This is the most-used in
 - **Minimum query length before anything fires**, debounced, and bounded to a small result count (`02-architecture.md` §14). A dropdown that loads every student to filter in the browser is the loader that section warns about, in nicer clothes.
 - Three states are all real and all need a design: **loading** (a subtle inline spinner in the input, never a layout shift), **no results** (with the "add new" action inline, since at Reception that is the likely next step), and **too short** (silent — no panel at all).
 - **Full keyboard support**: ↑/↓ to move, Enter to select, Escape to close. Reception uses a hardware barcode scanner, which types fast and presses Enter — the dropdown must not swallow or reorder that.
-- **The QR/scan path bypasses the dropdown entirely**: a scanned `KAYEDU|…` payload resolves straight to the selected-student panel (`lib/id-card.ts`'s `parseStudentQrPayload`), and that panel **must show the student's photo** — it is the anti-impersonation control the static-QR decision rests on (`00-master-product-spec.md` §5.1), and it is currently missing (§7.1).
+- **The QR/scan path bypasses the dropdown entirely**: a scanned `KAYEDU|…` payload resolves straight to the selected-student panel (`lib/id-card.ts`'s `parseStudentQrPayload`), and that panel **must show the student's photo** — it is the anti-impersonation control the static-QR decision rests on (`00-master-product-spec.md` §5.1), delivered in the same milestone (§7.1).
 - Below `md`, the dropdown becomes a full-width sheet under the input, not a floating panel.
+
+**Delivered as `components/center/type-ahead-search.tsx`: 300ms debounce, a 2-character minimum, 8 results.** Loading/no-results/too-short are all real, distinct states exactly as specified. Two details landed narrower than this section's draft: rows show **name + the matched field as plain text**, not an avatar and not a highlighted substring — no avatar image exists to show for most of these lists (teachers/students have no thumbnail beyond the ID-card photo, which reception's own selected-student panel already covers separately, §7.1), and substring-highlighting was left for a follow-up pass rather than blocking the rest of the sweep on it. The "add new" inline action in the empty state is supported by the component (an `emptyAction` slot) but not yet wired into any screen — none of the nine screens converted pass one today. Below `md` the dropdown is a `w-full` panel directly under the input; on Reception and the other single-column mobile layouts this already reads as the full-width sheet the spec calls for, so no separate mobile variant was needed.
 
 ### 11.9 Settlements & refunds (M14)
 

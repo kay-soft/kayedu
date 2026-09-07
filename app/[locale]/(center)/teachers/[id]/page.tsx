@@ -7,7 +7,8 @@ import {
   type BlockedStudent,
 } from "@/app/[locale]/(center)/teachers/[id]/block-list";
 import { TeacherProfileForm } from "@/app/[locale]/(center)/teachers/[id]/teacher-profile-form";
-import { SearchBox } from "@/components/center/search-box";
+import { searchBlockCandidatesAction } from "@/app/[locale]/(center)/teachers/actions";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { DetailRow } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { PageHeader } from "@/components/shared/page-header";
@@ -222,11 +223,12 @@ export default async function TeacherDetailPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {ctxCan(ctx, "student.block") ? (
-            <SearchBox
+            <TypeAheadSearch
               value={query}
               label={t("blocks.searchLabel")}
               placeholder={t("blocks.searchPlaceholder")}
               submitLabel={t("blocks.searchSubmit")}
+              search={searchBlockCandidatesAction.bind(null, teacher.id)}
             />
           ) : null}
 

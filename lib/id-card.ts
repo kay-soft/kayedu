@@ -67,6 +67,14 @@ export function resolveCardLayout(raw: unknown): CardLayout {
 
   const elements: Record<string, CardElement> = {};
   for (const [key, fallback] of Object.entries(DEFAULT_ELEMENTS)) {
+    // A center's editor can remove an element from the card entirely (M18,
+    // docs/04 §11.6 "add from a palette... remove with an ×") — stored as an
+    // explicit `null`, distinct from the key simply being absent (which means
+    // "not customized, use the built-in default"). `el.X` is checked as a
+    // boolean everywhere in the renderer below, so omitting the key here is
+    // exactly what makes a removed element not render at all.
+    if (storedElements[key] === null) continue;
+
     const stored =
       storedElements[key] && typeof storedElements[key] === "object"
         ? (storedElements[key] as Record<string, unknown>)

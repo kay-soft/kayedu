@@ -13,7 +13,8 @@ import {
   type ScheduleSlotRow,
 } from "@/app/[locale]/(center)/classes/[id]/schedule-builder";
 import { GenerateSessionsButton } from "@/app/[locale]/(center)/classes/generate-sessions-button";
-import { SearchBox } from "@/components/center/search-box";
+import { searchEnrollCandidatesAction } from "@/app/[locale]/(center)/classes/actions";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -284,11 +285,12 @@ export default async function ClassDetailPage({
           <CardDescription>{t("roster.description")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SearchBox
+          <TypeAheadSearch
             value={query}
             label={t("roster.searchLabel")}
             placeholder={t("roster.searchPlaceholder")}
             submitLabel={t("roster.searchSubmit")}
+            search={searchEnrollCandidatesAction.bind(null, classGroup.id)}
           />
           <ClassRoster
             classGroupId={classGroup.id}

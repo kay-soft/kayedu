@@ -6,7 +6,8 @@ import { SessionLifecycleActions } from "@/app/[locale]/(center)/sessions/[id]/s
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { SessionRoster, type RosterRowData } from "@/app/[locale]/(center)/sessions/[id]/session-roster";
 import { SessionSettlementAction } from "@/app/[locale]/(center)/settlements/session-settlement-action";
-import { SearchBox } from "@/components/center/search-box";
+import { searchAddAttendeeCandidatesAction } from "@/app/[locale]/(center)/sessions/actions";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -218,11 +219,12 @@ export default async function SessionDetailPage({
                 <p className="mb-2 text-sm font-medium text-text-primary">
                   {t("addAttendee.title")}
                 </p>
-                <SearchBox
+                <TypeAheadSearch
                   value={query}
                   label={t("addAttendee.searchLabel")}
                   placeholder={t("addAttendee.searchPlaceholder")}
                   submitLabel={t("addAttendee.searchSubmit")}
+                  search={searchAddAttendeeCandidatesAction.bind(null, session.id)}
                 />
                 <div className="mt-4">
                   <AddAttendeePanel

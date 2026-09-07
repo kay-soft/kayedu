@@ -1,7 +1,8 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { searchTaughtStudentsTypeAheadAction } from "@/app/[locale]/(teacher)/teacher/students/actions";
 import { Pagination } from "@/components/center/pagination";
-import { SearchBox } from "@/components/center/search-box";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   Card,
@@ -80,11 +81,12 @@ export default async function TeacherStudentsPage({
           <CardDescription>{t("listDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SearchBox
+          <TypeAheadSearch
             value={query}
             label={t("searchLabel")}
             placeholder={t("searchPlaceholder")}
             submitLabel={t("searchSubmit")}
+            search={searchTaughtStudentsTypeAheadAction}
           />
 
           {rows.length === 0 ? (

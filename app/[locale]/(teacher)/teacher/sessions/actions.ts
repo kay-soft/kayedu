@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
+import { studentSearchWhere } from "@/lib/db/students";
+import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -11,6 +15,7 @@ import {
   teacherSessionDescriptionSchema,
   type TeacherActionState,
 } from "@/lib/validation/teacher";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 
 /**
  * Session-description edit only (spec §4.2 item 2). Attendance and payments
@@ -20,6 +25,41 @@ import {
 
 const NOT_FOUND: TeacherActionState = { error: "notFound" };
 const EDIT_DEADLINE_PASSED: TeacherActionState = { error: "editDeadlinePassed" };
+
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+// Narrowed to students this teacher has actually taught at the active
+// center — never the center's full roster — exactly like the /teacher/
+// students search. Selecting a result keeps the query in a "self-navigate"
+// href back to this page: `filters.q` becomes the exact student code, which
+// re-runs `teacherSessionListWhere`'s existing narrowing unchanged.
+export async function searchOwnSessionStudentsTypeAheadAction(
+  currentParams: string,
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const ctx = await getTenantContext("teacher");
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id);
+  if (studentIds.length === 0) return [];
+
+  const rows = await scoped(ctx).students.search({
+    where: { id: { in: studentIds }, ...studentSearchWhere(trimmed) },
+    take: 8,
+  });
+
+  const kept = new URLSearchParams(currentParams);
+  return rows.map((row) => {
+    const params = new URLSearchParams(kept);
+    params.set("q", row.studentCode);
+    return {
+      id: row.id,
+      primary: fullName(localName(row, row.user)),
+      secondary: row.studentCode,
+      href: `${ROUTES.teacherSessions}?${params.toString()}`,
+    };
+  });
+}
 
 export async function updateSessionDescriptionAction(
   _state: TeacherActionState,

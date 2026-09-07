@@ -4,10 +4,10 @@ import {
   fullName,
   normalizeContact,
   normalizeEmail,
-  normalizePhone,
   type ContactInput,
   type ContactMatchField,
 } from "@/lib/identity";
+import { normalizePhone } from "@/lib/phone";
 import type { MatchCandidate } from "@/lib/validation/people";
 
 /**

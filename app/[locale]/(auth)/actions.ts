@@ -96,11 +96,13 @@ export async function signUpAction(
   if (!parsed.success) {
     return { fieldErrors: fieldErrorsFrom(parsed.error) };
   }
-  const { firstName, lastName, email, password, locale, next } = parsed.data;
-  const phone = parsed.data.phone?.trim() || null;
+  const { firstName, lastName, email, phone, password, locale, next } = parsed.data;
 
   // Identity is global: one person, one User. A phone already claimed by a
   // different person is a match/merge case (M3), never a silent duplicate.
+  // `phone` here is already the one canonical `01XXXXXXXXX` form (lib/phone.ts,
+  // via signUpSchema) — the same normalizer every other duplicate-match path
+  // uses, so this lookup can't miss an existing owner stored in another shape.
   if (phone) {
     const phoneOwner = await prisma.user.findUnique({ where: { phone } });
     if (phoneOwner && phoneOwner.email !== email) {

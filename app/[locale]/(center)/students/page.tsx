@@ -2,12 +2,13 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
 import { PromoteForm } from "@/app/[locale]/(center)/students/promote-form";
+import { searchStudentsTypeAheadAction } from "@/app/[locale]/(center)/students/actions";
 import {
   StudentRow,
   type StudentRowData,
 } from "@/app/[locale]/(center)/students/student-row";
 import { Pagination } from "@/components/center/pagination";
-import { SearchBox } from "@/components/center/search-box";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { FormMessage } from "@/components/shared/form-message";
 import { PageHeader } from "@/components/shared/page-header";
 import {
@@ -119,11 +120,12 @@ export default async function StudentsPage({
           <CardDescription>{t("listDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SearchBox
+          <TypeAheadSearch
             value={query}
             label={t("searchLabel")}
             placeholder={t("searchPlaceholder")}
             submitLabel={t("searchSubmit")}
+            search={searchStudentsTypeAheadAction}
           />
 
           {rows.length === 0 ? (

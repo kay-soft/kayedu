@@ -1,9 +1,9 @@
 import { getTranslations } from "next-intl/server";
 
 import { CardLayoutForm } from "@/app/[locale]/(center)/settings/card/card-form";
-import { FormMessage } from "@/components/shared/form-message";
 import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { resolveCardLayout } from "@/lib/id-card";
 import { scoped } from "@/lib/db/scoped";
 
 export default async function CardCustomizationPage() {
@@ -13,19 +13,20 @@ export default async function CardCustomizationPage() {
   const settings = await scoped(ctx).settings.get();
   const t = await getTranslations("Settings.card");
 
-  const layout = settings?.cardLayout;
-  const initialJson =
-    layout === null || layout === undefined
-      ? ""
-      : JSON.stringify(layout, null, 2);
+  // The centre never sees this layout as JSON (M18) — resolved straight into
+  // the element map the visual editor drags/resizes/adds/removes directly.
+  const layout = resolveCardLayout(settings?.cardLayout);
 
   return (
     <div className="flex flex-col gap-6">
       <SectionHeader title={t("title")} description={t("description")} />
 
-      <FormMessage tone="info">{t("rendererNote")}</FormMessage>
-
-      <CardLayoutForm initialJson={initialJson} />
+      <CardLayoutForm
+        initialElements={layout.elements}
+        background={layout.background}
+        centerName={ctx.center.name}
+        brandColor={ctx.center.themeColor}
+      />
     </div>
   );
 }
