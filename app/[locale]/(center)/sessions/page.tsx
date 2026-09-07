@@ -22,6 +22,7 @@ import {
   sessionDisplayName,
   sessionListWhere,
 } from "@/lib/db/sessions";
+import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -63,9 +64,12 @@ export default async function SessionsPage({
       };
 
   const now = new Date();
-  const { start: from, end: to } = resolveSharedDateFilter(
-    toSharedDateFilterInput(filters),
-    now,
+  // Clamped to the data-visibility window (M19, docs/01 §7): a receptionist
+  // (etc.) manipulating `?from=` cannot read further back than their centre's
+  // window, regardless of what the shared date filter itself would allow.
+  const { start: from, end: to } = clampRangeToVisibility(
+    resolveSharedDateFilter(toSharedDateFilterInput(filters), now),
+    visibilityWindowFloor(ctx, now),
   );
 
   const db = scoped(ctx);

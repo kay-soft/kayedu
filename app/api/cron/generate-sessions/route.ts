@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db/client";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { generateSessions } from "@/lib/db/sessions";
 
 /**
  * The rolling-window session generator's scheduled entry point
- * (docs/02-architecture.md §11): runs `generateSessions` for every active
- * center, materializing the next ~6 weeks of `Session` rows from each
- * center's `ClassSchedule`s. Wired to Vercel Cron via `vercel.ts`.
+ * (docs/02-architecture.md §11): runs `generateSessions` for every center
+ * that can currently sign in and operate (ONBOARDING/ACTIVE/GRACE, M19),
+ * materializing the next ~6 weeks of `Session` rows from each center's
+ * `ClassSchedule`s. Wired to Vercel Cron via `vercel.ts`.
  *
  * Vercel signs cron-triggered requests with `Authorization: Bearer
  * $CRON_SECRET` when the `CRON_SECRET` env var is set on the project — this
@@ -27,7 +29,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const centers = await prisma.center.findMany({
-    where: { active: true },
+    where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
     select: { id: true, settings: { select: { scheduleConflictPolicy: true } } },
   });
 

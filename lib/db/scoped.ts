@@ -27,6 +27,7 @@ import {
   scopedFindById,
   scopedWhere,
 } from "@/lib/db/tenant-scope";
+import { visibilityWindowFloor } from "@/lib/db/visibility";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
@@ -50,6 +51,13 @@ const PENDING_RESERVATION: ReservationStatus = "PENDING";
  */
 export function scoped(ctx: TenantContext) {
   const centerId = ctx.center.id;
+  // M19 data-visibility window (docs/01 §7) — `null` for a platform admin.
+  // Every other date-filterable centre-side read (Sessions, Analytics,
+  // Expenses) clamps its own caller-supplied range with this same helper at
+  // the page level, since those already take an explicit `from`/`to`; this is
+  // only for `refunds.list` below, which has no caller-supplied date param at
+  // all to clamp.
+  const visibilityFloor = visibilityWindowFloor(ctx);
   // The account's own remembered locale — the best signal available inside a
   // scoped-only helper for resolving a catalog entry's bilingual name into
   // the flat `.name` shape every existing list/select-option consumer
@@ -450,7 +458,10 @@ export function scoped(ctx: TenantContext) {
     refunds: {
       list: (take = 100) =>
         prisma.refund.findMany({
-          where: scopedWhere(centerId),
+          where: scopedWhere(
+            centerId,
+            visibilityFloor ? { refundedAt: { gte: visibilityFloor } } : undefined,
+          ),
           orderBy: { refundedAt: "desc" },
           take,
           include: {

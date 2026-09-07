@@ -347,6 +347,7 @@ export async function saveGeneralSettingsAction(
     timezone,
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
+    dataVisibilityDays,
   } = parsed.data;
 
   const before = await scope.db.settings.get();
@@ -358,6 +359,7 @@ export async function saveGeneralSettingsAction(
     timezone,
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
+    dataVisibilityDays,
   });
 
   // The default center cut is money configuration, so the change is audited
@@ -377,6 +379,7 @@ export async function saveGeneralSettingsAction(
           defaultLateThreshold: before.defaultLateThreshold,
           timezone: before.timezone,
           scheduleConflictPolicy: before.scheduleConflictPolicy,
+          dataVisibilityDays: before.dataVisibilityDays,
         }
       : null,
     after: {
@@ -386,6 +389,7 @@ export async function saveGeneralSettingsAction(
       defaultLateThreshold,
       timezone,
       scheduleConflictPolicy,
+      dataVisibilityDays,
     },
   });
 

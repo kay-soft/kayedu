@@ -6,6 +6,7 @@ import type { Center, PrismaClient, Role } from "@prisma/client";
 // lib/db/sessions.ts follow, so `npm run check:permissions` can exercise the
 // real production functions (docs/02-architecture.md §5).
 import type { Permission, PermissionGrants } from "../auth/permissions.ts";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 
 /**
  * The resolved grant map for one role at one center — what
@@ -83,7 +84,10 @@ export async function membershipBranchGrantsFor(
 ): Promise<Map<string, Center[]>> {
   if (membershipIds.length === 0) return new Map();
   const rows = await db.membershipBranchGrant.findMany({
-    where: { membershipId: { in: membershipIds }, center: { active: true } },
+    where: {
+      membershipId: { in: membershipIds },
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    },
     include: { center: true },
   });
   const byMembership = new Map<string, Center[]>();

@@ -24,6 +24,7 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { expenseTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
+import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
@@ -53,9 +54,11 @@ export default async function ExpensesPage({
     : { range: "day" as const, date: null, from: null, to: null };
 
   const now = new Date();
-  const { start: from, end: to } = resolveSharedDateFilter(
-    toSharedDateFilterInput(filters),
-    now,
+  // Clamped to the data-visibility window (M19, docs/01 §7) before it reaches
+  // either the aggregate below or the ledger's own `where`.
+  const { start: from, end: to } = clampRangeToVisibility(
+    resolveSharedDateFilter(toSharedDateFilterInput(filters), now),
+    visibilityWindowFloor(ctx, now),
   );
 
   const db = scoped(ctx);

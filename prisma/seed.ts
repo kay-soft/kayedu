@@ -652,14 +652,13 @@ async function main() {
   for (const config of branchConfigs) {
     const center = await prisma.center.upsert({
       where: { slug: config.slug },
-      update: { name: config.name, themeColor: config.themeColor, active: true },
+      update: { name: config.name, themeColor: config.themeColor, lifecycleState: "ACTIVE" },
       create: {
         slug: config.slug,
         name: config.name,
         nameEn: config.name,
         themeColor: config.themeColor,
-        active: true,
-        plan: "pilot",
+        lifecycleState: "ACTIVE",
         organizationId: organization.id,
       },
     });

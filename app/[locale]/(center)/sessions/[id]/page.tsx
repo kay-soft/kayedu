@@ -22,6 +22,7 @@ import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { sessionReceiptTotals } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
+import { isWithinVisibilityWindow, visibilityWindowFloor } from "@/lib/db/visibility";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { studentSearchWhere } from "@/lib/db/students";
 import { formatDate, formatMoney } from "@/lib/format";
@@ -60,7 +61,13 @@ export default async function SessionDetailPage({
 
   const db = scoped(ctx);
   const session = await db.sessions.findDetailById(id);
-  if (!session) notFound();
+  // A session older than the data-visibility window (M19) refuses the same
+  // way a cross-tenant id does — "not found", not a visible-but-locked page —
+  // mirroring the receptionist profit-denial shape (spec §7 criterion 9) at
+  // the direct-URL level this milestone's acceptance criteria call out.
+  if (!session || !isWithinVisibilityWindow(session.date, visibilityWindowFloor(ctx))) {
+    notFound();
+  }
 
   const t = await getTranslations("Sessions");
   const tStatus = await getTranslations("Sessions.status");

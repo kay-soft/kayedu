@@ -24,11 +24,19 @@
  * their own result down to just the throwaway centers, which is exact
  * regardless of what else exists in the database.
  *
+ * M19 adds: the lifecycle-transition table (`isValidLifecycleTransition`/
+ * `transitionCenterLifecycle`, replacing the old boolean activate/suspend),
+ * `Center.plan` being fully gone, and `CenterSettings.dataVisibilityDays`
+ * defaulting to 30 and being writable — the same shape
+ * `updateCenterVisibilityWindowAction` writes in.
+ *
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type CenterLifecycleState } from "@prisma/client";
 import {
+  ACCESSIBLE_LIFECYCLE_STATES,
   createCenterWithSettings,
+  isValidLifecycleTransition,
   platformAdoptionTrend,
   platformCenterCounts,
   platformCenterDetailStats,
@@ -37,8 +45,8 @@ import {
   platformStudentCount,
   platformTeacherCount,
   recordSupportAccess,
-  setCenterActive,
-  updateCenterPlan,
+  transitionCenterLifecycle,
+  validNextLifecycleStates,
 } from "../lib/db/platform.ts";
 
 const prisma = new PrismaClient();
@@ -115,7 +123,6 @@ async function main() {
     name: "Admin Check Center A",
     slug: SLUG_A,
     themeColor: "#2563EB",
-    plan: "pilot",
     // Already-lowercased: the real action's zod schema normalizes email
     // before this function ever sees it (`lib/validation/admin.ts`'s
     // `ownerEmail`); createCenterWithSettings itself does no normalizing.
@@ -125,12 +132,19 @@ async function main() {
   const centerA = created.ok ? created.center : null;
 
   if (centerA) {
+    check(
+      "A freshly admin-provisioned center starts ONBOARDING, not ACTIVE (M19)",
+      centerA.lifecycleState === "ONBOARDING",
+      centerA.lifecycleState,
+    );
+
     const settingsRow = await prisma.centerSettings.findUnique({ where: { centerId: centerA.id } });
     check(
       "A CenterSettings row is created in the same flow, with sane defaults",
       settingsRow !== null &&
         settingsRow.defaultShareType === "PERCENTAGE" &&
-        settingsRow.defaultShareValue === 15,
+        settingsRow.defaultShareValue === 15 &&
+        settingsRow.dataVisibilityDays === 30,
       JSON.stringify(settingsRow),
     );
 
@@ -184,15 +198,107 @@ async function main() {
     throw new Error("Setup failed — cannot continue admin-check.");
   }
 
-  // ── 2. Activate / suspend ────────────────────────────────────────────────
-  const suspended = await setCenterActive(prisma, centerA.id, false);
-  check("setCenterActive(false) suspends the center", suspended.active === false);
-  const reactivated = await setCenterActive(prisma, centerA.id, true);
-  check("setCenterActive(true) reactivates the center", reactivated.active === true);
+  // ── 2. Centre lifecycle transitions (M19) ────────────────────────────────
+  console.log("\nLifecycle transition table (no database needed)");
+  const expectedAccessible: CenterLifecycleState[] = ["ONBOARDING", "ACTIVE", "GRACE"];
+  check(
+    "ACCESSIBLE_LIFECYCLE_STATES is exactly ONBOARDING/ACTIVE/GRACE — the sign-in gate lib/auth/tenant.ts filters on",
+    ACCESSIBLE_LIFECYCLE_STATES.length === 3 &&
+      expectedAccessible.every((state) => ACCESSIBLE_LIFECYCLE_STATES.includes(state)) &&
+      !ACCESSIBLE_LIFECYCLE_STATES.includes("SUSPENDED") &&
+      !ACCESSIBLE_LIFECYCLE_STATES.includes("ARCHIVED"),
+    JSON.stringify(ACCESSIBLE_LIFECYCLE_STATES),
+  );
+  check(
+    "ONBOARDING -> ACTIVE is valid (setup finishing)",
+    isValidLifecycleTransition("ONBOARDING", "ACTIVE"),
+  );
+  check(
+    "ONBOARDING -> GRACE is refused — grace is a lapse from active service, not a pre-launch state",
+    !isValidLifecycleTransition("ONBOARDING", "GRACE"),
+  );
+  check("ACTIVE -> GRACE is valid", isValidLifecycleTransition("ACTIVE", "GRACE"));
+  check("GRACE -> ACTIVE is valid (resolved before a hard suspension)", isValidLifecycleTransition("GRACE", "ACTIVE"));
+  check("GRACE -> SUSPENDED is valid", isValidLifecycleTransition("GRACE", "SUSPENDED"));
+  check("SUSPENDED -> ACTIVE is valid (reinstated)", isValidLifecycleTransition("SUSPENDED", "ACTIVE"));
+  const nonTerminalStates: CenterLifecycleState[] = ["ONBOARDING", "ACTIVE", "GRACE", "SUSPENDED"];
+  check(
+    "Every non-terminal state can jump straight to SUSPENDED",
+    nonTerminalStates
+      .filter((state) => state !== "SUSPENDED")
+      .every((state) => isValidLifecycleTransition(state, "SUSPENDED")),
+  );
+  check(
+    "Every non-terminal state can jump straight to ARCHIVED",
+    nonTerminalStates.every((state) => isValidLifecycleTransition(state, "ARCHIVED")),
+  );
+  check(
+    "ARCHIVED is terminal — nothing transitions out of it, not even back to ACTIVE",
+    validNextLifecycleStates("ARCHIVED").length === 0 &&
+      !isValidLifecycleTransition("ARCHIVED", "ACTIVE"),
+  );
+  check(
+    "SUSPENDED cannot go directly to GRACE — recovery is to ACTIVE or a close-out to ARCHIVED only",
+    !isValidLifecycleTransition("SUSPENDED", "GRACE"),
+  );
 
-  // ── 3. Plan metadata ──────────────────────────────────────────────────────
-  const planned = await updateCenterPlan(prisma, centerA.id, "standard");
-  check("updateCenterPlan writes the free-text plan field", planned.plan === "standard");
+  console.log("\nLifecycle transitions against the database — refused, not silently allowed, when invalid");
+  const toGrace = await transitionCenterLifecycle(prisma, centerA.id, "ACTIVE");
+  check(
+    "transitionCenterLifecycle(ONBOARDING -> ACTIVE) succeeds and writes the new state",
+    toGrace.ok && toGrace.center.lifecycleState === "ACTIVE",
+    JSON.stringify(toGrace),
+  );
+
+  const invalidJump = await transitionCenterLifecycle(prisma, centerA.id, "ONBOARDING");
+  check(
+    "transitionCenterLifecycle(ACTIVE -> ONBOARDING) is refused — not a valid transition",
+    !invalidJump.ok && invalidJump.error === "invalidTransition",
+    JSON.stringify(invalidJump),
+  );
+  const afterInvalidJump = await prisma.center.findUnique({ where: { id: centerA.id } });
+  check(
+    "A refused transition leaves the stored lifecycleState unchanged",
+    afterInvalidJump?.lifecycleState === "ACTIVE",
+    afterInvalidJump?.lifecycleState,
+  );
+
+  const archived = await transitionCenterLifecycle(prisma, centerA.id, "ARCHIVED");
+  check(
+    "transitionCenterLifecycle(ACTIVE -> ARCHIVED) succeeds (a direct close-out, no SUSPENDED stopover required)",
+    archived.ok && archived.center.lifecycleState === "ARCHIVED",
+    JSON.stringify(archived),
+  );
+  const reviveAttempt = await transitionCenterLifecycle(prisma, centerA.id, "ACTIVE");
+  check(
+    "transitionCenterLifecycle(ARCHIVED -> ACTIVE) is refused — archiving is final",
+    !reviveAttempt.ok && reviveAttempt.error === "invalidTransition",
+    JSON.stringify(reviveAttempt),
+  );
+
+  const missingCenter = await transitionCenterLifecycle(prisma, "00000000-0000-0000-0000-000000000000", "ACTIVE");
+  check(
+    "transitionCenterLifecycle on a non-existent center reports notFound, not invalidTransition",
+    !missingCenter.ok && missingCenter.error === "notFound",
+    JSON.stringify(missingCenter),
+  );
+
+  // Reactivate centerA — the seeding/KPI checks below don't care about
+  // lifecycle state, but there's no reason to leave a throwaway fixture in a
+  // state a later assertion might trip over.
+  await prisma.center.update({ where: { id: centerA.id }, data: { lifecycleState: "ACTIVE" } });
+
+  // ── 3. Data-visibility window (M19) ──────────────────────────────────────
+  const beforeWindow = await prisma.centerSettings.findUnique({ where: { centerId: centerA.id } });
+  check("A fresh center's dataVisibilityDays defaults to 30 (the settled 1-calendar-month default)", beforeWindow?.dataVisibilityDays === 30);
+  const widenedWindow = await prisma.centerSettings.update({
+    where: { centerId: centerA.id },
+    data: { dataVisibilityDays: 60 },
+  });
+  check(
+    "dataVisibilityDays is writable per-centre — the same column both the centre's own settings and a platform admin's override write",
+    widenedWindow.dataVisibilityDays === 60,
+  );
 
   // ── 4. Seed staff/teachers/students/sessions across both centers ─────────
   async function seedCenter(centerId: string, tag: string, teacherCount: number, studentCount: number) {
@@ -268,8 +374,15 @@ async function main() {
     JSON.stringify({ before: baselineCenterCounts, after: afterCenterCounts }),
   );
   check(
-    "platformCenterCounts.active reflects both centers being active",
-    afterCenterCounts.active - baselineCenterCounts.active === 2,
+    "platformCenterCounts.operational reflects both centers (A: ACTIVE, B: still ONBOARDING) as operational",
+    afterCenterCounts.operational - baselineCenterCounts.operational === 2,
+    JSON.stringify({ before: baselineCenterCounts, after: afterCenterCounts }),
+  );
+  check(
+    "platformCenterCounts.byState reconciles exactly: +1 ACTIVE (center A) and +1 ONBOARDING (center B)",
+    afterCenterCounts.byState.ACTIVE - baselineCenterCounts.byState.ACTIVE === 1 &&
+      afterCenterCounts.byState.ONBOARDING - baselineCenterCounts.byState.ONBOARDING === 1,
+    JSON.stringify({ before: baselineCenterCounts.byState, after: afterCenterCounts.byState }),
   );
 
   const afterTeachers = await platformTeacherCount(prisma);

@@ -32,6 +32,7 @@ export default async function GeneralSettingsPage() {
           timezone: settings?.timezone ?? "Africa/Cairo",
           scheduleConflictPolicy: settings?.scheduleConflictPolicy ?? "WARN",
           teacherEditDeadlineHours: settings?.teacherEditDeadlineHours ?? null,
+          dataVisibilityDays: settings?.dataVisibilityDays ?? 30,
         }}
       />
     </div>

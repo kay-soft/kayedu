@@ -25,6 +25,7 @@ import {
   MAX_EDIT_DEADLINE_HOURS,
   MAX_LATE_THRESHOLD,
   MAX_TIMEOUT_DAYS,
+  MAX_VISIBILITY_WINDOW_DAYS,
 } from "@/lib/validation/settings";
 
 /** The session price the cut preview is worked out against: 120.00 EGP. */
@@ -41,6 +42,7 @@ export type GeneralSettingsValues = {
   timezone: string;
   scheduleConflictPolicy: ConflictPolicy;
   teacherEditDeadlineHours: number | null;
+  dataVisibilityDays: number;
 };
 
 export function GeneralSettingsForm({
@@ -286,6 +288,38 @@ export function GeneralSettingsForm({
               </div>
             }
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("visibilityTitle")}</CardTitle>
+          <CardDescription>{t("visibilityDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex min-w-0 flex-col gap-1.5 sm:max-w-56">
+            <Label htmlFor="dataVisibilityDays">{t("visibilityDays")}</Label>
+            <Input
+              id="dataVisibilityDays"
+              name="dataVisibilityDays"
+              type="number"
+              dir="ltr"
+              inputMode="numeric"
+              min={1}
+              max={MAX_VISIBILITY_WINDOW_DAYS}
+              step={1}
+              defaultValue={values.dataVisibilityDays}
+              aria-invalid={
+                state.fieldErrors?.dataVisibilityDays ? true : undefined
+              }
+            />
+            <p className="text-xs text-text-muted">{t("visibilityHint")}</p>
+            {state.fieldErrors?.dataVisibilityDays ? (
+              <FieldError>
+                {tErrors(state.fieldErrors.dataVisibilityDays)}
+              </FieldError>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 

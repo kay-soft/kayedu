@@ -1,7 +1,7 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { ActiveToggleForm } from "@/app/[locale]/(admin)/admin/centers/active-toggle-form";
 import { CreateCenterForm } from "@/app/[locale]/(admin)/admin/centers/create-center-form";
+import { LIFECYCLE_BADGE_VARIANT } from "@/app/[locale]/(admin)/admin/centers/lifecycle-badge";
 import { FormMessage } from "@/components/shared/form-message";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
@@ -16,11 +16,14 @@ import { ROUTES } from "@/lib/routes";
 
 /**
  * Center tenant management (spec §4.4, M9): create a new Center + its
- * CenterSettings row in one flow, list every tenant with basic stats, and
- * activate/suspend a center. Platform-scoped by design — no `centerId`
- * filter here is deliberate, not a bug (docs/01 §4 "Multi-tenant isolation
- * strategy" is about a tenant reaching another tenant; the platform admin
- * experience spans every tenant on purpose, spec §3).
+ * CenterSettings row in one flow, and list every tenant with basic stats and
+ * its lifecycle state (M19). Lifecycle transitions happen on the detail page
+ * — a card grid has no room for up to three valid next-state buttons per
+ * tile, so this list stays read-only on that front. Platform-scoped by
+ * design — no `centerId` filter here is deliberate, not a bug (docs/01 §4
+ * "Multi-tenant isolation strategy" is about a tenant reaching another
+ * tenant; the platform admin experience spans every tenant on purpose, spec
+ * §3).
  */
 export default async function AdminCentersPage() {
   await requirePlatformAdmin();
@@ -58,8 +61,8 @@ export default async function AdminCentersPage() {
                   >
                     {center.name}
                   </Link>
-                  <Badge variant={center.active ? "success" : "danger"}>
-                    {center.active ? t("active") : t("suspended")}
+                  <Badge variant={LIFECYCLE_BADGE_VARIANT[center.lifecycleState]}>
+                    {t(`lifecycle.${center.lifecycleState}`)}
                   </Badge>
                 </CardTitle>
               </CardHeader>
@@ -68,7 +71,6 @@ export default async function AdminCentersPage() {
                   <span dir="ltr" className="text-text-muted">
                     /{center.slug}
                   </span>
-                  {center.plan ? <Badge variant="brand">{center.plan}</Badge> : null}
                 </div>
                 <div className="flex flex-wrap gap-4 text-sm text-text-secondary">
                   <span>{t("staffCount", { count: formatNumber(center.staffCount, locale) })}</span>
@@ -82,7 +84,6 @@ export default async function AdminCentersPage() {
                   >
                     {t("openDetail")}
                   </Link>
-                  <ActiveToggleForm centerId={center.id} active={center.active} />
                 </div>
               </CardContent>
             </Card>

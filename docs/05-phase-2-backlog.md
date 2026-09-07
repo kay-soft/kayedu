@@ -94,7 +94,7 @@
 
 **What it is.** In-app support ticketing between a center and KayEdu; platform-wide or per-center announcements; billing plans; and gating features per plan.
 
-**Why deferred.** `Center.plan` was a free-text field with an editor and no behavior behind it; it is **removed entirely** at M19 rather than left to imply a billing system that does not exist (`00-master-product-spec.md` §5 "Center lifecycle"). Module entitlements are explicitly rejected for Phase 1 — one product, configured, never forked per center (§8) — and a plan flag that switches features on and off is the first step toward that fork. Support tickets and announcements both need the messaging entity this app has nowhere: the Approvals screen's "contact" action was punted for exactly this reason (`03-build-order.md`, Approvals).
+**Why deferred.** `Center.plan` was a free-text field with an editor and no behavior behind it; it **was removed entirely at M19** rather than left to imply a billing system that does not exist (`00-master-product-spec.md` §5 "Center lifecycle"). Module entitlements are explicitly rejected for Phase 1 — one product, configured, never forked per center (§8) — and a plan flag that switches features on and off is the first step toward that fork. Support tickets and announcements both need the messaging entity this app has nowhere: the Approvals screen's "contact" action was punted for exactly this reason (`03-build-order.md`, Approvals).
 
 **Depends on.** A real billing relationship with more than one paying customer (the `Organization` model at M11 is the entity that would carry it); and one messaging/notification substrate serving tickets, announcements and Approvals-contact together, rather than three one-off inboxes.
 

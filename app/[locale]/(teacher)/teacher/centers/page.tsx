@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { requireTeacherUser } from "@/lib/auth/tenant";
 import { listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
 
@@ -30,7 +31,7 @@ export default async function TeacherCentersPage() {
 
   const [centers, subjects, grades] = await Promise.all([
     prisma.center.findMany({
-      where: { active: true },
+      where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
       select: { id: true, name: true, logoUrl: true, themeColor: true },
       orderBy: { name: "asc" },
     }),

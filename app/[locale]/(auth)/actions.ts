@@ -15,6 +15,7 @@ import {
   primaryRole,
   type CenterRelation,
 } from "@/lib/auth/tenant";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole, safeNextPath } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
@@ -245,7 +246,7 @@ export async function acceptInvitationAction(
   if (invitation.status === "ACCEPTED") {
     return { error: "inviteAlreadyAccepted" };
   }
-  if (!invitation.center.active) {
+  if (!ACCESSIBLE_LIFECYCLE_STATES.includes(invitation.center.lifecycleState)) {
     return { error: "centerInactive" };
   }
   if (invitation.status === "EXPIRED" || invitation.expiresAt < new Date()) {

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -38,7 +39,9 @@ export async function requestToTeachAction(
 
   const { locale, centerId, ...payload } = parsed.data;
 
-  const center = await prisma.center.findFirst({ where: { id: centerId, active: true } });
+  const center = await prisma.center.findFirst({
+    where: { id: centerId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+  });
   if (!center) return { error: "notFound" };
 
   await prisma.changeRequest.create({

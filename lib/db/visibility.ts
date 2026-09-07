@@ -1,0 +1,79 @@
+// Relative import on purpose — `npm run check:visibility` exercises this
+// module directly, outside the Next.js runtime (same reasoning as
+// lib/db/analytics.ts and lib/db/organizations.ts).
+import { startOfUtcDay } from "../scheduling.ts";
+
+/**
+ * The data-visibility window (M19, docs/00-master-product-spec.md §5.1 "Data
+ * visibility window", docs/01-data-model.md §7). By default, no centre-side
+ * role (OWNER/MANAGER/RECEPTIONIST/ACCOUNTANT) may read analytics, money, old
+ * sessions or attendance history older than this many days back — a *rolling*
+ * window ending today, not "the 1st of this calendar month": the spec's "1
+ * calendar month" is expressed as a day count (`CenterSettings.
+ * dataVisibilityDays`, default 30) precisely so a centre widening it, or a
+ * platform admin's bypass, takes effect on the very next request with nothing
+ * to backfill — an anchored "since the 1st" window would instead jump
+ * backwards by up to 30 days at the start of every new month, which is not
+ * what "how far back can this role see" is supposed to mean.
+ *
+ * TEACHER/STUDENT/PARENT reads are never windowed — the settled decision is
+ * scoped to centre-side ERP roles only (spec §3's role table: "no centre-side
+ * role may read data older than..."). Settlement/payout records and audit
+ * logs are carved out and must never call this at all (`scoped(ctx).
+ * settlements`/`auditLogs`/`refunds` — see lib/db/scoped.ts).
+ */
+export const DEFAULT_VISIBILITY_WINDOW_DAYS = 30;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * A minimal, structural slice of `TenantContext` (`lib/auth/tenant.ts`) — a
+ * real `TenantContext` satisfies this directly (its `settings` is a full
+ * `CenterSettings | null`), and a gate script can build one without
+ * constructing a whole fake tenant context just to reach `dataVisibilityDays`.
+ */
+type VisibilityAwareContext = {
+  isPlatformAdmin: boolean;
+  settings: { dataVisibilityDays: number } | null;
+};
+
+/**
+ * The oldest date a centre-side role may read historical data for right now,
+ * or `null` when unbounded — the platform-admin bypass (spec §3: "Super Admin
+ * ... Bypasses the data-visibility window"). A centre with no `CenterSettings`
+ * row yet (should not happen post-M2, but every other reader of this table
+ * treats a missing row as "use the default" the same way) falls back to
+ * `DEFAULT_VISIBILITY_WINDOW_DAYS`.
+ */
+export function visibilityWindowFloor(
+  ctx: VisibilityAwareContext,
+  now: Date = new Date(),
+): Date | null {
+  if (ctx.isPlatformAdmin) return null;
+  const days = ctx.settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS;
+  return new Date(startOfUtcDay(now).getTime() - days * MS_PER_DAY);
+}
+
+/** Whether `date` falls on or after the window floor — always true when unbounded. */
+export function isWithinVisibilityWindow(date: Date, floor: Date | null): boolean {
+  return !floor || date.getTime() >= floor.getTime();
+}
+
+/**
+ * Raises `range.start` up to the window floor when the caller's requested
+ * range reaches further back than that — never narrows a range that was
+ * already inside the window. This is the enforcement point for every
+ * date-filterable centre-side list/aggregate (Sessions, Analytics, Expenses):
+ * the filter itself (`resolveSharedDateFilter`) accepts any `from`/`to` a
+ * request supplies, by design (docs/01 §7 "a direct URL or API call must not
+ * bypass it") — clamping happens here, once, right before the range reaches a
+ * query, so a manipulated `?from=2020-01-01` cannot reach further back than a
+ * legitimate one could.
+ */
+export function clampRangeToVisibility<T extends { start: Date; end: Date }>(
+  range: T,
+  floor: Date | null,
+): T {
+  if (!floor || range.start.getTime() >= floor.getTime()) return range;
+  return { ...range, start: floor };
+}

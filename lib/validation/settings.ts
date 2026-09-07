@@ -153,6 +153,18 @@ export const catalogSuggestionResolveSchema = z.object({
 export const MAX_TIMEOUT_DAYS = 3650;
 export const MAX_LATE_THRESHOLD = 240;
 export const MAX_EDIT_DEADLINE_HOURS = 24 * 365;
+/** M19 — the data-visibility window (docs/01 §7); 1 is the floor, not 0, since a 0-day window is not a meaningful setting. */
+export const MAX_VISIBILITY_WINDOW_DAYS = 3650;
+
+const visibilityWindowDays = z
+  .string()
+  .trim()
+  .default("30")
+  .transform((value) => (value === "" ? 30 : Number(value)))
+  .refine(
+    (value) => Number.isInteger(value) && value >= 1 && value <= MAX_VISIBILITY_WINDOW_DAYS,
+    "invalidNumber",
+  );
 
 export const generalSettingsSchema = z
   .object({
@@ -175,6 +187,7 @@ export const generalSettingsSchema = z
     // default — editable any time, the M7 behavior.
     teacherEditDeadlineEnabled: checkbox,
     teacherEditDeadlineHours: z.string().trim().optional(),
+    dataVisibilityDays: visibilityWindowDays,
   })
   .transform((value, ctx) => {
     // The share value means two different things depending on the mode, so it
@@ -245,6 +258,7 @@ export const generalSettingsSchema = z
         ? ("DENY" as const)
         : ("WARN" as const),
       teacherEditDeadlineHours,
+      dataVisibilityDays: value.dataVisibilityDays,
     };
   });
 

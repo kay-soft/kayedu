@@ -51,8 +51,10 @@ export default async function AdminPlatformPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label={t("activeCenters")}
-          value={formatNumber(centers.active, locale)}
-          hint={t("suspendedHint", { count: formatNumber(centers.suspended, locale) })}
+          value={formatNumber(centers.operational, locale)}
+          hint={t("suspendedHint", {
+            count: formatNumber(centers.byState.SUSPENDED + centers.byState.ARCHIVED, locale),
+          })}
           icon={<Building2 className="size-4" />}
           accent="brand"
         />

@@ -18,6 +18,7 @@ import {
   type StudentCounts,
   type TeacherCounts,
 } from "./analytics.ts";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -121,18 +122,19 @@ export async function teacherCountsRollup(
 }
 
 /**
- * Every active branch under an organization — the reachable set an Owner's
- * "Whole Management" view sums over. A plain `Center.findMany`, not a
- * `scoped()` call: `Organization` isolates nothing (it is the thing *above*
- * the tenant), so there is no `centerId` to scope this lookup by in the first
- * place (docs/01-data-model.md, Organization layer).
+ * Every reachable branch under an organization (ONBOARDING/ACTIVE/GRACE,
+ * M19) — the set an Owner's "Whole Management" view sums over. A plain
+ * `Center.findMany`, not a `scoped()` call: `Organization` isolates nothing
+ * (it is the thing *above* the tenant), so there is no `centerId` to scope
+ * this lookup by in the first place (docs/01-data-model.md, Organization
+ * layer).
  */
 export async function organizationBranches(
   db: Db,
   organizationId: string,
 ): Promise<{ id: string; name: string }[]> {
   return db.center.findMany({
-    where: { organizationId, active: true },
+    where: { organizationId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });

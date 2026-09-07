@@ -148,14 +148,6 @@ export function CreateCenterForm() {
               ) : null}
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="create-center-plan">{t("create.fields.plan")}</Label>
-              <Input id="create-center-plan" name="plan" dir="ltr" />
-              {state.fieldErrors?.plan ? (
-                <FieldError>{tErrors(state.fieldErrors.plan)}</FieldError>
-              ) : null}
-            </div>
-
             <div className="flex flex-col gap-1.5 sm:col-span-2">
               <Label htmlFor="create-center-owner-email">
                 {t("create.fields.ownerEmail")}

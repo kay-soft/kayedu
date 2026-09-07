@@ -21,6 +21,7 @@ import {
   type TenantRole,
 } from "@/lib/auth/permissions";
 import { loadPermissionGrants, membershipBranchGrantsFor } from "@/lib/db/permissions";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { verifiedChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
@@ -113,7 +114,11 @@ const OWNER_ROLE: Role = "OWNER";
 export const getUserCenterRelations = cache(
   async (userId: string): Promise<CenterRelation[]> => {
     const memberships = await prisma.membership.findMany({
-      where: { userId, active: true, center: { active: true } },
+      where: {
+        userId,
+        active: true,
+        center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      },
       include: { center: true },
     });
 
@@ -131,12 +136,19 @@ export const getUserCenterRelations = cache(
 
     const [studentProfiles, siblingBranches, branchGrantsByMembership] = await Promise.all([
       prisma.studentProfile.findMany({
-        where: { userId, active: true, center: { active: true } },
+        where: {
+          userId,
+          active: true,
+          center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+        },
         include: { center: true },
       }),
       ownerOrgIds.length > 0
         ? prisma.center.findMany({
-            where: { organizationId: { in: ownerOrgIds }, active: true },
+            where: {
+              organizationId: { in: ownerOrgIds },
+              lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] },
+            },
           })
         : Promise.resolve([]),
       membershipBranchGrantsFor(prisma, branchGrantableMembershipIds),

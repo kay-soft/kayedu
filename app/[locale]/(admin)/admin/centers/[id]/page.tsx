@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Building2, GraduationCap, ShieldCheck, Users } from "lucide-react";
 
-import { ActiveToggleForm } from "@/app/[locale]/(admin)/admin/centers/active-toggle-form";
-import { PlanForm } from "@/app/[locale]/(admin)/admin/centers/[id]/plan-form";
+import { LifecycleTransitionForm } from "@/app/[locale]/(admin)/admin/centers/lifecycle-transition-form";
+import { LIFECYCLE_BADGE_VARIANT } from "@/app/[locale]/(admin)/admin/centers/lifecycle-badge";
+import { VisibilityWindowForm } from "@/app/[locale]/(admin)/admin/centers/visibility-window-form";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
@@ -11,17 +12,22 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
-import { platformCenterDetailStats, recordSupportAccess } from "@/lib/db/platform";
+import { DEFAULT_VISIBILITY_WINDOW_DAYS } from "@/lib/db/visibility";
+import {
+  platformCenterDetailStats,
+  recordSupportAccess,
+  validNextLifecycleStates,
+} from "@/lib/db/platform";
 import { formatDate, formatNumber } from "@/lib/format";
 
 /**
  * A center's support view (spec §4.4 "controlled privileged support access").
- * Read-only, and every visit writes an `AuditLog` row before anything is
- * shown — the audit trail the spec asks for, not a full masquerade/
- * impersonation system (docs/03-build-order.md M9). The admin never acts on
- * this center's data from here — activate/suspend and the plan editor are
- * tenant-management, not "browsing tenant data", so they stay separate from
- * the recent-activity read below.
+ * Read-only except for two tenant-management controls — the lifecycle
+ * transition and the data-visibility-window override (M19) — which stay
+ * separate from the recent-activity read below, since acting on the tenant
+ * itself is not "browsing tenant data". Every visit writes an `AuditLog` row
+ * before anything is shown — the audit trail the spec asks for, not a full
+ * masquerade/impersonation system (docs/03-build-order.md M9).
  */
 export default async function AdminCenterDetailPage({
   params,
@@ -39,7 +45,7 @@ export default async function AdminCenterDetailPage({
   const locale = await getLocale();
   const t = await getTranslations("AdminCenters");
 
-  const [stats, recentAudit] = await Promise.all([
+  const [stats, recentAudit, settings] = await Promise.all([
     platformCenterDetailStats(prisma, center.id),
     prisma.auditLog.findMany({
       where: { centerId: center.id },
@@ -47,6 +53,7 @@ export default async function AdminCenterDetailPage({
       take: 20,
       include: { actor: true },
     }),
+    prisma.centerSettings.findUnique({ where: { centerId: center.id } }),
   ]);
 
   return (
@@ -55,12 +62,9 @@ export default async function AdminCenterDetailPage({
         title={center.name}
         description={t("detail.subtitle", { slug: center.slug })}
         action={
-          <div className="flex items-center gap-2">
-            <Badge variant={center.active ? "success" : "danger"}>
-              {center.active ? t("active") : t("suspended")}
-            </Badge>
-            <ActiveToggleForm centerId={center.id} active={center.active} />
-          </div>
+          <Badge variant={LIFECYCLE_BADGE_VARIANT[center.lifecycleState]}>
+            {t(`lifecycle.${center.lifecycleState}`)}
+          </Badge>
         }
       />
 
@@ -87,10 +91,29 @@ export default async function AdminCenterDetailPage({
         />
       </div>
 
-      <SectionHeader title={t("detail.planTitle")} description={t("detail.planDescription")} />
+      <SectionHeader
+        title={t("detail.lifecycleTitle")}
+        description={t("detail.lifecycleDescription")}
+      />
       <Card>
         <CardContent className="pt-6">
-          <PlanForm centerId={center.id} plan={center.plan} />
+          <LifecycleTransitionForm
+            centerId={center.id}
+            validNext={validNextLifecycleStates(center.lifecycleState)}
+          />
+        </CardContent>
+      </Card>
+
+      <SectionHeader
+        title={t("detail.visibilityTitle")}
+        description={t("detail.visibilityDescription")}
+      />
+      <Card>
+        <CardContent className="pt-6">
+          <VisibilityWindowForm
+            centerId={center.id}
+            dataVisibilityDays={settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS}
+          />
         </CardContent>
       </Card>
 

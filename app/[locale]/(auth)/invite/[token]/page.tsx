@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -45,7 +46,7 @@ export default async function InvitePage({
       ? "inviteNotFound"
       : invitation.status === "ACCEPTED"
         ? "inviteAlreadyAccepted"
-        : !invitation.center.active
+        : !ACCESSIBLE_LIFECYCLE_STATES.includes(invitation.center.lifecycleState)
           ? "centerInactive"
           : invitation.status === "EXPIRED" || invitation.expiresAt < new Date()
             ? "inviteExpired"

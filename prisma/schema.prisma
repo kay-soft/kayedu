@@ -25,6 +25,19 @@ enum Role {
   TEACHER
 }
 
+// A centre's own lifecycle (M19, docs/00-master-product-spec.md §5.1 "Centre
+// lifecycle"), replacing the old `Center.active` boolean. ONBOARDING/ACTIVE/
+// GRACE all permit sign-in; SUSPENDED/ARCHIVED both refuse it — see
+// lib/db/platform.ts's `ACCESSIBLE_LIFECYCLE_STATES` and the transition table
+// next to it for the enforced state machine.
+enum CenterLifecycleState {
+  ONBOARDING
+  ACTIVE
+  GRACE
+  SUSPENDED
+  ARCHIVED
+}
+
 enum ShareType {
   FIXED // centerShareValue is piastres taken by the center
   PERCENTAGE // centerShareValue is a whole-number percent (e.g. 15)
@@ -144,21 +157,21 @@ model User {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  memberships     Membership[]
-  studentProfiles StudentProfile[]
-  taughtClasses   ClassGroup[]     @relation("ClassTeacher")
-  taughtSessions  Session[]        @relation("SessionTeacher")
-  reservations    Reservation[]
-  auditLogs       AuditLog[]
+  memberships        Membership[]
+  studentProfiles    StudentProfile[]
+  taughtClasses      ClassGroup[]        @relation("ClassTeacher")
+  taughtSessions     Session[]           @relation("SessionTeacher")
+  reservations       Reservation[]
+  auditLogs          AuditLog[]
   // M14 — this user's own payout history, as a TEACHER. Named distinctly
   // from `taughtSessions`/`taughtClasses` since a Settlement references the
   // teacher, not a class or session.
-  settlements     Settlement[]     @relation("SettlementTeacher")
+  settlements        Settlement[]        @relation("SettlementTeacher")
   // M16 — the children this User reads as a PARENT (inert until VERIFIED).
   // Named distinctly from every relation above because this one isn't a
   // Membership or a StudentProfile of their own — it's read access into
   // someone else's.
-  parentLinks     ParentLink[]     @relation("ParentLinkParent")
+  parentLinks        ParentLink[]        @relation("ParentLinkParent")
   // M17 — this User's own ratings and skips, as a STUDENT rating sessions
   // they attended. Named off the global User (not a StudentProfile) because
   // rating is the student's own act, the same identity the login pop-up
@@ -189,21 +202,21 @@ model Organization {
 }
 
 model Center {
-  id             String       @id @default(uuid())
-  slug           String       @unique // subdomain / branding key
+  id             String               @id @default(uuid())
+  slug           String               @unique // subdomain / branding key
   name           String
   nameEn         String?
   logoUrl        String?
-  themeColor     String       @default("#2563EB")
-  active         Boolean      @default(true)
-  plan           String? // onboarding/plan metadata
+  themeColor     String               @default("#2563EB")
+  // M19: replaces the old `active` boolean — see the enum's own doc comment.
+  lifecycleState CenterLifecycleState @default(ACTIVE)
   // The organization (paying customer) this branch belongs to (M11). The
   // tenant, and the sole isolation key, stays Center/centerId — this is an
   // additive parent, not a rewrite of scoping (docs/01-data-model.md §4).
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   settings           CenterSettings?
   memberships        Membership[]
@@ -250,6 +263,12 @@ model CenterSettings {
   // after the session date (M10, closing the gap flagged at M5/M7). Null =
   // no deadline, editable any time — the M7 default.
   teacherEditDeadlineHours Int?
+  // M19: how many days back a centre-side role (OWNER/MANAGER/RECEPTIONIST/
+  // ACCOUNTANT) may read analytics/money/sessions/attendance — a rolling
+  // window ending today, not a calendar-month anchor (docs/01-data-model.md
+  // §7). Platform admin bypasses this entirely; Settlement/payout and
+  // AuditLog reads are carved out and never consult it (lib/db/visibility.ts).
+  dataVisibilityDays       Int            @default(30)
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt
 }
@@ -586,30 +605,30 @@ model ClassSchedule {
 // ─────────────────────────────────────────────────────────────
 
 model StudentProfile {
-  id              String        @id @default(uuid())
-  userId          String
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  centerId        String
-  center          Center        @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  studentCode     String // system-assigned per center via StudentCodeCounter — never typed
-  gradeId         String?
-  grade           CatalogGrade? @relation(fields: [gradeId], references: [id])
+  id                 String        @id @default(uuid())
+  userId             String
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  centerId           String
+  center             Center        @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentCode        String // system-assigned per center via StudentCodeCounter — never typed
+  gradeId            String?
+  grade              CatalogGrade? @relation(fields: [gradeId], references: [id])
   // Center-local record for the student themselves — see the note on
   // Membership above. `User` stays the auth credential + platform default;
   // these are this center's own name/contact and never write back to it.
-  firstName       String?
-  lastName        String?
-  email           String?
-  phone           String?
-  altPhone        String?
-  parentFirstName String?
-  parentLastName  String?
-  parentPhone     String?
-  parentAltPhone  String?
+  firstName          String?
+  lastName           String?
+  email              String?
+  phone              String?
+  altPhone           String?
+  parentFirstName    String?
+  parentLastName     String?
+  parentPhone        String?
+  parentAltPhone     String?
   // Center-uploaded student photo (Storage `avatars/{centerId}/…`). It lives
   // here, not on User.avatarUrl, because the photo a center takes for its own
   // ID card is that center's data — see docs/01-data-model.md §2.
-  photoUrl        String?
+  photoUrl           String?
   // M18: null on a self-registered student's auto-seeded profile (only name/
   // email/phone/altPhone are copied from User — no grade, no parent contact);
   // stamped the moment that profile is completed (`/student/profile`) or, for
@@ -618,9 +637,9 @@ model StudentProfile {
   // self-registered student to complete their profile exactly once — never a
   // second time, and never at all for a staff-created one.
   profileCompletedAt DateTime?
-  active          Boolean       @default(true)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  active             Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   enrollments Enrollment[]
   attendees   SessionAttendee[]
@@ -838,11 +857,11 @@ model Payment {
  * `Payment.teacherId` itself is denormalized.
  */
 model Refund {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   centerId  String
-  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  paymentId String   @unique
-  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  center    Center  @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   // Denormalized from payment.teacherId, purely so revenueByTeacher can
   // groupBy in one query — not a money field, like Payment.teacherId itself.
   teacherId String
@@ -867,7 +886,6 @@ model Refund {
  * range roll-up) is set on any row — an application-layer invariant, the
  * same "kind says which fields apply" shape `CenterCatalogSelection.kind`
  * already uses in this schema, enforced in `lib/db/settlements.ts`.
- *
  * `totalAmount` is computed ONCE, at DRAFT creation, as the sum of frozen
  * `Payment.teacherShareSnapshot` values in scope (excluding voided and
  * already-refunded payments), and never recomputed against the *class's*
@@ -903,12 +921,12 @@ model Settlement {
   status      SettlementStatus @default(DRAFT)
 
   createdBy  String
-  createdAt  DateTime         @default(now())
+  createdAt  DateTime  @default(now())
   approvedBy String?
   approvedAt DateTime?
   paidBy     String?
   paidAt     DateTime?
-  updatedAt  DateTime         @updatedAt
+  updatedAt  DateTime  @updatedAt
 
   @@index([centerId])
   @@index([centerId, teacherId])
@@ -1022,12 +1040,10 @@ model ChangeRequest {
  * through that child's `centerId` — `centerId` is denormalized here rather
  * than re-joined every time, exactly like `Payment.teacherId`/`Refund.teacherId`
  * are denormalized references, not money fields.
- *
  * Origination (a phone number matching some student's `parentPhone`/
  * `parentAltPhone`) only ever produces a PENDING row — a phone match alone
  * must never grant access. `status` flipping to VERIFIED is the ONLY thing
  * any parent-portal read trusts (`lib/db/parents.ts`'s `verifiedChildLinks`).
- *
  * `verifiedBy`/`verifiedAt` are deliberately generic (a User id + a
  * timestamp, not a "StaffApproval" shape) because **who or what verifies is
  * OD-6** (00-master-product-spec.md §2.2) — still open. The only writer today
@@ -1068,7 +1084,6 @@ model ParentLink {
  * identity the login pop-up authenticates against, and it must read/write
  * the same regardless of which centre's `StudentProfile` the attendance sat
  * under.
- *
  * `teacherId` is denormalized from `session.teacherId` at rating time — same
  * pattern as `Payment.teacherId` (M6, docs/02-architecture.md §14): the
  * published aggregate is a single-table `aggregate`/`groupBy` on `teacherId`
@@ -1077,7 +1092,6 @@ model ParentLink {
  * scalar column. Not money, and never re-derived if the session is later
  * rescheduled — a rating stays pinned to the teacher who actually taught the
  * session the student attended.
- *
  * Deliberately carries **no `centerId`**: the published aggregate is
  * platform-wide by design, never filtered to one centre, so there is no
  * scoped read here to protect and this model has no entry in
@@ -1113,7 +1127,6 @@ model SessionRating {
  * `attendedSessionsToRate` (`lib/db/ratings.ts`) excludes any session with a
  * row here exactly like it excludes an already-rated one, so a skipped
  * session is never re-surfaced, on this device or any other.
- *
  * Its own table rather than a `SKIPPED` sentinel on `SessionRating.score`, so
  * the aggregate's `avg`/`groupBy` over `SessionRating.score` never needs to
  * filter out a placeholder value — a skip carries no score at all.

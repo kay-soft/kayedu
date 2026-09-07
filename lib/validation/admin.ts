@@ -10,11 +10,6 @@ import { localeSchema } from "./auth.ts";
  * `AdminCenters.errors`, never user-facing copy (docs/02 §7).
  */
 
-const checkbox = z
-  .string()
-  .optional()
-  .transform((value) => value === "on" || value === "true");
-
 const optionalText = (max: number) =>
   z
     .string()
@@ -56,7 +51,6 @@ export const createCenterSchema = z.object({
   slug,
   logoUrl: optionalText(500),
   themeColor,
-  plan: optionalText(60),
   ownerEmail,
 });
 
@@ -65,10 +59,15 @@ export const centerIdSchema = z.object({
   id: centerId,
 });
 
-export const centerActiveSchema = z.object({
+/** M19 — the five-state lifecycle replacing `Center.active` (docs/00 §5.1). */
+const centerLifecycleState = z.enum(["ONBOARDING", "ACTIVE", "GRACE", "SUSPENDED", "ARCHIVED"], {
+  error: "invalidLifecycleState",
+});
+
+export const centerLifecycleTransitionSchema = z.object({
   locale: localeSchema,
   id: centerId,
-  active: checkbox,
+  to: centerLifecycleState,
 });
 
 /** M13's admin review queue — CatalogSuggestion ids are also `@default(uuid())`. */
@@ -77,8 +76,13 @@ export const catalogSuggestionIdSchema = z.object({
   id: z.string().uuid("notFound"),
 });
 
-export const centerPlanSchema = z.object({
+/** M19 — per-centre override of the data-visibility window (docs/01 §7). */
+export const centerVisibilityWindowSchema = z.object({
   locale: localeSchema,
   id: centerId,
-  plan: optionalText(60),
+  dataVisibilityDays: z.coerce
+    .number({ error: "invalidNumber" })
+    .int("invalidNumber")
+    .min(1, "invalidNumber")
+    .max(3650, "invalidNumber"),
 });
