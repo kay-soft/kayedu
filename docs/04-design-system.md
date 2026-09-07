@@ -208,7 +208,7 @@ The densest screen in the product, and the one most likely to become an unreadab
 Same card queue as the centre `/approvals` screen — deliberately, since a teacher and a manager are reading the same kind of request and should not have to learn two layouts.
 
 - One card per pending student: avatar + local name, class, requested-at, and the two actions.
-- **A refusal states its reason in the card, not in a toast.** "Blocked from this class", "class is full — change the room or increase its capacity", "rejected 3 days ago, can re-request in 4 days" (§11.7's copy rule). A toast disappears; the reason needs to stay next to the thing it explains.
+- **A refusal states its reason in the card, not in a toast.** "Blocked from this class", "class is at capacity — increase the class's capacity or move it to a room with more seats", "rejected 3 days ago, can re-request in 4 days" (§11.7's copy rule). A toast disappears; the reason needs to stay next to the thing it explains.
 - Empty state is a real state, not a blank panel — most teachers have an empty queue most days.
 
 ### 11.4 Parent portal (M16)

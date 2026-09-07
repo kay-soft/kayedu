@@ -525,7 +525,7 @@
       "duplicateDate": "That date is already on the holiday calendar.",
       "scheduleConflict": "This branch denies double-booked slots. Choose a different day, time or teacher.",
       "classInUse": "This class still has enrollments or generated sessions, so it cannot be deleted. Deactivate it instead.",
-      "classFull": "This class is at capacity — change the room or increase its capacity.",
+      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
       "alreadyEnrolled": "This student is already enrolled in this class.",
       "studentBlocked": "This student is blocked from this class or teacher.",
       "alreadyBlocked": "This student is already blocked from this class."
@@ -872,7 +872,7 @@
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is at capacity — change the room or increase its capacity.",
+      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
       "classNotFound": "The class this request was for no longer exists.",
       "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time."
@@ -1348,7 +1348,7 @@
       "notFound": "That request no longer exists, or is not for one of your classes.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is at capacity — change the room or increase its capacity."
+      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats."
     }
   },
   "TeacherCenters": {
@@ -1430,7 +1430,7 @@
       "studentBlocked": "You cannot join this class.",
       "alreadyEnrolled": "You are already enrolled in this class.",
       "alreadyRequested": "You already have a pending request for this class.",
-      "classFull": "This class is at capacity — change the room or increase its capacity.",
+      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
       "coolingOff": "Your last request for this class was declined. You can request it again from {date}."
     }
   },
