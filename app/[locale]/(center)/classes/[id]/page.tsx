@@ -31,7 +31,7 @@ import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { piastresToInputValue } from "@/lib/money";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 
 const MAX_CANDIDATES = 8;
 
@@ -164,8 +164,8 @@ export default async function ClassDetailPage({
   }));
 
   const subjectGrade = [
-    classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
-    classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+    classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+    classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
   ]
     .filter(Boolean)
     .join(" · ");

@@ -17,7 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { countOtherCenterRelations } from "@/lib/db/identity";
@@ -105,8 +105,8 @@ export default async function StudentDetailPage({
       classGroupId: enrollment.classGroupId,
       className:
         [
-          enrollment.classGroup.subject ? catalogLabel(locale, enrollment.classGroup.subject) : null,
-          enrollment.classGroup.grade ? catalogLabel(locale, enrollment.classGroup.grade) : null,
+          enrollment.classGroup.subject ? catalogLabelWithSelection(locale, enrollment.classGroup.subject) : null,
+          enrollment.classGroup.grade ? catalogLabelWithSelection(locale, enrollment.classGroup.grade) : null,
         ]
           .filter(Boolean)
           .join(" · ") || tCommon("none"),
@@ -281,7 +281,7 @@ export default async function StudentDetailPage({
                         href={ROUTES.centerClass(enrollment.classGroupId)}
                         className="text-sm font-medium text-brand hover:underline"
                       >
-                        {enrollment.classGroup.subject ? catalogLabel(locale, enrollment.classGroup.subject) : tCommon("none")}
+                        {enrollment.classGroup.subject ? catalogLabelWithSelection(locale, enrollment.classGroup.subject) : tCommon("none")}
                       </Link>
                       <span className="text-xs text-text-muted">
                         {fullName(enrollment.classGroup.teacher)}
@@ -336,8 +336,8 @@ export default async function StudentDetailPage({
                             className="text-brand hover:underline"
                           >
                             {[
-                              classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
-                              classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+                              classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+                              classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
                             ]
                               .filter(Boolean)
                               .join(" · ")}

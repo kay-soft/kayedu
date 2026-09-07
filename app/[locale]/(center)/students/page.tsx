@@ -18,7 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
@@ -66,7 +66,7 @@ export default async function StudentsPage({
     studentProfileId: student.id,
     name: fullName(localName(student, student.user)),
     studentCode: student.studentCode,
-    gradeName: student.grade ? catalogLabel(locale, student.grade) : null,
+    gradeName: student.grade ? catalogLabelWithSelection(locale, student.grade) : null,
     contact: student.parentPhone ?? student.phone ?? student.email,
     active: student.active,
   }));

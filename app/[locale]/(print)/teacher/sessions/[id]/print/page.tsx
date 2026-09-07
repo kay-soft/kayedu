@@ -4,7 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { TeacherSessionPrintToolbar } from "@/app/[locale]/(print)/teacher/sessions/[id]/print/toolbar";
 import { DetailRow } from "@/components/shared/field";
 import { getTenantContext } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { sessionReceiptTotals } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
@@ -80,7 +80,7 @@ export default async function TeacherSessionPrintPage({
           <div className="mt-2">
             <DetailRow
               label={t("fields.grade")}
-              value={session.classGroup.grade ? catalogLabel(locale, session.classGroup.grade) : tCommon("none")}
+              value={session.classGroup.grade ? catalogLabelWithSelection(locale, session.classGroup.grade) : tCommon("none")}
             />
             <DetailRow label={t("fields.room")} value={session.room?.name ?? tCommon("none")} />
             <DetailRow label={t("fields.price")} value={formatMoney(session.priceSnapshot, locale)} />

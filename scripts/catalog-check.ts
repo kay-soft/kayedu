@@ -24,7 +24,7 @@
  */
 import { PrismaClient, type Role } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
-import { catalogLabel } from "../lib/catalog.ts";
+import { catalogLabel, catalogLabelWithSelection } from "../lib/catalog.ts";
 import {
   approveCatalogSuggestion,
   centerEducationSystemById,
@@ -37,6 +37,9 @@ import {
   selectCatalogEntry,
   updateCatalogSelection,
 } from "../lib/db/catalog.ts";
+import { classListSelect } from "../lib/db/classes.ts";
+import { sessionListSelect } from "../lib/db/sessions.ts";
+import { discoverClassesForCenter } from "../lib/db/discover.ts";
 import { recordPayment } from "../lib/db/payments.ts";
 import { splitShare } from "../lib/money.ts";
 
@@ -397,7 +400,84 @@ async function main() {
     JSON.stringify(paymentOverridden),
   );
 
-  // ── 10. Cross-centre isolation on the money-adjacent rows above ─────────
+  // ── 10. A rename propagates to every live read, not just the settings
+  // screen — class lists, session lists and Discover all resolve this
+  // centre's own `CenterCatalogSelection.displayName`. Nothing in this
+  // schema freezes a catalog entry's name (unlike `priceSnapshot` for
+  // money), so every one of these is a live join and must reflect a rename
+  // immediately.
+  const selectSubjectA = await selectCatalogEntry(
+    prisma,
+    centerA.id,
+    "SUBJECT",
+    subject.id,
+    "Centre A's Physics",
+    null,
+  );
+  check("Centre A selects and renames the subject", selectSubjectA.ok, JSON.stringify(selectSubjectA));
+
+  // Centre B gets its own class referencing the *same* global subject,
+  // never selected (let alone renamed) at Centre B.
+  const teacherB = await prisma.user.create({
+    data: { firstName: "T", lastName: "CatalogB", email: "catalog-check-teacher-b@kayedu.test", locale: "en" },
+  });
+  await prisma.membership.create({
+    data: scopedData(centerB.id, {
+      userId: teacherB.id,
+      role: TEACHER_ROLE,
+      firstName: "T",
+      lastName: "CatalogB",
+      joinedAt: new Date(),
+    }),
+  });
+  const roomB = await prisma.room.create({ data: scopedData(centerB.id, { name: "Room 1" }) });
+  const classGroupB = await prisma.classGroup.create({
+    data: scopedData(centerB.id, {
+      teacherId: teacherB.id,
+      subjectId: subject.id,
+      roomId: roomB.id,
+      price: 10_000,
+    }),
+  });
+
+  const classListRowA = await prisma.classGroup.findFirst({
+    where: { id: classGroup.id },
+    select: classListSelect(centerA.id),
+  });
+  check(
+    "Centre A's own class-list read resolves its own subject rename",
+    catalogLabelWithSelection("en", classListRowA?.subject ?? null) === "Centre A's Physics",
+    catalogLabelWithSelection("en", classListRowA?.subject ?? null) ?? "null",
+  );
+
+  const classListRowB = await prisma.classGroup.findFirst({
+    where: { id: classGroupB.id },
+    select: classListSelect(centerB.id),
+  });
+  check(
+    "Centre B's own class-list read for the same global subject shows the canonical name, unaffected by Centre A's rename",
+    catalogLabelWithSelection("en", classListRowB?.subject ?? null) === subject.nameEn,
+    catalogLabelWithSelection("en", classListRowB?.subject ?? null) ?? "null",
+  );
+
+  const sessionListRowsA = await prisma.session.findMany({
+    where: { id: sessionInheriting.id },
+    select: sessionListSelect(centerA.id),
+  });
+  check(
+    "Centre A's own session-list read resolves the same subject rename through the class",
+    catalogLabelWithSelection("en", sessionListRowsA[0]?.classGroup.subject ?? null) === "Centre A's Physics",
+  );
+
+  const discoverRowsA = await discoverClassesForCenter(prisma, centerA.id);
+  const discoverRowA = discoverRowsA.find((row) => row.id === classGroup.id);
+  check(
+    "Discover resolves Centre A's own subject rename for Centre A's class",
+    Boolean(discoverRowA) &&
+      catalogLabelWithSelection("en", discoverRowA?.subject ?? null) === "Centre A's Physics",
+  );
+
+  // ── 11. Cross-centre isolation on the money-adjacent rows above ─────────
   check(
     "Centre B cannot read Centre A's ClassGroup by id",
     (await scopedFindById(prisma.classGroup, centerB.id, classGroup.id)) === null,

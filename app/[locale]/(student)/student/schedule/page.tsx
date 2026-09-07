@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getStudentContexts, requireStudentUser } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
@@ -73,8 +73,8 @@ async function loadCenterSchedule(
     date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
-    subjectName: row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
-    gradeName: row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
+    subjectName: row.classGroup.subject ? catalogLabelWithSelection(locale, row.classGroup.subject) : null,
+    gradeName: row.classGroup.grade ? catalogLabelWithSelection(locale, row.classGroup.grade) : null,
     roomName: row.room?.name ?? row.classGroup.room?.name ?? null,
     teacherName: names.get(row.teacherId) ?? "—",
   }));
@@ -85,8 +85,8 @@ async function loadCenterSchedule(
     attendeeId: row.id,
     date: row.session.date,
     startTime: row.session.startTime,
-    subjectName: row.session.classGroup.subject ? catalogLabel(locale, row.session.classGroup.subject) : null,
-    gradeName: row.session.classGroup.grade ? catalogLabel(locale, row.session.classGroup.grade) : null,
+    subjectName: row.session.classGroup.subject ? catalogLabelWithSelection(locale, row.session.classGroup.subject) : null,
+    gradeName: row.session.classGroup.grade ? catalogLabelWithSelection(locale, row.session.classGroup.grade) : null,
     attendanceStatus: row.attendanceStatus,
     isDropIn: row.isDropIn,
     paidAmount: row.payments[0]?.amount ?? null,

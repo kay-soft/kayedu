@@ -49,23 +49,36 @@ export async function claimStudentCode(
  * `firstName`/`lastName` are the **local** name (docs/01 §6); `user` is kept
  * only as the fallback for a record whose local name was never seeded (see
  * `lib/identity.ts` `localName()`).
+ *
+ * A function of `centerId`, not a static object (M13): `grade` carries a
+ * nested, centre-scoped `selections` lookup so the grade shown resolves this
+ * centre's own rename when it has one (`lib/catalog.ts`'s
+ * `catalogLabelWithSelection`) — no schema field freezes a catalog name.
  */
-export const STUDENT_LIST_SELECT = {
-  id: true,
-  studentCode: true,
-  active: true,
-  firstName: true,
-  lastName: true,
-  email: true,
-  phone: true,
-  parentPhone: true,
-  gradeId: true,
-  user: { select: { firstName: true, lastName: true } },
-  grade: { select: { nameAr: true, nameEn: true } },
-} satisfies Prisma.StudentProfileSelect;
+export function studentListSelect(centerId: string) {
+  return {
+    id: true,
+    studentCode: true,
+    active: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    phone: true,
+    parentPhone: true,
+    gradeId: true,
+    user: { select: { firstName: true, lastName: true } },
+    grade: {
+      select: {
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      },
+    },
+  } satisfies Prisma.StudentProfileSelect;
+}
 
 export type StudentListRow = Prisma.StudentProfileGetPayload<{
-  select: typeof STUDENT_LIST_SELECT;
+  select: ReturnType<typeof studentListSelect>;
 }>;
 
 export const TEACHER_LIST_SELECT = {

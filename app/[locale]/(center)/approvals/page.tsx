@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
@@ -203,8 +203,8 @@ export default async function ApprovalsPage() {
                         <p className="mt-1 text-xs text-text-secondary">
                           {classGroup
                             ? [
-                                classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
-                                classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+                                classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+                                classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
                               ]
                                 .filter(Boolean)
                                 .join(" · ")
@@ -257,8 +257,8 @@ export default async function ApprovalsPage() {
                       </p>
                       <p className="mt-1 text-xs text-text-muted">
                         {[
-                          reservation.classGroup.subject ? catalogLabel(locale, reservation.classGroup.subject) : null,
-                          reservation.classGroup.grade ? catalogLabel(locale, reservation.classGroup.grade) : null,
+                          reservation.classGroup.subject ? catalogLabelWithSelection(locale, reservation.classGroup.subject) : null,
+                          reservation.classGroup.grade ? catalogLabelWithSelection(locale, reservation.classGroup.grade) : null,
                         ]
                           .filter(Boolean)
                           .join(" · ") || tCommon("none")}

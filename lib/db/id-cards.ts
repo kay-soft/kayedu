@@ -9,9 +9,12 @@ import {
   studentQrPayload,
 } from "@/lib/id-card";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 
-export type CardStudent = StudentProfile & { user: User; grade: CatalogGrade | null };
+export type CardStudent = StudentProfile & {
+  user: User;
+  grade: (CatalogGrade & { selections?: { displayName: string | null }[] }) | null;
+};
 
 /**
  * Builds one student's ID card (docs/04 §5, docs/02 §10).
@@ -48,9 +51,7 @@ export async function studentCardSvg(
     logoDataUri,
     photoDataUri,
     studentName: fullName(localName(student, student.user)),
-    gradeName: student.grade
-      ? catalogLabel(options.dir === "rtl" ? "ar" : "en", student.grade)
-      : null,
+    gradeName: catalogLabelWithSelection(options.dir === "rtl" ? "ar" : "en", student.grade),
     studentCode: student.studentCode,
     qrPayload: studentQrPayload(centerId, student.studentCode),
     labels: { code: options.codeLabel },

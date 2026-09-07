@@ -13,7 +13,11 @@ import type {
 // imported from lib/db/client.ts for the same reason — the gate script
 // constructs its own `PrismaClient()`, the app passes the shared singleton.
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
-import { catalogLabel } from "../catalog.ts";
+import {
+  catalogLabel,
+  catalogLabelWithSelection,
+  type CatalogWithSelection,
+} from "../catalog.ts";
 import {
   GENERATION_WINDOW_DAYS,
   addDays,
@@ -420,48 +424,71 @@ export async function rescheduleSession(
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
 const ACTIVE_ENROLLMENT_STATUS = "ACTIVE" as const;
 
-/** Fields a Today's Sessions dashboard row renders — never a full include. */
-export const SESSION_LIST_SELECT = {
-  id: true,
-  date: true,
-  startTime: true,
-  endTime: true,
-  status: true,
-  priceSnapshot: true,
-  teacherId: true,
-  classGroupId: true,
-  classGroup: {
-    select: {
-      subject: { select: { nameAr: true, nameEn: true } },
-      grade: { select: { nameAr: true, nameEn: true } },
-      _count: { select: { enrollments: { where: { status: ACTIVE_ENROLLMENT_STATUS } } } },
+/**
+ * Fields a Today's Sessions dashboard row renders — never a full include.
+ * A function of `centerId`, not a static object (M13): `subject`/`grade`
+ * each carry a nested, centre-scoped `selections` lookup so the label shown
+ * resolves this centre's own rename when it has one — no schema field
+ * freezes a catalog entry's name, so every live read resolves the override.
+ */
+export function sessionListSelect(centerId: string) {
+  return {
+    id: true,
+    date: true,
+    startTime: true,
+    endTime: true,
+    status: true,
+    priceSnapshot: true,
+    teacherId: true,
+    classGroupId: true,
+    classGroup: {
+      select: {
+        subject: {
+          select: {
+            nameAr: true,
+            nameEn: true,
+            selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+          },
+        },
+        grade: {
+          select: {
+            nameAr: true,
+            nameEn: true,
+            selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+          },
+        },
+        _count: { select: { enrollments: { where: { status: ACTIVE_ENROLLMENT_STATUS } } } },
+      },
     },
-  },
-  room: { select: { id: true, name: true } },
-  _count: { select: { attendees: true } },
-} satisfies Prisma.SessionSelect;
+    room: { select: { id: true, name: true } },
+    _count: { select: { attendees: true } },
+  } satisfies Prisma.SessionSelect;
+}
 
 export type SessionListRow = Prisma.SessionGetPayload<{
-  select: typeof SESSION_LIST_SELECT;
+  select: ReturnType<typeof sessionListSelect>;
 }>;
 
 /** A session detail page — every field it renders, including the roster. */
-export const SESSION_DETAIL_INCLUDE = {
-  teacher: true,
-  room: true,
-  classGroup: { include: { subject: true, grade: true } },
-  attendees: {
-    include: {
-      studentProfile: { include: { user: true } },
-      enrollment: true,
-      payments: { orderBy: { recordedAt: "desc" } },
+export function sessionDetailInclude(centerId: string) {
+  const withSelection = { include: { selections: { where: { centerId } } } } as const;
+  return {
+    teacher: true,
+    room: true,
+    classGroup: { include: { subject: withSelection, grade: withSelection } },
+    attendees: {
+      include: {
+        studentProfile: { include: { user: true } },
+        enrollment: true,
+        payments: { orderBy: { recordedAt: "desc" } },
+      },
+      orderBy: { createdAt: "asc" },
     },
-    orderBy: { createdAt: "asc" },
-  },
-} satisfies Prisma.SessionInclude;
+  } satisfies Prisma.SessionInclude;
+}
 
 export type SessionDetailRow = Prisma.SessionGetPayload<{
-  include: typeof SESSION_DETAIL_INCLUDE;
+  include: ReturnType<typeof sessionDetailInclude>;
 }>;
 
 export function sessionListWhere(filters: {
@@ -524,15 +551,15 @@ export function sessionDisplayName(
   locale: string,
   row: {
     classGroup: {
-      subject: { nameAr: string; nameEn: string } | null;
-      grade: { nameAr: string; nameEn: string } | null;
+      subject: CatalogWithSelection | null;
+      grade: CatalogWithSelection | null;
     };
   },
 ): string {
   return (
     [
-      row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
-      row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
+      catalogLabelWithSelection(locale, row.classGroup.subject),
+      catalogLabelWithSelection(locale, row.classGroup.grade),
     ]
       .filter(Boolean)
       .join(" · ") || "—"

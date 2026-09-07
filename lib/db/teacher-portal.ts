@@ -170,6 +170,7 @@ export function studentSessionsWithTeacher(
   teacherId: string,
   studentProfileId: string,
 ) {
+  const withSelection = { include: { selections: { where: { centerId } } } } as const;
   return db.sessionAttendee.findMany({
     where: scopedWhere(centerId, {
       studentProfileId,
@@ -177,7 +178,11 @@ export function studentSessionsWithTeacher(
     }),
     orderBy: { session: { date: "desc" } },
     include: {
-      session: { include: { classGroup: { include: { subject: true, grade: true } } } },
+      session: {
+        include: {
+          classGroup: { include: { subject: withSelection, grade: withSelection } },
+        },
+      },
       payments: { where: { voided: false }, orderBy: { recordedAt: "desc" }, take: 1 },
     },
   });

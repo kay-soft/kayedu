@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { sessionDisplayName } from "@/lib/db/sessions";
@@ -127,7 +127,7 @@ export default async function TeacherStudentDetailPage({
               <CardTitle>{t("fields.grade")}</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-text-primary">
-              {student.grade ? catalogLabel(locale, student.grade) : tCommon("none")}
+              {student.grade ? catalogLabelWithSelection(locale, student.grade) : tCommon("none")}
             </CardContent>
           </Card>
 

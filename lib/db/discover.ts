@@ -19,29 +19,50 @@ import { scopedWhere } from "./tenant-scope.ts";
  * loop over centers instead of by a teacher's own memberships.
  */
 
-/** Fields a Discover card actually renders — never a full include. */
-export const DISCOVER_CLASS_SELECT = {
-  id: true,
-  price: true,
-  capacity: true,
-  acceptsNewStudents: true,
-  requiresConfirmation: true,
-  teacherId: true,
-  // Global catalog ids (M13) — a single subjectId/gradeId now means the same
-  // thing at every centre, so filtering can be a real `where` instead of the
-  // pre-M13 in-memory name match (see the page's filter logic).
-  subject: { select: { id: true, nameAr: true, nameEn: true } },
-  grade: { select: { id: true, nameAr: true, nameEn: true } },
-  room: { select: { name: true } },
-  schedules: {
-    select: { dayOfWeek: true, startTime: true, endTime: true },
-    orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
-  },
-  _count: { select: { enrollments: { where: { status: "ACTIVE" } } } },
-} satisfies Prisma.ClassGroupSelect;
+/**
+ * Fields a Discover card actually renders — never a full include. A function
+ * of `centerId`, not a static object (M13): `subject`/`grade` each carry a
+ * nested, centre-scoped `selections` lookup so a browsing student sees this
+ * centre's own rename when it has one, not just the canonical catalog name.
+ */
+export function discoverClassSelect(centerId: string) {
+  return {
+    id: true,
+    price: true,
+    capacity: true,
+    acceptsNewStudents: true,
+    requiresConfirmation: true,
+    teacherId: true,
+    // Global catalog ids (M13) — a single subjectId/gradeId now means the
+    // same thing at every centre, so filtering can be a real `where` instead
+    // of the pre-M13 in-memory name match (see the page's filter logic).
+    subject: {
+      select: {
+        id: true,
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      },
+    },
+    grade: {
+      select: {
+        id: true,
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      },
+    },
+    room: { select: { name: true } },
+    schedules: {
+      select: { dayOfWeek: true, startTime: true, endTime: true },
+      orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+    },
+    _count: { select: { enrollments: { where: { status: "ACTIVE" } } } },
+  } satisfies Prisma.ClassGroupSelect;
+}
 
 export type DiscoverClassRow = Prisma.ClassGroupGetPayload<{
-  select: typeof DISCOVER_CLASS_SELECT;
+  select: ReturnType<typeof discoverClassSelect>;
 }>;
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
@@ -71,7 +92,7 @@ export function discoverClassesForCenter(
       ...(filters?.subjectId ? { subjectId: filters.subjectId } : {}),
       ...(filters?.gradeId ? { gradeId: filters.gradeId } : {}),
     }),
-    select: DISCOVER_CLASS_SELECT,
+    select: discoverClassSelect(centerId),
     orderBy: [{ createdAt: "desc" }],
     take: 200,
   });

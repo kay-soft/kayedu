@@ -10,16 +10,16 @@ import * as catalog from "@/lib/db/catalog";
 import { catalogLabel } from "@/lib/catalog";
 import type { TenantContext } from "@/lib/auth/tenant";
 import {
-  STUDENT_LIST_SELECT,
   TEACHER_LIST_SELECT,
+  studentListSelect,
 } from "@/lib/db/students";
 import {
-  CLASS_DETAIL_INCLUDE,
-  CLASS_LIST_SELECT,
+  classDetailInclude,
+  classListSelect,
 } from "@/lib/db/classes";
 import {
-  SESSION_DETAIL_INCLUDE,
-  SESSION_LIST_SELECT,
+  sessionDetailInclude,
+  sessionListSelect,
 } from "@/lib/db/sessions";
 import {
   requireScopedById,
@@ -214,7 +214,7 @@ export function scoped(ctx: TenantContext) {
         prisma.studentProfile.findMany({
           where: scopedWhere(centerId, args.where),
           orderBy: [{ active: "desc" }, { studentCode: "asc" }],
-          select: STUDENT_LIST_SELECT,
+          select: studentListSelect(centerId),
           take: args.take,
           skip: args.skip,
         }),
@@ -225,7 +225,10 @@ export function scoped(ctx: TenantContext) {
       findDetailById: (id: string) =>
         prisma.studentProfile.findFirst({
           where: scopedWhere(centerId, { id }),
-          include: { user: true, grade: true },
+          include: {
+            user: true,
+            grade: { include: { selections: { where: { centerId } } } },
+          },
         }),
 
       findByUserId: (userId: string) =>
@@ -348,7 +351,11 @@ export function scoped(ctx: TenantContext) {
           orderBy: { enrolledAt: "desc" },
           include: {
             classGroup: {
-              include: { subject: true, grade: true, teacher: true },
+              include: {
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
+                teacher: true,
+              },
             },
           },
         }),
@@ -540,7 +547,11 @@ export function scoped(ctx: TenantContext) {
         prisma.classGroup.findMany({
           where: scopedWhere(centerId, where),
           orderBy: [{ active: "desc" }, { createdAt: "desc" }],
-          include: { subject: true, grade: true, room: true },
+          include: {
+            subject: { include: { selections: { where: { centerId } } } },
+            grade: { include: { selections: { where: { centerId } } } },
+            room: true,
+          },
         }),
 
       /** The list screen: a lean select, filtered, ordered and paged. */
@@ -552,7 +563,7 @@ export function scoped(ctx: TenantContext) {
         prisma.classGroup.findMany({
           where: scopedWhere(centerId, args.where),
           orderBy: [{ active: "desc" }, { createdAt: "desc" }],
-          select: CLASS_LIST_SELECT,
+          select: classListSelect(centerId),
           take: args.take,
           skip: args.skip,
         }),
@@ -562,7 +573,7 @@ export function scoped(ctx: TenantContext) {
       findDetailById: (id: string) =>
         prisma.classGroup.findFirst({
           where: scopedWhere(centerId, { id }),
-          include: CLASS_DETAIL_INCLUDE,
+          include: classDetailInclude(centerId),
         }),
 
       create: (data: Omit<Prisma.ClassGroupUncheckedCreateInput, "centerId">) =>
@@ -658,7 +669,7 @@ export function scoped(ctx: TenantContext) {
         prisma.session.findMany({
           where: scopedWhere(centerId, args.where),
           orderBy: [{ date: "asc" }, { startTime: "asc" }],
-          select: SESSION_LIST_SELECT,
+          select: sessionListSelect(centerId),
           take: 1000,
         }),
 
@@ -667,7 +678,7 @@ export function scoped(ctx: TenantContext) {
       findDetailById: (id: string) =>
         prisma.session.findFirst({
           where: scopedWhere(centerId, { id }),
-          include: SESSION_DETAIL_INCLUDE,
+          include: sessionDetailInclude(centerId),
         }),
 
       /** Today's non-cancelled sessions — the Reception Desk's live rail. */
@@ -678,7 +689,7 @@ export function scoped(ctx: TenantContext) {
             status: { not: CANCELLED_STATUS },
           }),
           orderBy: [{ startTime: "asc" }],
-          select: SESSION_LIST_SELECT,
+          select: sessionListSelect(centerId),
         }),
 
       /**
@@ -851,7 +862,12 @@ export function scoped(ctx: TenantContext) {
           orderBy: { requestedAt: "asc" },
           include: {
             student: true,
-            classGroup: { include: { subject: true, grade: true } },
+            classGroup: {
+              include: {
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
+              },
+            },
           },
         }),
 

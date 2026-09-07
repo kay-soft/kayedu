@@ -23,7 +23,7 @@ import { scoped } from "@/lib/db/scoped";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 
 /**
  * Classes (spec §4.1 item 3) — a filterable dashboard first, exactly like
@@ -86,8 +86,8 @@ export default async function ClassesPage({
   const rows: ClassRowData[] = classes.map((classGroup) => ({
     classGroupId: classGroup.id,
     teacherName: teacherByUserId.get(classGroup.teacherId) ?? tCommon("none"),
-    subjectName: classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
-    gradeName: classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+    subjectName: classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+    gradeName: classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
     roomName: classGroup.room?.name ?? null,
     price: classGroup.price,
     capacity: classGroup.capacity,

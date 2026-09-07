@@ -14,7 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import {
@@ -137,8 +137,8 @@ export default async function SessionsPage({
     value: classGroup.id,
     label:
       [
-        classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
-        classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+        classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+        classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
       ]
         .filter(Boolean)
         .join(" · ") || t("columns.untitled"),

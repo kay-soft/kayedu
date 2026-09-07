@@ -16,7 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
@@ -87,8 +87,8 @@ export default async function TeacherSessionsPage({
     value: classGroup.id,
     label:
       [
-        classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
-        classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+        classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+        classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
       ]
         .filter(Boolean)
         .join(" · ") || tCommon("none"),

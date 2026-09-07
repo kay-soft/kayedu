@@ -68,9 +68,21 @@ export async function studentActiveEnrollmentClassIds(
   return new Set(rows.map((row) => row.classGroupId));
 }
 
-/** "My reservations" (spec §4.3): every request this student has ever made. */
-export function listReservationsForStudent(db: Db, studentUserId: string) {
-  return db.reservation.findMany({
+/**
+ * "My reservations" (spec §4.3): every request this student has ever made.
+ *
+ * This is the one catalog-display read in this module that genuinely can't
+ * push a `selections: { where: { centerId } }` filter into the query itself
+ * (M13): it's identity-scoped across every centre the student ever
+ * reserved at, so there is no single `centerId` to filter the nested
+ * include by. Instead it batch-resolves the distinct (centre, catalog id)
+ * pairs actually present in the result — one extra query, not one per row —
+ * and attaches a `selections` array to each subject/grade matching the same
+ * shape a single-centre nested include would have produced, so
+ * `lib/catalog.ts`'s `catalogLabelWithSelection` reads it back identically.
+ */
+export async function listReservationsForStudent(db: Db, studentUserId: string) {
+  const rows = await db.reservation.findMany({
     where: { studentId: studentUserId },
     orderBy: { requestedAt: "desc" },
     include: {
@@ -78,21 +90,95 @@ export function listReservationsForStudent(db: Db, studentUserId: string) {
       classGroup: {
         select: {
           id: true,
+          centerId: true,
+          subjectId: true,
+          gradeId: true,
           subject: { select: { nameAr: true, nameEn: true } },
           grade: { select: { nameAr: true, nameEn: true } },
         },
       },
     },
   });
+
+  type Pair = { kind: "SUBJECT" | "GRADE"; centerId: string; catalogId: string };
+  const pairsByKey = new Map<string, Pair>();
+  for (const row of rows) {
+    if (row.classGroup.subjectId) {
+      const pair: Pair = { kind: "SUBJECT", centerId: row.classGroup.centerId, catalogId: row.classGroup.subjectId };
+      pairsByKey.set(`${pair.kind}:${pair.centerId}:${pair.catalogId}`, pair);
+    }
+    if (row.classGroup.gradeId) {
+      const pair: Pair = { kind: "GRADE", centerId: row.classGroup.centerId, catalogId: row.classGroup.gradeId };
+      pairsByKey.set(`${pair.kind}:${pair.centerId}:${pair.catalogId}`, pair);
+    }
+  }
+  const pairs = [...pairsByKey.values()];
+
+  const selections = pairs.length
+    ? await db.centerCatalogSelection.findMany({
+        where: {
+          OR: pairs.map((pair) =>
+            pair.kind === "SUBJECT"
+              ? { kind: "SUBJECT" as const, centerId: pair.centerId, subjectId: pair.catalogId }
+              : { kind: "GRADE" as const, centerId: pair.centerId, gradeId: pair.catalogId },
+          ),
+        },
+        select: { centerId: true, kind: true, subjectId: true, gradeId: true, displayName: true },
+      })
+    : [];
+
+  const displayNameByKey = new Map<string, string | null>();
+  for (const selection of selections) {
+    const catalogId = selection.kind === "SUBJECT" ? selection.subjectId : selection.gradeId;
+    if (catalogId) {
+      displayNameByKey.set(`${selection.kind}:${selection.centerId}:${catalogId}`, selection.displayName);
+    }
+  }
+
+  const withDisplayName = (
+    kind: "SUBJECT" | "GRADE",
+    centerId: string,
+    catalogId: string | null,
+  ) => {
+    const displayName = catalogId ? (displayNameByKey.get(`${kind}:${centerId}:${catalogId}`) ?? null) : null;
+    return [{ displayName }];
+  };
+
+  return rows.map((row) => ({
+    ...row,
+    classGroup: {
+      ...row.classGroup,
+      subject: row.classGroup.subject
+        ? {
+            ...row.classGroup.subject,
+            selections: withDisplayName("SUBJECT", row.classGroup.centerId, row.classGroup.subjectId),
+          }
+        : null,
+      grade: row.classGroup.grade
+        ? {
+            ...row.classGroup.grade,
+            selections: withDisplayName("GRADE", row.classGroup.centerId, row.classGroup.gradeId),
+          }
+        : null,
+    },
+  }));
 }
 
 // ── Schedule: one center's slice, unioned by the caller (getStudentContexts) ─
 
-/** Fields a schedule card renders — never a full include. */
-export const STUDENT_UPCOMING_SESSION_INCLUDE = {
-  classGroup: { include: { subject: true, grade: true, room: true } },
-  room: true,
-} satisfies Prisma.SessionInclude;
+/**
+ * Fields a schedule card renders — never a full include. A function of
+ * `centerId`, not a static object (M13): `subject`/`grade` each carry a
+ * nested, centre-scoped `selections` lookup so a student sees this centre's
+ * own rename when it has one.
+ */
+function studentUpcomingSessionInclude(centerId: string) {
+  const withSelection = { include: { selections: { where: { centerId } } } } as const;
+  return {
+    classGroup: { include: { subject: withSelection, grade: withSelection, room: true } },
+    room: true,
+  } satisfies Prisma.SessionInclude;
+}
 
 /** Every future, non-cancelled session for this student's active enrollments at one center. */
 export function studentUpcomingSessions(
@@ -107,7 +193,7 @@ export function studentUpcomingSessions(
       status: { not: CANCELLED_STATUS },
       classGroup: { enrollments: { some: { studentProfileId, status: ACTIVE_ENROLLMENT } } },
     }),
-    include: STUDENT_UPCOMING_SESSION_INCLUDE,
+    include: studentUpcomingSessionInclude(centerId),
     orderBy: [{ date: "asc" }, { startTime: "asc" }],
     take: 100,
   });
@@ -126,13 +212,19 @@ export function studentPastAttendance(
   studentProfileId: string,
   uptoDate: Date,
 ) {
+  const withSelection = { include: { selections: { where: { centerId } } } } as const;
   return db.sessionAttendee.findMany({
     where: scopedWhere(centerId, {
       studentProfileId,
       session: { date: { lt: uptoDate } },
     }),
     include: {
-      session: { include: { classGroup: { include: { subject: true, grade: true } }, room: true } },
+      session: {
+        include: {
+          classGroup: { include: { subject: withSelection, grade: withSelection } },
+          room: true,
+        },
+      },
       payments: { where: { voided: false }, orderBy: { recordedAt: "desc" }, take: 1 },
     },
     orderBy: { session: { date: "desc" } },

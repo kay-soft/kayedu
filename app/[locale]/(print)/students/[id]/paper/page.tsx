@@ -5,7 +5,7 @@ import { IdCardPreview } from "@/components/center/id-card-preview";
 import { PrintToolbar } from "@/components/center/print-toolbar";
 import { DetailRow } from "@/components/shared/field";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
@@ -73,7 +73,7 @@ export default async function StudentPaperPrintPage({
             <div className="mt-2">
               <DetailRow
                 label={t("fields.grade")}
-                value={student.grade ? catalogLabel(locale, student.grade) : tCommon("none")}
+                value={student.grade ? catalogLabelWithSelection(locale, student.grade) : tCommon("none")}
               />
               <DetailRow
                 label={t("fields.phone")}
@@ -133,7 +133,7 @@ export default async function StudentPaperPrintPage({
                   className="flex flex-wrap gap-x-3 border-b border-border-subtle py-2 text-sm last:border-0"
                 >
                   <span className="font-medium text-text-primary">
-                    {enrollment.classGroup.subject ? catalogLabel(locale, enrollment.classGroup.subject) : tCommon("none")}
+                    {enrollment.classGroup.subject ? catalogLabelWithSelection(locale, enrollment.classGroup.subject) : tCommon("none")}
                   </span>
                   <span className="text-text-secondary">
                     {fullName(enrollment.classGroup.teacher)}

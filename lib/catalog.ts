@@ -28,3 +28,25 @@ export function catalogLabel(
 }
 
 export type CatalogEntryKind = "EDUCATION_SYSTEM" | "GRADE" | "SUBJECT";
+
+/**
+ * The shape a `subject`/`grade`/`educationSystem` relation has once its
+ * `select`/`include` carries the nested, centre-scoped
+ * `selections: { where: { centerId }, select: { displayName: true }, take: 1 }`
+ * every live read path below adds. There is no schema field anywhere that
+ * freezes a catalog entry's name (unlike `priceSnapshot` for money) — every
+ * one of these is a live join, so a centre's own rename belongs on every one
+ * of them, not just the settings screen and the class form.
+ */
+export type CatalogWithSelection = CatalogLabelSource & {
+  selections?: { displayName: string | null }[];
+};
+
+/** `catalogLabel`, but pulling the override out of a nested `selections` include. Null-safe. */
+export function catalogLabelWithSelection(
+  locale: string,
+  entry: CatalogWithSelection | null | undefined,
+): string | null {
+  if (!entry) return null;
+  return catalogLabel(locale, entry, entry.selections?.[0]?.displayName ?? null);
+}

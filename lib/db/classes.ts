@@ -16,42 +16,68 @@ import type { ScopedDb } from "@/lib/db/scoped";
  * local record on the teacher's `Membership` (docs/01-data-model.md §6), not
  * the raw global `User`; the page batches that lookup once per page of rows,
  * the same way the teacher block-counts are batched (docs/02 §14).
+ *
+ * A function of `centerId`, not a static object (M13): `subject`/`grade`
+ * each carry a nested, centre-scoped `selections` lookup so a display reads
+ * this centre's own rename when it has one — no schema field freezes a
+ * catalog entry's name (unlike `priceSnapshot` for money), so every live
+ * read resolves the override, not just the settings/catalog screen and the
+ * class form. `lib/catalog.ts`'s `catalogLabelWithSelection` reads it back.
  */
-export const CLASS_LIST_SELECT = {
-  id: true,
-  active: true,
-  price: true,
-  capacity: true,
-  centerShareType: true,
-  centerShareValue: true,
-  teacherId: true,
-  subject: { select: { id: true, nameAr: true, nameEn: true } },
-  grade: { select: { id: true, nameAr: true, nameEn: true } },
-  room: { select: { id: true, name: true } },
-  _count: {
-    select: {
-      schedules: true,
-      enrollments: { where: { status: "ACTIVE" } },
+export function classListSelect(centerId: string) {
+  return {
+    id: true,
+    active: true,
+    price: true,
+    capacity: true,
+    centerShareType: true,
+    centerShareValue: true,
+    teacherId: true,
+    subject: {
+      select: {
+        id: true,
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      },
     },
-  },
-} satisfies Prisma.ClassGroupSelect;
+    grade: {
+      select: {
+        id: true,
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      },
+    },
+    room: { select: { id: true, name: true } },
+    _count: {
+      select: {
+        schedules: true,
+        enrollments: { where: { status: "ACTIVE" } },
+      },
+    },
+  } satisfies Prisma.ClassGroupSelect;
+}
 
 export type ClassListRow = Prisma.ClassGroupGetPayload<{
-  select: typeof CLASS_LIST_SELECT;
+  select: ReturnType<typeof classListSelect>;
 }>;
 
 /** A class detail page — every field it actually renders, plus its schedules. */
-export const CLASS_DETAIL_INCLUDE = {
-  teacher: true,
-  subject: true,
-  grade: true,
-  educationSystem: true,
-  room: true,
-  schedules: { orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }] },
-} satisfies Prisma.ClassGroupInclude;
+export function classDetailInclude(centerId: string) {
+  const withSelection = { include: { selections: { where: { centerId } } } } as const;
+  return {
+    teacher: true,
+    subject: withSelection,
+    grade: withSelection,
+    educationSystem: withSelection,
+    room: true,
+    schedules: { orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }] },
+  } satisfies Prisma.ClassGroupInclude;
+}
 
 export type ClassDetailRow = Prisma.ClassGroupGetPayload<{
-  include: typeof CLASS_DETAIL_INCLUDE;
+  include: ReturnType<typeof classDetailInclude>;
 }>;
 
 export function classListWhere(filters: {

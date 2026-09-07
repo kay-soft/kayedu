@@ -14,7 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { sessionReceiptTotals } from "@/lib/db/payments";
@@ -101,7 +101,7 @@ export default async function TeacherSessionDetailPage({
       <PageHeader
         title={className}
         description={t("detailSubtitle", {
-          grade: session.classGroup.grade ? catalogLabel(locale, session.classGroup.grade) : tCommon("none"),
+          grade: catalogLabelWithSelection(locale, session.classGroup.grade) ?? tCommon("none"),
           date: formatDate(session.date, locale),
         })}
         action={
@@ -212,7 +212,7 @@ export default async function TeacherSessionDetailPage({
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.grade")}</span>
                 <span className="font-medium text-text-primary">
-                  {session.classGroup.grade ? catalogLabel(locale, session.classGroup.grade) : tCommon("none")}
+                  {session.classGroup.grade ? catalogLabelWithSelection(locale, session.classGroup.grade) : tCommon("none")}
                 </span>
               </div>
               <div className="flex justify-between gap-3">
