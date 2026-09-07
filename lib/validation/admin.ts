@@ -71,6 +71,12 @@ export const centerActiveSchema = z.object({
   active: checkbox,
 });
 
+/** M13's admin review queue — CatalogSuggestion ids are also `@default(uuid())`. */
+export const catalogSuggestionIdSchema = z.object({
+  locale: localeSchema,
+  id: z.string().uuid("notFound"),
+});
+
 export const centerPlanSchema = z.object({
   locale: localeSchema,
   id: centerId,

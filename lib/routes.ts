@@ -35,9 +35,7 @@ export const ROUTES = {
   // configuration screen is a child of it.
   centerSettings: "/settings",
   centerSettingsRooms: "/settings/rooms",
-  centerSettingsEducationSystems: "/settings/education-systems",
-  centerSettingsGrades: "/settings/grades",
-  centerSettingsSubjects: "/settings/subjects",
+  centerSettingsCatalog: "/settings/catalog",
   centerSettingsCard: "/settings/card",
   centerSettingsPermissions: "/settings/permissions",
   centerStaff: "/settings/staff",
@@ -54,6 +52,7 @@ export const ROUTES = {
   adminCenters: "/admin/centers",
   adminCenter: (id: string) => `/admin/centers/${id}`,
   adminPlatform: "/admin/platform",
+  adminCatalog: "/admin/catalog",
 } as const;
 
 export function homePathForRole(role: TenantRole): string {

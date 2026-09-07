@@ -129,7 +129,10 @@ export default async function SessionsPage({
     value: teacher.userId,
     label: fullName(localName(teacher, teacher.user)),
   }));
-  const subjectOptions = subjects.map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject) }));
+  // `subjects` comes from `scoped(ctx).subjects.list()`, which already
+  // resolves `.name` to this centre's own display-name override or the
+  // catalog entry's bilingual name.
+  const subjectOptions = subjects.map((subject) => ({ value: subject.id, label: subject.name }));
   const classOptions = classes.map((classGroup) => ({
     value: classGroup.id,
     label:

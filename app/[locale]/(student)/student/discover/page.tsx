@@ -6,6 +6,7 @@ import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { requireStudentUser } from "@/lib/auth/tenant";
+import { listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import {
   discoverClassesForCenter,
@@ -30,10 +31,6 @@ type CardViewModel = {
   centerName: string;
   centerLogoUrl: string | null;
   classGroupId: string;
-  // Global catalog ids (M13) — what a filter actually matches on now, never
-  // a name string (docs/02-architecture.md §14).
-  subjectId: string | null;
-  gradeId: string | null;
   subjectName: string | null;
   gradeName: string | null;
   teacherName: string;
@@ -68,20 +65,32 @@ export default async function StudentDiscoverPage({
   const locale = await getLocale();
   const dayNames = tClasses.raw("dayNames") as string[];
 
-  const [centers, blockedByCenter, reservationByClass, enrolledClassIds] = await Promise.all([
-    prisma.center.findMany({
-      where: { active: true },
-      select: { id: true, name: true, logoUrl: true, themeColor: true },
-      orderBy: { name: "asc" },
-    }),
-    studentBlockedRefsByCenter(prisma, session.user.id),
-    studentReservationStatusByClass(prisma, session.user.id),
-    studentActiveEnrollmentClassIds(prisma, session.user.id),
-  ]);
+  const [centers, blockedByCenter, reservationByClass, enrolledClassIds, allSubjects, allGrades] =
+    await Promise.all([
+      prisma.center.findMany({
+        where: { active: true },
+        select: { id: true, name: true, logoUrl: true, themeColor: true },
+        orderBy: { name: "asc" },
+      }),
+      studentBlockedRefsByCenter(prisma, session.user.id),
+      studentReservationStatusByClass(prisma, session.user.id),
+      studentActiveEnrollmentClassIds(prisma, session.user.id),
+      // The full global catalog (M13) — filter options come from here, not
+      // from whatever happens to be in the current result set, so every
+      // pill stays available even while a filter narrows the cards shown.
+      listCatalogSubjects(prisma),
+      listCatalogGrades(prisma),
+    ]);
 
+  // Global catalog ids (M13) mean the same thing at every centre, so the
+  // subject/grade filter is a real scoped `where` per centre now — never the
+  // pre-M13 in-memory name match (docs/02-architecture.md §14).
   const perCenter = await Promise.all(
     centers.map(async (center) => {
-      const classes = await discoverClassesForCenter(prisma, center.id);
+      const classes = await discoverClassesForCenter(prisma, center.id, {
+        subjectId: subjectFilter || undefined,
+        gradeId: gradeFilter || undefined,
+      });
       const teacherIds = [...new Set(classes.map((row) => row.teacherId))];
       const teacherNames = await teacherDisplayNames(prisma, center.id, teacherIds);
       return { center, classes, teacherNames };
@@ -116,8 +125,6 @@ export default async function StudentDiscoverPage({
         centerName: center.name,
         centerLogoUrl: center.logoUrl,
         classGroupId: row.id,
-        subjectId: row.subject?.id ?? null,
-        gradeId: row.grade?.id ?? null,
         subjectName: row.subject ? catalogLabel(locale, row.subject) : null,
         gradeName: row.grade ? catalogLabel(locale, row.grade) : null,
         teacherName: teacherNames.get(row.teacherId) ?? "—",
@@ -130,25 +137,17 @@ export default async function StudentDiscoverPage({
     }
   }
 
-  // Deduped by catalog id (M13) — a "Math" pill now means the same
-  // CatalogSubject everywhere it's offered, so the filter matches an id, not
-  // a name string that happened to collide across two centres' own rows.
-  const subjectOptionsById = new Map<string, string>();
-  const gradeOptionsById = new Map<string, string>();
-  for (const card of cards) {
-    if (card.subjectId && card.subjectName) subjectOptionsById.set(card.subjectId, card.subjectName);
-    if (card.gradeId && card.gradeName) gradeOptionsById.set(card.gradeId, card.gradeName);
-  }
-  const subjectOptions = [...subjectOptionsById.entries()]
-    .map(([value, label]) => ({ value, label }))
+  const subjectOptions = allSubjects
+    .map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject) }))
     .sort((a, b) => a.label.localeCompare(b.label));
-  const gradeOptions = [...gradeOptionsById.entries()]
-    .map(([value, label]) => ({ value, label }))
+  const gradeOptions = allGrades
+    .map((grade) => ({ value: grade.id, label: catalogLabel(locale, grade) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
+  // Subject/grade are already applied in each centre's own query above; only
+  // the day filter (a child-row check) still happens here, in memory, after
+  // the per-centre results are combined.
   const filtered = cards.filter((card) => {
-    if (subjectFilter && card.subjectId !== subjectFilter) return false;
-    if (gradeFilter && card.gradeId !== gradeFilter) return false;
     if (dayFilter) {
       const day = Number(dayFilter);
       if (!card.schedules.some((slot) => slot.dayOfWeek === day)) return false;

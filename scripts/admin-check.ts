@@ -61,6 +61,9 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "admin-check-" } } });
+  // CatalogSubject is global (M13) — it doesn't cascade away with the
+  // throwaway centers above.
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Admin-Check" } } });
 }
 
 function invite(email: string, invitedBy: string) {
@@ -227,7 +230,12 @@ async function main() {
       });
     }
 
-    const subject = await prisma.subject.create({ data: { centerId, name: "Math" } });
+    // A global catalog row (M13) — ClassGroup.subjectId references it
+    // directly; no CenterCatalogSelection is needed for this script's own
+    // fixture writes, since it bypasses the Server Actions entirely.
+    const subject = await prisma.catalogSubject.create({
+      data: { nameAr: "Admin-Check Math", nameEn: "Admin-Check Math" },
+    });
     const classGroup = await prisma.classGroup.create({
       data: { centerId, teacherId: teacherIds[0], subjectId: subject.id, price: 10_000 },
     });

@@ -190,6 +190,16 @@
 
 ---
 
+## 19. Propagate a centre's catalog display-name override to every downstream surface
+
+**What it is.** `CenterCatalogSelection.displayName` — a centre's own rename of a picked catalog entry (M13, `01-data-model.md` "Academic catalog layer") — is honoured today only on `/settings/catalog` itself and on the class create/edit form's subject/grade/education-system dropdowns. Every other place a class's subject/grade renders (the class list, session receipts and rosters, the teacher and student portals, print views, Discover's cards, and the Approvals queue) shows the catalog entry's own bilingual name (`nameAr`/`nameEn` by locale) instead, ignoring the override.
+
+**Why deferred.** Wiring the override through those roughly twenty read sites means resolving, for every subject/grade/education-system reference, "does this centre have a `CenterCatalogSelection` with a `displayName` for this catalog id" — either a nested Prisma `include` (`selections: { where: { centerId } }`) added to each of `lib/db/classes.ts`'s `CLASS_LIST_SELECT`/`CLASS_DETAIL_INCLUDE`, `lib/db/sessions.ts`'s `SESSION_LIST_SELECT`/`SESSION_DETAIL_INCLUDE`, `lib/db/student-portal.ts`'s session/reservation includes, `lib/db/discover.ts`'s `DISCOVER_CLASS_SELECT`, and `lib/db/approvals.ts`'s conflict-check rows, or a batch-resolve helper called at each of those pages. None of that is hard individually, but touching every one in the same pass as the schema migration and the centre-cut rework risked exactly the kind of scope creep CLAUDE.md rule 5 exists to catch. The platform-wide bilingual name is correct in both locales everywhere today — the gap is cosmetic (a centre's own nickname not showing up), not a correctness or isolation bug.
+
+**Depends on.** Nothing blocking — it's purely additional plumbing on top of the M13 shape that already exists (`CenterCatalogSelection`, `lib/catalog.ts`'s `catalogLabel`). Do it as its own small pass: add the nested `selections` include (or a batched lookup) to each select/include list above, thread `centerId` through, and swap each `catalogLabel(locale, entity)` call for `catalogLabel(locale, entity, selection?.displayName)`.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

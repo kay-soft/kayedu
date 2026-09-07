@@ -108,7 +108,10 @@ export default async function TeacherSessionsPage({
   const total = filtered.length;
   const pageEntries = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  const gradeOptions = grades.map((grade) => ({ value: grade.id, label: catalogLabel(locale, grade) }));
+  // `grades` comes from `scoped(ctx).grades.list()`, which already resolves
+  // `.name` to this centre's own display-name override or the catalog
+  // entry's bilingual name.
+  const gradeOptions = grades.map((grade) => ({ value: grade.id, label: grade.name }));
   const upcomingCount = withStatus.filter(
     (entry) => entry.displayStatus === "SCHEDULED" || entry.displayStatus === "LIVE",
   ).length;

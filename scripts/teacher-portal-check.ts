@@ -48,6 +48,13 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "teacher-portal-check-" } } });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({
+    where: { nameEn: { startsWith: "Teacher-Portal-Check" } },
+  });
+  await prisma.catalogGrade.deleteMany({
+    where: { nameEn: { startsWith: "Teacher-Portal-Check" } },
+  });
 }
 
 async function makeStudent(centerId: string, code: string) {
@@ -155,9 +162,16 @@ async function main() {
     data: scopedData(centerB.id, { userId: teacher.id, role: "TEACHER", firstName: "T", lastName: "Shared", joinedAt: new Date() }),
   });
 
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
-  const gradeA = await prisma.grade.create({ data: scopedData(centerA.id, { name: "Grade 10" }) });
-  const subjectB = await prisma.subject.create({ data: scopedData(centerB.id, { name: "Physics" }) });
+  // Global catalog rows (M13) — no centerId; ClassGroup references them directly.
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: "Teacher-Portal-Check Math", nameEn: "Teacher-Portal-Check Math" },
+  });
+  const gradeA = await prisma.catalogGrade.create({
+    data: { nameAr: "Teacher-Portal-Check Grade 10", nameEn: "Teacher-Portal-Check Grade 10" },
+  });
+  const subjectB = await prisma.catalogSubject.create({
+    data: { nameAr: "Teacher-Portal-Check Physics", nameEn: "Teacher-Portal-Check Physics" },
+  });
 
   const classA = await prisma.classGroup.create({
     data: scopedData(centerA.id, {

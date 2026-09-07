@@ -60,24 +60,9 @@ const moneyEgp = z
 const base = { locale: localeSchema };
 
 // ── Master data ────────────────────────────────────────────────────────────
-
-export const educationSystemSchema = z.object({
-  ...base,
-  name: entityName,
-  basePrice: moneyEgp,
-});
-
-export const gradeSchema = z.object({
-  ...base,
-  name: entityName,
-  educationSystemId: optionalRef,
-});
-
-export const subjectSchema = z.object({
-  ...base,
-  name: entityName,
-  gradeId: optionalRef,
-});
+// Education systems/grades/subjects moved to the platform-owned global
+// catalog at M13 — a centre no longer authors these rows (see the catalog
+// schemas further down). Rooms are the one entity still centre-authored.
 
 export const roomSchema = z.object({
   ...base,
@@ -86,11 +71,6 @@ export const roomSchema = z.object({
 });
 
 /** Every master-data update carries the id of the row being edited. */
-export const educationSystemUpdateSchema = educationSystemSchema.extend({
-  id: recordId,
-});
-export const gradeUpdateSchema = gradeSchema.extend({ id: recordId });
-export const subjectUpdateSchema = subjectSchema.extend({ id: recordId });
 export const roomUpdateSchema = roomSchema.extend({ id: recordId });
 
 export const recordToggleSchema = z.object({
@@ -100,6 +80,73 @@ export const recordToggleSchema = z.object({
 });
 
 export const recordDeleteSchema = z.object({ ...base, id: recordId });
+
+// ── The academic catalog (M13) ──────────────────────────────────────────────
+// A centre picks a global catalog entry (never authors one), may edit only
+// its own display name + price for that pick, and may suggest a missing or
+// wrong entry into the platform-admin review queue.
+// (docs/00-master-product-spec.md §5.1 "Global academic catalog".)
+
+export const catalogEntryKindSchema = z.enum(["EDUCATION_SYSTEM", "GRADE", "SUBJECT"], {
+  error: "notFound",
+});
+
+export const catalogSelectSchema = z.object({
+  ...base,
+  kind: catalogEntryKindSchema,
+  catalogId: recordId,
+  /** Optional at select time — a centre can rename later from its own list. */
+  displayName: z
+    .string()
+    .trim()
+    .max(80, "tooLong")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+  /** Only meaningful for kind = EDUCATION_SYSTEM; ignored otherwise. */
+  basePrice: moneyEgp,
+});
+
+export const catalogSelectionUpdateSchema = z.object({
+  ...base,
+  selectionId: recordId,
+  displayName: z
+    .string()
+    .trim()
+    .max(80, "tooLong")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+  basePrice: moneyEgp,
+});
+
+export const catalogDeselectSchema = z.object({ ...base, selectionId: recordId });
+
+export const catalogSelectionToggleSchema = z.object({
+  ...base,
+  selectionId: recordId,
+  active: checkbox,
+});
+
+export const catalogSuggestionSchema = z.object({
+  ...base,
+  kind: catalogEntryKindSchema,
+  /** Set only when suggesting a correction to an existing entry. */
+  targetId: optionalRef,
+  /** The parent a new GRADE/SUBJECT should hang off — ignored for EDUCATION_SYSTEM. */
+  parentId: optionalRef,
+  proposedNameAr: z.string().trim().min(1, "required").max(120, "tooLong"),
+  proposedNameEn: z.string().trim().min(1, "required").max(120, "tooLong"),
+  note: z
+    .string()
+    .trim()
+    .max(400, "tooLong")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+});
+
+export const catalogSuggestionResolveSchema = z.object({
+  ...base,
+  suggestionId: recordId,
+});
 
 // ── General settings (default center cut, timeout, late threshold) ─────────
 

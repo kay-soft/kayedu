@@ -389,7 +389,7 @@ async function seedDemoData(centerId: string) {
           endTime: def.end,
         },
       });
-      console.log(`  + Class: ${subject.name} (${teacher.firstName} ${teacher.lastName})`);
+      console.log(`  + Class: ${subject.nameEn} (${teacher.firstName} ${teacher.lastName})`);
     }
     classGroups.push(classGroup);
   }

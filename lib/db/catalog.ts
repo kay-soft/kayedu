@@ -301,6 +301,11 @@ export function removeCatalogSelection(db: Db, selectionId: string) {
   return db.centerCatalogSelection.delete({ where: { id: selectionId } });
 }
 
+/** Deactivating a pick (not deleting it) — docs/01-data-model.md §6. */
+export function setCatalogSelectionActive(db: Db, selectionId: string, active: boolean) {
+  return db.centerCatalogSelection.update({ where: { id: selectionId }, data: { active } });
+}
+
 /** Blocks deselecting an education system while the centre still has grade picks under it. */
 export function countCenterGradeSelectionsUnderSystem(
   db: Db,
@@ -343,6 +348,7 @@ export function createCatalogSuggestion(
   return db.catalogSuggestion.create({
     data: {
       centerId,
+      createdBy,
       kind: KIND[input.kind],
       targetId: input.targetId,
       parentId: input.parentId,

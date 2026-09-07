@@ -469,6 +469,7 @@ export async function rescheduleSessionAction(
     sessionId,
     { date, startTime, endTime },
     ctx.settings?.scheduleConflictPolicy ?? "WARN",
+    locale,
   );
   if (!result.ok) return { error: result.error };
 

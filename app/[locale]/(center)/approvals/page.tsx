@@ -90,8 +90,12 @@ export default async function ApprovalsPage() {
       fullName(localName(membership, membership.user)),
     ]),
   );
-  const subjectNameById = new Map(subjects.map((subject) => [subject.id, catalogLabel(locale, subject)]));
-  const gradeNameById = new Map(grades.map((grade) => [grade.id, catalogLabel(locale, grade)]));
+  // `subjects`/`grades` come from `scoped(ctx)`'s catalog collections, which
+  // already resolve `.name` to this centre's own display-name override (or
+  // the catalog entry's bilingual name) — `catalogLabel` is for a raw
+  // ClassGroup relation include below, which has no such override baked in.
+  const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));
+  const gradeNameById = new Map(grades.map((grade) => [grade.id, grade.name]));
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
   const totalPending = changeRequests.length + sessionRequests.length + reservations.length;

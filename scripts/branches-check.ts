@@ -73,6 +73,8 @@ async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.organization.deleteMany({ where: { name: ORG_NAME } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "branches-check-" } } });
+  // A global catalog row (M13) doesn't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Branches-Check" } } });
 }
 
 async function makeTeacher(centerId: string, email: string) {
@@ -102,7 +104,10 @@ async function makeStudent(centerId: string, code: string) {
 
 /** Seeds one real, snapshotted payment at a branch — the money a roll-up sums. */
 async function seedPayment(centerId: string, teacherId: string, amount: number) {
-  const subject = await prisma.subject.create({ data: scopedData(centerId, { name: "Math" }) });
+  // A global catalog row (M13) — no centerId.
+  const subject = await prisma.catalogSubject.create({
+    data: { nameAr: "Branches-Check Math", nameEn: "Branches-Check Math" },
+  });
   const classGroup = await prisma.classGroup.create({
     data: scopedData(centerId, {
       teacherId,

@@ -9,6 +9,7 @@ import {
   ConciergeBell,
   GraduationCap,
   LayoutDashboard,
+  Library,
   Settings,
   ShieldCheck,
   UserRound,
@@ -33,6 +34,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string }>> = {
   discover: BookOpen,
   centers: Building2,
   platform: ShieldCheck,
+  catalog: Library,
 };
 
 export function ShellIcon({

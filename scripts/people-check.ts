@@ -109,6 +109,8 @@ async function cleanup() {
       ],
     },
   });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "People-Check" } } });
 }
 
 /**
@@ -224,14 +226,18 @@ async function main() {
     },
   });
 
-  const gradeA1 = await prisma.grade.create({
-    data: { centerId: centerA.id, name: "Grade 10" },
+  // Global catalog rows (M13) — no centerId; StudentProfile.gradeId
+  // references them directly. Three distinct rows, matching the pre-M13
+  // fixture shape (this test only needs valid, distinct grade ids, not
+  // centre ownership of them).
+  const gradeA1 = await prisma.catalogGrade.create({
+    data: { nameAr: "People-Check Grade 10", nameEn: "People-Check Grade 10" },
   });
-  const gradeA2 = await prisma.grade.create({
-    data: { centerId: centerA.id, name: "Grade 11" },
+  const gradeA2 = await prisma.catalogGrade.create({
+    data: { nameAr: "People-Check Grade 11", nameEn: "People-Check Grade 11" },
   });
-  const gradeB1 = await prisma.grade.create({
-    data: { centerId: centerB.id, name: "Grade 10" },
+  const gradeB1 = await prisma.catalogGrade.create({
+    data: { nameAr: "People-Check Grade 10 (B)", nameEn: "People-Check Grade 10 (B)" },
   });
 
   console.log("People check (M3 revised — center-local contacts, system-assigned codes)");

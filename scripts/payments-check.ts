@@ -45,6 +45,9 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "payments-check-" } } });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Payments-Check" } } });
+  await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "Payments-Check" } } });
 }
 
 async function makeTeacher(centerId: string, email: string) {
@@ -139,8 +142,13 @@ async function main() {
   const teacherA = await makeTeacher(centerA.id, "payments-check-teacher-a@kayedu.test");
   const actorId = teacherA.id; // stands in for a recording staff member's userId
 
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
-  const gradeA = await prisma.grade.create({ data: scopedData(centerA.id, { name: "Grade 10" }) });
+  // Global catalog rows (M13) — no centerId; ClassGroup references them directly.
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: "Payments-Check Math", nameEn: "Payments-Check Math" },
+  });
+  const gradeA = await prisma.catalogGrade.create({
+    data: { nameAr: "Payments-Check Grade 10", nameEn: "Payments-Check Grade 10" },
+  });
 
   const PRICE = 12_000; // 120 EGP
 

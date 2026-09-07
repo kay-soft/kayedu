@@ -423,6 +423,7 @@
       "fixed": "Fixed amount (EGP)",
       "shareValuePct": "Percentage",
       "shareValueEgp": "Amount (EGP)",
+      "shareValueInheritedHint": "Starts from the education system's default fixed cut — change it freely for this class.",
       "centerShare": "Branch keeps",
       "teacherShare": "Teacher gets",
       "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
@@ -867,9 +868,7 @@
       "label": "Settings sections",
       "general": "General",
       "rooms": "Rooms",
-      "educationSystems": "Education systems",
-      "grades": "Grades",
-      "subjects": "Subjects",
+      "catalog": "Academic catalog",
       "card": "ID card",
       "permissions": "Permissions",
       "staff": "Users & roles"
@@ -907,7 +906,8 @@
       "ownerOnly": "Only an owner can change another owner.",
       "lastOwner": "This is the branch's only owner. Add another owner first.",
       "selfEdit": "You cannot change your own role or access.",
-      "alreadyMember": "That person already holds this role at this branch."
+      "alreadyMember": "That person already holds this role at this branch.",
+      "catalogAlreadySelected": "This branch has already picked that catalog entry."
     },
     "general": {
       "title": "General",
@@ -940,46 +940,48 @@
       "denyConflictsLabel": "Deny double-booked slots and sessions",
       "denyConflictsDescription": "Off by default: a conflict is saved and flagged so staff can review it. On: the conflicting slot or session is refused instead."
     },
-    "educationSystems": {
-      "title": "Education systems",
-      "description": "The curricula this branch teaches (National, Languages, IG…) and the price each one starts from.",
-      "addTitle": "Add an education system",
-      "addDescription": "Grades and classes are organised under these.",
-      "listTitle": "Education systems",
-      "listDescription": "Deactivate one to keep it out of new classes without losing its history.",
-      "empty": "No education systems yet. Add the first one above.",
+    "catalog": {
+      "title": "Academic catalog",
+      "description": "Education systems, grades and subjects are shared platform-wide. Pick the ones this branch teaches, rename or price your own pick, and suggest anything missing or wrong.",
+      "pickTitle": "Pick from the catalog",
+      "pickPlaceholder": "Choose an entry…",
+      "nothingLeftToPick": "This branch has already picked everything currently in the catalog.",
+      "select": "Add",
+      "deselect": "Remove",
+      "suggestNew": "Suggest a new entry",
+      "suggestCorrection": "Suggest a correction",
+      "suggestDescription": "Reviewed by a platform admin. Approving creates or corrects the shared catalog entry; rejecting leaves your own pick as it is.",
+      "suggestionSubmitted": "Suggestion submitted for review.",
+      "submitSuggestion": "Submit suggestion",
+      "noParent": "No parent",
       "fields": {
-        "name": "Name",
         "basePrice": "Base price",
-        "basePriceHint": "Per session, in EGP. A class can charge something different."
-      }
-    },
-    "grades": {
-      "title": "Grades",
-      "description": "The year groups this branch teaches, optionally tied to an education system.",
-      "addTitle": "Add a grade",
-      "addDescription": "Subjects, students and classes all hang off a grade.",
-      "listTitle": "Grades",
-      "listDescription": "Deactivate a grade to retire it without touching the students already in it.",
-      "empty": "No grades yet. Add the first one above.",
-      "noSystemsHint": "You have no education systems yet. Grades work without one, but adding systems first keeps the taxonomy tidy.",
-      "fields": {
-        "name": "Name",
-        "educationSystem": "Education system"
-      }
-    },
-    "subjects": {
-      "title": "Subjects",
-      "description": "What is taught, per grade. The same subject name can repeat across grades.",
-      "addTitle": "Add a subject",
-      "addDescription": "A class is a teacher teaching one subject to one grade.",
-      "listTitle": "Subjects",
-      "listDescription": "Deactivate a subject to stop new classes using it.",
-      "empty": "No subjects yet. Add the first one above.",
-      "noGradesHint": "You have no grades yet. Add grades first so each subject can sit under one.",
-      "fields": {
-        "name": "Name",
+        "displayName": "Your own name for this",
+        "displayNameHint": "Leave blank to use the catalog name ({name}).",
+        "nameAr": "Arabic name",
+        "nameEn": "English name",
+        "note": "Note to the reviewer",
+        "existingEntry": "Which entry",
+        "educationSystem": "Education system",
         "grade": "Grade"
+      },
+      "educationSystems": {
+        "title": "Education systems",
+        "description": "The curricula this branch teaches (National, Languages, IG…) and the price each one starts from.",
+        "empty": "No education systems picked yet.",
+        "suggestTitle": "Suggest an education system"
+      },
+      "grades": {
+        "title": "Grades",
+        "description": "The year groups this branch teaches.",
+        "empty": "No grades picked yet.",
+        "suggestTitle": "Suggest a grade"
+      },
+      "subjects": {
+        "title": "Subjects",
+        "description": "What is taught, per grade.",
+        "empty": "No subjects picked yet.",
+        "suggestTitle": "Suggest a subject"
       }
     },
     "rooms": {
@@ -1386,6 +1388,29 @@
       "invalidSlug": "Use lowercase letters, digits and hyphens only.",
       "invalidColor": "Enter a color as #RRGGBB.",
       "invalidEmail": "Enter a valid email address."
+    }
+  },
+  "AdminCatalog": {
+    "title": "Academic catalog",
+    "subtitle": "{count, plural, =0 {No suggestions pending review} one {# suggestion pending review} other {# suggestions pending review}}",
+    "empty": "No suggestions waiting on review.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "newEntry": "New entry",
+    "correctionOf": "Correction to \"{name}\"",
+    "kinds": {
+      "educationSystem": "Education system",
+      "grade": "Grade",
+      "subject": "Subject"
+    },
+    "fields": {
+      "nameAr": "Arabic name",
+      "nameEn": "English name",
+      "parent": "Parent"
+    },
+    "errors": {
+      "notFound": "That suggestion no longer exists.",
+      "alreadyResolved": "That suggestion has already been resolved."
     }
   },
   "AdminPlatform": {

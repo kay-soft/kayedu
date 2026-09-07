@@ -356,6 +356,8 @@ export async function rescheduleSession(
   sessionId: string,
   next: { date: Date; startTime: string; endTime: string },
   conflictPolicy: ConflictPolicy,
+  // Only labels a conflict for display (`ScheduleConflict.className`, M13).
+  locale = "en",
 ): Promise<RescheduleSessionResult> {
   const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
   if (!session) return { ok: false, error: "notFound" };
@@ -364,6 +366,7 @@ export async function rescheduleSession(
   const existing = await loadExistingSessions(
     db as PrismaClient,
     centerId,
+    locale,
     startOfUtcDay(next.date),
     startOfUtcDay(next.date),
   );

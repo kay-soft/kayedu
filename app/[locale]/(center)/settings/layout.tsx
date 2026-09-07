@@ -30,12 +30,7 @@ export default async function SettingsLayout({
     items.push(
       { href: ROUTES.centerSettings, labelKey: "general" },
       { href: ROUTES.centerSettingsRooms, labelKey: "rooms" },
-      {
-        href: ROUTES.centerSettingsEducationSystems,
-        labelKey: "educationSystems",
-      },
-      { href: ROUTES.centerSettingsGrades, labelKey: "grades" },
-      { href: ROUTES.centerSettingsSubjects, labelKey: "subjects" },
+      { href: ROUTES.centerSettingsCatalog, labelKey: "catalog" },
       { href: ROUTES.centerSettingsCard, labelKey: "card" },
     );
     if (ctxCan(ctx, "permission.manage")) {

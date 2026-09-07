@@ -13,21 +13,30 @@ import {
   savePermissionGrants,
   type PermissionGrantWrite,
 } from "@/lib/db/permissions";
+import {
+  countCenterGradeSelectionsUnderSystem,
+  countCenterSubjectSelectionsUnderGrade,
+  createCatalogSuggestion,
+  findSelectionById,
+  removeCatalogSelection,
+  selectCatalogEntry,
+  setCatalogSelectionActive,
+  updateCatalogSelection,
+} from "@/lib/db/catalog";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   cardLayoutSchema,
-  educationSystemSchema,
-  educationSystemUpdateSchema,
+  catalogDeselectSchema,
+  catalogSelectSchema,
+  catalogSelectionToggleSchema,
+  catalogSelectionUpdateSchema,
+  catalogSuggestionSchema,
   generalSettingsSchema,
-  gradeSchema,
-  gradeUpdateSchema,
   permissionMatrixSchema,
   recordDeleteSchema,
   recordToggleSchema,
   roomSchema,
   roomUpdateSchema,
-  subjectSchema,
-  subjectUpdateSchema,
 } from "@/lib/validation/settings";
 
 /**
@@ -58,146 +67,48 @@ function revalidateSettings(locale: string): void {
   revalidatePath(`/${locale}/settings`, "layout");
 }
 
-// ── Generic master-data plumbing ───────────────────────────────────────────
+// ── Rooms — the one master-data entity still centre-authored; education
+// systems/grades/subjects moved to the global catalog at M13, see the
+// "Academic catalog" section below. ─────────────────────────────────────────
 
-type MasterDataKind = "educationSystem" | "grade" | "subject" | "room";
-
-/**
- * The slice of a scoped collection the shared toggle/delete paths need.
- * Structural on purpose — each concrete collection satisfies it.
- */
-type ManagedCollection = {
-  findById: (id: string) => Promise<{ id: string; active: boolean } | null>;
-  update: (id: string, data: { active: boolean }) => Promise<unknown>;
-  remove: (id: string) => Promise<unknown>;
-};
-
-function collectionFor(db: ScopedDb, kind: MasterDataKind): ManagedCollection {
-  switch (kind) {
-    case "educationSystem":
-      return db.educationSystems;
-    case "grade":
-      return db.grades;
-    case "subject":
-      return db.subjects;
-    case "room":
-      return db.rooms;
-  }
-}
-
-/**
- * Rows that point at this one. Prisma's default action for these optional
- * relations is SET NULL, which would silently orphan a grade's subjects — so
- * we refuse the delete ourselves and let the center deactivate instead.
- */
-async function referenceCount(
-  db: ScopedDb,
-  kind: MasterDataKind,
-  id: string,
-): Promise<number> {
-  switch (kind) {
-    case "educationSystem": {
-      const [grades, classes] = await Promise.all([
-        db.grades.count({ educationSystemId: id }),
-        db.classGroups.count({ educationSystemId: id }),
-      ]);
-      return grades + classes;
-    }
-    case "grade": {
-      const [subjects, classes, students] = await Promise.all([
-        db.subjects.count({ gradeId: id }),
-        db.classGroups.count({ gradeId: id }),
-        db.students.count({ gradeId: id }),
-      ]);
-      return subjects + classes + students;
-    }
-    case "subject":
-      return db.classGroups.count({ subjectId: id });
-    case "room": {
-      const [classes, sessions] = await Promise.all([
-        db.classGroups.count({ roomId: id }),
-        db.sessions.count({ roomId: id }),
-      ]);
-      return classes + sessions;
-    }
-  }
-}
-
-/**
- * Names are what staff pick from in every later dropdown, so two identical
- * ones would be a daily papercut. Case-insensitive, within this center only.
- */
-async function nameTaken(
-  db: ScopedDb,
-  kind: MasterDataKind,
-  name: string,
-  exceptId?: string,
-): Promise<boolean> {
-  const where = {
-    name: { equals: name, mode: "insensitive" as const },
-    ...(exceptId ? { NOT: { id: exceptId } } : {}),
-  };
-  switch (kind) {
-    case "educationSystem":
-      return (await db.educationSystems.count(where)) > 0;
-    case "grade":
-      return (await db.grades.count(where)) > 0;
-    case "subject":
-      return (await db.subjects.count(where)) > 0;
-    case "room":
-      return (await db.rooms.count(where)) > 0;
-  }
-}
-
-/** Re-resolves a form-supplied foreign key inside the active center. */
-async function resolveRef(
-  lookup: (id: string) => Promise<unknown>,
-  id: string | null,
-): Promise<{ ok: true; id: string | null } | { ok: false }> {
-  if (id === null) return { ok: true, id: null };
-  const row = await lookup(id);
-  return row ? { ok: true, id } : { ok: false };
-}
-
-async function toggleRecord(
-  kind: MasterDataKind,
-  formData: FormData,
-): Promise<ActionState> {
+async function toggleRoomRecord(formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
   if (!scope) return FORBIDDEN;
 
   const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
 
-  const collection = collectionFor(scope.db, kind);
-  const row = await collection.findById(parsed.data.id);
+  const row = await scope.db.rooms.findById(parsed.data.id);
   if (!row) return NOT_FOUND;
 
-  await collection.update(row.id, { active: parsed.data.active });
+  await scope.db.rooms.update(row.id, { active: parsed.data.active });
   revalidateSettings(parsed.data.locale);
   return { status: "saved" };
 }
 
-async function deleteRecord(
-  kind: MasterDataKind,
-  formData: FormData,
-): Promise<ActionState> {
+async function deleteRoomRecord(formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
   if (!scope) return FORBIDDEN;
 
   const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
 
-  const collection = collectionFor(scope.db, kind);
-  const row = await collection.findById(parsed.data.id);
+  const row = await scope.db.rooms.findById(parsed.data.id);
   if (!row) return NOT_FOUND;
 
-  if ((await referenceCount(scope.db, kind, row.id)) > 0) {
+  // Rows that point at this one. Prisma's default action for this optional
+  // relation is SET NULL, which would silently orphan a class's room — so we
+  // refuse the delete ourselves and let the center deactivate instead.
+  const [classes, sessions] = await Promise.all([
+    scope.db.classGroups.count({ roomId: row.id }),
+    scope.db.sessions.count({ roomId: row.id }),
+  ]);
+  if (classes + sessions > 0) {
     return { error: "inUse" };
   }
 
   try {
-    await collection.remove(row.id);
+    await scope.db.rooms.remove(row.id);
   } catch (error) {
     // A reference we did not think to count still must not corrupt anything.
     if (
@@ -213,207 +124,145 @@ async function deleteRecord(
   return { status: "deleted" };
 }
 
-// ── Education systems ──────────────────────────────────────────────────────
+// ── The academic catalog (M13) ──────────────────────────────────────────────
+// A centre picks from the platform-owned global catalog, edits only its own
+// display name + price for that pick, and may suggest a missing or wrong
+// entry into the platform-admin review queue at /admin/catalog. Nothing here
+// ever writes to a canonical CatalogEducationSystem/CatalogGrade/
+// CatalogSubject row (docs/00-master-product-spec.md §5.1).
 
-export async function createEducationSystemAction(
+export async function selectCatalogEntryAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
   if (!scope) return FORBIDDEN;
 
-  const parsed = educationSystemSchema.safeParse(Object.fromEntries(formData));
+  const parsed = catalogSelectSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { name, basePrice, locale } = parsed.data;
-  if (await nameTaken(scope.db, "educationSystem", name)) {
-    return { fieldErrors: { name: "duplicateName" } };
+  const { kind, catalogId, displayName, basePrice, locale } = parsed.data;
+  const result = await selectCatalogEntry(
+    prisma,
+    scope.ctx.center.id,
+    kind,
+    catalogId,
+    displayName,
+    basePrice,
+  );
+  if (!result.ok) {
+    return result.error === "alreadySelected"
+      ? { error: "catalogAlreadySelected" }
+      : NOT_FOUND;
   }
 
-  await scope.db.educationSystems.create({ name, basePrice });
   revalidateSettings(locale);
   return { status: "created" };
 }
 
-export async function updateEducationSystemAction(
+export async function updateCatalogSelectionAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
   if (!scope) return FORBIDDEN;
 
-  const parsed = educationSystemUpdateSchema.safeParse(
-    Object.fromEntries(formData),
-  );
+  const parsed = catalogSelectionUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { id, name, basePrice, locale } = parsed.data;
-  const existing = await scope.db.educationSystems.findById(id);
+  const { selectionId, displayName, basePrice, locale } = parsed.data;
+  const existing = await findSelectionById(prisma, scope.ctx.center.id, selectionId);
   if (!existing) return NOT_FOUND;
 
-  if (await nameTaken(scope.db, "educationSystem", name, id)) {
-    return { fieldErrors: { name: "duplicateName" } };
-  }
-
-  await scope.db.educationSystems.update(id, { name, basePrice });
+  await updateCatalogSelection(prisma, selectionId, {
+    displayName,
+    basePrice: existing.kind === "EDUCATION_SYSTEM" ? basePrice : null,
+  });
   revalidateSettings(locale);
   return { status: "saved" };
 }
 
-export async function toggleEducationSystemAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return toggleRecord("educationSystem", formData);
-}
-
-export async function deleteEducationSystemAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return deleteRecord("educationSystem", formData);
-}
-
-// ── Grades ─────────────────────────────────────────────────────────────────
-
-export async function createGradeAction(
+export async function toggleCatalogSelectionAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
   if (!scope) return FORBIDDEN;
 
-  const parsed = gradeSchema.safeParse(Object.fromEntries(formData));
+  const parsed = catalogSelectionToggleSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { selectionId, active, locale } = parsed.data;
+  const existing = await findSelectionById(prisma, scope.ctx.center.id, selectionId);
+  if (!existing) return NOT_FOUND;
+
+  await setCatalogSelectionActive(prisma, selectionId, active);
+  revalidateSettings(locale);
+  return { status: "saved" };
+}
+
+export async function deselectCatalogEntryAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = catalogDeselectSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { selectionId, locale } = parsed.data;
+  const existing = await findSelectionById(prisma, scope.ctx.center.id, selectionId);
+  if (!existing) return NOT_FOUND;
+
+  // Rows that point at this one — refuse the deselect rather than silently
+  // orphaning a class/session/student that still relies on it.
+  let inUse = 0;
+  if (existing.kind === "EDUCATION_SYSTEM" && existing.educationSystemId) {
+    const [grades, classes] = await Promise.all([
+      countCenterGradeSelectionsUnderSystem(prisma, scope.ctx.center.id, existing.educationSystemId),
+      scope.db.classGroups.count({ educationSystemId: existing.educationSystemId }),
+    ]);
+    inUse = grades + classes;
+  } else if (existing.kind === "GRADE" && existing.gradeId) {
+    const [subjects, classes, students] = await Promise.all([
+      countCenterSubjectSelectionsUnderGrade(prisma, scope.ctx.center.id, existing.gradeId),
+      scope.db.classGroups.count({ gradeId: existing.gradeId }),
+      scope.db.students.count({ gradeId: existing.gradeId }),
+    ]);
+    inUse = subjects + classes + students;
+  } else if (existing.kind === "SUBJECT" && existing.subjectId) {
+    inUse = await scope.db.classGroups.count({ subjectId: existing.subjectId });
+  }
+  if (inUse > 0) return { error: "inUse" };
+
+  await removeCatalogSelection(prisma, selectionId);
+  revalidateSettings(locale);
+  return { status: "deleted" };
+}
+
+export async function suggestCatalogEntryAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = catalogSuggestionSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { name, educationSystemId, locale } = parsed.data;
-  const ref = await resolveRef(
-    (id) => scope.db.educationSystems.findById(id),
-    educationSystemId,
-  );
-  if (!ref.ok) return { fieldErrors: { educationSystemId: "notFound" } };
-  if (await nameTaken(scope.db, "grade", name)) {
-    return { fieldErrors: { name: "duplicateName" } };
-  }
+  const { kind, targetId, parentId, proposedNameAr, proposedNameEn, note, locale } = parsed.data;
+  await createCatalogSuggestion(prisma, scope.ctx.center.id, scope.ctx.user.id, {
+    kind,
+    targetId,
+    parentId,
+    proposedNameAr,
+    proposedNameEn,
+    note,
+  });
 
-  await scope.db.grades.create({ name, educationSystemId: ref.id });
   revalidateSettings(locale);
   return { status: "created" };
-}
-
-export async function updateGradeAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = gradeUpdateSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const { id, name, educationSystemId, locale } = parsed.data;
-  if (!(await scope.db.grades.findById(id))) return NOT_FOUND;
-
-  const ref = await resolveRef(
-    (refId) => scope.db.educationSystems.findById(refId),
-    educationSystemId,
-  );
-  if (!ref.ok) return { fieldErrors: { educationSystemId: "notFound" } };
-  if (await nameTaken(scope.db, "grade", name, id)) {
-    return { fieldErrors: { name: "duplicateName" } };
-  }
-
-  await scope.db.grades.update(id, { name, educationSystemId: ref.id });
-  revalidateSettings(locale);
-  return { status: "saved" };
-}
-
-export async function toggleGradeAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return toggleRecord("grade", formData);
-}
-
-export async function deleteGradeAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return deleteRecord("grade", formData);
-}
-
-// ── Subjects ───────────────────────────────────────────────────────────────
-
-export async function createSubjectAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = subjectSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const { name, gradeId, locale } = parsed.data;
-  const ref = await resolveRef((id) => scope.db.grades.findById(id), gradeId);
-  if (!ref.ok) return { fieldErrors: { gradeId: "notFound" } };
-
-  // A subject name repeats legitimately across grades (Maths in every year),
-  // so uniqueness is per grade rather than per center.
-  const clash = await scope.db.subjects.count({
-    name: { equals: name, mode: "insensitive" },
-    gradeId: ref.id,
-  });
-  if (clash > 0) return { fieldErrors: { name: "duplicateName" } };
-
-  await scope.db.subjects.create({ name, gradeId: ref.id });
-  revalidateSettings(locale);
-  return { status: "created" };
-}
-
-export async function updateSubjectAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = subjectUpdateSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const { id, name, gradeId, locale } = parsed.data;
-  if (!(await scope.db.subjects.findById(id))) return NOT_FOUND;
-
-  const ref = await resolveRef(
-    (refId) => scope.db.grades.findById(refId),
-    gradeId,
-  );
-  if (!ref.ok) return { fieldErrors: { gradeId: "notFound" } };
-
-  const clash = await scope.db.subjects.count({
-    name: { equals: name, mode: "insensitive" },
-    gradeId: ref.id,
-    NOT: { id },
-  });
-  if (clash > 0) return { fieldErrors: { name: "duplicateName" } };
-
-  await scope.db.subjects.update(id, { name, gradeId: ref.id });
-  revalidateSettings(locale);
-  return { status: "saved" };
-}
-
-export async function toggleSubjectAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return toggleRecord("subject", formData);
-}
-
-export async function deleteSubjectAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  return deleteRecord("subject", formData);
 }
 
 // ── Rooms ──────────────────────────────────────────────────────────────────
@@ -467,14 +316,14 @@ export async function toggleRoomAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  return toggleRecord("room", formData);
+  return toggleRoomRecord(formData);
 }
 
 export async function deleteRoomAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  return deleteRecord("room", formData);
+  return deleteRoomRecord(formData);
 }
 
 // ── General settings (default center cut, timeout, late threshold) ─────────

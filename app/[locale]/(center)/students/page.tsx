@@ -71,11 +71,12 @@ export default async function StudentsPage({
     active: student.active,
   }));
 
+  // `grades` comes from `scoped(ctx).grades.list()`, which already resolves
+  // `.name` to this centre's own display-name override or the catalog
+  // entry's bilingual name.
   const gradeOptions = grades.map((grade) => ({
     value: grade.id,
-    label: grade.active
-      ? catalogLabel(locale, grade)
-      : `${catalogLabel(locale, grade)} · ${tCommon("inactive")}`,
+    label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
   }));
 
   const canPromote = ctxCan(ctx, "student.promote");

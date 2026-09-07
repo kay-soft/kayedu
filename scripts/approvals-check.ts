@@ -44,6 +44,8 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "approvals-check-" } } });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Approvals-Check" } } });
 }
 
 async function makeTeacher(centerId: string, tag: string) {
@@ -137,7 +139,10 @@ async function main() {
   );
 
   // ── 2. ChangeRequest type NEW_SESSION (M10): accepting creates a Session ──
-  const subjectS = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Physics" }) });
+  // A global catalog row (M13) — no centerId.
+  const subjectS = await prisma.catalogSubject.create({
+    data: { nameAr: "Approvals-Check Physics", nameEn: "Approvals-Check Physics" },
+  });
   const classForSession = await prisma.classGroup.create({
     data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
@@ -269,7 +274,9 @@ async function main() {
   );
 
   // ── 3. Reservation accept/decline (reusing M8's confirm/reject) ─────────
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: "Approvals-Check Math", nameEn: "Approvals-Check Math" },
+  });
   const classConfirm = await prisma.classGroup.create({
     data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
   });
