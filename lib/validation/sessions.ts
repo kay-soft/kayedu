@@ -7,6 +7,7 @@ import { z } from "zod";
 // classGroupSchema.
 import { localeSchema } from "./auth.ts";
 import { normalizeEmail, normalizePhone } from "../identity.ts";
+import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 
 /**
  * Session, attendance, payment and Reception Desk schemas (M5). Every Server
@@ -170,6 +171,53 @@ export const rescheduleSessionSchema = z
     message: "invalidTimeRange",
   });
 
+// ── Per-session centre-cut override (M13, spec §5.1 "Center cut") ─────────
+
+/**
+ * `override` unchecked clears this session back to inheriting the class's
+ * own cut; checked applies `centerShareType`/`shareValue` as this one
+ * session's override — the same FIXED-piastres/PERCENTAGE-percent resolution
+ * `classGroupFields` uses in `lib/validation/classes.ts`, just for one row.
+ */
+export const sessionShareOverrideSchema = z
+  .object({
+    ...base,
+    sessionId: recordId,
+    override: z
+      .string()
+      .optional()
+      .transform((value) => value === "on" || value === "true"),
+    centerShareType: z.enum(["FIXED", "PERCENTAGE"], { error: "invalidShareType" }),
+    shareValue: z.string().trim().default("0"),
+  })
+  .transform((value, ctx) => {
+    if (!value.override) {
+      return { locale: value.locale, sessionId: value.sessionId, override: null };
+    }
+    if (value.centerShareType === "PERCENTAGE") {
+      const percent = Number(value.shareValue);
+      if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
+        ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidPercent" });
+        return z.NEVER;
+      }
+      return {
+        locale: value.locale,
+        sessionId: value.sessionId,
+        override: { centerShareType: value.centerShareType, centerShareValue: percent },
+      };
+    }
+    const piastres = parseEgpToPiastres(value.shareValue);
+    if (piastres === null || piastres > MAX_PIASTRES) {
+      ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidAmount" });
+      return z.NEVER;
+    }
+    return {
+      locale: value.locale,
+      sessionId: value.sessionId,
+      override: { centerShareType: value.centerShareType, centerShareValue: piastres },
+    };
+  });
+
 // ── Reception Desk (attendance + payment in one submit) ────────────────────
 
 export const receptionCheckInSchema = z.object({
@@ -208,7 +256,8 @@ export type SessionActionState = {
     | "matchFound"
     | "voided"
     | "cancelled"
-    | "rescheduled";
+    | "rescheduled"
+    | "shareUpdated";
   match?: SessionMatchCandidate;
   conflicts?: { type: "teacher" | "room"; className: string }[];
 };

@@ -12,6 +12,7 @@ import type {
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/reservations.ts and lib/db/payments.ts).
 import { findSessionConflicts, type ScheduleConflict } from "../scheduling.ts";
+import { catalogLabel } from "../catalog.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -96,6 +97,8 @@ export async function resolveSessionRequest(
   decision: Exclude<ChangeRequestStatus, "PENDING">,
   resolvedBy: string,
   conflictPolicy: ConflictPolicy,
+  // Only labels a conflict for display (`ScheduleConflict.className`, M13).
+  locale = "en",
 ): Promise<ResolveSessionRequestResult> {
   return db.$transaction(async (tx) => {
     const existing = await tx.changeRequest.findFirst({
@@ -130,7 +133,10 @@ export async function resolveSessionRequest(
         startTime: true,
         endTime: true,
         classGroup: {
-          select: { subject: { select: { name: true } }, grade: { select: { name: true } } },
+          select: {
+            subject: { select: { nameAr: true, nameEn: true } },
+            grade: { select: { nameAr: true, nameEn: true } },
+          },
         },
       },
     });
@@ -151,7 +157,10 @@ export async function resolveSessionRequest(
         startTime: row.startTime,
         endTime: row.endTime,
         className:
-          [row.classGroup.subject?.name, row.classGroup.grade?.name]
+          [
+            row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
+            row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
+          ]
             .filter(Boolean)
             .join(" · ") || "—",
       })),

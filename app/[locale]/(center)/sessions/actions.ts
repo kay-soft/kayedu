@@ -18,7 +18,11 @@ import {
 } from "@/lib/db/identity";
 import { recordPayment, voidPayment } from "@/lib/db/payments";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
-import { cancelSession, rescheduleSession } from "@/lib/db/sessions";
+import {
+  cancelSession,
+  rescheduleSession,
+  updateSessionShareOverride,
+} from "@/lib/db/sessions";
 import { claimStudentCode } from "@/lib/db/students";
 import { scopedData } from "@/lib/db/tenant-scope";
 import { ROUTES } from "@/lib/routes";
@@ -29,6 +33,7 @@ import {
   cancelSessionSchema,
   recordPaymentSchema,
   rescheduleSessionSchema,
+  sessionShareOverrideSchema,
   setAttendanceSchema,
   voidPaymentSchema,
   type SessionActionState,
@@ -481,5 +486,47 @@ export async function rescheduleSessionAction(
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);
   return { status: "rescheduled", conflicts: result.conflicts };
+}
+
+/**
+ * Sets or clears this one session's centre-cut override (M13, spec §5.1
+ * "Center cut" — "overridable per class and per session"). Money
+ * configuration, so it is audited exactly like a class's own cut edit
+ * (`classGroup.update` in `app/[locale]/(center)/classes/actions.ts`); it
+ * never rewrites an already-recorded payment's frozen snapshots — only
+ * `recordPayment`, called after this, ever reads it.
+ */
+export async function updateSessionShareOverrideAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
+
+  const parsed = sessionShareOverrideSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const { locale, sessionId, override } = parsed.data;
+
+  const before = await prisma.session.findFirst({
+    where: { centerId: ctx.center.id, id: sessionId },
+    select: { centerShareType: true, centerShareValue: true },
+  });
+  if (!before) return NOT_FOUND;
+
+  const result = await updateSessionShareOverride(prisma, ctx.center.id, sessionId, override);
+  if (!result.ok) return NOT_FOUND;
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "session.shareOverride.update",
+    entityType: "Session",
+    entityId: sessionId,
+    before,
+    after: override,
+  });
+
+  revalidateSessionDetail(locale, sessionId);
+  return { status: "shareUpdated" };
 }
 

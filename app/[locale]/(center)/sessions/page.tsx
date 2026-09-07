@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import {
@@ -110,7 +111,7 @@ export default async function SessionsPage({
 
   const tableRows: SessionRowData[] = pageEntries.map(({ row, displayStatus }) => ({
     sessionId: row.id,
-    className: sessionDisplayName(row),
+    className: sessionDisplayName(locale, row),
     teacherName: teacherByUserId.get(row.teacherId) ?? tCommon("none"),
     roomName: row.room?.name ?? null,
     startTime: row.startTime,
@@ -128,10 +129,16 @@ export default async function SessionsPage({
     value: teacher.userId,
     label: fullName(localName(teacher, teacher.user)),
   }));
-  const subjectOptions = subjects.map((subject) => ({ value: subject.id, label: subject.name }));
+  const subjectOptions = subjects.map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject) }));
   const classOptions = classes.map((classGroup) => ({
     value: classGroup.id,
-    label: [classGroup.subject?.name, classGroup.grade?.name].filter(Boolean).join(" · ") || t("columns.untitled"),
+    label:
+      [
+        classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
+        classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || t("columns.untitled"),
   }));
 
   const buildHref = (targetPage: number) => {

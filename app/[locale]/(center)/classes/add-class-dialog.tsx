@@ -26,6 +26,7 @@ export function AddClassDialog({
   subjects,
   grades,
   educationSystems,
+  educationSystemDefaultFixedShare,
   rooms,
   noneLabel,
   defaults,
@@ -34,6 +35,7 @@ export function AddClassDialog({
   subjects: SelectOption[];
   grades: SelectOption[];
   educationSystems: SelectOption[];
+  educationSystemDefaultFixedShare: Record<string, number>;
   rooms: SelectOption[];
   noneLabel: string;
   defaults: ClassFormDefaults;
@@ -62,6 +64,7 @@ export function AddClassDialog({
             subjects={subjects}
             grades={grades}
             educationSystems={educationSystems}
+            educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={rooms}
             noneLabel={noneLabel}
             defaults={defaults}

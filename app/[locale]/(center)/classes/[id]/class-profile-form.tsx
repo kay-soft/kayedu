@@ -26,6 +26,7 @@ export function ClassProfileForm({
   subjects,
   grades,
   educationSystems,
+  educationSystemDefaultFixedShare,
   rooms,
   noneLabel,
   canDelete,
@@ -36,6 +37,7 @@ export function ClassProfileForm({
   subjects: SelectOption[];
   grades: SelectOption[];
   educationSystems: SelectOption[];
+  educationSystemDefaultFixedShare: Record<string, number>;
   rooms: SelectOption[];
   noneLabel: string;
   canDelete: boolean;
@@ -72,6 +74,7 @@ export function ClassProfileForm({
         subjects={subjects}
         grades={grades}
         educationSystems={educationSystems}
+        educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
         rooms={rooms}
         noneLabel={noneLabel}
         fieldErrors={state.fieldErrors}

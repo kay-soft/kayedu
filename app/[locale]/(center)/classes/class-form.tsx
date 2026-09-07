@@ -31,6 +31,7 @@ export function ClassForm({
   subjects,
   grades,
   educationSystems,
+  educationSystemDefaultFixedShare,
   rooms,
   noneLabel,
   defaults,
@@ -40,6 +41,7 @@ export function ClassForm({
   subjects: SelectOption[];
   grades: SelectOption[];
   educationSystems: SelectOption[];
+  educationSystemDefaultFixedShare: Record<string, number>;
   rooms: SelectOption[];
   noneLabel: string;
   defaults: ClassFormDefaults;
@@ -86,6 +88,7 @@ export function ClassForm({
         subjects={subjects}
         grades={grades}
         educationSystems={educationSystems}
+        educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
         rooms={rooms}
         noneLabel={noneLabel}
         fieldErrors={state.fieldErrors}

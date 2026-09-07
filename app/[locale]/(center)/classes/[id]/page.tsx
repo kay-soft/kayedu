@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { ClassProfileForm } from "@/app/[locale]/(center)/classes/[id]/class-profile-form";
 import {
@@ -31,6 +31,7 @@ import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { piastresToInputValue } from "@/lib/money";
+import { catalogLabel } from "@/lib/catalog";
 
 const MAX_CANDIDATES = 8;
 
@@ -51,6 +52,7 @@ export default async function ClassDetailPage({
   const ctx = await getTenantContext("center");
   await requirePermission(ctx, "class.manage");
 
+  const locale = await getLocale();
   const { id } = await params;
   const { q } = await searchParams;
   const query = (q ?? "").trim();
@@ -161,9 +163,16 @@ export default async function ClassDetailPage({
     label: fullName(localName(row, row.user)),
   }));
 
-  const subjectGrade = [classGroup.subject?.name, classGroup.grade?.name]
+  const subjectGrade = [
+    classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
+    classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+  ]
     .filter(Boolean)
     .join(" · ");
+
+  const educationSystemDefaultFixedShare = Object.fromEntries(
+    educationSystems.map((system) => [system.id, system.defaultFixedCenterShare]),
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -217,6 +226,7 @@ export default async function ClassDetailPage({
               subjects={optionList(subjects)}
               grades={optionList(grades)}
               educationSystems={optionList(educationSystems)}
+              educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
               rooms={optionList(rooms)}
               noneLabel={tCommon("none")}
               canDelete={ctxCan(ctx, "class.delete")}

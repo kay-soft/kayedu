@@ -27,8 +27,11 @@ export const DISCOVER_CLASS_SELECT = {
   acceptsNewStudents: true,
   requiresConfirmation: true,
   teacherId: true,
-  subject: { select: { id: true, name: true } },
-  grade: { select: { id: true, name: true } },
+  // Global catalog ids (M13) — a single subjectId/gradeId now means the same
+  // thing at every centre, so filtering can be a real `where` instead of the
+  // pre-M13 in-memory name match (see the page's filter logic).
+  subject: { select: { id: true, nameAr: true, nameEn: true } },
+  grade: { select: { id: true, nameAr: true, nameEn: true } },
   room: { select: { name: true } },
   schedules: {
     select: { dayOfWeek: true, startTime: true, endTime: true },
@@ -48,18 +51,26 @@ const TEACHER: Role = "TEACHER";
  * Every discoverable class at one center: active, and `acceptsNewStudents`
  * (docs/00-master-product-spec.md §5 "Reservations / enrollment" — a class
  * with the flag off is hidden from new enrollment while it keeps running for
- * students already in it). Subject/grade/day filtering happens in the caller,
- * in memory, after the per-center results are combined — `Subject`/`Grade`
- * are center-local master data (docs/01 §2), so a single subject *id* has no
- * meaning across two different centers; filtering by name post-union is the
- * only way a "Math" pill means the same thing everywhere it's offered.
+ * students already in it). Day filtering still happens in the caller, in
+ * memory, after the per-center results are combined — a schedule slot is a
+ * child row, not a scalar `where` can cheaply express alongside everything
+ * else here. Subject/grade filtering, though, **is** a real scoped `where`
+ * as of M13: `CatalogSubject`/`CatalogGrade` are global, so a single id means
+ * the same thing at every centre (the in-memory name-match this replaced is
+ * gone — docs/02-architecture.md §14).
  */
 export function discoverClassesForCenter(
   db: PrismaClient,
   centerId: string,
+  filters?: { subjectId?: string; gradeId?: string },
 ): Promise<DiscoverClassRow[]> {
   return db.classGroup.findMany({
-    where: scopedWhere(centerId, { active: true, acceptsNewStudents: true }),
+    where: scopedWhere(centerId, {
+      active: true,
+      acceptsNewStudents: true,
+      ...(filters?.subjectId ? { subjectId: filters.subjectId } : {}),
+      ...(filters?.gradeId ? { gradeId: filters.gradeId } : {}),
+    }),
     select: DISCOVER_CLASS_SELECT,
     orderBy: [{ createdAt: "desc" }],
     take: 200,

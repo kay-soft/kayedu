@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { sessionDisplayName } from "@/lib/db/sessions";
@@ -102,7 +103,7 @@ export default async function TeacherStudentDetailPage({
                       href={ROUTES.teacherSession(attendee.session.id)}
                       className="truncate text-sm font-medium text-brand hover:underline"
                     >
-                      {sessionDisplayName(attendee.session)}
+                      {sessionDisplayName(locale, attendee.session)}
                     </Link>
                     <p className="mt-1 text-xs text-text-muted">
                       {formatDate(attendee.session.date, locale)}
@@ -126,7 +127,7 @@ export default async function TeacherStudentDetailPage({
               <CardTitle>{t("fields.grade")}</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-text-primary">
-              {student.grade?.name ?? tCommon("none")}
+              {student.grade ? catalogLabel(locale, student.grade) : tCommon("none")}
             </CardContent>
           </Card>
 

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import {
   BlockList,
@@ -20,6 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
@@ -56,6 +57,7 @@ export default async function TeacherDetailPage({
 
   const t = await getTranslations("Teachers");
   const tCommon = await getTranslations("Settings.common");
+  const locale = await getLocale();
 
   // Security fix 16 (M12, docs/00-master-product-spec.md §5 "Teacher detail
   // leak"): this page must never reveal which other centres this teacher
@@ -186,10 +188,10 @@ export default async function TeacherDetailPage({
                         href={ROUTES.centerClass(classGroup.id)}
                         className="text-sm font-medium text-brand hover:underline"
                       >
-                        {classGroup.subject?.name ?? tCommon("none")}
+                        {classGroup.subject ? catalogLabel(locale, classGroup.subject) : tCommon("none")}
                       </Link>
                       <span className="text-xs text-text-muted">
-                        {[classGroup.grade?.name, classGroup.room?.name]
+                        {[classGroup.grade ? catalogLabel(locale, classGroup.grade) : null, classGroup.room?.name]
                           .filter(Boolean)
                           .join(" · ") || tCommon("none")}
                       </span>

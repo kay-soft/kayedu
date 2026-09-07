@@ -1,4 +1,4 @@
-import type { Grade, StudentProfile, User } from "@prisma/client";
+import type { CatalogGrade, StudentProfile, User } from "@prisma/client";
 
 import type { TenantContext } from "@/lib/auth/tenant";
 import { objectAsDataUri, remoteImageAsDataUri } from "@/lib/db/storage";
@@ -9,8 +9,9 @@ import {
   studentQrPayload,
 } from "@/lib/id-card";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
+import { catalogLabel } from "@/lib/catalog";
 
-export type CardStudent = StudentProfile & { user: User; grade: Grade | null };
+export type CardStudent = StudentProfile & { user: User; grade: CatalogGrade | null };
 
 /**
  * Builds one student's ID card (docs/04 §5, docs/02 §10).
@@ -47,7 +48,9 @@ export async function studentCardSvg(
     logoDataUri,
     photoDataUri,
     studentName: fullName(localName(student, student.user)),
-    gradeName: student.grade?.name ?? null,
+    gradeName: student.grade
+      ? catalogLabel(options.dir === "rtl" ? "ar" : "en", student.grade)
+      : null,
     studentCode: student.studentCode,
     qrPayload: studentQrPayload(centerId, student.studentCode),
     labels: { code: options.codeLabel },

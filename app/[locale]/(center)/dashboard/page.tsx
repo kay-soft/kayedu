@@ -159,7 +159,7 @@ export default async function CenterDashboardPage() {
                     href={ROUTES.centerSession(row.id)}
                     className="min-w-0 flex-1 truncate text-sm font-medium text-brand hover:underline"
                   >
-                    {sessionDisplayName(row)}
+                    {sessionDisplayName(locale, row)}
                   </Link>
                   <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">
                     {teacherNameByUserId.get(row.teacherId) ?? "—"}

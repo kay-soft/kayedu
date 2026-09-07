@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
@@ -84,7 +85,13 @@ export default async function TeacherSessionsPage({
     ctxCan(ctx, "changeRequest.create") && (ctx.membership?.isTrustedTeacher ?? false);
   const classOptions = ownClasses.map((classGroup) => ({
     value: classGroup.id,
-    label: [classGroup.subject?.name, classGroup.grade?.name].filter(Boolean).join(" · ") || tCommon("none"),
+    label:
+      [
+        classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
+        classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || tCommon("none"),
   }));
 
   const now = new Date();
@@ -101,7 +108,7 @@ export default async function TeacherSessionsPage({
   const total = filtered.length;
   const pageEntries = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  const gradeOptions = grades.map((grade) => ({ value: grade.id, label: grade.name }));
+  const gradeOptions = grades.map((grade) => ({ value: grade.id, label: catalogLabel(locale, grade) }));
   const upcomingCount = withStatus.filter(
     (entry) => entry.displayStatus === "SCHEDULED" || entry.displayStatus === "LIVE",
   ).length;
@@ -189,7 +196,7 @@ export default async function TeacherSessionsPage({
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-text-primary">
-                        {sessionDisplayName(row)}
+                        {sessionDisplayName(locale, row)}
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                         <span>{formatDate(row.date, locale)}</span>

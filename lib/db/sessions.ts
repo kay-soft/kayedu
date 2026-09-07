@@ -4,6 +4,7 @@ import type {
   PrismaClient,
   Session,
   SessionStatus,
+  ShareType,
 } from "@prisma/client";
 
 // Relative imports on purpose: `npm run check:classes` exercises this module
@@ -12,6 +13,7 @@ import type {
 // imported from lib/db/client.ts for the same reason — the gate script
 // constructs its own `PrismaClient()`, the app passes the shared singleton.
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
+import { catalogLabel } from "../catalog.ts";
 import {
   GENERATION_WINDOW_DAYS,
   addDays,
@@ -54,6 +56,7 @@ type ClassForGeneration = {
 async function loadClassesForGeneration(
   db: PrismaClient,
   centerId: string,
+  locale: string,
   classGroupId?: string,
 ): Promise<ClassForGeneration[]> {
   const rows = await db.classGroup.findMany({
@@ -69,8 +72,8 @@ async function loadClassesForGeneration(
       schedules: {
         select: { dayOfWeek: true, startTime: true, endTime: true },
       },
-      subject: { select: { name: true } },
-      grade: { select: { name: true } },
+      subject: { select: { nameAr: true, nameEn: true } },
+      grade: { select: { nameAr: true, nameEn: true } },
     },
   });
 
@@ -82,7 +85,13 @@ async function loadClassesForGeneration(
       roomId: row.roomId,
       price: row.price,
       schedules: row.schedules,
-      className: [row.subject?.name, row.grade?.name].filter(Boolean).join(" · ") || "—",
+      className:
+        [
+          row.subject ? catalogLabel(locale, row.subject) : null,
+          row.grade ? catalogLabel(locale, row.grade) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || "—",
     }));
 }
 
@@ -92,6 +101,7 @@ const CANCELLED: SessionStatus = "CANCELLED";
 async function loadExistingSessions(
   db: PrismaClient,
   centerId: string,
+  locale: string,
   windowStart: Date,
   windowEnd: Date,
 ): Promise<ExistingSession[]> {
@@ -109,8 +119,8 @@ async function loadExistingSessions(
       endTime: true,
       classGroup: {
         select: {
-          subject: { select: { name: true } },
-          grade: { select: { name: true } },
+          subject: { select: { nameAr: true, nameEn: true } },
+          grade: { select: { nameAr: true, nameEn: true } },
         },
       },
     },
@@ -124,7 +134,10 @@ async function loadExistingSessions(
     startTime: row.startTime,
     endTime: row.endTime,
     className:
-      [row.classGroup.subject?.name, row.classGroup.grade?.name]
+      [
+        row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
+        row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
+      ]
         .filter(Boolean)
         .join(" · ") || "—",
   }));
@@ -155,6 +168,10 @@ export async function generateSessions(
   centerId: string,
   conflictPolicy: ConflictPolicy,
   classGroupId?: string,
+  // Only used to label a conflict for display (`GenerationConflict.className`)
+  // — the cron-triggered path (`app/api/cron/generate-sessions/route.ts`) has
+  // no user/locale to thread through, so it stays on this neutral default.
+  locale = "en",
 ): Promise<GenerateSessionsResult> {
   const windowStart = startOfUtcDay(new Date());
   // generateOccurrenceDates treats both ends inclusively (its own doc-comment
@@ -167,9 +184,9 @@ export async function generateSessions(
   const windowEnd = addDays(windowStart, GENERATION_WINDOW_DAYS - 1);
 
   const [classes, holidayKeys, existing] = await Promise.all([
-    loadClassesForGeneration(db, centerId, classGroupId),
+    loadClassesForGeneration(db, centerId, locale, classGroupId),
     loadHolidayKeys(db, centerId, windowStart, windowEnd),
-    loadExistingSessions(db, centerId, windowStart, windowEnd),
+    loadExistingSessions(db, centerId, locale, windowStart, windowEnd),
   ]);
 
   // Accumulates as we go, so two classes generated in the same run still see
@@ -286,6 +303,37 @@ export async function cancelSession(
   return { ok: true, session: updated };
 }
 
+export type UpdateSessionShareOverrideResult =
+  | { ok: true; session: Session }
+  | { ok: false; error: "notFound" };
+
+/**
+ * Sets or clears this one session's centre-cut override (M13, spec §5.1
+ * "Center cut" — "overridable per class and per session"). `null` clears the
+ * override back to "inherit the class's own centerShareType/
+ * centerShareValue" — every session's state until this is called. Only
+ * consulted by `recordPayment` at the moment a payment is frozen; never
+ * touches an already-recorded payment's snapshots (CLAUDE.md rule 2).
+ */
+export async function updateSessionShareOverride(
+  db: SessionDb,
+  centerId: string,
+  sessionId: string,
+  override: { centerShareType: ShareType; centerShareValue: number } | null,
+): Promise<UpdateSessionShareOverrideResult> {
+  const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
+  if (!session) return { ok: false, error: "notFound" };
+
+  const updated = await db.session.update({
+    where: { id: sessionId },
+    data: {
+      centerShareType: override?.centerShareType ?? null,
+      centerShareValue: override?.centerShareValue ?? null,
+    },
+  });
+  return { ok: true, session: updated };
+}
+
 export type RescheduleSessionResult =
   | { ok: true; session: Session; conflicts: GenerationConflict[] }
   | { ok: false; error: "notFound" | "cancelled" | "conflict" | "duplicateSlot" };
@@ -381,8 +429,8 @@ export const SESSION_LIST_SELECT = {
   classGroupId: true,
   classGroup: {
     select: {
-      subject: { select: { name: true } },
-      grade: { select: { name: true } },
+      subject: { select: { nameAr: true, nameEn: true } },
+      grade: { select: { nameAr: true, nameEn: true } },
       _count: { select: { enrollments: { where: { status: ACTIVE_ENROLLMENT_STATUS } } } },
     },
   },
@@ -469,11 +517,20 @@ function parseTimeToMinutesSafe(value: string): number {
 }
 
 /** A short label for the session in a list/receipt ("Math · Grade 10"). */
-export function sessionDisplayName(row: {
-  classGroup: { subject: { name: string } | null; grade: { name: string } | null };
-}): string {
+export function sessionDisplayName(
+  locale: string,
+  row: {
+    classGroup: {
+      subject: { nameAr: string; nameEn: string } | null;
+      grade: { nameAr: string; nameEn: string } | null;
+    };
+  },
+): string {
   return (
-    [row.classGroup.subject?.name, row.classGroup.grade?.name]
+    [
+      row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
+      row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
+    ]
       .filter(Boolean)
       .join(" · ") || "—"
   );

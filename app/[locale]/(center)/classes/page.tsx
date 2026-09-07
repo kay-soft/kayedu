@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddClassDialog } from "@/app/[locale]/(center)/classes/add-class-dialog";
 import {
@@ -23,6 +23,7 @@ import { scoped } from "@/lib/db/scoped";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { catalogLabel } from "@/lib/catalog";
 
 /**
  * Classes (spec §4.1 item 3) — a filterable dashboard first, exactly like
@@ -49,6 +50,7 @@ export default async function ClassesPage({
   const pageSize = DEFAULT_PAGE_SIZE;
 
   const db = scoped(ctx);
+  const locale = await getLocale();
   const t = await getTranslations("Classes");
   const tCommon = await getTranslations("Settings.common");
 
@@ -84,8 +86,8 @@ export default async function ClassesPage({
   const rows: ClassRowData[] = classes.map((classGroup) => ({
     classGroupId: classGroup.id,
     teacherName: teacherByUserId.get(classGroup.teacherId) ?? tCommon("none"),
-    subjectName: classGroup.subject?.name ?? null,
-    gradeName: classGroup.grade?.name ?? null,
+    subjectName: classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
+    gradeName: classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
     roomName: classGroup.room?.name ?? null,
     price: classGroup.price,
     capacity: classGroup.capacity,
@@ -118,6 +120,9 @@ export default async function ClassesPage({
     value: room.id,
     label: room.active ? room.name : `${room.name} · ${tCommon("inactive")}`,
   }));
+  const educationSystemDefaultFixedShare = Object.fromEntries(
+    educationSystems.map((system) => [system.id, system.defaultFixedCenterShare]),
+  );
 
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();
@@ -140,6 +145,7 @@ export default async function ClassesPage({
             subjects={subjectOptions}
             grades={gradeOptions}
             educationSystems={educationSystemOptions}
+            educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={roomOptions}
             noneLabel={tCommon("none")}
             defaults={{

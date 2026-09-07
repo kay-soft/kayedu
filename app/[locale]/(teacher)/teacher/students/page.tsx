@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { Pagination } from "@/components/center/pagination";
 import { SearchBox } from "@/components/center/search-box";
@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
@@ -39,6 +40,7 @@ export default async function TeacherStudentsPage({
   const db = scoped(ctx);
   const t = await getTranslations("TeacherStudents");
   const tCommon = await getTranslations("Settings.common");
+  const locale = await getLocale();
 
   const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id);
 
@@ -103,7 +105,7 @@ export default async function TeacherStudentsPage({
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
                         <span dir="ltr">{row.studentCode}</span>
-                        <span>{row.grade?.name ?? tCommon("none")}</span>
+                        <span>{row.grade ? catalogLabel(locale, row.grade) : tCommon("none")}</span>
                       </p>
                     </div>
                   </Link>

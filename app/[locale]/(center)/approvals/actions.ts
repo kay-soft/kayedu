@@ -176,6 +176,7 @@ export async function approveSessionRequestAction(
     "APPROVED",
     ctx.user.id,
     ctx.settings?.scheduleConflictPolicy ?? "WARN",
+    locale,
   );
   if (!result.ok) return { error: result.error };
 

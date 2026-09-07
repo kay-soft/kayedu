@@ -52,6 +52,7 @@ import {
   classScheduleSchema,
 } from "../lib/validation/classes.ts";
 import { cancelSession, generateSessions, rescheduleSession } from "../lib/db/sessions.ts";
+import { catalogLabel } from "../lib/catalog.ts";
 
 const prisma = new PrismaClient();
 
@@ -93,10 +94,22 @@ function withoutLocale<T extends { locale: string }>(value: T): Omit<T, "locale"
   return copy as Omit<T, "locale">;
 }
 
+/** The prefix every global catalog fixture this script creates carries. */
+const CATALOG_PREFIX = "Classes-Check";
+
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({
     where: { email: { startsWith: "classes-check-" } },
+  });
+  // CatalogSubject/CatalogGrade are global (M13) — they don't cascade away
+  // with the throwaway centers above, so this script must clean up its own
+  // catalog fixtures explicitly, the same way it cleans up its own users.
+  await prisma.catalogSubject.deleteMany({
+    where: { nameEn: { startsWith: CATALOG_PREFIX } },
+  });
+  await prisma.catalogGrade.deleteMany({
+    where: { nameEn: { startsWith: CATALOG_PREFIX } },
   });
 }
 
@@ -332,8 +345,8 @@ async function conflictCheckSlots(
         select: {
           teacherId: true,
           roomId: true,
-          subject: { select: { name: true } },
-          grade: { select: { name: true } },
+          subject: { select: { nameAr: true, nameEn: true } },
+          grade: { select: { nameAr: true, nameEn: true } },
         },
       },
     },
@@ -346,7 +359,10 @@ async function conflictCheckSlots(
     teacherId: row.classGroup.teacherId,
     roomId: row.classGroup.roomId,
     className:
-      [row.classGroup.subject?.name, row.classGroup.grade?.name]
+      [
+        row.classGroup.subject ? catalogLabel("en", row.classGroup.subject) : null,
+        row.classGroup.grade ? catalogLabel("en", row.classGroup.grade) : null,
+      ]
         .filter(Boolean)
         .join(" · ") || "—",
   }));
@@ -368,8 +384,15 @@ async function main() {
   const teacherA = await makeTeacher(centerA.id, "classes-check-teacher-a@kayedu.test");
   const roomA1 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 1" }) });
   const roomA2 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 2" }) });
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
-  const gradeA = await prisma.grade.create({ data: scopedData(centerA.id, { name: "Grade 10" }) });
+  // Global catalog rows (M13) — ClassGroup.subjectId/gradeId now reference
+  // the platform-owned catalog directly, not a centre-authored row. Named
+  // with CATALOG_PREFIX so cleanup() can find and remove them.
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: `${CATALOG_PREFIX} Math`, nameEn: `${CATALOG_PREFIX} Math` },
+  });
+  const gradeA = await prisma.catalogGrade.create({
+    data: { nameAr: `${CATALOG_PREFIX} Grade 10`, nameEn: `${CATALOG_PREFIX} Grade 10` },
+  });
 
   // ── 1. Two classes generate correct sessions across two weekly slots ─────
   const classGroupInput = parse(

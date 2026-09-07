@@ -317,6 +317,7 @@ export async function deleteClassAction(
 async function checkScheduleConflicts(
   db: ScopedDb,
   ctx: TenantContext,
+  locale: string,
   classGroupId: string,
   candidate: { dayOfWeek: number; startTime: string; endTime: string },
 ): Promise<{ conflicts: { type: "teacher" | "room"; className: string }[]; denied: boolean }> {
@@ -324,7 +325,7 @@ async function checkScheduleConflicts(
   if (!classGroup) return { conflicts: [], denied: false };
 
   const existingRows = await db.classSchedules.listForConflictCheck(classGroupId);
-  const existing = toExistingScheduleSlots(existingRows);
+  const existing = toExistingScheduleSlots(locale, existingRows);
 
   const conflicts = findScheduleConflicts(
     {
@@ -359,7 +360,7 @@ export async function createScheduleAction(
   const classGroup = await scope.db.classGroups.findById(classGroupId);
   if (!classGroup) return NOT_FOUND;
 
-  const check = await checkScheduleConflicts(scope.db, scope.ctx, classGroupId, {
+  const check = await checkScheduleConflicts(scope.db, scope.ctx, locale, classGroupId, {
     dayOfWeek,
     startTime,
     endTime,
@@ -396,7 +397,7 @@ export async function updateScheduleAction(
   const schedule = await scope.db.classSchedules.findById(id);
   if (!schedule || schedule.classGroupId !== classGroupId) return NOT_FOUND;
 
-  const check = await checkScheduleConflicts(scope.db, scope.ctx, classGroupId, {
+  const check = await checkScheduleConflicts(scope.db, scope.ctx, locale, classGroupId, {
     dayOfWeek,
     startTime,
     endTime,
@@ -679,6 +680,7 @@ export async function generateSessionsAction(
     ctx.center.id,
     policy,
     classGroupId ?? undefined,
+    locale,
   );
 
   if (classGroupId) revalidateClassDetail(locale, classGroupId);

@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
@@ -89,8 +90,8 @@ export default async function ApprovalsPage() {
       fullName(localName(membership, membership.user)),
     ]),
   );
-  const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));
-  const gradeNameById = new Map(grades.map((grade) => [grade.id, grade.name]));
+  const subjectNameById = new Map(subjects.map((subject) => [subject.id, catalogLabel(locale, subject)]));
+  const gradeNameById = new Map(grades.map((grade) => [grade.id, catalogLabel(locale, grade)]));
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
   const totalPending = changeRequests.length + sessionRequests.length + reservations.length;
@@ -197,7 +198,10 @@ export default async function ApprovalsPage() {
                         </p>
                         <p className="mt-1 text-xs text-text-secondary">
                           {classGroup
-                            ? [classGroup.subject?.name, classGroup.grade?.name]
+                            ? [
+                                classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
+                                classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+                              ]
                                 .filter(Boolean)
                                 .join(" · ")
                             : t("sessionRequests.classGone")}
@@ -248,7 +252,10 @@ export default async function ApprovalsPage() {
                         {fullName(reservation.student)}
                       </p>
                       <p className="mt-1 text-xs text-text-muted">
-                        {[reservation.classGroup.subject?.name, reservation.classGroup.grade?.name]
+                        {[
+                          reservation.classGroup.subject ? catalogLabel(locale, reservation.classGroup.subject) : null,
+                          reservation.classGroup.grade ? catalogLabel(locale, reservation.classGroup.grade) : null,
+                        ]
                           .filter(Boolean)
                           .join(" · ") || tCommon("none")}
                       </p>

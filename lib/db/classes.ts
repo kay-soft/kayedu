@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
-// Relative import on purpose — `npm run check:classes` exercises this module
+// Relative imports on purpose — `npm run check:classes` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts).
 import type { ExistingScheduleSlot, ScheduleConflict } from "../scheduling.ts";
+import { catalogLabel } from "../catalog.ts";
 import type { ScopedDb } from "@/lib/db/scoped";
 
 /**
@@ -24,8 +25,8 @@ export const CLASS_LIST_SELECT = {
   centerShareType: true,
   centerShareValue: true,
   teacherId: true,
-  subject: { select: { id: true, name: true } },
-  grade: { select: { id: true, name: true } },
+  subject: { select: { id: true, nameAr: true, nameEn: true } },
+  grade: { select: { id: true, nameAr: true, nameEn: true } },
   room: { select: { id: true, name: true } },
   _count: {
     select: {
@@ -82,11 +83,24 @@ export async function classDeleteBlockers(
   return enrollments + sessions;
 }
 
-/** A short label for the class in a conflict message ("Math · Grade 10"). */
+/**
+ * A short label for the class in a conflict message ("Math · Grade 10") —
+ * the catalog entry's bilingual name in the given locale (M13), never a
+ * centre's display-name override: a conflict warning is internal
+ * plumbing text, not a screen a centre customizes.
+ */
 export function classDisplayName(
+  locale: string,
   row: Pick<ClassListRow, "subject" | "grade">,
 ): string {
-  return [row.subject?.name, row.grade?.name].filter(Boolean).join(" · ") || "—";
+  return (
+    [
+      row.subject ? catalogLabel(locale, row.subject) : null,
+      row.grade ? catalogLabel(locale, row.grade) : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "—"
+  );
 }
 
 /** Renders the conflict list into i18n-safe pieces the UI can format. */
@@ -108,8 +122,8 @@ export type ConflictCheckRow = {
   classGroup: {
     teacherId: string;
     roomId: string | null;
-    subject: { name: string } | null;
-    grade: { name: string } | null;
+    subject: { nameAr: string; nameEn: string } | null;
+    grade: { nameAr: string; nameEn: string } | null;
   };
 };
 
@@ -119,6 +133,7 @@ export type ConflictCheckRow = {
  * boundary between the Prisma shape and the pure primitive.
  */
 export function toExistingScheduleSlots(
+  locale: string,
   rows: ConflictCheckRow[],
 ): ExistingScheduleSlot[] {
   return rows.map((row) => ({
@@ -129,7 +144,10 @@ export function toExistingScheduleSlots(
     teacherId: row.classGroup.teacherId,
     roomId: row.classGroup.roomId,
     className:
-      [row.classGroup.subject?.name, row.classGroup.grade?.name]
+      [
+        row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
+        row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
+      ]
         .filter(Boolean)
         .join(" · ") || "—",
   }));

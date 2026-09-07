@@ -148,7 +148,7 @@ export default async function SessionDetailPage({
 
   const displayStatus = deriveSessionDisplayStatus(session, new Date());
   const teacherName = fullName(session.teacher);
-  const className = sessionDisplayName({ classGroup: session.classGroup });
+  const className = sessionDisplayName(locale, { classGroup: session.classGroup });
 
   return (
     <div className="flex flex-col gap-6">

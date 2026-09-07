@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { TeacherSessionPrintToolbar } from "@/app/[locale]/(print)/teacher/sessions/[id]/print/toolbar";
 import { DetailRow } from "@/components/shared/field";
 import { getTenantContext } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { sessionReceiptTotals } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
@@ -46,7 +47,7 @@ export default async function TeacherSessionPrintPage({
       status: attendee.attendanceStatus,
     }));
 
-  const className = sessionDisplayName({ classGroup: session.classGroup });
+  const className = sessionDisplayName(locale, { classGroup: session.classGroup });
 
   return (
     <>
@@ -77,7 +78,10 @@ export default async function TeacherSessionPrintPage({
         <section className="mt-6">
           <h3 className="text-sm font-semibold text-text-primary">{t("context.title")}</h3>
           <div className="mt-2">
-            <DetailRow label={t("fields.grade")} value={session.classGroup.grade?.name ?? tCommon("none")} />
+            <DetailRow
+              label={t("fields.grade")}
+              value={session.classGroup.grade ? catalogLabel(locale, session.classGroup.grade) : tCommon("none")}
+            />
             <DetailRow label={t("fields.room")} value={session.room?.name ?? tCommon("none")} />
             <DetailRow label={t("fields.price")} value={formatMoney(session.priceSnapshot, locale)} />
           </div>

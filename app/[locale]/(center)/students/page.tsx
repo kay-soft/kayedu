@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
 import { PromoteForm } from "@/app/[locale]/(center)/students/promote-form";
@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
@@ -47,6 +48,7 @@ export default async function StudentsPage({
   const db = scoped(ctx);
   const t = await getTranslations("Students");
   const tCommon = await getTranslations("Settings.common");
+  const locale = await getLocale();
 
   const where = query.length > 0 ? studentSearchWhere(query) : undefined;
 
@@ -64,7 +66,7 @@ export default async function StudentsPage({
     studentProfileId: student.id,
     name: fullName(localName(student, student.user)),
     studentCode: student.studentCode,
-    gradeName: student.grade?.name ?? null,
+    gradeName: student.grade ? catalogLabel(locale, student.grade) : null,
     contact: student.parentPhone ?? student.phone ?? student.email,
     active: student.active,
   }));
@@ -72,8 +74,8 @@ export default async function StudentsPage({
   const gradeOptions = grades.map((grade) => ({
     value: grade.id,
     label: grade.active
-      ? grade.name
-      : `${grade.name} · ${tCommon("inactive")}`,
+      ? catalogLabel(locale, grade)
+      : `${catalogLabel(locale, grade)} · ${tCommon("inactive")}`,
   }));
 
   const canPromote = ctxCan(ctx, "student.promote");

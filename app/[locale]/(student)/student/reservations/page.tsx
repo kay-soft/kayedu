@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireStudentUser } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { listReservationsForStudent } from "@/lib/db/student-portal";
 import { formatDate } from "@/lib/format";
@@ -45,7 +46,10 @@ export default async function StudentReservationsPage() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-text-primary">
-                    {[reservation.classGroup.subject?.name, reservation.classGroup.grade?.name]
+                    {[
+                      reservation.classGroup.subject ? catalogLabel(locale, reservation.classGroup.subject) : null,
+                      reservation.classGroup.grade ? catalogLabel(locale, reservation.classGroup.grade) : null,
+                    ]
                       .filter(Boolean)
                       .join(" · ") || tCommon("none")}
                   </p>

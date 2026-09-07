@@ -45,11 +45,14 @@ export type RecordPaymentResult =
  *   class's *current* price, so a manager editing a class's price after
  *   sessions were generated cannot retroactively change what an
  *   already-materialized session charges.
- * - `centerShareSnapshot`/`teacherShareSnapshot` come from the class's
- *   *current* `centerShareType`/`centerShareValue` — read fresh, right now —
- *   because that split is being decided the moment this payment is
- *   recorded. A later change to the class's cut affects only payments
- *   recorded after that change (spec §7 acceptance criterion 3).
+ * - `centerShareSnapshot`/`teacherShareSnapshot` come from the session's own
+ *   `centerShareType`/`centerShareValue` override when one is set (M13, spec
+ *   §5.1 "Center cut" — "overridable per class and per session"), else from
+ *   the class's *current* `centerShareType`/`centerShareValue` — read fresh,
+ *   right now — because that split is being decided the moment this payment
+ *   is recorded. A later change to the class's cut (or a session's override)
+ *   affects only payments recorded after that change (spec §7 acceptance
+ *   criterion 3).
  * - "No debt" (spec §5): only PRESENT/LATE attendees are payable. An
  *   ABSENT/EXCUSED attendee is simply not counted — there is nothing to
  *   freeze a payment against.
@@ -86,11 +89,14 @@ export async function recordPayment(
   if (existingActive) return { ok: false, error: "alreadyPaid" };
 
   const amount = attendee.session.priceSnapshot;
-  const split = splitShare(
-    amount,
-    attendee.session.classGroup.centerShareType,
-    attendee.session.classGroup.centerShareValue,
-  );
+  // A session's own override (M13) wins when set; otherwise the class's
+  // current cut. Both are read fresh, right now — this is the instant the
+  // split is decided and frozen (CLAUDE.md rule 2).
+  const centerShareType =
+    attendee.session.centerShareType ?? attendee.session.classGroup.centerShareType;
+  const centerShareValue =
+    attendee.session.centerShareValue ?? attendee.session.classGroup.centerShareValue;
+  const split = splitShare(amount, centerShareType, centerShareValue);
 
   const payment = await tx.payment.create({
     data: {

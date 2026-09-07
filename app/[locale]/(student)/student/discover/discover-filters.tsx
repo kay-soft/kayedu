@@ -4,14 +4,16 @@ import { useTranslations } from "next-intl";
 
 import { SelectInput } from "@/components/ui/select-input";
 
+export type DiscoverFilterOption = { value: string; label: string };
+
 /**
  * Grade/subject/day filter pills (docs/04-design-system.md §10). A plain GET
  * form — state lives in the URL, exactly like every other list filter in this
- * app (`TeacherSessionFilters`, `SessionFilters`). Options are subject/grade
- * *names*, not ids: `Subject`/`Grade` are center-local master data
- * (docs/01-data-model.md §2), so a single id has no meaning once results span
- * more than one center — the page derives these options from the names
- * actually present in the combined result set.
+ * app (`TeacherSessionFilters`, `SessionFilters`). Subject/grade options carry
+ * the global catalog id as of M13 (`CatalogSubject`/`CatalogGrade` — a single
+ * id now means the same thing at every centre, docs/02-architecture.md §14),
+ * with a locale-resolved label; the page derives them from what's actually
+ * present in the combined result set.
  */
 export function DiscoverFilters({
   subject,
@@ -25,8 +27,8 @@ export function DiscoverFilters({
   subject: string;
   grade: string;
   day: string;
-  subjects: string[];
-  grades: string[];
+  subjects: DiscoverFilterOption[];
+  grades: DiscoverFilterOption[];
   dayNames: string[];
   allLabel: string;
 }) {
@@ -46,9 +48,9 @@ export function DiscoverFilters({
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
         >
           <option value="">{allLabel}</option>
-          {subjects.map((name) => (
-            <option key={name} value={name}>
-              {name}
+          {subjects.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </SelectInput>
@@ -66,9 +68,9 @@ export function DiscoverFilters({
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
         >
           <option value="">{allLabel}</option>
-          {grades.map((name) => (
-            <option key={name} value={name}>
-              {name}
+          {grades.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </SelectInput>

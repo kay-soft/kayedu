@@ -6,6 +6,8 @@ import type {
   SessionStatus,
 } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
+import * as catalog from "@/lib/db/catalog";
+import { catalogLabel } from "@/lib/catalog";
 import type { TenantContext } from "@/lib/auth/tenant";
 import {
   STUDENT_LIST_SELECT,
@@ -48,6 +50,11 @@ const PENDING_RESERVATION: ReservationStatus = "PENDING";
  */
 export function scoped(ctx: TenantContext) {
   const centerId = ctx.center.id;
+  // The account's own remembered locale — the best signal available inside a
+  // scoped-only helper for resolving a catalog entry's bilingual name into
+  // the flat `.name` shape every existing list/select-option consumer
+  // already expects (M13, docs/01-data-model.md "Academic catalog layer").
+  const locale = ctx.user.locale ?? "ar";
 
   return {
     centerId,
@@ -453,85 +460,71 @@ export function scoped(ctx: TenantContext) {
         prisma.room.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
+    /**
+     * The academic catalog (M13, docs/01-data-model.md "Academic catalog
+     * layer"). These three no longer author rows — `list`/`findById` read
+     * this centre's own `CenterCatalogSelection` picks joined with the
+     * global catalog entry, resolved into the same flat `{ id, active,
+     * name, ... }` shape every existing consumer already expects (`name` is
+     * the centre's own display-name override if set, else the catalog
+     * entry's bilingual name in the account's locale — `lib/catalog.ts`'s
+     * `catalogLabel`). `findById` returning non-null **is** the tenant
+     * boundary: a catalog id this centre never selected resolves to
+     * nothing, exactly like an id from another centre used to. Selecting,
+     * customizing, deselecting and suggesting go through `lib/db/catalog.ts`
+     * directly (`app/[locale]/(center)/settings/actions.ts`), since they are
+     * a materially different write shape than "author a new row."
+     */
     educationSystems: {
-      list: (where?: Prisma.EducationSystemWhereInput) =>
-        prisma.educationSystem.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-        }),
+      list: async (opts?: { active?: boolean }) => {
+        const rows = await catalog.centerEducationSystems(prisma, centerId);
+        return rows
+          .filter((row) => (opts?.active ? row.active : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row.displayName) }));
+      },
 
-      count: (where?: Prisma.EducationSystemWhereInput) =>
-        prisma.educationSystem.count({ where: scopedWhere(centerId, where) }),
-
-      findById: (id: string) =>
-        scopedFindById(prisma.educationSystem, centerId, id),
-
-      create: (
-        data: Omit<Prisma.EducationSystemUncheckedCreateInput, "centerId">,
-      ) => prisma.educationSystem.create({ data: scopedData(centerId, data) }),
-
-      update: (
-        id: string,
-        data: Omit<Prisma.EducationSystemUncheckedUpdateManyInput, "centerId">,
-      ) =>
-        prisma.educationSystem.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
-        }),
-
-      remove: (id: string) =>
-        prisma.educationSystem.deleteMany({
-          where: scopedWhere(centerId, { id }),
-        }),
+      findById: async (id: string) => {
+        const row = await catalog.centerEducationSystemById(prisma, centerId, id);
+        return row ? { ...row, name: catalogLabel(locale, row, row.displayName) } : null;
+      },
     },
 
     grades: {
-      list: (where?: Prisma.GradeWhereInput) =>
-        prisma.grade.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-          include: { educationSystem: true },
-        }),
+      list: async (opts?: { active?: boolean }) => {
+        const rows = await catalog.centerGrades(prisma, centerId);
+        return rows
+          .filter((row) => (opts?.active ? row.active : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row.displayName) }));
+      },
 
-      count: (where?: Prisma.GradeWhereInput) =>
-        prisma.grade.count({ where: scopedWhere(centerId, where) }),
-
-      findById: (id: string) => scopedFindById(prisma.grade, centerId, id),
-
-      create: (data: Omit<Prisma.GradeUncheckedCreateInput, "centerId">) =>
-        prisma.grade.create({ data: scopedData(centerId, data) }),
-
-      update: (id: string, data: Omit<Prisma.GradeUncheckedUpdateManyInput, "centerId">) =>
-        prisma.grade.updateMany({ where: scopedWhere(centerId, { id }), data }),
-
-      remove: (id: string) =>
-        prisma.grade.deleteMany({ where: scopedWhere(centerId, { id }) }),
+      findById: async (id: string) => {
+        const row = await catalog.centerGradeById(prisma, centerId, id);
+        return row ? { ...row, name: catalogLabel(locale, row, row.displayName) } : null;
+      },
     },
 
     subjects: {
-      list: (where?: Prisma.SubjectWhereInput) =>
-        prisma.subject.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-          include: { grade: true },
-        }),
+      list: async (opts?: { active?: boolean }) => {
+        const rows = await catalog.centerSubjects(prisma, centerId);
+        return rows
+          .filter((row) => (opts?.active ? row.active : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row.displayName) }));
+      },
 
-      count: (where?: Prisma.SubjectWhereInput) =>
-        prisma.subject.count({ where: scopedWhere(centerId, where) }),
+      findById: async (id: string) => {
+        const row = await catalog.centerSubjectById(prisma, centerId, id);
+        return row ? { ...row, name: catalogLabel(locale, row, row.displayName) } : null;
+      },
+    },
 
-      findById: (id: string) => scopedFindById(prisma.subject, centerId, id),
+    /** A centre's own proposed catalog additions/corrections (M13). */
+    catalogSuggestions: {
+      list: () => catalog.listCenterCatalogSuggestions(prisma, centerId),
 
-      create: (data: Omit<Prisma.SubjectUncheckedCreateInput, "centerId">) =>
-        prisma.subject.create({ data: scopedData(centerId, data) }),
-
-      update: (id: string, data: Omit<Prisma.SubjectUncheckedUpdateManyInput, "centerId">) =>
-        prisma.subject.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
-        }),
-
-      remove: (id: string) =>
-        prisma.subject.deleteMany({ where: scopedWhere(centerId, { id }) }),
+      create: (
+        createdBy: string,
+        input: Parameters<typeof catalog.createCatalogSuggestion>[3],
+      ) => catalog.createCatalogSuggestion(prisma, centerId, createdBy, input),
     },
 
     /**
@@ -616,8 +609,8 @@ export function scoped(ctx: TenantContext) {
               select: {
                 teacherId: true,
                 roomId: true,
-                subject: { select: { name: true } },
-                grade: { select: { name: true } },
+                subject: { select: { nameAr: true, nameEn: true } },
+                grade: { select: { nameAr: true, nameEn: true } },
               },
             },
           },

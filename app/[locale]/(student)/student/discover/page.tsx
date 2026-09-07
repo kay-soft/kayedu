@@ -19,6 +19,7 @@ import {
 } from "@/lib/db/student-portal";
 import { formatMoney } from "@/lib/format";
 import { subjectAccentColor } from "@/lib/subject-accent";
+import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 
@@ -29,6 +30,10 @@ type CardViewModel = {
   centerName: string;
   centerLogoUrl: string | null;
   classGroupId: string;
+  // Global catalog ids (M13) — what a filter actually matches on now, never
+  // a name string (docs/02-architecture.md §14).
+  subjectId: string | null;
+  gradeId: string | null;
   subjectName: string | null;
   gradeName: string | null;
   teacherName: string;
@@ -111,8 +116,10 @@ export default async function StudentDiscoverPage({
         centerName: center.name,
         centerLogoUrl: center.logoUrl,
         classGroupId: row.id,
-        subjectName: row.subject?.name ?? null,
-        gradeName: row.grade?.name ?? null,
+        subjectId: row.subject?.id ?? null,
+        gradeId: row.grade?.id ?? null,
+        subjectName: row.subject ? catalogLabel(locale, row.subject) : null,
+        gradeName: row.grade ? catalogLabel(locale, row.grade) : null,
         teacherName: teacherNames.get(row.teacherId) ?? "—",
         roomName: row.room?.name ?? null,
         price: row.price,
@@ -123,12 +130,25 @@ export default async function StudentDiscoverPage({
     }
   }
 
-  const subjectOptions = [...new Set(cards.map((c) => c.subjectName).filter((v): v is string => !!v))].sort();
-  const gradeOptions = [...new Set(cards.map((c) => c.gradeName).filter((v): v is string => !!v))].sort();
+  // Deduped by catalog id (M13) — a "Math" pill now means the same
+  // CatalogSubject everywhere it's offered, so the filter matches an id, not
+  // a name string that happened to collide across two centres' own rows.
+  const subjectOptionsById = new Map<string, string>();
+  const gradeOptionsById = new Map<string, string>();
+  for (const card of cards) {
+    if (card.subjectId && card.subjectName) subjectOptionsById.set(card.subjectId, card.subjectName);
+    if (card.gradeId && card.gradeName) gradeOptionsById.set(card.gradeId, card.gradeName);
+  }
+  const subjectOptions = [...subjectOptionsById.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const gradeOptions = [...gradeOptionsById.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   const filtered = cards.filter((card) => {
-    if (subjectFilter && card.subjectName !== subjectFilter) return false;
-    if (gradeFilter && card.gradeName !== gradeFilter) return false;
+    if (subjectFilter && card.subjectId !== subjectFilter) return false;
+    if (gradeFilter && card.gradeId !== gradeFilter) return false;
     if (dayFilter) {
       const day = Number(dayFilter);
       if (!card.schedules.some((slot) => slot.dayOfWeek === day)) return false;

@@ -61,7 +61,7 @@ export const STUDENT_LIST_SELECT = {
   parentPhone: true,
   gradeId: true,
   user: { select: { firstName: true, lastName: true } },
-  grade: { select: { name: true } },
+  grade: { select: { nameAr: true, nameEn: true } },
 } satisfies Prisma.StudentProfileSelect;
 
 export type StudentListRow = Prisma.StudentProfileGetPayload<{

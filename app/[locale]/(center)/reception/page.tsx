@@ -1,5 +1,5 @@
 import { CalendarPlus } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
 import { CheckInForm } from "@/app/[locale]/(center)/reception/checkin-form";
@@ -51,6 +51,7 @@ export default async function ReceptionPage({
   const query = (q ?? "").trim();
 
   const db = scoped(ctx);
+  const locale = await getLocale();
   const t = await getTranslations("Reception");
   const tCommon = await getTranslations("Settings.common");
 
@@ -72,7 +73,7 @@ export default async function ReceptionPage({
 
   const liveSessions: LiveSessionOption[] = todaySessions.map((row) => ({
     sessionId: row.id,
-    className: sessionDisplayName(row),
+    className: sessionDisplayName(locale, row),
     teacherName: teacherNameByUserId.get(row.teacherId) ?? tCommon("none"),
     startTime: row.startTime,
     endTime: row.endTime,

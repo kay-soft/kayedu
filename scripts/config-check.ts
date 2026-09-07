@@ -24,11 +24,8 @@ import {
 import { splitShare } from "../lib/money.ts";
 import {
   cardLayoutSchema,
-  educationSystemSchema,
   generalSettingsSchema,
-  gradeSchema,
   roomSchema,
-  subjectSchema,
 } from "../lib/validation/settings.ts";
 
 const prisma = new PrismaClient();
@@ -63,45 +60,13 @@ function parse<T>(
 /**
  * The whole of M2's configuration surface, driven by form-shaped input.
  * Takes a centerId and nothing else — this function *is* the "zero code
- * changes for a second center" claim.
+ * changes for a second center" claim. Education systems/grades/subjects
+ * moved to the platform-owned global catalog at M13 (a centre picks/
+ * suggests rather than authors) — that surface has its own dedicated gate,
+ * `npm run check:catalog`; this script keeps only the config that is still
+ * genuinely centre-authored: rooms and general settings.
  */
 async function configureCenter(centerId: string) {
-  const system = parse(
-    educationSystemSchema,
-    { locale: "en", name: "National", basePrice: "120" },
-    "educationSystem",
-  );
-  const systemRow = await prisma.educationSystem.create({
-    data: scopedData(centerId, {
-      name: system.name,
-      basePrice: system.basePrice,
-    }),
-  });
-
-  const grade = parse(
-    gradeSchema,
-    { locale: "en", name: "Grade 10", educationSystemId: systemRow.id },
-    "grade",
-  );
-  const gradeRow = await prisma.grade.create({
-    data: scopedData(centerId, {
-      name: grade.name,
-      educationSystemId: grade.educationSystemId,
-    }),
-  });
-
-  const subject = parse(
-    subjectSchema,
-    { locale: "en", name: "Mathematics", gradeId: gradeRow.id },
-    "subject",
-  );
-  const subjectRow = await prisma.subject.create({
-    data: scopedData(centerId, {
-      name: subject.name,
-      gradeId: subject.gradeId,
-    }),
-  });
-
   const room = parse(
     roomSchema,
     { locale: "en", name: "Room 1", capacity: "30" },
@@ -159,7 +124,7 @@ async function configureCenter(centerId: string) {
     },
   });
 
-  return { systemRow, gradeRow, subjectRow, roomRow, settingsRow };
+  return { roomRow, settingsRow };
 }
 
 async function cleanup() {
@@ -184,33 +149,23 @@ async function main() {
 
   check(
     "One configureCenter() fully configures a fresh center",
-    Boolean(a.systemRow && a.gradeRow && a.subjectRow && a.roomRow && a.settingsRow),
+    Boolean(a.roomRow && a.settingsRow),
   );
   check(
     "The identical call configures a second center — no code changes",
-    Boolean(b.systemRow && b.gradeRow && b.subjectRow && b.roomRow && b.settingsRow) &&
-      b.systemRow.id !== a.systemRow.id,
+    Boolean(b.roomRow && b.settingsRow) && b.roomRow.id !== a.roomRow.id,
   );
 
   // ── 2. EGP typed into a form is stored as integer piastres ──────────────
   check(
-    "Base price 120 EGP is stored as 12000 piastres",
-    a.systemRow.basePrice === 12_000,
-    `got ${a.systemRow.basePrice}`,
+    "A teacher-timeout of 45 days round-trips exactly (integer, not a piastre amount)",
+    a.settingsRow.teacherTimeoutDays === 45,
+    `got ${a.settingsRow.teacherTimeoutDays}`,
   );
 
   // ── 3. Every config table is center-scoped ─────────────────────────────
   // One call per delegate, so each one is checked against its real Prisma type.
   const leaks: [string, unknown][] = [
-    [
-      "EducationSystem",
-      await scopedFindById(prisma.educationSystem, centerA.id, b.systemRow.id),
-    ],
-    ["Grade", await scopedFindById(prisma.grade, centerA.id, b.gradeRow.id)],
-    [
-      "Subject",
-      await scopedFindById(prisma.subject, centerA.id, b.subjectRow.id),
-    ],
     ["Room", await scopedFindById(prisma.room, centerA.id, b.roomRow.id)],
   ];
 
@@ -218,12 +173,12 @@ async function main() {
     check(`Center A cannot read Center B's ${label} by id`, leaked === null);
   }
 
-  const systemsInA = await prisma.educationSystem.findMany({
+  const roomsInA = await prisma.room.findMany({
     where: scopedWhere(centerA.id),
   });
   check(
     "A scoped config list contains only the active center's rows",
-    systemsInA.length === 1 && systemsInA[0].id === a.systemRow.id,
+    roomsInA.length === 1 && roomsInA[0].id === a.roomRow.id,
   );
 
   // ── 4. Center-cut math (the default this screen configures) ────────────
@@ -249,14 +204,6 @@ async function main() {
       shareValue: "150",
       defaultLateThreshold: "10",
       timezone: "Africa/Cairo",
-    }).success,
-  );
-  check(
-    "A negative base price is rejected",
-    !educationSystemSchema.safeParse({
-      locale: "en",
-      name: "Bad",
-      basePrice: "-5",
     }).success,
   );
   check(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ShareType } from "@prisma/client";
 
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { SelectInput } from "@/components/ui/select-input";
 import { formatMoney } from "@/lib/format";
 import { MAX_LATE_THRESHOLD_MINUTES } from "@/lib/validation/classes";
-import { splitShare } from "@/lib/money";
+import { piastresToInputValue, splitShare } from "@/lib/money";
 
 export type SelectOption = { value: string; label: string };
 
@@ -46,6 +46,7 @@ export function ClassFields({
   subjects,
   grades,
   educationSystems,
+  educationSystemDefaultFixedShare,
   rooms,
   noneLabel,
   fieldErrors,
@@ -56,6 +57,14 @@ export function ClassFields({
   subjects: SelectOption[];
   grades: SelectOption[];
   educationSystems: SelectOption[];
+  /**
+   * Piastres, keyed by catalog education-system id — each system's
+   * `defaultFixedCenterShare` (M13, spec §5.1 "Center cut"). A class set to
+   * FIXED inherits this as the field's starting value; typing into the
+   * field at all counts as an override from then on, so this never fights
+   * the person filling in the form.
+   */
+  educationSystemDefaultFixedShare: Record<string, number>;
   rooms: SelectOption[];
   noneLabel: string;
   fieldErrors?: Record<string, string>;
@@ -67,6 +76,17 @@ export function ClassFields({
   const [shareType, setShareType] = useState<ShareType>(values.centerShareType);
   const [shareValue, setShareValue] = useState(values.centerShareValue);
   const [priceInput, setPriceInput] = useState(values.price);
+  const [educationSystemId, setEducationSystemId] = useState(values.educationSystemId);
+  // Once the person types into shareValue themselves, the FIXED-default
+  // auto-fill below stops touching it — an explicit edit always wins.
+  const shareValueTouched = useRef(false);
+
+  function applyInheritedFixedShare(nextEducationSystemId: string, nextShareType: ShareType) {
+    if (shareValueTouched.current || nextShareType !== "FIXED") return;
+    const defaultPiastres = educationSystemDefaultFixedShare[nextEducationSystemId];
+    if (defaultPiastres === undefined) return;
+    setShareValue(piastresToInputValue(defaultPiastres));
+  }
 
   const error = (name: string) =>
     fieldErrors?.[name] ? tErrors(fieldErrors[name]) : undefined;
@@ -162,7 +182,11 @@ export function ClassFields({
           <SelectInput
             id={`${idPrefix}-educationSystemId`}
             name="educationSystemId"
-            defaultValue={values.educationSystemId}
+            value={educationSystemId}
+            onChange={(event) => {
+              setEducationSystemId(event.target.value);
+              applyInheritedFixedShare(event.target.value, shareType);
+            }}
           >
             <option value="">{noneLabel}</option>
             {educationSystems.map((option) => (
@@ -239,7 +263,11 @@ export function ClassFields({
               id={`${idPrefix}-centerShareType`}
               name="centerShareType"
               value={shareType}
-              onChange={(event) => setShareType(event.target.value as ShareType)}
+              onChange={(event) => {
+                const nextShareType = event.target.value as ShareType;
+                setShareType(nextShareType);
+                applyInheritedFixedShare(educationSystemId, nextShareType);
+              }}
             >
               <option value="PERCENTAGE">{t("percentage")}</option>
               <option value="FIXED">{t("fixed")}</option>
@@ -249,6 +277,7 @@ export function ClassFields({
           <Field
             id={`${idPrefix}-shareValue`}
             label={shareType === "FIXED" ? t("shareValueEgp") : t("shareValuePct")}
+            hint={shareType === "FIXED" ? t("shareValueInheritedHint") : undefined}
             error={error("shareValue")}
           >
             <Input
@@ -262,7 +291,10 @@ export function ClassFields({
                 ? { step: "0.01" }
                 : { step: 1, max: 100 })}
               value={shareValue}
-              onChange={(event) => setShareValue(event.target.value)}
+              onChange={(event) => {
+                shareValueTouched.current = true;
+                setShareValue(event.target.value);
+              }}
               aria-invalid={fieldErrors?.shareValue ? true : undefined}
             />
           </Field>

@@ -17,7 +17,7 @@
  *   SEED_OWNER_EMAIL, SEED_OWNER_PASSWORD,
  *   SEED_OWNER_FIRST_NAME, SEED_OWNER_LAST_NAME, SEED_OWNER_PHONE
  */
-import { PrismaClient, type Grade } from "@prisma/client";
+import { PrismaClient, type CatalogGrade } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
@@ -124,40 +124,83 @@ async function seedDemoData(centerId: string) {
     return created;
   }
 
+  // Education systems/grades/subjects are the platform-owned global catalog
+  // as of M13 — this centre picks from it via CenterCatalogSelection rather
+  // than authoring its own rows. `findOrCreateByName` still keeps the seed
+  // idempotent: the catalog rows are looked up (and created once) globally,
+  // by name, with no centerId at all; the selection rows below are what's
+  // actually centre-scoped.
   const educationSystem = await findOrCreateByName(
-    "Education system: الثانوية العامة",
-    () => prisma.educationSystem.findFirst({ where: { centerId, name: "الثانوية العامة" } }),
-    () => prisma.educationSystem.create({ data: { centerId, name: "الثانوية العامة", basePrice: 0 } }),
+    "Catalog education system: الثانوية العامة",
+    () => prisma.catalogEducationSystem.findFirst({ where: { nameAr: "الثانوية العامة" } }),
+    () =>
+      prisma.catalogEducationSystem.create({
+        data: { nameAr: "الثانوية العامة", nameEn: "General Secondary", defaultFixedCenterShare: 0 },
+      }),
   );
+  await prisma.centerCatalogSelection.upsert({
+    where: {
+      centerId_kind_educationSystemId: {
+        centerId,
+        kind: "EDUCATION_SYSTEM",
+        educationSystemId: educationSystem.id,
+      },
+    },
+    update: {},
+    create: {
+      centerId,
+      kind: "EDUCATION_SYSTEM",
+      educationSystemId: educationSystem.id,
+      basePrice: 0,
+    },
+  });
 
-  const gradeNames = ["الصف الأول الثانوي", "الصف الثاني الثانوي", "الصف الثالث الثانوي"];
-  const grades: Grade[] = [];
-  for (const name of gradeNames) {
-    grades.push(
-      await findOrCreateByName(
-        `Grade: ${name}`,
-        () => prisma.grade.findFirst({ where: { centerId, name } }),
-        () => prisma.grade.create({ data: { centerId, name, educationSystemId: educationSystem.id } }),
-      ),
+  const gradeDefs = [
+    { ar: "الصف الأول الثانوي", en: "Grade 10" },
+    { ar: "الصف الثاني الثانوي", en: "Grade 11" },
+    { ar: "الصف الثالث الثانوي", en: "Grade 12" },
+  ];
+  const grades: CatalogGrade[] = [];
+  for (const def of gradeDefs) {
+    const grade = await findOrCreateByName(
+      `Catalog grade: ${def.ar}`,
+      () => prisma.catalogGrade.findFirst({ where: { nameAr: def.ar } }),
+      () =>
+        prisma.catalogGrade.create({
+          data: { nameAr: def.ar, nameEn: def.en, educationSystemId: educationSystem.id },
+        }),
     );
+    grades.push(grade);
+    await prisma.centerCatalogSelection.upsert({
+      where: { centerId_kind_gradeId: { centerId, kind: "GRADE", gradeId: grade.id } },
+      update: {},
+      create: { centerId, kind: "GRADE", gradeId: grade.id },
+    });
   }
 
   const subjectDefs = [
-    { name: "رياضيات", gradeIndex: 0 },
-    { name: "فيزياء", gradeIndex: 1 },
-    { name: "كيمياء", gradeIndex: 1 },
-    { name: "لغة عربية", gradeIndex: 0 },
-    { name: "لغة إنجليزية", gradeIndex: 2 },
+    { ar: "رياضيات", en: "Mathematics", gradeIndex: 0 },
+    { ar: "فيزياء", en: "Physics", gradeIndex: 1 },
+    { ar: "كيمياء", en: "Chemistry", gradeIndex: 1 },
+    { ar: "لغة عربية", en: "Arabic", gradeIndex: 0 },
+    { ar: "لغة إنجليزية", en: "English", gradeIndex: 2 },
   ];
   const subjects = [];
   for (const def of subjectDefs) {
-    subjects.push(
-      await findOrCreateByName(
-        `Subject: ${def.name}`,
-        () => prisma.subject.findFirst({ where: { centerId, name: def.name } }),
-        () => prisma.subject.create({ data: { centerId, name: def.name, gradeId: grades[def.gradeIndex].id } }),
-      ),
+    const subject = await findOrCreateByName(
+      `Catalog subject: ${def.ar}`,
+      () => prisma.catalogSubject.findFirst({ where: { nameAr: def.ar } }),
+      () =>
+        prisma.catalogSubject.create({
+          data: { nameAr: def.ar, nameEn: def.en, gradeId: grades[def.gradeIndex].id },
+        }),
     );
+    subjects.push(subject);
+    await prisma.centerCatalogSelection.upsert({
+      where: { centerId_kind_subjectId: { centerId, kind: "SUBJECT", subjectId: subject.id } },
+      update: {},
+      create: { centerId, kind: "SUBJECT", subjectId: subject.id },
+    });
   }
 
   const roomNames = ["قاعة 1", "قاعة 2", "قاعة 3"];

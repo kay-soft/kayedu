@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getStudentContexts, requireStudentUser } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
@@ -50,6 +51,7 @@ async function loadCenterSchedule(
   centerName: string,
   studentProfileId: string,
   today: Date,
+  locale: string,
 ): Promise<{ upcoming: UpcomingRow[]; past: PastRow[] }> {
   const [futureSessions, history] = await Promise.all([
     studentUpcomingSessions(prisma, centerId, studentProfileId, today),
@@ -71,8 +73,8 @@ async function loadCenterSchedule(
     date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
-    subjectName: row.classGroup.subject?.name ?? null,
-    gradeName: row.classGroup.grade?.name ?? null,
+    subjectName: row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
+    gradeName: row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
     roomName: row.room?.name ?? row.classGroup.room?.name ?? null,
     teacherName: names.get(row.teacherId) ?? "—",
   }));
@@ -83,8 +85,8 @@ async function loadCenterSchedule(
     attendeeId: row.id,
     date: row.session.date,
     startTime: row.session.startTime,
-    subjectName: row.session.classGroup.subject?.name ?? null,
-    gradeName: row.session.classGroup.grade?.name ?? null,
+    subjectName: row.session.classGroup.subject ? catalogLabel(locale, row.session.classGroup.subject) : null,
+    gradeName: row.session.classGroup.grade ? catalogLabel(locale, row.session.classGroup.grade) : null,
     attendanceStatus: row.attendanceStatus,
     isDropIn: row.isDropIn,
     paidAmount: row.payments[0]?.amount ?? null,
@@ -122,7 +124,7 @@ export default async function StudentSchedulePage({
   const perCenter = await Promise.all(
     contexts
       .filter((ctx) => ctx.studentProfile)
-      .map((ctx) => loadCenterSchedule(ctx.center.id, ctx.center.name, ctx.studentProfile!.id, today)),
+      .map((ctx) => loadCenterSchedule(ctx.center.id, ctx.center.name, ctx.studentProfile!.id, today, locale)),
   );
 
   const upcoming = perCenter

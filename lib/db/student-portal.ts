@@ -76,7 +76,11 @@ export function listReservationsForStudent(db: Db, studentUserId: string) {
     include: {
       center: { select: { id: true, name: true, logoUrl: true, themeColor: true } },
       classGroup: {
-        select: { id: true, subject: { select: { name: true } }, grade: { select: { name: true } } },
+        select: {
+          id: true,
+          subject: { select: { nameAr: true, nameEn: true } },
+          grade: { select: { nameAr: true, nameEn: true } },
+        },
       },
     },
   });

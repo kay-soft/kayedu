@@ -17,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { catalogLabel } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { countOtherCenterRelations } from "@/lib/db/identity";
@@ -103,7 +104,10 @@ export default async function StudentDetailPage({
     activeEnrollments.map(async (enrollment) => ({
       classGroupId: enrollment.classGroupId,
       className:
-        [enrollment.classGroup.subject?.name, enrollment.classGroup.grade?.name]
+        [
+          enrollment.classGroup.subject ? catalogLabel(locale, enrollment.classGroup.subject) : null,
+          enrollment.classGroup.grade ? catalogLabel(locale, enrollment.classGroup.grade) : null,
+        ]
           .filter(Boolean)
           .join(" · ") || tCommon("none"),
       count: await consecutiveAbsenceCount(
@@ -119,7 +123,9 @@ export default async function StudentDetailPage({
 
   const gradeOptions = grades.map((grade) => ({
     value: grade.id,
-    label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
+    label: grade.active
+      ? catalogLabel(locale, grade)
+      : `${catalogLabel(locale, grade)} · ${tCommon("inactive")}`,
   }));
 
   return (
@@ -274,7 +280,7 @@ export default async function StudentDetailPage({
                         href={ROUTES.centerClass(enrollment.classGroupId)}
                         className="text-sm font-medium text-brand hover:underline"
                       >
-                        {enrollment.classGroup.subject?.name ?? tCommon("none")}
+                        {enrollment.classGroup.subject ? catalogLabel(locale, enrollment.classGroup.subject) : tCommon("none")}
                       </Link>
                       <span className="text-xs text-text-muted">
                         {fullName(enrollment.classGroup.teacher)}
@@ -328,7 +334,10 @@ export default async function StudentDetailPage({
                             href={ROUTES.centerClass(classGroup.id)}
                             className="text-brand hover:underline"
                           >
-                            {[classGroup.subject?.name, classGroup.grade?.name]
+                            {[
+                              classGroup.subject ? catalogLabel(locale, classGroup.subject) : null,
+                              classGroup.grade ? catalogLabel(locale, classGroup.grade) : null,
+                            ]
                               .filter(Boolean)
                               .join(" · ")}
                           </Link>
