@@ -699,6 +699,31 @@ async function main() {
     JSON.stringify(rescheduled),
   );
 
+  // ── 8b. Reschedule links, it never mutates the original in place (M15) ───
+  const originalAfterReschedule = await prisma.session.findUnique({
+    where: { id: sessionToReschedule.id },
+  });
+  check(
+    "The original session is untouched — same date/time — and links to its replacement via rescheduledToId",
+    originalAfterReschedule?.date.getTime() === sessionToReschedule.date.getTime() &&
+      originalAfterReschedule?.startTime === sessionToReschedule.startTime &&
+      rescheduled.ok &&
+      originalAfterReschedule?.rescheduledToId === rescheduled.session.id,
+    JSON.stringify(originalAfterReschedule),
+  );
+  const rescheduleAlreadyRescheduled = await rescheduleSession(
+    prisma,
+    centerA.id,
+    sessionToReschedule.id,
+    { date: farDate, startTime: "13:00", endTime: "14:00" },
+    "WARN",
+  );
+  check(
+    "Rescheduling an already-rescheduled session is refused",
+    !rescheduleAlreadyRescheduled.ok && rescheduleAlreadyRescheduled.error === "alreadyRescheduled",
+    JSON.stringify(rescheduleAlreadyRescheduled),
+  );
+
   // A same-teacher session on a different class, at a specific slot, to
   // reschedule other classA sessions into conflict with.
   const conflictDate = addDays(startOfUtcDay(new Date()), 305);

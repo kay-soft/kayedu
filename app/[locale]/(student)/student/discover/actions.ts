@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { reserveOrEnroll } from "@/lib/db/reservations";
+import { formatDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -40,7 +41,14 @@ export async function reserveClassAction(
     reserveOrEnroll(tx, { centerId, classGroupId, studentUserId: user.id }),
   );
 
-  if (!result.ok) return { error: result.error };
+  if (!result.ok) {
+    // A rejected student cannot re-request the same class for 7 days (M15) —
+    // the UI must say so explicitly, not just refuse silently.
+    if (result.error === "coolingOff") {
+      return { error: result.error, errorDate: formatDate(result.cooldownUntil, locale) };
+    }
+    return { error: result.error };
+  }
 
   revalidatePath(`/${locale}${ROUTES.studentDiscover}`);
   revalidatePath(`/${locale}${ROUTES.studentReservations}`);

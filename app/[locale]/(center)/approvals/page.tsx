@@ -12,7 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabelWithSelection } from "@/lib/catalog";
+import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
+import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
@@ -90,12 +91,38 @@ export default async function ApprovalsPage() {
       fullName(localName(membership, membership.user)),
     ]),
   );
+  // A teacher requesting to teach here for the first time (M15's centre
+  // directory, `/teacher/centers`) has no local `Membership` record yet — the
+  // lookup above only covers requesters who already teach at this centre —
+  // so fall back to the person's global `User` name for anyone still missing.
+  const unresolvedTeacherIds = teacherIds.filter((id) => !teacherNameById.has(id));
+  if (unresolvedTeacherIds.length > 0) {
+    const users = await prisma.user.findMany({ where: { id: { in: unresolvedTeacherIds } } });
+    for (const user of users) teacherNameById.set(user.id, fullName(user));
+  }
   // `subjects`/`grades` come from `scoped(ctx)`'s catalog collections, which
   // already resolve `.name` to this centre's own display-name override (or
   // the catalog entry's bilingual name) — `catalogLabel` is for a raw
   // ClassGroup relation include below, which has no such override baked in.
   const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));
   const gradeNameById = new Map(grades.map((grade) => [grade.id, grade.name]));
+  // A centre directory request (M15) may name a subject/grade this centre
+  // has not picked into its own catalog yet — fall back to the canonical
+  // global entry's own bilingual name rather than showing "none".
+  const requestedSubjectIds = changeRequests
+    .map((request) => (request.payload as unknown as ChangeRequestPayload).subjectId)
+    .filter((id): id is string => Boolean(id) && !subjectNameById.has(id!));
+  const requestedGradeIds = changeRequests
+    .map((request) => (request.payload as unknown as ChangeRequestPayload).gradeId)
+    .filter((id): id is string => Boolean(id) && !gradeNameById.has(id!));
+  if (requestedSubjectIds.length > 0) {
+    const rows = await prisma.catalogSubject.findMany({ where: { id: { in: requestedSubjectIds } } });
+    for (const row of rows) subjectNameById.set(row.id, catalogLabel(locale, row));
+  }
+  if (requestedGradeIds.length > 0) {
+    const rows = await prisma.catalogGrade.findMany({ where: { id: { in: requestedGradeIds } } });
+    for (const row of rows) gradeNameById.set(row.id, catalogLabel(locale, row));
+  }
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
   const totalPending = changeRequests.length + sessionRequests.length + reservations.length;

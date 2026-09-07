@@ -68,7 +68,11 @@ export function ReserveButton({
       <input type="hidden" name="centerId" value={centerId} />
       <input type="hidden" name="classGroupId" value={classGroupId} />
       {state.error ? (
-        <p className="text-xs text-danger">{tErrors(state.error)}</p>
+        <p className="text-xs text-danger">
+          {state.error === "coolingOff" && state.errorDate
+            ? tErrors("coolingOff", { date: state.errorDate })
+            : tErrors(state.error)}
+        </p>
       ) : null}
       <SubmitAction
         requiresConfirmation={requiresConfirmation}

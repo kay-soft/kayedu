@@ -19,6 +19,7 @@ import {
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
 import { formatMoney } from "@/lib/format";
+import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { subjectAccentColor } from "@/lib/subject-accent";
 import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
@@ -111,8 +112,7 @@ export default async function StudentDiscoverPage({
       const isFull =
         !isEnrolled &&
         !row.requiresConfirmation &&
-        row.capacity > 0 &&
-        row._count.enrollments >= row.capacity;
+        isAtCapacity(row._count.enrollments, enrollmentCap(row.capacity, row.room?.capacity));
 
       let status: CardStatus;
       if (isEnrolled) status = "enrolled";

@@ -7,6 +7,7 @@ import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant"
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { classDeleteBlockers, toExistingScheduleSlots } from "@/lib/db/classes";
+import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { generateSessions } from "@/lib/db/sessions";
 import { findScheduleConflicts } from "@/lib/scheduling";
@@ -454,9 +455,14 @@ export async function enrollStudentAction(
   const student = await scope.db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
 
-  // Blocking (spec §5 "Blocking") — a student blocked from this class cannot
-  // be enrolled, full stop.
-  if (await scope.db.studentBlocks.isBlocked("CLASS", classGroupId, student.userId)) {
+  // Blocking (spec §5 "Blocking", M15: both StudentBlock scopes, checked here
+  // exactly as at request/approval time) — a student blocked from this class
+  // OR from its teacher cannot be enrolled, full stop, staff override or not.
+  const [classBlocked, teacherBlocked] = await Promise.all([
+    scope.db.studentBlocks.isBlocked("CLASS", classGroupId, student.userId),
+    scope.db.studentBlocks.isBlocked("TEACHER", classGroup.teacherId, student.userId),
+  ]);
+  if (classBlocked || teacherBlocked) {
     return { error: "studentBlocked" };
   }
 
@@ -464,11 +470,12 @@ export async function enrollStudentAction(
     return { error: "alreadyEnrolled" };
   }
 
-  // capacity 0 means unlimited (the same convention as Room.capacity).
-  if (classGroup.capacity > 0) {
-    const active = await scope.db.enrollments.countActive(classGroupId);
-    if (active >= classGroup.capacity) return { error: "classFull" };
-  }
+  // Hard-capped by the room, not just the class's own configured target
+  // (M15, spec §5.1 "Capacity") — staff cannot manually add past the cap.
+  const room = classGroup.roomId ? await scope.db.rooms.findById(classGroup.roomId) : null;
+  const cap = enrollmentCap(classGroup.capacity, room?.capacity);
+  const active = await scope.db.enrollments.countActive(classGroupId);
+  if (isAtCapacity(active, cap)) return { error: "classFull" };
 
   // @@unique([studentProfileId, classGroupId]) means a previously removed
   // enrollment still owns this pair's row — reactivate it instead of

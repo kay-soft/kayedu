@@ -32,6 +32,7 @@ const STATUS_BADGE = {
   LIVE: "success",
   COMPLETED: "neutral",
   CANCELLED: "danger",
+  RESCHEDULED: "warning",
 } as const;
 
 const RANGE_SPAN_DAYS = { day: 0, week: 6, month: 29 } as const;

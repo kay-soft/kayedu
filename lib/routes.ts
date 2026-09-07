@@ -48,6 +48,8 @@ export const ROUTES = {
   teacherStudents: "/teacher/students",
   teacherStudent: (id: string) => `/teacher/students/${id}`,
   teacherClasses: "/teacher/classes",
+  teacherApprovals: "/teacher/approvals",
+  teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",
   studentSchedule: "/student/schedule",
   studentDiscover: "/student/discover",

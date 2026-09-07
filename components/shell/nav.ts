@@ -58,6 +58,12 @@ const TEACHER_NAV: NavDef[] = [
   { href: ROUTES.teacherSessions, labelKey: "sessions", icon: "sessions" },
   { href: ROUTES.teacherStudents, labelKey: "students", icon: "students" },
   { href: ROUTES.teacherClasses, labelKey: "classes", icon: "classes" },
+  {
+    href: ROUTES.teacherApprovals,
+    labelKey: "approvals",
+    icon: "approvals",
+    permission: "reservation.manage.own",
+  },
   // Spec §4.2 item 1's filterable earnings/sessions/students analytics screen
   // is still a gap beyond the Dashboard's combined/per-center summary (M7) —
   // docs/03-build-order.md M7 note.

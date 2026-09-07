@@ -35,6 +35,7 @@ const STATUS_BADGE = {
   LIVE: "success",
   COMPLETED: "neutral",
   CANCELLED: "danger",
+  RESCHEDULED: "warning",
 } as const;
 
 /**
@@ -159,6 +160,11 @@ export default async function SessionDetailPage({
   const displayStatus = deriveSessionDisplayStatus(session, new Date());
   const teacherName = fullName(session.teacher);
   const className = sessionDisplayName(locale, { classGroup: session.classGroup });
+  // A cancelled session never happened; a rescheduled one moved to its
+  // replacement (M15) — neither accepts new attendance/payment, and the
+  // server actions refuse both by direct call, not just by hiding controls
+  // here (docs/00 §7.1's verified gap, closed at M15).
+  const rosterReadOnly = displayStatus === "CANCELLED" || displayStatus === "RESCHEDULED";
 
   return (
     <div className="flex flex-col gap-6">
@@ -171,6 +177,14 @@ export default async function SessionDetailPage({
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
+            {displayStatus === "RESCHEDULED" && session.rescheduledToId ? (
+              <Link
+                href={ROUTES.centerSession(session.rescheduledToId)}
+                className="inline-flex h-11 items-center rounded-lg border border-brand px-4 text-sm font-medium text-brand hover:bg-brand/5"
+              >
+                {t("lifecycle.viewNewSession")}
+              </Link>
+            ) : null}
             <Link
               href={ROUTES.centerSessions}
               className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
@@ -196,26 +210,29 @@ export default async function SessionDetailPage({
               canVoid={ctxCan(ctx, "payment.void")}
               canRefund={ctxCan(ctx, "payment.refund")}
               allowExcused={session.classGroup.allowExcused}
+              readOnly={rosterReadOnly}
             />
 
-            <div className="border-t border-border pt-4">
-              <p className="mb-2 text-sm font-medium text-text-primary">
-                {t("addAttendee.title")}
-              </p>
-              <SearchBox
-                value={query}
-                label={t("addAttendee.searchLabel")}
-                placeholder={t("addAttendee.searchPlaceholder")}
-                submitLabel={t("addAttendee.searchSubmit")}
-              />
-              <div className="mt-4">
-                <AddAttendeePanel
-                  sessionId={session.id}
-                  candidates={candidates}
-                  hasQuery={query.length > 0}
+            {rosterReadOnly ? null : (
+              <div className="border-t border-border pt-4">
+                <p className="mb-2 text-sm font-medium text-text-primary">
+                  {t("addAttendee.title")}
+                </p>
+                <SearchBox
+                  value={query}
+                  label={t("addAttendee.searchLabel")}
+                  placeholder={t("addAttendee.searchPlaceholder")}
+                  submitLabel={t("addAttendee.searchSubmit")}
                 />
+                <div className="mt-4">
+                  <AddAttendeePanel
+                    sessionId={session.id}
+                    candidates={candidates}
+                    hasQuery={query.length > 0}
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -249,7 +266,7 @@ export default async function SessionDetailPage({
                   date={session.date.toISOString().slice(0, 10)}
                   startTime={session.startTime}
                   endTime={session.endTime}
-                  cancelled={displayStatus === "CANCELLED"}
+                  locked={rosterReadOnly}
                   canCancel={ctxCan(ctx, "session.cancel")}
                   canReschedule={ctxCan(ctx, "session.manage")}
                 />

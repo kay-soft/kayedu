@@ -57,6 +57,11 @@ export const PERMISSIONS = [
   // Workflow
   "approvals.manage",
   "changeRequest.create",
+  // A teacher's own queue of students requesting to join their classes (M15,
+  // spec §4.2 item 6) — a separate decision from the centre's own
+  // `approvals.manage` queue, and scoped in the action itself to reservations
+  // whose class this teacher actually teaches.
+  "reservation.manage.own",
   // Trust
   "audit.view",
   // Platform
@@ -235,7 +240,12 @@ export const DEFAULT_ROLE_GRANTS: Record<Role, readonly Permission[]> = {
     "student.manage",
   ],
   ACCOUNTANT: ["analytics.center.view", "expense.manage"],
-  TEACHER: ["analytics.own.view", "changeRequest.create", "student.block"],
+  TEACHER: [
+    "analytics.own.view",
+    "changeRequest.create",
+    "student.block",
+    "reservation.manage.own",
+  ],
 };
 
 export const CENTER_STAFF_ROLES: readonly Role[] = [

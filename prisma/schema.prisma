@@ -670,6 +670,16 @@ model Session {
   startTime        String // "16:00"
   endTime          String // "18:00"
   status           SessionStatus @default(SCHEDULED)
+  // The replacement session a reschedule created (M15, spec §5.1 "Reschedule
+  // with linkage"). Written immediately — the original row is never silently
+  // mutated into its new date/time — so history reads "this session moved to
+  // that one." A session carrying this is neither CANCELLED (it still
+  // happens, just elsewhere) nor open for new attendance/payment (see
+  // `lib/db/attendance.ts`/`lib/db/payments.ts`'s guard) — whatever attendance
+  // it already carries stays exactly as recorded (CLAUDE.md rule 2).
+  rescheduledToId  String?       @unique
+  rescheduledTo    Session?      @relation("SessionReschedule", fields: [rescheduledToId], references: [id], onDelete: SetNull)
+  rescheduledFrom  Session?      @relation("SessionReschedule")
   priceSnapshot    Int           @default(0) // piastres; frozen from class at generation
   // Per-session centre-cut override (M13, spec §5.1 "Center cut" —
   // "overridable per class and per session"). Null on both = inherit the
@@ -937,6 +947,12 @@ model Reservation {
   requestedAt  DateTime          @default(now())
   resolvedAt   DateTime?
   resolvedBy   String?
+  // Set only on a REJECTED transition (M15, spec §5.1 "Approvals &
+  // enrolment") — the whole mechanism behind the 7-day re-request cooling-off:
+  // this same row is reused across its lifecycle (docs/01-data-model.md
+  // "Workflow layer"), so a re-request inside 7 days of this timestamp is
+  // refused, with the UI stating why rather than failing silently.
+  rejectedAt   DateTime?
 
   @@unique([classGroupId, studentId])
   @@index([centerId])

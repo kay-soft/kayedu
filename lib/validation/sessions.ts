@@ -272,6 +272,8 @@ export type SessionActionState = {
     | "shareUpdated";
   match?: SessionMatchCandidate;
   conflicts?: { type: "teacher" | "room"; className: string }[];
+  /** The replacement session a reschedule created (M15) — for a link to it. */
+  newSessionId?: string;
 };
 
 export const IDLE_SESSION_STATE: SessionActionState = {};

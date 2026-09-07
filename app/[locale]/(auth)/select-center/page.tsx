@@ -67,6 +67,16 @@ export default async function SelectCenterPage({
               >
                 {t("browseClasses")}
               </a>
+              {/* A teacher with zero centres gets the directory, never only
+                  the student Discover link above (M15, spec §5.1 "Teacher
+                  onboarding") — both stay offered here since a brand-new
+                  sign-up's intent (student or teacher) isn't known yet. */}
+              <a
+                href={`/${locale}${ROUTES.teacherCenters}`}
+                className="flex min-h-11 items-center justify-center rounded-lg border border-brand px-3 py-2 text-sm font-medium text-brand hover:bg-brand/5"
+              >
+                {t("findCenterToTeach")}
+              </a>
             </>
           ) : null}
 

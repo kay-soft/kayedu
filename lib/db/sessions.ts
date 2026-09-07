@@ -280,7 +280,7 @@ const CANCELLED_ENUM: SessionStatus = "CANCELLED";
 
 export type CancelSessionResult =
   | { ok: true; session: Session }
-  | { ok: false; error: "notFound" | "alreadyCancelled" };
+  | { ok: false; error: "notFound" | "alreadyCancelled" | "alreadyRescheduled" };
 
 /**
  * Cancels one session. Money is never touched here (CLAUDE.md rule 2) — a
@@ -299,6 +299,7 @@ export async function cancelSession(
   const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
   if (!session) return { ok: false, error: "notFound" };
   if (session.status === CANCELLED_ENUM) return { ok: false, error: "alreadyCancelled" };
+  if (session.rescheduledToId) return { ok: false, error: "alreadyRescheduled" };
 
   const updated = await db.session.update({
     where: { id: sessionId },
@@ -340,22 +341,38 @@ export async function updateSessionShareOverride(
 
 export type RescheduleSessionResult =
   | { ok: true; session: Session; conflicts: GenerationConflict[] }
-  | { ok: false; error: "notFound" | "cancelled" | "conflict" | "duplicateSlot" };
+  | {
+      ok: false;
+      error: "notFound" | "cancelled" | "alreadyRescheduled" | "conflict" | "duplicateSlot";
+    };
 
 /**
- * Moves one session to a new date/time, re-running the same teacher/room
- * conflict check the generator itself uses (`findSessionConflicts`, docs/02
- * §11) against every other class's sessions on the target date — WARN saves
- * it flagged, DENY refuses. `findSessionConflicts` already skips a session's
- * own class (`session.classGroupId === candidate.classGroupId`), so the
- * session being moved never "conflicts with itself".
+ * Moves one session to a new date/time — same-day at a different time, or a
+ * future date (M15, spec §5.1 "Reschedule with linkage"). Unlike the pre-M15
+ * behavior, the original row is never mutated in place: a **new** `Session`
+ * is created at the target date/time and the original's `rescheduledToId` is
+ * written immediately, so history reads "this session moved to that one"
+ * rather than "this session was always on Thursday" — the original keeps
+ * whatever attendance/payments it already carries, untouched (CLAUDE.md rule
+ * 2), and is closed to any *new* attendance/payment from that point on
+ * (`lib/db/attendance.ts`/`lib/db/payments.ts`'s `sessionRescheduled` guard).
+ * Identical rule whether a teacher or centre staff initiates it — this
+ * function has no caller-identity branch at all.
  *
- * The `(classGroupId, date, startTime)` unique constraint still applies — if
- * this class already has another session at the target slot, the write
- * fails with `duplicateSlot` rather than silently merging two sessions.
+ * The teacher/room conflict check (`findSessionConflicts`, docs/02 §11) is
+ * the same one the generator uses: `timeRangesOverlap` compares the full
+ * start→end window, not just the start instant, so a target slot free at its
+ * start but busy before it ends is still flagged — WARN saves it flagged,
+ * DENY refuses. `findSessionConflicts` already skips the session's own class,
+ * so the moved session never "conflicts with itself".
+ *
+ * The `(classGroupId, date, startTime)` unique constraint still applies to
+ * the new row — if this class already has another session at the target
+ * slot, the write fails with `duplicateSlot` rather than silently merging
+ * two sessions.
  */
 export async function rescheduleSession(
-  db: SessionDb,
+  db: PrismaClient,
   centerId: string,
   sessionId: string,
   next: { date: Date; startTime: string; endTime: string },
@@ -366,9 +383,10 @@ export async function rescheduleSession(
   const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
   if (!session) return { ok: false, error: "notFound" };
   if (session.status === CANCELLED_ENUM) return { ok: false, error: "cancelled" };
+  if (session.rescheduledToId) return { ok: false, error: "alreadyRescheduled" };
 
   const existing = await loadExistingSessions(
-    db as PrismaClient,
+    db,
     centerId,
     locale,
     startOfUtcDay(next.date),
@@ -396,11 +414,32 @@ export async function rescheduleSession(
   }
 
   try {
-    const updated = await db.session.update({
-      where: { id: sessionId },
-      data: { date: next.date, startTime: next.startTime, endTime: next.endTime },
+    // One transaction: the new occurrence and the original's linkage are
+    // written together, or not at all — never a replacement with no session
+    // pointing at it, or a link to a replacement that doesn't exist.
+    const replacement = await db.$transaction(async (tx) => {
+      const created = await tx.session.create({
+        data: {
+          centerId,
+          classGroupId: session.classGroupId,
+          teacherId: session.teacherId,
+          roomId: session.roomId,
+          date: next.date,
+          startTime: next.startTime,
+          endTime: next.endTime,
+          priceSnapshot: session.priceSnapshot,
+          centerShareType: session.centerShareType,
+          centerShareValue: session.centerShareValue,
+          description: session.description,
+        },
+      });
+      await tx.session.update({
+        where: { id: sessionId },
+        data: { rescheduledToId: created.id },
+      });
+      return created;
     });
-    return { ok: true, session: updated, conflicts };
+    return { ok: true, session: replacement, conflicts };
   } catch (error) {
     if (
       error instanceof Object &&
@@ -438,6 +477,7 @@ export function sessionListSelect(centerId: string) {
     startTime: true,
     endTime: true,
     status: true,
+    rescheduledToId: true,
     priceSnapshot: true,
     teacherId: true,
     classGroupId: true,
@@ -507,13 +547,22 @@ export function sessionListWhere(filters: {
   return where;
 }
 
-export type SessionDisplayStatus = "SCHEDULED" | "LIVE" | "COMPLETED" | "CANCELLED";
+export type SessionDisplayStatus =
+  | "SCHEDULED"
+  | "LIVE"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "RESCHEDULED";
 
 /**
  * SCHEDULED/LIVE/COMPLETED are derived from the clock, not stored — nothing
  * in this codebase transitions `Session.status` between them yet (docs/02
  * §11 leaves session lifecycle writes, cancel included, to a later
  * milestone). CANCELLED is the one persisted value this passes through.
+ * RESCHEDULED (M15) is derived from `rescheduledToId` rather than stored on
+ * `status` at all — the original session is neither cancelled (it still
+ * happens, just on its replacement) nor genuinely SCHEDULED/COMPLETED by the
+ * clock (its own slot never occurred), so this takes precedence over both.
  *
  * Consistent with `generateOccurrenceDates`/`startOfUtcDay` elsewhere in this
  * file: `date` is a pure UTC-midnight calendar-day marker and `startTime`/
@@ -523,9 +572,16 @@ export type SessionDisplayStatus = "SCHEDULED" | "LIVE" | "COMPLETED" | "CANCELL
  * timezone, per spec §1).
  */
 export function deriveSessionDisplayStatus(
-  session: { status: SessionStatus; date: Date; startTime: string; endTime: string },
+  session: {
+    status: SessionStatus;
+    date: Date;
+    startTime: string;
+    endTime: string;
+    rescheduledToId?: string | null;
+  },
   now: Date,
 ): SessionDisplayStatus {
+  if (session.rescheduledToId) return "RESCHEDULED";
   if (session.status === CANCELLED_STATUS) return "CANCELLED";
 
   const dayKey = session.date.toISOString().slice(0, 10);

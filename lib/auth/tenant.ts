@@ -353,6 +353,13 @@ export const getTenantContext = cache(
 
     if (relations.length === 0) {
       if (user.isPlatformAdmin) return redirectTo(ROUTES.adminCenters);
+      // A zero-relation user requesting the teacher experience lands on the
+      // centre directory, never the generic (student-leaning) empty state
+      // (M15, spec §5.1 "Teacher onboarding") — `requireTeacherUser()` is the
+      // gate that actually renders `/teacher/centers` itself without ever
+      // reaching this redirect, so this only covers a teacher-experience page
+      // reached some other way (a direct `/teacher/dashboard` URL, say).
+      if (experience === "teacher") return redirectTo(ROUTES.teacherCenters);
       return redirectTo(ROUTES.selectCenter);
     }
 
@@ -452,6 +459,34 @@ export const getStudentContexts = cache(
     );
   },
 );
+
+export type TeacherSession =
+  | { hasCenter: true; ctx: TenantContext; relations: CenterRelation[] }
+  | { hasCenter: false; user: User; relations: CenterRelation[] };
+
+/**
+ * The (teacher) route group's gate — deliberately **not**
+ * `requireExperience("teacher")` on its own. A teacher who belongs to zero
+ * centres must land on the centre directory (`/teacher/centers`, M15, spec
+ * §5.1 "Teacher onboarding") rather than being swept into `/select-center`'s
+ * generic empty state, which — before this milestone — only ever pointed a
+ * zero-relation user at the student Discover screen (the exact "wrong
+ * fall-through" the spec calls out). This mirrors `requireStudentUser()`
+ * exactly: only a signed-in `User` is required, and the caller (the teacher
+ * layout) decides what to render when there is no `TEACHER` relation yet.
+ */
+export async function requireTeacherUser(): Promise<TeacherSession> {
+  const user = await getCurrentUser();
+  if (!user) return redirectTo(ROUTES.login);
+
+  const relations = await getUserCenterRelations(user.id);
+  const hasTeacherCenter = relations.some((relation) => relation.roles.includes("TEACHER"));
+
+  if (!hasTeacherCenter) return { hasCenter: false, user, relations };
+
+  const ctx = await getTenantContext("teacher");
+  return { hasCenter: true, ctx, relations };
+}
 
 /** The platform default before a student has connected anywhere (docs/04 §2). */
 const DEFAULT_STUDENT_BRAND = {

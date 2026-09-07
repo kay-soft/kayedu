@@ -31,6 +31,8 @@ export const cancelReservationSchema = z.object({
 
 export type StudentActionState = {
   error?: string;
+  /** Formatted date for the `coolingOff` error message (M15). */
+  errorDate?: string;
   status?: "enrolled" | "pending" | "cancelled";
 };
 

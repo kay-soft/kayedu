@@ -84,8 +84,9 @@
       "title": "Choose a branch",
       "subtitle": "You are connected to more than one branch. Pick where you want to work.",
       "emptySubtitle": "Your account is not connected to a branch yet.",
-      "emptyHelp": "Ask a branch owner or manager to invite you by email, or open the invitation link you were sent — or browse classes to join a branch as a student.",
+      "emptyHelp": "Ask a branch owner or manager to invite you by email, or open the invitation link you were sent — or browse classes to join a branch as a student, or find a branch to teach at.",
       "browseClasses": "Browse classes",
+      "findCenterToTeach": "Find a branch to teach at",
       "platformAdminLink": "Go to the platform admin",
       "wholeManagement": "Whole Management — {organization}",
       "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}"
@@ -524,9 +525,9 @@
       "duplicateDate": "That date is already on the holiday calendar.",
       "scheduleConflict": "This branch denies double-booked slots. Choose a different day, time or teacher.",
       "classInUse": "This class still has enrollments or generated sessions, so it cannot be deleted. Deactivate it instead.",
-      "classFull": "This class is at capacity.",
+      "classFull": "This class is at capacity — change the room or increase its capacity.",
       "alreadyEnrolled": "This student is already enrolled in this class.",
-      "studentBlocked": "This student is blocked from this class.",
+      "studentBlocked": "This student is blocked from this class or teacher.",
       "alreadyBlocked": "This student is already blocked from this class."
     }
   },
@@ -570,7 +571,8 @@
       "SCHEDULED": "Scheduled",
       "LIVE": "Live",
       "COMPLETED": "Completed",
-      "CANCELLED": "Cancelled"
+      "CANCELLED": "Cancelled",
+      "RESCHEDULED": "Rescheduled"
     },
     "attendance": {
       "groupLabel": "Attendance",
@@ -591,6 +593,7 @@
       "description": "Every enrolled student, plus any drop-ins. Mark attendance, then record the payment.",
       "empty": "No students enrolled or added yet.",
       "dropIn": "Drop-in",
+      "unmarked": "Not marked",
       "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian.",
       "paid": "Paid {amount} · {method}",
       "method": {
@@ -633,6 +636,7 @@
       "save": "Save new time",
       "rescheduled": "Session rescheduled.",
       "rescheduledWithConflict": "Session rescheduled, but it now conflicts with {count, plural, one {# other class} other {# other classes}} — review it.",
+      "viewNewSession": "View the new session",
       "fields": {
         "date": "Date",
         "startTime": "Start time",
@@ -670,7 +674,10 @@
       "contactInUse": "Those contact details already belong to someone else.",
       "matchGone": "That person is no longer the match for these details. Check the form and try again.",
       "alreadyCancelled": "This session is already cancelled.",
+      "alreadyRescheduled": "This session was already rescheduled to another one.",
       "cancelled": "This session is cancelled and can no longer be edited.",
+      "sessionCancelled": "This session is cancelled — attendance and payment can no longer be recorded on it.",
+      "sessionRescheduled": "This session was rescheduled — attendance and payment can no longer be recorded on it. Use the new session instead.",
       "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time.",
       "excusedNotAllowed": "This class does not allow the Excused status.",
@@ -865,7 +872,7 @@
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is at capacity.",
+      "classFull": "This class is at capacity — change the room or increase its capacity.",
       "classNotFound": "The class this request was for no longer exists.",
       "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time."
@@ -1325,6 +1332,60 @@
       "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here."
     }
   },
+  "TeacherApprovals": {
+    "title": "My approvals",
+    "subtitle": "{count, plural, one {# student waiting} other {# students waiting}} to join your classes.",
+    "listTitle": "Pending requests",
+    "listDescription": "Students who asked to join a class you teach. Approving enrolls them immediately.",
+    "empty": "No pending requests for your classes.",
+    "requestedOn": "Requested {date}",
+    "approve": "Approve",
+    "decline": "Decline",
+    "approved": "Approved",
+    "declined": "Declined",
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That request no longer exists, or is not for one of your classes.",
+      "notPending": "That request has already been resolved.",
+      "studentBlocked": "This student cannot be enrolled in this class.",
+      "classFull": "This class is at capacity — change the room or increase its capacity."
+    }
+  },
+  "TeacherCenters": {
+    "title": "Find a centre to teach at",
+    "subtitle": "You are not connected to any centre yet. Browse active centres and request to teach a class at one — the centre reviews your request.",
+    "empty": "No active centres yet.",
+    "request": {
+      "title": "Request to teach at {center}",
+      "description": "Subject, grade, timing, capacity and attendance settings — this centre reviews the request before it becomes a real class.",
+      "subject": "Subject",
+      "grade": "Grade",
+      "none": "Not set",
+      "day": "Day",
+      "start": "Start",
+      "end": "End",
+      "capacity": "Capacity",
+      "capacityHint": "Students. Use 0 for no limit.",
+      "lateThreshold": "Late threshold (minutes)",
+      "attendanceRequired": "Attendance is required for this class",
+      "note": "Note to the centre",
+      "notePlaceholder": "Anything else the centre should know",
+      "submit": "Send request",
+      "submitted": "Request sent — the centre will review it.",
+      "cancel": "Cancel"
+    },
+    "requestButton": "Request to teach here",
+    "errors": {
+      "forbidden": "You need to sign in to do this.",
+      "notFound": "That centre is no longer available.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidDay": "Choose a day of the week.",
+      "invalidTime": "Enter a valid time.",
+      "invalidTimeRange": "The end time must be after the start time.",
+      "invalidNumber": "Enter a whole number."
+    }
+  },
   "StudentSchedule": {
     "title": "My schedule",
     "subtitle": "Every class you're enrolled in, across every branch you've joined.",
@@ -1369,7 +1430,8 @@
       "studentBlocked": "You cannot join this class.",
       "alreadyEnrolled": "You are already enrolled in this class.",
       "alreadyRequested": "You already have a pending request for this class.",
-      "classFull": "This class is at capacity."
+      "classFull": "This class is at capacity — change the room or increase its capacity.",
+      "coolingOff": "Your last request for this class was declined. You can request it again from {date}."
     }
   },
   "StudentReservations": {

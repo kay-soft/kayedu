@@ -6,6 +6,7 @@ import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant"
 import {
   createAttendance,
   findAttendee,
+  SessionClosedError,
   updateAttendanceStatus,
 } from "@/lib/db/attendance";
 import { writeAuditLog } from "@/lib/db/audit";
@@ -90,6 +91,24 @@ async function resolveEnrollment(
   return { enrollmentId: active ? enrollment!.id : null, isDropIn: !active };
 }
 
+/**
+ * Runs an attendance write and turns `SessionClosedError` (M15, spec §7
+ * criterion 17 — the cancelled/rescheduled-session guard) into the same
+ * `{ error }` shape every other refusal in this file already returns.
+ */
+async function writeAttendance<T>(
+  write: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; error: SessionActionState }> {
+  try {
+    return { ok: true, value: await write() };
+  } catch (error) {
+    if (error instanceof SessionClosedError) {
+      return { ok: false, error: { error: error.reason } };
+    }
+    throw error;
+  }
+}
+
 /** EXCUSED is offered only when the session's class allows it (M10). */
 async function excusedAllowed(db: ScopedDb, classGroupId: string): Promise<boolean> {
   const classGroup = await db.classGroups.findById(classGroupId);
@@ -136,7 +155,10 @@ export async function setAttendanceAction(
     if (existing.attendanceStatus === status) return { status: "saved" };
 
     const before = existing.attendanceStatus;
-    await updateAttendanceStatus(prisma, existing.id, status, ctx.user.id);
+    const result = await writeAttendance(() =>
+      updateAttendanceStatus(prisma, existing, status, ctx.user.id),
+    );
+    if (!result.ok) return result.error;
 
     await writeAuditLog({
       centerId: ctx.center.id,
@@ -154,15 +176,18 @@ export async function setAttendanceAction(
       session.classGroupId,
       studentProfileId,
     );
-    await createAttendance(prisma, {
-      centerId: ctx.center.id,
-      sessionId,
-      studentProfileId,
-      enrollmentId,
-      isDropIn,
-      status,
-      recordedBy: ctx.user.id,
-    });
+    const result = await writeAttendance(() =>
+      createAttendance(prisma, {
+        centerId: ctx.center.id,
+        sessionId,
+        studentProfileId,
+        enrollmentId,
+        isDropIn,
+        status,
+        recordedBy: ctx.user.id,
+      }),
+    );
+    if (!result.ok) return result.error;
   }
 
   revalidateSessionDetail(locale, sessionId);
@@ -205,15 +230,18 @@ export async function addExistingAttendeeAction(
     session.classGroupId,
     studentProfileId,
   );
-  await createAttendance(prisma, {
-    centerId: ctx.center.id,
-    sessionId,
-    studentProfileId,
-    enrollmentId,
-    isDropIn,
-    status,
-    recordedBy: ctx.user.id,
-  });
+  const result = await writeAttendance(() =>
+    createAttendance(prisma, {
+      centerId: ctx.center.id,
+      sessionId,
+      studentProfileId,
+      enrollmentId,
+      isDropIn,
+      status,
+      recordedBy: ctx.user.id,
+    }),
+  );
+  if (!result.ok) return result.error;
 
   revalidateSessionDetail(locale, sessionId);
   revalidateSessionList(locale);
@@ -322,15 +350,18 @@ export async function addNewAttendeeAction(
     return { error: "studentBlocked" };
   }
 
-  await createAttendance(prisma, {
-    centerId,
-    sessionId,
-    studentProfileId,
-    enrollmentId: null,
-    isDropIn: true,
-    status,
-    recordedBy: ctx.user.id,
-  });
+  const attendanceResult = await writeAttendance(() =>
+    createAttendance(prisma, {
+      centerId,
+      sessionId,
+      studentProfileId,
+      enrollmentId: null,
+      isDropIn: true,
+      status,
+      recordedBy: ctx.user.id,
+    }),
+  );
+  if (!attendanceResult.ok) return attendanceResult.error;
 
   await writeAuditLog({
     centerId,
@@ -534,6 +565,8 @@ export async function rescheduleSessionAction(
   );
   if (!result.ok) return { error: result.error };
 
+  // Reschedule creates a *new* Session (M15) — the original row is left in
+  // place, linked via `rescheduledToId`, not mutated into the new date/time.
   await writeAuditLog({
     centerId: ctx.center.id,
     actorUserId: ctx.user.id,
@@ -541,13 +574,14 @@ export async function rescheduleSessionAction(
     entityType: "Session",
     entityId: sessionId,
     before,
-    after: { date: result.session.date, startTime, endTime },
+    after: { date: result.session.date, startTime, endTime, newSessionId: result.session.id },
   });
 
   revalidateSessionDetail(locale, sessionId);
+  revalidateSessionDetail(locale, result.session.id);
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);
-  return { status: "rescheduled", conflicts: result.conflicts };
+  return { status: "rescheduled", conflicts: result.conflicts, newSessionId: result.session.id };
 }
 
 /**

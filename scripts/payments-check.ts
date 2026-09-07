@@ -478,7 +478,7 @@ async function main() {
     where: { centerId: centerA.id, sessionId: nextAbsentSession.id, studentProfileId: studentAbsentee.profile.id },
   });
   check("A roster row exists to correct", beforeCorrectionStatus !== null);
-  const corrected = await updateAttendanceStatus(prisma, beforeCorrectionStatus!.id, "PRESENT", actorId);
+  const corrected = await updateAttendanceStatus(prisma, beforeCorrectionStatus!, "PRESENT", actorId);
   check(
     "attendance.correct changes the recorded status",
     corrected.attendanceStatus === "PRESENT",

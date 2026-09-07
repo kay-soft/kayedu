@@ -368,6 +368,29 @@ async function main() {
     pendingReservationsA.length === 0,
     JSON.stringify(pendingReservationsA.map((r) => r.id)),
   );
+
+  // ── 6. M15: rejection starts the 7-day cooling-off, and a teacher's own
+  // approvals-queue permission resolves the way a separate reviewer needs ──
+  check(
+    "rejectReservation stamps rejectedAt — the whole cooling-off mechanism (M15, spec §5.1 'Approvals & enrolment')",
+    rejected.ok && rejected.reservation.rejectedAt !== null,
+    JSON.stringify(rejected),
+  );
+  const coolingOffRetry = await prisma.$transaction((tx) =>
+    reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classConfirm.id, studentUserId: studentToDecline.id }),
+  );
+  check(
+    "Re-requesting the same class within 7 days of a rejection is refused as coolingOff, not silently",
+    !coolingOffRetry.ok && coolingOffRetry.error === "coolingOff",
+    JSON.stringify(coolingOffRetry),
+  );
+
+  check(
+    "A TEACHER's own approvals queue (reservation.manage.own, M15) is grantable and off by default; never for STUDENT",
+    can("TEACHER", "reservation.manage.own", { "reservation.manage.own": true }) &&
+      !can("TEACHER", "reservation.manage.own") &&
+      !can("STUDENT", "reservation.manage.own"),
+  );
 }
 
 main()

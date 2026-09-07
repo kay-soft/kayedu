@@ -52,7 +52,9 @@ export function discoverClassSelect(centerId: string) {
         selections: { where: { centerId }, select: { displayName: true }, take: 1 },
       },
     },
-    room: { select: { name: true } },
+    // `capacity` (M15) — a card's "full" state is hard-capped by the room,
+    // not just the class's own configured target (`lib/capacity.ts`).
+    room: { select: { name: true, capacity: true } },
     schedules: {
       select: { dayOfWeek: true, startTime: true, endTime: true },
       orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],

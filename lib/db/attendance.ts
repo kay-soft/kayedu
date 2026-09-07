@@ -43,12 +43,45 @@ export function findAttendeeById(
 }
 
 /**
+ * Thrown by `createAttendance`/`updateAttendanceStatus` when the session is
+ * CANCELLED or has already been rescheduled onto a replacement (M15, spec §7
+ * criterion 17 / §5.1 "Reschedule with linkage") — the single choke point
+ * every attendance write funnels through, so a future caller cannot forget
+ * the check the way every existing caller did (docs/00 §7.1's verified gap).
+ * A thrown error rather than a result union on purpose: every pre-existing
+ * caller (throwaway fixtures in `scripts/*-check.ts`, `prisma/seed.ts`) never
+ * hits this path and keeps working against the exact same `SessionAttendee`
+ * return type unchanged — only the production Server Actions that must
+ * surface this as a user-facing refusal catch it (the same shape
+ * `PermissionError`/`assertCan` already establishes in `lib/auth/permissions.ts`).
+ */
+export class SessionClosedError extends Error {
+  reason: "sessionCancelled" | "sessionRescheduled";
+
+  constructor(reason: "sessionCancelled" | "sessionRescheduled") {
+    super(`Session is ${reason}.`);
+    this.name = "SessionClosedError";
+    this.reason = reason;
+  }
+}
+
+async function assertSessionOpen(db: Db, sessionId: string): Promise<void> {
+  const session = await db.session.findUnique({
+    where: { id: sessionId },
+    select: { status: true, rescheduledToId: true },
+  });
+  if (!session) return; // let the caller's own existence check fail instead.
+  if (session.status === "CANCELLED") throw new SessionClosedError("sessionCancelled");
+  if (session.rescheduledToId) throw new SessionClosedError("sessionRescheduled");
+}
+
+/**
  * First-time mark (`attendance.record`). `enrollmentId`/`isDropIn` are
  * resolved by the caller from the class's active enrollments (docs/01 §1
  * principle 4 — the roster is decoupled from enrollment; drop-in is simply
  * `enrollmentId: null, isDropIn: true`).
  */
-export function createAttendance(
+export async function createAttendance(
   db: Db,
   params: {
     centerId: string;
@@ -60,6 +93,8 @@ export function createAttendance(
     recordedBy: string;
   },
 ): Promise<SessionAttendee> {
+  await assertSessionOpen(db, params.sessionId);
+
   return db.sessionAttendee.create({
     data: {
       centerId: params.centerId,
@@ -74,14 +109,16 @@ export function createAttendance(
 }
 
 /** A changed mark on an already-marked row — this is the audited "correction". */
-export function updateAttendanceStatus(
+export async function updateAttendanceStatus(
   db: Db,
-  id: string,
+  existing: Pick<SessionAttendee, "id" | "sessionId">,
   status: AttendanceStatus,
   recordedBy: string,
 ): Promise<SessionAttendee> {
+  await assertSessionOpen(db, existing.sessionId);
+
   return db.sessionAttendee.update({
-    where: { id },
+    where: { id: existing.id },
     data: { attendanceStatus: status, recordedBy, recordedAt: new Date() },
   });
 }

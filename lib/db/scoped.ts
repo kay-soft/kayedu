@@ -932,6 +932,30 @@ export function scoped(ctx: TenantContext) {
           },
         }),
 
+      /**
+       * A teacher's own approvals queue (M15, spec §4.2 item 6): PENDING
+       * requests for classes *this* teacher teaches — a separate, narrower
+       * view of the same `Reservation` data the centre's own queue reads,
+       * never a parallel workflow.
+       */
+      listPendingForTeacher: (teacherId: string) =>
+        prisma.reservation.findMany({
+          where: scopedWhere(centerId, {
+            status: PENDING_RESERVATION,
+            classGroup: { teacherId },
+          }),
+          orderBy: { requestedAt: "asc" },
+          include: {
+            student: true,
+            classGroup: {
+              include: {
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
+              },
+            },
+          },
+        }),
+
       findById: (id: string) => scopedFindById(prisma.reservation, centerId, id),
     },
   };

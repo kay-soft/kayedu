@@ -6,6 +6,7 @@ import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import {
   createAttendance,
   findAttendee,
+  SessionClosedError,
   updateAttendanceStatus,
 } from "@/lib/db/attendance";
 import { writeAuditLog } from "@/lib/db/audit";
@@ -66,39 +67,46 @@ export async function checkInAction(
   const existing = await findAttendee(prisma, centerId, sessionId, studentProfileId);
   let attendeeId: string;
 
-  if (existing) {
-    if (existing.attendanceStatus !== status) {
-      if (!ctxCan(ctx, "attendance.correct")) return FORBIDDEN;
-      const before = existing.attendanceStatus;
-      await updateAttendanceStatus(prisma, existing.id, status, ctx.user.id);
-      await writeAuditLog({
+  try {
+    if (existing) {
+      if (existing.attendanceStatus !== status) {
+        if (!ctxCan(ctx, "attendance.correct")) return FORBIDDEN;
+        const before = existing.attendanceStatus;
+        await updateAttendanceStatus(prisma, existing, status, ctx.user.id);
+        await writeAuditLog({
+          centerId,
+          actorUserId: ctx.user.id,
+          action: "attendance.correct",
+          entityType: "SessionAttendee",
+          entityId: existing.id,
+          before: { attendanceStatus: before },
+          after: { attendanceStatus: status },
+        });
+      }
+      attendeeId = existing.id;
+    } else {
+      if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
+      const enrollment = await db.enrollments.findExisting(
+        session.classGroupId,
+        studentProfileId,
+      );
+      const active = enrollment?.status === "ACTIVE";
+      const created = await createAttendance(prisma, {
         centerId,
-        actorUserId: ctx.user.id,
-        action: "attendance.correct",
-        entityType: "SessionAttendee",
-        entityId: existing.id,
-        before: { attendanceStatus: before },
-        after: { attendanceStatus: status },
+        sessionId,
+        studentProfileId,
+        enrollmentId: active ? enrollment!.id : null,
+        isDropIn: !active,
+        status,
+        recordedBy: ctx.user.id,
       });
+      attendeeId = created.id;
     }
-    attendeeId = existing.id;
-  } else {
-    if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
-    const enrollment = await db.enrollments.findExisting(
-      session.classGroupId,
-      studentProfileId,
-    );
-    const active = enrollment?.status === "ACTIVE";
-    const created = await createAttendance(prisma, {
-      centerId,
-      sessionId,
-      studentProfileId,
-      enrollmentId: active ? enrollment!.id : null,
-      isDropIn: !active,
-      status,
-      recordedBy: ctx.user.id,
-    });
-    attendeeId = created.id;
+  } catch (error) {
+    // Cancelled or already-rescheduled session (M15, spec §7 criterion 17) —
+    // refused server-side here too, not just hidden in the Reception UI.
+    if (error instanceof SessionClosedError) return { error: error.reason };
+    throw error;
   }
 
   // "Attend = pay, or not counted" — only PRESENT/LATE is ever payable

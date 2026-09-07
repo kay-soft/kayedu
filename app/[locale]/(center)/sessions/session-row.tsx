@@ -26,6 +26,7 @@ const STATUS_BADGE = {
   LIVE: "success",
   COMPLETED: "neutral",
   CANCELLED: "danger",
+  RESCHEDULED: "warning",
 } as const;
 
 /** One session. Stacked card below `md`, table row from `md` up (docs/04 §6). */

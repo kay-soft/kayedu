@@ -9,6 +9,8 @@ import {
 } from "@/app/[locale]/(center)/sessions/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
+import { Link } from "@/lib/i18n/navigation";
+import { ROUTES } from "@/lib/routes";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
 
 /**
@@ -17,13 +19,18 @@ import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
  * attendance rows (CLAUDE.md rule 2); a manager who needs that too uses the
  * roster's own void/correct controls, unchanged. `canCancel`/`canReschedule`
  * only hide controls — the server actions re-check every permission.
+ *
+ * `locked` (M15) covers both terminal states a session can reach here:
+ * CANCELLED (it never happened) and RESCHEDULED (it moved to a replacement,
+ * `rescheduledToId` — the replacement's own detail page is where cancel/
+ * reschedule become available again, not this one).
  */
 export function SessionLifecycleActions({
   sessionId,
   date,
   startTime,
   endTime,
-  cancelled,
+  locked,
   canCancel,
   canReschedule,
 }: {
@@ -31,7 +38,7 @@ export function SessionLifecycleActions({
   date: string;
   startTime: string;
   endTime: string;
-  cancelled: boolean;
+  locked: boolean;
   canCancel: boolean;
   canReschedule: boolean;
 }) {
@@ -49,7 +56,7 @@ export function SessionLifecycleActions({
     IDLE_SESSION_STATE,
   );
 
-  if (cancelled || (!canCancel && !canReschedule)) return null;
+  if (locked || (!canCancel && !canReschedule)) return null;
 
   return (
     <div className="flex flex-col gap-2">
@@ -117,15 +124,25 @@ export function SessionLifecycleActions({
         <FormMessage>{tErrors(rescheduleState.error)}</FormMessage>
       ) : null}
       {rescheduleState.status === "rescheduled" ? (
-        rescheduleState.conflicts && rescheduleState.conflicts.length > 0 ? (
-          <FormMessage tone="warning">
-            {t("rescheduledWithConflict", {
-              count: rescheduleState.conflicts.length,
-            })}
-          </FormMessage>
-        ) : (
-          <FormMessage tone="info">{t("rescheduled")}</FormMessage>
-        )
+        <>
+          {rescheduleState.conflicts && rescheduleState.conflicts.length > 0 ? (
+            <FormMessage tone="warning">
+              {t("rescheduledWithConflict", {
+                count: rescheduleState.conflicts.length,
+              })}
+            </FormMessage>
+          ) : (
+            <FormMessage tone="info">{t("rescheduled")}</FormMessage>
+          )}
+          {rescheduleState.newSessionId ? (
+            <Link
+              href={ROUTES.centerSession(rescheduleState.newSessionId)}
+              className="text-sm font-medium text-brand hover:underline"
+            >
+              {t("viewNewSession")}
+            </Link>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

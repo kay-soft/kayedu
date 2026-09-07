@@ -53,6 +53,7 @@ export function SessionRoster({
   canVoid,
   canRefund,
   allowExcused,
+  readOnly = false,
 }: {
   sessionId: string;
   rows: RosterRowData[];
@@ -61,6 +62,8 @@ export function SessionRoster({
   canVoid: boolean;
   canRefund: boolean;
   allowExcused: boolean;
+  /** Cancelled or already-rescheduled (M15) — no attendance/payment control renders. */
+  readOnly?: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
 
@@ -80,6 +83,7 @@ export function SessionRoster({
           canVoid={canVoid}
           canRefund={canRefund}
           allowExcused={allowExcused}
+          readOnly={readOnly}
         />
       ))}
     </ul>
@@ -94,6 +98,7 @@ function AttendeeRow({
   canVoid,
   canRefund,
   allowExcused,
+  readOnly,
 }: {
   sessionId: string;
   row: RosterRowData;
@@ -102,9 +107,11 @@ function AttendeeRow({
   canVoid: boolean;
   canRefund: boolean;
   allowExcused: boolean;
+  readOnly: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
   const tErrors = useTranslations("Sessions.errors");
+  const tAttendance = useTranslations("Sessions.attendance");
   const locale = useLocale();
 
   const [attendanceState, attendanceFormAction, attendancePending] =
@@ -154,24 +161,41 @@ function AttendeeRow({
         </p>
       ) : null}
 
-      <AttendanceControl
-        formAction={attendanceFormAction}
-        value={row.status}
-        pending={attendancePending || attendanceLocked}
-        allowExcused={allowExcused}
-        hiddenFields={
-          <>
-            <input type="hidden" name="locale" value={locale} />
-            <input type="hidden" name="sessionId" value={sessionId} />
-            <input type="hidden" name="studentProfileId" value={row.studentProfileId} />
-          </>
-        }
-      />
-      {attendanceState.error ? (
-        <FormMessage>{tErrors(attendanceState.error)}</FormMessage>
-      ) : null}
+      {readOnly ? (
+        <Badge variant="neutral">
+          {row.status ? tAttendance(row.status) : t("unmarked")}
+        </Badge>
+      ) : (
+        <>
+          <AttendanceControl
+            formAction={attendanceFormAction}
+            value={row.status}
+            pending={attendancePending || attendanceLocked}
+            allowExcused={allowExcused}
+            hiddenFields={
+              <>
+                <input type="hidden" name="locale" value={locale} />
+                <input type="hidden" name="sessionId" value={sessionId} />
+                <input type="hidden" name="studentProfileId" value={row.studentProfileId} />
+              </>
+            }
+          />
+          {attendanceState.error ? (
+            <FormMessage>{tErrors(attendanceState.error)}</FormMessage>
+          ) : null}
+        </>
+      )}
 
-      {payable ? (
+      {readOnly ? (
+        row.payment ? (
+          <p className="text-sm font-medium text-success">
+            {t("paid", {
+              amount: formatMoney(row.payment.amount, locale),
+              method: t(`method.${row.payment.method}`),
+            })}
+          </p>
+        ) : null
+      ) : payable ? (
         row.payment ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-success-bg px-3 py-2">
             <p className="text-sm font-medium text-success">

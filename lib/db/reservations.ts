@@ -13,6 +13,7 @@ import type {
 // lib/db/teacher-portal.ts and lib/db/payments.ts).
 import { claimStudentCode } from "./students.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
+import { cooldownUntil, enrollmentCap, isAtCapacity, isInCooldown } from "../capacity.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER_SCOPE: BlockScope = "TEACHER";
@@ -101,7 +102,8 @@ export type ReserveOrEnrollResult =
         | "alreadyEnrolled"
         | "alreadyRequested"
         | "classFull";
-    };
+    }
+  | { ok: false; error: "coolingOff"; cooldownUntil: Date };
 
 /**
  * The student-facing write for Discover (spec §5, docs/04 §10): branches on
@@ -133,6 +135,7 @@ export async function reserveOrEnroll(
 
   const classGroup = await tx.classGroup.findFirst({
     where: scopedWhere(centerId, { id: classGroupId, active: true }),
+    include: { room: { select: { capacity: true } } },
   });
   if (!classGroup) return { ok: false, error: "notFound" };
   if (!classGroup.acceptsNewStudents) return { ok: false, error: "notAcceptingStudents" };
@@ -164,14 +167,24 @@ export async function reserveOrEnroll(
   if (existingReservation?.status === "CONFIRMED") {
     return { ok: false, error: "alreadyEnrolled" };
   }
+  // A rejected student cannot re-request the same class for 7 days (M15,
+  // spec §5.1 "Approvals & enrolment") — the reused row's own `rejectedAt` is
+  // the whole mechanism (docs/01-data-model.md "Workflow layer"). Cancelling
+  // your own pending request is not a rejection and carries no cooldown.
+  if (
+    existingReservation?.status === "REJECTED" &&
+    existingReservation.rejectedAt &&
+    isInCooldown(existingReservation.rejectedAt, new Date())
+  ) {
+    return { ok: false, error: "coolingOff", cooldownUntil: cooldownUntil(existingReservation.rejectedAt) };
+  }
 
   if (!classGroup.requiresConfirmation) {
-    if (classGroup.capacity > 0) {
-      const active = await tx.enrollment.count({
-        where: scopedWhere(centerId, { classGroupId, status: ACTIVE_ENROLLMENT }),
-      });
-      if (active >= classGroup.capacity) return { ok: false, error: "classFull" };
-    }
+    const cap = enrollmentCap(classGroup.capacity, classGroup.room?.capacity);
+    const active = await tx.enrollment.count({
+      where: scopedWhere(centerId, { classGroupId, status: ACTIVE_ENROLLMENT }),
+    });
+    if (isAtCapacity(active, cap)) return { ok: false, error: "classFull" };
 
     const user = await tx.user.findUniqueOrThrow({ where: { id: studentUserId } });
     const profile = existingProfile ?? (await ensureStudentProfile(tx, centerId, user));
@@ -190,7 +203,13 @@ export async function reserveOrEnroll(
   const reservation = existingReservation
     ? await tx.reservation.update({
         where: { id: existingReservation.id },
-        data: { status: "PENDING", requestedAt: new Date(), resolvedAt: null, resolvedBy: null },
+        data: {
+          status: "PENDING",
+          requestedAt: new Date(),
+          resolvedAt: null,
+          resolvedBy: null,
+          rejectedAt: null,
+        },
       })
     : await tx.reservation.create({
         data: scopedData(centerId, { classGroupId, studentId: studentUserId, status: "PENDING" }),
@@ -225,6 +244,7 @@ export async function confirmReservation(
 
   const classGroup = await tx.classGroup.findFirst({
     where: scopedWhere(centerId, { id: reservation.classGroupId }),
+    include: { room: { select: { capacity: true } } },
   });
   if (!classGroup) return { ok: false, error: "notFound" };
 
@@ -232,12 +252,14 @@ export async function confirmReservation(
     return { ok: false, error: "studentBlocked" };
   }
 
-  if (classGroup.capacity > 0) {
-    const active = await tx.enrollment.count({
-      where: scopedWhere(centerId, { classGroupId: classGroup.id, status: ACTIVE_ENROLLMENT }),
-    });
-    if (active >= classGroup.capacity) return { ok: false, error: "classFull" };
-  }
+  // Hard-capped by the room, not just the class's own configured target
+  // (M15, spec §5.1 "Capacity") — staff cannot approve past the cap, request
+  // or no request.
+  const cap = enrollmentCap(classGroup.capacity, classGroup.room?.capacity);
+  const active = await tx.enrollment.count({
+    where: scopedWhere(centerId, { classGroupId: classGroup.id, status: ACTIVE_ENROLLMENT }),
+  });
+  if (isAtCapacity(active, cap)) return { ok: false, error: "classFull" };
 
   const user = await tx.user.findUniqueOrThrow({ where: { id: reservation.studentId } });
   const profile = await ensureStudentProfile(tx, centerId, user);
@@ -280,9 +302,12 @@ export async function rejectReservation(
   if (!reservation) return { ok: false, error: "notFound" };
   if (reservation.status !== "PENDING") return { ok: false, error: "notPending" };
 
+  const now = new Date();
   const updated = await db.reservation.update({
     where: { id: reservation.id },
-    data: { status: "REJECTED", resolvedAt: new Date(), resolvedBy },
+    // `rejectedAt` (M15) starts this (student, class) pair's 7-day
+    // cooling-off — `reserveOrEnroll` reads it back off this same row.
+    data: { status: "REJECTED", resolvedAt: now, resolvedBy, rejectedAt: now },
   });
   return { ok: true, reservation: updated };
 }

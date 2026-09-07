@@ -137,6 +137,28 @@ export const classRequestSchema = z
     message: "invalidTimeRange",
   });
 
+// ── Centre directory: request to teach at a centre with zero memberships
+// (M15, spec §5.1 "Teacher onboarding") ─────────────────────────────────────
+
+export const teachAtCenterRequestSchema = z
+  .object({
+    ...base,
+    centerId: recordId,
+    subjectId: optionalRef,
+    gradeId: optionalRef,
+    dayOfWeek,
+    startTime: timeValue,
+    endTime: timeValue,
+    capacity: wholeNumber(MAX_REQUEST_CAPACITY),
+    attendanceRequired: checkbox,
+    lateThresholdMinutes: wholeNumber(MAX_REQUEST_LATE_THRESHOLD_MINUTES),
+    note: optionalText(300),
+  })
+  .refine((value) => value.startTime < value.endTime, {
+    path: ["endTime"],
+    message: "invalidTimeRange",
+  });
+
 // ── Sessions: request a new one-off session (ChangeRequest, spec §4.2 item 2) ─
 
 const sessionDate = z

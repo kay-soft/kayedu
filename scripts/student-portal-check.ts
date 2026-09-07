@@ -233,6 +233,10 @@ async function main() {
   check("Confirming a reservation creates the StudentProfile at that center", profileYAfterConfirm !== null);
 
   // ── 10. Reject → re-request reuses the same Reservation row ──────────────
+  // (M15, spec §5.1 "Approvals & enrolment": a rejected student cannot
+  // re-request the same class for 7 days — full coverage of that cooling-off
+  // lives in `npm run check:enrollment`; this just confirms the pre-existing
+  // "same row reused" guarantee still holds once the cooldown has elapsed.)
   const firstRequest = await prisma.$transaction((tx) =>
     reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classReRequest.id, studentUserId: studentX.id }),
   );
@@ -240,11 +244,24 @@ async function main() {
   const rejected = await rejectReservation(prisma, centerA.id, firstReservationId, teacherA.id);
   check("rejectReservation marks a PENDING request REJECTED", rejected.ok && rejected.reservation.status === "REJECTED");
 
+  const immediateRetry = await prisma.$transaction((tx) =>
+    reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classReRequest.id, studentUserId: studentX.id }),
+  );
+  check(
+    "Re-requesting immediately after REJECTED is refused as coolingOff (M15)",
+    !immediateRetry.ok && immediateRetry.error === "coolingOff",
+    JSON.stringify(immediateRetry),
+  );
+
+  const eightDaysAgo = new Date();
+  eightDaysAgo.setUTCDate(eightDaysAgo.getUTCDate() - 8);
+  await prisma.reservation.update({ where: { id: firstReservationId }, data: { rejectedAt: eightDaysAgo } });
+
   const secondRequest = await prisma.$transaction((tx) =>
     reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classReRequest.id, studentUserId: studentX.id }),
   );
   check(
-    "Re-requesting after REJECTED succeeds and reuses the same row (the (classGroupId, studentId) unique constraint)",
+    "Once the cooling-off has elapsed, re-requesting after REJECTED succeeds and reuses the same row (the (classGroupId, studentId) unique constraint)",
     secondRequest.ok &&
       secondRequest.kind === "pending" &&
       secondRequest.reservationId === firstReservationId,

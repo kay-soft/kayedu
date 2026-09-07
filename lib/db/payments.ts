@@ -31,7 +31,12 @@ export type RecordPaymentResult =
   | { ok: true; payment: Payment }
   | {
       ok: false;
-      error: "notFound" | "attendanceNotPayable" | "alreadyPaid";
+      error:
+        | "notFound"
+        | "attendanceNotPayable"
+        | "alreadyPaid"
+        | "sessionCancelled"
+        | "sessionRescheduled";
     };
 
 /**
@@ -75,6 +80,17 @@ export async function recordPayment(
   });
   if (!attendee || !attendee.studentProfileId) {
     return { ok: false, error: "notFound" };
+  }
+  // A cancelled session, or one already superseded by a reschedule (M15,
+  // spec §7 criterion 17 / §5.1 "Reschedule with linkage"), accepts no new
+  // payment — the same closed-session rule `lib/db/attendance.ts` enforces
+  // for attendance, checked here too since a payment can be the very first
+  // write against an attendee row created moments earlier.
+  if (attendee.session.status === "CANCELLED") {
+    return { ok: false, error: "sessionCancelled" };
+  }
+  if (attendee.session.rescheduledToId) {
+    return { ok: false, error: "sessionRescheduled" };
   }
   if (
     attendee.attendanceStatus !== "PRESENT" &&

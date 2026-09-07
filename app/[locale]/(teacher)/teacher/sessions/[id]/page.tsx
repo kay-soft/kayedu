@@ -30,6 +30,7 @@ const STATUS_BADGE = {
   LIVE: "success",
   COMPLETED: "neutral",
   CANCELLED: "danger",
+  RESCHEDULED: "warning",
 } as const;
 
 const ATTENDANCE_BADGE = {
