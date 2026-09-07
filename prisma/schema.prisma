@@ -159,6 +159,12 @@ model User {
   // Membership or a StudentProfile of their own — it's read access into
   // someone else's.
   parentLinks     ParentLink[]     @relation("ParentLinkParent")
+  // M17 — this User's own ratings and skips, as a STUDENT rating sessions
+  // they attended. Named off the global User (not a StudentProfile) because
+  // rating is the student's own act, the same identity the login pop-up
+  // authenticates against — see the note on SessionRating below.
+  sessionRatings     SessionRating[]     @relation("SessionRatingStudent")
+  sessionRatingSkips SessionRatingSkip[] @relation("SessionRatingSkipStudent")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -715,6 +721,11 @@ model Session {
   attendees   SessionAttendee[]
   payments    Payment[]
   settlements Settlement[]
+  // M17 — ratings/skips students recorded against this exact session. Never
+  // re-derived if the session is later rescheduled: a rating is for the
+  // session actually attended, at the teacher who actually taught it.
+  ratings     SessionRating[]
+  ratingSkips SessionRatingSkip[]
 
   // The idempotency key the session generator relies on (docs/02 §11):
   // regenerating a window is a `createMany({ skipDuplicates: true })` against
@@ -1036,6 +1047,79 @@ model ParentLink {
   @@index([parentUserId])
   @@index([studentProfileId])
   @@index([centerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// TEACHER RATINGS (M17)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A student's 1-5 rating of one session they attended (M17, docs/00-master-
+ * product-spec.md §5 "Teacher ratings"). `studentUserId` names the global
+ * `User`, not a `StudentProfile` — rating is the student's own act, the same
+ * identity the login pop-up authenticates against, and it must read/write
+ * the same regardless of which centre's `StudentProfile` the attendance sat
+ * under.
+ *
+ * `teacherId` is denormalized from `session.teacherId` at rating time — same
+ * pattern as `Payment.teacherId` (M6, docs/02-architecture.md §14): the
+ * published aggregate is a single-table `aggregate`/`groupBy` on `teacherId`
+ * across every centre a teacher works at ("follows the teacher across
+ * centres" per spec §5), and Prisma cannot `groupBy` on a related model's
+ * scalar column. Not money, and never re-derived if the session is later
+ * rescheduled — a rating stays pinned to the teacher who actually taught the
+ * session the student attended.
+ *
+ * Deliberately carries **no `centerId`**: the published aggregate is
+ * platform-wide by design, never filtered to one centre, so there is no
+ * scoped read here to protect and this model has no entry in
+ * `lib/db/scoped.ts` — `lib/db/ratings.ts`'s functions take `teacherId`
+ * directly, the same "cross-cutting read, not a scoped() entry" shape
+ * `lib/db/settlements.ts`/`lib/db/refunds.ts` use for centerId. The teacher
+ * can never see who rated them or how many ratings exist: `lib/db/ratings.ts`
+ * exposes aggregate-only reads (`teacherRatingAverage`/`teacherRatingAverages`,
+ * `{ average }` only, never a count) and no function anywhere lists raw rows
+ * by `teacherId` — `studentUserId` is real, sensitive data on this table, but
+ * no exported read path ever hands it back to a teacher-facing caller.
+ */
+model SessionRating {
+  id            String   @id @default(uuid())
+  studentUserId String
+  studentUser   User     @relation("SessionRatingStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  teacherId     String
+  score         Int // 1-5
+  createdAt     DateTime @default(now())
+
+  // One rating per student per session — re-rating is not offered.
+  @@unique([studentUserId, sessionId])
+  @@index([teacherId])
+  @@index([sessionId])
+}
+
+/**
+ * A student's explicit "skip" of one session's rating prompt (M17). Persisted
+ * server-side — not browser storage — so "skipping costs nothing" holds
+ * across devices and logins, not just within one browser tab:
+ * `attendedSessionsToRate` (`lib/db/ratings.ts`) excludes any session with a
+ * row here exactly like it excludes an already-rated one, so a skipped
+ * session is never re-surfaced, on this device or any other.
+ *
+ * Its own table rather than a `SKIPPED` sentinel on `SessionRating.score`, so
+ * the aggregate's `avg`/`groupBy` over `SessionRating.score` never needs to
+ * filter out a placeholder value — a skip carries no score at all.
+ */
+model SessionRatingSkip {
+  id            String   @id @default(uuid())
+  studentUserId String
+  studentUser   User     @relation("SessionRatingSkipStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([studentUserId, sessionId])
+  @@index([studentUserId])
 }
 
 // ─────────────────────────────────────────────────────────────

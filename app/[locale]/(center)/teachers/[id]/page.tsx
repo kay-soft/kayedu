@@ -21,8 +21,11 @@ import {
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { prisma } from "@/lib/db/client";
+import { teacherRatingAverage } from "@/lib/db/ratings";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
+import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -63,9 +66,13 @@ export default async function TeacherDetailPage({
   // leak"): this page must never reveal which other centres this teacher
   // works at, so nothing here queries across centres — everything below is
   // scoped to this center alone.
-  const [classes, blocks] = await Promise.all([
+  const [classes, blocks, rating] = await Promise.all([
     db.classGroups.list({ teacherId: teacher.userId }),
     db.studentBlocks.list({ scope: "TEACHER", refId: teacher.userId }),
+    // M17, spec §5 "Teacher ratings": platform-wide by the teacher's global
+    // id, average-only — the same shape the teacher's own dashboard and
+    // Discover cards read, never a centre-privileged view of the count.
+    teacherRatingAverage(prisma, teacher.userId),
   ]);
 
   // A block stores the student's *User* id; the name shown is this center's
@@ -165,6 +172,10 @@ export default async function TeacherDetailPage({
                 value={
                   teacher.user.authId ? tCommon("active") : tCommon("inactive")
                 }
+              />
+              <DetailRow
+                label={t("rating.title")}
+                value={rating.average !== null ? formatRating(rating.average, locale) : t("rating.none")}
               />
             </CardContent>
           </Card>

@@ -267,6 +267,10 @@
     "fields": {
       "accountClaimed": "Signed in before"
     },
+    "rating": {
+      "title": "Rating",
+      "none": "No ratings yet"
+    },
     "blocks": {
       "title": "Block-list",
       "description": "A student blocked here cannot be enrolled with, or added to a session of, this teacher.",
@@ -1162,7 +1166,9 @@
       "centers": "Branches",
       "sessionsToday": "Sessions today",
       "sessionsThisWeek": "Sessions this week",
-      "earningsThisMonth": "Earnings this month"
+      "earningsThisMonth": "Earnings this month",
+      "rating": "Your rating",
+      "ratingNone": "No ratings yet"
     },
     "centers": {
       "title": "Your branches",
@@ -1434,7 +1440,8 @@
       "pending": "Pending",
       "enrolled": "Enrolled",
       "full": "Class full",
-      "noSchedule": "Schedule not set yet"
+      "noSchedule": "Schedule not set yet",
+      "rating": "★ {value}"
     },
     "errors": {
       "forbidden": "You need to sign in to reserve a class.",
@@ -1462,6 +1469,21 @@
       "forbidden": "You are not allowed to do this.",
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved."
+    }
+  },
+  "RatingPopup": {
+    "title": "Rate your sessions",
+    "description": "Your rating is anonymous — the teacher only ever sees their average, never who rated them or how many ratings they have. Skipping costs nothing.",
+    "session": "Session",
+    "meta": "{teacher} · {center} · {date}",
+    "scoreLabel": "Rate {score} out of 5",
+    "skip": "Skip",
+    "errors": {
+      "forbidden": "You need to sign in to rate a session.",
+      "notFound": "Something went wrong. Try again.",
+      "invalidScore": "Choose a rating from 1 to 5.",
+      "notAttended": "This session isn't in your attended list anymore.",
+      "alreadyRated": "You already rated this session."
     }
   },
   "ParentPortal": {

@@ -56,8 +56,11 @@ app/
     (teacher)/teacher/          # /teacher/dashboard, /teacher/sessions, /teacher/students, /teacher/classes (M7)
                                 #   + /teacher/approvals, /teacher/centers (directory, M15),
                                 #     /teacher/settlements (M14)
-    (student)/student/          # /student/schedule, /student/discover, /student/reservations (M8)
-                                #   + the skippable rating prompt (M17)
+    (student)/                  # layout.tsx wires the skippable rating pop-up (delivered M17) —
+                                #   it spans every /student/* page, not one of them
+      actions.ts                # submit/skip rating actions, identity-scoped (delivered M17)
+      rating-popup.tsx          # the pop-up itself — closing it persists nothing; Skip does (M17)
+      student/                  # /student/schedule, /student/discover, /student/reservations (M8)
     (parent)/parent/            # child selector + per-child mirror of the student portal (delivered M16)
     (admin)/admin/              # /admin/centers, /admin/centers/[id], /admin/platform (M9)
                                 #   + /admin/catalog (global entries + suggestion queue, M13)
@@ -108,7 +111,7 @@ lib/
     settlements.ts                # the ONLY Settlement writes — DRAFT→APPROVED→PAID, totals derived from
                                   #   frozen snapshots, never recomputed (M14)
     refunds.ts                    # the ONLY Refund writes — original Payment row never touched (M14)
-    ratings.ts                    # SessionRating writes + the average-only aggregate; never exposes a rater (M17)
+    ratings.ts                    # SessionRating writes + the average-only aggregate; never exposes a rater (delivered M17)
     parents.ts                    # ParentLink resolution — refuses privileged phones, inert until verified (delivered M16)
     visibility.ts                 # the data-visibility window bound + its Settlement/AuditLog carve-outs (M19)
   money.ts                      # the ONLY center-cut math + piastre helpers
@@ -149,7 +152,7 @@ scripts/
   settlements-check.ts           # settlement totals derive from frozen snapshots; refund arithmetic on revenue + both shares (M14)
   enrollment-check.ts            # block scopes, 7-day cooling-off, capacity cap vs. uncapped attendance, full-window reschedule (M15)
   parent-check.ts                # privileged-phone refusal, inert-until-verified, parent sees no more than the child (delivered M16)
-  ratings-check.ts               # average-only aggregate, rater identity never exposed, 7-day window (M17)
+  ratings-check.ts               # average-only aggregate, rater identity never exposed, 7-day window (delivered M17)
   visibility-check.ts            # out-of-window denial in the data layer; Settlement/AuditLog carve-outs; nothing deleted (M19)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/

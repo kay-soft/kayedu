@@ -1,4 +1,4 @@
-import { Building2, CalendarClock, CalendarDays, Coins } from "lucide-react";
+import { Building2, CalendarClock, CalendarDays, Coins, Star } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
@@ -15,8 +15,9 @@ import {
 } from "@/components/ui/card";
 import { getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
+import { teacherRatingAverage } from "@/lib/db/ratings";
 import { combineTeacherSummaries, teacherCenterSummary } from "@/lib/db/teacher-portal";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber, formatRating } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { monthRangeUtc, startOfUtcDay, weekRangeUtc } from "@/lib/scheduling";
@@ -57,6 +58,12 @@ export default async function TeacherDashboardPage() {
   const combined = combineTeacherSummaries(summaries);
   const summaryByCenter = new Map(summaries.map((summary) => [summary.centerId, summary]));
 
+  // M17, spec §5 "Teacher ratings": the same average-out-of-5-only shape
+  // every other reader of this aggregate gets — a teacher reading their own
+  // rating is never shown a count either, and there is no separate,
+  // privileged rating query for this page to call.
+  const rating = await teacherRatingAverage(prisma, ctx.user.id);
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -65,7 +72,7 @@ export default async function TeacherDashboardPage() {
         action={<Badge variant="brand">{tRoles(ctx.role)}</Badge>}
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label={t("stats.centers")}
           value={formatNumber(combined.centerCount, locale)}
@@ -87,6 +94,12 @@ export default async function TeacherDashboardPage() {
           value={formatMoney(combined.teacherShare, locale)}
           icon={<Coins className="size-4" />}
           accent="brand"
+        />
+        <StatCard
+          label={t("stats.rating")}
+          value={rating.average !== null ? formatRating(rating.average, locale) : t("stats.ratingNone")}
+          icon={<Star className="size-4" />}
+          accent="warning"
         />
       </div>
 

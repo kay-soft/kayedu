@@ -13,12 +13,13 @@ import {
   teacherDisplayNames,
   type DiscoverClassRow,
 } from "@/lib/db/discover";
+import { teacherRatingAverages } from "@/lib/db/ratings";
 import {
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatRating } from "@/lib/format";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { subjectAccentColor } from "@/lib/subject-accent";
 import { catalogLabel } from "@/lib/catalog";
@@ -35,6 +36,9 @@ type CardViewModel = {
   subjectName: string | null;
   gradeName: string | null;
   teacherName: string;
+  /** Average out of 5, platform-wide, across every centre this teacher works
+   * at (M17) — never a count alongside it (spec §5 "Teacher ratings"). */
+  teacherRating: number | null;
   roomName: string | null;
   price: number;
   requiresConfirmation: boolean;
@@ -98,6 +102,12 @@ export default async function StudentDiscoverPage({
     }),
   );
 
+  // Ratings are platform-wide by teacherId, never per-centre (M17, spec §5
+  // "Teacher ratings" — "follows the teacher across centres") — one batched
+  // lookup across every centre's classes combined, not one per centre.
+  const allTeacherIds = [...new Set(perCenter.flatMap(({ classes }) => classes.map((row) => row.teacherId)))];
+  const teacherRatings = await teacherRatingAverages(prisma, allTeacherIds);
+
   const blockedEverywhere = blockedByCenter;
   const cards: CardViewModel[] = [];
 
@@ -128,6 +138,7 @@ export default async function StudentDiscoverPage({
         subjectName: row.subject ? catalogLabel(locale, row.subject) : null,
         gradeName: row.grade ? catalogLabel(locale, row.grade) : null,
         teacherName: teacherNames.get(row.teacherId) ?? "—",
+        teacherRating: teacherRatings.get(row.teacherId) ?? null,
         roomName: row.room?.name ?? null,
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
@@ -218,6 +229,11 @@ export default async function StudentDiscoverPage({
                   {card.teacherName.trim().charAt(0) || "?"}
                 </span>
                 <span className="min-w-0 truncate text-sm text-text-secondary">{card.teacherName}</span>
+                {card.teacherRating !== null ? (
+                  <span className="ms-auto shrink-0 text-xs font-medium text-text-muted">
+                    {t("card.rating", { value: formatRating(card.teacherRating, locale) })}
+                  </span>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">

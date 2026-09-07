@@ -28,7 +28,8 @@
     "check:catalog": "node --env-file-if-exists=.env scripts/catalog-check.ts",
     "check:settlements": "node --env-file-if-exists=.env scripts/settlements-check.ts",
     "check:enrollment": "node --env-file-if-exists=.env scripts/enrollment-check.ts",
-    "check:parent": "node --env-file-if-exists=.env scripts/parent-check.ts"
+    "check:parent": "node --env-file-if-exists=.env scripts/parent-check.ts",
+    "check:ratings": "node --env-file-if-exists=.env scripts/ratings-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

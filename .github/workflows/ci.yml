@@ -73,3 +73,5 @@ jobs:
       - run: npm run check:catalog
       - run: npm run check:settlements
       - run: npm run check:enrollment
+      - run: npm run check:parent
+      - run: npm run check:ratings

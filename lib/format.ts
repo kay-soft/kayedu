@@ -20,6 +20,18 @@ export function formatDate(value: Date, locale: string): string {
 }
 
 /**
+ * A teacher's published rating (M17, docs/00-master-product-spec.md §5
+ * "Teacher ratings") — always the average alone, out of 5, never a count
+ * alongside it.
+ */
+export function formatRating(average: number, locale: string): string {
+  return new Intl.NumberFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(average);
+}
+
+/**
  * Money display. Takes **piastres** (never EGP) so callers can't accidentally
  * format a raw float — conversion lives in lib/money.ts.
  */
