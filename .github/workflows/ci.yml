@@ -68,4 +68,7 @@ jobs:
       - run: npm run check:admin
       - run: npm run check:performance
       - run: npm run check:rtl
+      - run: npm run check:branches
+      - run: npm run check:permissions
+      - run: npm run check:catalog
       - run: npm run check:settlements

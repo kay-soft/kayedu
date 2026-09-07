@@ -822,15 +822,20 @@ model Refund {
  *
  * `totalAmount` is computed ONCE, at DRAFT creation, as the sum of frozen
  * `Payment.teacherShareSnapshot` values in scope (excluding voided and
- * already-refunded payments) — and is never recomputed afterward, even if
- * the underlying class's cut changes, or if a payment inside this
- * settlement's scope is refunded later. A later refund's reversal is simply
- * never included in this settlement; it lands in the next one that covers
- * that payment's date/session, exactly like the existing rule that a
- * settlement already PAID is not rewritten by a refund (00-master-product-
- * spec.md §5 "Teacher settlements") — this milestone applies that same
- * "never recomputed" discipline uniformly to DRAFT/APPROVED settlements too,
- * rather than only to PAID ones.
+ * already-refunded payments), and never recomputed against the *class's*
+ * config — a later cut change moves nothing here. A later *refund*, though,
+ * is a real event that reverses money still sitting in this record, and is
+ * handled differently depending on status (M14 follow-up, 00-master-
+ * product-spec.md §5 "Teacher settlements"): while this settlement is
+ * DRAFT or APPROVED — the payout has not left the centre yet —
+ * `lib/db/refunds.ts`'s `refundPayment` finds it and subtracts the refunded
+ * payment's `teacherShareReversed` from `totalAmount` in the same
+ * transaction, audited as `settlement.adjust`. Once **PAID**, this row is
+ * genuinely immutable — the money is already out the door, so a refund on a
+ * payment inside a paid settlement's scope is never applied here; it is a
+ * loss the centre absorbs or recovers directly with the teacher, and any
+ * accounting for it happens outside this record, exactly as spec §5's
+ * void/refund table already says for a PAID settlement.
  */
 model Settlement {
   id       String @id @default(uuid())

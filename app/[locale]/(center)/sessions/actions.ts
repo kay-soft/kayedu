@@ -455,6 +455,21 @@ export async function refundPaymentAction(
     },
   });
 
+  // Any DRAFT/APPROVED settlement this payment was already claimed by just
+  // had its total live-adjusted (lib/db/refunds.ts) — audited as its own
+  // row, distinct from the refund itself (docs/00 §5 "Teacher settlements").
+  for (const { settlement, previousTotal } of result.adjustedSettlements) {
+    await writeAuditLog({
+      centerId: ctx.center.id,
+      actorUserId: ctx.user.id,
+      action: "settlement.adjust",
+      entityType: "Settlement",
+      entityId: settlement.id,
+      before: { totalAmount: previousTotal },
+      after: { totalAmount: settlement.totalAmount, reason: "payment.refund", paymentId: result.payment.id },
+    });
+  }
+
   revalidateSessionDetail(locale, result.payment.sessionId);
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);

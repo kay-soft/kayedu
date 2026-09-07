@@ -291,10 +291,12 @@ async function main() {
     JSON.stringify(settlementExcludingRefund),
   );
 
-  // ── 4. Decision: a LATER refund of an already-settled payment does not ──
-  // rewrite that settlement's total (docs/01-data-model.md's Settlement
-  // comment) — the same "a PAID settlement is not rewritten" rule extended
-  // uniformly to DRAFT/APPROVED settlements too, not only PAID ones.
+  // ── 4. A LATER refund of an already-settled payment: DRAFT/APPROVED get ──
+  // live-adjusted, PAID never does (00-master-product-spec.md §5 "Settlement
+  // totals: frozen at creation, live-adjusted while unpaid, immutable once
+  // PAID" — the M14 follow-up decision, replacing an earlier "never
+  // recomputed at any status" draft that let a centre pay out on refunded
+  // money).
   const day4 = new Date("2026-04-27T00:00:00Z");
   const paid5 = await payForSession(centerA.id, classFixed.id, teacherA.id, s1.profile.id, day4, actorId);
   const settlementBeforeLaterRefund = await prisma.$transaction((tx) =>
@@ -307,14 +309,76 @@ async function main() {
   );
   if (!settlementBeforeLaterRefund.ok) throw new Error("settlementBeforeLaterRefund was not ok");
 
-  await prisma.$transaction((tx) => refundPayment(tx, centerA.id, paid5.payment.id, "refunded after settling", actorId));
-  const reloadedSettlementAfterLaterRefund = await prisma.settlement.findUniqueOrThrow({
+  const refund5 = await prisma.$transaction((tx) =>
+    refundPayment(tx, centerA.id, paid5.payment.id, "refunded after settling (still DRAFT)", actorId),
+  );
+  check(
+    "Refunding a payment inside a DRAFT settlement's scope live-adjusts that settlement's total down by the reversed teacher share",
+    refund5.ok &&
+      refund5.adjustedSettlements.length === 1 &&
+      refund5.adjustedSettlements[0].settlement.id === settlementBeforeLaterRefund.settlement.id &&
+      refund5.adjustedSettlements[0].previousTotal === paid5.payment.teacherShareSnapshot &&
+      refund5.adjustedSettlements[0].settlement.totalAmount === 0,
+    JSON.stringify(refund5),
+  );
+  const reloadedDraftSettlementAfterRefund = await prisma.settlement.findUniqueOrThrow({
     where: { id: settlementBeforeLaterRefund.settlement.id },
   });
   check(
-    "A refund on a payment already inside a settlement's scope does NOT retroactively reduce that settlement's total",
-    reloadedSettlementAfterLaterRefund.totalAmount === paid5.payment.teacherShareSnapshot,
-    JSON.stringify(reloadedSettlementAfterLaterRefund),
+    "The DRAFT settlement's stored total reflects the live adjustment, not just the in-memory result",
+    reloadedDraftSettlementAfterRefund.totalAmount === 0,
+    JSON.stringify(reloadedDraftSettlementAfterRefund),
+  );
+
+  if (!refund5.ok) throw new Error("refund5 was not ok");
+  const adjustAudit = await prisma.auditLog.create({
+    data: {
+      centerId: centerA.id,
+      actorUserId: actorId,
+      action: "settlement.adjust",
+      entityType: "Settlement",
+      entityId: refund5.adjustedSettlements[0].settlement.id,
+      before: { totalAmount: refund5.adjustedSettlements[0].previousTotal },
+      after: { totalAmount: refund5.adjustedSettlements[0].settlement.totalAmount, reason: "payment.refund", paymentId: paid5.payment.id },
+    },
+  });
+  check(
+    "The settlement.adjust audit row for a live adjustment is scoped to the acting center with the expected shape",
+    adjustAudit.centerId === centerA.id &&
+      adjustAudit.action === "settlement.adjust" &&
+      adjustAudit.entityType === "Settlement" &&
+      adjustAudit.entityId === settlementBeforeLaterRefund.settlement.id,
+  );
+
+  // Now the PAID case: settle, approve, pay — THEN refund. The total must
+  // stay byte-for-byte unchanged, and this settlement must not appear in
+  // the refund's own adjustedSettlements list at all.
+  const day4b = new Date("2026-05-11T00:00:00Z");
+  const paid5b = await payForSession(centerA.id, classFixed.id, teacherA.id, s2.profile.id, day4b, actorId);
+  const settlementToPayOut = await prisma.$transaction((tx) =>
+    createPeriodSettlement(tx, centerA.id, teacherA.id, day4b, day4b, actorId),
+  );
+  check("Setup: settlementToPayOut is created", settlementToPayOut.ok);
+  if (!settlementToPayOut.ok) throw new Error("settlementToPayOut was not ok");
+  await prisma.$transaction((tx) => approveSettlement(tx, centerA.id, settlementToPayOut.settlement.id, actorId));
+  const paidOut = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, settlementToPayOut.settlement.id, actorId));
+  check("Setup: settlementToPayOut is now PAID", paidOut.ok && paidOut.settlement.status === "PAID");
+
+  const refundAfterPayout = await prisma.$transaction((tx) =>
+    refundPayment(tx, centerA.id, paid5b.payment.id, "refunded after payout", actorId),
+  );
+  check(
+    "Refunding a payment inside an already-PAID settlement's scope adjusts nothing — the settlement never appears in adjustedSettlements",
+    refundAfterPayout.ok && refundAfterPayout.adjustedSettlements.length === 0,
+    JSON.stringify(refundAfterPayout),
+  );
+  const reloadedPaidSettlement = await prisma.settlement.findUniqueOrThrow({
+    where: { id: settlementToPayOut.settlement.id },
+  });
+  check(
+    "A PAID settlement's stored total stays byte-for-byte unchanged after a later refund",
+    reloadedPaidSettlement.totalAmount === paid5b.payment.teacherShareSnapshot,
+    JSON.stringify(reloadedPaidSettlement),
   );
 
   // ── 5. Session-scoped settlement + duplicate-claim prevention ───────────
