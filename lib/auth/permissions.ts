@@ -12,7 +12,7 @@ import type { Role } from "@prisma/client";
  * runtime imports so the acceptance gates can exercise it outside Next.
  */
 
-export type TenantRole = Role | "STUDENT" | "PLATFORM_ADMIN";
+export type TenantRole = Role | "STUDENT" | "PLATFORM_ADMIN" | "PARENT";
 
 export const PERMISSIONS = [
   // Ownership — OWNER only, forced true for OWNER and forbidden to every
@@ -64,6 +64,11 @@ export const PERMISSIONS = [
   "reservation.manage.own",
   // Trust
   "audit.view",
+  // Parent accounts (M16) — the OD-6 placeholder seam: a centre staff member
+  // manually flips a PENDING ParentLink to VERIFIED from the student's
+  // profile. Not OD-6's real answer, just an obvious, gated, audited seam
+  // until OD-6 settles who/how actually verifies.
+  "parent.link.manage",
   // Platform
   "platform.manage",
 ] as const;
@@ -129,7 +134,12 @@ export function can(
 ): boolean {
   if (PLATFORM_ONLY_ACTIONS.includes(permission)) return role === "PLATFORM_ADMIN";
   if (role === "PLATFORM_ADMIN") return PLATFORM_ADMIN_ACTIONS.includes(permission);
-  if (role === "STUDENT") return false;
+  // PARENT is a resolved role, not a Membership — it never has a
+  // PermissionGrant row, and it holds no permission at all: the parent
+  // portal has no write path of any kind (00-master-product-spec.md §4.5,
+  // §5.1 "Parent role & portal"). This denies unconditionally, the same
+  // shape as STUDENT, so a future stray grant row could never reopen one.
+  if (role === "STUDENT" || role === "PARENT") return false;
 
   if (OWNER_ONLY_ACTIONS.includes(permission)) return role === "OWNER";
   if (FORBIDDEN_CEILING[role]?.includes(permission)) return false;
@@ -227,6 +237,7 @@ const MANAGER_BASELINE: readonly Permission[] = [
   "analytics.center.view",
   "approvals.manage",
   "audit.view",
+  "parent.link.manage",
 ];
 
 export const DEFAULT_ROLE_GRANTS: Record<Role, readonly Permission[]> = {

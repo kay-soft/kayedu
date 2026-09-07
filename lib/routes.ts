@@ -54,6 +54,7 @@ export const ROUTES = {
   studentSchedule: "/student/schedule",
   studentDiscover: "/student/discover",
   studentReservations: "/student/reservations",
+  parentHome: "/parent",
   adminCenters: "/admin/centers",
   adminCenter: (id: string) => `/admin/centers/${id}`,
   adminPlatform: "/admin/platform",
@@ -71,6 +72,8 @@ export function homePathForRole(role: TenantRole): string {
       return ROUTES.teacherDashboard;
     case "STUDENT":
       return ROUTES.studentSchedule;
+    case "PARENT":
+      return ROUTES.parentHome;
     case "PLATFORM_ADMIN":
       return ROUTES.adminCenters;
   }

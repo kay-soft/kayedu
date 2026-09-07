@@ -77,6 +77,14 @@ const STUDENT_NAV: NavDef[] = [
   { href: ROUTES.studentReservations, labelKey: "reservations", icon: "sessions" },
 ];
 
+// The parent portal has exactly one screen (M16, spec §4.5) — a read-only
+// mirror of the student schedule, per selected child. No permission gate: a
+// parent's `can()` is unconditionally false (lib/auth/permissions.ts), so
+// there is nothing this nav needs to hide beyond "there's only one page".
+const PARENT_NAV: NavDef[] = [
+  { href: ROUTES.parentHome, labelKey: "schedule", icon: "schedule" },
+];
+
 const ADMIN_NAV: NavDef[] = [
   { href: ROUTES.adminCenters, labelKey: "centers", icon: "centers" },
   { href: ROUTES.adminPlatform, labelKey: "platform", icon: "platform" },
@@ -99,7 +107,7 @@ function visible(
 }
 
 export function navForExperience(
-  experience: "center" | "teacher" | "student" | "admin",
+  experience: "center" | "teacher" | "student" | "parent" | "admin",
   role: TenantRole,
   grants?: PermissionGrants,
 ): ShellNavItem[] {
@@ -110,6 +118,8 @@ export function navForExperience(
       return visible(TEACHER_NAV, role, grants);
     case "student":
       return visible(STUDENT_NAV, role, grants);
+    case "parent":
+      return visible(PARENT_NAV, role, grants);
     case "admin":
       return visible(ADMIN_NAV, role, grants);
   }

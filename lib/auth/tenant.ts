@@ -21,6 +21,8 @@ import {
   type TenantRole,
 } from "@/lib/auth/permissions";
 import { loadPermissionGrants, membershipBranchGrantsFor } from "@/lib/db/permissions";
+import { verifiedChildLinks } from "@/lib/db/parents";
+import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 
@@ -533,6 +535,59 @@ export function studentBrand(session: StudentSession) {
     logoUrl: session.studentRelation.center.logoUrl,
     themeColor: session.studentRelation.center.themeColor,
   };
+}
+
+export type ParentChildOption = {
+  linkId: string;
+  centerId: string;
+  centerName: string;
+  centerLogoUrl: string | null;
+  centerThemeColor: string;
+  studentProfileId: string;
+  childName: string;
+};
+
+/**
+ * A parent's readable children — the **only** child list any parent-portal
+ * page may build on (M16, `lib/db/parents.ts`'s `verifiedChildLinks`, which
+ * is itself already filtered to VERIFIED). A PENDING link contributes
+ * nothing here, which is what makes "inert until verified" true for the
+ * child selector too, not just for the schedule read underneath it.
+ */
+export const getVerifiedParentChildren = cache(
+  async (parentUserId: string): Promise<ParentChildOption[]> => {
+    const links = await verifiedChildLinks(prisma, parentUserId);
+    return links.map((link) => ({
+      linkId: link.id,
+      centerId: link.center.id,
+      centerName: link.center.name,
+      centerLogoUrl: link.center.logoUrl,
+      centerThemeColor: link.center.themeColor,
+      studentProfileId: link.studentProfileId,
+      childName: fullName(localName(link.studentProfile, link.studentProfile.user)),
+    }));
+  },
+);
+
+export type ParentSession = {
+  user: User;
+  /** Verified children only — see `getVerifiedParentChildren`'s doc comment. */
+  children: ParentChildOption[];
+};
+
+/**
+ * The (parent) route group's gate (M16, spec §4.5 "Parent portal"). Any
+ * signed-in `User` — a brand-new parent account has zero VERIFIED children
+ * until OD-6's still-open verification step happens, and the page itself
+ * renders that as an empty state rather than a redirect (mirroring
+ * `requireStudentUser`'s "zero relations is a valid state to render" shape).
+ */
+export async function requireParentUser(): Promise<ParentSession> {
+  const user = await getCurrentUser();
+  if (!user) return redirectTo(ROUTES.login);
+
+  const children = await getVerifiedParentChildren(user.id);
+  return { user, children };
 }
 
 export function hasExperience(ctx: TenantContext, experience: Experience): boolean {

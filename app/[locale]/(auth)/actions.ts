@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/client";
 import { writeAuditLog } from "@/lib/db/audit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUser, syncUserFromAuth } from "@/lib/auth/session";
+import { originateParentLinks } from "@/lib/db/parents";
 import {
   clearActiveCenterId,
   setActiveCenterId,
@@ -139,6 +140,14 @@ export async function signUpAction(
     where: { id: user.id },
     data: { firstName, lastName, phone, locale },
   });
+
+  // Parent account origination (M16, spec §4.5 item 0 / §5.1 "Parent role &
+  // portal"): if this phone appears as a parent phone on some student's
+  // record, this creates PENDING ParentLink row(s) — never a read, never for
+  // a privileged phone (`lib/db/parents.ts`'s `originateParentLinks`).
+  // Best-effort: a person registering as themselves must never be blocked by
+  // an unrelated parent-matching failure.
+  await originateParentLinks(prisma, { parentUserId: user.id, phone }).catch(() => undefined);
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(user));
 

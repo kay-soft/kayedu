@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { IdCardPanel } from "@/app/[locale]/(center)/students/[id]/id-card-panel";
 import { PhotoForm } from "@/app/[locale]/(center)/students/[id]/photo-form";
 import { StudentProfileForm } from "@/app/[locale]/(center)/students/[id]/student-profile-form";
+import { VerifyParentLinkButton } from "@/app/[locale]/(center)/students/[id]/verify-parent-link-button";
 import { IdCardPreview } from "@/components/center/id-card-preview";
 import { DetailRow } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
@@ -22,6 +23,7 @@ import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { countOtherCenterRelations } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
+import { parentLinksForStudent } from "@/lib/db/parents";
 import { scoped } from "@/lib/db/scoped";
 import { idCardGeneratedAt } from "@/lib/db/storage";
 import { formatDate } from "@/lib/format";
@@ -57,13 +59,14 @@ export default async function StudentDetailPage({
 
   const hasStorage = storageConfigured();
 
-  const [grades, enrollments, blocks, otherRelations, cardStamp] =
+  const [grades, enrollments, blocks, otherRelations, cardStamp, parentLinks] =
     await Promise.all([
       db.grades.list(),
       db.enrollments.listForStudent(student.id),
       db.studentBlocks.list({ blockedUserId: student.userId }),
       countOtherCenterRelations(student.userId, ctx.center.id),
       hasStorage ? idCardGeneratedAt(ctx.center.id, student.id) : null,
+      parentLinksForStudent(prisma, ctx.center.id, student.id),
     ]);
 
   // A TEACHER block names the teacher by their User id; a CLASS block names
@@ -240,6 +243,45 @@ export default async function StudentDetailPage({
                 label={t("fields.otherCenters")}
                 value={String(otherRelations)}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("parentLinks.title")}</CardTitle>
+              <CardDescription>{t("parentLinks.description")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {parentLinks.length === 0 ? (
+                <p className="text-sm text-text-muted">{t("parentLinks.empty")}</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {parentLinks.map((link) => (
+                    <li
+                      key={link.id}
+                      className="flex flex-col gap-2 rounded-xl border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-text-primary">
+                          {fullName(link.parentUser)}
+                        </p>
+                        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                          <span dir="ltr">{link.matchedPhone}</span>
+                          <span>{formatDate(link.createdAt, locale)}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={link.status === "VERIFIED" ? "success" : "warning"}>
+                          {t(`parentLinks.status.${link.status}`)}
+                        </Badge>
+                        {link.status === "PENDING" && ctxCan(ctx, "parent.link.manage") ? (
+                          <VerifyParentLinkButton parentLinkId={link.id} />
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </div>

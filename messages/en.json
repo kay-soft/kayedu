@@ -52,7 +52,8 @@
     "ACCOUNTANT": "Accountant",
     "TEACHER": "Teacher",
     "STUDENT": "Student",
-    "PLATFORM_ADMIN": "Super admin"
+    "PLATFORM_ADMIN": "Super admin",
+    "PARENT": "Parent"
   },
   "Auth": {
     "fields": {
@@ -228,7 +229,8 @@
       "photoMissing": "Choose a photo first.",
       "photoType": "Photos must be PNG, JPEG or WebP.",
       "photoTooLarge": "That photo is larger than 5 MB.",
-      "storage": "File storage is unavailable right now. Try again in a moment."
+      "storage": "File storage is unavailable right now. Try again in a moment.",
+      "alreadyVerified": "This parent link is already verified."
     }
   },
   "Teachers": {
@@ -373,6 +375,17 @@
       "description": "Teachers and classes that have blocked this student.",
       "empty": "No teacher or class has blocked this student.",
       "unknownClass": "Former class"
+    },
+    "parentLinks": {
+      "title": "Parent accounts",
+      "description": "Accounts that matched this student's parent phone. A match alone grants no access — verify it before a parent can see this student's data.",
+      "empty": "No parent account has matched this student's parent phone yet.",
+      "status": {
+        "PENDING": "Pending",
+        "VERIFIED": "Verified"
+      },
+      "verify": "Verify",
+      "verified": "Verified."
     },
     "print": {
       "print": "Print",
@@ -1450,6 +1463,20 @@
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved."
     }
+  },
+  "ParentPortal": {
+    "title": "My children",
+    "subtitle": "A read-only mirror of your child's own schedule — nothing here can be changed from this account.",
+    "noChildren": "No verified children yet. Once a branch verifies your account against your child's record, their schedule will appear here.",
+    "childSelectorLabel": "Child",
+    "filterDate": "Filter by date",
+    "clearDate": "Clear",
+    "upcomingTitle": "Upcoming",
+    "upcomingEmpty": "No upcoming sessions.",
+    "upcomingBadge": "Upcoming",
+    "pastTitle": "Past",
+    "pastEmpty": "No past sessions yet.",
+    "dropIn": "Drop-in"
   },
   "AdminCenters": {
     "title": "Branches",

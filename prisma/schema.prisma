@@ -115,6 +115,16 @@ enum SettlementStatus {
   PAID
 }
 
+// A parent↔child link's lifecycle (M16, spec §5.1 "Parent role & portal").
+// A phone match alone only ever produces PENDING — it grants zero reads.
+// VERIFIED is the only status any parent-portal read trusts. There is no
+// REJECTED state: OD-6 (00-master-product-spec.md §2.2) hasn't decided who
+// verifies or how, so this enum only carries what M16 actually needs.
+enum ParentLinkStatus {
+  PENDING
+  VERIFIED
+}
+
 // ─────────────────────────────────────────────────────────────
 // IDENTITY (global — no centerId)
 // ─────────────────────────────────────────────────────────────
@@ -144,6 +154,11 @@ model User {
   // from `taughtSessions`/`taughtClasses` since a Settlement references the
   // teacher, not a class or session.
   settlements     Settlement[]     @relation("SettlementTeacher")
+  // M16 — the children this User reads as a PARENT (inert until VERIFIED).
+  // Named distinctly from every relation above because this one isn't a
+  // Membership or a StudentProfile of their own — it's read access into
+  // someone else's.
+  parentLinks     ParentLink[]     @relation("ParentLinkParent")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -207,6 +222,7 @@ model Center {
   branchGrants       MembershipBranchGrant[]  @relation("MembershipBranchGrantCenter")
   refunds            Refund[]
   settlements        Settlement[]
+  parentLinks        ParentLink[]
 
   @@index([organizationId])
 }
@@ -595,6 +611,9 @@ model StudentProfile {
   enrollments Enrollment[]
   attendees   SessionAttendee[]
   payments    Payment[]
+  // M16 — every parent account that has matched (or been verified) against
+  // this child, via `parentPhone`/`parentAltPhone` above.
+  parentLinks ParentLink[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
@@ -970,6 +989,52 @@ model ChangeRequest {
   resolvedAt  DateTime?
   createdAt   DateTime            @default(now())
 
+  @@index([centerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PARENT (M16)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A parent↔child link (docs/01-data-model.md §2 "People layer, continued",
+ * docs/00-master-product-spec.md §5.1 "Parent role & portal"). Every row
+ * names exactly one `StudentProfile`, so a parent's read stays a tenant read
+ * through that child's `centerId` — `centerId` is denormalized here rather
+ * than re-joined every time, exactly like `Payment.teacherId`/`Refund.teacherId`
+ * are denormalized references, not money fields.
+ *
+ * Origination (a phone number matching some student's `parentPhone`/
+ * `parentAltPhone`) only ever produces a PENDING row — a phone match alone
+ * must never grant access. `status` flipping to VERIFIED is the ONLY thing
+ * any parent-portal read trusts (`lib/db/parents.ts`'s `verifiedChildLinks`).
+ *
+ * `verifiedBy`/`verifiedAt` are deliberately generic (a User id + a
+ * timestamp, not a "StaffApproval" shape) because **who or what verifies is
+ * OD-6** (00-master-product-spec.md §2.2) — still open. The only writer today
+ * is `lib/db/parents.ts`'s `verifyParentLinkPlaceholder`, an explicitly
+ * temporary centre-staff seam, not OD-6's real answer.
+ */
+model ParentLink {
+  id               String           @id @default(uuid())
+  parentUserId     String
+  parentUser       User             @relation("ParentLinkParent", fields: [parentUserId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile   @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  centerId         String
+  center           Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  status           ParentLinkStatus @default(PENDING)
+  // The normalized phone that produced this link — an audit trail for staff
+  // reviewing the placeholder seam above, not itself re-checked on read.
+  matchedPhone     String
+  verifiedAt       DateTime?
+  verifiedBy       String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([parentUserId, studentProfileId])
+  @@index([parentUserId])
+  @@index([studentProfileId])
   @@index([centerId])
 }
 

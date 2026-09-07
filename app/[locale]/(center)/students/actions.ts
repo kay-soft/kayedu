@@ -14,6 +14,7 @@ import {
   seedLocalName,
 } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
+import { verifyParentLinkPlaceholder } from "@/lib/db/parents";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { claimStudentCode, studentDeleteBlockers } from "@/lib/db/students";
 import { scopedData } from "@/lib/db/tenant-scope";
@@ -41,6 +42,7 @@ import {
   studentUpdateSchema,
   type PeopleActionState,
 } from "@/lib/validation/people";
+import { verifyParentLinkSchema } from "@/lib/validation/parents";
 
 /**
  * Students (M3, revised). Every action follows docs/02 §7: getTenantContext()
@@ -543,4 +545,48 @@ export async function generateIdCardAction(
   return downloadUrl
     ? { status: "generated", downloadUrl }
     : { error: "storage" };
+}
+
+// ── Parent links (M16) ──────────────────────────────────────────────────────
+
+/**
+ * ─────────────────────────────── OD-6 PLACEHOLDER ───────────────────────────
+ * See `lib/db/parents.ts`'s `verifyParentLinkPlaceholder` — this Server
+ * Action is the manual, staff-facing, audited seam it describes, NOT OD-6's
+ * real verification mechanism. `parent.link.manage` is a MANAGER_BASELINE
+ * permission (OWNER/MANAGER by default, configurable like any other post-M12
+ * action) — a Receptionist cannot flip this by direct call any more than by
+ * a hidden button.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export async function verifyParentLinkAction(
+  _state: PeopleActionState,
+  formData: FormData,
+): Promise<PeopleActionState> {
+  const ctx = await getTenantContext("center");
+  if (!ctxCan(ctx, "parent.link.manage")) return FORBIDDEN;
+
+  const parsed = verifyParentLinkSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { parentLinkId, locale } = parsed.data;
+  const result = await verifyParentLinkPlaceholder(prisma, {
+    parentLinkId,
+    centerId: ctx.center.id,
+    verifiedByUserId: ctx.user.id,
+  });
+  if (!result.ok) return { error: result.error };
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "parentLink.verify",
+    entityType: "ParentLink",
+    entityId: result.linkId,
+    before: { status: "PENDING" },
+    after: { status: "VERIFIED" },
+  });
+
+  revalidateStudentDetail(locale, result.studentProfileId);
+  return { status: "saved" };
 }
