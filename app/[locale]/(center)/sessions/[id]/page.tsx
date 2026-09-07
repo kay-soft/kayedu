@@ -5,6 +5,7 @@ import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center
 import { SessionLifecycleActions } from "@/app/[locale]/(center)/sessions/[id]/session-lifecycle-actions";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { SessionRoster, type RosterRowData } from "@/app/[locale]/(center)/sessions/[id]/session-roster";
+import { SessionSettlementAction } from "@/app/[locale]/(center)/settlements/session-settlement-action";
 import { SearchBox } from "@/components/center/search-box";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -62,11 +63,15 @@ export default async function SessionDetailPage({
   const t = await getTranslations("Sessions");
   const tStatus = await getTranslations("Sessions.status");
   const tCommon = await getTranslations("Settings.common");
+  const tSettlementStatus = await getTranslations("Settlements.status");
   const locale = await getLocale();
 
-  const [enrollments, totals] = await Promise.all([
+  const [enrollments, totals, existingSettlement] = await Promise.all([
     db.enrollments.listForClass(session.classGroupId),
     sessionReceiptTotals(prisma, ctx.center.id, session.id),
+    ctxCan(ctx, "settlement.manage")
+      ? prisma.settlement.findFirst({ where: { centerId: ctx.center.id, sessionId: session.id } })
+      : Promise.resolve(null),
   ]);
 
   const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
@@ -92,7 +97,12 @@ export default async function SessionDetailPage({
       isDropIn: attendee?.isDropIn ?? false,
       status: attendee?.attendanceStatus ?? null,
       payment: activePayment
-        ? { id: activePayment.id, amount: activePayment.amount, method: activePayment.method }
+        ? {
+            id: activePayment.id,
+            amount: activePayment.amount,
+            method: activePayment.method,
+            refunded: activePayment.refunded,
+          }
         : null,
       consecutiveAbsences: 0,
     };
@@ -184,6 +194,7 @@ export default async function SessionDetailPage({
               canCorrect={ctxCan(ctx, "attendance.correct")}
               canRecordPayment={ctxCan(ctx, "payment.record")}
               canVoid={ctxCan(ctx, "payment.void")}
+              canRefund={ctxCan(ctx, "payment.refund")}
               allowExcused={session.classGroup.allowExcused}
             />
 
@@ -251,12 +262,25 @@ export default async function SessionDetailPage({
               <CardTitle>{t("receipt.title")}</CardTitle>
               <CardDescription>{t("receipt.description")}</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-4">
               <SessionReceipt
                 totals={totals}
                 showProfit={ctxCan(ctx, "center.profit.view")}
                 locale={locale}
               />
+              {ctxCan(ctx, "settlement.manage") ? (
+                <div className="border-t border-border-subtle pt-4">
+                  {existingSettlement ? (
+                    <p className="text-sm text-text-secondary">
+                      {t("settlement.status", {
+                        status: tSettlementStatus(existingSettlement.status),
+                      })}
+                    </p>
+                  ) : (
+                    <SessionSettlementAction sessionId={session.id} />
+                  )}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>

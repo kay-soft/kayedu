@@ -8,10 +8,12 @@ import {
   ClipboardCheck,
   ConciergeBell,
   GraduationCap,
+  HandCoins,
   LayoutDashboard,
   Library,
   Settings,
   ShieldCheck,
+  Undo2,
   UserRound,
   Users,
   Wallet,
@@ -35,6 +37,8 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string }>> = {
   centers: Building2,
   platform: ShieldCheck,
   catalog: Library,
+  refunds: Undo2,
+  settlements: HandCoins,
 };
 
 export function ShellIcon({

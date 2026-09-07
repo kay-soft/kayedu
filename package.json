@@ -25,7 +25,8 @@
     "check:rtl": "node --env-file-if-exists=.env scripts/rtl-check.ts",
     "check:branches": "node --env-file-if-exists=.env scripts/branches-check.ts",
     "check:permissions": "node --env-file-if-exists=.env scripts/permissions-check.ts",
-    "check:catalog": "node --env-file-if-exists=.env scripts/catalog-check.ts"
+    "check:catalog": "node --env-file-if-exists=.env scripts/catalog-check.ts",
+    "check:settlements": "node --env-file-if-exists=.env scripts/settlements-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

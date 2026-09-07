@@ -107,6 +107,14 @@ enum CatalogSuggestionStatus {
   REJECTED
 }
 
+// A teacher payout's lifecycle (M14, spec §5 "Teacher settlements"). No
+// partially-paid state — a settlement is fully paid or it is not.
+enum SettlementStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
 // ─────────────────────────────────────────────────────────────
 // IDENTITY (global — no centerId)
 // ─────────────────────────────────────────────────────────────
@@ -132,6 +140,10 @@ model User {
   taughtSessions  Session[]        @relation("SessionTeacher")
   reservations    Reservation[]
   auditLogs       AuditLog[]
+  // M14 — this user's own payout history, as a TEACHER. Named distinctly
+  // from `taughtSessions`/`taughtClasses` since a Settlement references the
+  // teacher, not a class or session.
+  settlements     Settlement[]     @relation("SettlementTeacher")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -193,6 +205,8 @@ model Center {
   auditLogs          AuditLog[]
   permissionGrants   PermissionGrant[]
   branchGrants       MembershipBranchGrant[]  @relation("MembershipBranchGrantCenter")
+  refunds            Refund[]
+  settlements        Settlement[]
 
   @@index([organizationId])
 }
@@ -669,8 +683,9 @@ model Session {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  attendees SessionAttendee[]
-  payments  Payment[]
+  attendees   SessionAttendee[]
+  payments    Payment[]
+  settlements Settlement[]
 
   // The idempotency key the session generator relies on (docs/02 §11):
   // regenerating a window is a `createMany({ skipDuplicates: true })` against
@@ -743,6 +758,12 @@ model Payment {
   voidReason           String?
   voidedAt             DateTime?
   voidedBy             String?
+  // M14 — a plain marker so a reader sees the refunded state without a join;
+  // the actual reversal amounts live on the `Refund` row, never here. A
+  // voided payment is never refunded and vice versa (CLAUDE.md rule 7: void
+  // and refund are different mechanisms, never collapsed into one flag).
+  refunded             Boolean         @default(false)
+  refund               Refund?
   recordedBy           String
   recordedAt           DateTime        @default(now())
   createdAt            DateTime        @default(now())
@@ -752,6 +773,93 @@ model Payment {
   @@index([centerId])
   @@index([centerId, recordedAt])
   @@index([centerId, teacherId, recordedAt])
+}
+
+/**
+ * Money given back, in cash — never a balance (M14, spec §5 "Void vs.
+ * refund", docs/01-data-model.md "Finance-adjacent layer"). The `Payment`
+ * row it reverses is preserved byte-for-byte; this row is the only place a
+ * refund's amounts are recorded. Phase 1 refunds are whole-payment only —
+ * there is no partial-refund UI or schema support, matching "mark a
+ * recorded payment REFUNDED" (spec §4.1 item 12) rather than inventing a
+ * proration model nothing asked for. `amount`/`centerShareReversed`/
+ * `teacherShareReversed` are therefore always exactly the original payment's
+ * own `amount`/`centerShareSnapshot`/`teacherShareSnapshot` — stored here
+ * (not re-read from `Payment` on every analytics query) so the by-teacher
+ * breakdown can `groupBy` on `teacherId` in one query, the same reason
+ * `Payment.teacherId` itself is denormalized.
+ */
+model Refund {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  paymentId String   @unique
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  // Denormalized from payment.teacherId, purely so revenueByTeacher can
+  // groupBy in one query — not a money field, like Payment.teacherId itself.
+  teacherId String
+
+  amount               Int // piastres reversed — always payment.amount (whole-payment refund)
+  centerShareReversed  Int // piastres reversed from the centre's share
+  teacherShareReversed Int // piastres reversed from the teacher's share
+
+  reason     String
+  refundedBy String
+  refundedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([centerId])
+  @@index([centerId, teacherId])
+}
+
+/**
+ * A teacher's payout record (M14, spec §5 "Teacher settlements"). Exactly
+ * one of `sessionId` (a single session's teacher share, for a centre that
+ * pays cash right after each session) or `periodFrom`+`periodTo` (a date-
+ * range roll-up) is set on any row — an application-layer invariant, the
+ * same "kind says which fields apply" shape `CenterCatalogSelection.kind`
+ * already uses in this schema, enforced in `lib/db/settlements.ts`.
+ *
+ * `totalAmount` is computed ONCE, at DRAFT creation, as the sum of frozen
+ * `Payment.teacherShareSnapshot` values in scope (excluding voided and
+ * already-refunded payments) — and is never recomputed afterward, even if
+ * the underlying class's cut changes, or if a payment inside this
+ * settlement's scope is refunded later. A later refund's reversal is simply
+ * never included in this settlement; it lands in the next one that covers
+ * that payment's date/session, exactly like the existing rule that a
+ * settlement already PAID is not rewritten by a refund (00-master-product-
+ * spec.md §5 "Teacher settlements") — this milestone applies that same
+ * "never recomputed" discipline uniformly to DRAFT/APPROVED settlements too,
+ * rather than only to PAID ones.
+ */
+model Settlement {
+  id       String @id @default(uuid())
+  centerId String
+  center   Center @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  teacherId String
+  teacher   User   @relation("SettlementTeacher", fields: [teacherId], references: [id])
+
+  // Scope — exactly one of these two shapes is populated.
+  sessionId  String?
+  session    Session?  @relation(fields: [sessionId], references: [id])
+  periodFrom DateTime?
+  periodTo   DateTime?
+
+  totalAmount Int
+  status      SettlementStatus @default(DRAFT)
+
+  createdBy  String
+  createdAt  DateTime         @default(now())
+  approvedBy String?
+  approvedAt DateTime?
+  paidBy     String?
+  paidAt     DateTime?
+  updatedAt  DateTime         @updatedAt
+
+  @@index([centerId])
+  @@index([centerId, teacherId])
+  @@index([sessionId])
 }
 
 /**

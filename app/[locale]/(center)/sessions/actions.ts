@@ -17,6 +17,7 @@ import {
   seedLocalName,
 } from "@/lib/db/identity";
 import { recordPayment, voidPayment } from "@/lib/db/payments";
+import { refundPayment } from "@/lib/db/refunds";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import {
   cancelSession,
@@ -32,6 +33,7 @@ import {
   addNewAttendeeSchema,
   cancelSessionSchema,
   recordPaymentSchema,
+  refundPaymentSchema,
   rescheduleSessionSchema,
   sessionShareOverrideSchema,
   setAttendanceSchema,
@@ -413,6 +415,50 @@ export async function voidPaymentAction(
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);
   return { status: "voided" };
+}
+
+/**
+ * Cash back to the student, no balance created anywhere (M14, spec §4.1
+ * item 12, §5 "Void vs. refund"). Never touches the original `Payment`
+ * row's money fields — `lib/db/refunds.ts`'s `refundPayment` only flips
+ * `Payment.refunded` and writes the reversal onto a new `Refund` row.
+ */
+export async function refundPaymentAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "payment.refund")) return FORBIDDEN;
+
+  const parsed = refundPaymentSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const { locale, paymentId, reason } = parsed.data;
+
+  const result = await prisma.$transaction((tx) =>
+    refundPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id),
+  );
+  if (!result.ok) return { error: result.error };
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "payment.refund",
+    entityType: "Payment",
+    entityId: result.payment.id,
+    before: { refunded: false },
+    after: {
+      refunded: true,
+      amount: result.refund.amount,
+      centerShareReversed: result.refund.centerShareReversed,
+      teacherShareReversed: result.refund.teacherShareReversed,
+      reason,
+    },
+  });
+
+  revalidateSessionDetail(locale, result.payment.sessionId);
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  return { status: "refunded" };
 }
 
 // ── Session lifecycle: cancel / reschedule (spec §7 acceptance criterion 11) ─

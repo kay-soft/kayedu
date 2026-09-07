@@ -68,3 +68,4 @@ jobs:
       - run: npm run check:admin
       - run: npm run check:performance
       - run: npm run check:rtl
+      - run: npm run check:settlements

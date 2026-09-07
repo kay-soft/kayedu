@@ -31,6 +31,8 @@ export const ROUTES = {
   centerAnalytics: "/analytics",
   centerExpenses: "/expenses",
   centerApprovals: "/approvals",
+  centerRefunds: "/refunds",
+  centerSettlements: "/settlements",
   // Center configuration (M2). The settings shell lives at /settings and every
   // configuration screen is a child of it.
   centerSettings: "/settings",
@@ -46,6 +48,7 @@ export const ROUTES = {
   teacherStudents: "/teacher/students",
   teacherStudent: (id: string) => `/teacher/students/${id}`,
   teacherClasses: "/teacher/classes",
+  teacherSettlements: "/teacher/settlements",
   studentSchedule: "/student/schedule",
   studentDiscover: "/student/discover",
   studentReservations: "/student/reservations",

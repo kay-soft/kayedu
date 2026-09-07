@@ -40,10 +40,44 @@ const EMPTY_REVENUE: RevenueTotals = {
 };
 
 /**
+ * Refunds (M14, spec §5 "Void vs. refund") reversed within a date range (and,
+ * optionally, for one teacher) — read off `Refund`'s own frozen reversal
+ * amounts, never recomputed from the `Payment` it reverses. Every refunded
+ * payment is itself non-voided (a voided payment can never be refunded,
+ * `lib/db/refunds.ts`), so it is still counted in `revenueTotals`'s own
+ * `voided: false` aggregate above; this is what gets subtracted back out.
+ */
+async function refundTotals(
+  db: Db,
+  centerId: string,
+  range: DateRange,
+  teacherId?: string | null,
+): Promise<{ amount: number; centerShare: number; teacherShare: number }> {
+  const sessionDate = dateWhere(range);
+  const agg = await db.refund.aggregate({
+    where: {
+      centerId,
+      ...(teacherId ? { teacherId } : {}),
+      ...(sessionDate ? { payment: { session: { date: sessionDate } } } : {}),
+    },
+    _sum: { amount: true, centerShareReversed: true, teacherShareReversed: true },
+  });
+  return {
+    amount: agg._sum.amount ?? 0,
+    centerShare: agg._sum.centerShareReversed ?? 0,
+    teacherShare: agg._sum.teacherShareReversed ?? 0,
+  };
+}
+
+/**
  * Revenue totals for one date range (and, optionally, one teacher), read
  * straight off the frozen `Payment` snapshots via a single SQL aggregate —
  * never fetched row-by-row and summed in memory (docs/02 §14). A voided
- * payment never contributes.
+ * payment never contributes. A refunded payment's amounts are subtracted
+ * back out (M14, spec §5 "Void vs. refund" — "collected revenue is reduced,
+ * and so are that payment's centre and teacher shares"): the payment itself
+ * is not voided, so it still appears in the aggregate above, and `Refund`'s
+ * own frozen reversal amounts are what get subtracted here.
  */
 export async function revenueTotals(
   db: Db,
@@ -64,10 +98,12 @@ export async function revenueTotals(
   });
 
   if (agg._count === 0) return EMPTY_REVENUE;
+
+  const refunds = await refundTotals(db, centerId, range, teacherId);
   return {
-    collected: agg._sum.amount ?? 0,
-    centerShare: agg._sum.centerShareSnapshot ?? 0,
-    teacherShare: agg._sum.teacherShareSnapshot ?? 0,
+    collected: (agg._sum.amount ?? 0) - refunds.amount,
+    centerShare: (agg._sum.centerShareSnapshot ?? 0) - refunds.centerShare,
+    teacherShare: (agg._sum.teacherShareSnapshot ?? 0) - refunds.teacherShare,
     paymentCount: agg._count,
   };
 }
@@ -77,7 +113,13 @@ export type TeacherRevenueRow = RevenueTotals & { teacherId: string };
 /**
  * The by-teacher breakdown (spec §4.1 item 5): one `groupBy` on `Payment`,
  * keyed on the `teacherId` snapshot (docs/01 §3 note on `Payment.teacherId`)
- * rather than fetching every payment and reducing in JS.
+ * rather than fetching every payment and reducing in JS. Refunds are
+ * subtracted per teacher via a second `groupBy` on `Refund.teacherId` (M14)
+ * — denormalized on `Refund` for exactly this reason (Prisma cannot
+ * `groupBy` on a related model's column). Every refunded payment's teacher
+ * already has a row in `rows` (a refund can only exist against a non-voided
+ * payment, which is what `rows` sums), so there is never an orphan refund
+ * row to add.
  */
 export async function revenueByTeacher(
   db: Db,
@@ -85,25 +127,40 @@ export async function revenueByTeacher(
   range: DateRange,
 ): Promise<TeacherRevenueRow[]> {
   const sessionDate = dateWhere(range);
-  const rows = await db.payment.groupBy({
-    by: ["teacherId"],
-    where: {
-      centerId,
-      voided: false,
-      ...(sessionDate ? { session: { date: sessionDate } } : {}),
-    },
-    _sum: { amount: true, centerShareSnapshot: true, teacherShareSnapshot: true },
-    _count: true,
-  });
+  const [rows, refundRows] = await Promise.all([
+    db.payment.groupBy({
+      by: ["teacherId"],
+      where: {
+        centerId,
+        voided: false,
+        ...(sessionDate ? { session: { date: sessionDate } } : {}),
+      },
+      _sum: { amount: true, centerShareSnapshot: true, teacherShareSnapshot: true },
+      _count: true,
+    }),
+    db.refund.groupBy({
+      by: ["teacherId"],
+      where: {
+        centerId,
+        ...(sessionDate ? { payment: { session: { date: sessionDate } } } : {}),
+      },
+      _sum: { amount: true, centerShareReversed: true, teacherShareReversed: true },
+    }),
+  ]);
+
+  const refundByTeacher = new Map(refundRows.map((row) => [row.teacherId, row]));
 
   return rows
-    .map((row) => ({
-      teacherId: row.teacherId,
-      collected: row._sum.amount ?? 0,
-      centerShare: row._sum.centerShareSnapshot ?? 0,
-      teacherShare: row._sum.teacherShareSnapshot ?? 0,
-      paymentCount: row._count,
-    }))
+    .map((row) => {
+      const refund = refundByTeacher.get(row.teacherId);
+      return {
+        teacherId: row.teacherId,
+        collected: (row._sum.amount ?? 0) - (refund?._sum.amount ?? 0),
+        centerShare: (row._sum.centerShareSnapshot ?? 0) - (refund?._sum.centerShareReversed ?? 0),
+        teacherShare: (row._sum.teacherShareSnapshot ?? 0) - (refund?._sum.teacherShareReversed ?? 0),
+        paymentCount: row._count,
+      };
+    })
     .sort((a, b) => b.collected - a.collected);
 }
 

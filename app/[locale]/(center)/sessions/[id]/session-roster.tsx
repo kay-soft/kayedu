@@ -1,11 +1,12 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { AlertTriangle, Ban } from "lucide-react";
+import { AlertTriangle, Ban, Undo2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
   recordPaymentAction,
+  refundPaymentAction,
   setAttendanceAction,
   voidPaymentAction,
 } from "@/app/[locale]/(center)/sessions/actions";
@@ -32,16 +33,17 @@ export type RosterRowData = {
   studentCode: string;
   isDropIn: boolean;
   status: AttendanceStatusValue | null;
-  payment: { id: string; amount: number; method: PaymentMethodValue } | null;
+  payment: { id: string; amount: number; method: PaymentMethodValue; refunded: boolean } | null;
   consecutiveAbsences: number;
 };
 
 /**
  * The session roster (spec §4.1 item 7): every actively-enrolled student
  * (marked or not) plus any drop-ins, each with the Attendance control and,
- * once PRESENT/LATE, the money — record a payment, or void one already
- * recorded. `canCorrect`/`canRecordPayment`/`canVoid` only hide controls;
- * the server actions re-check every permission (docs/02 §6).
+ * once PRESENT/LATE, the money — record a payment, void one already
+ * recorded, or (M14) refund one already recorded. `canCorrect`/
+ * `canRecordPayment`/`canVoid`/`canRefund` only hide controls; the server
+ * actions re-check every permission (docs/02 §6).
  */
 export function SessionRoster({
   sessionId,
@@ -49,6 +51,7 @@ export function SessionRoster({
   canCorrect,
   canRecordPayment,
   canVoid,
+  canRefund,
   allowExcused,
 }: {
   sessionId: string;
@@ -56,6 +59,7 @@ export function SessionRoster({
   canCorrect: boolean;
   canRecordPayment: boolean;
   canVoid: boolean;
+  canRefund: boolean;
   allowExcused: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
@@ -74,6 +78,7 @@ export function SessionRoster({
           canCorrect={canCorrect}
           canRecordPayment={canRecordPayment}
           canVoid={canVoid}
+          canRefund={canRefund}
           allowExcused={allowExcused}
         />
       ))}
@@ -87,6 +92,7 @@ function AttendeeRow({
   canCorrect,
   canRecordPayment,
   canVoid,
+  canRefund,
   allowExcused,
 }: {
   sessionId: string;
@@ -94,6 +100,7 @@ function AttendeeRow({
   canCorrect: boolean;
   canRecordPayment: boolean;
   canVoid: boolean;
+  canRefund: boolean;
   allowExcused: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
@@ -109,6 +116,11 @@ function AttendeeRow({
   const [voidOpen, setVoidOpen] = useState(false);
   const [voidState, voidFormAction] = useActionState(
     voidPaymentAction,
+    IDLE_SESSION_STATE,
+  );
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundState, refundFormAction] = useActionState(
+    refundPaymentAction,
     IDLE_SESSION_STATE,
   );
 
@@ -167,38 +179,78 @@ function AttendeeRow({
                 amount: formatMoney(row.payment.amount, locale),
                 method: t(`method.${row.payment.method}`),
               })}
+              {row.payment.refunded ? (
+                <span className="ms-2 inline-flex items-center rounded-full bg-info-bg px-2 py-0.5 text-xs font-medium text-info">
+                  {t("refunded")}
+                </span>
+              ) : null}
             </p>
-            {canVoid ? (
-              voidOpen ? (
-                <form
-                  action={voidFormAction}
-                  className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
-                >
-                  <input type="hidden" name="locale" value={locale} />
-                  <input type="hidden" name="paymentId" value={row.payment.id} />
-                  <input
-                    type="text"
-                    name="reason"
-                    required
-                    maxLength={200}
-                    placeholder={t("voidReasonPlaceholder")}
-                    className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
-                  />
-                  <SubmitButton variant="destructive">
-                    {t("confirmVoid")}
-                  </SubmitButton>
-                </form>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setVoidOpen(true)}
-                  className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-xs font-medium text-danger hover:bg-danger-bg"
-                >
-                  <Ban className="size-3.5" aria-hidden />
-                  {t("void")}
-                </button>
-              )
-            ) : null}
+            {row.payment.refunded ? null : (
+              <div className="flex flex-wrap items-center gap-2">
+                {canVoid ? (
+                  voidOpen ? (
+                    <form
+                      action={voidFormAction}
+                      className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
+                    >
+                      <input type="hidden" name="locale" value={locale} />
+                      <input type="hidden" name="paymentId" value={row.payment.id} />
+                      <input
+                        type="text"
+                        name="reason"
+                        required
+                        maxLength={200}
+                        placeholder={t("voidReasonPlaceholder")}
+                        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
+                      />
+                      <SubmitButton variant="destructive">
+                        {t("confirmVoid")}
+                      </SubmitButton>
+                    </form>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setVoidOpen(true)}
+                      className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-xs font-medium text-danger hover:bg-danger-bg"
+                    >
+                      <Ban className="size-3.5" aria-hidden />
+                      {t("void")}
+                    </button>
+                  )
+                ) : null}
+                {canRefund ? (
+                  refundOpen ? (
+                    <form
+                      action={refundFormAction}
+                      className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
+                    >
+                      <input type="hidden" name="locale" value={locale} />
+                      <input type="hidden" name="paymentId" value={row.payment.id} />
+                      <input
+                        type="text"
+                        name="reason"
+                        required
+                        maxLength={200}
+                        placeholder={t("refundReasonPlaceholder")}
+                        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
+                      />
+                      <SubmitButton variant="destructive">
+                        {t("confirmRefund")}
+                      </SubmitButton>
+                    </form>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setRefundOpen(true)}
+                      className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-xs font-medium text-info hover:bg-info-bg"
+                    >
+                      <Undo2 className="size-3.5" aria-hidden />
+                      {t("refund")}
+                    </button>
+                  )
+                ) : null}
+              </div>
+            )}
           </div>
         ) : canRecordPayment ? (
           <form
@@ -218,6 +270,7 @@ function AttendeeRow({
         <FormMessage>{tErrors(paymentState.error)}</FormMessage>
       ) : null}
       {voidState.error ? <FormMessage>{tErrors(voidState.error)}</FormMessage> : null}
+      {refundState.error ? <FormMessage>{tErrors(refundState.error)}</FormMessage> : null}
     </li>
   );
 }

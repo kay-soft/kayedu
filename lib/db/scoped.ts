@@ -440,6 +440,67 @@ export function scoped(ctx: TenantContext) {
       findById: (id: string) => scopedFindById(prisma.payment, centerId, id),
     },
 
+    /**
+     * The refunds ledger (M14, spec §4.1 item 12) — read-only here; the
+     * write path (`lib/db/refunds.ts`'s `refundPayment`) takes `centerId`
+     * directly, the same shape `recordPayment`/`voidPayment` already use,
+     * since it runs inside the same transaction as the Server Action's
+     * audit write.
+     */
+    refunds: {
+      list: (take = 100) =>
+        prisma.refund.findMany({
+          where: scopedWhere(centerId),
+          orderBy: { refundedAt: "desc" },
+          take,
+          include: {
+            payment: {
+              include: {
+                studentProfile: { include: { user: true } },
+                session: {
+                  include: {
+                    classGroup: {
+                      include: {
+                        subject: { include: { selections: { where: { centerId } } } },
+                        grade: { include: { selections: { where: { centerId } } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+    },
+
+    /**
+     * Teacher settlements (M14, spec §4.1 item 11 / §4.2 item 9) — read-only
+     * here; creation and every DRAFT→APPROVED/APPROVED→PAID transition go
+     * through `lib/db/settlements.ts` directly with `centerId`, the same
+     * "money write takes centerId, not ScopedDb" shape as payments/refunds.
+     */
+    settlements: {
+      list: (where?: Prisma.SettlementWhereInput) =>
+        prisma.settlement.findMany({
+          where: scopedWhere(centerId, where),
+          orderBy: { createdAt: "desc" },
+          include: {
+            session: {
+              include: {
+                classGroup: {
+                  include: {
+                    subject: { include: { selections: { where: { centerId } } } },
+                    grade: { include: { selections: { where: { centerId } } } },
+                  },
+                },
+              },
+            },
+          },
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.settlement, centerId, id),
+    },
+
     // ── Academic / config master data (docs/01-data-model.md §2) ───────────
     // Same shape for every entity: scoped list, scoped lookup, scoped write.
     // `update`/`remove` go through updateMany/deleteMany with a scoped where so

@@ -35,6 +35,8 @@
     "analytics": "Analytics",
     "expenses": "Expenses",
     "approvals": "Approvals",
+    "refunds": "Refunds",
+    "settlements": "Settlements",
     "staff": "Users & roles",
     "schedule": "My schedule",
     "discover": "Discover",
@@ -600,7 +602,11 @@
       "recordPayment": "Record payment",
       "void": "Void",
       "voidReasonPlaceholder": "Reason for voiding",
-      "confirmVoid": "Confirm void"
+      "confirmVoid": "Confirm void",
+      "refund": "Refund",
+      "refunded": "Refunded",
+      "refundReasonPlaceholder": "Reason for the refund",
+      "confirmRefund": "Confirm refund"
     },
     "addAttendee": {
       "title": "Add a student",
@@ -644,6 +650,9 @@
       "absent": "Absent",
       "excused": "Excused"
     },
+    "settlement": {
+      "status": "Settlement: {status}"
+    },
     "errors": {
       "forbidden": "You are not allowed to do this.",
       "notFound": "That record no longer exists in this branch.",
@@ -656,6 +665,7 @@
       "attendanceNotPayable": "Only a Present or Late attendee can have a payment recorded.",
       "alreadyPaid": "This attendee already has an active payment. Void it first to record a new one.",
       "alreadyVoided": "This payment was already voided.",
+      "alreadyRefunded": "This payment was already refunded.",
       "contactConflict": "The email and the phone belong to two different people. Correct one of them, or ask a super admin to merge the identities.",
       "contactInUse": "Those contact details already belong to someone else.",
       "matchGone": "That person is no longer the match for these details. Check the form and try again.",
@@ -861,6 +871,57 @@
       "duplicateSlot": "This class already has a session at that exact date and time."
     }
   },
+  "Refunds": {
+    "title": "Refunds",
+    "subtitle": "Every payment given back in cash at this branch, most recent first.",
+    "registerTitle": "Refund register",
+    "registerDescription": "Recorded from a session's roster — see a session's Refund button to issue a new one.",
+    "empty": "No refunds recorded yet.",
+    "refundedOn": "Refunded {date}"
+  },
+  "Settlements": {
+    "title": "Settlements",
+    "subtitle": "A teacher's payout register — a single session's share, or a period roll-up. Every total is derived from frozen payment snapshots and never recomputed.",
+    "createPeriodTitle": "Create a period settlement",
+    "createPeriodDescription": "Sum one teacher's frozen teacher-share snapshots over a date range into a new DRAFT settlement.",
+    "createPeriod": "Create settlement",
+    "created": "Settlement created.",
+    "noTeachers": "No active teachers at this branch yet.",
+    "registerTitle": "Settlements",
+    "registerDescription": "Every settlement at this branch — approve, then mark paid, in order.",
+    "empty": "No settlements yet.",
+    "unknownTeacher": "Former teacher",
+    "approve": "Approve",
+    "markPaid": "Mark paid",
+    "settleThisSession": "Settle this session's teacher share",
+    "sessionSettled": "This session's teacher share has been settled.",
+    "scopeSession": "{class} · {date}",
+    "scopePeriod": "{from} – {to}",
+    "fields": {
+      "teacher": "Teacher",
+      "from": "From",
+      "to": "To"
+    },
+    "status": {
+      "DRAFT": "Draft",
+      "APPROVED": "Approved",
+      "PAID": "Paid"
+    },
+    "teacherTitle": "My settlements",
+    "teacherSubtitle": "What you've been paid, and what's outstanding — across every branch you teach at.",
+    "teacherEmpty": "No settlements recorded for you yet.",
+    "errors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That settlement no longer exists.",
+      "sessionNotFound": "That session no longer exists in this branch.",
+      "sessionAlreadySettled": "This session's teacher share has already been settled.",
+      "invalidRange": "The end date must be on or after the start date.",
+      "invalidDate": "Enter a valid date.",
+      "overlappingSettlement": "This teacher already has a settlement covering part of that date range.",
+      "notDraft": "This settlement has already been approved or paid.",
+      "notApproved": "This settlement must be approved before it can be marked paid."
+    }
+  },
   "Settings": {
     "title": "Branch configuration",
     "subtitle": "Set up this branch's academic and operational reference data. Everything here is per branch — the next branch needs no code changes.",
@@ -1038,6 +1099,8 @@
         "attendance_correct": "Correct attendance",
         "payment_record": "Record payments",
         "payment_void": "Void payments",
+        "payment_refund": "Refund payments",
+        "settlement_manage": "Manage teacher settlements",
         "expense_manage": "Manage expenses",
         "analytics_center_view": "View branch analytics",
         "analytics_own_view": "View own analytics",

@@ -140,6 +140,17 @@ export const voidPaymentSchema = z.object({
   reason: z.string().trim().min(1, "required").max(200, "tooLong"),
 });
 
+// ── Refund (M14, spec §4.1 item 12) ─────────────────────────────────────────
+// Same shape as voidPaymentSchema on purpose: a refund and a void are both
+// "which payment, why" — the mechanism they trigger differs (CLAUDE.md rule
+// 7), the input shape does not.
+
+export const refundPaymentSchema = z.object({
+  ...base,
+  paymentId: recordId,
+  reason: z.string().trim().min(1, "required").max(200, "tooLong"),
+});
+
 // ── Session lifecycle: cancel / reschedule (M10) ────────────────────────────
 
 export const cancelSessionSchema = z.object({
@@ -255,6 +266,7 @@ export type SessionActionState = {
     | "deleted"
     | "matchFound"
     | "voided"
+    | "refunded"
     | "cancelled"
     | "rescheduled"
     | "shareUpdated";

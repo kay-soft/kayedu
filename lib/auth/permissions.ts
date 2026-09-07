@@ -46,6 +46,10 @@ export const PERMISSIONS = [
   "attendance.correct",
   "payment.record",
   "payment.void",
+  "payment.refund",
+  // Settlements (M14) — creating a settlement, and each DRAFT→APPROVED /
+  // APPROVED→PAID transition, all gate on this one action.
+  "settlement.manage",
   // Money & reporting
   "expense.manage",
   "analytics.center.view",
@@ -212,6 +216,8 @@ const MANAGER_BASELINE: readonly Permission[] = [
   "attendance.correct",
   "payment.record",
   "payment.void",
+  "payment.refund",
+  "settlement.manage",
   "expense.manage",
   "analytics.center.view",
   "approvals.manage",

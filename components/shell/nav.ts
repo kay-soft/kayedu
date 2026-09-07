@@ -22,7 +22,9 @@ export type ShellIconName =
   | "discover"
   | "centers"
   | "platform"
-  | "catalog";
+  | "catalog"
+  | "refunds"
+  | "settlements";
 
 export type ShellNavItem = {
   href: string;
@@ -45,6 +47,8 @@ const CENTER_NAV: NavDef[] = [
   { href: ROUTES.centerAnalytics, labelKey: "analytics", icon: "analytics", permission: "analytics.center.view" },
   { href: ROUTES.centerExpenses, labelKey: "expenses", icon: "expenses", permission: "expense.manage" },
   { href: ROUTES.centerApprovals, labelKey: "approvals", icon: "approvals", permission: "approvals.manage" },
+  { href: ROUTES.centerRefunds, labelKey: "refunds", icon: "refunds", permission: "payment.refund" },
+  { href: ROUTES.centerSettlements, labelKey: "settlements", icon: "settlements", permission: "settlement.manage" },
   // Settings owns its own sub-navigation (users & roles lives under it).
   { href: ROUTES.centerSettings, labelKey: "settings", icon: "settings", permission: "center.settings.edit" },
 ];
@@ -58,6 +62,7 @@ const TEACHER_NAV: NavDef[] = [
   // is still a gap beyond the Dashboard's combined/per-center summary (M7) —
   // docs/03-build-order.md M7 note.
   { href: "/teacher/analytics", labelKey: "analytics", icon: "analytics", disabled: true },
+  { href: ROUTES.teacherSettlements, labelKey: "settlements", icon: "settlements" },
 ];
 
 const STUDENT_NAV: NavDef[] = [
