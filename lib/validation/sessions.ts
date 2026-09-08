@@ -53,14 +53,28 @@ const paymentMethod = z.enum(["CASH", "INSTAPAY", "WALLET", "VISA"], {
 
 // ── Today's Sessions dashboard filters (M18: the shared date filter) ───────
 
+/**
+ * A filter dropdown's "All" option submits an **empty string**, not nothing —
+ * so an optional enum has to read `""` as "no filter" rather than as an
+ * invalid value. Without this the whole filter object failed to parse the
+ * moment Status sat on "All" (its default), and the page's `safeParse`
+ * fallback then discarded *every* filter alongside it — including a date
+ * range the user had just picked, which is what made the Sessions tab snap
+ * back to today.
+ */
+const optionalSessionStatus = z
+  .preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(["SCHEDULED", "LIVE", "COMPLETED", "CANCELLED"]).optional(),
+  )
+  .transform((value) => value ?? null);
+
+
 export const sessionListFilterSchema = dateFilterSchema.extend({
   teacherId: optionalRef,
   subjectId: optionalRef,
   classGroupId: optionalRef,
-  status: z
-    .enum(["SCHEDULED", "LIVE", "COMPLETED", "CANCELLED"])
-    .optional()
-    .transform((value) => value ?? null),
+  status: optionalSessionStatus,
 });
 
 // ── Attendance (mark / correct) ─────────────────────────────────────────────

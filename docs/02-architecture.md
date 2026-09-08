@@ -388,6 +388,21 @@ Buckets: `logos/` (center branding), `avatars/` (users/students), `id-cards/` (g
 
 ---
 
+## 10.5 Filter parsing (a rule learned the hard way)
+
+A filter bar posts **every** control on every submit, and an untouched dropdown posts its "All" option as an **empty string** — not as an absent key. So an optional filter must read `""` as *no filter*, never as an invalid value.
+
+`sessionListFilterSchema`'s `status` was `z.enum([...]).optional()`, which rejects `""`. With Status on "All" — its default — the whole object failed to parse, and the page's `safeParse` fallback then replaced *every* filter with its default, including a date range the user had just picked. The visible symptom ("choosing a date range snaps back to today") pointed at the date filter; the cause was three fields away, and the coupling in the fallback is what carried it there.
+
+Two rules follow, both enforced by `npm run check:filters` (`scripts/filters-check.ts`):
+
+1. **An optional enum filter tolerates `""`** — via `z.preprocess((v) => (v === "" ? undefined : v), …)` — while still rejecting a genuinely bogus value. Tolerating the empty string must not become tolerating anything.
+2. **The date filter is parsed independently of its siblings.** `/sessions` and `/teacher/sessions` parse `dateFilterSchema`/`teacherSessionDateSchema` alongside the full schema, so a rejected sibling filter degrades that one field instead of silently resetting the whole view. A filter the user can see they chose must not disappear because of a field they did not touch.
+
+The gate asserts every filter bar parses its own form's untouched submission — a filter bar that cannot parse its own default state is broken by construction.
+
+---
+
 ## 11. Session generation & scheduling conflicts (M4)
 
 `generateSessions()` (`lib/db/sessions.ts`) materializes `Session` rows from every active `ClassGroup`'s `ClassSchedule`s on a rolling **42-day (`GENERATION_WINDOW_DAYS`) window starting today**, skipping any date on the center's `Holiday` calendar, and snapshotting `Session.priceSnapshot` from the class's current price at generation time (§3's snapshot rule applies here too — a later price change never rewrites an already-generated session). It takes a `PrismaClient` as its first argument rather than importing the app's singleton, so `npm run check:classes` can call the *real* generator with its own client, outside the Next.js runtime (§5's "no `@/` aliases" rule, extended to this module).

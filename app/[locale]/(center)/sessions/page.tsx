@@ -32,7 +32,7 @@ import { ROUTES } from "@/lib/routes";
 import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { sessionListFilterSchema } from "@/lib/validation/sessions";
-import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
+import { dateFilterSchema, toSharedDateFilterInput } from "@/lib/validation/date-filter";
 
 /**
  * Today's Sessions dashboard (spec §4.1 item 7): a KPI row, filters (date/
@@ -53,13 +53,19 @@ export default async function SessionsPage({
 
   const rawParams = await searchParams;
   const parsedFilters = sessionListFilterSchema.safeParse(rawParams);
+  // The date part is parsed on its own as well, so a rejected *sibling*
+  // filter can never discard a date range the user just picked. Coupling the
+  // two is what turned one over-strict enum into "the range resets to today":
+  // a single bad field failed the whole object, and the fallback below then
+  // silently replaced every filter, dates included.
+  const parsedDates = dateFilterSchema.safeParse(rawParams);
+  const dates = parsedDates.success
+    ? parsedDates.data
+    : { range: "day" as const, date: null, from: null, to: null };
   const filters = parsedFilters.success
     ? parsedFilters.data
     : {
-        range: "day" as const,
-        date: null,
-        from: null,
-        to: null,
+        ...dates,
         teacherId: null,
         subjectId: null,
         classGroupId: null,

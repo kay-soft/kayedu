@@ -27,7 +27,10 @@ import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { addDays, startOfUtcDay } from "@/lib/scheduling";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
-import { teacherSessionListFilterSchema } from "@/lib/validation/teacher";
+import {
+  teacherSessionDateSchema,
+  teacherSessionListFilterSchema,
+} from "@/lib/validation/teacher";
 import { EmptyState } from "@/components/shared/empty-state";
 
 const STATUS_BADGE = {
@@ -55,9 +58,15 @@ export default async function TeacherSessionsPage({
   const ctx = await getTenantContext("teacher");
   const rawParams = await searchParams;
   const parsed = teacherSessionListFilterSchema.safeParse(rawParams);
+  // Same rule as the centre list: the date the teacher picked survives a
+  // rejected sibling filter rather than being reset alongside it.
+  const parsedDate = teacherSessionDateSchema.safeParse(rawParams);
+  const dates = parsedDate.success
+    ? parsedDate.data
+    : { range: "week" as const, date: null };
   const filters = parsed.success
     ? parsed.data
-    : { range: "week" as const, date: null, gradeId: null, status: null, q: null };
+    : { ...dates, gradeId: null, status: null, q: null };
 
   const anchor = filters.date
     ? new Date(`${filters.date}T00:00:00.000Z`)

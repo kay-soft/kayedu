@@ -56,7 +56,28 @@ const base = { locale: localeSchema };
 
 export const teacherSessionRangeSchema = z.enum(["day", "week", "month"]);
 
-export const teacherSessionListFilterSchema = z.object({
+/**
+ * A filter dropdown's "All" option submits an **empty string**, not nothing —
+ * so an optional enum has to read `""` as "no filter" rather than as an
+ * invalid value. Without this the whole filter object failed to parse the
+ * moment Status sat on "All" (its default), and the page's `safeParse`
+ * fallback then discarded *every* filter alongside it — including a date
+ * range the user had just picked, which is what made the Sessions tab snap
+ * back to today.
+ */
+const optionalSessionStatus = z
+  .preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(["SCHEDULED", "LIVE", "COMPLETED", "CANCELLED"]).optional(),
+  )
+  .transform((value) => value ?? null);
+
+/**
+ * Just the date half of the teacher's session filters, so the page can parse
+ * it on its own and a rejected sibling filter never resets the day the
+ * teacher is looking at.
+ */
+export const teacherSessionDateSchema = z.object({
   range: teacherSessionRangeSchema.default("week"),
   date: z
     .string()
@@ -66,11 +87,11 @@ export const teacherSessionListFilterSchema = z.object({
     .transform((value) =>
       value && !Number.isNaN(Date.parse(value)) ? value.slice(0, 10) : null,
     ),
+});
+
+export const teacherSessionListFilterSchema = teacherSessionDateSchema.extend({
   gradeId: optionalRef,
-  status: z
-    .enum(["SCHEDULED", "LIVE", "COMPLETED", "CANCELLED"])
-    .optional()
-    .transform((value) => value ?? null),
+  status: optionalSessionStatus,
   q: z
     .string()
     .trim()
