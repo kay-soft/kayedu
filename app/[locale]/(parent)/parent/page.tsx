@@ -9,7 +9,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
 import { startOfUtcDay } from "@/lib/scheduling";
 import { ChildSelector } from "./child-selector";
 import { ParentDateFilter } from "./parent-date-filter";
@@ -200,9 +200,7 @@ export default async function ParentPage({
                   <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
-                    <span dir="ltr">
-                      {row.startTime}–{row.endTime}
-                    </span>
+                    <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                     {row.roomName ? <span>{row.roomName}</span> : null}
                   </p>
                 </div>
@@ -233,6 +231,7 @@ export default async function ParentPage({
                   <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
+                    <span>{formatTime(row.startTime, locale)}</span>
                     {row.isDropIn ? <span>{t("dropIn")}</span> : null}
                     {row.paidAmount !== null ? <span>{formatMoney(row.paidAmount, locale)}</span> : null}
                   </p>

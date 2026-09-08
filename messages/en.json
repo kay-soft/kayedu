@@ -644,7 +644,7 @@
       "collected": "Collected"
     },
     "columns": {
-      "time": "Time",
+      "when": "Date & time",
       "class": "Class",
       "teacher": "Teacher",
       "room": "Room",
@@ -719,6 +719,7 @@
       "title": "Session"
     },
     "fields": {
+      "date": "Date",
       "time": "Time",
       "room": "Room",
       "price": "Price"
@@ -1370,6 +1371,7 @@
       "title": "Session"
     },
     "fields": {
+      "date": "Date",
       "time": "Time",
       "room": "Room",
       "grade": "Grade",

@@ -13,7 +13,7 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 
 type ChangeRequestPayload = {
@@ -134,7 +134,7 @@ export default async function ApprovalsPage() {
     teacherMemberships.map((membership) => membership.userId),
   );
 
-  const timeRange = (start: string, end: string) => start + "–" + end;
+  const timeRange = (start: string, end: string) => formatTimeRange(start, end, locale);
 
   return (
     <div className="flex flex-col gap-6">

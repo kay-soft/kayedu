@@ -81,3 +81,51 @@ export function formatFullDate(value: Date, locale: string): string {
     timeZone: "UTC",
   }).format(value);
 }
+
+/**
+ * Wall-clock time display. Takes the `"HH:MM"` strings that `ClassSchedule`
+ * and `Session` store (docs/01-data-model.md §2 — a plain wall-clock string,
+ * never a timestamp) and renders them in the **12-hour** convention the
+ * centres actually speak in: `4:00 PM` / `٤:٠٠ م`, never `16:00`.
+ *
+ * The string is parsed into a UTC instant and formatted in UTC so no server
+ * or browser timezone can shift it — "16:00" is 4 PM in every locale.
+ * Anything that isn't a valid `HH:MM` is passed through untouched rather than
+ * rendered as "Invalid Date".
+ */
+function timeToUtcDate(value: string): Date | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return new Date(Date.UTC(1970, 0, 1, hours, minutes));
+}
+
+const timeFormatOptions: Intl.DateTimeFormatOptions = {
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+  timeZone: "UTC",
+};
+
+export function formatTime(value: string, locale: string): string {
+  const date = timeToUtcDate(value);
+  if (!date) return value;
+  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).format(date);
+}
+
+/**
+ * A start–end pair as one range. `formatRange` collapses the shared meridiem
+ * where the locale does ("4:00 – 5:30 PM") and picks the locale's own range
+ * separator, which is why this never hand-joins with an en dash.
+ */
+export function formatTimeRange(start: string, end: string, locale: string): string {
+  const from = timeToUtcDate(start);
+  const to = timeToUtcDate(end);
+  if (!from || !to) return `${formatTime(start, locale)}–${formatTime(end, locale)}`;
+  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).formatRange(
+    from,
+    to,
+  );
+}

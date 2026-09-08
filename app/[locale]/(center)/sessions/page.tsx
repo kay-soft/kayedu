@@ -131,6 +131,7 @@ export default async function SessionsPage({
     className: sessionDisplayName(locale, row),
     teacherName: teacherByUserId.get(row.teacherId) ?? tCommon("none"),
     roomName: row.room?.name ?? null,
+    date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
     price: row.priceSnapshot,
@@ -250,7 +251,7 @@ export default async function SessionsPage({
                 aria-hidden
                 className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
               >
-                <span className="w-24 shrink-0">{t("columns.time")}</span>
+                <span className="w-44 shrink-0">{t("columns.when")}</span>
                 <span className="min-w-0 flex-1">{t("columns.class")}</span>
                 <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
                 <span className="min-w-0 flex-1">{t("columns.room")}</span>

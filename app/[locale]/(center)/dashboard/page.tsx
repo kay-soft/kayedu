@@ -22,7 +22,7 @@ import { attendanceStatusCounts, revenueTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -173,7 +173,7 @@ export default async function CenterDashboardPage() {
                   className="flex flex-col gap-2 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3 md:last:border-0"
                 >
                   <span className="text-sm tabular-nums text-text-secondary md:w-16 md:shrink-0" dir="ltr">
-                    {row.startTime}
+                    {formatTime(row.startTime, locale)}
                   </span>
                   <Link
                     href={ROUTES.centerSession(row.id)}

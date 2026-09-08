@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatTimeRange } from "@/lib/format";
 import { EmptyState } from "@/components/shared/empty-state";
 
 const STATUS_BADGE = {
@@ -106,9 +106,7 @@ export default async function TeacherClassesPage() {
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                         <span>{dayNames[payload.dayOfWeek]}</span>
-                        <span dir="ltr">
-                          {payload.startTime}–{payload.endTime}
-                        </span>
+                        <span>{formatTimeRange(payload.startTime, payload.endTime, locale)}</span>
                         <span>{formatDate(request.createdAt, locale)}</span>
                       </p>
                     </div>

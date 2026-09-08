@@ -9,6 +9,7 @@ import type { AttendanceStatusValue } from "@/components/center/attendance-contr
 import { PaymentMethodSelector } from "@/components/center/payment-method-selector";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
+import { formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
 import type { LiveSessionOption } from "@/app/[locale]/(center)/reception/live-session-rail";
@@ -100,7 +101,7 @@ export function CheckInForm({
               >
                 <span className="min-w-0 truncate font-medium">{session.className}</span>
                 <span className="shrink-0 tabular-nums" dir="ltr">
-                  {session.startTime}
+                  {formatTime(session.startTime, locale)}
                 </span>
               </button>
             ))}

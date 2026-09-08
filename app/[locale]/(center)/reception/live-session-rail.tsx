@@ -6,6 +6,7 @@ import type { SessionDisplayStatus } from "@/lib/db/sessions";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { EmptyState } from "@/components/shared/empty-state";
+import { formatTimeRange } from "@/lib/format";
 
 export type LiveSessionOption = {
   sessionId: string;
@@ -30,7 +31,13 @@ const STATUS_BADGE = {
  * without leaving Reception. `AddSessionShortcut` sits beside it for a
  * session outside today (or not yet generated).
  */
-export async function LiveSessionRail({ sessions }: { sessions: LiveSessionOption[] }) {
+export async function LiveSessionRail({
+  sessions,
+  locale,
+}: {
+  sessions: LiveSessionOption[];
+  locale: string;
+}) {
   const t = await getTranslations("Reception");
   const tStatus = await getTranslations("Sessions.status");
 
@@ -63,7 +70,7 @@ export async function LiveSessionRail({ sessions }: { sessions: LiveSessionOptio
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
             <span className="text-xs tabular-nums text-text-secondary" dir="ltr">
-              {session.startTime}
+              {formatTimeRange(session.startTime, session.endTime, locale)}
             </span>
             <Badge variant={STATUS_BADGE[session.displayStatus]}>
               {session.displayStatus === "LIVE" ? (

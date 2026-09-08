@@ -21,7 +21,7 @@ import {
   studentBlockedRefsByCenter,
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
-import { formatMoney, formatRating } from "@/lib/format";
+import { formatMoney, formatRating, formatTimeRange } from "@/lib/format";
 import { nameInitial } from "@/lib/initials";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { subjectAccentColor } from "@/lib/subject-accent";
@@ -247,7 +247,10 @@ export default async function StudentDiscoverPage({
                 {card.schedules.length > 0 ? (
                   <span>
                     {card.schedules
-                      .map((slot) => `${dayNames[slot.dayOfWeek]} ${slot.startTime}–${slot.endTime}`)
+                      .map(
+                        (slot) =>
+                          `${dayNames[slot.dayOfWeek]} ${formatTimeRange(slot.startTime, slot.endTime, locale)}`,
+                      )
                       .join(" · ")}
                   </span>
                 ) : (

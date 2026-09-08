@@ -219,7 +219,7 @@ export default async function ReceptionPage({
             <CardDescription>{t("liveRailDescription")}</CardDescription>
           </CardHeader>
           <CardContent>
-            <LiveSessionRail sessions={liveSessions} />
+            <LiveSessionRail sessions={liveSessions} locale={locale} />
           </CardContent>
         </Card>
       </div>

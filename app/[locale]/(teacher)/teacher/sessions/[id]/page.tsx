@@ -21,7 +21,7 @@ import { prisma } from "@/lib/db/client";
 import { sessionReceiptTotals } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -195,9 +195,15 @@ export default async function TeacherSessionDetailPage({
             </CardHeader>
             <CardContent className="flex flex-col gap-2 text-sm">
               <div className="flex justify-between gap-3">
+                <span className="text-text-secondary">{t("fields.date")}</span>
+                <span className="font-medium text-text-primary">
+                  {formatDate(session.date, locale)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.time")}</span>
-                <span className="font-medium tabular-nums text-text-primary" dir="ltr">
-                  {session.startTime}–{session.endTime}
+                <span className="font-medium tabular-nums text-text-primary">
+                  {formatTimeRange(session.startTime, session.endTime, locale)}
                 </span>
               </div>
               <div className="flex justify-between gap-3">

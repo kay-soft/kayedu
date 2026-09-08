@@ -350,7 +350,8 @@ All gates import only modules free of `@/` aliases and of Next-runtime imports �
 - **next-intl** with a `[locale]` segment; `en` default, `ar` fully supported. All copy in `messages/ar.json` + `messages/en.json`, never hardcoded.
 - `<html lang={locale} dir={locale === "ar" ? "rtl" : "ltr"}>`.
 - **Tailwind logical properties only:** `ps-*/pe-*`, `ms-*/me-*`, `text-start/text-end`, `start-0/end-0`. No `left/right`.
-- Arabic-Indic vs Latin numerals: Arabic-Indic in `ar` (`ar-EG-u-nu-arab`), Latin in `en`. Always format through `lib/format.ts` (`formatNumber`, `formatDate`) — never `toLocaleString()` inline.
+- Arabic-Indic vs Latin numerals: Arabic-Indic in `ar` (`ar-EG-u-nu-arab`), Latin in `en`. Always format through `lib/format.ts` (`formatNumber`, `formatDate`, `formatTime`, `formatTimeRange`) — never `toLocaleString()` inline.
+- **Clock times are 12-hour, everywhere.** `ClassSchedule`/`Session` store a bare `"HH:MM"` wall-clock string (`01-data-model.md` §2); nothing renders that string raw. `formatTime` / `formatTimeRange` turn it into `4:00 PM` in `en` and `٤:٠٠ م` in `ar`, parsing and formatting in UTC so no server or browser timezone can shift 16:00 off 4 PM. `<input type="time">` is untouched — it posts `"HH:MM"` and the browser presents it in the OS convention.
 - Fonts: Cairo (Arabic + Latin) via `next/font`, bound to `--font-sans`.
 - **Routing:** Next 16 names the middleware file `proxy.ts`. It runs the next-intl middleware first, then refreshes the Supabase session onto that same response (`lib/supabase/proxy.ts`), so the i18n rewrite/redirect survives.
 

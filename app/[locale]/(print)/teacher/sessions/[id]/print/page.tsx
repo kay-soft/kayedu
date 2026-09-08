@@ -9,7 +9,7 @@ import { prisma } from "@/lib/db/client";
 import { sessionReceiptTotals } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
 import { sessionDisplayName } from "@/lib/db/sessions";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 
@@ -67,7 +67,8 @@ export default async function TeacherSessionPrintPage({
             <p className="text-xs text-text-muted">{ctx.center.name}</p>
             <h2 className="text-xl font-bold text-text-primary">{className}</h2>
             <p className="mt-1 text-sm text-text-secondary" dir="ltr">
-              {formatDate(session.date, locale)} · {session.startTime}–{session.endTime}
+              {formatDate(session.date, locale)} ·{" "}
+              {formatTimeRange(session.startTime, session.endTime, locale)}
             </p>
           </div>
           <p className="text-xs text-text-muted">

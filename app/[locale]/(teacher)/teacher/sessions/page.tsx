@@ -22,7 +22,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
-import { formatDate, formatNumber } from "@/lib/format";
+import { formatDate, formatNumber, formatTimeRange } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { addDays, startOfUtcDay } from "@/lib/scheduling";
@@ -226,9 +226,7 @@ export default async function TeacherSessionsPage({
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                         <span>{formatDate(row.date, locale)}</span>
-                        <span dir="ltr">
-                          {row.startTime}–{row.endTime}
-                        </span>
+                        <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                         <span>{row.room?.name ?? tCommon("none")}</span>
                       </p>
                     </div>

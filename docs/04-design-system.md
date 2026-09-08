@@ -68,6 +68,8 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 
 - **Font:** Cairo (already loaded via `next/font` — covers Arabic + Latin). One family everywhere.
 - **Numerals:** Arabic-Indic (٠١٢٣) in `ar`, Latin (0123) in `en`, via a shared `Intl` formatter helper. Never mix within a locale.
+- **Times:** 12-hour with a meridiem — `4:00 PM` / `٤:٠٠ م`, never `16:00`. A start–end pair renders as one range through `formatTimeRange` (`4:00 – 5:30 PM`), which collapses the shared meridiem and picks the locale’s own separator rather than a hand-joined en dash. A formatted time needs no `dir="ltr"` wrapper — the string carries its own direction.
+- **Wherever a session is listed, its date rides with its time.** A time alone answers “when in the day”, not “which day”. The two today-only surfaces — the dashboard’s *Today* rail and Reception — are the exception: there the date is the screen’s premise.
 - **Scale:**
   | Use | Size / weight |
   |---|---|

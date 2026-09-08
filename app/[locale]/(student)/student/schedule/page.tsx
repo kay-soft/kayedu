@@ -9,7 +9,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
 import { startOfUtcDay } from "@/lib/scheduling";
 import { ScheduleDateFilter } from "./schedule-date-filter";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -171,9 +171,7 @@ export default async function StudentSchedulePage({
                     <span>{row.centerName}</span>
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
-                    <span dir="ltr">
-                      {row.startTime}–{row.endTime}
-                    </span>
+                    <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                     {row.roomName ? <span>{row.roomName}</span> : null}
                   </p>
                 </div>
@@ -205,6 +203,7 @@ export default async function StudentSchedulePage({
                     <span>{row.centerName}</span>
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
+                    <span>{formatTime(row.startTime, locale)}</span>
                     {row.isDropIn ? <span>{t("dropIn")}</span> : null}
                     {row.paidAmount !== null ? <span>{formatMoney(row.paidAmount, locale)}</span> : null}
                   </p>

@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Link } from "@/lib/i18n/navigation";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber, formatTimeRange } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import type { SessionDisplayStatus } from "@/lib/db/sessions";
 import { LinkButton } from "@/components/shared/link-button";
@@ -14,6 +14,7 @@ export type SessionRowData = {
   className: string;
   teacherName: string;
   roomName: string | null;
+  date: Date;
   startTime: string;
   endTime: string;
   price: number;
@@ -37,10 +38,13 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
 
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
-      <div className="flex md:w-24 md:shrink-0 flex-col">
-        <span className="text-xs text-text-muted md:hidden">{t("columns.time")}</span>
-        <span className="truncate text-sm tabular-nums text-text-secondary" dir="ltr">
-          {session.startTime}
+      <div className="flex md:w-44 md:shrink-0 flex-col">
+        <span className="text-xs text-text-muted md:hidden">{t("columns.when")}</span>
+        <span className="truncate text-sm text-text-secondary">
+          {formatDate(session.date, locale)}
+        </span>
+        <span className="truncate text-xs tabular-nums text-text-muted">
+          {formatTimeRange(session.startTime, session.endTime, locale)}
         </span>
       </div>
 
