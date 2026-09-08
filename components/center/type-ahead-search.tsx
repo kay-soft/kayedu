@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -24,6 +25,20 @@ export type TypeAheadResult = {
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LENGTH = 2;
 const MAX_RESULTS = 8;
+
+/** Gap between the input and the panel, and the panel's own height bounds. */
+const PANEL_GAP = 4;
+const PANEL_MIN_HEIGHT = 176;
+const PANEL_MAX_HEIGHT = 288;
+
+/**
+ * Placement must happen before the browser paints, or the panel flashes at
+ * the top-left of the viewport for a frame. `useLayoutEffect` does that, but
+ * React warns when it runs during SSR — so on the server this degrades to
+ * `useEffect`, which never runs there anyway.
+ */
+const useIsomorphicLayoutEffect =
+  typeof document === "undefined" ? useEffect : useLayoutEffect;
 
 /**
  * The one live type-ahead search input (M18, docs/04 §11.8). A plain GET
@@ -69,6 +84,8 @@ export function TypeAheadSearch({
   const [searched, setSearched] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
 
   const queryTooShort = query.trim().length < MIN_QUERY_LENGTH;
@@ -102,11 +119,58 @@ export function TypeAheadSearch({
 
   useEffect(() => {
     function onPointerDown(event: PointerEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      // The panel is portalled to <body>, so it is not inside `containerRef`
+      // any more — it has to be checked separately or every click on a
+      // result would read as a click outside and close the list first.
+      if (containerRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, []);
+
+  // Position the portalled panel against the input, in viewport coordinates.
+  // Written straight to the node rather than through state: this runs on
+  // every scroll frame, and re-rendering the whole list to move it would be
+  // both wasteful and a cascading-render hazard.
+  useIsomorphicLayoutEffect(() => {
+    if (!open || queryTooShort) return;
+    const field = fieldRef.current;
+    const panel = panelRef.current;
+    if (!field || !panel) return;
+
+    function place() {
+      if (!field || !panel) return;
+      const rect = field.getBoundingClientRect();
+      const below = window.innerHeight - rect.bottom - PANEL_GAP * 2;
+      const above = rect.top - PANEL_GAP * 2;
+      // Flip above the input only when there is genuinely more room there —
+      // at a desk the input is usually near the top and this never fires.
+      const flip = below < PANEL_MIN_HEIGHT && above > below;
+      const room = Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, flip ? above : below));
+
+      // `left`/`width` come from the measured rect, so this lands over the
+      // input in both reading directions without a special case (docs/04 §7).
+      panel.style.width = `${rect.width}px`;
+      panel.style.left = `${rect.left}px`;
+      panel.style.maxHeight = `${room}px`;
+      panel.style.top = flip
+        ? `${Math.max(PANEL_GAP, rect.top - Math.min(panel.offsetHeight, room) - PANEL_GAP)}px`
+        : `${rect.bottom + PANEL_GAP}px`;
+      panel.style.visibility = "visible";
+    }
+
+    place();
+    // `true` catches scrolling in any ancestor container, not just the page.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, queryTooShort, results, loading, searched, activeIndex]);
 
   function select(result: TypeAheadResult) {
     setOpen(false);
@@ -144,7 +208,7 @@ export function TypeAheadSearch({
         <label htmlFor={inputId} className="text-xs font-medium text-text-secondary">
           {label}
         </label>
-        <div className="relative">
+        <div ref={fieldRef} className="relative">
           <Input
             id={inputId}
             name={name}
@@ -168,48 +232,58 @@ export function TypeAheadSearch({
           ) : null}
         </div>
 
-        {open && !queryTooShort ? (
-          <div
-            id={listboxId}
-            role="listbox"
-            className="absolute top-full z-20 mt-1 w-full rounded-lg border border-border bg-surface shadow-card-hover"
-          >
-            {results.length > 0 ? (
-              <ul className="max-h-72 overflow-y-auto py-1">
-                {results.map((result, index) => (
-                  <li key={result.id} role="option" aria-selected={index === activeIndex}>
-                    <button
-                      type="button"
-                      onMouseEnter={() => setActiveIndex(index)}
-                      onClick={() => select(result)}
-                      className={cn(
-                        "flex w-full flex-col gap-0.5 px-3 py-2 text-start text-sm transition-ui",
-                        "transition-ui-fast focus-ring",
-                        index === activeIndex
-                          ? "bg-brand/10 text-brand"
-                          : "hover:bg-surface-hover active:bg-surface-active",
-                      )}
-                    >
-                      <span className="truncate font-medium text-text-primary">
-                        {result.primary}
-                      </span>
-                      {result.secondary ? (
-                        <span className="truncate text-xs text-text-muted" dir="ltr">
-                          {result.secondary}
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : searched && !loading ? (
-              <div className="flex flex-col gap-2 px-3 py-3 text-sm text-text-muted">
-                <span>{t("noResults")}</span>
-                {emptyAction}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        {open && !queryTooShort
+          ? createPortal(
+              <div
+                ref={panelRef}
+                id={listboxId}
+                role="listbox"
+                // Portalled to <body> and positioned in viewport coordinates,
+                // so no ancestor can clip it. `Card` sets `overflow-hidden`
+                // for its rounded corners, and the search box sits inside a
+                // card on every screen that has one — which used to cut this
+                // panel off at the card's bottom edge.
+                style={{ visibility: "hidden" }}
+                className="fixed z-50 overflow-y-auto rounded-lg border border-border bg-surface shadow-popover"
+              >
+                {results.length > 0 ? (
+                  <ul className="py-1">
+                    {results.map((result, index) => (
+                      <li key={result.id} role="option" aria-selected={index === activeIndex}>
+                        <button
+                          type="button"
+                          onMouseEnter={() => setActiveIndex(index)}
+                          onClick={() => select(result)}
+                          className={cn(
+                            "flex w-full flex-col gap-0.5 px-3 py-2 text-start text-sm",
+                            "transition-ui-fast focus-ring",
+                            index === activeIndex
+                              ? "bg-brand/10 text-brand"
+                              : "hover:bg-surface-hover active:bg-surface-active",
+                          )}
+                        >
+                          <span className="truncate font-medium text-text-primary">
+                            {result.primary}
+                          </span>
+                          {result.secondary ? (
+                            <span className="truncate text-xs text-text-muted" dir="ltr">
+                              {result.secondary}
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : searched && !loading ? (
+                  <div className="flex flex-col gap-2 px-3 py-3 text-sm text-text-muted">
+                    <span>{t("noResults")}</span>
+                    {emptyAction}
+                  </div>
+                ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
       </div>
 
       <Button type="submit" variant="outline" className="h-11 px-4">
