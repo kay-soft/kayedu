@@ -1,16 +1,14 @@
+import { ClipboardCheck } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { ChangeRequestActions } from "@/app/[locale]/(center)/approvals/change-request-actions";
 import { ReservationActions } from "@/app/[locale]/(center)/approvals/reservation-actions";
 import { SessionRequestActions } from "@/app/[locale]/(center)/approvals/session-request-actions";
+import { EmptyState } from "@/components/shared/empty-state";
+import { FormMessage } from "@/components/shared/form-message";
 import { PageHeader } from "@/components/shared/page-header";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { RequestCard } from "@/components/shared/request-card";
+import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
@@ -127,183 +125,225 @@ export default async function ApprovalsPage() {
 
   const totalPending = changeRequests.length + sessionRequests.length + reservations.length;
 
+  // A NEW_CLASS request from someone with no local `Membership` is a teacher
+  // asking to work at this branch at all (M15's centre directory), not an
+  // existing teacher proposing another class. Same row in the database,
+  // genuinely different decision — so it gets its own card kind and its own
+  // note (docs/04 §11.3).
+  const localTeacherIds = new Set(
+    teacherMemberships.map((membership) => membership.userId),
+  );
+
+  const timeRange = (start: string, end: string) => start + "–" + end;
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle", { count: totalPending })} />
 
       {totalPending === 0 ? (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-text-muted">{t("empty")}</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={<ClipboardCheck />}
+          tone="success"
+          title={t("empty")}
+          description={t("emptyHint")}
+        />
       ) : (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("changeRequests.title")}</CardTitle>
-              <CardDescription>{t("changeRequests.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {changeRequests.length === 0 ? (
-                <p className="text-sm text-text-muted">{t("changeRequests.empty")}</p>
-              ) : (
-                changeRequests.map((request) => {
-                  const payload = request.payload as unknown as ChangeRequestPayload;
-                  return (
-                    <div
-                      key={request.id}
-                      className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-start sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-text-primary">
-                          {teacherNameById.get(request.requestedBy) ?? tCommon("none")}
-                        </p>
-                        <p className="mt-1 text-xs text-text-secondary">
-                          {[
-                            payload.subjectId ? subjectNameById.get(payload.subjectId) : null,
-                            payload.gradeId ? gradeNameById.get(payload.gradeId) : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ") || tCommon("none")}
-                        </p>
-                        <p className="mt-1 text-xs text-text-muted">
-                          {t("changeRequests.requestedOn", { date: formatDate(request.createdAt, locale) })}
-                        </p>
-                        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-3">
-                          <div>
-                            <dt className="text-text-muted">{t("changeRequests.fields.day")}</dt>
-                            <dd>{dayNames[payload.dayOfWeek]}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-text-muted">{t("changeRequests.fields.time")}</dt>
-                            <dd dir="ltr">
-                              {payload.startTime}–{payload.endTime}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-text-muted">{t("changeRequests.fields.capacity")}</dt>
-                            <dd>{payload.capacity || tCommon("none")}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-text-muted">{t("changeRequests.fields.attendance")}</dt>
-                            <dd>{payload.attendanceRequired ? t("changeRequests.fields.yes") : t("changeRequests.fields.no")}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-text-muted">{t("changeRequests.fields.lateThreshold")}</dt>
-                            <dd>{payload.lateThresholdMinutes}</dd>
-                          </div>
-                        </dl>
-                        {payload.note ? (
-                          <p className="mt-2 text-xs text-text-secondary">{payload.note}</p>
-                        ) : null}
-                      </div>
-                      <ChangeRequestActions id={request.id} />
-                    </div>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
+        <div className="flex flex-col gap-8">
+          <section className="flex flex-col gap-3">
+            <SectionHeader
+              title={t("changeRequests.title")}
+              description={t("changeRequests.description")}
+            />
+            {changeRequests.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<ClipboardCheck />}
+                title={t("changeRequests.empty")}
+                description={t("changeRequests.emptyHint")}
+              />
+            ) : (
+              changeRequests.map((request) => {
+                const payload = request.payload as unknown as ChangeRequestPayload;
+                const onboarding = !localTeacherIds.has(request.requestedBy);
+                const subjectAndGrade = [
+                  payload.subjectId ? subjectNameById.get(payload.subjectId) : null,
+                  payload.gradeId ? gradeNameById.get(payload.gradeId) : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("sessionRequests.title")}</CardTitle>
-              <CardDescription>{t("sessionRequests.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {sessionRequests.length === 0 ? (
-                <p className="text-sm text-text-muted">{t("sessionRequests.empty")}</p>
-              ) : (
-                sessionRequests.map((request) => {
-                  const payload = request.payload as unknown as SessionRequestPayload;
-                  const classGroup = classGroupById.get(payload.classGroupId);
-                  return (
-                    <div
-                      key={request.id}
-                      className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-start sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-text-primary">
-                          {teacherNameById.get(request.requestedBy) ?? tCommon("none")}
-                        </p>
-                        <p className="mt-1 text-xs text-text-secondary">
-                          {classGroup
-                            ? [
-                                classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
-                                classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")
-                            : t("sessionRequests.classGone")}
-                        </p>
-                        <p className="mt-1 text-xs text-text-muted">
-                          {t("changeRequests.requestedOn", { date: formatDate(request.createdAt, locale) })}
-                        </p>
-                        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-3">
-                          <div>
-                            <dt className="text-text-muted">{t("sessionRequests.fields.date")}</dt>
-                            <dd>{formatDate(new Date(`${payload.date}T00:00:00.000Z`), locale)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-text-muted">{t("changeRequests.fields.time")}</dt>
-                            <dd dir="ltr">
-                              {payload.startTime}–{payload.endTime}
-                            </dd>
-                          </div>
-                        </dl>
-                        {payload.note ? (
-                          <p className="mt-2 text-xs text-text-secondary">{payload.note}</p>
-                        ) : null}
-                      </div>
-                      <SessionRequestActions id={request.id} />
-                    </div>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("reservations.title")}</CardTitle>
-              <CardDescription>{t("reservations.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {reservations.length === 0 ? (
-                <p className="text-sm text-text-muted">{t("reservations.empty")}</p>
-              ) : (
-                reservations.map((reservation) => (
-                  <div
-                    key={reservation.id}
-                    className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-start sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-text-primary">
-                        {fullName(reservation.student)}
-                      </p>
-                      <p className="mt-1 text-xs text-text-muted">
-                        {[
-                          reservation.classGroup.subject ? catalogLabelWithSelection(locale, reservation.classGroup.subject) : null,
-                          reservation.classGroup.grade ? catalogLabelWithSelection(locale, reservation.classGroup.grade) : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || tCommon("none")}
-                      </p>
-                      <p className="mt-1 text-xs text-text-muted">
-                        {t("reservations.requestedOn", { date: formatDate(reservation.requestedAt, locale) })}
-                      </p>
-                      <p className="mt-1 text-xs text-text-muted">
-                        {formatMoney(reservation.classGroup.price, locale)}
-                      </p>
-                    </div>
-                    <ReservationActions id={reservation.id} />
+                return (
+                  <div key={request.id} className="flex flex-col gap-2">
+                    <RequestCard
+                      kind={onboarding ? "onboarding" : "class"}
+                      kindLabel={t(onboarding ? "kinds.onboarding" : "kinds.class")}
+                      requesterName={
+                        teacherNameById.get(request.requestedBy) ?? tCommon("none")
+                      }
+                      headline={[
+                        onboarding
+                          ? t("onboarding.headline")
+                          : t("changeRequests.headline"),
+                        subjectAndGrade,
+                      ]
+                        .filter(Boolean)
+                        .join(" — ")}
+                      requestedOn={t("changeRequests.requestedOn", {
+                        date: formatDate(request.createdAt, locale),
+                      })}
+                      details={[
+                        {
+                          label: t("changeRequests.fields.day"),
+                          value: dayNames[payload.dayOfWeek],
+                        },
+                        {
+                          label: t("changeRequests.fields.time"),
+                          value: timeRange(payload.startTime, payload.endTime),
+                          ltr: true,
+                        },
+                        {
+                          label: t("changeRequests.fields.capacity"),
+                          value: payload.capacity
+                            ? String(payload.capacity)
+                            : tCommon("none"),
+                        },
+                        {
+                          label: t("changeRequests.fields.attendance"),
+                          value: payload.attendanceRequired
+                            ? t("changeRequests.fields.yes")
+                            : t("changeRequests.fields.no"),
+                        },
+                        {
+                          label: t("changeRequests.fields.lateThreshold"),
+                          value: String(payload.lateThresholdMinutes),
+                        },
+                      ]}
+                      note={payload.note ?? null}
+                      actions={<ChangeRequestActions id={request.id} />}
+                    />
+                    {onboarding ? (
+                      <FormMessage tone="info" className="text-xs">
+                        {t("onboarding.hint")}
+                      </FormMessage>
+                    ) : null}
                   </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </>
+                );
+              })
+            )}
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <SectionHeader
+              title={t("sessionRequests.title")}
+              description={t("sessionRequests.description")}
+            />
+            {sessionRequests.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<ClipboardCheck />}
+                title={t("sessionRequests.empty")}
+                description={t("sessionRequests.emptyHint")}
+              />
+            ) : (
+              sessionRequests.map((request) => {
+                const payload = request.payload as unknown as SessionRequestPayload;
+                const classGroup = classGroupById.get(payload.classGroupId);
+                const classLabel = classGroup
+                  ? [
+                      classGroup.subject
+                        ? catalogLabelWithSelection(locale, classGroup.subject)
+                        : null,
+                      classGroup.grade
+                        ? catalogLabelWithSelection(locale, classGroup.grade)
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : t("sessionRequests.classGone");
+
+                return (
+                  <RequestCard
+                    key={request.id}
+                    kind="session"
+                    kindLabel={t("kinds.session")}
+                    requesterName={
+                      teacherNameById.get(request.requestedBy) ?? tCommon("none")
+                    }
+                    headline={[t("sessionRequests.headline"), classLabel].join(" — ")}
+                    requestedOn={t("changeRequests.requestedOn", {
+                      date: formatDate(request.createdAt, locale),
+                    })}
+                    details={[
+                      {
+                        label: t("sessionRequests.fields.date"),
+                        value: formatDate(
+                          new Date(payload.date + "T00:00:00.000Z"),
+                          locale,
+                        ),
+                      },
+                      {
+                        label: t("changeRequests.fields.time"),
+                        value: timeRange(payload.startTime, payload.endTime),
+                        ltr: true,
+                      },
+                    ]}
+                    note={payload.note ?? null}
+                    actions={<SessionRequestActions id={request.id} />}
+                  />
+                );
+              })
+            )}
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <SectionHeader
+              title={t("reservations.title")}
+              description={t("reservations.description")}
+            />
+            {reservations.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<ClipboardCheck />}
+                title={t("reservations.empty")}
+                description={t("reservations.emptyHint")}
+              />
+            ) : (
+              reservations.map((reservation) => {
+                const classLabel =
+                  [
+                    reservation.classGroup.subject
+                      ? catalogLabelWithSelection(locale, reservation.classGroup.subject)
+                      : null,
+                    reservation.classGroup.grade
+                      ? catalogLabelWithSelection(locale, reservation.classGroup.grade)
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || tCommon("none");
+
+                return (
+                  <RequestCard
+                    key={reservation.id}
+                    kind="reservation"
+                    kindLabel={t("kinds.reservation")}
+                    requesterName={fullName(reservation.student)}
+                    headline={[t("reservations.headline"), classLabel].join(" — ")}
+                    requestedOn={t("reservations.requestedOn", {
+                      date: formatDate(reservation.requestedAt, locale),
+                    })}
+                    details={[
+                      {
+                        label: t("reservations.priceLabel"),
+                        value: formatMoney(reservation.classGroup.price, locale),
+                      },
+                    ]}
+                    actions={<ReservationActions id={reservation.id} />}
+                  />
+                );
+              })
+            )}
+          </section>
+        </div>
       )}
     </div>
   );

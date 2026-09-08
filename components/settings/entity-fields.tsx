@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { FieldError } from "@/components/shared/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 
 /**
  * One field descriptor drives both the create form and every row's edit form,
@@ -85,7 +85,7 @@ export function EntityFields({
             </Label>
 
             {field.kind === "select" ? (
-              <SelectInput
+              <Select
                 id={id}
                 name={field.name}
                 defaultValue={defaultValue}
@@ -100,7 +100,7 @@ export function EntityFields({
                     {option.label}
                   </option>
                 ))}
-              </SelectInput>
+              </Select>
             ) : (
               <Input
                 id={id}

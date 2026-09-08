@@ -6,7 +6,7 @@ import {
 } from "@/app/[locale]/(center)/settings/staff/member-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -84,7 +84,7 @@ export async function BranchGrants({
                         <button
                           type="submit"
                           aria-label={t("revoke", { branch: branch.name })}
-                          className="flex size-6 items-center justify-center rounded-full text-text-muted hover:bg-surface-subtle hover:text-text-primary"
+                          className="flex size-6 items-center justify-center rounded-full text-text-muted transition-ui-fast focus-ring hover:bg-danger-bg hover:text-danger"
                         >
                           ×
                         </button>
@@ -107,7 +107,7 @@ export async function BranchGrants({
                     name="membershipId"
                     value={member.membershipId}
                   />
-                  <SelectInput
+                  <Select
                     name="centerId"
                     aria-label={t("grantLabel")}
                     className="min-w-0 flex-1"
@@ -117,7 +117,7 @@ export async function BranchGrants({
                         {branch.name}
                       </option>
                     ))}
-                  </SelectInput>
+                  </Select>
                   <Button type="submit" variant="outline" className="h-11 shrink-0 px-3">
                     {t("grant")}
                   </Button>

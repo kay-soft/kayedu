@@ -9,7 +9,7 @@ import { transitionCenterLifecycleAction } from "@/app/[locale]/(admin)/admin/ce
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Label } from "@/components/ui/label";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 
 /**
  * The lifecycle-state transition control (M19, replacing the old boolean
@@ -46,13 +46,13 @@ export function LifecycleTransitionForm({
 
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <Label htmlFor="lifecycle-transition-to">{t("lifecycleTransitionLabel")}</Label>
-        <SelectInput id="lifecycle-transition-to" name="to" defaultValue={validNext[0]}>
+        <Select id="lifecycle-transition-to" name="to" defaultValue={validNext[0]}>
           {validNext.map((next) => (
             <option key={next} value={next}>
               {tLifecycle(next)}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
 
       <SubmitButton className="sm:w-auto">{t("lifecycleTransitionSubmit")}</SubmitButton>

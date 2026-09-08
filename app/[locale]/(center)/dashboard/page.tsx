@@ -10,8 +10,11 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
@@ -97,7 +100,7 @@ export default async function CenterDashboardPage() {
       />
 
       <SectionHeader title={t("today.title")} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={4}>
         <StatCard
           label={t("today.sessions")}
           value={formatNumber(withStatus.length, locale)}
@@ -118,24 +121,30 @@ export default async function CenterDashboardPage() {
         <StatCard
           label={t("today.marked")}
           value={formatNumber(markedToday, locale)}
+          zero={markedToday === 0}
+          zeroLabel={t("zeroHint")}
           hint={t("today.markedHint", { absent: formatNumber(todayAttendance.ABSENT, locale) })}
         />
-      </div>
+      </StatGrid>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <StatGrid count={showProfit ? 2 : 1}>
         <StatCard
           label={t("today.collected")}
           value={formatMoney(todayRevenue.collected, locale)}
           icon={<Wallet className="size-4" />}
           accent="brand"
+          zero={todayRevenue.paymentCount === 0}
+          zeroLabel={t("zeroHint")}
         />
         {showProfit ? (
           <StatCard
             label={t("today.centerShare")}
             value={formatMoney(todayRevenue.centerShare, locale)}
+            zero={todayRevenue.paymentCount === 0}
+            zeroLabel={t("zeroHint")}
           />
         ) : null}
-      </div>
+      </StatGrid>
 
       <SectionHeader title={t("today.sessionsListTitle")} action={
         <Link href={ROUTES.centerSessions} className="text-sm font-medium text-brand hover:underline">
@@ -145,7 +154,17 @@ export default async function CenterDashboardPage() {
       <Card>
         <CardContent className="pt-6">
           {withStatus.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("today.empty")}</p>
+            <EmptyState
+              compact
+              icon={<CalendarClock />}
+              title={t("today.empty")}
+              description={t("emptyHint")}
+              action={
+                <LinkButton href={ROUTES.centerClasses} size="sm">
+                  {t("today.viewClasses")}
+                </LinkButton>
+              }
+            />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               {withStatus.slice(0, 8).map(({ row, displayStatus }) => (
@@ -153,7 +172,7 @@ export default async function CenterDashboardPage() {
                   key={row.id}
                   className="flex flex-col gap-2 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3 md:last:border-0"
                 >
-                  <span className="w-16 shrink-0 text-sm tabular-nums text-text-secondary" dir="ltr">
+                  <span className="text-sm tabular-nums text-text-secondary md:w-16 md:shrink-0" dir="ltr">
                     {row.startTime}
                   </span>
                   <Link
@@ -180,7 +199,7 @@ export default async function CenterDashboardPage() {
       </Card>
 
       <SectionHeader title={t("center.title")} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={3}>
         <StatCard
           label={t("stats.staff")}
           value={formatNumber(staffCount, locale)}
@@ -196,7 +215,7 @@ export default async function CenterDashboardPage() {
           value={formatNumber(studentCount, locale)}
           icon={<Users className="size-4" />}
         />
-      </div>
+      </StatGrid>
     </div>
   );
 }

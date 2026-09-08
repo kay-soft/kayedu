@@ -1,11 +1,14 @@
-import { CalendarClock, ClipboardCheck, Radio, Wallet } from "lucide-react";
+import { CalendarClock, CalendarSearch, ClipboardCheck, Radio, Wallet } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { SessionFilters } from "@/app/[locale]/(center)/sessions/session-filters";
 import { SessionRow, type SessionRowData } from "@/app/[locale]/(center)/sessions/session-row";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import {
   Card,
   CardContent,
@@ -171,7 +174,7 @@ export default async function SessionsPage({
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle", { count: total })} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={4}>
         <StatCard
           label={t("stats.total")}
           value={formatNumber(total, locale)}
@@ -193,8 +196,10 @@ export default async function SessionsPage({
           value={formatMoney(paymentAgg._sum.amount ?? 0, locale)}
           icon={<Wallet className="size-4" />}
           accent="brand"
+          zero={(paymentAgg._sum.amount ?? 0) === 0}
+          zeroLabel={t("zeroHint")}
         />
-      </div>
+      </StatGrid>
 
       <Card>
         <CardHeader>
@@ -222,7 +227,17 @@ export default async function SessionsPage({
           />
 
           {tableRows.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState
+              icon={<CalendarSearch />}
+              tone="warning"
+              title={t("empty")}
+              description={t("emptyHint")}
+              action={
+                <LinkButton href={ROUTES.centerSessions} size="sm">
+                  {t("clearFilters")}
+                </LinkButton>
+              }
+            />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li

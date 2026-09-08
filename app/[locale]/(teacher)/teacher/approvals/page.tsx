@@ -1,14 +1,11 @@
+import { ClipboardCheck } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeacherReservationActions } from "@/app/[locale]/(teacher)/teacher/approvals/reservation-actions";
+import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { RequestCard } from "@/components/shared/request-card";
+import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
@@ -22,6 +19,10 @@ import { fullName } from "@/lib/identity";
  * different decision from "does this fit our roster." Reads the exact same
  * `Reservation` rows, filtered to classes this teacher teaches
  * (`scoped(ctx).reservations.listPendingForTeacher`).
+ *
+ * Renders the same `RequestCard` queue the centre screen does, deliberately
+ * (docs/04 §11.3): a teacher and a manager are reading the same kind of
+ * request and should not have to learn two layouts.
  */
 export default async function TeacherApprovalsPage() {
   const ctx = await getTenantContext("teacher");
@@ -37,46 +38,45 @@ export default async function TeacherApprovalsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle", { count: reservations.length })} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("listTitle")}</CardTitle>
-          <CardDescription>{t("listDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {reservations.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
-          ) : (
-            reservations.map((reservation) => (
-              <div
+      <section className="flex flex-col gap-3">
+        <SectionHeader title={t("listTitle")} description={t("listDescription")} />
+
+        {reservations.length === 0 ? (
+          <EmptyState
+            icon={<ClipboardCheck />}
+            tone="success"
+            title={t("empty")}
+            description={t("emptyHint")}
+          />
+        ) : (
+          reservations.map((reservation) => {
+            const classLabel = [
+              reservation.classGroup.subject
+                ? catalogLabelWithSelection(locale, reservation.classGroup.subject)
+                : null,
+              reservation.classGroup.grade
+                ? catalogLabelWithSelection(locale, reservation.classGroup.grade)
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+
+            return (
+              <RequestCard
                 key={reservation.id}
-                className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-start sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-text-primary">
-                    {fullName(reservation.student)}
-                  </p>
-                  <p className="mt-1 text-xs text-text-muted">
-                    {[
-                      reservation.classGroup.subject
-                        ? catalogLabelWithSelection(locale, reservation.classGroup.subject)
-                        : null,
-                      reservation.classGroup.grade
-                        ? catalogLabelWithSelection(locale, reservation.classGroup.grade)
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                  <p className="mt-1 text-xs text-text-muted">
-                    {t("requestedOn", { date: formatDate(reservation.requestedAt, locale) })}
-                  </p>
-                </div>
-                <TeacherReservationActions id={reservation.id} />
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+                kind="reservation"
+                kindLabel={t("kindLabel")}
+                requesterName={fullName(reservation.student)}
+                headline={[t("headline"), classLabel].filter(Boolean).join(" — ")}
+                requestedOn={t("requestedOn", {
+                  date: formatDate(reservation.requestedAt, locale),
+                })}
+                actions={<TeacherReservationActions id={reservation.id} />}
+              />
+            );
+          })
+        )}
+      </section>
     </div>
   );
 }

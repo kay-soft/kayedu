@@ -35,7 +35,6 @@ export default async function ParentLayout({
       nav={navForExperience("parent", "PARENT")}
       brand={PARENT_BRAND}
       user={shellUser(session.user, "PARENT")}
-      canSwitchCenter={false}
       defaultCollapsed={defaultCollapsed}
     >
       {children}

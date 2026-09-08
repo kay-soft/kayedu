@@ -39,10 +39,10 @@ export function SettingsNav({ items }: { items: SettingsNavItem[] }) {
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm transition-colors lg:w-full",
+                  "flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm transition-ui focus-ring lg:w-full",
                   active
                     ? "border-brand/30 bg-brand/10 font-medium text-brand"
-                    : "border-transparent text-text-secondary hover:bg-surface-subtle hover:text-text-primary",
+                    : "border-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary active:bg-surface-active",
                 )}
               >
                 {t(item.labelKey)}

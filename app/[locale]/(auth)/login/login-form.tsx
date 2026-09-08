@@ -4,10 +4,10 @@ import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { signInAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
-import { FieldError, FormMessage } from "@/components/shared/form-message";
+import { Field } from "@/components/shared/field";
+import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 
@@ -26,8 +26,11 @@ export function LoginForm({ next }: { next?: string }) {
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="email">{t("fields.email")}</Label>
+      <Field
+        id="email"
+        label={t("fields.email")}
+        error={state.fieldErrors?.email ? tErrors(state.fieldErrors.email) : undefined}
+      >
         <Input
           id="email"
           name="email"
@@ -35,16 +38,17 @@ export function LoginForm({ next }: { next?: string }) {
           autoComplete="email"
           inputMode="email"
           dir="ltr"
+          placeholder="name@example.com"
           required
           aria-invalid={state.fieldErrors?.email ? true : undefined}
         />
-        {state.fieldErrors?.email ? (
-          <FieldError>{tErrors(state.fieldErrors.email)}</FieldError>
-        ) : null}
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">{t("fields.password")}</Label>
+      <Field
+        id="password"
+        label={t("fields.password")}
+        error={state.fieldErrors?.password ? tErrors(state.fieldErrors.password) : undefined}
+      >
         <Input
           id="password"
           name="password"
@@ -53,10 +57,7 @@ export function LoginForm({ next }: { next?: string }) {
           required
           aria-invalid={state.fieldErrors?.password ? true : undefined}
         />
-        {state.fieldErrors?.password ? (
-          <FieldError>{tErrors(state.fieldErrors.password)}</FieldError>
-        ) : null}
-      </div>
+      </Field>
 
       <SubmitButton className="w-full">{t("login.submit")}</SubmitButton>
 

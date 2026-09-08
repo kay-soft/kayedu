@@ -1,12 +1,18 @@
 "use client";
 
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+
 /**
  * The child selector (spec §4.5 item 1) — a parent with 2+ verified children
- * switches between them. A plain GET `<select>`, state lives in the URL
- * (`?child=`), the same "no client state" pattern as `ScheduleDateFilter`.
- * Only ever offered options from `session.children` — already filtered to
- * VERIFIED (`requireParentUser`, `lib/auth/tenant.ts`) — so this control
- * itself can never expose an unverified child.
+ * switches between them. A plain GET form, state lives in the URL (`?child=`),
+ * the same "no client state" pattern as `ParentDateFilter`. Only ever offered
+ * options from `session.children` — already filtered to VERIFIED
+ * (`requireParentUser`, `lib/auth/tenant.ts`) — so this control itself can
+ * never expose an unverified child.
+ *
+ * The control is the shared `Select` (docs/04 §5), so a parent on a phone
+ * gets the same list, sized for a thumb, that staff get on the desk.
  */
 export function ChildSelector({
   options,
@@ -19,22 +25,17 @@ export function ChildSelector({
 }) {
   return (
     <form className="flex flex-col gap-1.5 sm:w-80">
-      <label htmlFor="parent-child" className="text-xs font-medium text-text-secondary">
-        {label}
-      </label>
-      <select
+      <Label htmlFor="parent-child">{label}</Label>
+      <Select
         id="parent-child"
         name="child"
         defaultValue={selectedId}
-        onChange={(event) => event.currentTarget.form?.requestSubmit()}
-        className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
-      >
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        submitOnChange
+        options={options.map((option) => ({
+          value: option.id,
+          label: option.label,
+        }))}
+      />
     </form>
   );
 }

@@ -8,6 +8,7 @@ import { DateFilter } from "@/components/shared/date-filter";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -123,6 +124,14 @@ export default async function AnalyticsPage({
   const avgPerPayment = revenue.paymentCount > 0 ? Math.round(revenue.collected / revenue.paymentCount) : 0;
   const avgPerDay = daysInRange ? Math.round(revenue.collected / daysInRange) : null;
 
+  // "Nothing was collected in this range" is a different answer from
+  // "something is broken", and a wall of bold EGP 0 says the second one
+  // (docs/04 §5 "KPI / stat card").
+  const noRevenue = revenue.paymentCount === 0;
+  // The second revenue row's card count, so `StatGrid` can pick a column
+  // arrangement that divides evenly instead of leaving an orphan tile.
+  const secondaryCount = (showProfit ? 2 : 0) + 1 + (avgPerDay !== null ? 1 : 0);
+
   const teacherNameByUserId = new Map(
     teacherMemberships.map((teacher) => [teacher.userId, fullName(localName(teacher, teacher.user))]),
   );
@@ -149,9 +158,14 @@ export default async function AnalyticsPage({
         }
       />
 
+      {/* One row, one baseline (docs/04 §11.7). The date control is a single
+          control now rather than a segmented row plus two browser date
+          fields, so the teacher select sits directly beside it instead of
+          floating between two competing affordances. Below `sm` the two
+          stack, each full-width. */}
       <Card>
-        <CardContent className="pt-6">
-          <form className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <CardContent className="py-4">
+          <form className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <DateFilter
               value={{
                 range: filters.range,
@@ -167,28 +181,55 @@ export default async function AnalyticsPage({
         </CardContent>
       </Card>
 
+      {/* Two rows, split by meaning: what came in, then what it left behind.
+          Seven cards in one four-wide grid left an orphan row of three
+          (docs/04 §5 "KPI grid"). `StatGrid` picks the columns from the
+          count, so neither row can wrap into an orphan at any breakpoint. */}
       <SectionHeader title={t("revenue.title")} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={showProfit ? 3 : 1}>
         <StatCard
           label={t("revenue.collected")}
           value={formatMoney(revenue.collected, locale)}
           icon={<Wallet className="size-4" />}
           accent="brand"
+          zero={noRevenue}
+          zeroLabel={t("zeroHint")}
         />
         {showProfit ? (
           <>
-            <StatCard label={t("revenue.centerShare")} value={formatMoney(revenue.centerShare, locale)} />
-            <StatCard label={t("revenue.teacherShare")} value={formatMoney(revenue.teacherShare, locale)} />
+            <StatCard
+              label={t("revenue.centerShare")}
+              value={formatMoney(revenue.centerShare, locale)}
+              zero={noRevenue}
+              zeroLabel={t("zeroHint")}
+            />
+            <StatCard
+              label={t("revenue.teacherShare")}
+              value={formatMoney(revenue.teacherShare, locale)}
+              zero={noRevenue}
+              zeroLabel={t("zeroHint")}
+            />
+          </>
+        ) : null}
+      </StatGrid>
+
+      <StatGrid count={secondaryCount}>
+        {showProfit ? (
+          <>
             <StatCard
               label={t("revenue.expenses")}
               value={formatMoney(expenses.total, locale)}
               accent="danger"
+              zero={expenses.total === 0}
+              zeroLabel={t("zeroHint")}
             />
             <StatCard
               label={t("revenue.net")}
               value={formatMoney(net, locale)}
               icon={<TrendingUp className="size-4" />}
               accent={net >= 0 ? "success" : "danger"}
+              zero={noRevenue && expenses.total === 0}
+              zeroLabel={t("zeroHint")}
             />
           </>
         ) : null}
@@ -196,14 +237,23 @@ export default async function AnalyticsPage({
           label={t("revenue.avgPerPayment")}
           value={formatMoney(avgPerPayment, locale)}
           icon={<Banknote className="size-4" />}
+          zero={noRevenue}
+          zeroLabel={t("zeroHint")}
         />
         {avgPerDay !== null ? (
-          <StatCard label={t("revenue.avgPerDay")} value={formatMoney(avgPerDay, locale)} />
+          <StatCard
+            label={t("revenue.avgPerDay")}
+            value={formatMoney(avgPerDay, locale)}
+            zero={noRevenue}
+            zeroLabel={t("zeroHint")}
+          />
         ) : null}
-      </div>
+      </StatGrid>
 
+      {/* Two cards about students, three about teachers — five in one
+          four-wide grid stranded a single tile on its own row. */}
       <SectionHeader title={t("users.title")} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={2}>
         <StatCard
           label={t("users.totalStudents")}
           value={formatNumber(students.total, locale)}
@@ -213,15 +263,24 @@ export default async function AnalyticsPage({
           label={t("users.newStudents")}
           value={formatNumber(students.new, locale)}
           icon={<UserPlus className="size-4" />}
+          zero={students.new === 0}
+          zeroLabel={t("zeroHint")}
         />
+      </StatGrid>
+      <StatGrid count={3}>
         <StatCard
           label={t("users.totalTeachers")}
           value={formatNumber(teachers.total, locale)}
           icon={<GraduationCap className="size-4" />}
         />
         <StatCard label={t("users.activeTeachers")} value={formatNumber(teachers.active, locale)} />
-        <StatCard label={t("users.newTeachers")} value={formatNumber(teachers.new, locale)} />
-      </div>
+        <StatCard
+          label={t("users.newTeachers")}
+          value={formatNumber(teachers.new, locale)}
+          zero={teachers.new === 0}
+          zeroLabel={t("zeroHint")}
+        />
+      </StatGrid>
 
       {orgGroup ? (
         <>

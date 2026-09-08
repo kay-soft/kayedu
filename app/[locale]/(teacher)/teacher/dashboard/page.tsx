@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,9 +19,9 @@ import { prisma } from "@/lib/db/client";
 import { teacherRatingAverage } from "@/lib/db/ratings";
 import { combineTeacherSummaries, teacherCenterSummary } from "@/lib/db/teacher-portal";
 import { formatMoney, formatNumber, formatRating } from "@/lib/format";
-import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { monthRangeUtc, startOfUtcDay, weekRangeUtc } from "@/lib/scheduling";
+import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * The teacher dashboard (spec §4.2 item 0/1, docs/03 M7): a combined summary
@@ -72,7 +73,7 @@ export default async function TeacherDashboardPage() {
         action={<Badge variant="brand">{tRoles(ctx.role)}</Badge>}
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <StatGrid count={5}>
         <StatCard
           label={t("stats.centers")}
           value={formatNumber(combined.centerCount, locale)}
@@ -101,7 +102,7 @@ export default async function TeacherDashboardPage() {
           icon={<Star className="size-4" />}
           accent="warning"
         />
-      </div>
+      </StatGrid>
 
       <Card>
         <CardHeader>
@@ -144,12 +145,9 @@ export default async function TeacherDashboardPage() {
                 </div>
 
                 {isActive ? (
-                  <Link
-                    href={ROUTES.teacherSessions}
-                    className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-                  >
+                  <LinkButton href={ROUTES.teacherSessions} className="shrink-0">
                     {t("centers.viewSchedule")}
-                  </Link>
+                  </LinkButton>
                 ) : (
                   <form action={selectCenterAction} className="shrink-0">
                     <input type="hidden" name="locale" value={locale} />

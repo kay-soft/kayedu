@@ -9,9 +9,11 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
+import { Button } from "@/components/ui/button";
 
 type SelectOption = { value: string; label: string };
 type CenterCard = { id: string; name: string; logoUrl: string | null; themeColor: string };
@@ -54,13 +56,9 @@ export function TeachAtCenterCard({
             onCancel={() => setOpen(false)}
           />
         ) : (
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-dashed border-border px-4 text-sm font-medium text-text-secondary hover:bg-surface-subtle"
-          >
+          <Button type="button" onClick={() => setOpen(true)} variant="outline" className="h-11 px-4 border-dashed w-full">
             {t("requestButton")}
-          </button>
+          </Button>
         )}
       </CardContent>
     </Card>
@@ -108,14 +106,14 @@ function RequestForm({
           optional
           error={state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined}
         >
-          <SelectInput id={`${centerId}-subjectId`} name="subjectId" defaultValue="">
+          <Select id={`${centerId}-subjectId`} name="subjectId" defaultValue="">
             <option value="">{t("none")}</option>
             {subjects.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -124,14 +122,14 @@ function RequestForm({
           optional
           error={state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined}
         >
-          <SelectInput id={`${centerId}-gradeId`} name="gradeId" defaultValue="">
+          <Select id={`${centerId}-gradeId`} name="gradeId" defaultValue="">
             <option value="">{t("none")}</option>
             {grades.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
       </div>
 
@@ -141,13 +139,13 @@ function RequestForm({
           label={t("day")}
           error={state.fieldErrors?.dayOfWeek ? tErrors(state.fieldErrors.dayOfWeek) : undefined}
         >
-          <SelectInput id={`${centerId}-dayOfWeek`} name="dayOfWeek" defaultValue="0">
+          <Select id={`${centerId}-dayOfWeek`} name="dayOfWeek" defaultValue="0">
             {DAY_INDEXES.map((day) => (
               <option key={day} value={day}>
                 {dayNames[day]}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -197,7 +195,7 @@ function RequestForm({
       </div>
 
       <label className="flex items-center gap-2 text-sm text-text-secondary">
-        <input type="checkbox" name="attendanceRequired" defaultChecked className="size-4 rounded border-border" />
+        <Checkbox name="attendanceRequired" defaultChecked />
         {t("attendanceRequired")}
       </label>
 
@@ -207,13 +205,9 @@ function RequestForm({
 
       <div className="flex gap-2">
         <SubmitButton className="self-start">{t("submit")}</SubmitButton>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-        >
+        <Button type="button" onClick={onCancel} variant="outline" className="h-11 px-4">
           {t("cancel")}
-        </button>
+        </Button>
       </div>
     </form>
   );

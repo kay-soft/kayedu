@@ -3,7 +3,9 @@ import { Building2, ChevronLeft } from "lucide-react";
 
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { SignOutButton } from "@/components/shell/sign-out-button";
-import { FormMessage } from "@/components/shared/form-message";
+import { AnchorButton } from "@/components/shared/link-button";
+import { BrandAvatar } from "@/components/shared/brand-avatar";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -59,25 +61,29 @@ export default async function SelectCenterPage({
 
         <CardContent className="flex flex-col gap-3">
           {relations.length === 0 ? (
-            <>
-              <FormMessage tone="info">{t("emptyHelp")}</FormMessage>
-              <a
-                href={`/${locale}${ROUTES.studentDiscover}`}
-                className="flex min-h-11 items-center justify-center rounded-lg bg-brand px-3 py-2 text-sm font-medium text-brand-foreground hover:opacity-90"
-              >
-                {t("browseClasses")}
-              </a>
-              {/* A teacher with zero centres gets the directory, never only
-                  the student Discover link above (M15, spec §5.1 "Teacher
-                  onboarding") — both stay offered here since a brand-new
-                  sign-up's intent (student or teacher) isn't known yet. */}
-              <a
-                href={`/${locale}${ROUTES.teacherCenters}`}
-                className="flex min-h-11 items-center justify-center rounded-lg border border-brand px-3 py-2 text-sm font-medium text-brand hover:bg-brand/5"
-              >
-                {t("findCenterToTeach")}
-              </a>
-            </>
+            <EmptyState
+              icon={<Building2 />}
+              tone="info"
+              title={t("emptySubtitle")}
+              description={t("emptyHelp")}
+              action={
+                /* A teacher with zero centres gets the directory, never only
+                   the student Discover link (M15, spec §5.1 "Teacher
+                   onboarding") — both stay offered here since a brand-new
+                   sign-up's intent (student or teacher) isn't known yet. */
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <AnchorButton
+                    href={`/${locale}${ROUTES.studentDiscover}`}
+                    variant="default"
+                  >
+                    {t("browseClasses")}
+                  </AnchorButton>
+                  <AnchorButton href={`/${locale}${ROUTES.teacherCenters}`}>
+                    {t("findCenterToTeach")}
+                  </AnchorButton>
+                </div>
+              }
+            />
           ) : null}
 
           {orgGroups.map((group) => (
@@ -90,7 +96,7 @@ export default async function SelectCenterPage({
               />
               <button
                 type="submit"
-                className="flex w-full min-h-16 items-center gap-3 rounded-xl border-2 border-brand bg-surface p-3 text-start transition-shadow hover:shadow-card-hover sm:p-4"
+                className="flex w-full min-h-16 items-center gap-3 rounded-xl border border-brand bg-brand/5 p-3 text-start transition-ui focus-ring hover:bg-brand/10 hover:shadow-card-hover active:translate-y-px sm:p-4"
               >
                 <span
                   aria-hidden
@@ -126,15 +132,14 @@ export default async function SelectCenterPage({
               />
               <button
                 type="submit"
-                className="flex w-full min-h-16 items-center gap-3 rounded-xl border border-border bg-surface p-3 text-start transition-shadow hover:shadow-card-hover sm:p-4"
+                className="flex w-full min-h-16 items-center gap-3 rounded-xl border border-border bg-surface p-3 text-start transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover hover:shadow-card-hover active:translate-y-px sm:p-4"
               >
-                <span
-                  aria-hidden
-                  className="flex size-11 shrink-0 items-center justify-center rounded-lg text-base font-bold text-brand-foreground"
-                  style={{ backgroundColor: relation.center.themeColor }}
-                >
-                  {relation.center.name.trim().charAt(0)}
-                </span>
+                <BrandAvatar
+                  name={relation.center.name}
+                  logoUrl={relation.center.logoUrl}
+                  themeColor={relation.center.themeColor}
+                  size="lg"
+                />
 
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">
@@ -158,13 +163,14 @@ export default async function SelectCenterPage({
           ))}
 
           {user!.isPlatformAdmin ? (
-            <a
+            <AnchorButton
               href={`/${locale}${ROUTES.adminCenters}`}
-              className="flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-brand hover:bg-surface-subtle"
+              variant="ghost"
+              className="w-full justify-start text-brand"
             >
-              <Building2 className="size-4" />
+              <Building2 className="size-4" aria-hidden />
               {t("platformAdminLink")}
-            </a>
+            </AnchorButton>
           ) : null}
         </CardContent>
       </Card>

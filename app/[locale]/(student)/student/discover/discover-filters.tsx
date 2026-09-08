@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 
 export type DiscoverFilterOption = { value: string; label: string };
 
@@ -40,12 +40,12 @@ export function DiscoverFilters({
         <label htmlFor="filter-subject" className="text-xs font-medium text-text-secondary">
           {t("subject")}
         </label>
-        <SelectInput
+        <Select
           id="filter-subject"
           name="subject"
           defaultValue={subject}
           className="rounded-full"
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {subjects.map((option) => (
@@ -53,19 +53,19 @@ export function DiscoverFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
 
       <div className="flex min-w-0 flex-col gap-1.5">
         <label htmlFor="filter-grade" className="text-xs font-medium text-text-secondary">
           {t("grade")}
         </label>
-        <SelectInput
+        <Select
           id="filter-grade"
           name="grade"
           defaultValue={grade}
           className="rounded-full"
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {grades.map((option) => (
@@ -73,19 +73,19 @@ export function DiscoverFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
 
       <div className="flex min-w-0 flex-col gap-1.5">
         <label htmlFor="filter-day" className="text-xs font-medium text-text-secondary">
           {t("day")}
         </label>
-        <SelectInput
+        <Select
           id="filter-day"
           name="day"
           defaultValue={day}
           className="rounded-full"
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {dayNames.map((name, index) => (
@@ -93,7 +93,7 @@ export function DiscoverFilters({
               {name}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
     </form>
   );

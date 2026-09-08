@@ -31,6 +31,13 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 
 --border: #e5e7eb;
 --border-subtle: #f1f5f9;
+--border-strong: #cbd5e1; /* the border a control takes on hover */
+
+/* Interaction surfaces. `--bg-subtle` is a *resting* inset (table headers,
+   read-only panels), so it cannot double as the hover tint for a control
+   that already sits on one. These are the two steps above it. */
+--bg-hover: #f1f5f9; /* pointer over an interactive surface */
+--bg-active: #e2e8f0; /* pressed */
 
 --success: #16a34a; /* present, paid, positive trend */
 --success-bg: #dcfce7;
@@ -43,7 +50,7 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 ```
 
 **How these bind to shadcn (`app/globals.css`).** The tokens above are the source; the base-nova variables are aliases onto them, so components inherit the palette without per-screen overrides:
-`--background: var(--bg-canvas)` · `--card: var(--bg-surface)` · `--muted: var(--bg-subtle)` · `--primary`/`--ring`/`--sidebar-primary`: `var(--brand)` · `--destructive: var(--danger)` · the sidebar family maps to `--bg-sidebar` / `--bg-sidebar-hover` / `--text-on-dark`. The semantic set is exposed as Tailwind utilities too: `bg-success-bg text-success`, `text-text-muted`, `bg-canvas`, `bg-surface-subtle`.
+`--background: var(--bg-canvas)` · `--card: var(--bg-surface)` · `--muted: var(--bg-subtle)` · `--primary`/`--ring`/`--sidebar-primary`: `var(--brand)` · `--destructive: var(--danger)` · the sidebar family maps to `--bg-sidebar` / `--bg-sidebar-hover` / `--text-on-dark`. The semantic set is exposed as Tailwind utilities too: `bg-success-bg text-success`, `text-text-muted`, `bg-canvas`, `bg-surface-subtle`, `bg-surface-hover`, `bg-surface-active`, `border-border-strong`.
 
 **Semantic color rules (non-negotiable — consistency here is what makes the app readable at a glance):**
 
@@ -81,7 +88,23 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
   In Tailwind: `--radius: 0.5rem` makes `rounded-lg` = 8px (buttons/inputs/badges) and `--radius-xl` is pinned to `0.75rem` = 12px (cards). Use `rounded-lg` and `rounded-xl`; don't hand-write radii.
 - **Spacing scale:** 4 / 8 / 12 / 16 / 24 / 32 px. Card padding `24px` desktop, `16px` mobile.
 - **Shadows:** soft and minimal — `0 1px 3px rgba(15,23,42,.06)` at rest, `0 4px 12px rgba(15,23,42,.08)` on hover/elevated. Available as the `shadow-card` / `shadow-card-hover` utilities. No heavy drop shadows.
-- **Borders:** 1px `--border`. Prefer a border over a shadow for table and list separation.
+- **Borders:** 1px `--border` at rest, `--border-strong` on hover for anything interactive. Prefer a border over a shadow for table and list separation.
+- **Floating surfaces** (popover, dropdown, calendar) use `shadow-popover` — deeper than a card, because they sit *above* the page rather than in it.
+
+**Motion.** Short, consistent, and always in answer to something the user did.
+
+```css
+--motion-fast: 120ms; /* hover, press, small state flips */
+--motion-base: 160ms; /* the default for every interactive element */
+--motion-slow: 200ms; /* drawers, popovers, anything that travels */
+--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+```
+
+Apply them through the `transition-ui` / `transition-ui-fast` utilities rather than per-component `transition-colors`, so hover, press and focus feel identical everywhere. Nothing bounces, nothing lingers, and **nothing animates at all under `prefers-reduced-motion: reduce`** — one global rule in `globals.css`, so a component added later cannot forget it.
+
+**Interaction states are not optional.** Every interactive element has a visible **hover**, **active**, **focus-visible** and **disabled** state. `Button` carries all four on its base class, so no variant can ship without them; everything that is not a `Button` — links, list rows, calendar days, menu items — applies the `focus-ring` utility (`focus-ring-inverse` on the dark sidebar) instead of writing its own ring. Focus rings are keyboard-only (`:focus-visible`) and always drawn from `--ring`.
+
+**Content width.** One rule, applied by the app shell and nothing else: `--content-max: 96rem`, centred, via the `content-shell` utility. The header bar and the page body share it, so they align. A 1280px laptop is unchanged; a wide monitor gets a wider working area instead of a narrow column stranded in grey.
 
 ---
 
@@ -91,9 +114,9 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 
 **Dialog** (M3) — the standard pattern for "Add X" on every list-first entity screen (students, teachers, and every later one). A centered card (`max-w-lg`, rounded, `shadow-card-hover`) from `sm` up; **a full-screen sheet below `sm`**, per the modal→sheet rule in §6. Implemented in `components/ui/dialog.tsx` wrapping Base UI's `Dialog` primitives (already a dependency — `components/ui/button.tsx` uses the same package), exporting `Dialog`/`DialogTrigger`/`DialogContent`/`DialogHeader`/`DialogBody`/`DialogFooter`/`DialogTitle`/`DialogDescription`/`DialogClose`. Backdrop fades and the popup scales in on open using Base UI's `data-starting-style`/`data-ending-style` attributes — plain CSS transitions, no animation library. A visible close button sits at the popup's logical end corner (`end-3 top-3`) and is always present unless explicitly suppressed. Centering uses `-translate-x-1/2`/`-translate-y-1/2`, which needs no RTL mirroring — moving to the exact center is the same operation in either direction. The list page composes it as a small client wrapper (e.g. `add-student-dialog.tsx`) that controls `open` state itself so the form inside can close the dialog on success (`onCreated` callback) while staying open on a duplicate-match result so staff can confirm the link.
 
-**KPI / stat card** — white surface, label (12px muted) above a large figure, trend chip below (`▲ 12.4%` in success/danger). Optional colored top border or icon chip to differentiate. Implemented in `components/shared/stat-card.tsx`: `trend` takes a direction plus an already-localized label, with `invertColor` for metrics where a rise is bad news (expenses, absences) so the color follows the meaning rather than the arrow; `accent` paints the top border; the icon sits in a tinted chip. The figure itself is never colored.
+**KPI / stat card** — white surface, label (12px muted) above a large figure, trend chip below (`▲ 12.4%` in success/danger). Optional colored top border or icon chip to differentiate. Implemented in `components/shared/stat-card.tsx`: `trend` takes a direction plus an already-localized label, with `invertColor` for metrics where a rise is bad news (expenses, absences) so the color follows the meaning rather than the arrow; `accent` paints the top border; the icon sits in a tinted chip. The figure itself is never colored. **A zero gets its own treatment** (`zero` + `zeroLabel`): the figure dims and a one-line "no activity in this range" sits under it, because a wall of bold `EGP 0` reads as a broken screen rather than as an answer.
 
-**Data table** — subtle header background, 1px row borders, generous row height (~56px), hover highlight, status as a badge in its own column, avatar+name as a combined cell. **On mobile, tables become stacked cards** — never horizontally scroll a primary table. The configuration screens share one implementation: `components/settings/entity-manager.tsx` takes a field-descriptor list and drives the create form, the row display and an inline edit panel from it, so a new master-data screen is a page file rather than another table. Editing expands in place instead of opening a modal — one behavior on phone and on desktop.
+**Data table** — subtle header background, 1px row borders, generous row height (~56px), hover highlight, status as a badge in its own column, avatar+name as a combined cell. **On mobile, tables become stacked cards** — never horizontally scroll a primary table. A column's fixed width is *table* layout, so it is scoped `md:` and up: a card column has no column width, and an unscoped `w-28` truncated money and dates inside a card that had room to spare. The configuration screens share one implementation: `components/settings/entity-manager.tsx` takes a field-descriptor list and drives the create form, the row display and an inline edit panel from it, so a new master-data screen is a page file rather than another table. Editing expands in place instead of opening a modal — one behavior on phone and on desktop.
 
 **Status badge** — pill, 12px medium, tinted background + matching text color from the semantic set (e.g. `--success-bg` + `--success`). Live states get a pulsing dot.
 
@@ -104,6 +127,30 @@ Define these as CSS variables on `:root` in `globals.css`. The **brand** value i
 **Receipt / money summary** (M5) — bordered panel, right-aligned figures, clear label→value rows (Total collected / Center share / Teacher share), with counts (present / late / absent / excused) alongside. Implemented in `app/[locale]/(center)/sessions/[id]/session-receipt.tsx`; center/teacher share rows are hidden entirely — not just visually de-emphasized — for a role without `center.profit.view` (spec §7 acceptance criterion 9).
 
 **ID card** — landscape credit-card proportions (85.6 × 54 mm), dark gradient surface, center logo + name, student photo, name, grade, student code, QR block, and a brand-colored band along the bottom edge. Layout positions come from `CenterSettings.cardLayout`. The built-in starting layout lives in `lib/card-layout.ts` and is laid out so no two elements collide in either direction — the M3 gate asserts it. Rendered by `lib/id-card.ts` as a single self-contained SVG on a 320 × 202 unit face: `x`/`y`/`width` are percentages of that face and `fontSize` is in card units, so one layout is correct on screen and at print DPI. `x` is a **logical start** offset — an Arabic card mirrors the whole layout, per §7 — and a missing logo or photo falls back to an initial rather than a gap. The preview (`components/center/id-card-preview.tsx`), the print view (`/students/[id]/card`) and the file stored in `id-cards/` are the same string. The paper printout (`/students/[id]/paper`) is the A4 companion: registration details, parent contacts, enrolments and the same card artwork. Both print views live in the `(print)` route group — the center role gate without the app shell — and their on-screen controls are `print:hidden`.
+
+**App bar** — the header is a real bar, not a strip of text links: `content-shell`-aligned, 64px, sticky, translucent over the canvas. It carries, from the start edge, the mobile drawer trigger and the **branch switcher** (§11.1); from the end edge, the **language toggle** and the **user menu**. Implemented across `components/shell/app-shell.tsx`, `components/shell/branch-switcher.tsx`, `components/shell/user-menu.tsx` and `components/shared/locale-switcher.tsx`. The user menu exists because below `lg` the sidebar is a drawer, and *who am I signed in as* / *sign out* must not live behind a navigation drawer. The language toggle is a two-segment track with a filled active segment — two states are a segmented control, not a dropdown.
+
+**Avatar** (`components/shared/brand-avatar.tsx`) — a centre's logo when one is set, otherwise its initial on the centre's own theme colour. The sidebar, the branch switcher and the centre-selection cards all render this one component, so a branch looks the same in all three. The initial comes from `lib/initials.ts` — `centerInitial` for an organisation/branch (code-point aware, skips punctuation and a leading generic word such as `مركز` / "Academy"), `nameInitial` / `personInitials` for a person. Never `name.charAt(0)`: it returns half a surrogate pair on an astral character and happily takes a quote mark as the initial.
+
+**Select** (`components/ui/select.tsx`) — the product's one dropdown, built on Base UI's `Select`. It replaces the native `<select>`: the old control styled the *closed* box but handed the open list to the browser, so the most-used control in the ERP dropped out of the design system the moment anyone clicked it, and the option list ignored the app's direction in Arabic. This renders the list itself — 44px rows, brand-tinted selection, a check on the chosen item, keyboard and type-ahead support, correct RTL alignment — and still posts a real form value from `name`, so no form's payload changed. Accepts the list either as an `options` array or as plain `<option>` children. `submitOnChange` reproduces the filter bars' "re-query on change", fired from an effect so the hidden input is written before the form serialises.
+
+**Checkbox & switch** (`components/ui/checkbox.tsx`, `components/ui/switch.tsx`) — replace `<input type="checkbox" className="accent-…">`, which tinted the OS control but left its size, radius, focus ring and disabled treatment to the browser. A **checkbox** is a value that will be true when you save (the permission matrix, which saves on Apply); a **switch** is a setting that is on *now* (`ToggleRow` on the configuration screens). The switch's thumb travels on a logical inset, so it slides toward the end edge in both directions.
+
+**Date control** (`components/ui/calendar.tsx`, `components/ui/date-picker.tsx`) — the app's own month grid, replacing `<input type="date">` everywhere. The browser's calendar ignores the app's locale and direction, renders Latin digits inside an Arabic screen, and looks different in every browser the desk happens to run. This one formats its month heading, weekday initials and day numbers through `lib/format.ts` (so Arabic-Indic in `ar`), opens the week on Saturday in `ar` and Sunday in `en`, does all arithmetic in UTC to match every stored date, and supports single and range selection with the span highlighted between the two ends and previewed under the pointer. Full arrow-key navigation, with left/right reversed in a right-to-left grid. `DatePicker` is the single-date form control: same 44px height as `Input`, same `"YYYY-MM-DD"` value posted, an optional inline clear for a filter with an "any date" state.
+
+**Popover** (`components/ui/popover.tsx`) — one floating-surface pattern for the branch switcher, the user menu and the date control, opening with the same `data-starting-style`/`data-ending-style` CSS transition the dialog established. Base UI's `align="start"`/`"end"` are logical, so a popover anchored to the start edge stays there in Arabic. **`components/shell/ui-direction.tsx` wraps the app in Base UI's `DirectionProvider`** — `<html dir>` alone is not enough, and without it every popover, select and dropdown anchored to the left in Arabic.
+
+**Empty state** (`components/shared/empty-state.tsx`) — an icon in a tinted chip, a short title naming the absence, a line explaining what *would* appear here, and, where the screen has one, the action that creates the first item. It replaced thirty-odd single dimmed sentences floating in cards, which read as a screen that failed to load rather than a screen with nothing in it yet. `tone` carries meaning: `info` for "nothing here yet", `warning` for "nothing matched what you asked for" (something is filtered, and the action is *clear the filter*), `success` for a queue that is legitimately empty, `muted` for a secondary panel.
+
+**Loading state** (`components/shared/skeleton.tsx`) — skeletons compose into the layout the real screen uses (`SkeletonPageHeader`, `SkeletonStatRow`, `SkeletonList`, `SkeletonPage`), never a single grey bar standing in for a page. Every route group has a `loading.tsx` built from these, so nothing shifts when the data lands. The pulse is plain CSS, stopped by the global reduced-motion rule.
+
+**Error state** (`components/shared/error-state.tsx`) — what every `error.tsx` renders. Says what happened in the interface's voice, offers the retry React's boundary already gives us, and shows the raw message **only in development** (an ORM error string can name a table, a column, or an id from another tenant). Each route group has its own boundary so the shell — sidebar, branch context, language — stays usable while one screen has failed; `app/[locale]/not-found.tsx` and `app/[locale]/error.tsx` are the backstops outside any shell.
+
+**Button & link button** — `Button` (`components/ui/button.tsx`) carries hover/active/focus-visible/disabled on its base class. A *link* that acts as a button is `LinkButton` / `AnchorButton` (`components/shared/link-button.tsx`), same variants and sizes, default size `touch` (44px). Twenty-five screens had hand-written this as a bare `<Link>` with a copied class string — each slightly different, none with a focus ring — so the most common navigation affordance in the ERP was the one control a keyboard user could not see.
+
+**Request card** (`components/shared/request-card.tsx`) — one pending request in an approvals queue; see §11.3.
+
+**KPI grid** (`components/shared/stat-grid.tsx`) — a KPI row's column count is chosen for the number of cards in it, not left at a fixed `sm:2 / xl:4`. Above five cards there is no arrangement that divides cleanly at every breakpoint; that is the signal to split the row by meaning, which is what Analytics now does (money in / what it left behind; students / teachers).
 
 **Alert note** — amber-tinted panel with icon for operational warnings (e.g. "absent 3 sessions in a row — consider contacting the guardian").
 
@@ -121,10 +168,10 @@ Every screen must work on a phone. Breakpoints: `sm 640` / `md 768` / `lg 1024` 
 - Sidebar → hamburger drawer below `lg`.
 - Multi-column grids → single column below `md`.
 - Tables → stacked cards below `md` (label/value pairs), never a horizontal scroll for primary data.
-- KPI rows → 2-up on `sm`, 1-up on very small screens.
+- KPI rows → 2-up on `sm`, 1-up on very small screens, and the wide arrangement chosen for the card count (`StatGrid`, §5) — never a fixed four-wide grid that leaves an orphan row.
 - Touch targets **min 44×44px**; reception/attendance controls larger still.
 - Modals → full-screen sheets on mobile.
-- Test at **375px** width as the floor.
+- Test at **375px** width as the floor, and at **2560px** as the ceiling: content is centred and capped at `--content-max` by the `content-shell` utility (§4), applied by the app shell only.
 
 ---
 
@@ -193,6 +240,8 @@ Lives in the header, beside the centre logo, **not** in the sidebar — it chang
 - **Roll-up is analytics-only** (`00-master-product-spec.md` §4.1). When "Whole Management" is active, operational nav items (Reception, Sessions, Approvals) are **disabled with a one-line reason** — "pick a branch to use the desk" — never silently missing. A nav item that vanishes reads as a permission problem.
 - Mobile: the switcher moves into the drawer header, full-width, 44px minimum.
 
+**Delivered** as `components/shell/branch-switcher.tsx`, in the app bar (§5). It replaced a plain "Switch branch" text link that showed no branch context at all — the one thing a switcher exists to show. The trigger *is* the context (the branch's mark plus its name); the panel is the list, with "Whole Management" pinned above a divider under a `Layers` icon so it cannot be read as one more branch name, and a check on whatever is currently in scope. Each row submits the same `selectCenterAction` the `/select-center` hub uses — the switch itself is unchanged, only where it can be reached from. Hidden entirely below two branches, per the rule above. Below `sm` the trigger collapses to the mark and chevron alone; the branch name is in the panel.
+
 ### 11.2 Permissions matrix screen (M12)
 
 The densest screen in the product, and the one most likely to become an unreadable grid.
@@ -203,6 +252,8 @@ The densest screen in the product, and the one most likely to become an unreadab
 - **Below `md` the grid becomes one card per action**, listing the roles as label→value toggle rows — the standard table→card rule (§6), applied to a matrix. Do **not** horizontally scroll it; this is primary data.
 - Changes save explicitly (an Apply button with a dirty-state count), never per-cell-on-click: a permission grid that writes on every tick is a grid where a mis-click is a silent privilege change.
 
+**Delivered, with one part of this section still outstanding.** The header row and the action column are both sticky (`app/[locale]/(center)/settings/permissions/permissions-form.tsx`), inside an explicit max-height scroll box — sticky needs a scroll container, and `overflow-x: auto` alone had made the page's own scrolling the wrong one to stick against. Cells are the shared `Checkbox` (§5); not-grantable still renders as a dimmed dash, never an unchecked box. **Grouping the rows by area with sticky group headers has not shipped** — that is a content decision (which action belongs to People vs Money) rather than a presentation one, and it is the remaining gap against this section.
+
 ### 11.3 Teacher approvals (M15)
 
 Same card queue as the centre `/approvals` screen — deliberately, since a teacher and a manager are reading the same kind of request and should not have to learn two layouts.
@@ -210,6 +261,14 @@ Same card queue as the centre `/approvals` screen — deliberately, since a teac
 - One card per pending student: avatar + local name, class, requested-at, and the two actions.
 - **A refusal states its reason in the card, not in a toast.** "Blocked from this class", "class is at capacity — increase the class's capacity or move it to a room with more seats", "rejected 3 days ago, can re-request in 4 days" (§11.7's copy rule). A toast disappears; the reason needs to stay next to the thing it explains.
 - Empty state is a real state, not a blank panel — most teachers have an empty queue most days.
+
+**Delivered as `components/shared/request-card.tsx`, shared by `/approvals` and `/teacher/approvals`.** The centre queue carries four genuinely different asks — a teacher proposing a **new class**, a teacher asking for a one-off **session**, a student requesting a **place**, and a teacher asking to work at this branch at all (**onboarding**) — and all four used to render as the same anonymous bordered box, so a manager could not tell what kind of decision they were about to make until they read the body text.
+
+- **The kind is the first thing the card says**: a distinct icon, a named badge, and a detail grid holding the fields that kind actually turns on (day/time/capacity/attendance/late-threshold for a class; date/time for a session; price for a reservation).
+- `kind` is a *category, not a status*, so it takes no semantic colour (§2 reserves those). The icon and the label carry it; the badge stays neutral.
+- **Onboarding is derived, not stored**: a `NEW_CLASS` request from a requester with no local `Membership` is a teacher asking to work here, which is the same database row but a different decision. It gets its own kind and an info note saying so — approving is a decision about the class, not about hiring.
+- Requester, requested-on, note and the two actions are identical across kinds on purpose: those parts of the decision genuinely are the same and should not have to be re-learned per queue.
+- Below `lg` the actions move under the card, full-width; from `lg` they pin to the card's end edge.
 
 ### 11.4 Parent portal (M16)
 
@@ -223,7 +282,7 @@ Visually the **student portal**, with exactly one addition and one subtraction.
 
 A modal on login (full-screen sheet below `sm`, per §6), and the interaction most at risk of being annoying.
 
-- One row per session from the **last 7 days**: subject + teacher + date, and a 5-star control with 44px targets.
+- One row per session from the **last 7 days**: subject + teacher + date, and a 5-star control with 44px targets. **Delivered as real stars** (`app/[locale]/(student)/rating-popup.tsx`), not numbered buttons: the run up to the pointer fills as a preview, so the score is legible before it is committed, and each star is still a single submit — a click is the whole interaction, with no separate confirm step.
 - **Skip is a first-class action, not a dismissal.** A visible "Skip" button of equal weight to "Submit", plus the standard close affordance. It must never be re-shown in the same session after a skip.
 - **Partial submission is allowed** — rate two of five, submit, done. Never gate submit on completeness.
 - **Never show a count anywhere** — not in the prompt, not in the confirmation. Where an aggregate appears (the Discover class card, §10, and the teacher's own view), it is `4.6 ★` and nothing else. No "(23 ratings)", no distribution bar: a count is what lets a teacher infer who rated them from a small sample.
@@ -250,7 +309,13 @@ Replaces every ad-hoc date filter in the product. Analytics, Expenses, Sessions 
 - **State lives in the URL** (`02-architecture.md` §14), like pagination, so a filtered view is shareable and back-button-safe.
 - Below `md` the segments stay a row (they are short) and the two pickers stack.
 
-**Delivered** as `components/shared/date-filter.tsx`, on Analytics, Expenses and Sessions, exactly as specified above. **One deliberate exception, not an oversight**: the teacher's own session list (`/teacher/sessions`) keeps its own bespoke day/week/month filter rather than adopting this component, because its "week"/"month" are forward-looking (today → today+6/+29, "what's coming up," spec §4.2 item 2) while this component's are backward-looking by definition (today−7 → today, 1st-of-month → today) — the two are answering different questions, and unifying them would have silently turned an upcoming-sessions view into a recent-sessions one.
+**Delivered** as `components/shared/date-filter.tsx`, on Analytics, Expenses and Sessions.
+
+**Revised presentation: one control, not five.** The first delivery put a segmented row, two separate picker toggles, two native `<input type="date">` fields and a stray Reset link on four different baselines — three date affordances for one job, two of them drawn by the browser. It is now a **single trigger** reading the active selection ("Range: 1–6 Sep"), opening **one panel** that holds the presets beside one range calendar: pick a start, pick an end, the span highlights between them and previews under the pointer, and **a start with no end *is* the specific-date case**. One Apply, in the panel's footer, disabled until there is something to apply. Reset is an icon button beside the trigger, on the same baseline. The presets still apply on click; the calendar still waits for Apply.
+
+**The URL contract is unchanged** — `range` / `date` / `from` / `to`, same schema, same parser — so a bookmarked filtered view resolves exactly as it did. Every visible control writes to the same four hidden inputs and nothing else, so there is exactly one `range` value in the query; Apply fires from an effect, after those inputs are written, and submits the page's real form so the screen's other filters ride along untouched.
+
+**Single-date filters use the same calendar, not the same component**: `/student/schedule`, `/parent` and `/teacher/sessions` filter by one `?date=`, so they render `DatePicker` (§5) — the same month grid, the same locale and direction, an inline clear for the "any date" state. The teacher session list keeps its own forward-looking day/week/month for the reason recorded below. **One deliberate exception, not an oversight**: the teacher's own session list (`/teacher/sessions`) keeps its own bespoke day/week/month filter rather than adopting this component, because its "week"/"month" are forward-looking (today → today+6/+29, "what's coming up," spec §4.2 item 2) while this component's are backward-looking by definition (today−7 → today, 1st-of-month → today) — the two are answering different questions, and unifying them would have silently turned an upcoming-sessions view into a recent-sessions one.
 
 ### 11.8 Live search dropdown (delivered M18)
 
@@ -279,3 +344,29 @@ When a read is refused because it falls outside the data-visibility window, the 
 - Copy pattern: *"Data older than 30 days isn't shown at this centre."* Plus, for a role that can change it, a link to `/settings/visibility`.
 - **A zero is the wrong answer here** — a chart rendering 0 EGP for last quarter reads as "we earned nothing", not "you can't see this", and that is a genuinely dangerous ambiguity on a money screen.
 - Uses the **Alert note** pattern (§5), info-tinted rather than amber: nothing is wrong, something is simply out of view.
+
+---
+
+## 12. Auth surfaces (presentation pass)
+
+The four signed-out screens — `/login`, `/register`, `/invite/[token]`, `/select-center` — are the first thing anyone sees, and they shipped as a bare white card floating on the app canvas with a header of two loose text links.
+
+- **`(auth)/layout.tsx` is a two-column page from `lg`**: a branded panel on the product's own dark navy (mark, one line of positioning, one soft brand wash anchored to the *logical* end corner so it mirrors), and the form on the light working canvas beside it. The panel carries no information the form needs, so it is the half that disappears below `lg`.
+- **Fields go through `Field`** (§5), so label size, hint placement, error placement and the "(optional)" convention are the same here as inside the ERP. Every text input has a format placeholder.
+- **Submit buttons show pending state** via `SubmitButton` — spinner plus disabled, so a slow sign-in cannot be double-submitted.
+- **`/select-center`'s zero-relation case is a designed empty state** (§5) with both next steps as real buttons — browse classes as a student, or find a branch to teach at — rather than an info banner followed by two links. Branch cards use the shared `BrandAvatar`, which is also what fixed the wrong-initial bug on this screen.
+
+---
+
+## 13. What each screen owes this system
+
+Every route in the product has, without exception:
+
+1. A **designed empty state** for each region that can be empty — icon, title, one line of explanation, and the creating action where one exists (§5).
+2. A **loading state** that matches the real layout's shape (`loading.tsx` per route group, §5).
+3. An **error state** inside its own shell (`error.tsx` per route group), plus `not-found.tsx` and a locale-level backstop.
+4. **Four states on every interactive element** — hover, active, focus-visible, disabled (§4).
+5. **No raw browser-default control**: no unstyled `<select>`, no native `<input type="date">` chrome, no `accent-color` checkbox. The design-system components in §5 cover all three.
+6. **Both locales and four widths** verified: 375px, tablet, laptop, and a wide monitor capped by `content-shell`.
+
+A screen that does not is not finished, and this list is the checklist to run against it.

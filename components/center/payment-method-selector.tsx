@@ -48,10 +48,10 @@ export function PaymentMethodSelector({
             onClick={() => setSelected(method)}
             aria-pressed={isSelected}
             className={cn(
-              "flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors",
+              "flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-ui focus-ring",
               isSelected
                 ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/30"
-                : "border-border bg-surface text-text-secondary hover:bg-surface-subtle",
+                : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
             )}
           >
             <Icon className="size-4" aria-hidden />

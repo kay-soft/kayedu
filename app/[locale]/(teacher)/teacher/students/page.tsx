@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { SearchX, Users } from "lucide-react";
 
 import { searchTaughtStudentsTypeAheadAction } from "@/app/[locale]/(teacher)/teacher/students/actions";
 import { Pagination } from "@/components/center/pagination";
@@ -21,6 +22,7 @@ import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { EmptyState } from "@/components/shared/empty-state";
 
 /**
  * Every student this teacher has ever taught at the active center (spec
@@ -90,16 +92,27 @@ export default async function TeacherStudentsPage({
           />
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              {query ? t("noMatches") : t("empty")}
-            </p>
+            query ? (
+              <EmptyState
+                icon={<SearchX />}
+                tone="warning"
+                title={t("noMatches")}
+                description={t("noMatchesHint")}
+              />
+            ) : (
+              <EmptyState
+                icon={<Users />}
+                title={t("empty")}
+                description={t("emptyHint")}
+              />
+            )
           ) : (
             <ul className="flex flex-col gap-2">
               {rows.map((row) => (
                 <li key={row.id}>
                   <Link
                     href={ROUTES.teacherStudent(row.id)}
-                    className="flex flex-col gap-1 rounded-xl border border-border p-3 transition-shadow hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-1 rounded-xl border border-border p-3 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-text-primary">

@@ -3,6 +3,7 @@ import { Cairo, Geist_Mono } from "next/font/google";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
 import { getMessages } from "next-intl/server";
+import { UiDirection } from "@/components/shell/ui-direction";
 import { routing } from "@/lib/i18n/routing";
 import "../globals.css";
 
@@ -46,7 +47,7 @@ export default async function RootLayout({
     >
       <body className="flex min-h-full flex-col">
         <NextIntlClientProvider messages={messages}>
-          {children}
+          <UiDirection direction={dir}>{children}</UiDirection>
         </NextIntlClientProvider>
       </body>
     </html>

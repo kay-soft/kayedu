@@ -12,8 +12,10 @@ import { ExpenseRow, type ExpenseRowData } from "@/app/[locale]/(center)/expense
 import { Pagination } from "@/components/center/pagination";
 import { DateFilter } from "@/components/shared/date-filter";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import {
   EntityManager,
   type EntityRecord,
@@ -119,7 +121,7 @@ export default async function ExpensesPage({
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle")} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <StatGrid count={2}>
         <StatCard
           label={t("stats.total")}
           value={formatMoney(totals.total, locale)}
@@ -127,7 +129,7 @@ export default async function ExpensesPage({
           accent="danger"
         />
         <StatCard label={t("stats.count")} value={formatNumber(totals.count, locale)} />
-      </div>
+      </StatGrid>
 
       <Card>
         <CardHeader>
@@ -157,7 +159,11 @@ export default async function ExpensesPage({
           </form>
 
           {tableRows.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState
+              icon={<Wallet />}
+              title={t("empty")}
+              description={t("emptyHint")}
+            />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li

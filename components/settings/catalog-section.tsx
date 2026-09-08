@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Inbox, Pencil, Plus, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -24,9 +24,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 import { piastresToInputValue } from "@/lib/money";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type CatalogEntryKind = "EDUCATION_SYSTEM" | "GRADE" | "SUBJECT";
 
@@ -77,6 +78,7 @@ export function CatalogSection({
   };
 }) {
   const t = useTranslations("Settings.catalog");
+  const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("Settings.errors");
   const locale = useLocale();
 
@@ -105,7 +107,7 @@ export function CatalogSection({
               <input type="hidden" name="kind" value={kind} />
 
               <Field id={`${kind}-pick`} label={labels.pickTitle} className="flex-1">
-                <SelectInput id={`${kind}-pick`} name="catalogId" required defaultValue="">
+                <Select id={`${kind}-pick`} name="catalogId" required defaultValue="">
                   <option value="" disabled>
                     {labels.pickPlaceholder}
                   </option>
@@ -114,7 +116,7 @@ export function CatalogSection({
                       {option.label}
                     </option>
                   ))}
-                </SelectInput>
+                </Select>
               </Field>
 
               {hasPricing ? (
@@ -143,7 +145,12 @@ export function CatalogSection({
           {pickState.error ? <FormMessage>{tErrors(pickState.error)}</FormMessage> : null}
 
           {items.length === 0 ? (
-            <p className="text-sm text-text-muted">{labels.empty}</p>
+            <EmptyState
+              compact
+              icon={<Inbox />}
+              title={labels.empty}
+              description={tCommon("emptyHint")}
+            />
           ) : (
             <ul className="flex flex-col gap-2">
               {items.map((item) => (
@@ -196,7 +203,7 @@ export function CatalogSection({
 
             {correcting ? (
               <Field id={`${kind}-suggest-target`} label={t("fields.existingEntry")}>
-                <SelectInput id={`${kind}-suggest-target`} name="targetId" required defaultValue="">
+                <Select id={`${kind}-suggest-target`} name="targetId" required defaultValue="">
                   <option value="" disabled>
                     {labels.pickPlaceholder}
                   </option>
@@ -205,7 +212,7 @@ export function CatalogSection({
                       {item.displayName ?? item.name}
                     </option>
                   ))}
-                </SelectInput>
+                </Select>
               </Field>
             ) : parentOptions.length > 0 ? (
               <Field
@@ -213,14 +220,14 @@ export function CatalogSection({
                 label={kind === "GRADE" ? t("fields.educationSystem") : t("fields.grade")}
                 optional
               >
-                <SelectInput id={`${kind}-suggest-parent`} name="parentId" defaultValue="">
+                <Select id={`${kind}-suggest-parent`} name="parentId" defaultValue="">
                   <option value="">{t("noParent")}</option>
                   {parentOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
                   ))}
-                </SelectInput>
+                </Select>
               </Field>
             ) : null}
 

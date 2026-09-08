@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import type { SelectOption } from "@/components/center/class-fields";
 
 /**
@@ -36,11 +36,11 @@ export function ClassFilters({
         <label htmlFor="filter-teacherId" className="text-xs font-medium text-text-secondary">
           {t("teacher")}
         </label>
-        <SelectInput
+        <Select
           id="filter-teacherId"
           name="teacherId"
           defaultValue={teacherId}
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {teachers.map((option) => (
@@ -48,18 +48,18 @@ export function ClassFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
 
       <div className="flex min-w-0 flex-col gap-1.5">
         <label htmlFor="filter-subjectId" className="text-xs font-medium text-text-secondary">
           {t("subject")}
         </label>
-        <SelectInput
+        <Select
           id="filter-subjectId"
           name="subjectId"
           defaultValue={subjectId}
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {subjects.map((option) => (
@@ -67,18 +67,18 @@ export function ClassFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
 
       <div className="flex min-w-0 flex-col gap-1.5">
         <label htmlFor="filter-gradeId" className="text-xs font-medium text-text-secondary">
           {t("grade")}
         </label>
-        <SelectInput
+        <Select
           id="filter-gradeId"
           name="gradeId"
           defaultValue={gradeId}
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {grades.map((option) => (
@@ -86,7 +86,7 @@ export function ClassFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
     </form>
   );

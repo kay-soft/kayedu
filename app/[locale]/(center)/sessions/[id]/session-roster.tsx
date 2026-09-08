@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { AlertTriangle, Ban, Undo2 } from "lucide-react";
+import { AlertTriangle, Ban, Undo2, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -25,6 +25,7 @@ import { Link } from "@/lib/i18n/navigation";
 import { formatMoney } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type RosterRowData = {
   studentProfileId: string;
@@ -68,7 +69,7 @@ export function SessionRoster({
   const t = useTranslations("Sessions.roster");
 
   if (rows.length === 0) {
-    return <p className="text-sm text-text-muted">{t("empty")}</p>;
+    return <EmptyState compact icon={<Users />} title={t("empty")} description={t("emptyHint")} />;
   }
 
   return (

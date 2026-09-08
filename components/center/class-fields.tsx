@@ -7,7 +7,7 @@ import type { ShareType } from "@prisma/client";
 import { Field } from "@/components/shared/field";
 import { ToggleRow } from "@/components/settings/toggle-row";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/format";
 import { MAX_LATE_THRESHOLD_MINUTES } from "@/lib/validation/classes";
 import { piastresToInputValue, splitShare } from "@/lib/money";
@@ -115,7 +115,7 @@ export function ClassFields({
           label={t("teacher")}
           error={error("teacherId")}
         >
-          <SelectInput
+          <Select
             id={`${idPrefix}-teacherId`}
             name="teacherId"
             defaultValue={values.teacherId}
@@ -130,7 +130,7 @@ export function ClassFields({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -139,7 +139,7 @@ export function ClassFields({
           optional
           error={error("subjectId")}
         >
-          <SelectInput
+          <Select
             id={`${idPrefix}-subjectId`}
             name="subjectId"
             defaultValue={values.subjectId}
@@ -150,7 +150,7 @@ export function ClassFields({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -159,7 +159,7 @@ export function ClassFields({
           optional
           error={error("gradeId")}
         >
-          <SelectInput
+          <Select
             id={`${idPrefix}-gradeId`}
             name="gradeId"
             defaultValue={values.gradeId}
@@ -170,7 +170,7 @@ export function ClassFields({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -179,13 +179,13 @@ export function ClassFields({
           optional
           error={error("educationSystemId")}
         >
-          <SelectInput
+          <Select
             id={`${idPrefix}-educationSystemId`}
             name="educationSystemId"
             value={educationSystemId}
-            onChange={(event) => {
-              setEducationSystemId(event.target.value);
-              applyInheritedFixedShare(event.target.value, shareType);
+            onValueChange={(next) => {
+              setEducationSystemId(next);
+              applyInheritedFixedShare(next, shareType);
             }}
           >
             <option value="">{noneLabel}</option>
@@ -194,7 +194,7 @@ export function ClassFields({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -203,7 +203,7 @@ export function ClassFields({
           optional
           error={error("roomId")}
         >
-          <SelectInput
+          <Select
             id={`${idPrefix}-roomId`}
             name="roomId"
             defaultValue={values.roomId}
@@ -214,7 +214,7 @@ export function ClassFields({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -259,19 +259,19 @@ export function ClassFields({
           </Field>
 
           <Field id={`${idPrefix}-centerShareType`} label={t("shareType")}>
-            <SelectInput
+            <Select
               id={`${idPrefix}-centerShareType`}
               name="centerShareType"
               value={shareType}
-              onChange={(event) => {
-                const nextShareType = event.target.value as ShareType;
+              onValueChange={(next) => {
+                const nextShareType = next as ShareType;
                 setShareType(nextShareType);
                 applyInheritedFixedShare(educationSystemId, nextShareType);
               }}
             >
               <option value="PERCENTAGE">{t("percentage")}</option>
               <option value="FIXED">{t("fixed")}</option>
-            </SelectInput>
+            </Select>
           </Field>
 
           <Field

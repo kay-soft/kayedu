@@ -19,9 +19,9 @@ export default async function LoginPage({
   const t = await getTranslations("Auth.login");
 
   return (
-    <Card className="p-2 sm:p-4">
+    <Card className="p-2 shadow-card sm:p-4">
       <CardHeader>
-        <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
+        <CardTitle className="text-xl font-bold text-text-primary">{t("title")}</CardTitle>
         <CardDescription>{t("subtitle")}</CardDescription>
       </CardHeader>
       <CardContent>

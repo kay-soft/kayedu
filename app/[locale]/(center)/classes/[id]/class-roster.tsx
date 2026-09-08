@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Ban, UserMinus, UserPlus, UserX } from "lucide-react";
+import { Ban, ShieldOff, UserMinus, UserPlus, UserX, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -15,6 +15,7 @@ import { SubmitButton } from "@/components/shared/submit-button";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type RosterRow = {
   enrollmentId: string;
@@ -89,7 +90,7 @@ export function ClassRoster({
           {t("activeTitle", { count: roster.length })}
         </p>
         {roster.length === 0 ? (
-          <p className="text-sm text-text-muted">{t("empty")}</p>
+          <EmptyState compact icon={<Users />} title={t("empty")} description={t("emptyHint")} />
         ) : (
           <ul className="flex flex-col gap-2">
             {roster.map((row) => (
@@ -144,7 +145,7 @@ export function ClassRoster({
           {t("blockedTitle", { count: blocked.length })}
         </p>
         {blocked.length === 0 ? (
-          <p className="text-sm text-text-muted">{t("blockedEmpty")}</p>
+          <EmptyState compact icon={<ShieldOff />} title={t("blockedEmpty")} description={t("blockedEmptyHint")} />
         ) : (
           <ul className="flex flex-col gap-2">
             {blocked.map((row) => (

@@ -26,6 +26,7 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -44,6 +45,8 @@
   --color-canvas: var(--bg-canvas);
   --color-surface: var(--bg-surface);
   --color-surface-subtle: var(--bg-subtle);
+  --color-surface-hover: var(--bg-hover);
+  --color-surface-active: var(--bg-active);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
@@ -77,6 +80,11 @@
   --bg-sidebar: #0f172a;
   --bg-sidebar-hover: #1e293b;
   --bg-subtle: #f8fafc;
+  /* Interaction surfaces (docs/04 §2). `--bg-subtle` is a *resting* inset —
+     table headers, read-only panels — so it cannot double as the hover tint
+     for a control that already sits on one. These are the two steps above it. */
+  --bg-hover: #f1f5f9;
+  --bg-active: #e2e8f0;
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
@@ -91,6 +99,15 @@
   --danger-bg: #fee2e2;
   --info: #3b82f6;
   --info-bg: #dbeafe;
+
+  /* ── Motion (docs/04 §4) ───────────────────────────────────────────── */
+  --motion-fast: 120ms;
+  --motion-base: 160ms;
+  --motion-slow: 200ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Layout (docs/04 §6) ───────────────────────────────────────────── */
+  --content-max: 96rem;
 
   /* ── shadcn/base-nova bindings — mapped onto the tokens above ─────── */
   --background: var(--bg-canvas);
@@ -110,6 +127,9 @@
   --destructive: var(--danger);
   --border: #e5e7eb;
   --border-subtle: #f1f5f9;
+  /* The border a control takes on hover, so an input answers the pointer
+     before it is ever focused. */
+  --border-strong: #cbd5e1;
   --input: #e5e7eb;
   --ring: var(--brand);
   --chart-1: var(--brand);
@@ -146,6 +166,20 @@
   html[dir="rtl"] body {
     @apply leading-relaxed;
   }
+
+  /* Nothing in the product animates for someone who has asked it not to
+     (docs/04 §4). One global rule rather than a per-component opt-out, so a
+     component added later cannot forget it. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @utility shadow-card {
@@ -154,4 +188,59 @@
 
 @utility shadow-card-hover {
   box-shadow: 0 4px 12px rgb(15 23 42 / 0.08);
+}
+
+/* A floating surface (dropdown, popover, calendar) sits above the page rather
+   than in it, so it carries a deeper shadow than a card ever does. */
+@utility shadow-popover {
+  box-shadow:
+    0 12px 32px -12px rgb(15 23 42 / 0.22),
+    0 2px 6px rgb(15 23 42 / 0.06);
+}
+
+/* The one transition every interactive element uses, so hover, press and
+   focus feel identical everywhere (docs/04 §4). */
+@utility transition-ui {
+  transition-property:
+    color, background-color, border-color, box-shadow, opacity, transform,
+    filter;
+  transition-timing-function: var(--ease-out);
+  transition-duration: var(--motion-base);
+}
+
+@utility transition-ui-fast {
+  transition-property:
+    color, background-color, border-color, box-shadow, opacity, transform,
+    filter;
+  transition-timing-function: var(--ease-out);
+  transition-duration: var(--motion-fast);
+}
+
+/* Keyboard focus, written once. Everything interactive that is not a
+   `Button` — links, rows, calendar days, menu items — applies this instead
+   of inventing its own ring (docs/04 §4). */
+@utility focus-ring {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:focus-visible {
+    outline-color: var(--ring);
+  }
+}
+
+/* The same, on the dark sidebar, where brand blue on navy does not read. */
+@utility focus-ring-inverse {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:focus-visible {
+    outline-color: var(--brand-fg);
+  }
+}
+
+/* The app's one content-width rule (docs/04 §6): centred, capped at
+   `--content-max`, so a 2560px monitor gets a wider working area instead of a
+   narrow column stranded in grey — and a 1280px laptop is unchanged. */
+@utility content-shell {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--content-max);
 }

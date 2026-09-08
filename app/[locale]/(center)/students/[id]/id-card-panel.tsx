@@ -8,9 +8,9 @@ import { useLocale, useTranslations } from "next-intl";
 import { generateIdCardAction } from "@/app/[locale]/(center)/students/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * The ID-card panel: the live preview (rendered on the server and passed in as
@@ -55,20 +55,14 @@ export function IdCardPanel({
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <Link
-          href={ROUTES.centerStudentCard(studentProfileId)}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/80"
-        >
+        <LinkButton href={ROUTES.centerStudentCard(studentProfileId)} variant="default">
           <IdCard className="size-4" aria-hidden />
           {t("printCard")}
-        </Link>
+        </LinkButton>
 
-        <Link
-          href={ROUTES.centerStudentPaper(studentProfileId)}
-          className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-text-primary hover:bg-surface-subtle"
-        >
+        <LinkButton href={ROUTES.centerStudentPaper(studentProfileId)}>
           {t("printPaper")}
-        </Link>
+        </LinkButton>
 
         {storageEnabled ? (
           <form action={formAction}>

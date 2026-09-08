@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { SessionDescriptionForm } from "@/app/[locale]/(teacher)/teacher/sessions/[id]/description-form";
@@ -22,8 +23,9 @@ import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 
 const STATUS_BADGE = {
   SCHEDULED: "info",
@@ -108,18 +110,12 @@ export default async function TeacherSessionDetailPage({
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
-            <Link
-              href={ROUTES.teacherSessionPrint(session.id)}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.teacherSessionPrint(session.id)}>
               {t("printAction")}
-            </Link>
-            <Link
-              href={ROUTES.teacherSessions}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            </LinkButton>
+            <LinkButton href={ROUTES.teacherSessions}>
               {t("backToList")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />
@@ -135,7 +131,7 @@ export default async function TeacherSessionDetailPage({
             </CardHeader>
             <CardContent>
               {roster.length === 0 ? (
-                <p className="text-sm text-text-muted">{t("roster.empty")}</p>
+                <EmptyState compact icon={<Users />} title={t("roster.empty")} description={t("roster.emptyHint")} />
               ) : (
                 <ul className="flex flex-col gap-2">
                   {roster.map((row) => (

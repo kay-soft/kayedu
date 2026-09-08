@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { ClipboardList } from "lucide-react";
 
 import { CancelReservationButton } from "@/app/[locale]/(student)/student/reservations/cancel-button";
 import { PageHeader } from "@/components/shared/page-header";
@@ -9,6 +10,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { listReservationsForStudent } from "@/lib/db/student-portal";
 import { formatDate } from "@/lib/format";
+import { EmptyState } from "@/components/shared/empty-state";
 
 const STATUS_BADGE = {
   PENDING: "warning",
@@ -37,7 +39,7 @@ export default async function StudentReservationsPage() {
       <Card>
         <CardContent className="flex flex-col gap-3 pt-6">
           {reservations.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState icon={<ClipboardList />} title={t("empty")} description={t("emptyHint")} />
           ) : (
             reservations.map((reservation) => (
               <div

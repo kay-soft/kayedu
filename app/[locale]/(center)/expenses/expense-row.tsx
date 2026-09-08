@@ -28,7 +28,7 @@ export function ExpenseRow({ expense }: { expense: ExpenseRowData }) {
 
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
-      <div className="flex w-32 shrink-0 flex-col">
+      <div className="flex md:w-32 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.date")}</span>
         <span className="truncate text-sm text-text-secondary">
           {formatDate(new Date(expense.date), locale)}
@@ -47,7 +47,7 @@ export function ExpenseRow({ expense }: { expense: ExpenseRowData }) {
         <span className="truncate text-sm text-text-secondary">{expense.note ?? "—"}</span>
       </div>
 
-      <div className="flex w-28 shrink-0 flex-col">
+      <div className="flex md:w-28 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.amount")}</span>
         <span className="truncate text-sm font-medium tabular-nums text-text-primary">
           {formatMoney(expense.amount, locale)}

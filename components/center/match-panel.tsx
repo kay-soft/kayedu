@@ -3,11 +3,11 @@
 import { UserCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/shared/submit-button";
 import type { MatchCandidate } from "@/lib/validation/people";
+import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * The duplicate-match workflow, made visible (spec §5, docs/02 §3).
@@ -97,12 +97,9 @@ export function MatchPanel({
       <div className="flex flex-col gap-2 sm:flex-row">
         {blocked ? (
           match.existingProfileId ? (
-            <Link
-              href={ROUTES.centerStudent(match.existingProfileId)}
-              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground sm:w-auto"
-            >
+            <LinkButton href={ROUTES.centerStudent(match.existingProfileId)} variant="default" className="w-full sm:w-auto">
               {t("openProfile")}
-            </Link>
+            </LinkButton>
           ) : null
         ) : (
           // Submitting the same form again — now carrying linkUserId — is what

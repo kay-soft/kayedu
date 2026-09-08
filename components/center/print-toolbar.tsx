@@ -4,7 +4,7 @@ import { Printer } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
-import { Link } from "@/lib/i18n/navigation";
+import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * On-screen controls for a print view. Hidden from the printout itself
@@ -41,12 +41,9 @@ export function PrintToolbar({
           {t("print")}
         </Button>
 
-        <Link
-          href={backHref}
-          className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-        >
+        <LinkButton href={backHref}>
           {t("back")}
-        </Link>
+        </LinkButton>
       </div>
     </div>
   );

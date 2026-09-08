@@ -1,8 +1,10 @@
+import { HandCoins } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { PeriodSettlementForm } from "@/app/[locale]/(center)/settlements/period-settlement-form";
 import { SettlementTransitionActions } from "@/app/[locale]/(center)/settlements/settlement-transition-actions";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -76,7 +78,11 @@ export default async function SettlementsPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {settlements.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState
+              icon={<HandCoins />}
+              title={t("empty")}
+              description={t("emptyHint")}
+            />
           ) : (
             settlements.map((settlement) => (
               <div

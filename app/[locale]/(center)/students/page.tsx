@@ -1,6 +1,7 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
+import { SearchX, Users } from "lucide-react";
 import { PromoteForm } from "@/app/[locale]/(center)/students/promote-form";
 import { searchStudentsTypeAheadAction } from "@/app/[locale]/(center)/students/actions";
 import {
@@ -11,6 +12,8 @@ import { Pagination } from "@/components/center/pagination";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { FormMessage } from "@/components/shared/form-message";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import {
   Card,
   CardContent,
@@ -129,9 +132,28 @@ export default async function StudentsPage({
           />
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              {query.length > 0 ? t("noMatches") : t("empty")}
-            </p>
+            query.length > 0 ? (
+              <EmptyState
+                icon={<SearchX />}
+                tone="warning"
+                title={t("noMatches")}
+                description={t("noMatchesHint")}
+                action={
+                  <LinkButton href={ROUTES.centerStudents} size="sm">
+                    {t("clearSearch")}
+                  </LinkButton>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<Users />}
+                title={t("empty")}
+                description={t("emptyHint")}
+                action={
+                  <AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} />
+                }
+              />
+            )
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li

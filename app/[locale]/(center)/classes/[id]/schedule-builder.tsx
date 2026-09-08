@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { AlertTriangle, Plus, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Plus, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -13,8 +13,9 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import { IDLE_CLASS_STATE, type ClassActionState } from "@/lib/validation/classes";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type ScheduleSlotRow = {
   id: string;
@@ -73,7 +74,7 @@ export function ScheduleBuilder({
       </div>
 
       {slots.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("empty")}</p>
+        <EmptyState compact icon={<CalendarClock />} title={t("empty")} description={t("emptyHint")} />
       ) : (
         <ul className="flex flex-col gap-3">
           {slots.map((slot) => (
@@ -119,13 +120,13 @@ function ScheduleRow({
           <label className="text-xs font-medium text-text-secondary">
             {t("day")}
           </label>
-          <SelectInput name="dayOfWeek" defaultValue={String(slot.dayOfWeek)}>
+          <Select name="dayOfWeek" defaultValue={String(slot.dayOfWeek)}>
             {DAY_VALUES.map((day) => (
               <option key={day} value={day}>
                 {tDays.raw("dayNames")[day] as string}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -231,13 +232,13 @@ function AddSlotForm({ classGroupId }: { classGroupId: string }) {
           <label className="text-xs font-medium text-text-secondary">
             {t("day")}
           </label>
-          <SelectInput name="dayOfWeek" defaultValue="0">
+          <Select name="dayOfWeek" defaultValue="0">
             {DAY_VALUES.map((day) => (
               <option key={day} value={day}>
                 {tDays.raw("dayNames")[day] as string}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">

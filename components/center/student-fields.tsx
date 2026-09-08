@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { Field } from "@/components/shared/field";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 
 export type GradeOption = { value: string; label: string };
 
@@ -68,7 +68,7 @@ export function StudentFields({
         optional
         error={error("gradeId")}
       >
-        <SelectInput
+        <Select
           id={`${idPrefix}-gradeId`}
           name="gradeId"
           defaultValue={values?.gradeId ?? ""}
@@ -80,7 +80,7 @@ export function StudentFields({
               {grade.label}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </Field>
 
       <Field

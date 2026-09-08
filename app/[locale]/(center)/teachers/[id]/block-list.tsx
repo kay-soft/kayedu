@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Ban, UserMinus } from "lucide-react";
+import { Ban, ShieldOff, UserMinus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type BlockedStudent = {
   blockId: string;
@@ -67,7 +68,7 @@ export function BlockList({
       {error ? <FormMessage>{tErrors(error)}</FormMessage> : null}
 
       {blocked.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("empty")}</p>
+        <EmptyState compact icon={<ShieldOff />} title={t("empty")} description={t("emptyHint")} />
       ) : (
         <ul className="flex flex-col gap-2">
           {blocked.map((student) => (

@@ -27,8 +27,8 @@ import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/session
 import { studentSearchWhere } from "@/lib/db/students";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { LinkButton } from "@/components/shared/link-button";
 
 const MAX_CANDIDATES = 8;
 
@@ -186,19 +186,13 @@ export default async function SessionDetailPage({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
             {displayStatus === "RESCHEDULED" && session.rescheduledToId ? (
-              <Link
-                href={ROUTES.centerSession(session.rescheduledToId)}
-                className="inline-flex h-11 items-center rounded-lg border border-brand px-4 text-sm font-medium text-brand hover:bg-brand/5"
-              >
+              <LinkButton href={ROUTES.centerSession(session.rescheduledToId)}>
                 {t("lifecycle.viewNewSession")}
-              </Link>
+              </LinkButton>
             ) : null}
-            <Link
-              href={ROUTES.centerSessions}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.centerSessions}>
               {t("backToList")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />

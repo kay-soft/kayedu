@@ -6,8 +6,9 @@ import { useLocale, useTranslations } from "next-intl";
 import { createPeriodSettlementAction } from "@/app/[locale]/(center)/settlements/actions";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { IDLE_SETTLEMENT_STATE } from "@/lib/validation/settlements";
 
 export type SettlementTeacherOption = { id: string; name: string };
@@ -38,18 +39,17 @@ export function PeriodSettlementForm({
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="settlement-teacher">{t("fields.teacher")}</Label>
-          <select
+          <Select
             id="settlement-teacher"
             name="teacherId"
             required
-            className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
-          >
-            {teachers.map((teacher) => (
-              <option key={teacher.id} value={teacher.id}>
-                {teacher.name}
-              </option>
-            ))}
-          </select>
+            defaultValue={teachers[0]?.id ?? ""}
+            aria-invalid={state.fieldErrors?.teacherId ? true : undefined}
+            options={teachers.map((teacher) => ({
+              value: teacher.id,
+              label: teacher.name,
+            }))}
+          />
           {state.fieldErrors?.teacherId ? (
             <FieldError>{tErrors(state.fieldErrors.teacherId)}</FieldError>
           ) : null}
@@ -57,7 +57,7 @@ export function PeriodSettlementForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="settlement-from">{t("fields.from")}</Label>
-          <Input id="settlement-from" name="from" type="date" required dir="ltr" />
+          <DatePicker id="settlement-from" name="from" required />
           {state.fieldErrors?.from ? (
             <FieldError>{tErrors(state.fieldErrors.from)}</FieldError>
           ) : null}
@@ -65,7 +65,7 @@ export function PeriodSettlementForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="settlement-to">{t("fields.to")}</Label>
-          <Input id="settlement-to" name="to" type="date" required dir="ltr" />
+          <DatePicker id="settlement-to" name="to" required />
           {state.fieldErrors?.to ? (
             <FieldError>{tErrors(state.fieldErrors.to)}</FieldError>
           ) : null}

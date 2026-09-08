@@ -1,4 +1,4 @@
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, CalendarSearch } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeacherSessionFilters } from "@/app/[locale]/(teacher)/teacher/sessions/session-filters";
@@ -8,6 +8,7 @@ import { Pagination } from "@/components/center/pagination";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -27,6 +28,7 @@ import { ROUTES } from "@/lib/routes";
 import { addDays, startOfUtcDay } from "@/lib/scheduling";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { teacherSessionListFilterSchema } from "@/lib/validation/teacher";
+import { EmptyState } from "@/components/shared/empty-state";
 
 const STATUS_BADGE = {
   SCHEDULED: "info",
@@ -134,7 +136,7 @@ export default async function TeacherSessionsPage({
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle", { count: total })} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <StatGrid count={2}>
         <StatCard
           label={t("stats.inRange")}
           value={formatNumber(total, locale)}
@@ -146,7 +148,7 @@ export default async function TeacherSessionsPage({
           icon={<CalendarClock className="size-4" />}
           accent="info"
         />
-      </div>
+      </StatGrid>
 
       {canRequestSession ? (
         <Card>
@@ -191,6 +193,7 @@ export default async function TeacherSessionsPage({
           <TeacherSessionFilters
             range={filters.range}
             date={filters.date ?? anchor.toISOString().slice(0, 10)}
+            todayIso={startOfUtcDay(new Date()).toISOString().slice(0, 10)}
             gradeId={filters.gradeId ?? ""}
             status={filters.status ?? ""}
             q={filters.q ?? ""}
@@ -199,14 +202,14 @@ export default async function TeacherSessionsPage({
           />
 
           {pageEntries.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState icon={<CalendarSearch />} tone="warning" title={t("empty")} description={t("emptyHint")} />
           ) : (
             <ul className="flex flex-col gap-3">
               {pageEntries.map(({ row, displayStatus }) => (
                 <li key={row.id}>
                   <Link
                     href={ROUTES.teacherSession(row.id)}
-                    className="flex flex-col gap-2 rounded-xl border border-border p-4 transition-shadow hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-2 rounded-xl border border-border p-4 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-text-primary">

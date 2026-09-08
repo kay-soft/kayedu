@@ -6,6 +6,7 @@ import type { Role } from "@prisma/client";
 
 import { savePermissionMatrixAction } from "@/app/[locale]/(center)/settings/actions";
 import { FormMessage } from "@/components/shared/form-message";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 import type { Permission } from "@/lib/auth/permissions";
@@ -30,9 +31,11 @@ function Cell({
 
   if (!editable) {
     return (
+      // Not grantable at all (the platform ceiling, docs/02 §6.1) — a dimmed
+      // dash, never an unchecked box, which would imply an Owner could tick it.
       <span
         aria-hidden
-        className="inline-flex size-5 items-center justify-center rounded border border-dashed border-border text-text-muted"
+        className="inline-flex size-5 items-center justify-center rounded-md border border-dashed border-border-strong text-text-muted"
       >
         —
       </span>
@@ -40,17 +43,13 @@ function Cell({
   }
 
   return (
-    <label
-      className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg hover:bg-surface-subtle"
-      aria-label={tRoles(role)}
-    >
-      <input
-        type="checkbox"
+    <span className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-ui-fast hover:bg-surface-hover">
+      <Checkbox
         name={`grant__${role}__${action}`}
         defaultChecked={defaultChecked}
-        className="size-5 accent-[var(--brand)]"
+        aria-label={tRoles(role)}
       />
-    </label>
+    </span>
   );
 }
 
@@ -88,12 +87,18 @@ export function PermissionMatrixForm({
         <FormMessage tone="success">{tCommon("saved")}</FormMessage>
       ) : null}
 
-      {/* Table from md up (docs/04 §6). */}
-      <div className="hidden overflow-x-auto rounded-xl border border-border md:block">
+      {/* Table from md up (docs/04 §6). The header row and the action column
+          are both sticky (docs/04 §11.2): this is the densest grid in the
+          product, and a matrix you scroll blind is a matrix that gets
+          misconfigured. Sticky needs an explicit scroll box, hence the
+          max-height rather than letting the page scroll it. */}
+      <div className="hidden max-h-[70vh] overflow-auto rounded-xl border border-border md:block">
         <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border bg-surface-subtle text-xs font-medium text-text-muted">
-              <th className="p-3 text-start">{t("actionColumn")}</th>
+          <thead className="sticky top-0 z-20">
+            <tr className="bg-surface-subtle text-xs font-medium text-text-muted [&>th]:border-b [&>th]:border-border">
+              <th className="sticky start-0 z-10 bg-surface-subtle p-3 text-start">
+                {t("actionColumn")}
+              </th>
               {roles.map((role) => (
                 <th key={role} className="p-3 text-center">
                   {tRoles(role)}
@@ -110,7 +115,14 @@ export function PermissionMatrixForm({
                   index % 2 === 1 && "bg-surface-subtle/50",
                 )}
               >
-                <td className="p-3 text-text-primary">
+                <td
+                  className={cn(
+                    "sticky start-0 z-10 p-3 text-text-primary",
+                    // The sticky cell has to be opaque, so it takes the
+                    // striping as a solid token rather than the row's alpha.
+                    index % 2 === 1 ? "bg-surface-subtle" : "bg-surface",
+                  )}
+                >
                   {t(`actions.${actionMessageKey(action)}`)}
                 </td>
                 {roles.map((role) => (

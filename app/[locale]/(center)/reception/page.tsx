@@ -1,4 +1,4 @@
-import { CalendarPlus } from "lucide-react";
+import { CalendarPlus, SearchX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
@@ -29,6 +29,8 @@ import { ROUTES } from "@/lib/routes";
 import { startOfUtcDay } from "@/lib/scheduling";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
 import { storageConfigured } from "@/lib/supabase/admin";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * Reception Desk (spec §4.1 item 8): search by code/name/phone — or a
@@ -151,13 +153,10 @@ export default async function ReceptionPage({
         action={
           <div className="flex flex-wrap items-center gap-2">
             <AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} />
-            <Link
-              href={ROUTES.centerSessions}
-              className="inline-flex h-11 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.centerSessions}>
               <CalendarPlus className="size-4" aria-hidden />
               {t("addSessionShortcut")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />
@@ -179,14 +178,14 @@ export default async function ReceptionPage({
 
             {query.length > 0 && !selectedStudent ? (
               results.length === 0 ? (
-                <p className="text-sm text-text-muted">{t("noMatches")}</p>
+                <EmptyState compact icon={<SearchX />} tone="warning" title={t("noMatches")} description={t("noMatchesHint")} />
               ) : (
                 <ul className="flex flex-col gap-2">
                   {results.map((result) => (
                     <li key={result.studentProfileId}>
                       <Link
                         href={`${ROUTES.centerReception}?studentId=${result.studentProfileId}`}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-border p-3 hover:bg-surface-subtle"
+                        className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border p-3 transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
                       >
                         <span className="truncate text-sm font-medium text-text-primary">
                           {result.name}

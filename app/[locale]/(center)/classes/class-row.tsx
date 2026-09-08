@@ -11,6 +11,7 @@ import { formatMoney, formatNumber } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
+import { LinkButton } from "@/components/shared/link-button";
 
 export type ClassRowData = {
   classGroupId: string;
@@ -78,7 +79,7 @@ export function ClassRow({
         </span>
       </div>
 
-      <div className="flex w-28 shrink-0 flex-col">
+      <div className="flex md:w-28 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">
           {t("columns.price")}
         </span>
@@ -87,7 +88,7 @@ export function ClassRow({
         </span>
       </div>
 
-      <div className="flex w-28 shrink-0 flex-col">
+      <div className="flex md:w-28 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">
           {t("columns.enrolled")}
         </span>
@@ -99,19 +100,16 @@ export function ClassRow({
         </span>
       </div>
 
-      <div className="w-24 shrink-0">
+      <div className="md:w-24 md:shrink-0">
         <Badge variant={classGroup.active ? "success" : "neutral"}>
           {classGroup.active ? tCommon("active") : tCommon("inactive")}
         </Badge>
       </div>
 
       <div className="flex shrink-0 flex-col gap-2 sm:flex-row md:w-44 md:justify-end">
-        <Link
-          href={ROUTES.centerClass(classGroup.classGroupId)}
-          className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-text-primary hover:bg-surface-subtle"
-        >
+        <LinkButton href={ROUTES.centerClass(classGroup.classGroupId)}>
           {t("open")}
-        </Link>
+        </LinkButton>
 
         {canManage ? (
           <form action={formAction}>

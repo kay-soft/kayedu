@@ -8,7 +8,8 @@ import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
 
@@ -42,37 +43,37 @@ export function ClassRequestForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="request-subjectId" label={t("subject")} optional error={state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined}>
-          <SelectInput id="request-subjectId" name="subjectId" defaultValue="">
+          <Select id="request-subjectId" name="subjectId" defaultValue="">
             <option value="">{t("none")}</option>
             {subjects.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field id="request-gradeId" label={t("grade")} optional error={state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined}>
-          <SelectInput id="request-gradeId" name="gradeId" defaultValue="">
+          <Select id="request-gradeId" name="gradeId" defaultValue="">
             <option value="">{t("none")}</option>
             {grades.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Field id="request-dayOfWeek" label={t("day")} error={state.fieldErrors?.dayOfWeek ? tErrors(state.fieldErrors.dayOfWeek) : undefined}>
-          <SelectInput id="request-dayOfWeek" name="dayOfWeek" defaultValue="0">
+          <Select id="request-dayOfWeek" name="dayOfWeek" defaultValue="0">
             {DAY_INDEXES.map((day) => (
               <option key={day} value={day}>
                 {dayNames[day]}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field id="request-startTime" label={t("start")} error={state.fieldErrors?.startTime ? tErrors(state.fieldErrors.startTime) : undefined}>
@@ -95,7 +96,7 @@ export function ClassRequestForm({
       </div>
 
       <label className="flex items-center gap-2 text-sm text-text-secondary">
-        <input type="checkbox" name="attendanceRequired" defaultChecked className="size-4 rounded border-border" />
+        <Checkbox name="attendanceRequired" defaultChecked />
         {t("attendanceRequired")}
       </label>
 

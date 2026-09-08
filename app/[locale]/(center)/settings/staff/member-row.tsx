@@ -11,7 +11,7 @@ import {
 import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 
 const ROLE_OPTIONS: Role[] = [
@@ -93,7 +93,7 @@ export function MemberRow({ member }: { member: MemberRowData }) {
               name="membershipId"
               value={member.membershipId}
             />
-            <SelectInput
+            <Select
               name="role"
               defaultValue={member.role}
               aria-label={t("columns.role")}
@@ -104,7 +104,7 @@ export function MemberRow({ member }: { member: MemberRowData }) {
                   {tRoles(role)}
                 </option>
               ))}
-            </SelectInput>
+            </Select>
             <Button type="submit" variant="outline" className="h-11 px-3">
               {tCommon("save")}
             </Button>
@@ -112,7 +112,7 @@ export function MemberRow({ member }: { member: MemberRowData }) {
         )}
       </div>
 
-      <div className="w-20 shrink-0">
+      <div className="md:w-20 md:shrink-0">
         <Badge variant={member.active ? "success" : "neutral"}>
           {member.active ? tCommon("active") : tCommon("inactive")}
         </Badge>

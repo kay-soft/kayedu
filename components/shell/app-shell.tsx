@@ -3,12 +3,18 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Link, usePathname } from "@/lib/i18n/navigation";
+import { usePathname } from "@/lib/i18n/navigation";
+import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
+import {
+  BranchSwitcher,
+  type BranchOption,
+  type RollupOption,
+} from "@/components/shell/branch-switcher";
 import { NavItem } from "@/components/shell/nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
-import { ROUTES } from "@/lib/routes";
+import { UserMenu } from "@/components/shell/user-menu";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +31,24 @@ export type ShellUser = {
   roleKey: string;
 };
 
+/**
+ * What the header's branch switcher needs to render (docs/04 §11.1). Absent
+ * for the experiences that have no branch scope of their own — a parent, a
+ * platform admin — and for anyone with a single branch, where §11.1 says the
+ * control is hidden entirely rather than disabled.
+ */
+export type ShellScope = {
+  activeId: string | null;
+  branches: BranchOption[];
+  rollups: RollupOption[];
+};
+
 type AppShellProps = {
   nav: ShellNavItem[];
   brand: ShellBrand;
   user: ShellUser;
-  canSwitchCenter: boolean;
+  /** Omitted for an experience with nothing to switch between. */
+  scope?: ShellScope;
   /** Read server-side from the cookie, so the first paint is already correct. */
   defaultCollapsed: boolean;
   children: ReactNode;
@@ -70,21 +89,15 @@ function SidebarContent({
           collapsed && "justify-center px-2",
         )}
       >
-        {brand.logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- remote center logos; Storage wiring lands in M3
-          <img
-            src={brand.logoUrl}
-            alt=""
-            className="size-9 shrink-0 rounded-lg object-cover"
-          />
-        ) : (
-          <span
-            aria-hidden
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-sm font-bold text-brand-foreground"
-          >
-            {brand.name.trim().charAt(0)}
-          </span>
-        )}
+        {/* Logo when the centre has one, otherwise its real initial —
+            `lib/initials.ts` explains why `name.charAt(0)` was wrong. */}
+        <BrandAvatar
+          name={brand.name}
+          logoUrl={brand.logoUrl}
+          themeColor={brand.themeColor}
+          size="md"
+          className="rounded-lg"
+        />
         {collapsed ? null : (
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold text-white">
@@ -156,7 +169,7 @@ function SidebarContent({
               onClick={onToggleCollapsed}
               title={collapsed ? tShell("expandSidebar") : tShell("collapseSidebar")}
               aria-pressed={collapsed}
-              className="flex size-11 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-accent"
+              className="flex size-11 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground transition-ui focus-ring-inverse hover:bg-sidebar-accent active:bg-sidebar-accent/70"
             >
               {/* The panel flips edge with the toggle direction, so it mirrors
                   correctly in RTL (docs/04 §7) — collapsing always "closes
@@ -178,7 +191,7 @@ export function AppShell({
   nav,
   brand,
   user,
-  canSwitchCenter,
+  scope,
   defaultCollapsed,
   children,
 }: AppShellProps) {
@@ -216,7 +229,7 @@ export function AppShell({
           (docs/04 §5). */}
       <aside
         className={cn(
-          "fixed inset-y-0 start-0 z-30 hidden flex-col bg-sidebar transition-[width] duration-200 lg:flex",
+          "fixed inset-y-0 start-0 z-30 hidden flex-col bg-sidebar transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out)] lg:flex",
           collapsed ? "w-18" : "w-60",
         )}
       >
@@ -233,7 +246,7 @@ export function AppShell({
           expanded, since a full-screen sheet has no need for a rail. */}
       <div
         className={cn(
-          "fixed inset-0 z-40 bg-slate-900/50 transition-opacity lg:hidden",
+          "fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-[1px] transition-opacity duration-[var(--motion-slow)] lg:hidden",
           drawerOpen ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         onClick={() => setDrawerOpen(false)}
@@ -244,7 +257,8 @@ export function AppShell({
         aria-label={tShell("primaryNav")}
         aria-hidden={!drawerOpen}
         className={cn(
-          "fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col bg-sidebar transition-transform duration-200 lg:hidden",
+          "fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col bg-sidebar lg:hidden",
+          "transition-transform duration-[var(--motion-slow)] ease-[var(--ease-out)]",
           drawerOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full",
         )}
       >
@@ -253,7 +267,7 @@ export function AppShell({
             type="button"
             onClick={() => setDrawerOpen(false)}
             aria-label={tShell("closeMenu")}
-            className="flex size-11 items-center justify-center rounded-lg text-sidebar-foreground hover:bg-sidebar-accent"
+            className="flex size-11 items-center justify-center rounded-lg text-sidebar-foreground transition-ui focus-ring-inverse hover:bg-sidebar-accent active:bg-sidebar-accent/70"
           >
             <X className="size-5" />
           </button>
@@ -268,41 +282,58 @@ export function AppShell({
 
       <div
         className={cn(
-          "flex min-h-dvh flex-col transition-[padding] duration-200",
+          "flex min-h-dvh flex-col transition-[padding] duration-[var(--motion-slow)] ease-[var(--ease-out)]",
           collapsed ? "lg:ps-18" : "lg:ps-60",
         )}
       >
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-surface px-3 sm:px-6">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            aria-label={tShell("openMenu")}
-            aria-controls="app-drawer"
-            aria-expanded={drawerOpen}
-            className="flex size-11 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-subtle lg:hidden"
-          >
-            <Menu className="size-5" />
-          </button>
+        {/* The app bar (docs/04 §5): branch context on the start edge, account
+            and language on the end edge, one baseline, real controls. */}
+        <header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+          <div className="content-shell flex h-16 items-center gap-2 px-3 sm:px-6">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              aria-label={tShell("openMenu")}
+              aria-controls="app-drawer"
+              aria-expanded={drawerOpen}
+              className="flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-ui focus-ring hover:bg-surface-hover active:bg-surface-active lg:hidden"
+            >
+              <Menu className="size-5" />
+            </button>
 
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold lg:hidden">
-            {brand.name}
-          </span>
-
-          <div className="ms-auto flex items-center gap-2 sm:gap-3">
-            {canSwitchCenter ? (
-              <Link
-                href={`${ROUTES.selectCenter}?switch=1`}
-                className="hidden rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-subtle sm:inline-flex"
-              >
-                {tShell("switchCenter")}
-              </Link>
+            {scope ? (
+              <BranchSwitcher
+                activeName={brand.name}
+                activeLogoUrl={brand.logoUrl}
+                activeThemeColor={brand.themeColor}
+                activeId={scope.activeId}
+                branches={scope.branches}
+                rollups={scope.rollups}
+              />
             ) : null}
-            <LocaleSwitcher />
+
+            {/* Below lg the sidebar's own branding is behind the drawer, so
+                the bar carries the name — unless the switcher already does. */}
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-sm font-semibold",
+                scope && (scope.branches.length > 1 || scope.rollups.length > 0)
+                  ? "hidden"
+                  : "lg:hidden",
+              )}
+            >
+              {brand.name}
+            </span>
+
+            <div className="ms-auto flex items-center gap-2">
+              <LocaleSwitcher />
+              <UserMenu user={user} />
+            </div>
           </div>
         </header>
 
         <main className="flex-1 p-4 sm:p-6">
-          <div className="mx-auto w-full max-w-7xl">{children}</div>
+          <div className="content-shell">{children}</div>
         </main>
       </div>
     </div>

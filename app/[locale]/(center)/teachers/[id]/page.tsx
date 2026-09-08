@@ -30,6 +30,7 @@ import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { LinkButton } from "@/components/shared/link-button";
 
 const MAX_BLOCK_CANDIDATES = 8;
 
@@ -130,12 +131,9 @@ export default async function TeacherDetailPage({
             <Badge variant={teacher.active ? "success" : "neutral"}>
               {teacher.active ? tCommon("active") : tCommon("inactive")}
             </Badge>
-            <Link
-              href={ROUTES.centerTeachers}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.centerTeachers}>
               {t("backToList")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />

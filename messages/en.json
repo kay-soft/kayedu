@@ -27,10 +27,34 @@
       "activeDay": "Today",
       "activeWeek": "Last 7 days",
       "activeMonth": "This month so far",
-      "activeRange": "{from} – {to}"
+      "activeRange": "{from} – {to}",
+      "pickRangeHint": "Pick a day, or a start and an end"
     },
     "typeAhead": {
       "noResults": "No matches yet — keep typing, or add a new record."
+    },
+    "calendar": {
+      "gridLabel": "Calendar",
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month",
+      "pickDate": "Pick a date",
+      "clear": "Clear date"
+    },
+    "error": {
+      "title": "This screen didn't load",
+      "description": "Something broke on our side. Try again — if it keeps happening, tell your branch owner.",
+      "retry": "Try again"
+    },
+    "notFound": {
+      "title": "This page doesn't exist",
+      "description": "The link may be out of date, or the record was removed. Go back to your home screen and start again.",
+      "home": "Go to my home screen"
+    },
+    "loading": "Loading",
+    "empty": {
+      "noResults": "Nothing matched this filter",
+      "noResultsHint": "Widen the date range or clear a filter to see more.",
+      "noData": "Nothing here yet"
     }
   },
   "Shell": {
@@ -42,7 +66,12 @@
     "signOut": "Sign out",
     "soon": "Soon",
     "collapseSidebar": "Collapse sidebar",
-    "expandSidebar": "Expand sidebar"
+    "expandSidebar": "Expand sidebar",
+    "branchLabel": "Branch",
+    "branchesLabel": "Your branches",
+    "accountMenu": "Account",
+    "wholeManagement": "Whole Management — {organization}",
+    "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}"
   },
   "Nav": {
     "dashboard": "Dashboard",
@@ -82,7 +111,9 @@
       "firstName": "First name",
       "lastName": "Last name",
       "phone": "Phone",
-      "optional": "optional"
+      "optional": "optional",
+      "firstNamePlaceholder": "Mona",
+      "lastNamePlaceholder": "Kamel"
     },
     "login": {
       "title": "Sign in",
@@ -144,6 +175,10 @@
       "centerInactive": "This branch is not active.",
       "invalidCenter": "Unknown branch.",
       "invalidInvitation": "Unknown invitation."
+    },
+    "shell": {
+      "headline": "Run the whole centre from one screen.",
+      "subhead": "Attendance, payments, teacher shares and every branch's numbers — in Arabic or English, on any device."
     }
   },
   "Staff": {
@@ -193,7 +228,9 @@
       "grant": "Grant",
       "revoke": "Remove access to {branch}",
       "noBranches": "No extra branches granted yet."
-    }
+    },
+    "noMembersHint": "Invite someone by email and they appear here once they accept.",
+    "noInvitationsHint": "Invitations you send are listed here until they are accepted or expire."
   },
   "People": {
     "fields": {
@@ -310,14 +347,19 @@
       "searchSubmit": "Search",
       "noCandidates": "No students match that search.",
       "unknownStudent": "Former student",
-      "unknownTeacher": "Former teacher"
+      "unknownTeacher": "Former teacher",
+      "emptyHint": "This teacher has not blocked any student from their classes."
     },
     "contactTitle": "This branch's record",
     "contactDescription": "This branch's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other branch's record.",
     "trusted": {
       "label": "Trusted teacher",
       "description": "Lets this teacher request a new class or session from their portal at this branch. Off hides those request forms for them."
-    }
+    },
+    "emptyHint": "Teachers you add appear here, with the classes and blocks attached to them.",
+    "noMatchesHint": "Check the spelling, or search by phone number or email.",
+    "classesEmptyHint": "Assign this teacher to a class and it will show up here.",
+    "clearSearch": "Clear search"
   },
   "Students": {
     "title": "Students",
@@ -404,7 +446,8 @@
       "title": "Blocked by",
       "description": "Teachers and classes that have blocked this student.",
       "empty": "No teacher or class has blocked this student.",
-      "unknownClass": "Former class"
+      "unknownClass": "Former class",
+      "emptyHint": "No teacher has blocked this student from a class."
     },
     "parentLinks": {
       "title": "Parent accounts",
@@ -415,14 +458,18 @@
         "VERIFIED": "Verified"
       },
       "verify": "Verify",
-      "verified": "Verified."
+      "verified": "Verified.",
+      "emptyHint": "A parent who links to this student appears here once a staff member verifies them."
     },
     "print": {
       "print": "Print",
       "back": "Back to the student",
       "hint": "Only the sheet below is printed.",
       "printedOn": "Printed {date}"
-    }
+    },
+    "emptyHint": "Students you register appear here with their code, grade and contact.",
+    "noMatchesHint": "Check the spelling, or search by student code or phone number.",
+    "clearSearch": "Clear search"
   },
   "Classes": {
     "title": "Classes",
@@ -512,7 +559,8 @@
       "cancel": "Cancel",
       "summary": "{day}",
       "roomConflictWith": "Room conflict with {className}.",
-      "teacherConflictWith": "Teacher conflict with {className}."
+      "teacherConflictWith": "Teacher conflict with {className}.",
+      "emptyHint": "Add a weekly time slot and sessions will be generated from it."
     },
     "holidays": {
       "title": "Holiday calendar",
@@ -522,7 +570,8 @@
       "name": "Name",
       "namePlaceholder": "Eid al-Fitr",
       "add": "Add holiday",
-      "remove": "Remove holiday"
+      "remove": "Remove holiday",
+      "emptyHint": "A date added here is skipped by the session generator for every class."
     },
     "generate": {
       "title": "Session generator",
@@ -550,7 +599,9 @@
       "candidatesTitle": "Search results",
       "noCandidates": "No students match that search.",
       "enroll": "Enroll",
-      "unknownStudent": "Former student"
+      "unknownStudent": "Former student",
+      "emptyHint": "Enrol a student and they appear here with their enrolment date.",
+      "blockedEmptyHint": "A teacher can block a student from their class; blocks show up here."
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -572,7 +623,10 @@
       "alreadyEnrolled": "This student is already enrolled in this class.",
       "studentBlocked": "This student is blocked from this class or teacher.",
       "alreadyBlocked": "This student is already blocked from this class."
-    }
+    },
+    "emptyHint": "A class pairs a teacher, a subject and a weekly schedule. Add the first one to start generating sessions.",
+    "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
+    "clearFilters": "Clear filters"
   },
   "Sessions": {
     "title": "Today's Sessions",
@@ -647,7 +701,8 @@
       "refund": "Refund",
       "refunded": "Refunded",
       "refundReasonPlaceholder": "Reason for the refund",
-      "confirmRefund": "Confirm refund"
+      "confirmRefund": "Confirm refund",
+      "emptyHint": "Students enrolled in this class appear here once the session is generated."
     },
     "addAttendee": {
       "title": "Add a student",
@@ -721,7 +776,10 @@
       "excusedNotAllowed": "This class does not allow the Excused status.",
       "invalidDate": "Enter a valid date.",
       "invalidTimeRange": "The end time must be after the start time."
-    }
+    },
+    "emptyHint": "Sessions are generated from each class's weekly schedule. Widen the date range, or clear a filter.",
+    "clearFilters": "Clear filters",
+    "zeroHint": "No activity in this range"
   },
   "Reception": {
     "title": "Reception Desk",
@@ -742,7 +800,9 @@
     "statusLabel": "Attendance",
     "methodLabel": "Payment method",
     "submit": "Check in",
-    "checkedIn": "Checked in."
+    "checkedIn": "Checked in.",
+    "noMatchesHint": "Search by name, student code or phone — or scan an ID card.",
+    "noSessionsTodayHint": "Sessions marked live show up here as the day runs."
   },
   "Analytics": {
     "title": "Analytics",
@@ -780,7 +840,8 @@
         "centerShare": "Branch share",
         "teacherShare": "Teacher share",
         "payments": "Payments"
-      }
+      },
+      "emptyHint": "No teacher collected anything in this range."
     },
     "byBranch": {
       "title": "By branch",
@@ -792,11 +853,15 @@
         "centerShare": "Branch share",
         "teacherShare": "Teacher share",
         "payments": "Payments"
-      }
+      },
+      "emptyHint": "No branch under this organization collected anything in this range."
     },
     "rollup": {
       "badge": "Whole Management — {organization}"
-    }
+    },
+    "emptyState": "No revenue in this range",
+    "emptyStateHint": "Nothing was collected between these dates. Try a wider range.",
+    "zeroHint": "No activity in this range"
   },
   "Expenses": {
     "title": "Expenses",
@@ -848,7 +913,9 @@
       "invalidDate": "Enter a valid date.",
       "required": "This field is required.",
       "tooLong": "This value is too long."
-    }
+    },
+    "emptyHint": "Record what the branch spends and it is subtracted from the centre's share in Analytics.",
+    "clearFilters": "Clear filters"
   },
   "Approvals": {
     "title": "Approvals",
@@ -871,7 +938,9 @@
         "lateThreshold": "Late threshold (min)",
         "yes": "Yes",
         "no": "No"
-      }
+      },
+      "emptyHint": "When a teacher proposes a class at this branch, it appears here with the schedule they asked for.",
+      "headline": "Wants to open a class"
     },
     "sessionRequests": {
       "title": "Session requests",
@@ -880,7 +949,9 @@
       "classGone": "That class no longer exists.",
       "fields": {
         "date": "Date"
-      }
+      },
+      "emptyHint": "When a teacher asks for an extra session on a class they already teach, it appears here.",
+      "headline": "Wants an extra session"
     },
     "reservations": {
       "title": "Class reservations",
@@ -888,7 +959,10 @@
       "empty": "No pending reservations.",
       "requestedOn": "Requested {date}",
       "approved": "Approved",
-      "declined": "Declined"
+      "declined": "Declined",
+      "emptyHint": "Students who ask to join a class that needs confirmation appear here.",
+      "headline": "Wants to join this class",
+      "priceLabel": "Price"
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -899,6 +973,17 @@
       "classNotFound": "The class this request was for no longer exists.",
       "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time."
+    },
+    "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
+    "kinds": {
+      "class": "New class",
+      "session": "New session",
+      "reservation": "Joining a class",
+      "onboarding": "New teacher"
+    },
+    "onboarding": {
+      "headline": "Wants to teach at this branch",
+      "hint": "This teacher has no record at this branch yet. Approving is a decision about the class, not about hiring — create their teacher record at Teachers."
     }
   },
   "Refunds": {
@@ -907,7 +992,8 @@
     "registerTitle": "Refund register",
     "registerDescription": "Recorded from a session's roster — see a session's Refund button to issue a new one.",
     "empty": "No refunds recorded yet.",
-    "refundedOn": "Refunded {date}"
+    "refundedOn": "Refunded {date}",
+    "emptyHint": "A refund appears here next to the payment it reverses. Nothing has been refunded in this branch."
   },
   "Settlements": {
     "title": "Settlements",
@@ -950,7 +1036,9 @@
       "overlappingSettlement": "This teacher already has a settlement covering part of that date range.",
       "notDraft": "This settlement has already been approved or paid.",
       "notApproved": "This settlement must be approved before it can be marked paid."
-    }
+    },
+    "emptyHint": "A settlement rolls up what a teacher has earned across a period. Create the first one below.",
+    "teacherEmptyHint": "When the branch settles your earnings, each settlement appears here with its status."
   },
   "Settings": {
     "title": "Branch configuration",
@@ -979,7 +1067,8 @@
       "status": "Status",
       "actions": "Actions",
       "none": "Not set",
-      "saved": "Changes saved."
+      "saved": "Changes saved.",
+      "emptyHint": "Add the first one using the form above — it becomes selectable everywhere it applies."
     },
     "errors": {
       "forbidden": "You are not allowed to change this branch's configuration.",
@@ -1179,7 +1268,8 @@
       "centerShare": "Branch share today",
       "sessionsListTitle": "Today's sessions",
       "viewAll": "View all sessions",
-      "empty": "No sessions scheduled today."
+      "empty": "No sessions scheduled today.",
+      "viewClasses": "Manage classes"
     },
     "center": {
       "title": "Branch"
@@ -1188,7 +1278,9 @@
       "staff": "Staff",
       "teachers": "Teachers",
       "students": "Students"
-    }
+    },
+    "emptyHint": "Nothing is scheduled for today. Sessions are generated from each class's weekly schedule.",
+    "zeroHint": "No activity yet today"
   },
   "TeacherDashboard": {
     "title": "Teacher dashboard",
@@ -1251,14 +1343,16 @@
       "note": "Note to the branch",
       "notePlaceholder": "Anything else the branch should know",
       "submit": "Send request",
-      "submitted": "Request sent."
+      "submitted": "Request sent.",
+      "noClassesHint": "You need a class at this branch before you can request a session for it."
     },
     "roster": {
       "title": "Roster",
       "description": "{absent, plural, =0 {No absences.} one {# absent.} other {# absent.}}",
       "empty": "No students on the roster yet.",
       "dropIn": "Drop-in",
-      "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian."
+      "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian.",
+      "emptyHint": "Enrolled students appear here so you can mark attendance."
     },
     "description": {
       "title": "Session note",
@@ -1305,7 +1399,9 @@
       "invalidDate": "Enter a valid date.",
       "invalidTimeRange": "The end time must be after the start time.",
       "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here."
-    }
+    },
+    "emptyHint": "No session matches these filters. Widen the date range, or clear a filter.",
+    "zeroHint": "No activity in this range"
   },
   "TeacherStudents": {
     "title": "My students",
@@ -1340,7 +1436,9 @@
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "alreadyBlocked": "You have already blocked this student."
-    }
+    },
+    "emptyHint": "Students enrolled in the classes you teach appear here.",
+    "noMatchesHint": "Check the spelling, or search by student code."
   },
   "TeacherClasses": {
     "title": "My classes",
@@ -1380,7 +1478,8 @@
       "invalidTimeRange": "The end time must be after the start time.",
       "invalidNumber": "Enter a whole number.",
       "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here."
-    }
+    },
+    "emptyHint": "Classes a branch assigns to you appear here. You can also request a new one below."
   },
   "TeacherApprovals": {
     "title": "My approvals",
@@ -1399,7 +1498,10 @@
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
       "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats."
-    }
+    },
+    "emptyHint": "When a student asks to join one of your classes, the request appears here with their name and the class.",
+    "headline": "Wants to join your class",
+    "kindLabel": "Joining a class"
   },
   "TeacherCenters": {
     "title": "Find a centre to teach at",
@@ -1434,7 +1536,8 @@
       "invalidTime": "Enter a valid time.",
       "invalidTimeRange": "The end time must be after the start time.",
       "invalidNumber": "Enter a whole number."
-    }
+    },
+    "emptyHint": "No branch on the platform is open to new teachers right now."
   },
   "StudentSchedule": {
     "title": "My schedule",
@@ -1446,7 +1549,9 @@
     "upcomingBadge": "Upcoming",
     "pastTitle": "Past",
     "pastEmpty": "No past sessions yet.",
-    "dropIn": "Drop-in"
+    "dropIn": "Drop-in",
+    "upcomingEmptyHint": "Sessions for the classes you are enrolled in will appear here.",
+    "pastEmptyHint": "Your attendance shows up here after a session is marked."
   },
   "StudentDiscover": {
     "title": "Discover",
@@ -1483,7 +1588,8 @@
       "alreadyRequested": "You already have a pending request for this class.",
       "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
       "coolingOff": "Your last request for this class was declined. You can request it again from {date}."
-    }
+    },
+    "emptyHint": "No published class matches these filters. Clear one to see more."
   },
   "StudentProfile": {
     "title": "Complete your profile",
@@ -1505,7 +1611,8 @@
       "forbidden": "You are not allowed to do this.",
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved."
-    }
+    },
+    "emptyHint": "Request to join a class from Discover and the request appears here with its status."
   },
   "RatingPopup": {
     "title": "Rate your sessions",
@@ -1534,7 +1641,9 @@
     "upcomingBadge": "Upcoming",
     "pastTitle": "Past",
     "pastEmpty": "No past sessions yet.",
-    "dropIn": "Drop-in"
+    "dropIn": "Drop-in",
+    "upcomingEmptyHint": "Sessions scheduled for this child will appear here.",
+    "pastEmptyHint": "Attendance is listed here once a session has been marked."
   },
   "AdminCenters": {
     "title": "Branches",
@@ -1594,7 +1703,8 @@
       "auditTitle": "Recent activity",
       "auditDescription": "Every visit to this page — and every tenant-management action taken here — writes an audit row (privileged support access, spec §4.4).",
       "auditEmpty": "No activity recorded yet.",
-      "unknownActor": "Unknown"
+      "unknownActor": "Unknown",
+      "auditEmptyHint": "Lifecycle changes and window edits for this centre will be listed here."
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -1631,7 +1741,8 @@
     "errors": {
       "notFound": "That suggestion no longer exists.",
       "alreadyResolved": "That suggestion has already been resolved."
-    }
+    },
+    "emptyHint": "Subjects and grades you add here become selectable at every centre on the platform."
   },
   "AdminPlatform": {
     "title": "Platform",

@@ -8,7 +8,8 @@ import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 
 export type ExpenseCategoryOption = { value: string; label: string };
@@ -46,14 +47,14 @@ export function ExpenseForm({
           optional
           error={state.fieldErrors?.categoryId ? tErrors(state.fieldErrors.categoryId) : undefined}
         >
-          <SelectInput id="expense-categoryId" name="categoryId" defaultValue="">
+          <Select id="expense-categoryId" name="categoryId" defaultValue="">
             <option value="">{t("fields.categoryNone")}</option>
             {categories.map((category) => (
               <option key={category.value} value={category.value}>
                 {category.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -79,7 +80,13 @@ export function ExpenseForm({
           label={t("fields.date")}
           error={state.fieldErrors?.date ? tErrors(state.fieldErrors.date) : undefined}
         >
-          <Input id="expense-date" name="date" type="date" dir="ltr" defaultValue={today} required />
+          <DatePicker
+            id="expense-date"
+            name="date"
+            defaultValue={today}
+            todayIso={today}
+            required
+          />
         </Field>
 
         <Field

@@ -8,6 +8,7 @@ import { saveCardLayoutAction } from "@/app/[locale]/(center)/settings/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
@@ -195,6 +196,7 @@ export function CardLayoutForm({
                   }}
                   className={cn(
                     "absolute flex cursor-grab items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap active:cursor-grabbing",
+                    "transition-ui-fast outline-none focus-visible:ring-2 focus-visible:ring-white",
                     selected === key
                       ? "border-brand bg-brand/20 text-white ring-2 ring-brand"
                       : "border-white/40 bg-black/20 text-white/90 hover:border-white/70",
@@ -327,7 +329,7 @@ function NumberField({
   return (
     <label className="flex flex-col gap-1 text-xs font-medium text-text-secondary">
       {label}
-      <input
+      <Input
         type="number"
         dir="ltr"
         value={value}
@@ -337,7 +339,7 @@ function NumberField({
           const parsed = Number(event.currentTarget.value);
           if (Number.isFinite(parsed)) onChange(parsed);
         }}
-        className="h-9 w-20 rounded-lg border border-border bg-background px-2 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
+        className="h-9 w-20 px-2"
       />
     </label>
   );

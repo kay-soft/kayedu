@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { MailPlus, Users } from "lucide-react";
 
 import { revokeInvitationAction } from "@/app/[locale]/(center)/settings/staff/actions";
 import { BranchGrants, type BranchGrantMember } from "@/app/[locale]/(center)/settings/staff/branch-grants";
@@ -24,6 +25,7 @@ import { organizationBranches } from "@/lib/db/organizations";
 import { membershipBranchGrantsFor } from "@/lib/db/permissions";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export default async function StaffSettingsPage() {
   const ctx = await getTenantContext("center");
@@ -108,7 +110,12 @@ export default async function StaffSettingsPage() {
         </CardHeader>
         <CardContent>
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("noMembers")}</p>
+            <EmptyState
+              compact
+              icon={<Users />}
+              title={t("noMembers")}
+              description={t("noMembersHint")}
+            />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li
@@ -140,7 +147,12 @@ export default async function StaffSettingsPage() {
         </CardHeader>
         <CardContent>
           {invitations.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("noInvitations")}</p>
+            <EmptyState
+              compact
+              icon={<MailPlus />}
+              title={t("noInvitations")}
+              description={t("noInvitationsHint")}
+            />
           ) : (
             <ul className="flex flex-col gap-3">
               {invitations.map((invitation) => (

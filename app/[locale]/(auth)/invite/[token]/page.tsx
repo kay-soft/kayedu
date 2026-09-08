@@ -54,7 +54,7 @@ export default async function InvitePage({
 
   if (!invitation || invalidReason) {
     return (
-      <Card className="p-2 sm:p-4">
+      <Card className="p-2 shadow-card sm:p-4">
         <CardHeader>
           <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
         </CardHeader>
@@ -77,7 +77,7 @@ export default async function InvitePage({
   const nextPath = encodeURIComponent(ROUTES.invite(token));
 
   return (
-    <Card className="p-2 sm:p-4">
+    <Card className="p-2 shadow-card sm:p-4">
       <CardHeader>
         <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
         <CardDescription>

@@ -29,10 +29,10 @@ import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { piastresToInputValue } from "@/lib/money";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { LinkButton } from "@/components/shared/link-button";
 
 const MAX_CANDIDATES = 8;
 
@@ -185,12 +185,9 @@ export default async function ClassDetailPage({
             <Badge variant={classGroup.active ? "success" : "neutral"}>
               {classGroup.active ? tCommon("active") : tCommon("inactive")}
             </Badge>
-            <Link
-              href={ROUTES.centerClasses}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.centerClasses}>
               {t("backToList")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />

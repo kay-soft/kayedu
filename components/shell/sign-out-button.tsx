@@ -16,7 +16,7 @@ export function SignOutButton({ collapsed }: { collapsed?: boolean }) {
         type="submit"
         title={collapsed ? t("signOut") : undefined}
         className={cn(
-          "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground transition-ui focus-ring-inverse hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent/70",
           collapsed && "justify-center px-0",
         )}
       >

@@ -67,7 +67,7 @@ export function NavItem({
       aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
       className={cn(
-        "relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+        "relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-ui",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
         collapsed && "justify-center px-0",
         active

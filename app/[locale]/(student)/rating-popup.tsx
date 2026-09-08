@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { Star } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -99,6 +100,7 @@ function RatingRow({
     if (skipState.status === "skipped") onResolved();
   }, [skipState.status, onResolved]);
 
+  const [hovered, setHovered] = useState(0);
   const pending = submitPending || skipPending;
   const error = submitState.error ?? skipState.error;
 
@@ -113,7 +115,15 @@ function RatingRow({
         </p>
       </div>
 
-      <form action={submitAction} className="flex flex-wrap items-center gap-2">
+      {/* Stars, not numbers (docs/04 §11.5) — with the run up to the pointer
+          filling as a preview, so the score is legible before it is committed.
+          Still one submit per star: a click is the whole interaction, with no
+          separate confirm step. */}
+      <form
+        action={submitAction}
+        className="flex flex-wrap items-center gap-1"
+        onMouseLeave={() => setHovered(0)}
+      >
         <input type="hidden" name="sessionId" value={session.sessionId} />
         {SCORES.map((score) => (
           <button
@@ -123,12 +133,20 @@ function RatingRow({
             value={score}
             disabled={pending}
             aria-label={t("scoreLabel", { score })}
+            onMouseEnter={() => setHovered(score)}
+            onFocus={() => setHovered(score)}
             className={cn(
-              "flex size-11 shrink-0 items-center justify-center rounded-lg border border-border text-sm font-semibold text-text-primary",
-              "hover:bg-surface-subtle disabled:opacity-50",
+              "flex size-11 shrink-0 items-center justify-center rounded-lg",
+              "transition-ui-fast focus-ring hover:bg-surface-hover active:bg-surface-active",
+              "disabled:pointer-events-none disabled:opacity-50",
+              score <= hovered ? "text-warning" : "text-text-muted",
             )}
           >
-            {score}
+            <Star
+              className="size-6"
+              aria-hidden
+              fill={score <= hovered ? "currentColor" : "none"}
+            />
           </button>
         ))}
       </form>
@@ -140,7 +158,11 @@ function RatingRow({
         <button
           type="submit"
           disabled={pending}
-          className="text-xs font-medium text-text-muted underline hover:text-text-secondary disabled:opacity-50"
+          className={cn(
+            "-mx-2 flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-text-secondary",
+            "transition-ui-fast focus-ring hover:bg-surface-hover hover:text-text-primary active:bg-surface-active",
+            "disabled:pointer-events-none disabled:opacity-50",
+          )}
         >
           {t("skip")}
         </button>

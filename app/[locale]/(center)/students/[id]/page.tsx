@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { ShieldOff, Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { IdCardPanel } from "@/app/[locale]/(center)/students/[id]/id-card-panel";
@@ -31,6 +32,8 @@ import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { storageConfigured } from "@/lib/supabase/admin";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * One student at this center (spec §4.1 item 4): their record, their enrolment
@@ -143,12 +146,9 @@ export default async function StudentDetailPage({
             <Badge variant={student.active ? "success" : "neutral"}>
               {student.active ? tCommon("active") : tCommon("inactive")}
             </Badge>
-            <Link
-              href={ROUTES.centerStudents}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.centerStudents}>
               {t("backToList")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />
@@ -253,7 +253,7 @@ export default async function StudentDetailPage({
             </CardHeader>
             <CardContent>
               {parentLinks.length === 0 ? (
-                <p className="text-sm text-text-muted">{t("parentLinks.empty")}</p>
+                <EmptyState compact icon={<Users />} title={t("parentLinks.empty")} description={t("parentLinks.emptyHint")} />
               ) : (
                 <ul className="flex flex-col gap-2">
                   {parentLinks.map((link) => (
@@ -345,7 +345,7 @@ export default async function StudentDetailPage({
           </CardHeader>
           <CardContent>
             {blocks.length === 0 ? (
-              <p className="text-sm text-text-muted">{t("blockedBy.empty")}</p>
+              <EmptyState compact icon={<ShieldOff />} title={t("blockedBy.empty")} description={t("blockedBy.emptyHint")} />
             ) : (
               <ul className="flex flex-col gap-2">
                 {blocks.map((block) => {

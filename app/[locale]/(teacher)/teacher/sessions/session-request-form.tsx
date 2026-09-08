@@ -1,14 +1,18 @@
 "use client";
 
 import { useActionState } from "react";
+import { BookOpen } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createSessionRequestAction } from "@/app/[locale]/(teacher)/teacher/sessions/actions";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { SelectInput } from "@/components/ui/select-input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type TeacherClassOption = { value: string; label: string };
 
@@ -28,7 +32,7 @@ export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] 
   );
 
   if (classes.length === 0) {
-    return <p className="text-sm text-text-muted">{t("noClasses")}</p>;
+    return <EmptyState compact icon={<BookOpen />} title={t("noClasses")} description={t("noClassesHint")} />;
   }
 
   return (
@@ -44,7 +48,7 @@ export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] 
         <label htmlFor="session-request-class" className="text-xs font-medium text-text-secondary">
           {t("class")}
         </label>
-        <SelectInput id="session-request-class" name="classGroupId" required>
+        <Select id="session-request-class" name="classGroupId" required>
           <option value="" disabled>
             {t("classPlaceholder")}
           </option>
@@ -53,7 +57,7 @@ export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] 
               {option.label}
             </option>
           ))}
-        </SelectInput>
+        </Select>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -61,13 +65,7 @@ export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] 
           <label htmlFor="session-request-date" className="text-xs font-medium text-text-secondary">
             {t("date")}
           </label>
-          <input
-            id="session-request-date"
-            type="date"
-            name="date"
-            required
-            className="h-11 rounded-lg border border-border bg-background px-3 text-sm"
-          />
+          <DatePicker id="session-request-date" name="date" required />
           {state.fieldErrors?.date ? (
             <FieldError>{tErrors(state.fieldErrors.date)}</FieldError>
           ) : null}
@@ -76,24 +74,24 @@ export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] 
           <label htmlFor="session-request-start" className="text-xs font-medium text-text-secondary">
             {t("start")}
           </label>
-          <input
+          <Input
             id="session-request-start"
             type="time"
             name="startTime"
+            dir="ltr"
             required
-            className="h-11 rounded-lg border border-border bg-background px-3 text-sm"
           />
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="session-request-end" className="text-xs font-medium text-text-secondary">
             {t("end")}
           </label>
-          <input
+          <Input
             id="session-request-end"
             type="time"
             name="endTime"
+            dir="ltr"
             required
-            className="h-11 rounded-lg border border-border bg-background px-3 text-sm"
           />
           {state.fieldErrors?.endTime ? (
             <FieldError>{tErrors(state.fieldErrors.endTime)}</FieldError>

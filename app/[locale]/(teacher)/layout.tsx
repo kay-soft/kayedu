@@ -2,7 +2,11 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 
 import { AppShell } from "@/components/shell/app-shell";
-import { brandFromContext, shellUser } from "@/components/shell/from-context";
+import {
+  brandFromContext,
+  shellScope,
+  shellUser,
+} from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireTeacherUser } from "@/lib/auth/tenant";
 import { ROUTES } from "@/lib/routes";
@@ -38,7 +42,6 @@ export default async function TeacherLayout({
         nav={[{ href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" }]}
         brand={DEFAULT_TEACHER_BRAND}
         user={shellUser(session.user, "TEACHER")}
-        canSwitchCenter={false}
         defaultCollapsed={defaultCollapsed}
       >
         {children}
@@ -52,7 +55,7 @@ export default async function TeacherLayout({
       nav={navForExperience("teacher", ctx.role, ctx.grants)}
       brand={brandFromContext(ctx)}
       user={shellUser(ctx.user, ctx.role)}
-      canSwitchCenter={session.relations.length > 1}
+      scope={shellScope(session.relations, [], ctx.center.id)}
       defaultCollapsed={defaultCollapsed}
     >
       {children}

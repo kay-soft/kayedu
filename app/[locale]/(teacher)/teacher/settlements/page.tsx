@@ -1,6 +1,8 @@
+import { HandCoins } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
@@ -49,7 +51,11 @@ export default async function TeacherSettlementsPage() {
       <Card>
         <CardContent className="flex flex-col gap-3 pt-6">
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("teacherEmpty")}</p>
+            <EmptyState
+              icon={<HandCoins />}
+              title={t("teacherEmpty")}
+              description={t("teacherEmptyHint")}
+            />
           ) : (
             rows.map(({ center, settlement }) => (
               <div

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Building2 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeachAtCenterCard } from "@/app/[locale]/(teacher)/teacher/centers/teach-at-center-card";
@@ -10,6 +11,7 @@ import { prisma } from "@/lib/db/client";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
+import { EmptyState } from "@/components/shared/empty-state";
 
 /**
  * The centre directory (M15, spec §4.2 item 7 / §5.1 "Teacher onboarding"):
@@ -53,7 +55,7 @@ export default async function TeacherCentersPage() {
       {centers.length === 0 ? (
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState icon={<Building2 />} title={t("empty")} description={t("emptyHint")} />
           </CardContent>
         </Card>
       ) : (

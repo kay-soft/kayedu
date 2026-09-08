@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { BookOpen, SearchX } from "lucide-react";
 
 import { AddClassDialog } from "@/app/[locale]/(center)/classes/add-class-dialog";
 import {
@@ -10,6 +11,8 @@ import { GenerateSessionsButton } from "@/app/[locale]/(center)/classes/generate
 import { HolidayCalendar } from "@/app/[locale]/(center)/classes/holiday-calendar";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import {
   Card,
   CardContent,
@@ -174,9 +177,25 @@ export default async function ClassesPage({
           />
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              {teacherId || subjectId || gradeId ? t("noMatches") : t("empty")}
-            </p>
+            teacherId || subjectId || gradeId ? (
+              <EmptyState
+                icon={<SearchX />}
+                tone="warning"
+                title={t("noMatches")}
+                description={t("noMatchesHint")}
+                action={
+                  <LinkButton href={ROUTES.centerClasses} size="sm">
+                    {t("clearFilters")}
+                  </LinkButton>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<BookOpen />}
+                title={t("empty")}
+                description={t("emptyHint")}
+              />
+            )
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li

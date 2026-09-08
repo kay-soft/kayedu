@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { BookOpen } from "lucide-react";
 
 import { ClassRequestForm } from "@/app/[locale]/(teacher)/teacher/classes/class-request-form";
 import { PageHeader } from "@/components/shared/page-header";
@@ -13,6 +14,7 @@ import {
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
+import { EmptyState } from "@/components/shared/empty-state";
 
 const STATUS_BADGE = {
   PENDING: "warning",
@@ -85,7 +87,7 @@ export default async function TeacherClassesPage() {
         </CardHeader>
         <CardContent>
           {requests.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState icon={<BookOpen />} title={t("empty")} description={t("emptyHint")} />
           ) : (
             <ul className="flex flex-col gap-2">
               {requests.map((request) => {

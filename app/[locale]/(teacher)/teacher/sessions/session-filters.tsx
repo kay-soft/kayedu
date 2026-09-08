@@ -2,7 +2,8 @@
 
 import { useTranslations } from "next-intl";
 
-import { SelectInput } from "@/components/ui/select-input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Select } from "@/components/ui/select";
 
 export type SelectOption = { value: string; label: string };
 
@@ -14,6 +15,7 @@ export type SelectOption = { value: string; label: string };
 export function TeacherSessionFilters({
   range,
   date,
+  todayIso,
   gradeId,
   status,
   q,
@@ -22,6 +24,8 @@ export function TeacherSessionFilters({
 }: {
   range: "day" | "week" | "month";
   date: string;
+  /** Today, from the server — the same "now" the query itself resolves against. */
+  todayIso: string;
   gradeId: string;
   status: string;
   q: string;
@@ -40,13 +44,13 @@ export function TeacherSessionFilters({
           <label htmlFor="filter-date" className="text-xs font-medium text-text-secondary">
             {t("date")}
           </label>
-          <input
+          <DatePicker
             id="filter-date"
             name="date"
-            type="date"
             defaultValue={date}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
-            className="h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
+            todayIso={todayIso}
+            clearable
+            submitOnChange
           />
         </div>
 
@@ -54,45 +58,45 @@ export function TeacherSessionFilters({
           <label htmlFor="filter-range" className="text-xs font-medium text-text-secondary">
             {t("range")}
           </label>
-          <SelectInput
+          <Select
             id="filter-range"
             name="range"
             defaultValue={range}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="day">{t("rangeDay")}</option>
             <option value="week">{t("rangeWeek")}</option>
             <option value="month">{t("rangeMonth")}</option>
-          </SelectInput>
+          </Select>
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="filter-status" className="text-xs font-medium text-text-secondary">
             {t("status")}
           </label>
-          <SelectInput
+          <Select
             id="filter-status"
             name="status"
             defaultValue={status}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             <option value="SCHEDULED">{tStatus("SCHEDULED")}</option>
             <option value="LIVE">{tStatus("LIVE")}</option>
             <option value="COMPLETED">{tStatus("COMPLETED")}</option>
             <option value="CANCELLED">{tStatus("CANCELLED")}</option>
-          </SelectInput>
+          </Select>
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="filter-gradeId" className="text-xs font-medium text-text-secondary">
             {t("grade")}
           </label>
-          <SelectInput
+          <Select
             id="filter-gradeId"
             name="gradeId"
             defaultValue={gradeId}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             {grades.map((option) => (
@@ -100,7 +104,7 @@ export function TeacherSessionFilters({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </div>
       </div>
     </form>

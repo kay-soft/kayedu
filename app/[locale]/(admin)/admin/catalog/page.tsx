@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { Library } from "lucide-react";
 
 import { SuggestionRow } from "@/app/[locale]/(admin)/admin/catalog/suggestion-row";
 import { PageHeader } from "@/components/shared/page-header";
@@ -9,6 +10,7 @@ import { catalogLabel } from "@/lib/catalog";
 import { listPendingCatalogSuggestions } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { formatDate } from "@/lib/format";
+import { EmptyState } from "@/components/shared/empty-state";
 
 /**
  * The platform-admin review queue (M13, docs/00-master-product-spec.md §4.4
@@ -75,7 +77,7 @@ export default async function AdminCatalogPage() {
       <PageHeader title={t("title")} description={t("subtitle", { count: rows.length })} />
 
       {rows.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("empty")}</p>
+        <EmptyState compact icon={<Library />} title={t("empty")} description={t("emptyHint")} />
       ) : (
         <div className="flex flex-col gap-3">
           {rows.map(({ suggestion, targetName, parentName }) => (

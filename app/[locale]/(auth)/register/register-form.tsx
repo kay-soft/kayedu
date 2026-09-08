@@ -4,10 +4,10 @@ import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { signUpAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
-import { FieldError, FormMessage } from "@/components/shared/form-message";
+import { Field } from "@/components/shared/field";
+import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 
@@ -39,37 +39,50 @@ export function RegisterForm({
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="firstName">{t("fields.firstName")}</Label>
+        <Field
+          id="firstName"
+          label={t("fields.firstName")}
+          error={
+            state.fieldErrors?.firstName
+              ? tErrors(state.fieldErrors.firstName)
+              : undefined
+          }
+        >
           <Input
             id="firstName"
             name="firstName"
             autoComplete="given-name"
+            placeholder={t("fields.firstNamePlaceholder")}
             required
             aria-invalid={state.fieldErrors?.firstName ? true : undefined}
           />
-          {state.fieldErrors?.firstName ? (
-            <FieldError>{tErrors(state.fieldErrors.firstName)}</FieldError>
-          ) : null}
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="lastName">{t("fields.lastName")}</Label>
+        <Field
+          id="lastName"
+          label={t("fields.lastName")}
+          error={
+            state.fieldErrors?.lastName
+              ? tErrors(state.fieldErrors.lastName)
+              : undefined
+          }
+        >
           <Input
             id="lastName"
             name="lastName"
             autoComplete="family-name"
+            placeholder={t("fields.lastNamePlaceholder")}
             required
             aria-invalid={state.fieldErrors?.lastName ? true : undefined}
           />
-          {state.fieldErrors?.lastName ? (
-            <FieldError>{tErrors(state.fieldErrors.lastName)}</FieldError>
-          ) : null}
-        </div>
+        </Field>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="email">{t("fields.email")}</Label>
+      <Field
+        id="email"
+        label={t("fields.email")}
+        error={state.fieldErrors?.email ? tErrors(state.fieldErrors.email) : undefined}
+      >
         <Input
           id="email"
           name="email"
@@ -77,21 +90,20 @@ export function RegisterForm({
           inputMode="email"
           autoComplete="email"
           dir="ltr"
+          placeholder="name@example.com"
           defaultValue={defaultEmail}
           readOnly={Boolean(defaultEmail)}
           required
           aria-invalid={state.fieldErrors?.email ? true : undefined}
         />
-        {state.fieldErrors?.email ? (
-          <FieldError>{tErrors(state.fieldErrors.email)}</FieldError>
-        ) : null}
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="phone">
-          {t("fields.phone")}
-          <span className="text-text-muted">({t("fields.optional")})</span>
-        </Label>
+      <Field
+        id="phone"
+        label={t("fields.phone")}
+        optional
+        error={state.fieldErrors?.phone ? tErrors(state.fieldErrors.phone) : undefined}
+      >
         <Input
           id="phone"
           name="phone"
@@ -99,16 +111,21 @@ export function RegisterForm({
           inputMode="tel"
           autoComplete="tel"
           dir="ltr"
-          placeholder="01xxxxxxxxx"
+          placeholder="01012345678"
           aria-invalid={state.fieldErrors?.phone ? true : undefined}
         />
-        {state.fieldErrors?.phone ? (
-          <FieldError>{tErrors(state.fieldErrors.phone)}</FieldError>
-        ) : null}
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">{t("fields.password")}</Label>
+      <Field
+        id="password"
+        label={t("fields.password")}
+        hint={state.fieldErrors?.password ? undefined : t("register.passwordHint")}
+        error={
+          state.fieldErrors?.password
+            ? tErrors(state.fieldErrors.password)
+            : undefined
+        }
+      >
         <Input
           id="password"
           name="password"
@@ -117,15 +134,17 @@ export function RegisterForm({
           required
           aria-invalid={state.fieldErrors?.password ? true : undefined}
         />
-        {state.fieldErrors?.password ? (
-          <FieldError>{tErrors(state.fieldErrors.password)}</FieldError>
-        ) : (
-          <p className="text-xs text-text-muted">{t("register.passwordHint")}</p>
-        )}
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="confirmPassword">{t("fields.confirmPassword")}</Label>
+      <Field
+        id="confirmPassword"
+        label={t("fields.confirmPassword")}
+        error={
+          state.fieldErrors?.confirmPassword
+            ? tErrors(state.fieldErrors.confirmPassword)
+            : undefined
+        }
+      >
         <Input
           id="confirmPassword"
           name="confirmPassword"
@@ -134,10 +153,7 @@ export function RegisterForm({
           required
           aria-invalid={state.fieldErrors?.confirmPassword ? true : undefined}
         />
-        {state.fieldErrors?.confirmPassword ? (
-          <FieldError>{tErrors(state.fieldErrors.confirmPassword)}</FieldError>
-        ) : null}
-      </div>
+      </Field>
 
       <SubmitButton className="w-full">{t("register.submit")}</SubmitButton>
 

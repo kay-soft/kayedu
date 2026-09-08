@@ -13,6 +13,7 @@ import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { ROUTES } from "@/lib/routes";
 
 const initialState: InviteFormState = {};
@@ -99,18 +100,16 @@ export function InviteForm() {
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="invite-role">{t("fields.role")}</Label>
-            <select
+            <Select
               id="invite-role"
               name="role"
               defaultValue="RECEPTIONIST"
-              className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
-            >
-              {ROLE_OPTIONS.map((role) => (
-                <option key={role} value={role}>
-                  {tRoles(role)}
-                </option>
-              ))}
-            </select>
+              aria-invalid={state.fieldErrors?.role ? true : undefined}
+              options={ROLE_OPTIONS.map((role) => ({
+                value: role,
+                label: tRoles(role),
+              }))}
+            />
             {state.fieldErrors?.role ? (
               <FieldError>{tErrors(state.fieldErrors.role)}</FieldError>
             ) : null}

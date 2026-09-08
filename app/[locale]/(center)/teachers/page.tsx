@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { AddTeacherDialog } from "@/app/[locale]/(center)/teachers/add-teacher-dialog";
+import { GraduationCap, SearchX } from "lucide-react";
 import { searchTeachersTypeAheadAction } from "@/app/[locale]/(center)/teachers/actions";
 import {
   TeacherRow,
@@ -9,6 +10,8 @@ import {
 import { Pagination } from "@/components/center/pagination";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import {
   Card,
   CardContent,
@@ -106,9 +109,26 @@ export default async function TeachersPage({
           />
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              {query.length > 0 ? t("noMatches") : t("empty")}
-            </p>
+            query.length > 0 ? (
+              <EmptyState
+                icon={<SearchX />}
+                tone="warning"
+                title={t("noMatches")}
+                description={t("noMatchesHint")}
+                action={
+                  <LinkButton href={ROUTES.centerTeachers} size="sm">
+                    {t("clearSearch")}
+                  </LinkButton>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<GraduationCap />}
+                title={t("empty")}
+                description={t("emptyHint")}
+                action={<AddTeacherDialog />}
+              />
+            )
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li

@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { SearchX } from "lucide-react";
 
 import { DiscoverFilters } from "@/app/[locale]/(student)/student/discover/discover-filters";
 import { ReserveButton } from "@/app/[locale]/(student)/student/discover/reserve-button";
@@ -21,11 +22,13 @@ import {
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
 import { formatMoney, formatRating } from "@/lib/format";
+import { nameInitial } from "@/lib/initials";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { subjectAccentColor } from "@/lib/subject-accent";
 import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { EmptyState } from "@/components/shared/empty-state";
 
 type CardStatus = "enrolled" | "pending" | "full" | "open" | "requiresApproval";
 
@@ -197,13 +200,13 @@ export default async function StudentDiscoverPage({
       />
 
       {pageEntries.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("empty")}</p>
+        <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {pageEntries.map((card) => (
             <div
               key={`${card.centerId}:${card.classGroupId}`}
-              className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card"
+              className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover"
             >
               <div
                 aria-hidden
@@ -227,7 +230,7 @@ export default async function StudentDiscoverPage({
                   className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
                   style={{ backgroundColor: subjectAccentColor(card.subjectName) }}
                 >
-                  {card.teacherName.trim().charAt(0) || "?"}
+                  {nameInitial(card.teacherName)}
                 </span>
                 <span className="min-w-0 truncate text-sm text-text-secondary">{card.teacherName}</span>
                 {card.teacherRating !== null ? (

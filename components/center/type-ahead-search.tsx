@@ -183,8 +183,11 @@ export function TypeAheadSearch({
                       onMouseEnter={() => setActiveIndex(index)}
                       onClick={() => select(result)}
                       className={cn(
-                        "flex w-full flex-col gap-0.5 px-3 py-2 text-start text-sm transition-colors",
-                        index === activeIndex ? "bg-surface-subtle" : "hover:bg-surface-subtle",
+                        "flex w-full flex-col gap-0.5 px-3 py-2 text-start text-sm transition-ui",
+                        "transition-ui-fast focus-ring",
+                        index === activeIndex
+                          ? "bg-brand/10 text-brand"
+                          : "hover:bg-surface-hover active:bg-surface-active",
                       )}
                     >
                       <span className="truncate font-medium text-text-primary">

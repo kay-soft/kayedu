@@ -64,11 +64,11 @@ export function AttendanceControl({
             disabled={pending}
             aria-pressed={selected}
             className={cn(
-              "min-h-11 min-w-11 rounded-lg px-3 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-60",
+              "min-h-11 min-w-11 rounded-lg px-3 text-sm font-medium transition-ui focus-ring disabled:pointer-events-none disabled:opacity-60",
               size === "lg" ? "min-h-12 px-4 text-base" : undefined,
               selected
                 ? TINT[status]
-                : "border border-border bg-surface text-text-secondary hover:bg-surface-subtle",
+                : "border border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
             )}
           >
             {t(status)}

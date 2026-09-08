@@ -21,6 +21,7 @@ import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { LinkButton } from "@/components/shared/link-button";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
@@ -75,12 +76,9 @@ export default async function TeacherStudentDetailPage({
             <span className="text-sm text-text-muted" dir="ltr">
               {student.studentCode}
             </span>
-            <Link
-              href={ROUTES.teacherStudents}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.teacherStudents}>
               {t("backToList")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />

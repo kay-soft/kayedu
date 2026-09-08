@@ -7,6 +7,7 @@ import { Link } from "@/lib/i18n/navigation";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import type { SessionDisplayStatus } from "@/lib/db/sessions";
+import { LinkButton } from "@/components/shared/link-button";
 
 export type SessionRowData = {
   sessionId: string;
@@ -36,7 +37,7 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
 
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
-      <div className="flex w-24 shrink-0 flex-col">
+      <div className="flex md:w-24 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.time")}</span>
         <span className="truncate text-sm tabular-nums text-text-secondary" dir="ltr">
           {session.startTime}
@@ -63,7 +64,7 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
         <span className="truncate text-sm text-text-secondary">{session.roomName ?? "—"}</span>
       </div>
 
-      <div className="flex w-28 shrink-0 flex-col">
+      <div className="flex md:w-28 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.marked")}</span>
         <span className="truncate text-sm tabular-nums text-text-secondary">
           {formatNumber(session.attendeeCount, locale)}
@@ -71,14 +72,14 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
         </span>
       </div>
 
-      <div className="flex w-28 shrink-0 flex-col">
+      <div className="flex md:w-28 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.price")}</span>
         <span className="truncate text-sm tabular-nums text-text-secondary">
           {formatMoney(session.price, locale)}
         </span>
       </div>
 
-      <div className="w-28 shrink-0">
+      <div className="md:w-28 md:shrink-0">
         <Badge variant={STATUS_BADGE[session.displayStatus]}>
           {session.displayStatus === "LIVE" ? (
             <span className="me-1 inline-block size-1.5 animate-pulse rounded-full bg-success" aria-hidden />
@@ -88,12 +89,9 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
       </div>
 
       <div className="shrink-0 md:w-24 md:text-end">
-        <Link
-          href={ROUTES.centerSession(session.sessionId)}
-          className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-text-primary hover:bg-surface-subtle md:h-9"
-        >
+        <LinkButton href={ROUTES.centerSession(session.sessionId)} className="md:h-9">
           {t("open")}
-        </Link>
+        </LinkButton>
       </div>
     </li>
   );

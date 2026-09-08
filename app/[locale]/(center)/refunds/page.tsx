@@ -1,6 +1,8 @@
+import { Undo2 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
 import {
   Card,
   CardContent,
@@ -41,7 +43,11 @@ export default async function RefundsPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {refunds.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState
+              icon={<Undo2 />}
+              title={t("empty")}
+              description={t("emptyHint")}
+            />
           ) : (
             refunds.map((refund) => {
               const classGroup = refund.payment.session.classGroup;

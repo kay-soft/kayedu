@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { CalendarClock, History } from "lucide-react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +12,7 @@ import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student
 import { formatDate, formatMoney } from "@/lib/format";
 import { startOfUtcDay } from "@/lib/scheduling";
 import { ScheduleDateFilter } from "./schedule-date-filter";
+import { EmptyState } from "@/components/shared/empty-state";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
@@ -142,7 +144,11 @@ export default async function StudentSchedulePage({
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle")} />
 
-      <ScheduleDateFilter date={dateFilter} dateLabel={t("filterDate")} clearLabel={t("clearDate")} />
+      <ScheduleDateFilter
+        date={dateFilter}
+        todayIso={today.toISOString().slice(0, 10)}
+        dateLabel={t("filterDate")}
+      />
 
       <Card>
         <CardHeader>
@@ -150,7 +156,7 @@ export default async function StudentSchedulePage({
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {upcomingFiltered.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("upcomingEmpty")}</p>
+            <EmptyState compact icon={<CalendarClock />} title={t("upcomingEmpty")} description={t("upcomingEmptyHint")} />
           ) : (
             upcomingFiltered.map((row) => (
               <div
@@ -184,7 +190,7 @@ export default async function StudentSchedulePage({
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {pastFiltered.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("pastEmpty")}</p>
+            <EmptyState compact icon={<History />} title={t("pastEmpty")} description={t("pastEmptyHint")} />
           ) : (
             pastFiltered.map((row) => (
               <div

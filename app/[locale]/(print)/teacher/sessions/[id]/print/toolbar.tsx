@@ -3,7 +3,7 @@
 import { Printer } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Link } from "@/lib/i18n/navigation";
+import { LinkButton } from "@/components/shared/link-button";
 
 /** On-screen-only print controls — hidden from the printout (`print:hidden`). */
 export function TeacherSessionPrintToolbar({
@@ -30,12 +30,9 @@ export function TeacherSessionPrintToolbar({
           <Printer className="size-4" aria-hidden />
           {printLabel}
         </Button>
-        <Link
-          href={backHref}
-          className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-        >
+        <LinkButton href={backHref}>
           {backLabel}
-        </Link>
+        </LinkButton>
       </div>
     </div>
   );

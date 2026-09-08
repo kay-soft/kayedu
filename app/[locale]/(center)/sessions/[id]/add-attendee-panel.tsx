@@ -14,6 +14,7 @@ import { PersonFields } from "@/components/center/person-fields";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import { Button } from "@/components/ui/button";
 
 export type AttendeeCandidate = {
   studentProfileId: string;
@@ -64,14 +65,10 @@ export function AddAttendeePanel({
       {showNewForm ? (
         <NewAttendeeForm sessionId={sessionId} onDone={() => setShowNewForm(false)} />
       ) : (
-        <button
-          type="button"
-          onClick={() => setShowNewForm(true)}
-          className="inline-flex h-11 w-fit items-center gap-2 rounded-lg border border-dashed border-border px-4 text-sm font-medium text-text-secondary hover:bg-surface-subtle"
-        >
+        <Button type="button" onClick={() => setShowNewForm(true)} variant="outline" className="h-11 px-4 border-dashed w-fit">
           <UserPlus className="size-4" aria-hidden />
           {t("registerNew")}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -165,13 +162,9 @@ function NewAttendeeForm({
       ) : (
         <div className="flex flex-col gap-2 sm:flex-row">
           <SubmitButton className="w-full sm:w-auto">{t("add")}</SubmitButton>
-          <button
-            type="button"
-            onClick={onDone}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle sm:w-auto"
-          >
+          <Button type="button" onClick={onDone} variant="outline" className="h-11 px-4 sm:w-auto">
             {t("cancel")}
-          </button>
+          </Button>
         </div>
       )}
     </form>

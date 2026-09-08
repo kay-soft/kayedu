@@ -8,7 +8,7 @@ import {
 } from "@/app/[locale]/(student)/rating-popup";
 import { ProfileCompletionForm } from "@/app/[locale]/(student)/student/profile/profile-completion-form";
 import { AppShell } from "@/components/shell/app-shell";
-import { shellUser } from "@/components/shell/from-context";
+import { shellScope, shellUser } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireStudentUser, studentBrand } from "@/lib/auth/tenant";
 import { catalogLabel } from "@/lib/catalog";
@@ -110,7 +110,6 @@ export default async function StudentLayout({
         nav={navForExperience("student", "STUDENT")}
         brand={studentBrand(session)}
         user={shellUser(session.user, "STUDENT")}
-        canSwitchCenter={false}
         defaultCollapsed={defaultCollapsed}
       >
         <ProfileCompletionForm
@@ -144,7 +143,7 @@ export default async function StudentLayout({
       nav={navForExperience("student", "STUDENT")}
       brand={studentBrand(session)}
       user={shellUser(session.user, "STUDENT")}
-      canSwitchCenter={session.relations.length > 1}
+      scope={shellScope(session.relations, [], session.studentRelation?.center.id ?? null)}
       defaultCollapsed={defaultCollapsed}
     >
       <RatingPopup sessions={pendingRatings} />

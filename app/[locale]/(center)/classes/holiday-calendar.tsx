@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Trash2 } from "lucide-react";
+import { CalendarOff, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -13,8 +13,10 @@ import { Field } from "@/components/shared/field";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { formatDate } from "@/lib/format";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type HolidayRow = { id: string; date: string; name: string | null };
 
@@ -47,7 +49,7 @@ export function HolidayCalendar({ holidays }: { holidays: HolidayRow[] }) {
       ) : null}
 
       {holidays.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("empty")}</p>
+        <EmptyState compact icon={<CalendarOff />} title={t("empty")} description={t("emptyHint")} />
       ) : (
         <ul className="flex flex-col gap-2">
           {holidays.map((holiday) => (
@@ -97,7 +99,7 @@ export function HolidayCalendar({ holidays }: { holidays: HolidayRow[] }) {
               : undefined
           }
         >
-          <Input id="holiday-date" name="date" type="date" dir="ltr" required />
+          <DatePicker id="holiday-date" name="date" required />
         </Field>
 
         <Field id="holiday-name" label={t("name")} optional className="flex-1">

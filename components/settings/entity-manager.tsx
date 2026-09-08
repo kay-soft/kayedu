@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Inbox, Pencil, Plus, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -20,6 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { IDLE_ACTION_STATE, type ActionState } from "@/lib/validation/form";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type EntityRecord = {
   id: string;
@@ -121,7 +122,12 @@ export function EntityManager({
         </CardHeader>
         <CardContent>
           {records.length === 0 ? (
-            <p className="text-sm text-text-muted">{labels.empty}</p>
+            <EmptyState
+              compact
+              icon={<Inbox />}
+              title={labels.empty}
+              description={t("emptyHint")}
+            />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <li
@@ -133,7 +139,7 @@ export function EntityManager({
                     {field.label}
                   </span>
                 ))}
-                <span className="w-20 shrink-0">{t("status")}</span>
+                <span className="md:w-20 md:shrink-0">{t("status")}</span>
                 <span className="w-40 shrink-0 text-end">{t("actions")}</span>
               </li>
 
@@ -278,7 +284,7 @@ function EntityRow({
         </div>
       ))}
 
-      <div className="w-20 shrink-0">
+      <div className="md:w-20 md:shrink-0">
         <Badge variant={record.active ? "success" : "neutral"}>
           {record.active ? t("active") : t("inactive")}
         </Badge>

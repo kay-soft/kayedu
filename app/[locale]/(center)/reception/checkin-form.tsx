@@ -92,10 +92,10 @@ export function CheckInForm({
                 onClick={() => setSessionId(session.sessionId)}
                 aria-pressed={sessionId === session.sessionId}
                 className={cn(
-                  "flex min-h-11 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-start text-sm transition-colors",
+                  "flex min-h-11 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-start text-sm transition-ui",
                   sessionId === session.sessionId
                     ? "border-brand bg-brand/10 text-brand"
-                    : "border-border bg-surface text-text-secondary hover:bg-surface-subtle",
+                    : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
                 )}
               >
                 <span className="min-w-0 truncate font-medium">{session.className}</span>
@@ -118,10 +118,10 @@ export function CheckInForm({
               onClick={() => setStatus(value)}
               aria-pressed={status === value}
               className={cn(
-                "min-h-12 min-w-12 rounded-lg px-4 text-base font-medium transition-colors",
+                "min-h-12 min-w-12 rounded-lg px-4 text-base font-medium transition-ui",
                 status === value
                   ? TINT[value]
-                  : "border border-border bg-surface text-text-secondary hover:bg-surface-subtle",
+                  : "border border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
               )}
             >
               {tAttendance(value)}

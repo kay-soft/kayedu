@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 
 import { DateFilter, type DateFilterValue } from "@/components/shared/date-filter";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 
 export type SelectOption = { value: string; label: string };
 
@@ -52,29 +52,29 @@ export function SessionFilters({
           <label htmlFor="filter-status" className="text-xs font-medium text-text-secondary">
             {t("status")}
           </label>
-          <SelectInput
+          <Select
             id="filter-status"
             name="status"
             defaultValue={status}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             <option value="SCHEDULED">{tStatus("SCHEDULED")}</option>
             <option value="LIVE">{tStatus("LIVE")}</option>
             <option value="COMPLETED">{tStatus("COMPLETED")}</option>
             <option value="CANCELLED">{tStatus("CANCELLED")}</option>
-          </SelectInput>
+          </Select>
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="filter-teacherId" className="text-xs font-medium text-text-secondary">
             {t("teacher")}
           </label>
-          <SelectInput
+          <Select
             id="filter-teacherId"
             name="teacherId"
             defaultValue={teacherId}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             {teachers.map((option) => (
@@ -82,18 +82,18 @@ export function SessionFilters({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="filter-subjectId" className="text-xs font-medium text-text-secondary">
             {t("subject")}
           </label>
-          <SelectInput
+          <Select
             id="filter-subjectId"
             name="subjectId"
             defaultValue={subjectId}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             {subjects.map((option) => (
@@ -101,18 +101,18 @@ export function SessionFilters({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="filter-classGroupId" className="text-xs font-medium text-text-secondary">
             {t("class")}
           </label>
-          <SelectInput
+          <Select
             id="filter-classGroupId"
             name="classGroupId"
             defaultValue={classGroupId}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             {classes.map((option) => (
@@ -120,7 +120,7 @@ export function SessionFilters({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </div>
       </div>
     </form>

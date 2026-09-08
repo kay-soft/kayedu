@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { LinkButton } from "@/components/shared/link-button";
 
 export type TeacherRowData = {
   membershipId: string;
@@ -79,19 +80,16 @@ export function TeacherRow({
         </span>
       </div>
 
-      <div className="w-24 shrink-0">
+      <div className="md:w-24 md:shrink-0">
         <Badge variant={teacher.active ? "success" : "neutral"}>
           {teacher.active ? tCommon("active") : tCommon("inactive")}
         </Badge>
       </div>
 
       <div className="flex shrink-0 flex-col gap-2 sm:flex-row md:w-44 md:justify-end">
-        <Link
-          href={ROUTES.centerTeacher(teacher.membershipId)}
-          className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-text-primary hover:bg-surface-subtle"
-        >
+        <LinkButton href={ROUTES.centerTeacher(teacher.membershipId)}>
           {t("open")}
-        </Link>
+        </LinkButton>
 
         {canManage ? (
           <form action={formAction}>

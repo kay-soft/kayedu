@@ -8,6 +8,9 @@ import {
   rescheduleSessionAction,
 } from "@/app/[locale]/(center)/sessions/actions";
 import { FormMessage } from "@/components/shared/form-message";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -65,7 +68,7 @@ export function SessionLifecycleActions({
           <button
             type="button"
             onClick={() => setRescheduleOpen((open) => !open)}
-            className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-xs font-medium text-text-secondary hover:bg-surface-subtle"
+            className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-xs font-medium text-text-secondary transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
           >
             {t("reschedule")}
           </button>
@@ -87,36 +90,32 @@ export function SessionLifecycleActions({
         >
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="sessionId" value={sessionId} />
-          <label className="flex flex-col gap-1 text-xs text-text-secondary">
-            {t("fields.date")}
-            <input
-              type="date"
-              name="date"
-              defaultValue={date}
-              required
-              className="h-11 rounded-lg border border-border bg-background px-3 text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-text-secondary">
-            {t("fields.startTime")}
-            <input
+          <div className="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">
+            <Label htmlFor="reschedule-date">{t("fields.date")}</Label>
+            <DatePicker id="reschedule-date" name="date" defaultValue={date} required />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Label htmlFor="reschedule-start">{t("fields.startTime")}</Label>
+            <Input
+              id="reschedule-start"
               type="time"
               name="startTime"
+              dir="ltr"
               defaultValue={startTime}
               required
-              className="h-11 rounded-lg border border-border bg-background px-3 text-sm"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-text-secondary">
-            {t("fields.endTime")}
-            <input
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Label htmlFor="reschedule-end">{t("fields.endTime")}</Label>
+            <Input
+              id="reschedule-end"
               type="time"
               name="endTime"
+              dir="ltr"
               defaultValue={endTime}
               required
-              className="h-11 rounded-lg border border-border bg-background px-3 text-sm"
             />
-          </label>
+          </div>
           <SubmitButton>{t("save")}</SubmitButton>
         </form>
       ) : null}

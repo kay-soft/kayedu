@@ -4,6 +4,7 @@ import { Building2, CalendarClock, GraduationCap, Users } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import { Card, CardContent } from "@/components/ui/card";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
@@ -48,7 +49,7 @@ export default async function AdminPlatformPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle")} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={4}>
         <StatCard
           label={t("activeCenters")}
           value={formatNumber(centers.operational, locale)}
@@ -73,7 +74,7 @@ export default async function AdminPlatformPage() {
           value={formatNumber(sessions, locale)}
           icon={<CalendarClock className="size-4" />}
         />
-      </div>
+      </StatGrid>
 
       <SectionHeader title={t("adoption.title")} description={t("adoption.description")} />
       <Card>

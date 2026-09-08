@@ -43,3 +43,41 @@ export function formatMoney(piastres: number, locale: string): string {
     maximumFractionDigits: 2,
   }).format(fromPiastres(piastres));
 }
+
+/**
+ * Calendar chrome (docs/04-design-system.md §5 "Date control"). The month
+ * heading, the weekday initials and the day numbers all render through here
+ * for the same reason every other figure does: Arabic-Indic digits in `ar`,
+ * Latin in `en`, and never a mix (docs/02 §8).
+ */
+export function formatMonthYear(value: Date, locale: string): string {
+  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(value);
+}
+
+/** The single-letter column heading for a weekday, e.g. "M" / "ن". */
+export function formatWeekdayNarrow(value: Date, locale: string): string {
+  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    weekday: "narrow",
+    timeZone: "UTC",
+  }).format(value);
+}
+
+/** A bare day-of-month number for a calendar cell. */
+export function formatDayOfMonth(value: Date, locale: string): string {
+  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(value);
+}
+
+/** The accessible name of a calendar cell — the full date, spelled out. */
+export function formatFullDate(value: Date, locale: string): string {
+  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    dateStyle: "full",
+    timeZone: "UTC",
+  }).format(value);
+}

@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/format";
 import { piastresToInputValue, splitShare } from "@/lib/money";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
@@ -102,17 +102,15 @@ export function GeneralSettingsForm({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex min-w-0 flex-col gap-1.5">
               <Label htmlFor="defaultShareType">{t("shareType")}</Label>
-              <SelectInput
+              <Select
                 id="defaultShareType"
                 name="defaultShareType"
                 value={shareType}
-                onChange={(event) =>
-                  setShareType(event.target.value as ShareType)
-                }
+                onValueChange={(next) => setShareType(next as ShareType)}
               >
                 <option value="PERCENTAGE">{t("percentage")}</option>
                 <option value="FIXED">{t("fixed")}</option>
-              </SelectInput>
+              </Select>
             </div>
 
             <div className="flex min-w-0 flex-col gap-1.5">
@@ -240,7 +238,7 @@ export function GeneralSettingsForm({
 
             <div className="flex min-w-0 flex-col gap-1.5">
               <Label htmlFor="timezone">{t("timezone")}</Label>
-              <SelectInput
+              <Select
                 id="timezone"
                 name="timezone"
                 defaultValue={values.timezone}
@@ -250,7 +248,7 @@ export function GeneralSettingsForm({
                     {zone}
                   </option>
                 ))}
-              </SelectInput>
+              </Select>
             </div>
           </div>
 

@@ -41,7 +41,7 @@ export async function Pagination({
         {page > 1 ? (
           <Link
             href={buildHref(page - 1)}
-            className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-primary hover:bg-surface-subtle"
+            className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-primary transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
           >
             {/* The arrow means "previous", so it mirrors in RTL (docs/04 §7). */}
             <ChevronLeft className="size-4 rtl:-scale-x-100" aria-hidden />
@@ -50,7 +50,7 @@ export async function Pagination({
         ) : (
           <span
             aria-disabled
-            className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-muted/60"
+            className="flex h-11 min-w-11 cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-border bg-surface-subtle px-3 text-sm text-text-muted/60"
           >
             <ChevronLeft className="size-4 rtl:-scale-x-100" aria-hidden />
             {t("previous")}
@@ -64,7 +64,7 @@ export async function Pagination({
         {page < totalPages ? (
           <Link
             href={buildHref(page + 1)}
-            className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-primary hover:bg-surface-subtle"
+            className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-primary transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
           >
             {t("next")}
             <ChevronRight className="size-4 rtl:-scale-x-100" aria-hidden />
@@ -72,7 +72,7 @@ export async function Pagination({
         ) : (
           <span
             aria-disabled
-            className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-muted/60"
+            className="flex h-11 min-w-11 cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-border bg-surface-subtle px-3 text-sm text-text-muted/60"
           >
             {t("next")}
             <ChevronRight className="size-4 rtl:-scale-x-100" aria-hidden />

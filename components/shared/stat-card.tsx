@@ -50,6 +50,8 @@ export function StatCard({
   icon,
   trend,
   accent,
+  zero,
+  zeroLabel,
   className,
 }: {
   label: string;
@@ -58,6 +60,15 @@ export function StatCard({
   icon?: ReactNode;
   trend?: StatTrend;
   accent?: keyof typeof ACCENTS;
+  /**
+   * True when the figure is zero *because nothing happened in this range*,
+   * not because something failed. A wall of bold black "EGP 0" reads as a
+   * broken screen; a dimmed figure with a one-line reason reads as an answer
+   * (docs/04 §5 "KPI / stat card").
+   */
+  zero?: boolean;
+  /** The already-translated "no activity in this range" line. */
+  zeroLabel?: string;
   className?: string;
 }) {
   const TrendIcon = trend ? TREND_ICONS[trend.direction] : null;
@@ -65,7 +76,7 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border border-border bg-surface p-4 shadow-card transition-shadow hover:shadow-card-hover sm:p-6",
+        "relative overflow-hidden rounded-xl border border-border bg-surface p-4 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover sm:p-6",
         // The accent is a top border in both locales — a logical inset, so it
         // does not flip with direction (docs/04 §7).
         accent &&
@@ -83,7 +94,12 @@ export function StatCard({
         ) : null}
       </div>
 
-      <p className="mt-2 text-3xl font-bold tabular-nums text-text-primary">
+      <p
+        className={cn(
+          "mt-2 text-3xl font-bold tabular-nums",
+          zero ? "text-text-muted" : "text-text-primary",
+        )}
+      >
         {value}
       </p>
 
@@ -98,6 +114,10 @@ export function StatCard({
           <TrendIcon className="size-3" aria-hidden />
           <span className="tabular-nums">{trend.label}</span>
         </span>
+      ) : null}
+
+      {zero && zeroLabel ? (
+        <p className="mt-2 text-xs text-text-muted">{zeroLabel}</p>
       ) : null}
 
       {hint ? <p className="mt-1 text-xs text-text-muted">{hint}</p> : null}

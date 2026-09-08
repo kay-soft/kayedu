@@ -1,9 +1,11 @@
 import { getTranslations } from "next-intl/server";
+import { CalendarClock } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { SessionDisplayStatus } from "@/lib/db/sessions";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { EmptyState } from "@/components/shared/empty-state";
 
 export type LiveSessionOption = {
   sessionId: string;
@@ -33,7 +35,14 @@ export async function LiveSessionRail({ sessions }: { sessions: LiveSessionOptio
   const tStatus = await getTranslations("Sessions.status");
 
   if (sessions.length === 0) {
-    return <p className="text-sm text-text-muted">{t("noSessionsToday")}</p>;
+    return (
+      <EmptyState
+        compact
+        icon={<CalendarClock />}
+        title={t("noSessionsToday")}
+        description={t("noSessionsTodayHint")}
+      />
+    );
   }
 
   return (

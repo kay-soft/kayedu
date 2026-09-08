@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,21 +43,8 @@ export function ToggleRow({
     >
       <label
         htmlFor={id}
-        className="flex min-h-11 cursor-pointer items-start gap-3"
+        className="flex min-h-11 cursor-pointer items-start justify-between gap-3"
       >
-        <input
-          id={id}
-          name={name}
-          type="checkbox"
-          disabled={disabled}
-          className="mt-0.5 size-5 shrink-0 accent-[var(--brand)]"
-          {...(checked === undefined
-            ? { defaultChecked }
-            : {
-                checked,
-                onChange: (event) => onCheckedChange?.(event.target.checked),
-              })}
-        />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium text-text-primary">
             {label}
@@ -67,6 +55,15 @@ export function ToggleRow({
             </span>
           ) : null}
         </span>
+        <Switch
+          id={id}
+          name={name}
+          disabled={disabled}
+          className="mt-0.5"
+          {...(checked === undefined
+            ? { defaultChecked }
+            : { checked, onCheckedChange: (next) => onCheckedChange?.(next) })}
+        />
       </label>
       {note ? <div className="mt-3">{note}</div> : null}
     </div>

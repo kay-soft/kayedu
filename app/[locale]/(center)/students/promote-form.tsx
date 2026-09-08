@@ -8,7 +8,7 @@ import { promoteGradeAction } from "@/app/[locale]/(center)/students/actions";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 import type { GradeOption } from "@/components/center/student-fields";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
 
@@ -45,13 +45,13 @@ export function PromoteForm({ grades }: { grades: GradeOption[] }) {
               : undefined
           }
         >
-          <SelectInput id="promote-from" name="fromGradeId" required>
+          <Select id="promote-from" name="fromGradeId" required>
             {grades.map((grade) => (
               <option key={grade.value} value={grade.value}>
                 {grade.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
@@ -63,13 +63,13 @@ export function PromoteForm({ grades }: { grades: GradeOption[] }) {
               : undefined
           }
         >
-          <SelectInput id="promote-to" name="toGradeId" required>
+          <Select id="promote-to" name="toGradeId" required>
             {grades.map((grade) => (
               <option key={grade.value} value={grade.value}>
                 {grade.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
       </div>
 
