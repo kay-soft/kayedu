@@ -1251,7 +1251,9 @@
         "analytics_own_view": "عرض التحليلات الشخصية",
         "approvals_manage": "إدارة الموافقات",
         "changeRequest_create": "تقديم طلبات فصل/حصة",
-        "audit_view": "عرض سجل التدقيق"
+        "reservation_manage_own": "إدارة حجوزات الفصول الخاصة",
+        "audit_view": "عرض سجل التدقيق",
+        "parent_link_manage": "إدارة ربط أولياء الأمور"
       }
     }
   },

@@ -43,7 +43,7 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
         <span className="truncate text-sm text-text-secondary">
           {formatDate(session.date, locale)}
         </span>
-        <span className="truncate text-xs tabular-nums text-text-muted">
+        <span className="truncate text-xs tabular-nums text-text-muted" suppressHydrationWarning>
           {formatTimeRange(session.startTime, session.endTime, locale)}
         </span>
       </div>

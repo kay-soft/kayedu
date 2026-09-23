@@ -81,7 +81,7 @@ export function StudentForm({
         description={t("centerSectionDescription")}
       />
       <PersonFields
-        key={linkedMatch?.userId ?? "new"}
+        key={`person-${linkedMatch?.userId ?? "new"}`}
         idPrefix="student-create"
         values={
           linkedMatch
@@ -91,7 +91,7 @@ export function StudentForm({
         fieldErrors={state.fieldErrors}
       />
       <ContactFields
-        key={linkedMatch?.userId ?? "new"}
+        key={`contact-${linkedMatch?.userId ?? "new"}`}
         idPrefix="student-create"
         values={linkedMatch ? { phone: linkedMatch.phone ?? "", email: linkedMatch.email ?? "" } : undefined}
         fieldErrors={state.fieldErrors}

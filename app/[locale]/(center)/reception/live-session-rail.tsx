@@ -69,7 +69,7 @@ export async function LiveSessionRail({
             <p className="truncate text-xs text-text-muted">{session.teacherName}</p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
-            <span className="text-xs tabular-nums text-text-secondary" dir="ltr">
+            <span className="text-xs tabular-nums text-text-secondary" dir="ltr" suppressHydrationWarning>
               {formatTimeRange(session.startTime, session.endTime, locale)}
             </span>
             <Badge variant={STATUS_BADGE[session.displayStatus]}>

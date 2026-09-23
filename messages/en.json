@@ -1251,7 +1251,9 @@
         "analytics_own_view": "View own analytics",
         "approvals_manage": "Manage approvals",
         "changeRequest_create": "Submit class/session requests",
-        "audit_view": "View audit log"
+        "reservation_manage_own": "Manage own class reservations",
+        "audit_view": "View audit log",
+        "parent_link_manage": "Manage parent links"
       }
     }
   },

@@ -109,10 +109,16 @@ const timeFormatOptions: Intl.DateTimeFormatOptions = {
   timeZone: "UTC",
 };
 
+function normalizeSpaces(value: string): string {
+  return value.replace(/[\u2009\u202F\u00A0]/g, " ");
+}
+
 export function formatTime(value: string, locale: string): string {
   const date = timeToUtcDate(value);
   if (!date) return value;
-  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).format(date);
+  return normalizeSpaces(
+    new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).format(date),
+  );
 }
 
 /**
@@ -124,8 +130,11 @@ export function formatTimeRange(start: string, end: string, locale: string): str
   const from = timeToUtcDate(start);
   const to = timeToUtcDate(end);
   if (!from || !to) return `${formatTime(start, locale)}–${formatTime(end, locale)}`;
-  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).formatRange(
-    from,
-    to,
+  return normalizeSpaces(
+    new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).formatRange(
+      from,
+      to,
+    ),
   );
 }
+

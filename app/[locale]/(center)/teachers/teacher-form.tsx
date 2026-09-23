@@ -68,7 +68,7 @@ export function TeacherForm({ onCreated }: { onCreated: () => void }) {
         description={t("contactDescription")}
       />
       <PersonFields
-        key={linkedMatch?.userId ?? "new"}
+        key={`person-${linkedMatch?.userId ?? "new"}`}
         idPrefix="teacher-create"
         values={
           linkedMatch
@@ -78,7 +78,7 @@ export function TeacherForm({ onCreated }: { onCreated: () => void }) {
         fieldErrors={state.fieldErrors}
       />
       <ContactFields
-        key={linkedMatch?.userId ?? "new"}
+        key={`contact-${linkedMatch?.userId ?? "new"}`}
         idPrefix="teacher-create"
         values={linkedMatch ? { phone: linkedMatch.phone ?? "", email: linkedMatch.email ?? "" } : undefined}
         fieldErrors={state.fieldErrors}
