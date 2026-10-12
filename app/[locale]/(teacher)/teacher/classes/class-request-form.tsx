@@ -85,10 +85,6 @@ export function ClassRequestForm({
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field id="request-capacity" label={t("capacity")} hint={t("capacityHint")} error={state.fieldErrors?.capacity ? tErrors(state.fieldErrors.capacity) : undefined}>
-          <Input id="request-capacity" name="capacity" type="number" min={0} defaultValue={0} />
-        </Field>
-
         <Field id="request-lateThresholdMinutes" label={t("lateThreshold")} error={state.fieldErrors?.lateThresholdMinutes ? tErrors(state.fieldErrors.lateThresholdMinutes) : undefined}>
           <Input id="request-lateThresholdMinutes" name="lateThresholdMinutes" type="number" min={0} defaultValue={10} />
         </Field>

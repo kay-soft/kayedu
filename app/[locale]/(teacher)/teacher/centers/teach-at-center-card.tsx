@@ -166,15 +166,6 @@ function RequestForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
-          id={`${centerId}-capacity`}
-          label={t("capacity")}
-          hint={t("capacityHint")}
-          error={state.fieldErrors?.capacity ? tErrors(state.fieldErrors.capacity) : undefined}
-        >
-          <Input id={`${centerId}-capacity`} name="capacity" type="number" min={0} defaultValue={0} />
-        </Field>
-
-        <Field
           id={`${centerId}-lateThresholdMinutes`}
           label={t("lateThreshold")}
           error={

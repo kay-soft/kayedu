@@ -10,6 +10,11 @@ import { normalizeEmail } from "../identity.ts";
 import { optionalPhone } from "./phone-schema.ts";
 import { dateFilterSchema } from "./date-filter.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
+import {
+  confirmConflictsField,
+  extraRoomIdsField,
+  type SlotConflictState,
+} from "./room-set.ts";
 
 /**
  * Session, attendance, payment and Reception Desk schemas (M5). Every Server
@@ -199,6 +204,17 @@ const sessionTime = z
   .trim()
   .refine((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value), "invalidTime");
 
+/**
+ * A session's primary room (R3). Absent → `undefined` (reschedule: keep the
+ * original's room set); empty → `null` (no room).
+ */
+const sessionRoomId = z
+  .string()
+  .trim()
+  .max(64, "notFound")
+  .optional()
+  .transform((value) => (value === undefined ? undefined : value.length > 0 ? value : null));
+
 export const rescheduleSessionSchema = z
   .object({
     ...base,
@@ -206,11 +222,23 @@ export const rescheduleSessionSchema = z
     date: sessionDate,
     startTime: sessionTime,
     endTime: sessionTime,
+    roomId: sessionRoomId,
+    extraRoomIds: extraRoomIdsField,
+    confirmConflicts: confirmConflictsField,
   })
   .refine((value) => value.startTime < value.endTime, {
     path: ["endTime"],
     message: "invalidTimeRange",
   });
+
+/** A session's own room set (R3) — this session only, never its class. */
+export const sessionRoomsSchema = z.object({
+  ...base,
+  sessionId: recordId,
+  roomId: sessionRoomId.transform((value) => value ?? null),
+  extraRoomIds: extraRoomIdsField,
+  confirmConflicts: confirmConflictsField,
+});
 
 // ── Per-session centre-cut override (M13, spec §5.1 "Center cut") ─────────
 
@@ -288,7 +316,7 @@ export type SessionMatchCandidate = {
   existingProfileId?: string;
 };
 
-export type SessionActionState = {
+export type SessionActionState = SlotConflictState & {
   error?: string;
   fieldErrors?: Record<string, string>;
   status?:
@@ -301,9 +329,9 @@ export type SessionActionState = {
     | "cancelled"
     | "rescheduled"
     | "shareUpdated"
+    | "roomsUpdated"
     | "closed";
   match?: SessionMatchCandidate;
-  conflicts?: { type: "teacher" | "room"; className: string }[];
   /** The replacement session a reschedule created (M15) — for a link to it. */
   newSessionId?: string;
 };

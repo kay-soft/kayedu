@@ -71,11 +71,18 @@ async function makeClass(
   teacherId: string,
   opts: { requiresConfirmation?: boolean; capacity?: number; acceptsNewStudents?: boolean } = {},
 ) {
+  // R3 fixture shape: a class's seats come from its room set, so a
+  // "capacity-N class" is a class on a capacity-N room.
+  const room = opts.capacity
+    ? await prisma.room.create({
+        data: scopedData(centerId, { name: `SP room ${Math.random()}`, capacity: opts.capacity }),
+      })
+    : null;
   return prisma.classGroup.create({
     data: scopedData(centerId, {
       teacherId,
+      roomId: room?.id ?? null,
       price: 10_000,
-      capacity: opts.capacity ?? 0,
       requiresConfirmation: opts.requiresConfirmation ?? false,
       acceptsNewStudents: opts.acceptsNewStudents ?? true,
     }),

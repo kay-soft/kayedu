@@ -9,9 +9,11 @@ import {
   ClassFields,
   type SelectOption,
 } from "@/components/center/class-fields";
+import type { RoomOption } from "@/components/center/room-set-picker";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { piastresToInputValue } from "@/lib/money";
+import type { RoomLinkPair } from "@/lib/rooms";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
 
 export type ClassFormDefaults = {
@@ -33,6 +35,7 @@ export function ClassForm({
   educationSystems,
   educationSystemDefaultFixedShare,
   rooms,
+  roomLinks,
   noneLabel,
   defaults,
   onCreated,
@@ -42,7 +45,8 @@ export function ClassForm({
   grades: SelectOption[];
   educationSystems: SelectOption[];
   educationSystemDefaultFixedShare: Record<string, number>;
-  rooms: SelectOption[];
+  rooms: RoomOption[];
+  roomLinks: RoomLinkPair[];
   noneLabel: string;
   defaults: ClassFormDefaults;
   onCreated: () => void;
@@ -71,13 +75,13 @@ export function ClassForm({
           gradeId: "",
           educationSystemId: "",
           roomId: "",
+          extraRoomIds: [],
           price: "0.00",
           centerShareType: defaults.centerShareType,
           centerShareValue:
             defaults.centerShareType === "FIXED"
               ? piastresToInputValue(defaults.centerShareValue)
               : String(defaults.centerShareValue),
-          capacity: "0",
           lateThresholdMinutes: String(defaults.lateThresholdMinutes),
           acceptsNewStudents: true,
           requiresConfirmation: false,
@@ -88,6 +92,7 @@ export function ClassForm({
         educationSystems={educationSystems}
         educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
         rooms={rooms}
+        roomLinks={roomLinks}
         noneLabel={noneLabel}
         fieldErrors={state.fieldErrors}
       />

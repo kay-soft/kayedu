@@ -281,7 +281,7 @@ function checkPurePrimitives() {
     price: "120",
     centerShareType: "FIXED",
     shareValue: "15",
-    capacity: "0",
+    roomId: "r",
     lateThresholdMinutes: "10",
     allowExcused: "on",
     attendanceRequired: "on",
@@ -381,7 +381,8 @@ async function main() {
   });
 
   const teacherA = await makeTeacher(centerA.id, "classes-check-teacher-a@kayedu.test");
-  const roomA1 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 1" }) });
+  // R3 fixture shape: classA's "capacity 1" lives on its room now.
+  const roomA1 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 1", capacity: 1 }) });
   const roomA2 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 2" }) });
   // Global catalog rows (M13) — ClassGroup.subjectId/gradeId now reference
   // the platform-owned catalog directly, not a centre-authored row. Named
@@ -421,7 +422,6 @@ async function main() {
       price: classGroupInput.price,
       centerShareType: classGroupInput.centerShareType,
       centerShareValue: classGroupInput.centerShareValue,
-      capacity: classGroupInput.capacity,
       lateThresholdMinutes: classGroupInput.lateThresholdMinutes,
       acceptsNewStudents: classGroupInput.acceptsNewStudents,
       requiresConfirmation: classGroupInput.requiresConfirmation,
@@ -589,8 +589,8 @@ async function main() {
   });
   check(
     "A class at capacity blocks a second enrollment (capacity check)",
-    activeCount >= classA.capacity,
-    `active=${activeCount} capacity=${classA.capacity}`,
+    activeCount >= roomA1.capacity,
+    `active=${activeCount} capacity=${roomA1.capacity}`,
   );
 
   const duplicate = await prisma.enrollment.findFirst({

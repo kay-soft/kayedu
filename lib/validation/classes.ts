@@ -6,6 +6,11 @@ import { z } from "zod";
 import { localeSchema } from "./auth.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 import { isValidTime } from "../scheduling.ts";
+import {
+  confirmConflictsField,
+  extraRoomIdsField,
+  type SlotConflictState,
+} from "./room-set.ts";
 
 /**
  * Class, schedule, enrollment and holiday schemas (M4). Every Server Action
@@ -55,8 +60,14 @@ const moneyEgp = z
   .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value)))
   .refine((value): value is number => value !== null, "invalidAmount");
 
-const MAX_CAPACITY = 1_000;
 export const MAX_LATE_THRESHOLD_MINUTES = 240;
+
+/**
+ * R3: every new or edited class must have a primary room — its seat limit
+ * is the room set's capacity, so a class without one would be silently
+ * uncapped. Existing rows with no room stay valid until next edited.
+ */
+const requiredRoom = z.string().trim().min(1, "roomRequired").max(64, "notFound");
 
 const base = { locale: localeSchema };
 
@@ -72,14 +83,15 @@ const classGroupFields = {
   subjectId: optionalRef,
   gradeId: optionalRef,
   educationSystemId: optionalRef,
-  roomId: optionalRef,
+  roomId: requiredRoom,
+  extraRoomIds: extraRoomIdsField,
   price: moneyEgp,
   centerShareType: z.enum(["FIXED", "PERCENTAGE"], { error: "invalidShareType" }),
   shareValue: z.string().trim().min(1, "required"),
-  capacity: wholeNumber(MAX_CAPACITY),
   lateThresholdMinutes: wholeNumber(MAX_LATE_THRESHOLD_MINUTES),
   acceptsNewStudents: checkbox,
   requiresConfirmation: checkbox,
+  confirmConflicts: confirmConflictsField,
 };
 
 function resolveShareValue(
@@ -114,13 +126,14 @@ export const classGroupSchema = z
       gradeId: value.gradeId,
       educationSystemId: value.educationSystemId,
       roomId: value.roomId,
+      extraRoomIds: value.extraRoomIds,
       price: value.price,
       centerShareType: value.centerShareType,
       centerShareValue,
-      capacity: value.capacity,
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      confirmConflicts: value.confirmConflicts,
     };
   });
 
@@ -137,13 +150,14 @@ export const classGroupUpdateSchema = z
       gradeId: value.gradeId,
       educationSystemId: value.educationSystemId,
       roomId: value.roomId,
+      extraRoomIds: value.extraRoomIds,
       price: value.price,
       centerShareType: value.centerShareType,
       centerShareValue,
-      capacity: value.capacity,
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      confirmConflicts: value.confirmConflicts,
     };
   });
 
@@ -174,6 +188,15 @@ const scheduleFields = {
   startTime: timeValue,
   endTime: timeValue,
 };
+
+/**
+ * The R3 "I understand, create anyway" flag for a slot write, parsed beside
+ * the slot itself rather than inside it — the parsed slot is exactly the
+ * `ClassSchedule` row, so nothing outside its columns belongs in it.
+ */
+export const slotConfirmationSchema = z.object({
+  confirmConflicts: confirmConflictsField,
+});
 
 export const classScheduleSchema = z
   .object({ ...base, ...scheduleFields })
@@ -233,6 +256,7 @@ export const generateSessionsSchema = z.object({
   ...base,
   /** Absent = regenerate for the whole center. */
   classGroupId: optionalRef,
+  confirmConflicts: confirmConflictsField,
 });
 
 // ── List filters (classes dashboard) ────────────────────────────────────────
@@ -245,25 +269,22 @@ export const classListFilterSchema = z.object({
 
 // ── Action state ────────────────────────────────────────────────────────────
 
-export type ScheduleConflictInfo = {
-  type: "teacher" | "room";
-  className: string;
-};
-
 /**
  * What the class/schedule/enrollment/generation actions return. `error` and
  * the values in `fieldErrors` are i18n keys under `Classes.errors`, not copy.
- * `conflicts` is populated whenever a save/generation surfaced a teacher/room
- * double-booking — under the WARN policy the row is still saved, so the UI
- * needs to show it; under DENY the action returns early with `error` set
- * instead.
+ * `conflicts` (R3, print-ready `SlotConflictInfo`) is populated whenever a
+ * save/generation found a teacher/room double-booking: with `error`
+ * `conflictsNeedConfirmation` (WARN, not yet confirmed — nothing saved),
+ * `scheduleConflict` (DENY — refused), or alongside a success status when
+ * the person confirmed it.
  */
-export type ClassActionState = {
+export type ClassActionState = SlotConflictState & {
   error?: string;
+  /** ICU values for `error` (e.g. how many classes still use a room). */
+  errorValues?: Record<string, number>;
   fieldErrors?: Record<string, string>;
   status?: "created" | "saved" | "deleted" | "generated";
-  conflicts?: ScheduleConflictInfo[];
-  generated?: { created: number; conflicts: number };
+  generated?: { created: number; conflicts: number; needsConfirmation: boolean };
 };
 
 export const IDLE_CLASS_STATE: ClassActionState = {};

@@ -107,7 +107,6 @@ async function makeClass(
   teacherId: string,
   opts: {
     roomId?: string | null;
-    capacity?: number;
     requiresConfirmation?: boolean;
   } = {},
 ) {
@@ -116,7 +115,6 @@ async function makeClass(
       teacherId,
       roomId: opts.roomId ?? null,
       price: 10_000,
-      capacity: opts.capacity ?? 0,
       requiresConfirmation: opts.requiresConfirmation ?? false,
     }),
   });
@@ -149,11 +147,10 @@ async function main() {
 
   console.log("Pure capacity/cooldown primitives (lib/capacity.ts)");
 
-  check("enrollmentCap: class=0 (unlimited), room=20 → cap is 20", enrollmentCap(0, 20) === 20);
-  check("enrollmentCap: class=15, room=0 (no room / unlimited) → cap is 15", enrollmentCap(15, 0) === 15);
-  check("enrollmentCap: class=15, room=20 → cap is the smaller, 15", enrollmentCap(15, 20) === 15);
-  check("enrollmentCap: class=20, room=15 → cap is the smaller, 15 (the room is the hard cap)", enrollmentCap(20, 15) === 15);
-  check("enrollmentCap: both 0 → unlimited (0)", enrollmentCap(0, 0) === 0);
+  // R3 reverses M15's min(class, room): the cap is the room set's capacity only.
+  check("enrollmentCap: room set of 20 → cap is 20", enrollmentCap(20) === 20);
+  check("enrollmentCap: room set 0 (no room / no capacity set) → unlimited (0)", enrollmentCap(0) === 0);
+  check("enrollmentCap: no room set at all → unlimited (0)", enrollmentCap(null) === 0);
   check("isAtCapacity: cap 0 (unlimited) is never at capacity", !isAtCapacity(1_000_000, 0));
   check("isAtCapacity: active === cap is at capacity", isAtCapacity(5, 5));
 
@@ -302,7 +299,7 @@ async function main() {
 
   // ── 4. Capacity: hard-capped by the ROOM, not the class's own target ─────
   const roomSmall = await prisma.room.create({ data: scopedData(centerId, { name: "Small Room", capacity: 2 }) });
-  const classCapacityInstant = await makeClass(centerId, teacher.id, { roomId: roomSmall.id, capacity: 0 });
+  const classCapacityInstant = await makeClass(centerId, teacher.id, { roomId: roomSmall.id });
   const cap1User = await makeStudentUser("cap1");
   const cap2User = await makeStudentUser("cap2");
   const cap3User = await makeStudentUser("cap3");
@@ -313,7 +310,7 @@ async function main() {
     reserveOrEnroll(tx, { centerId, classGroupId: classCapacityInstant.id, studentUserId: cap2User.id }),
   );
   check(
-    "The class's own capacity is 0 (unlimited), yet the first two instant-enrolls into a room-capacity-2 class both succeed",
+    "The first two instant-enrolls into a room-capacity-2 class both succeed",
     enroll1.ok && enroll1.kind === "enrolled" && enroll2.ok && enroll2.kind === "enrolled",
     JSON.stringify([enroll1, enroll2]),
   );
@@ -321,7 +318,7 @@ async function main() {
     reserveOrEnroll(tx, { centerId, classGroupId: classCapacityInstant.id, studentUserId: cap3User.id }),
   );
   check(
-    "A third instant-enroll is refused as classFull — the ROOM's capacity is the hard cap, not the class's own (unset) target",
+    "A third instant-enroll is refused as classFull — the ROOM's capacity is the hard cap",
     !enroll3.ok && enroll3.error === "classFull",
     JSON.stringify(enroll3),
   );

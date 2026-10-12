@@ -52,26 +52,93 @@ export type ScheduleSlot = {
   endTime: string;
 };
 
-export type ExistingScheduleSlot = ScheduleSlot & {
-  classGroupId: string;
-  className: string;
-  teacherId: string;
-  roomId: string | null;
-};
+/**
+ * R3: a booking occupies a **room set** — its primary room plus any extra
+ * rooms combined with it (lib/rooms.ts). `roomIds` is that whole set;
+ * when omitted, the set is just `roomId` (the pre-R3 single-room shape, still
+ * what a plain fixture passes).
+ */
+type RoomOccupant = { roomId: string | null; roomIds?: readonly string[] };
 
+export type ExistingScheduleSlot = ScheduleSlot &
+  RoomOccupant & {
+    classGroupId: string;
+    className: string;
+    teacherId: string;
+  };
+
+/**
+ * One double-booking. Beyond `type`/`classGroupId`/`className` (unchanged
+ * since M4), R3 carries enough to print the clash in full: which room
+ * (`roomId`, room conflicts) or teacher (`teacherId`, teacher conflicts),
+ * and the *other* booking's time window — its weekday (`dayOfWeek`, a
+ * schedule clash) or date (`date`, "YYYY-MM-DD", a session clash) plus
+ * `startTime`/`endTime`. Names are resolved for display by
+ * `lib/db/slot-conflicts.ts`'s `describeConflicts`, never here.
+ */
 export type ScheduleConflict = {
   type: "teacher" | "room";
   classGroupId: string;
   className: string;
+  roomId?: string;
+  teacherId?: string;
+  dayOfWeek?: number;
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  /** The clashing session (session conflicts only). */
+  sessionId?: string;
 };
+
+/** The whole set of rooms a booking occupies (R3). */
+export function occupiedRoomIds(occupant: RoomOccupant): string[] {
+  if (occupant.roomIds && occupant.roomIds.length > 0) return [...occupant.roomIds];
+  return occupant.roomId ? [occupant.roomId] : [];
+}
+
+/**
+ * The teacher and room clashes between a candidate and one overlapping
+ * booking: a teacher conflict when the teacher is the same, and one room
+ * conflict per room the two room sets share (primary or extra, either side).
+ */
+function clashesWith(
+  candidate: RoomOccupant & { teacherId: string },
+  other: RoomOccupant & { teacherId: string; classGroupId: string; className: string },
+  detail: Partial<ScheduleConflict>,
+): ScheduleConflict[] {
+  const conflicts: ScheduleConflict[] = [];
+  if (other.teacherId === candidate.teacherId) {
+    conflicts.push({
+      type: "teacher",
+      classGroupId: other.classGroupId,
+      className: other.className,
+      teacherId: other.teacherId,
+      ...detail,
+    });
+  }
+  const otherRooms = new Set(occupiedRoomIds(other));
+  for (const roomId of occupiedRoomIds(candidate)) {
+    if (!otherRooms.has(roomId)) continue;
+    conflicts.push({
+      type: "room",
+      classGroupId: other.classGroupId,
+      className: other.className,
+      roomId,
+      ...detail,
+    });
+  }
+  return conflicts;
+}
 
 /**
  * Which of `existing`'s slots the candidate would double-book — same day,
- * overlapping time, and either the same teacher or the same (non-null) room.
- * `existing` should already exclude the candidate's own class's other slots.
+ * overlapping time (half-open: one ending exactly when the other starts is
+ * free), and either the same teacher or a shared room (R3: any room of
+ * either side's room set). `existing` should already exclude the candidate's
+ * own class's other slots.
  */
 export function findScheduleConflicts(
-  candidate: ScheduleSlot & { teacherId: string; roomId: string | null },
+  candidate: ScheduleSlot & RoomOccupant & { teacherId: string },
   existing: ExistingScheduleSlot[],
 ): ScheduleConflict[] {
   const conflicts: ScheduleConflict[] = [];
@@ -87,23 +154,13 @@ export function findScheduleConflicts(
     ) {
       continue;
     }
-    if (slot.teacherId === candidate.teacherId) {
-      conflicts.push({
-        type: "teacher",
-        classGroupId: slot.classGroupId,
-        className: slot.className,
-      });
-    } else if (
-      candidate.roomId !== null &&
-      slot.roomId !== null &&
-      slot.roomId === candidate.roomId
-    ) {
-      conflicts.push({
-        type: "room",
-        classGroupId: slot.classGroupId,
-        className: slot.className,
-      });
-    }
+    conflicts.push(
+      ...clashesWith(candidate, slot, {
+        dayOfWeek: slot.dayOfWeek,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      }),
+    );
   }
   return conflicts;
 }
@@ -278,22 +335,29 @@ export function resolveSharedDateFilter(
 
 // ── Session conflicts (generation time) ────────────────────────────────────
 
-export type ExistingSession = {
+export type ExistingSession = RoomOccupant & {
+  /** Optional so a pure fixture can omit it; every DB loader sets it. */
+  sessionId?: string;
   classGroupId: string;
   className: string;
   teacherId: string;
-  roomId: string | null;
   date: Date;
   startTime: string;
   endTime: string;
 };
 
-export type SessionCandidate = Omit<ExistingSession, "className">;
+export type SessionCandidate = Omit<ExistingSession, "className" | "sessionId">;
 
 /**
  * Same shape as `findScheduleConflicts`, but keyed on a specific calendar date
  * rather than a recurring day-of-week — this is what the generator checks
- * right before materializing one `Session` row.
+ * right before materializing one `Session` row, and what every other
+ * slot-writing path checks too (reschedule, NEW_SESSION approval, a
+ * session's own room change). R3: a room is busy when it is the primary
+ * **or an extra** of an overlapping session, in either direction. Which
+ * sessions occupy anything at all (not CANCELLED, not the original slot of a
+ * RESCHEDULED session; closed sessions do) is decided by the loader,
+ * `lib/db/slot-conflicts.ts`'s `loadSessionOccupancy`.
  */
 export function findSessionConflicts(
   candidate: SessionCandidate,
@@ -314,26 +378,57 @@ export function findSessionConflicts(
     ) {
       continue;
     }
-    if (session.teacherId === candidate.teacherId) {
-      conflicts.push({
-        type: "teacher",
-        classGroupId: session.classGroupId,
-        className: session.className,
-      });
-    } else if (
-      candidate.roomId !== null &&
-      session.roomId !== null &&
-      session.roomId === candidate.roomId
-    ) {
-      conflicts.push({
-        type: "room",
-        classGroupId: session.classGroupId,
-        className: session.className,
-      });
-    }
+    conflicts.push(
+      ...clashesWith(candidate, session, {
+        date: candidateKey,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        ...(session.sessionId ? { sessionId: session.sessionId } : {}),
+      }),
+    );
   }
   return conflicts;
 }
+
+// ── The confirmation contract (R3, docs/02 §11 "confirmConflicts") ─────────
+
+export type ConflictPolicyValue = "WARN" | "DENY";
+
+/**
+ * What a slot-writing action does with the conflicts it found:
+ * - `proceed` — no conflicts, or WARN with the double-booking explicitly
+ *   confirmed (`confirmConflicts`), which the writer audits;
+ * - `needsConfirmation` — WARN, conflicts, no confirmation: refuse and
+ *   return the list so the form can show it with a confirm checkbox;
+ * - `denied` — DENY: refused whatever the flag says.
+ */
+export type ConflictDecision = "proceed" | "needsConfirmation" | "denied";
+
+export function decideConflicts(
+  conflictCount: number,
+  policy: ConflictPolicyValue,
+  confirmConflicts: boolean,
+): ConflictDecision {
+  if (conflictCount === 0) return "proceed";
+  if (policy === "DENY") return "denied";
+  return confirmConflicts ? "proceed" : "needsConfirmation";
+}
+
+/**
+ * A conflict ready to print (`SlotConflictNotice`): names resolved, the
+ * other booking's window attached. `date` is set for a session clash,
+ * `dayOfWeek` for a weekly-slot clash.
+ */
+export type SlotConflictInfo = {
+  type: "teacher" | "room";
+  className: string;
+  roomName: string | null;
+  teacherName: string | null;
+  date: string | null;
+  dayOfWeek: number | null;
+  startTime: string | null;
+  endTime: string | null;
+};
 
 // ── Centre-timezone clock (R2, docs/02-architecture.md §11 "Session lifecycle") ─
 // A `Session` stores its calendar day as a UTC-midnight marker (`date`) and

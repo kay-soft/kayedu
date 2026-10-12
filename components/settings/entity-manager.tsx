@@ -194,7 +194,7 @@ function EntityCreateForm({
     <form action={formAction} className="flex flex-col gap-4" noValidate>
       <input type="hidden" name="locale" value={locale} />
 
-      {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+      {state.error ? <FormMessage>{tErrors(state.error, state.errorValues)}</FormMessage> : null}
 
       <EntityFields
         fields={fields}
@@ -293,10 +293,10 @@ function EntityRow({
           <input type="hidden" name="id" value={record.id} />
 
           {state.error ? (
-            <FormMessage>{tErrors(state.error)}</FormMessage>
+            <FormMessage>{tErrors(state.error, state.errorValues)}</FormMessage>
           ) : null}
           {deleteState.error ? (
-            <FormMessage>{tErrors(deleteState.error)}</FormMessage>
+            <FormMessage>{tErrors(deleteState.error, deleteState.errorValues)}</FormMessage>
           ) : null}
           {deleteState.status === "deactivated" ? (
             <FormMessage tone="info">{t("deactivatedInstead")}</FormMessage>
@@ -415,7 +415,7 @@ function EntityRow({
 
       {toggleState.error ? (
         <div className="md:w-full md:basis-full">
-          <FormMessage>{tErrors(toggleState.error)}</FormMessage>
+          <FormMessage>{tErrors(toggleState.error, toggleState.errorValues)}</FormMessage>
         </div>
       ) : null}
     </li>

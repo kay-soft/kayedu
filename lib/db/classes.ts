@@ -1,8 +1,8 @@
 import type { Prisma } from "@prisma/client";
 // Relative imports on purpose — `npm run check:classes` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts).
-import type { ExistingScheduleSlot, ScheduleConflict } from "../scheduling.ts";
 import { catalogLabel } from "../catalog.ts";
+import { ROOM_SET_SELECT } from "./room-sets.ts";
 import type { ScopedDb } from "@/lib/db/scoped";
 
 /**
@@ -29,7 +29,6 @@ export function classListSelect(centerId: string) {
     id: true,
     active: true,
     price: true,
-    capacity: true,
     centerShareType: true,
     centerShareValue: true,
     teacherId: true,
@@ -49,7 +48,8 @@ export function classListSelect(centerId: string) {
         selections: { where: { centerId }, select: { displayName: true }, take: 1 },
       },
     },
-    room: { select: { id: true, name: true } },
+    // R3 — the class's room set (primary + extras) and the seats it adds up to.
+    ...ROOM_SET_SELECT,
     _count: {
       select: {
         schedules: true,
@@ -72,6 +72,7 @@ export function classDetailInclude(centerId: string) {
     grade: withSelection,
     educationSystem: withSelection,
     room: true,
+    extraRooms: { include: { room: true }, orderBy: { createdAt: "asc" } },
     schedules: { orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }] },
   } satisfies Prisma.ClassGroupInclude;
 }
@@ -127,54 +128,4 @@ export function classDisplayName(
       .filter(Boolean)
       .join(" · ") || "—"
   );
-}
-
-/** Renders the conflict list into i18n-safe pieces the UI can format. */
-export function summarizeConflicts(
-  conflicts: ScheduleConflict[],
-): { type: "teacher" | "room"; className: string }[] {
-  return conflicts.map((conflict) => ({
-    type: conflict.type,
-    className: conflict.className,
-  }));
-}
-
-/** The Prisma row shape `db.classSchedules.listForConflictCheck` returns. */
-export type ConflictCheckRow = {
-  classGroupId: string;
-  dayOfWeek: number;
-  startTime: string;
-  endTime: string;
-  classGroup: {
-    teacherId: string;
-    roomId: string | null;
-    subject: { nameAr: string; nameEn: string } | null;
-    grade: { nameAr: string; nameEn: string } | null;
-  };
-};
-
-/**
- * Flattens `listForConflictCheck`'s joined rows into the plain slots
- * `lib/scheduling.ts`'s `findScheduleConflicts` compares against — the
- * boundary between the Prisma shape and the pure primitive.
- */
-export function toExistingScheduleSlots(
-  locale: string,
-  rows: ConflictCheckRow[],
-): ExistingScheduleSlot[] {
-  return rows.map((row) => ({
-    classGroupId: row.classGroupId,
-    dayOfWeek: row.dayOfWeek,
-    startTime: row.startTime,
-    endTime: row.endTime,
-    teacherId: row.classGroup.teacherId,
-    roomId: row.classGroup.roomId,
-    className:
-      [
-        row.classGroup.subject ? catalogLabel(locale, row.classGroup.subject) : null,
-        row.classGroup.grade ? catalogLabel(locale, row.classGroup.grade) : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || "—",
-  }));
 }

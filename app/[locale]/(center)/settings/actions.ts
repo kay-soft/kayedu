@@ -14,6 +14,11 @@ import {
   type PermissionGrantWrite,
 } from "@/lib/db/permissions";
 import {
+  roomCombinationUsage,
+  setRoomLinks,
+} from "@/lib/db/room-sets";
+import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
+import {
   createPaymentMethod,
   deletePaymentMethod,
   renamePaymentMethod,
@@ -43,6 +48,7 @@ import {
   permissionMatrixSchema,
   recordDeleteSchema,
   recordToggleSchema,
+  roomLinksSchema,
   roomSchema,
   roomUpdateSchema,
 } from "@/lib/validation/settings";
@@ -79,6 +85,25 @@ function revalidateSettings(locale: string): void {
 // systems/grades/subjects moved to the global catalog at M13, see the
 // "Academic catalog" section below. ─────────────────────────────────────────
 
+/** "Now" at the centre — what "a future session" is measured against (R3). */
+function centreClock(ctx: TenantContext) {
+  return { now: new Date(), timeZone: ctx.settings?.timezone ?? DEFAULT_TIMEZONE };
+}
+
+/**
+ * R3: a room an active class or a non-closed future session uses as part of
+ * a **combined** room set cannot be deactivated or deleted — the refusal
+ * names how many, so staff know what to move first.
+ */
+async function roomInCombinationRefusal(
+  ctx: TenantContext,
+  roomId: string,
+): Promise<ActionState | null> {
+  const usage = await roomCombinationUsage(prisma, ctx.center.id, roomId, centreClock(ctx));
+  if (usage.classes + usage.sessions === 0) return null;
+  return { error: "roomInCombination", errorValues: usage };
+}
+
 async function toggleRoomRecord(formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
   if (!scope) return FORBIDDEN;
@@ -88,6 +113,11 @@ async function toggleRoomRecord(formData: FormData): Promise<ActionState> {
 
   const row = await scope.db.rooms.findById(parsed.data.id);
   if (!row) return NOT_FOUND;
+
+  if (!parsed.data.active) {
+    const refusal = await roomInCombinationRefusal(scope.ctx, row.id);
+    if (refusal) return refusal;
+  }
 
   await scope.db.rooms.update(row.id, { active: parsed.data.active });
   revalidateSettings(parsed.data.locale);
@@ -104,14 +134,22 @@ async function deleteRoomRecord(formData: FormData): Promise<ActionState> {
   const row = await scope.db.rooms.findById(parsed.data.id);
   if (!row) return NOT_FOUND;
 
+  const refusal = await roomInCombinationRefusal(scope.ctx, row.id);
+  if (refusal) return refusal;
+
   // Rows that point at this one. Prisma's default action for this optional
   // relation is SET NULL, which would silently orphan a class's room — so we
-  // refuse the delete ourselves and let the center deactivate instead.
-  const [classes, sessions] = await Promise.all([
+  // refuse the delete ourselves and let the center deactivate instead. R3:
+  // a class or session that uses it as an *extra* room counts too (their
+  // cascade would silently shrink a recorded room set). Its links alone do
+  // not block: they cascade with the room.
+  const [classes, sessions, classExtras, sessionExtras] = await Promise.all([
     scope.db.classGroups.count({ roomId: row.id }),
     scope.db.sessions.count({ roomId: row.id }),
+    prisma.classGroupRoom.count({ where: { centerId: scope.ctx.center.id, roomId: row.id } }),
+    prisma.sessionRoom.count({ where: { centerId: scope.ctx.center.id, roomId: row.id } }),
   ]);
-  if (classes + sessions > 0) {
+  if (classes + sessions + classExtras + sessionExtras > 0) {
     return { error: "inUse" };
   }
 
@@ -332,6 +370,61 @@ export async function deleteRoomAction(
   formData: FormData,
 ): Promise<ActionState> {
   return deleteRoomRecord(formData);
+}
+
+/**
+ * "Can be combined with" (R3) — makes one room's links exactly the posted
+ * set. Same gate as the rest of rooms (`center.settings.edit`); every rule
+ * that can refuse (self-link, a room from another centre, unlinking a pair
+ * an active class or a non-closed future session still uses) lives in
+ * `lib/db/room-sets.ts`. Each link and unlink is audited.
+ */
+export async function setRoomLinksAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = roomLinksSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+  const { locale, roomId, linkedRoomIds } = parsed.data;
+
+  const result = await setRoomLinks(
+    prisma,
+    scope.ctx.center.id,
+    roomId,
+    linkedRoomIds,
+    centreClock(scope.ctx),
+  );
+  if (!result.ok) {
+    if (result.error === "combinationInUse") {
+      return {
+        error: "combinationInUse",
+        errorValues: { classes: result.classes ?? 0, sessions: result.sessions ?? 0 },
+      };
+    }
+    return { error: result.error === "roomNotFound" ? "notFound" : result.error };
+  }
+
+  for (const [action, ids] of [
+    ["room.link", result.added],
+    ["room.unlink", result.removed],
+  ] as const) {
+    for (const otherRoomId of ids) {
+      await writeAuditLog({
+        centerId: scope.ctx.center.id,
+        actorUserId: scope.ctx.user.id,
+        action,
+        entityType: "Room",
+        entityId: roomId,
+        after: { roomId, otherRoomId },
+      });
+    }
+  }
+
+  revalidateSettings(locale);
+  return { status: "saved" };
 }
 
 // ── Payment methods (R1) ───────────────────────────────────────────────────

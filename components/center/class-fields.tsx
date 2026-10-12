@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ShareType } from "@prisma/client";
 
+import { RoomSetPicker, type RoomOption } from "@/components/center/room-set-picker";
 import { Field } from "@/components/shared/field";
 import { ToggleRow } from "@/components/settings/toggle-row";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/format";
 import { MAX_LATE_THRESHOLD_MINUTES } from "@/lib/validation/classes";
 import { piastresToInputValue, splitShare } from "@/lib/money";
+import type { RoomLinkPair } from "@/lib/rooms";
 
 export type SelectOption = { value: string; label: string };
 
@@ -20,18 +22,28 @@ export type ClassFieldsValues = {
   gradeId: string;
   educationSystemId: string;
   roomId: string;
+  /** R3 — rooms combined with the primary `roomId`. */
+  extraRoomIds: string[];
   price: string;
   centerShareType: ShareType;
   centerShareValue: string;
-  capacity: string;
   lateThresholdMinutes: string;
   acceptsNewStudents: boolean;
   requiresConfirmation: boolean;
 };
 
+/** The fields a class's weekly slots are checked against (R3 live preview). */
+export type ClassSlotInputs = {
+  teacherId: string;
+  roomId: string | null;
+  extraRoomIds: string[];
+};
+
 /**
  * Every field a `ClassGroup` carries (docs/01-data-model.md §2): who teaches
- * it, what/whom it's for, its room, its price and center-cut, capacity and
+ * it, what/whom it's for, its room set (R3 — a required primary room plus
+ * any rooms combined with it; the set's summed capacity is the class's seat
+ * limit, there is no separate class capacity), its price and center-cut and
  * the attendance/enrollment flags. Shared between the create form (the "Add
  * class" dialog) and the edit form on the class detail page, exactly like
  * `student-fields.tsx` is shared between `StudentForm` and
@@ -46,8 +58,10 @@ export function ClassFields({
   educationSystems,
   educationSystemDefaultFixedShare,
   rooms,
+  roomLinks,
   noneLabel,
   fieldErrors,
+  onSlotInputsChange,
 }: {
   idPrefix: string;
   values: ClassFieldsValues;
@@ -63,9 +77,12 @@ export function ClassFields({
    * the person filling in the form.
    */
   educationSystemDefaultFixedShare: Record<string, number>;
-  rooms: SelectOption[];
+  rooms: RoomOption[];
+  roomLinks: RoomLinkPair[];
   noneLabel: string;
   fieldErrors?: Record<string, string>;
+  /** Teacher or room set changed — the edit form re-previews slot conflicts. */
+  onSlotInputsChange?: (next: ClassSlotInputs) => void;
 }) {
   const t = useTranslations("Classes.fields");
   const tErrors = useTranslations("Classes.errors");
@@ -75,6 +92,15 @@ export function ClassFields({
   const [shareValue, setShareValue] = useState(values.centerShareValue);
   const [priceInput, setPriceInput] = useState(values.price);
   const [educationSystemId, setEducationSystemId] = useState(values.educationSystemId);
+  const slotInputs = useRef<ClassSlotInputs>({
+    teacherId: values.teacherId,
+    roomId: values.roomId || null,
+    extraRoomIds: values.extraRoomIds,
+  });
+  function changeSlotInputs(patch: Partial<ClassSlotInputs>) {
+    slotInputs.current = { ...slotInputs.current, ...patch };
+    onSlotInputsChange?.(slotInputs.current);
+  }
   // Once the person types into shareValue themselves, the FIXED-default
   // auto-fill below stops touching it — an explicit edit always wins.
   const shareValueTouched = useRef(false);
@@ -117,6 +143,7 @@ export function ClassFields({
             id={`${idPrefix}-teacherId`}
             name="teacherId"
             defaultValue={values.teacherId}
+            onValueChange={(teacherId) => changeSlotInputs({ teacherId })}
             required
             aria-invalid={fieldErrors?.teacherId ? true : undefined}
           >
@@ -195,45 +222,20 @@ export function ClassFields({
           </Select>
         </Field>
 
-        <Field
-          id={`${idPrefix}-roomId`}
-          label={t("room")}
-          optional
-          error={error("roomId")}
-        >
-          <Select
-            id={`${idPrefix}-roomId`}
-            name="roomId"
-            defaultValue={values.roomId}
-          >
-            <option value="">{noneLabel}</option>
-            {rooms.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field
-          id={`${idPrefix}-capacity`}
-          label={t("capacity")}
-          hint={t("capacityHint")}
-          error={error("capacity")}
-        >
-          <Input
-            id={`${idPrefix}-capacity`}
-            name="capacity"
-            type="number"
-            dir="ltr"
-            inputMode="numeric"
-            min={0}
-            max={1000}
-            step={1}
-            defaultValue={values.capacity}
-            aria-invalid={fieldErrors?.capacity ? true : undefined}
+        <div className="sm:col-span-2">
+          <RoomSetPicker
+            idPrefix={idPrefix}
+            rooms={rooms}
+            links={roomLinks}
+            defaultRoomId={values.roomId}
+            defaultExtraIds={values.extraRoomIds}
+            required
+            noneLabel={noneLabel}
+            roomError={error("roomId")}
+            extraError={error("extraRoomIds")}
+            onChange={(next) => changeSlotInputs(next)}
           />
-        </Field>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border p-3 sm:p-4">

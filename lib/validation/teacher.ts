@@ -120,6 +120,9 @@ export const teacherUnblockStudentSchema = z.object({
 });
 
 // ── Classes: request a new class (ChangeRequest, spec §4.2 item 4) ─────────
+// R3: no capacity — a class's seats come from the room set the centre picks
+// when it creates the class (a request never chooses a room). A stale form
+// still posting `capacity` parses; zod drops the key before the payload.
 
 const dayOfWeek = z
   .string()
@@ -132,7 +135,6 @@ const timeValue = z
   .trim()
   .refine((value) => isValidTime(value), "invalidTime");
 
-export const MAX_REQUEST_CAPACITY = 1_000;
 export const MAX_REQUEST_LATE_THRESHOLD_MINUTES = 240;
 
 export const classRequestSchema = z
@@ -143,7 +145,6 @@ export const classRequestSchema = z
     dayOfWeek,
     startTime: timeValue,
     endTime: timeValue,
-    capacity: wholeNumber(MAX_REQUEST_CAPACITY),
     lateThresholdMinutes: wholeNumber(MAX_REQUEST_LATE_THRESHOLD_MINUTES),
     note: optionalText(300),
   })
@@ -164,7 +165,6 @@ export const teachAtCenterRequestSchema = z
     dayOfWeek,
     startTime: timeValue,
     endTime: timeValue,
-    capacity: wholeNumber(MAX_REQUEST_CAPACITY),
     lateThresholdMinutes: wholeNumber(MAX_REQUEST_LATE_THRESHOLD_MINUTES),
     note: optionalText(300),
   })

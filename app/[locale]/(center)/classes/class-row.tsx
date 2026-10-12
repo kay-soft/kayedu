@@ -20,7 +20,8 @@ export type ClassRowData = {
   gradeName: string | null;
   roomName: string | null;
   price: number;
-  capacity: number;
+  /** R3 — the room set's summed capacity; 0 = no seat limit. */
+  seats: number;
   enrolledCount: number;
   scheduleCount: number;
   active: boolean;
@@ -94,8 +95,8 @@ export function ClassRow({
         </span>
         <span className="truncate text-sm tabular-nums text-text-secondary">
           {formatNumber(classGroup.enrolledCount, locale)}
-          {classGroup.capacity > 0
-            ? ` / ${formatNumber(classGroup.capacity, locale)}`
+          {classGroup.seats > 0
+            ? ` / ${formatNumber(classGroup.seats, locale)}`
             : ""}
         </span>
       </div>

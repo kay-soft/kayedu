@@ -157,7 +157,7 @@ async function main() {
     }),
   });
   const classGroup = await prisma.classGroup.create({
-    data: scopedData(center.id, { teacherId: teacherUser.id, price: 10_000, capacity: 0 }),
+    data: scopedData(center.id, { teacherId: teacherUser.id, price: 10_000 }),
   });
   const session = await prisma.session.create({
     data: scopedData(center.id, {

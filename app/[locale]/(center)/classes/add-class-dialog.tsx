@@ -19,6 +19,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import type { SelectOption } from "@/components/center/class-fields";
+import type { RoomOption } from "@/components/center/room-set-picker";
+import type { RoomLinkPair } from "@/lib/rooms";
 
 /** The list-first pattern (docs/04 §5 "Dialog"), same as students/teachers. */
 export function AddClassDialog({
@@ -28,6 +30,7 @@ export function AddClassDialog({
   educationSystems,
   educationSystemDefaultFixedShare,
   rooms,
+  roomLinks,
   noneLabel,
   defaults,
 }: {
@@ -36,7 +39,8 @@ export function AddClassDialog({
   grades: SelectOption[];
   educationSystems: SelectOption[];
   educationSystemDefaultFixedShare: Record<string, number>;
-  rooms: SelectOption[];
+  rooms: RoomOption[];
+  roomLinks: RoomLinkPair[];
   noneLabel: string;
   defaults: ClassFormDefaults;
 }) {
@@ -66,6 +70,7 @@ export function AddClassDialog({
             educationSystems={educationSystems}
             educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={rooms}
+            roomLinks={roomLinks}
             noneLabel={noneLabel}
             defaults={defaults}
             onCreated={() => setOpen(false)}

@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { classListWhere } from "@/lib/db/classes";
+import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { scoped } from "@/lib/db/scoped";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -63,7 +64,7 @@ export default async function ClassesPage({
     gradeId: gradeId || null,
   });
 
-  const [classes, total, teachers, subjects, grades, educationSystems, rooms, holidays] =
+  const [classes, total, teachers, subjects, grades, educationSystems, rooms, roomLinks, holidays] =
     await Promise.all([
       db.classGroups.search({
         where,
@@ -76,6 +77,7 @@ export default async function ClassesPage({
       db.grades.list(),
       db.educationSystems.list(),
       db.rooms.list(),
+      db.roomLinks.list(),
       db.holidays.list(),
     ]);
 
@@ -86,18 +88,21 @@ export default async function ClassesPage({
     ]),
   );
 
-  const rows: ClassRowData[] = classes.map((classGroup) => ({
-    classGroupId: classGroup.id,
-    teacherName: teacherByUserId.get(classGroup.teacherId) ?? tCommon("none"),
-    subjectName: classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
-    gradeName: classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
-    roomName: classGroup.room?.name ?? null,
-    price: classGroup.price,
-    capacity: classGroup.capacity,
-    enrolledCount: classGroup._count.enrollments,
-    scheduleCount: classGroup._count.schedules,
-    active: classGroup.active,
-  }));
+  const rows: ClassRowData[] = classes.map((classGroup) => {
+    const roomSet = classRoomSetFrom(classGroup);
+    return {
+      classGroupId: classGroup.id,
+      teacherName: teacherByUserId.get(classGroup.teacherId) ?? tCommon("none"),
+      subjectName: classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+      gradeName: classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
+      roomName: roomSet.rooms.map((room) => room.name).join(" + ") || null,
+      price: classGroup.price,
+      seats: roomSet.capacity,
+      enrolledCount: classGroup._count.enrollments,
+      scheduleCount: classGroup._count.schedules,
+      active: classGroup.active,
+    };
+  });
 
   const teacherOptions = teachers.map((teacher) => ({
     value: teacher.userId,
@@ -120,8 +125,10 @@ export default async function ClassesPage({
       : `${system.name} · ${tCommon("inactive")}`,
   }));
   const roomOptions = rooms.map((room) => ({
-    value: room.id,
-    label: room.active ? room.name : `${room.name} · ${tCommon("inactive")}`,
+    id: room.id,
+    name: room.name,
+    capacity: room.capacity,
+    active: room.active,
   }));
   const educationSystemDefaultFixedShare = Object.fromEntries(
     educationSystems.map((system) => [system.id, system.defaultFixedCenterShare]),
@@ -150,6 +157,7 @@ export default async function ClassesPage({
             educationSystems={educationSystemOptions}
             educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={roomOptions}
+            roomLinks={roomLinks}
             noneLabel={tCommon("none")}
             defaults={{
               centerShareType: ctx.settings?.defaultShareType ?? "PERCENTAGE",

@@ -8,8 +8,10 @@ import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { confirmReservation, rejectReservation } from "@/lib/db/reservations";
 import { ROUTES } from "@/lib/routes";
+import { describeConflicts } from "@/lib/db/slot-conflicts";
 import {
   approvalIdSchema,
+  approveSessionRequestSchema,
   type ApprovalsActionState,
 } from "@/lib/validation/approvals";
 
@@ -165,20 +167,33 @@ export async function approveSessionRequestAction(
   const ctx = await approvalsScope();
   if (!ctx) return FORBIDDEN;
 
-  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  const parsed = approveSessionRequestSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "notFound" };
-  const { locale, id } = parsed.data;
+  const { locale, id, confirmConflicts } = parsed.data;
 
+  // R3: a double-booking is refused with its conflict list — DENY always,
+  // WARN until the approver ticks "I understand" (audited by the data layer).
+  const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
   const result = await resolveSessionRequest(
     prisma,
     ctx.center.id,
     id,
     "APPROVED",
     ctx.user.id,
-    ctx.settings?.scheduleConflictPolicy ?? "WARN",
+    policy,
     locale,
+    { confirmConflicts, actorUserId: ctx.user.id },
   );
-  if (!result.ok) return { error: result.error };
+  if (!result.ok) {
+    if ("conflicts" in result) {
+      return {
+        error: result.error,
+        conflicts: await describeConflicts(prisma, ctx.center.id, result.conflicts.slice(0, 30)),
+        conflictPolicy: policy,
+      };
+    }
+    return { error: result.error };
+  }
 
   await writeAuditLog({
     centerId: ctx.center.id,

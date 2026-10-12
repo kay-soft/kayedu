@@ -6,6 +6,7 @@ import {
   toggleRoomAction,
   updateRoomAction,
 } from "@/app/[locale]/(center)/settings/actions";
+import { RoomLinksManager } from "@/app/[locale]/(center)/settings/rooms/room-links-manager";
 import type { EntityField } from "@/components/settings/entity-fields";
 import {
   EntityManager,
@@ -16,6 +17,11 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { formatNumber } from "@/lib/format";
 
+/**
+ * Rooms (centre-authored master data) and, R3, which of them can be combined
+ * into one bigger room. Deactivating or deleting a room that a combined room
+ * set still relies on is refused with how many classes/sessions use it.
+ */
 export default async function RoomsPage() {
   const ctx = await getTenantContext("center");
   await requirePermission(ctx, "center.settings.edit");
@@ -23,7 +29,7 @@ export default async function RoomsPage() {
   const db = scoped(ctx);
   const locale = await getLocale();
   const t = await getTranslations("Settings.rooms");
-  const rooms = await db.rooms.list();
+  const [rooms, links] = await Promise.all([db.rooms.list(), db.roomLinks.list()]);
 
   const fields: EntityField[] = [
     { name: "name", kind: "text", label: t("fields.name"), required: true },
@@ -64,6 +70,16 @@ export default async function RoomsPage() {
           listDescription: t("listDescription"),
           empty: t("empty"),
         }}
+      />
+
+      <RoomLinksManager
+        rooms={rooms
+          .filter((room) => room.active)
+          .map((room) => ({ id: room.id, name: room.name, capacity: room.capacity }))}
+        // Every link, including ones to a deactivated room: those are not
+        // offered as checkboxes but are kept (re-posted) on save, never
+        // silently unlinked.
+        links={links}
       />
     </div>
   );

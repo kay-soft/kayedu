@@ -476,7 +476,7 @@
     "subtitle": "{count} classes at this branch.",
     "add": "Add class",
     "addTitle": "Add a class",
-    "addDescription": "A teacher teaching one subject to one grade — its price, branch cut, capacity and enrollment rules.",
+    "addDescription": "A teacher teaching one subject to one grade — its price, branch cut, room and enrollment rules.",
     "listTitle": "Classes",
     "listDescription": "Deactivated classes stay listed — their history and any generated sessions keep resolving.",
     "empty": "No classes yet.",
@@ -507,8 +507,6 @@
       "grade": "Grade",
       "educationSystem": "Education system",
       "room": "Room",
-      "capacity": "Capacity",
-      "capacityHint": "Students. Use 0 for no limit.",
       "moneyTitle": "Price & branch cut",
       "price": "Price per session",
       "shareType": "Cut type",
@@ -525,7 +523,10 @@
       "acceptsNewStudents": "Accepting new students",
       "acceptsNewStudentsHint": "Turn off to hide this class from new enrollment while keeping it running.",
       "requiresConfirmation": "New enrollments need confirmation",
-      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate."
+      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate.",
+      "seats": "Seats",
+      "seatsValue": "{enrolled} of {seats}",
+      "seatsUnlimited": "{enrolled} · no seat limit"
     },
     "context": {
       "title": "Class context",
@@ -542,7 +543,7 @@
     ],
     "schedule": {
       "title": "Weekly schedule",
-      "description": "One row per recurring slot. A conflict banner appears directly beneath a slot that double-books this class's teacher or room.",
+      "description": "One row per recurring slot. A clash with this class's teacher or any of its rooms shows directly beneath the slot as you edit it.",
       "slotsHeading": "Weekly time slots",
       "slotCount": "{count, plural, one {# slot} other {# slots}} this week",
       "empty": "No time slots yet — add the first one below.",
@@ -554,9 +555,8 @@
       "addSlot": "Add time slot",
       "cancel": "Cancel",
       "summary": "{day}",
-      "roomConflictWith": "Room conflict with {className}.",
-      "teacherConflictWith": "Teacher conflict with {className}.",
-      "emptyHint": "Add a weekly time slot and sessions will be generated from it."
+      "emptyHint": "Add a weekly time slot and sessions will be generated from it.",
+      "savedWithConflict": "Saved with {count, plural, one {# confirmed double-booking} other {# confirmed double-bookings}}."
     },
     "holidays": {
       "title": "Holiday calendar",
@@ -576,8 +576,10 @@
       "generateForClass": "Generate sessions for this class",
       "generateForCenter": "Generate sessions for the whole branch",
       "result": "{created, plural, one {# session} other {# sessions}} created. {conflicts, plural, =0 {No conflicts.} one {# conflict flagged.} other {# conflicts flagged.}}",
-      "roomConflict": "Room conflict with {className}.",
-      "teacherConflict": "Teacher conflict with {className}."
+      "heldBack": "These sessions were not created because they double-book a room or a teacher. Tick the box and generate again to create them anyway.",
+      "skipped": "These sessions were skipped — this branch does not allow double-booking.",
+      "createdWithConflicts": "Created, including the double-bookings you confirmed (recorded in the audit log).",
+      "createConflicting": "Create them anyway"
     },
     "roster": {
       "title": "Roster",
@@ -615,14 +617,49 @@
       "duplicateDate": "That date is already on the holiday calendar.",
       "scheduleConflict": "This branch denies double-booked slots. Choose a different day, time or teacher.",
       "classInUse": "This class still has enrollments or generated sessions, so it cannot be deleted. Deactivate it instead.",
-      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
+      "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it.",
       "alreadyEnrolled": "This student is already enrolled in this class.",
       "studentBlocked": "This student is blocked from this class or teacher.",
-      "alreadyBlocked": "This student is already blocked from this class."
+      "alreadyBlocked": "This student is already blocked from this class.",
+      "roomRequired": "Choose a room for this class.",
+      "roomNotFound": "That room no longer exists in this branch.",
+      "roomInactive": "That room is deactivated — choose an active one.",
+      "notLinked": "One of the extra rooms is not set up to combine with the chosen room.",
+      "extraIsPrimary": "The main room cannot also be an extra room.",
+      "duplicateExtra": "A room was picked twice.",
+      "noPrimary": "Choose a main room before combining others with it.",
+      "conflictsNeedConfirmation": "This double-books a room or a teacher. Tick “I understand, create anyway” to save it."
     },
     "emptyHint": "A class pairs a teacher, a subject and a weekly schedule. Add the first one to start generating sessions.",
     "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
     "clearFilters": "Clear filters"
+  },
+  "RoomSets": {
+    "room": "Room",
+    "roomPlaceholder": "Choose a room",
+    "seats": "{count, plural, one {# seat} other {# seats}}",
+    "unlimited": "no seat limit",
+    "unlimitedHint": "A room with no capacity set (0) means the combined rooms have no seat limit.",
+    "combined": "{rooms} = {seats}",
+    "combineLabel": "Combine with another room",
+    "combineHint": "Only rooms set up to combine with the chosen room are offered (Settings → Rooms).",
+    "combineNone": "No room can be combined with this one yet.",
+    "choosePrimaryFirst": "Choose a room first.",
+    "conflicts": {
+      "warnTitle": "This double-books a room or a teacher",
+      "denyTitle": "This branch does not allow double-booking",
+      "denyHint": "Choose another day, time, room or teacher.",
+      "roomOnDate": "{room} is already booked by {className}, {time} on {date}",
+      "roomWeekly": "{room} is already booked by {className}, {time} every {day}",
+      "roomPlain": "{room} is already booked by {className}",
+      "teacherOnDate": "{teacher} is already teaching {className}, {time} on {date}",
+      "teacherWeekly": "{teacher} is already teaching {className}, {time} every {day}",
+      "teacherPlain": "{teacher} is already teaching {className}",
+      "unknownRoom": "A room",
+      "unknownTeacher": "The teacher",
+      "confirm": "I understand, create anyway",
+      "confirmHint": "The double-booking is saved and recorded in the audit log."
+    }
   },
   "Sessions": {
     "title": "Today's Sessions",
@@ -718,7 +755,9 @@
       "date": "Date",
       "time": "Time",
       "room": "Room",
-      "price": "Price"
+      "price": "Price",
+      "seats": "Seats",
+      "seatsUnlimited": "No seat limit"
     },
     "lifecycle": {
       "cancel": "Cancel session",
@@ -731,7 +770,12 @@
         "date": "Date",
         "startTime": "Start time",
         "endTime": "End time"
-      }
+      },
+      "rooms": "Rooms",
+      "roomsHint": "Change the rooms for this session only. The class keeps its own rooms and its seat limit.",
+      "saveRooms": "Save rooms",
+      "roomsSaved": "Rooms updated for this session.",
+      "roomsSavedWithConflict": "Rooms updated, with {count, plural, one {# confirmed double-booking} other {# confirmed double-bookings}}."
     },
     "receipt": {
       "title": "Receipt",
@@ -779,7 +823,7 @@
       "cancelled": "This session is cancelled and can no longer be edited.",
       "sessionCancelled": "This session is cancelled — attendance and payment can no longer be recorded on it.",
       "sessionRescheduled": "This session was rescheduled — attendance and payment can no longer be recorded on it. Use the new session instead.",
-      "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
+      "conflict": "That time double-books a room or the teacher, and this branch does not allow double-booking.",
       "duplicateSlot": "This class already has a session at that exact date and time.",
       "invalidDate": "Enter a valid date.",
       "invalidTimeRange": "The end time must be after the start time.",
@@ -787,7 +831,15 @@
       "notCheckedIn": "This student hasn't been checked in yet. Check them in first.",
       "voidConfirmationRequired": "This student has paid. Confirm that marking them absent voids the payment.",
       "alreadyClosed": "This session is already closed.",
-      "notStarted": "This session hasn't started yet, so it can't be ended."
+      "notStarted": "This session hasn't started yet, so it can't be ended.",
+      "conflictsNeedConfirmation": "This double-books a room or the teacher. Tick “I understand, create anyway” to save it.",
+      "roomRequired": "Choose a room.",
+      "roomNotFound": "That room no longer exists in this branch.",
+      "roomInactive": "That room is deactivated — choose an active one.",
+      "notLinked": "One of the extra rooms is not set up to combine with the chosen room.",
+      "extraIsPrimary": "The main room cannot also be an extra room.",
+      "duplicateExtra": "A room was picked twice.",
+      "noPrimary": "Choose a main room before combining others with it."
     },
     "emptyHint": "Sessions are generated from each class's weekly schedule. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
@@ -960,7 +1012,6 @@
       "fields": {
         "day": "Day",
         "time": "Time",
-        "capacity": "Capacity",
         "lateThreshold": "Late threshold (min)"
       },
       "emptyHint": "When a teacher proposes a class at this branch, it appears here with the schedule they asked for.",
@@ -993,10 +1044,11 @@
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
+      "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it.",
       "classNotFound": "The class this request was for no longer exists.",
-      "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
-      "duplicateSlot": "This class already has a session at that exact date and time."
+      "conflict": "That time double-books a room or the teacher, and this branch does not allow double-booking.",
+      "duplicateSlot": "This class already has a session at that exact date and time.",
+      "conflictsNeedConfirmation": "This double-books a room or the teacher. Tick “I understand, create anyway” and approve again."
     },
     "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
     "kinds": {
@@ -1116,7 +1168,10 @@
       "selfEdit": "You cannot change your own role or access.",
       "alreadyMember": "That person already holds this role at this branch.",
       "catalogAlreadySelected": "This branch has already picked that catalog entry.",
-      "lastActiveMethod": "This is the branch's only active payment method. Add or activate another one first."
+      "lastActiveMethod": "This is the branch's only active payment method. Add or activate another one first.",
+      "roomInCombination": "This room is part of a combined room used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first.",
+      "combinationInUse": "That combination is still used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first, then unlink.",
+      "selfLink": "A room cannot be combined with itself."
     },
     "general": {
       "title": "General",
@@ -1151,7 +1206,7 @@
       "schedulingTitle": "Scheduling conflicts",
       "schedulingDescription": "What happens when a class schedule or a generated session double-books a teacher or a room.",
       "denyConflictsLabel": "Deny double-booked slots and sessions",
-      "denyConflictsDescription": "Off by default: a conflict is saved and flagged so staff can review it. On: the conflicting slot or session is refused instead."
+      "denyConflictsDescription": "Off by default: a double-booked room or teacher can be saved only after staff tick “I understand, create anyway”, and the confirmation is recorded in the audit log. On: the conflicting slot or session is refused, with no override."
     },
     "catalog": {
       "title": "Academic catalog",
@@ -1199,7 +1254,7 @@
     },
     "rooms": {
       "title": "Rooms",
-      "description": "Where sessions physically happen. Capacity is used to warn about over-booking.",
+      "description": "Where sessions physically happen. A class's seat limit is the capacity of its room — or of its rooms added together when they are combined.",
       "addTitle": "Add a room",
       "addDescription": "Name it the way staff say it out loud — that is what they will pick from.",
       "listTitle": "Rooms",
@@ -1208,7 +1263,14 @@
       "fields": {
         "name": "Name",
         "capacity": "Capacity",
-        "capacityHint": "Seats. Use 0 if you do not want a limit."
+        "capacityHint": "Seats. Use 0 if not set — a class using this room is then not capped."
+      },
+      "links": {
+        "title": "Rooms that can be combined",
+        "description": "Tick the rooms each room can be joined with to make one bigger room — for example Room 1 + Room 2. A class or session can then use a room plus any room linked to it, and its seats are the rooms' capacities added together.",
+        "combinableWith": "Can be combined with",
+        "needTwo": "Add at least two active rooms to combine them.",
+        "save": "Save combinations"
       }
     },
     "paymentMethods": {
@@ -1493,15 +1555,13 @@
     },
     "request": {
       "title": "Request a new class",
-      "description": "Subject, grade, timing, capacity and attendance settings — a branch manager reviews this before it becomes a real class.",
+      "description": "Subject, grade, timing and attendance settings — a branch manager reviews this before it becomes a real class.",
       "subject": "Subject",
       "grade": "Grade",
       "none": "Not set",
       "day": "Day",
       "start": "Start",
       "end": "End",
-      "capacity": "Capacity",
-      "capacityHint": "Students. Use 0 for no limit.",
       "lateThreshold": "Late threshold (minutes)",
       "note": "Note to the branch",
       "notePlaceholder": "Anything else the branch should know",
@@ -1536,7 +1596,7 @@
       "notFound": "That request no longer exists, or is not for one of your classes.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats."
+      "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it."
     },
     "emptyHint": "When a student asks to join one of your classes, the request appears here with their name and the class.",
     "headline": "Wants to join your class",
@@ -1548,15 +1608,13 @@
     "empty": "No active centres yet.",
     "request": {
       "title": "Request to teach at {center}",
-      "description": "Subject, grade, timing, capacity and attendance settings — this centre reviews the request before it becomes a real class.",
+      "description": "Subject, grade, timing and attendance settings — this centre reviews the request before it becomes a real class.",
       "subject": "Subject",
       "grade": "Grade",
       "none": "Not set",
       "day": "Day",
       "start": "Start",
       "end": "End",
-      "capacity": "Capacity",
-      "capacityHint": "Students. Use 0 for no limit.",
       "lateThreshold": "Late threshold (minutes)",
       "note": "Note to the centre",
       "notePlaceholder": "Anything else the centre should know",
@@ -1624,7 +1682,7 @@
       "studentBlocked": "You cannot join this class.",
       "alreadyEnrolled": "You are already enrolled in this class.",
       "alreadyRequested": "You already have a pending request for this class.",
-      "classFull": "This class is at capacity — increase the class's capacity or move it to a room with more seats.",
+      "classFull": "This class is full — every seat is taken.",
       "coolingOff": "Your last request for this class was declined. You can request it again from {date}."
     },
     "emptyHint": "No published class matches these filters. Clear one to see more."

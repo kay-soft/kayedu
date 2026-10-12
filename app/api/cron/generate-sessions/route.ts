@@ -35,10 +35,16 @@ export async function GET(request: Request): Promise<Response> {
 
   const results = await Promise.all(
     centers.map(async (center) => {
+      // Unattended: nobody can confirm a double-booking here (R3), so a
+      // conflicting occurrence is always held back, under WARN as under
+      // DENY; staff confirm it from a class's own "Generate sessions".
       const result = await generateSessions(
         prisma,
         center.id,
         center.settings?.scheduleConflictPolicy ?? "WARN",
+        undefined,
+        "en",
+        { confirmConflicts: false, actorUserId: null },
       );
       return { centerId: center.id, ...result };
     }),

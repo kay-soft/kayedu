@@ -33,6 +33,8 @@ import {
   listActivePaymentMethods,
 } from "@/lib/db/payment-methods";
 import { listSessionAttendanceChanges } from "@/lib/db/session-lifecycle";
+import { loadRoomLinks } from "@/lib/db/room-sets";
+import { loadScheduleOccupancy } from "@/lib/db/slot-conflicts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
@@ -561,6 +563,36 @@ export function scoped(ctx: TenantContext) {
     },
 
     /**
+     * Joinable rooms (R3, docs/01 "Config layer"). Reads only — every link
+     * write (and its "in use" refusal) goes through `lib/db/room-sets.ts`,
+     * which owns normalization, the same-centre rule and the self-link
+     * refusal; a generic `create`/`remove` here would be a way around them.
+     */
+    roomLinks: {
+      list: () => loadRoomLinks(prisma, centerId),
+    },
+
+    /** The extra rooms of each class (R3) — reads only, see `roomLinks`. */
+    classGroupRooms: {
+      listForClass: (classGroupId: string) =>
+        prisma.classGroupRoom.findMany({
+          where: scopedWhere(centerId, { classGroupId }),
+          include: { room: true },
+          orderBy: { createdAt: "asc" },
+        }),
+    },
+
+    /** The extra rooms of each session (R3) — reads only, see `roomLinks`. */
+    sessionRooms: {
+      listForSession: (sessionId: string) =>
+        prisma.sessionRoom.findMany({
+          where: scopedWhere(centerId, { sessionId }),
+          include: { room: true },
+          orderBy: { createdAt: "asc" },
+        }),
+    },
+
+    /**
      * Payment methods (R1) — reads only. Every state change (create, rename,
      * activate/deactivate, delete) goes through `lib/db/payment-methods.ts`,
      * which owns the "at least one active method" and "referenced → deactivate,
@@ -709,7 +741,7 @@ export function scoped(ctx: TenantContext) {
 
     /**
      * Recurring weekly slots for a class — the Schedule Builder (docs/04 §9).
-     * `listForConflictCheck` is every *other* class's slots in the center, the
+     * `occupancy` is every *other* class's slots in the center, the
      * candidate universe `lib/scheduling.ts`'s `findScheduleConflicts` checks
      * against; it excludes the class being edited so a class never "conflicts"
      * with its own other slots.
@@ -721,26 +753,13 @@ export function scoped(ctx: TenantContext) {
           orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
         }),
 
-      listForConflictCheck: (excludeClassGroupId: string) =>
-        prisma.classSchedule.findMany({
-          where: scopedWhere(centerId, {
-            classGroupId: { not: excludeClassGroupId },
-          }),
-          select: {
-            classGroupId: true,
-            dayOfWeek: true,
-            startTime: true,
-            endTime: true,
-            classGroup: {
-              select: {
-                teacherId: true,
-                roomId: true,
-                subject: { select: { nameAr: true, nameEn: true } },
-                grade: { select: { nameAr: true, nameEn: true } },
-              },
-            },
-          },
-        }),
+      /**
+       * Every *other* class's slots with its teacher and full room set (R3)
+       * — `lib/db/slot-conflicts.ts`'s `loadScheduleOccupancy`, the one
+       * loader every schedule-slot conflict check uses.
+       */
+      occupancy: (excludeClassGroupId: string, displayLocale: string) =>
+        loadScheduleOccupancy(prisma, centerId, displayLocale, excludeClassGroupId),
 
       findById: (id: string) => scopedFindById(prisma.classSchedule, centerId, id),
 

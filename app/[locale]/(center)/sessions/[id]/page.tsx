@@ -28,7 +28,14 @@ import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { isWithinVisibilityWindow, visibilityWindowFloor } from "@/lib/db/visibility";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { studentSearchWhere } from "@/lib/db/students";
-import { formatDate, formatDateTime, formatMoney, formatTimeRange } from "@/lib/format";
+import {
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  formatNumber,
+  formatTimeRange,
+} from "@/lib/format";
+import { effectiveCapacity } from "@/lib/rooms";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { LinkButton } from "@/components/shared/link-button";
@@ -84,7 +91,8 @@ export default async function SessionDetailPage({
   const locale = await getLocale();
 
   const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
-  const [enrollments, receipt, existingSettlement, paymentMethods] = await Promise.all([
+  const canReschedule = ctxCan(ctx, "session.manage");
+  const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks] = await Promise.all([
     db.enrollments.listForClass(session.classGroupId),
     loadSessionReceiptView(ctx.center.id, session),
     ctxCan(ctx, "settlement.manage")
@@ -93,7 +101,15 @@ export default async function SessionDetailPage({
     // R1: only active methods are offered; recorded payments show their own
     // frozen label regardless of what happens to the method afterwards.
     db.paymentMethods.listActive(),
+    // R3: the room pickers in reschedule / "Rooms" — only for who can use them.
+    canReschedule ? db.rooms.list() : Promise.resolve([]),
+    canReschedule ? db.roomLinks.list() : Promise.resolve([]),
   ]);
+  // R3 — this session's own room set (primary + extras) and what it seats.
+  const sessionRooms = session.room
+    ? [session.room, ...session.extraRooms.map((extra) => extra.room)]
+    : [];
+  const sessionSeats = effectiveCapacity(sessionRooms);
 
   const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
   const attendeeByStudentId = new Map(
@@ -353,10 +369,20 @@ export default async function SessionDetailPage({
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.room")}</span>
-                <span className="font-medium text-text-primary">
-                  {session.room?.name ?? tCommon("none")}
+                <span className="text-end font-medium text-text-primary">
+                  {sessionRooms.map((room) => room.name).join(" + ") || tCommon("none")}
                 </span>
               </div>
+              {sessionRooms.length > 0 ? (
+                <div className="flex justify-between gap-3">
+                  <span className="text-text-secondary">{t("fields.seats")}</span>
+                  <span className="font-medium tabular-nums text-text-primary">
+                    {sessionSeats > 0
+                      ? formatNumber(sessionSeats, locale)
+                      : t("fields.seatsUnlimited")}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.price")}</span>
                 <span className="font-medium tabular-nums text-text-primary">
@@ -371,7 +397,21 @@ export default async function SessionDetailPage({
                   endTime={session.endTime}
                   locked={rosterReadOnly}
                   canCancel={ctxCan(ctx, "session.cancel")}
-                  canReschedule={ctxCan(ctx, "session.manage")}
+                  canReschedule={canReschedule}
+                  roomSet={{
+                    rooms: rooms.map((room) => ({
+                      id: room.id,
+                      name: room.name,
+                      capacity: room.capacity,
+                      active: room.active,
+                    })),
+                    roomLinks,
+                    roomId: session.roomId ?? "",
+                    extraRoomIds: session.roomId
+                      ? session.extraRooms.map((extra) => extra.roomId)
+                      : [],
+                    noneLabel: tCommon("none"),
+                  }}
                 />
               </div>
             </CardContent>

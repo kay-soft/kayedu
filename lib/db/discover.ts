@@ -29,7 +29,6 @@ export function discoverClassSelect(centerId: string) {
   return {
     id: true,
     price: true,
-    capacity: true,
     acceptsNewStudents: true,
     requiresConfirmation: true,
     teacherId: true,
@@ -52,9 +51,15 @@ export function discoverClassSelect(centerId: string) {
         selections: { where: { centerId }, select: { displayName: true }, take: 1 },
       },
     },
-    // `capacity` (M15) — a card's "full" state is hard-capped by the room,
-    // not just the class's own configured target (`lib/capacity.ts`).
-    room: { select: { name: true, capacity: true } },
+    // A card's "full" state is hard-capped by the class's room set (M15,
+    // revised R3 — the summed capacity of primary + extra rooms,
+    // `lib/db/room-sets.ts`'s `classRoomSetFrom`).
+    roomId: true,
+    room: { select: { id: true, name: true, capacity: true } },
+    extraRooms: {
+      select: { room: { select: { id: true, name: true, capacity: true } } },
+      orderBy: { createdAt: "asc" },
+    },
     schedules: {
       select: { dayOfWeek: true, startTime: true, endTime: true },
       orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],

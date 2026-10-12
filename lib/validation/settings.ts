@@ -5,6 +5,7 @@ import { z } from "zod";
 // exercise the real schemas (same reasoning as lib/db/tenant-scope.ts).
 import { localeSchema } from "./auth.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
+import { extraRoomIdsField } from "./room-set.ts";
 
 /**
  * Center-configuration schemas (M2). Every Server Action parses its input
@@ -72,6 +73,16 @@ export const roomSchema = z.object({
 
 /** Every master-data update carries the id of the row being edited. */
 export const roomUpdateSchema = roomSchema.extend({ id: recordId });
+
+/**
+ * "Can be combined with" for one room (R3): the full set of rooms it should
+ * be linked to after the save — links are added and removed to match.
+ */
+export const roomLinksSchema = z.object({
+  ...base,
+  roomId: recordId,
+  linkedRoomIds: extraRoomIdsField,
+});
 
 export const recordToggleSchema = z.object({
   ...base,

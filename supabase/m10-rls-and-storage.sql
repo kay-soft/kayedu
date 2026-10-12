@@ -116,6 +116,8 @@ declare
     'Enrollment', 'StudentBlock', 'Session', 'SessionAttendee', 'Payment',
     'Holiday', 'ExpenseCategory', 'Expense', 'Reservation', 'ChangeRequest',
     'CenterPaymentMethod', 'SessionAttendanceChange',
+    -- R3: joinable rooms and the extra rooms of a class / a session.
+    'RoomLink', 'ClassGroupRoom', 'SessionRoom',
     'CenterSettings'
   ];
 begin

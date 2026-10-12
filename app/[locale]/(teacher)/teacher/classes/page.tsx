@@ -28,7 +28,7 @@ type RequestPayload = {
   dayOfWeek: number;
   startTime: string;
   endTime: string;
-  capacity: number;
+  // R3: pre-R3 requests may still carry `capacity` in their JSON — ignored.
   lateThresholdMinutes: number;
   note?: string | null;
 };

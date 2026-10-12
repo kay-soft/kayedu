@@ -36,6 +36,11 @@ import {
   listActivePaymentMethods,
 } from "../lib/db/payment-methods.ts";
 import { generateSessions } from "../lib/db/sessions.ts";
+import {
+  linkRooms,
+  writeClassExtraRooms,
+  writeSessionExtraRooms,
+} from "../lib/db/room-sets.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 
 const prisma = new PrismaClient();
@@ -216,11 +221,15 @@ type BranchConfig = {
   teachers: PersonDef[];
   students: PersonDef[];
   roomNames: string[];
+  /** R3 — pairs of room indices that can be combined into one bigger room. */
+  roomLinks?: [number, number][];
   /** Indices into this branch's own teachers/rooms and the shared catalog's subjects. */
   classDefs: {
     subject: number;
     teacher: number;
     room: number;
+    /** R3 — extra rooms combined with `room` (each must be in `roomLinks`). */
+    extraRooms?: number[];
     day: number;
     start: string;
     end: string;
@@ -277,7 +286,7 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
     },
   });
 
-  const rooms = [];
+  const rooms: { id: string; name: string }[] = [];
   for (const name of config.roomNames) {
     rooms.push(
       await findOrCreateByName(
@@ -286,6 +295,13 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
         () => prisma.room.create({ data: { centerId, name, capacity: 20 } }),
       ),
     );
+  }
+
+  // R3 — joinable rooms, through the same writer Settings → Rooms uses
+  // (idempotent: an existing link is a no-op).
+  for (const [a, b] of config.roomLinks ?? []) {
+    await linkRooms(prisma, centerId, rooms[a].id, rooms[b].id);
+    console.log(`  + Rooms combinable: ${rooms[a].name} + ${rooms[b].name}`);
   }
 
   // The first teacher gets a real login so the teacher experience can be
@@ -434,7 +450,6 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
           price: def.price,
           centerShareType: def.shareType,
           centerShareValue: def.shareValue,
-          capacity: 20,
         },
       });
       await prisma.classSchedule.create({
@@ -447,6 +462,15 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
         },
       });
       console.log(`  + Class: ${subject.nameEn} (${teacher.firstName} ${teacher.lastName})`);
+    }
+    // R3 — a class on a combined room set: its seats are the rooms' sum.
+    if (def.extraRooms?.length) {
+      await writeClassExtraRooms(
+        prisma,
+        centerId,
+        classGroup.id,
+        def.extraRooms.map((index) => rooms[index].id),
+      );
     }
     classGroups.push(classGroup);
   }
@@ -472,6 +496,33 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
   // ── Forward rolling window (docs §11) — the real generator, unmodified ──
   const generated = await generateSessions(prisma, centerId, "WARN");
   console.log(`  + ${generated.created} upcoming session(s) generated for the next 6 weeks`);
+
+  // R3 — sessions generated before a class was combined (an earlier seed
+  // run) get the class's extra rooms too, so the demo's combined class is
+  // combined on every upcoming session. New ones were copied by the
+  // generator itself.
+  const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
+  for (const [index, def] of config.classDefs.entries()) {
+    if (!def.extraRooms?.length) continue;
+    const upcoming = await prisma.session.findMany({
+      where: {
+        centerId,
+        classGroupId: classGroups[index].id,
+        roomId: rooms[def.room].id,
+        date: { gte: today },
+        closedAt: null,
+      },
+      select: { id: true },
+    });
+    for (const session of upcoming) {
+      await writeSessionExtraRooms(
+        prisma,
+        centerId,
+        session.id,
+        def.extraRooms.map((roomIndex) => rooms[roomIndex].id),
+      );
+    }
+  }
 
   // ── Past attendance + payment history (4 weeks back per class) ─────────
   // generateSessions only ever looks forward, so history is written
@@ -616,8 +667,10 @@ const BRANCH_A: BranchConfig = {
     { first: "Nora", last: "Stevens", email: "demo-student20-downtown@center60-demo.test" },
   ],
   roomNames: ["Room 1", "Room 2", "Room 3"],
+  // R3 — Room 1 + Room 2 can be joined; the first class runs on both (40 seats).
+  roomLinks: [[0, 1]],
   classDefs: [
-    { subject: 0, teacher: 0, room: 0, day: 0, start: "16:00", end: "18:00", price: 15_000, shareType: "PERCENTAGE", shareValue: 15 },
+    { subject: 0, teacher: 0, room: 0, extraRooms: [1], day: 0, start: "16:00", end: "18:00", price: 15_000, shareType: "PERCENTAGE", shareValue: 15 },
     { subject: 1, teacher: 1, room: 1, day: 1, start: "16:00", end: "18:00", price: 18_000, shareType: "FIXED", shareValue: 4_000 },
     { subject: 2, teacher: 1, room: 2, day: 2, start: "16:00", end: "18:00", price: 16_000, shareType: "PERCENTAGE", shareValue: 20 },
     { subject: 3, teacher: 2, room: 0, day: 3, start: "17:00", end: "18:30", price: 12_000, shareType: "PERCENTAGE", shareValue: 10 },

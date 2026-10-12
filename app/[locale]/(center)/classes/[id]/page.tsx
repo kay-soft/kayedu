@@ -25,6 +25,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { formatMoney } from "@/lib/format";
@@ -73,6 +74,7 @@ export default async function ClassDetailPage({
     grades,
     educationSystems,
     rooms,
+    roomLinks,
     enrollments,
     classBlocks,
   ] = await Promise.all([
@@ -81,6 +83,7 @@ export default async function ClassDetailPage({
     db.grades.list(),
     db.educationSystems.list(),
     db.rooms.list(),
+    db.roomLinks.list(),
     db.enrollments.listForClass(id),
     db.studentBlocks.list({ scope: "CLASS", refId: id }),
   ]);
@@ -143,6 +146,9 @@ export default async function ClassDetailPage({
           studentCode: profile.studentCode,
         }))
       : [];
+
+  // R3 — the class's room set and the seats it adds up to (its enrolment cap).
+  const roomSet = classRoomSetFrom(classGroup);
 
   const schedules: ScheduleSlotRow[] = classGroup.schedules.map((schedule) => ({
     id: schedule.id,
@@ -207,13 +213,15 @@ export default async function ClassDetailPage({
                 gradeId: classGroup.gradeId ?? "",
                 educationSystemId: classGroup.educationSystemId ?? "",
                 roomId: classGroup.roomId ?? "",
+                extraRoomIds: classGroup.roomId
+                  ? classGroup.extraRooms.map((extra) => extra.roomId)
+                  : [],
                 price: piastresToInputValue(classGroup.price),
                 centerShareType: classGroup.centerShareType,
                 centerShareValue:
                   classGroup.centerShareType === "FIXED"
                     ? piastresToInputValue(classGroup.centerShareValue)
                     : String(classGroup.centerShareValue),
-                capacity: String(classGroup.capacity),
                 lateThresholdMinutes: String(classGroup.lateThresholdMinutes),
                 acceptsNewStudents: classGroup.acceptsNewStudents,
                 requiresConfirmation: classGroup.requiresConfirmation,
@@ -223,7 +231,13 @@ export default async function ClassDetailPage({
               grades={optionList(grades)}
               educationSystems={optionList(educationSystems)}
               educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
-              rooms={optionList(rooms)}
+              rooms={rooms.map((room) => ({
+                id: room.id,
+                name: room.name,
+                capacity: room.capacity,
+                active: room.active,
+              }))}
+              roomLinks={roomLinks}
               noneLabel={tCommon("none")}
               canDelete={ctxCan(ctx, "class.delete")}
             />
@@ -239,8 +253,19 @@ export default async function ClassDetailPage({
             <CardContent className="flex flex-col gap-2 text-sm">
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.room")}</span>
-                <span className="font-medium text-text-primary">
-                  {classGroup.room?.name ?? tCommon("none")}
+                <span className="text-end font-medium text-text-primary">
+                  {roomSet.rooms.map((room) => room.name).join(" + ") || tCommon("none")}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-text-secondary">{t("fields.seats")}</span>
+                <span className="font-medium tabular-nums text-text-primary">
+                  {roomSet.capacity > 0
+                    ? t("fields.seatsValue", {
+                        enrolled: roster.length,
+                        seats: roomSet.capacity,
+                      })
+                    : t("fields.seatsUnlimited", { enrolled: roster.length })}
                 </span>
               </div>
               <div className="flex justify-between gap-3">

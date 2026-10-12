@@ -24,6 +24,7 @@ import {
 import { formatMoney, formatRating, formatTimeRange } from "@/lib/format";
 import { nameInitial } from "@/lib/initials";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
+import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { subjectAccentColor } from "@/lib/subject-accent";
 import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
@@ -126,7 +127,7 @@ export default async function StudentDiscoverPage({
       const isFull =
         !isEnrolled &&
         !row.requiresConfirmation &&
-        isAtCapacity(row._count.enrollments, enrollmentCap(row.capacity, row.room?.capacity));
+        isAtCapacity(row._count.enrollments, enrollmentCap(classRoomSetFrom(row).capacity));
 
       let status: CardStatus;
       if (isEnrolled) status = "enrolled";
@@ -143,7 +144,7 @@ export default async function StudentDiscoverPage({
         gradeName: row.grade ? catalogLabel(locale, row.grade) : null,
         teacherName: teacherNames.get(row.teacherId) ?? "—",
         teacherRating: teacherRatings.get(row.teacherId) ?? null,
-        roomName: row.room?.name ?? null,
+        roomName: classRoomSetFrom(row).rooms.map((room) => room.name).join(" + ") || null,
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
         schedules: row.schedules,

@@ -22,7 +22,8 @@ type ChangeRequestPayload = {
   dayOfWeek: number;
   startTime: string;
   endTime: string;
-  capacity: number;
+  // R3: a pre-R3 request may still carry a `capacity` key in its JSON. It is
+  // ignored — a class's seats come from its room set, chosen by the centre.
   lateThresholdMinutes: number;
   note?: string | null;
 };
@@ -199,12 +200,6 @@ export default async function ApprovalsPage() {
                           label: t("changeRequests.fields.time"),
                           value: timeRange(payload.startTime, payload.endTime),
                           ltr: true,
-                        },
-                        {
-                          label: t("changeRequests.fields.capacity"),
-                          value: payload.capacity
-                            ? String(payload.capacity)
-                            : tCommon("none"),
                         },
                         {
                           label: t("changeRequests.fields.lateThreshold"),

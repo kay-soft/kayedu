@@ -14,6 +14,7 @@ import type {
 import { claimStudentCode } from "./students.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import { cooldownUntil, enrollmentCap, isAtCapacity, isInCooldown } from "../capacity.ts";
+import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER_SCOPE: BlockScope = "TEACHER";
@@ -135,7 +136,7 @@ export async function reserveOrEnroll(
 
   const classGroup = await tx.classGroup.findFirst({
     where: scopedWhere(centerId, { id: classGroupId, active: true }),
-    include: { room: { select: { capacity: true } } },
+    include: { room: ROOM_SET_SELECT.room, extraRooms: ROOM_SET_SELECT.extraRooms },
   });
   if (!classGroup) return { ok: false, error: "notFound" };
   if (!classGroup.acceptsNewStudents) return { ok: false, error: "notAcceptingStudents" };
@@ -180,7 +181,8 @@ export async function reserveOrEnroll(
   }
 
   if (!classGroup.requiresConfirmation) {
-    const cap = enrollmentCap(classGroup.capacity, classGroup.room?.capacity);
+    // R3: the summed capacity of the class's room set — never a class field.
+    const cap = enrollmentCap(classRoomSetFrom(classGroup).capacity);
     const active = await tx.enrollment.count({
       where: scopedWhere(centerId, { classGroupId, status: ACTIVE_ENROLLMENT }),
     });
@@ -244,7 +246,7 @@ export async function confirmReservation(
 
   const classGroup = await tx.classGroup.findFirst({
     where: scopedWhere(centerId, { id: reservation.classGroupId }),
-    include: { room: { select: { capacity: true } } },
+    include: { room: ROOM_SET_SELECT.room, extraRooms: ROOM_SET_SELECT.extraRooms },
   });
   if (!classGroup) return { ok: false, error: "notFound" };
 
@@ -252,10 +254,11 @@ export async function confirmReservation(
     return { ok: false, error: "studentBlocked" };
   }
 
-  // Hard-capped by the room, not just the class's own configured target
-  // (M15, spec §5.1 "Capacity") — staff cannot approve past the cap, request
-  // or no request.
-  const cap = enrollmentCap(classGroup.capacity, classGroup.room?.capacity);
+  // Hard-capped by the class's room set (M15, revised R3 — spec §5.1
+  // "Capacity") — staff cannot approve past the cap, request or no request.
+  // Enrolments already above a reduced cap are never removed; only new ones
+  // are refused.
+  const cap = enrollmentCap(classRoomSetFrom(classGroup).capacity);
   const active = await tx.enrollment.count({
     where: scopedWhere(centerId, { classGroupId: classGroup.id, status: ACTIVE_ENROLLMENT }),
   });

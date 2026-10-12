@@ -25,8 +25,11 @@ import type { AdjustedSettlement } from "@/lib/db/settlements";
 import {
   cancelSession,
   rescheduleSession,
+  updateSessionRooms,
   updateSessionShareOverride,
+  type GenerationConflict,
 } from "@/lib/db/sessions";
+import { describeConflicts } from "@/lib/db/slot-conflicts";
 import { claimStudentCode, studentSearchWhere } from "@/lib/db/students";
 import { scopedData } from "@/lib/db/tenant-scope";
 import { fullName, localName } from "@/lib/identity";
@@ -42,6 +45,7 @@ import {
   recordPaymentSchema,
   refundPaymentSchema,
   rescheduleSessionSchema,
+  sessionRoomsSchema,
   sessionShareOverrideSchema,
   setAttendanceSchema,
   voidPaymentSchema,
@@ -698,6 +702,40 @@ export async function endSessionAction(
   return { status: "closed" };
 }
 
+/** How many conflicts a form is shown — enough to act on, never a wall. */
+const MAX_SHOWN_CONFLICTS = 30;
+
+/** Conflicts → the print-ready list a form shows (R3, `SlotConflictNotice`). */
+async function shownConflicts(ctx: TenantContext, conflicts: GenerationConflict[]) {
+  return conflicts.length > 0
+    ? describeConflicts(prisma, ctx.center.id, conflicts.slice(0, MAX_SHOWN_CONFLICTS))
+    : undefined;
+}
+
+const ROOM_SET_ERRORS = new Set([
+  "noPrimary",
+  "roomNotFound",
+  "roomInactive",
+  "notLinked",
+  "extraIsPrimary",
+  "duplicateExtra",
+]);
+
+/** A room-set refusal (R3) → the field it belongs to. */
+function roomSetFieldErrors(error: string): SessionActionState {
+  if (error === "noPrimary") return { fieldErrors: { roomId: "roomRequired" } };
+  if (error === "roomNotFound" || error === "roomInactive") {
+    return { fieldErrors: { roomId: error } };
+  }
+  return { fieldErrors: { extraRoomIds: error } };
+}
+
+/**
+ * Reschedule (M15) — R3: the replacement takes the original's room set
+ * unless the form picks another valid one, and the whole window is
+ * re-checked. A conflict is refused with the list (DENY always; WARN until
+ * `confirmConflicts`), and a confirmed one is audited by the data layer.
+ */
 export async function rescheduleSessionAction(
   _state: SessionActionState,
   formData: FormData,
@@ -707,22 +745,35 @@ export async function rescheduleSessionAction(
 
   const parsed = rescheduleSessionSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-  const { locale, sessionId, date, startTime, endTime } = parsed.data;
+  const { locale, sessionId, date, startTime, endTime, roomId, extraRoomIds, confirmConflicts } =
+    parsed.data;
 
   const before = await prisma.session.findFirst({
     where: { centerId: ctx.center.id, id: sessionId },
-    select: { date: true, startTime: true, endTime: true },
+    select: { date: true, startTime: true, endTime: true, roomId: true },
   });
 
+  const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
   const result = await rescheduleSession(
     prisma,
     ctx.center.id,
     sessionId,
-    { date, startTime, endTime },
-    ctx.settings?.scheduleConflictPolicy ?? "WARN",
+    { date, startTime, endTime, roomId, extraRoomIds },
+    policy,
     locale,
+    { confirmConflicts, actorUserId: ctx.user.id },
   );
-  if (!result.ok) return { error: result.error };
+  if (!result.ok) {
+    if ("conflicts" in result) {
+      return {
+        error: result.error,
+        conflicts: await shownConflicts(ctx, result.conflicts),
+        conflictPolicy: policy,
+      };
+    }
+    if (ROOM_SET_ERRORS.has(result.error)) return roomSetFieldErrors(result.error);
+    return { error: result.error };
+  }
 
   // Reschedule creates a *new* Session (M15) — the original row is left in
   // place, linked via `rescheduledToId`, not mutated into the new date/time.
@@ -733,14 +784,92 @@ export async function rescheduleSessionAction(
     entityType: "Session",
     entityId: sessionId,
     before,
-    after: { date: result.session.date, startTime, endTime, newSessionId: result.session.id },
+    after: {
+      date: result.session.date,
+      startTime,
+      endTime,
+      roomId: result.session.roomId,
+      newSessionId: result.session.id,
+    },
   });
 
   revalidateSessionDetail(locale, sessionId);
   revalidateSessionDetail(locale, result.session.id);
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);
-  return { status: "rescheduled", conflicts: result.conflicts, newSessionId: result.session.id };
+  return {
+    status: "rescheduled",
+    conflicts: await shownConflicts(ctx, result.conflicts),
+    conflictPolicy: policy,
+    newSessionId: result.session.id,
+  };
+}
+
+/**
+ * Changes the room set of this one session (R3) — never its class, so the
+ * class's enrolment cap is untouched. Same permission as reschedule
+ * (`session.manage`), same combination rule, same conflict contract.
+ */
+export async function updateSessionRoomsAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
+
+  const parsed = sessionRoomsSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const { locale, sessionId, roomId, extraRoomIds, confirmConflicts } = parsed.data;
+
+  const before = await prisma.session.findFirst({
+    where: { centerId: ctx.center.id, id: sessionId },
+    select: { roomId: true, extraRooms: { select: { roomId: true } } },
+  });
+  if (!before) return NOT_FOUND;
+
+  const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
+  const result = await updateSessionRooms(
+    prisma,
+    ctx.center.id,
+    sessionId,
+    { roomId, extraRoomIds },
+    policy,
+    locale,
+    { confirmConflicts, actorUserId: ctx.user.id },
+  );
+  if (!result.ok) {
+    if ("conflicts" in result) {
+      return {
+        error: result.error,
+        conflicts: await shownConflicts(ctx, result.conflicts),
+        conflictPolicy: policy,
+      };
+    }
+    if (ROOM_SET_ERRORS.has(result.error)) return roomSetFieldErrors(result.error);
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "session.rooms.update",
+    entityType: "Session",
+    entityId: sessionId,
+    before: {
+      roomId: before.roomId,
+      extraRoomIds: before.extraRooms.map((extra) => extra.roomId),
+    },
+    after: { roomId, extraRoomIds: roomId ? extraRoomIds : [] },
+  });
+
+  revalidateSessionDetail(locale, sessionId);
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  return {
+    status: "roomsUpdated",
+    conflicts: await shownConflicts(ctx, result.conflicts),
+    conflictPolicy: policy,
+  };
 }
 
 /**

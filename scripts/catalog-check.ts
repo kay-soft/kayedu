@@ -321,7 +321,6 @@ async function main() {
       price: 10_000,
       centerShareType: "FIXED",
       centerShareValue: system.defaultFixedCenterShare, // 4,000 — inherited
-      capacity: 0,
     }),
   });
 

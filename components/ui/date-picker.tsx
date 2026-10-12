@@ -34,6 +34,7 @@ export function DatePicker({
   submitOnChange,
   placeholder,
   className,
+  onValueChange,
   "aria-invalid": ariaInvalid,
 }: {
   id?: string;
@@ -56,6 +57,8 @@ export function DatePicker({
   submitOnChange?: boolean;
   placeholder?: string;
   className?: string;
+  /** Told the new "YYYY-MM-DD" (or "") whenever the date changes. */
+  onValueChange?: (value: string) => void;
   "aria-invalid"?: boolean;
 }) {
   const t = useTranslations("Shared.calendar");
@@ -76,6 +79,7 @@ export function DatePicker({
 
   function commit(next: string) {
     setValue(next);
+    onValueChange?.(next);
     if (submitOnChange) pendingSubmit.current = true;
   }
 

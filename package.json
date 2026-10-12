@@ -33,7 +33,8 @@
     "check:parent": "node --env-file-if-exists=.env scripts/parent-check.ts",
     "check:ratings": "node --env-file-if-exists=.env scripts/ratings-check.ts",
     "check:visibility": "node --env-file-if-exists=.env scripts/visibility-check.ts",
-    "check:session-lifecycle": "node --env-file-if-exists=.env scripts/session-lifecycle-check.ts"
+    "check:session-lifecycle": "node --env-file-if-exists=.env scripts/session-lifecycle-check.ts",
+    "check:rooms": "node --env-file-if-exists=.env scripts/rooms-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -227,6 +227,9 @@ model Center {
   catalogSelections  CenterCatalogSelection[]
   catalogSuggestions CatalogSuggestion[]
   rooms              Room[]
+  roomLinks          RoomLink[]
+  classGroupRooms    ClassGroupRoom[]
+  sessionRooms       SessionRoom[]
   classGroups        ClassGroup[]
   studentProfiles    StudentProfile[]
   enrollments        Enrollment[]
@@ -540,10 +543,75 @@ model Room {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  classGroups ClassGroup[]
-  sessions    Session[]
+  classGroups      ClassGroup[]
+  sessions         Session[]
+  // R3 — joinable rooms. A link is stored once per pair (roomAId < roomBId),
+  // so "which rooms can this one combine with" reads both sides.
+  linksAsA         RoomLink[]       @relation("RoomLinkA")
+  linksAsB         RoomLink[]       @relation("RoomLinkB")
+  // R3 — this room used as an EXTRA room of a class / a session.
+  classGroupExtras ClassGroupRoom[]
+  sessionExtras    SessionRoom[]
 
   @@index([centerId])
+}
+
+/// R3 — two rooms of the same centre that may be combined into one bigger
+/// room (Room 1 + Room 2). Symmetric by construction: each pair is stored
+/// ONCE, normalized so roomAId < roomBId (compared as strings), and unique on
+/// that pair. Never a self-link, never across centres — both enforced in
+/// lib/db/room-sets.ts, the only writer. A combination is a star around a
+/// primary room, not transitive: A-B and B-C linked does not allow A+C
+/// (lib/rooms.ts `isValidCombination`).
+model RoomLink {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  roomAId   String
+  roomA     Room     @relation("RoomLinkA", fields: [roomAId], references: [id], onDelete: Cascade)
+  roomBId   String
+  roomB     Room     @relation("RoomLinkB", fields: [roomBId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([roomAId, roomBId])
+  @@index([centerId])
+}
+
+/// R3 — an EXTRA room a class uses alongside its primary `ClassGroup.roomId`.
+/// Each extra must be linked to the primary (RoomLink). The class's
+/// enrolment cap is the summed capacity of primary + extras (lib/rooms.ts).
+model ClassGroupRoom {
+  id           String     @id @default(uuid())
+  centerId     String
+  center       Center     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  classGroupId String
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  roomId       String
+  room         Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([classGroupId, roomId])
+  @@index([centerId])
+  @@index([centerId, roomId])
+}
+
+/// R3 — an EXTRA room one session uses alongside its primary
+/// `Session.roomId`. Copied from the class by the generator; a session may
+/// override its own set (that never changes the class's enrolment cap). While
+/// the session runs, every room in its set is busy (findSessionConflicts).
+model SessionRoom {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, roomId])
+  @@index([centerId])
+  @@index([centerId, roomId])
 }
 
 model ClassGroup {
@@ -568,7 +636,8 @@ model ClassGroup {
   // Center's cut config — resolved onto payments as a snapshot.
   centerShareType      ShareType               @default(PERCENTAGE)
   centerShareValue     Int                     @default(15) // percent OR piastres
-  capacity             Int                     @default(0)
+  // R3: no `capacity` column — enrolment is capped by the class's room set
+  // (primary + extraRooms, lib/rooms.ts), reversing M15's min(class, room).
   lateThresholdMinutes Int                     @default(10)
   acceptsNewStudents   Boolean                 @default(true)
   requiresConfirmation Boolean                 @default(false)
@@ -580,6 +649,8 @@ model ClassGroup {
   sessions     Session[]
   enrollments  Enrollment[]
   reservations Reservation[]
+  // R3 — rooms combined with the primary `roomId` (each linked to it).
+  extraRooms   ClassGroupRoom[]
 
   @@index([centerId])
   @@index([centerId, teacherId])
@@ -760,6 +831,8 @@ model Session {
   settlements       Settlement[]
   // R2 — every status change made while the session was live, in order.
   attendanceChanges SessionAttendanceChange[]
+  // R3 — rooms combined with the primary `roomId` for this session only.
+  extraRooms        SessionRoom[]
   // M17 — ratings/skips students recorded against this exact session. Never
   // re-derived if the session is later rescheduled: a rating is for the
   // session actually attended, at the teacher who actually taught it.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { AlertTriangle, CalendarClock, Plus, X } from "lucide-react";
+import { CalendarClock, Plus, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -9,11 +9,16 @@ import {
   removeScheduleAction,
   updateScheduleAction,
 } from "@/app/[locale]/(center)/classes/actions";
+import {
+  SlotConflictNotice,
+  useSlotConflicts,
+} from "@/components/center/slot-conflict-notice";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { isValidTimeRange } from "@/lib/scheduling";
 import { IDLE_CLASS_STATE, type ClassActionState } from "@/lib/validation/classes";
 import { EmptyState } from "@/components/shared/empty-state";
 
@@ -26,36 +31,52 @@ export type ScheduleSlotRow = {
 
 const DAY_VALUES = [0, 1, 2, 3, 4, 5, 6] as const;
 
-function ConflictBanner({ state }: { state: ClassActionState }) {
-  const t = useTranslations("Classes.schedule");
-  if (!state.conflicts || state.conflicts.length === 0) return null;
+/** Errors the conflict notice already explains — never shown twice. */
+const CONFLICT_ERRORS = new Set(["scheduleConflict", "conflictsNeedConfirmation"]);
 
-  return (
-    <div className="flex flex-col gap-1 rounded-lg border border-warning/30 bg-warning-bg p-3 text-sm text-warning">
-      {state.conflicts.map((conflict, index) => (
-        <p key={index} className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {t(conflict.type === "room" ? "roomConflictWith" : "teacherConflictWith", {
-              className: conflict.className,
-            })}
-          </span>
-        </p>
-      ))}
-    </div>
+/** A slot being edited, and the live conflict state for it (R3). */
+function useSlotDraft(
+  classGroupId: string,
+  initial: { dayOfWeek: string; startTime: string; endTime: string },
+  state: ClassActionState,
+) {
+  const locale = useLocale();
+  const [draft, setDraft] = useState(initial);
+  const edited =
+    draft.dayOfWeek !== initial.dayOfWeek ||
+    draft.startTime !== initial.startTime ||
+    draft.endTime !== initial.endTime;
+  const checkable = edited && isValidTimeRange(draft.startTime, draft.endTime);
+  const conflicts = useSlotConflicts(
+    checkable
+      ? {
+          kind: "schedule",
+          locale,
+          classGroupId,
+          dayOfWeek: Number(draft.dayOfWeek),
+          startTime: draft.startTime,
+          endTime: draft.endTime,
+        }
+      : null,
+    state.error ? state : undefined,
   );
+  return { draft, setDraft, conflicts };
 }
 
 /**
  * The Schedule Builder (docs/04-design-system.md §9): one row per weekly
- * slot, day/start/end editable in place, a conflict banner directly beneath
- * a row that double-books a teacher or (this class's single, fixed) room —
- * never a modal or toast. `+ Add time slot` appends a new row below the last.
+ * slot, day/start/end editable in place, and `SlotConflictNotice` directly
+ * beneath a row that double-books the teacher or any room of this class's
+ * room set (R3) — never a modal or toast. The clash is previewed live as the
+ * slot is edited; under WARN saving needs "I understand, create anyway",
+ * under DENY it is refused. `+ Add time slot` appends a new row below the
+ * last.
  *
- * The reference mockup shows a per-slot room picker; this build keeps one
- * room per class (`ClassGroup.roomId`, docs/01-data-model.md §2) rather than
- * adding a room to `ClassSchedule` — the class's room is shown in the header
- * panel above instead (docs/04 §9, revised).
+ * The reference mockup shows a per-slot room picker; this build keeps the
+ * room set per class (`ClassGroup.roomId` + extra rooms,
+ * docs/01-data-model.md §2) rather than adding a room to `ClassSchedule` —
+ * the class's rooms are shown in the header panel above instead (docs/04 §9,
+ * revised).
  */
 export function ScheduleBuilder({
   classGroupId,
@@ -105,59 +126,83 @@ function ScheduleRow({
     removeScheduleAction,
     IDLE_CLASS_STATE,
   );
+  const { draft, setDraft, conflicts } = useSlotDraft(
+    classGroupId,
+    {
+      dayOfWeek: String(slot.dayOfWeek),
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+    },
+    state,
+  );
 
   return (
     <li className="rounded-xl border border-border p-3">
-      <form
-        action={updateAction}
-        className="flex flex-col gap-3 sm:flex-row sm:items-end"
-      >
+      <form action={updateAction} className="flex flex-col gap-3">
         <input type="hidden" name="locale" value={locale} />
         <input type="hidden" name="id" value={slot.id} />
         <input type="hidden" name="classGroupId" value={classGroupId} />
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <label className="text-xs font-medium text-text-secondary">
-            {t("day")}
-          </label>
-          <Select name="dayOfWeek" defaultValue={String(slot.dayOfWeek)}>
-            {DAY_VALUES.map((day) => (
-              <option key={day} value={day}>
-                {tDays.raw("dayNames")[day] as string}
-              </option>
-            ))}
-          </Select>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-medium text-text-secondary">
+              {t("day")}
+            </label>
+            <Select
+              name="dayOfWeek"
+              value={draft.dayOfWeek}
+              onValueChange={(dayOfWeek) => setDraft({ ...draft, dayOfWeek })}
+            >
+              {DAY_VALUES.map((day) => (
+                <option key={day} value={day}>
+                  {tDays.raw("dayNames")[day] as string}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-medium text-text-secondary">
+              {t("start")}
+            </label>
+            <Input
+              name="startTime"
+              type="time"
+              dir="ltr"
+              value={draft.startTime}
+              onChange={(event) => setDraft({ ...draft, startTime: event.target.value })}
+              required
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-medium text-text-secondary">
+              {t("end")}
+            </label>
+            <Input
+              name="endTime"
+              type="time"
+              dir="ltr"
+              value={draft.endTime}
+              onChange={(event) => setDraft({ ...draft, endTime: event.target.value })}
+              required
+            />
+          </div>
+
+          <div className="flex shrink-0 gap-2">
+            <SubmitButton variant="outline" disabled={conflicts.blocked}>
+              {t("save")}
+            </SubmitButton>
+          </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <label className="text-xs font-medium text-text-secondary">
-            {t("start")}
-          </label>
-          <Input
-            name="startTime"
-            type="time"
-            dir="ltr"
-            defaultValue={slot.startTime}
-            required
-          />
-        </div>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <label className="text-xs font-medium text-text-secondary">
-            {t("end")}
-          </label>
-          <Input
-            name="endTime"
-            type="time"
-            dir="ltr"
-            defaultValue={slot.endTime}
-            required
-          />
-        </div>
-
-        <div className="flex shrink-0 gap-2">
-          <SubmitButton variant="outline">{t("save")}</SubmitButton>
-        </div>
+        <SlotConflictNotice
+          idPrefix={`slot-${slot.id}`}
+          conflicts={conflicts.conflicts}
+          policy={conflicts.policy}
+          confirmed={conflicts.confirmed}
+          onConfirmedChange={conflicts.setConfirmed}
+        />
       </form>
 
       <div className="mt-2 flex items-center justify-between">
@@ -170,7 +215,7 @@ function ScheduleRow({
           <Button
             type="submit"
             variant="ghost"
-            className="size-9 p-0 text-text-muted hover:text-danger"
+            className="size-11 p-0 text-text-muted hover:text-danger"
             aria-label={t("remove")}
           >
             <X className="size-4" />
@@ -178,7 +223,7 @@ function ScheduleRow({
         </form>
       </div>
 
-      {state.error && state.error !== "scheduleConflict" ? (
+      {state.error && !CONFLICT_ERRORS.has(state.error) ? (
         <div className="mt-2">
           <FormMessage>{tErrors(state.error)}</FormMessage>
         </div>
@@ -193,9 +238,13 @@ function ScheduleRow({
           <FormMessage>{tErrors(removeState.error)}</FormMessage>
         </div>
       ) : null}
-      <div className="mt-2">
-        <ConflictBanner state={state} />
-      </div>
+      {state.status === "saved" && state.conflicts && state.conflicts.length > 0 ? (
+        <div className="mt-2">
+          <FormMessage tone="warning">
+            {t("savedWithConflict", { count: state.conflicts.length })}
+          </FormMessage>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -207,6 +256,11 @@ function AddSlotForm({ classGroupId }: { classGroupId: string }) {
   const locale = useLocale();
   const [state, formAction] = useActionState(createScheduleAction, IDLE_CLASS_STATE);
   const [open, setOpen] = useState(false);
+  const { draft, setDraft, conflicts } = useSlotDraft(
+    classGroupId,
+    { dayOfWeek: "0", startTime: "", endTime: "" },
+    state,
+  );
 
   if (!open) {
     return (
@@ -224,46 +278,74 @@ function AddSlotForm({ classGroupId }: { classGroupId: string }) {
 
   return (
     <div className="rounded-xl border border-dashed border-border p-3">
-      <form action={formAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <form action={formAction} className="flex flex-col gap-3">
         <input type="hidden" name="locale" value={locale} />
         <input type="hidden" name="classGroupId" value={classGroupId} />
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <label className="text-xs font-medium text-text-secondary">
-            {t("day")}
-          </label>
-          <Select name="dayOfWeek" defaultValue="0">
-            {DAY_VALUES.map((day) => (
-              <option key={day} value={day}>
-                {tDays.raw("dayNames")[day] as string}
-              </option>
-            ))}
-          </Select>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-medium text-text-secondary">
+              {t("day")}
+            </label>
+            <Select
+              name="dayOfWeek"
+              value={draft.dayOfWeek}
+              onValueChange={(dayOfWeek) => setDraft({ ...draft, dayOfWeek })}
+            >
+              {DAY_VALUES.map((day) => (
+                <option key={day} value={day}>
+                  {tDays.raw("dayNames")[day] as string}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-medium text-text-secondary">
+              {t("start")}
+            </label>
+            <Input
+              name="startTime"
+              type="time"
+              dir="ltr"
+              value={draft.startTime}
+              onChange={(event) => setDraft({ ...draft, startTime: event.target.value })}
+              required
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <label className="text-xs font-medium text-text-secondary">
+              {t("end")}
+            </label>
+            <Input
+              name="endTime"
+              type="time"
+              dir="ltr"
+              value={draft.endTime}
+              onChange={(event) => setDraft({ ...draft, endTime: event.target.value })}
+              required
+            />
+          </div>
+
+          <div className="flex shrink-0 gap-2">
+            <SubmitButton disabled={conflicts.blocked}>{t("addSlot")}</SubmitButton>
+            <Button type="button" variant="outline" className="h-11" onClick={() => setOpen(false)}>
+              {t("cancel")}
+            </Button>
+          </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <label className="text-xs font-medium text-text-secondary">
-            {t("start")}
-          </label>
-          <Input name="startTime" type="time" dir="ltr" required />
-        </div>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <label className="text-xs font-medium text-text-secondary">
-            {t("end")}
-          </label>
-          <Input name="endTime" type="time" dir="ltr" required />
-        </div>
-
-        <div className="flex shrink-0 gap-2">
-          <SubmitButton>{t("addSlot")}</SubmitButton>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-            {t("cancel")}
-          </Button>
-        </div>
+        <SlotConflictNotice
+          idPrefix={`slot-new-${classGroupId}`}
+          conflicts={conflicts.conflicts}
+          policy={conflicts.policy}
+          confirmed={conflicts.confirmed}
+          onConfirmedChange={conflicts.setConfirmed}
+        />
       </form>
 
-      {state.error && state.error !== "scheduleConflict" ? (
+      {state.error && !CONFLICT_ERRORS.has(state.error) ? (
         <div className="mt-2">
           <FormMessage>{tErrors(state.error)}</FormMessage>
         </div>
@@ -273,9 +355,13 @@ function AddSlotForm({ classGroupId }: { classGroupId: string }) {
           <FormMessage>{tErrors(Object.values(state.fieldErrors)[0])}</FormMessage>
         </div>
       ) : null}
-      <div className="mt-2">
-        <ConflictBanner state={state} />
-      </div>
+      {state.status === "created" && state.conflicts && state.conflicts.length > 0 ? (
+        <div className="mt-2">
+          <FormMessage tone="warning">
+            {t("savedWithConflict", { count: state.conflicts.length })}
+          </FormMessage>
+        </div>
+      ) : null}
     </div>
   );
 }
