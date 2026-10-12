@@ -69,6 +69,9 @@ async function makeChangeRequest(centerId: string, teacherId: string) {
     data: scopedData(centerId, {
       type: "NEW_CLASS",
       requestedBy: teacherId,
+      // Deliberately a legacy payload shape: requests written before R1 still
+      // carry the removed `attendanceRequired` key, and approving them must
+      // keep working — readers ignore the key rather than choking on it.
       payload: { dayOfWeek: 1, startTime: "16:00", endTime: "18:00", capacity: 10, attendanceRequired: true, lateThresholdMinutes: 10 },
       status: "PENDING",
     }),

@@ -9,7 +9,6 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
@@ -193,11 +192,6 @@ function RequestForm({
           />
         </Field>
       </div>
-
-      <label className="flex items-center gap-2 text-sm text-text-secondary">
-        <Checkbox name="attendanceRequired" defaultChecked />
-        {t("attendanceRequired")}
-      </label>
 
       <Field id={`${centerId}-note`} label={t("note")} optional>
         <Textarea id={`${centerId}-note`} name="note" maxLength={300} rows={2} placeholder={t("notePlaceholder")} />

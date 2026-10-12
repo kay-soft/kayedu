@@ -24,11 +24,9 @@ export type ClassFieldsValues = {
   centerShareType: ShareType;
   centerShareValue: string;
   capacity: string;
-  attendanceRequired: boolean;
   lateThresholdMinutes: string;
   acceptsNewStudents: boolean;
   requiresConfirmation: boolean;
-  allowExcused: boolean;
 };
 
 /**
@@ -320,13 +318,6 @@ export function ClassFields({
       </div>
 
       <div className="flex flex-col gap-3">
-        <ToggleRow
-          name="attendanceRequired"
-          label={t("attendanceRequired")}
-          description={t("attendanceRequiredHint")}
-          defaultChecked={values.attendanceRequired}
-        />
-
         <div className="grid gap-4 sm:grid-cols-2 sm:items-end">
           <Field
             id={`${idPrefix}-lateThresholdMinutes`}
@@ -363,13 +354,6 @@ export function ClassFields({
           label={t("requiresConfirmation")}
           description={t("requiresConfirmationHint")}
           defaultChecked={values.requiresConfirmation}
-        />
-
-        <ToggleRow
-          name="allowExcused"
-          label={t("allowExcused")}
-          description={t("allowExcusedHint")}
-          defaultChecked={values.allowExcused}
         />
       </div>
     </div>

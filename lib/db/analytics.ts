@@ -228,7 +228,6 @@ const EMPTY_STATUS_COUNTS: AttendanceStatusCounts = {
   PRESENT: 0,
   LATE: 0,
   ABSENT: 0,
-  EXCUSED: 0,
 };
 
 /**

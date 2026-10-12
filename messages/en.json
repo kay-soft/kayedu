@@ -520,16 +520,12 @@
       "centerShare": "Branch keeps",
       "teacherShare": "Teacher gets",
       "snapshotNote": "Changing this never rewrites money already recorded — every payment keeps the split it was recorded with.",
-      "attendanceRequired": "Attendance is required for this class",
-      "attendanceRequiredHint": "Turn off for a class that doesn't track attendance per session.",
       "lateThreshold": "Late threshold (minutes)",
       "lateThresholdHint": "Minutes after the start time before a student counts as late.",
       "acceptsNewStudents": "Accepting new students",
       "acceptsNewStudentsHint": "Turn off to hide this class from new enrollment while keeping it running.",
       "requiresConfirmation": "New enrollments need confirmation",
-      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate.",
-      "allowExcused": "Allow Excused status",
-      "allowExcusedHint": "Turn off to offer only Present, Late and Absent on this class's sessions."
+      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate."
     },
     "context": {
       "title": "Class context",
@@ -670,15 +666,11 @@
       "groupLabel": "Attendance",
       "PRESENT": "Present",
       "LATE": "Late",
-      "ABSENT": "Absent",
-      "EXCUSED": "Excused"
+      "ABSENT": "Absent"
     },
     "paymentMethod": {
       "groupLabel": "Payment method",
-      "CASH": "Cash",
-      "INSTAPAY": "InstaPay",
-      "WALLET": "Wallet",
-      "VISA": "Visa"
+      "noneActive": "No active payment method. An owner or manager can add one in Settings → Payment methods."
     },
     "roster": {
       "title": "Roster",
@@ -688,12 +680,6 @@
       "unmarked": "Not marked",
       "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian.",
       "paid": "Paid {amount} · {method}",
-      "method": {
-        "CASH": "Cash",
-        "INSTAPAY": "InstaPay",
-        "WALLET": "Wallet",
-        "VISA": "Visa"
-      },
       "recordPayment": "Record payment",
       "void": "Void",
       "voidReasonPlaceholder": "Reason for voiding",
@@ -745,8 +731,7 @@
       "teacherShare": "Teacher share",
       "present": "Present",
       "late": "Late",
-      "absent": "Absent",
-      "excused": "Excused"
+      "absent": "Absent"
     },
     "settlement": {
       "status": "Settlement: {status}"
@@ -757,7 +742,7 @@
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "invalidStatus": "Choose an attendance status.",
-      "invalidMethod": "Choose a payment method.",
+      "invalidMethod": "That payment method isn't available here. Choose another one.",
       "alreadyOnRoster": "This student is already on this session's roster.",
       "studentBlocked": "This student is blocked from this class or teacher.",
       "attendanceNotPayable": "Only a Present or Late attendee can have a payment recorded.",
@@ -774,7 +759,6 @@
       "sessionRescheduled": "This session was rescheduled — attendance and payment can no longer be recorded on it. Use the new session instead.",
       "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time.",
-      "excusedNotAllowed": "This class does not allow the Excused status.",
       "invalidDate": "Enter a valid date.",
       "invalidTimeRange": "The end time must be after the start time."
     },
@@ -935,10 +919,7 @@
         "day": "Day",
         "time": "Time",
         "capacity": "Capacity",
-        "attendance": "Attendance required",
-        "lateThreshold": "Late threshold (min)",
-        "yes": "Yes",
-        "no": "No"
+        "lateThreshold": "Late threshold (min)"
       },
       "emptyHint": "When a teacher proposes a class at this branch, it appears here with the schedule they asked for.",
       "headline": "Wants to open a class"
@@ -1048,6 +1029,7 @@
       "label": "Settings sections",
       "general": "General",
       "rooms": "Rooms",
+      "paymentMethods": "Payment methods",
       "catalog": "Academic catalog",
       "card": "ID card",
       "permissions": "Permissions",
@@ -1069,7 +1051,8 @@
       "actions": "Actions",
       "none": "Not set",
       "saved": "Changes saved.",
-      "emptyHint": "Add the first one using the form above — it becomes selectable everywhere it applies."
+      "emptyHint": "Add the first one using the form above — it becomes selectable everywhere it applies.",
+      "deactivatedInstead": "Records already use this, so it was deactivated instead of deleted. Their history is unchanged."
     },
     "errors": {
       "forbidden": "You are not allowed to change this branch's configuration.",
@@ -1088,7 +1071,8 @@
       "lastOwner": "This is the branch's only owner. Add another owner first.",
       "selfEdit": "You cannot change your own role or access.",
       "alreadyMember": "That person already holds this role at this branch.",
-      "catalogAlreadySelected": "This branch has already picked that catalog entry."
+      "catalogAlreadySelected": "This branch has already picked that catalog entry.",
+      "lastActiveMethod": "This is the branch's only active payment method. Add or activate another one first."
     },
     "general": {
       "title": "General",
@@ -1181,6 +1165,19 @@
         "name": "Name",
         "capacity": "Capacity",
         "capacityHint": "Seats. Use 0 if you do not want a limit."
+      }
+    },
+    "paymentMethods": {
+      "title": "Payment methods",
+      "description": "How students pay at this branch. Reception and the session roster offer active methods only; every recorded payment keeps the name it was recorded with.",
+      "addTitle": "Add a payment method",
+      "addDescription": "Use the name staff and students know it by, e.g. \"Vodafone Cash\".",
+      "listTitle": "Payment methods",
+      "listDescription": "Renaming changes only future payments. A method already used by payments is deactivated instead of deleted. At least one must stay active.",
+      "empty": "No payment methods yet.",
+      "emptyHint": "Add the first one with the Add button above.",
+      "fields": {
+        "name": "Name"
       }
     },
     "card": {
@@ -1392,7 +1389,7 @@
       "centerShare": "Branch share",
       "teacherShare": "Your share",
       "attendanceSummary": "Attendance",
-      "attendanceCounts": "{present} present · {late} late · {absent} absent · {excused} excused"
+      "attendanceCounts": "{present} present · {late} late · {absent} absent"
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -1467,7 +1464,6 @@
       "capacity": "Capacity",
       "capacityHint": "Students. Use 0 for no limit.",
       "lateThreshold": "Late threshold (minutes)",
-      "attendanceRequired": "Attendance is required for this class",
       "note": "Note to the branch",
       "notePlaceholder": "Anything else the branch should know",
       "submit": "Send request",
@@ -1523,7 +1519,6 @@
       "capacity": "Capacity",
       "capacityHint": "Students. Use 0 for no limit.",
       "lateThreshold": "Late threshold (minutes)",
-      "attendanceRequired": "Attendance is required for this class",
       "note": "Note to the centre",
       "notePlaceholder": "Anything else the centre should know",
       "submit": "Send request",

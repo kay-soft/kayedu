@@ -19,7 +19,6 @@ const ATTENDANCE_BADGE = {
   PRESENT: "success",
   LATE: "warning",
   ABSENT: "danger",
-  EXCUSED: "neutral",
 } as const;
 
 type UpcomingRow = {
@@ -39,7 +38,7 @@ type PastRow = {
   startTime: string;
   subjectName: string | null;
   gradeName: string | null;
-  attendanceStatus: "PRESENT" | "LATE" | "ABSENT" | "EXCUSED";
+  attendanceStatus: "PRESENT" | "LATE" | "ABSENT";
   isDropIn: boolean;
   paidAmount: number | null;
   teacherName: string;

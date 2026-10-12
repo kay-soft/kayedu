@@ -5,23 +5,21 @@ import { UserRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { checkInAction } from "@/app/[locale]/(center)/reception/actions";
-import type { AttendanceStatusValue } from "@/components/center/attendance-control";
-import { PaymentMethodSelector } from "@/components/center/payment-method-selector";
+import {
+  ATTENDANCE_STATUS_ORDER,
+  ATTENDANCE_STATUS_TINT,
+  type AttendanceStatusValue,
+} from "@/components/center/attendance-control";
+import {
+  PaymentMethodSelector,
+  type PaymentMethodOption,
+} from "@/components/center/payment-method-selector";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
 import type { LiveSessionOption } from "@/app/[locale]/(center)/reception/live-session-rail";
-
-const STATUS_ORDER: AttendanceStatusValue[] = ["PRESENT", "LATE", "ABSENT", "EXCUSED"];
-
-const TINT: Record<AttendanceStatusValue, string> = {
-  PRESENT: "bg-success-bg text-success ring-1 ring-success/30",
-  LATE: "bg-warning-bg text-warning ring-1 ring-warning/30",
-  ABSENT: "bg-danger-bg text-danger ring-1 ring-danger/30",
-  EXCUSED: "bg-info-bg text-info ring-1 ring-info/30",
-};
 
 /**
  * The Reception Desk's "one flow" (spec §4.1 item 8): pick a session, an
@@ -36,12 +34,15 @@ export function CheckInForm({
   studentName,
   studentPhotoUrl,
   sessions,
+  paymentMethods,
 }: {
   studentProfileId: string;
   studentName: string;
   /** A short-lived signed URL, or null with no photo on file / Storage unset. */
   studentPhotoUrl: string | null;
   sessions: LiveSessionOption[];
+  /** The centre's active methods (R1), oldest first. */
+  paymentMethods: PaymentMethodOption[];
 }) {
   const t = useTranslations("Reception");
   const tAttendance = useTranslations("Sessions.attendance");
@@ -112,7 +113,7 @@ export function CheckInForm({
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-text-secondary">{t("statusLabel")}</span>
         <div className="inline-flex flex-wrap gap-1.5" role="group" aria-label={tAttendance("groupLabel")}>
-          {STATUS_ORDER.map((value) => (
+          {ATTENDANCE_STATUS_ORDER.map((value) => (
             <button
               key={value}
               type="button"
@@ -121,7 +122,7 @@ export function CheckInForm({
               className={cn(
                 "min-h-12 min-w-12 rounded-lg px-4 text-base font-medium transition-ui",
                 status === value
-                  ? TINT[value]
+                  ? ATTENDANCE_STATUS_TINT[value]
                   : "border border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
               )}
             >
@@ -134,7 +135,7 @@ export function CheckInForm({
       {payable ? (
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-text-secondary">{t("methodLabel")}</span>
-          <PaymentMethodSelector />
+          <PaymentMethodSelector methods={paymentMethods} />
         </div>
       ) : null}
 

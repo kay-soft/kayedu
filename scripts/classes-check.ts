@@ -268,30 +268,24 @@ function checkPurePrimitives() {
       endTime: "18:00",
     }).success,
   );
+  // R1 removed the per-class Excused toggle (M10) and attendanceRequired: a
+  // stale form still posting either key parses, and neither reaches a write.
+  const staleClassForm = classGroupSchema.safeParse({
+    locale: "en",
+    teacherId: "t",
+    price: "120",
+    centerShareType: "FIXED",
+    shareValue: "15",
+    capacity: "0",
+    lateThresholdMinutes: "10",
+    allowExcused: "on",
+    attendanceRequired: "on",
+  });
   check(
-    "The class schema parses allowExcused=on as true (M10, spec §5 'Excused configurable per class')",
-    classGroupSchema.safeParse({
-      locale: "en",
-      teacherId: "t",
-      price: "120",
-      centerShareType: "FIXED",
-      shareValue: "15",
-      capacity: "0",
-      lateThresholdMinutes: "10",
-      allowExcused: "on",
-    }).data?.allowExcused === true,
-  );
-  check(
-    "The class schema parses a missing allowExcused as false (an unchecked checkbox)",
-    classGroupSchema.safeParse({
-      locale: "en",
-      teacherId: "t",
-      price: "120",
-      centerShareType: "FIXED",
-      shareValue: "15",
-      capacity: "0",
-      lateThresholdMinutes: "10",
-    }).data?.allowExcused === false,
+    "The class schema drops the removed allowExcused/attendanceRequired keys (R1)",
+    staleClassForm.success &&
+      !("allowExcused" in staleClassForm.data) &&
+      !("attendanceRequired" in staleClassForm.data),
   );
 }
 
@@ -407,7 +401,6 @@ async function main() {
       centerShareType: "PERCENTAGE",
       shareValue: "15",
       capacity: "1",
-      attendanceRequired: "on",
       lateThresholdMinutes: "10",
       acceptsNewStudents: "on",
       requiresConfirmation: "",

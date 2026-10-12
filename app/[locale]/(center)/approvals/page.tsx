@@ -23,7 +23,6 @@ type ChangeRequestPayload = {
   startTime: string;
   endTime: string;
   capacity: number;
-  attendanceRequired: boolean;
   lateThresholdMinutes: number;
   note?: string | null;
 };
@@ -206,12 +205,6 @@ export default async function ApprovalsPage() {
                           value: payload.capacity
                             ? String(payload.capacity)
                             : tCommon("none"),
-                        },
-                        {
-                          label: t("changeRequests.fields.attendance"),
-                          value: payload.attendanceRequired
-                            ? t("changeRequests.fields.yes")
-                            : t("changeRequests.fields.no"),
                         },
                         {
                           label: t("changeRequests.fields.lateThreshold"),

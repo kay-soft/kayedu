@@ -64,9 +64,12 @@ export default async function ReceptionPage({
   const today = startOfUtcDay(new Date());
   const now = new Date();
 
-  const [todaySessions, grades] = await Promise.all([
+  const [todaySessions, grades, paymentMethods] = await Promise.all([
     db.sessions.listForDay(today),
     db.grades.list(),
+    // R1: the centre's own active methods — a deactivated one never reaches
+    // the picker (the action re-checks "this centre, active" regardless).
+    db.paymentMethods.listActive(),
   ]);
 
   // Batch teacher names once, matching the pattern on /classes and /sessions.
@@ -207,6 +210,7 @@ export default async function ReceptionPage({
                   studentName={selectedStudent.name}
                   studentPhotoUrl={selectedStudentPhotoUrl}
                   sessions={liveSessions}
+                  paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
                 />
               </div>
             ) : null}

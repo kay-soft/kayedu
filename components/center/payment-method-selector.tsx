@@ -1,61 +1,59 @@
 "use client";
 
 import { useState } from "react";
-import { Banknote, CreditCard, Smartphone, Wallet } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
-export type PaymentMethodValue = "CASH" | "INSTAPAY" | "WALLET" | "VISA";
-
-const ORDER: PaymentMethodValue[] = ["CASH", "INSTAPAY", "WALLET", "VISA"];
-
-const ICONS: Record<PaymentMethodValue, typeof Banknote> = {
-  CASH: Banknote,
-  INSTAPAY: Smartphone,
-  WALLET: Wallet,
-  VISA: CreditCard,
-};
+/** One of the centre's *active* methods (R1), as a picker shows it. */
+export type PaymentMethodOption = { id: string; name: string };
 
 /**
  * Payment method selector (docs/04-design-system.md §5): icon + label
- * buttons in a row, selected state uses a brand-colored ring, Cash
- * preselected by default. This is client selection state (unlike the
- * Attendance control) because the method is chosen *before* the surrounding
- * form's single submit button records the payment — so it renders a hidden
- * `name="method"` input the submit carries along.
+ * buttons in a row, selected state uses a brand-colored ring, the centre's
+ * first method preselected. The options are the centre's own active
+ * `CenterPaymentMethod` rows (R1) — the page reads them server-side, so a
+ * deactivated method simply never appears here. This is client selection
+ * state (unlike the Attendance control) because the method is chosen
+ * *before* the surrounding form's single submit button records the payment —
+ * so it renders a hidden `name="paymentMethodId"` input the submit carries
+ * along. The server re-resolves that id (this centre, active) regardless.
  */
 export function PaymentMethodSelector({
-  name = "method",
-  defaultValue = "CASH",
+  methods,
+  name = "paymentMethodId",
 }: {
+  methods: PaymentMethodOption[];
   name?: string;
-  defaultValue?: PaymentMethodValue;
 }) {
   const t = useTranslations("Sessions.paymentMethod");
-  const [selected, setSelected] = useState<PaymentMethodValue>(defaultValue);
+  const [selected, setSelected] = useState<string>(methods[0]?.id ?? "");
+
+  if (methods.length === 0) {
+    return <p className="text-sm text-text-muted">{t("noneActive")}</p>;
+  }
 
   return (
     <div role="group" aria-label={t("groupLabel")} className="flex flex-wrap gap-2">
       <input type="hidden" name={name} value={selected} />
-      {ORDER.map((method) => {
-        const Icon = ICONS[method];
-        const isSelected = selected === method;
+      {methods.map((method) => {
+        const isSelected = selected === method.id;
         return (
           <button
-            key={method}
+            key={method.id}
             type="button"
-            onClick={() => setSelected(method)}
+            onClick={() => setSelected(method.id)}
             aria-pressed={isSelected}
             className={cn(
-              "flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-ui focus-ring",
+              "flex min-h-11 max-w-full items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-ui focus-ring",
               isSelected
                 ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/30"
                 : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
             )}
           >
-            <Icon className="size-4" aria-hidden />
-            {t(method)}
+            <Wallet className="size-4 shrink-0" aria-hidden />
+            <span className="truncate">{method.name}</span>
           </button>
         );
       })}

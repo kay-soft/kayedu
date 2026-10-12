@@ -43,13 +43,17 @@ const optionalEmail = z
 
 const base = { locale: localeSchema };
 
-const attendanceStatus = z.enum(["PRESENT", "LATE", "ABSENT", "EXCUSED"], {
+/** Exactly three statuses (R1): present, late, absent. */
+export const attendanceStatus = z.enum(["PRESENT", "LATE", "ABSENT"], {
   error: "invalidStatus",
 });
 
-const paymentMethod = z.enum(["CASH", "INSTAPAY", "WALLET", "VISA"], {
-  error: "invalidMethod",
-});
+/**
+ * A centre-configured method's id (R1). Shape only — whether it names an
+ * *active* method of *this* centre is decided inside `recordPayment`'s
+ * transaction, never here.
+ */
+const paymentMethodId = z.string().trim().min(1, "invalidMethod").max(64, "invalidMethod");
 
 // ── Today's Sessions dashboard filters (M18: the shared date filter) ───────
 
@@ -120,7 +124,7 @@ export const addNewAttendeeSchema = z.object({
 export const recordPaymentSchema = z.object({
   ...base,
   sessionAttendeeId: recordId,
-  method: paymentMethod,
+  paymentMethodId,
 });
 
 export const voidPaymentSchema = z.object({
@@ -226,7 +230,7 @@ export const receptionCheckInSchema = z.object({
   studentProfileId: recordId,
   status: attendanceStatus,
   /** Absent = mark attendance only, no payment (spec §5 "No debt"). */
-  method: paymentMethod.optional(),
+  paymentMethodId: optionalRef,
 });
 
 // ── Action state ────────────────────────────────────────────────────────────

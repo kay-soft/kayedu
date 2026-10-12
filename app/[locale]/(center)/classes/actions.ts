@@ -148,11 +148,9 @@ export async function createClassAction(
     centerShareType,
     centerShareValue,
     capacity,
-    attendanceRequired,
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
-    allowExcused,
   } = parsed.data;
 
   // Every foreign key is re-resolved inside this center — an id from
@@ -184,11 +182,9 @@ export async function createClassAction(
     centerShareType,
     centerShareValue,
     capacity,
-    attendanceRequired,
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
-    allowExcused,
   });
 
   // A class's price and center-cut are money configuration (CLAUDE.md rule 7)
@@ -228,11 +224,9 @@ export async function updateClassAction(
     centerShareType,
     centerShareValue,
     capacity,
-    attendanceRequired,
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
-    allowExcused,
   } = parsed.data;
 
   const existing = await scope.db.classGroups.findById(id);
@@ -267,11 +261,9 @@ export async function updateClassAction(
     centerShareType,
     centerShareValue,
     capacity,
-    attendanceRequired,
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
-    allowExcused,
   });
 
   await writeAuditLog({

@@ -61,6 +61,7 @@ jobs:
       - run: npm run check:people
       - run: npm run check:classes
       - run: npm run check:payments
+      - run: npm run check:payment-methods
       - run: npm run check:analytics
       - run: npm run check:teacher-portal
       - run: npm run check:student-portal
@@ -75,3 +76,5 @@ jobs:
       - run: npm run check:enrollment
       - run: npm run check:parent
       - run: npm run check:ratings
+      - run: npm run check:visibility
+      - run: npm run check:filters

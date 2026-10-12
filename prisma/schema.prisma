@@ -43,18 +43,12 @@ enum ShareType {
   PERCENTAGE // centerShareValue is a whole-number percent (e.g. 15)
 }
 
+// Exactly three statuses (R1, docs/00-master-product-spec.md §5.1). There is
+// no fourth state: a student who is not PRESENT or LATE is ABSENT.
 enum AttendanceStatus {
   PRESENT
   LATE
   ABSENT
-  EXCUSED
-}
-
-enum PaymentMethod {
-  CASH
-  INSTAPAY
-  WALLET
-  VISA
 }
 
 enum SessionStatus {
@@ -230,6 +224,7 @@ model Center {
   sessions           Session[]
   attendees          SessionAttendee[]
   payments           Payment[]
+  paymentMethods     CenterPaymentMethod[]
   expenseCategories  ExpenseCategory[]
   expenses           Expense[]
   reservations       Reservation[]
@@ -564,15 +559,9 @@ model ClassGroup {
   centerShareType      ShareType               @default(PERCENTAGE)
   centerShareValue     Int                     @default(15) // percent OR piastres
   capacity             Int                     @default(0)
-  attendanceRequired   Boolean                 @default(true)
   lateThresholdMinutes Int                     @default(10)
   acceptsNewStudents   Boolean                 @default(true)
   requiresConfirmation Boolean                 @default(false)
-  // Whether EXCUSED is offered as an attendance status on this class's
-  // sessions (M10, closing the gap flagged at M5 — spec §5 "Excused
-  // configurable per class"). Defaults true, matching the M5 behavior where
-  // all four statuses were offered on every class.
-  allowExcused         Boolean                 @default(true)
   active               Boolean                 @default(true)
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
@@ -793,11 +782,11 @@ model SessionAttendee {
 
 // The financial ledger. Money fields are FROZEN at record time. Never recompute.
 model Payment {
-  id                   String          @id @default(uuid())
+  id                   String              @id @default(uuid())
   centerId             String
-  center               Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center               Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
   sessionId            String
-  session              Session         @relation(fields: [sessionId], references: [id])
+  session              Session             @relation(fields: [sessionId], references: [id])
   // Denormalized from session.teacherId at record time (M6, docs/02 §14): the
   // by-teacher analytics breakdown needs a single-table `groupBy`, and Prisma
   // cannot `groupBy` on a related model's scalar column. Not a money field —
@@ -812,16 +801,24 @@ model Payment {
   // most one non-voided Payment per attendee at a time" instead of the
   // database. See docs/01-data-model.md §3.
   sessionAttendeeId    String
-  sessionAttendee      SessionAttendee @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
+  sessionAttendee      SessionAttendee     @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
   studentProfileId     String
-  studentProfile       StudentProfile  @relation(fields: [studentProfileId], references: [id])
+  studentProfile       StudentProfile      @relation(fields: [studentProfileId], references: [id])
   amount               Int // piastres collected
-  method               PaymentMethod   @default(CASH)
+  // The centre's configured method (R1). `methodLabelSnapshot` is the
+  // method's name FROZEN at record time — renaming the method later never
+  // relabels a recorded payment, the same principle as the money snapshots
+  // (CLAUDE.md rule 2). Display always reads the snapshot, never the live
+  // `paymentMethod.name`. RESTRICT: a referenced method is deactivated, never
+  // deleted (lib/db/payment-methods.ts).
+  paymentMethodId      String
+  paymentMethod        CenterPaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  methodLabelSnapshot  String
   priceSnapshot        Int // frozen
   centerShareSnapshot  Int // frozen
   teacherShareSnapshot Int // frozen
   receiptRef           String?
-  voided               Boolean         @default(false)
+  voided               Boolean             @default(false)
   voidReason           String?
   voidedAt             DateTime?
   voidedBy             String?
@@ -829,15 +826,16 @@ model Payment {
   // the actual reversal amounts live on the `Refund` row, never here. A
   // voided payment is never refunded and vice versa (CLAUDE.md rule 7: void
   // and refund are different mechanisms, never collapsed into one flag).
-  refunded             Boolean         @default(false)
+  refunded             Boolean             @default(false)
   refund               Refund?
   recordedBy           String
-  recordedAt           DateTime        @default(now())
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  recordedAt           DateTime            @default(now())
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 
   @@index([sessionAttendeeId])
   @@index([centerId])
+  @@index([paymentMethodId])
   @@index([centerId, recordedAt])
   @@index([centerId, teacherId, recordedAt])
 }
@@ -949,6 +947,26 @@ model Holiday {
   createdAt DateTime @default(now())
 
   @@unique([centerId, date])
+  @@index([centerId])
+}
+
+// A centre's own payment method (R1) — centre-entered master data, one name
+// string like `Room.name` (not a bilingual catalog entry). At least one active
+// method always exists per centre; a method any Payment references is
+// deactivated rather than deleted. Both rules live in
+// lib/db/payment-methods.ts. New centres start with Cash / InstaPay /
+// Vodafone Cash (`DEFAULT_PAYMENT_METHOD_NAMES`).
+model CenterPaymentMethod {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
   @@index([centerId])
 }
 

@@ -33,11 +33,10 @@ export async function SessionReceipt({
         ) : null}
       </dl>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border-subtle pt-4 sm:grid-cols-4">
+      <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border-subtle pt-4">
         <Count label={t("present")} value={totals.presentCount} tone="success" locale={locale} />
         <Count label={t("late")} value={totals.lateCount} tone="warning" locale={locale} />
         <Count label={t("absent")} value={totals.absentCount} tone="danger" locale={locale} />
-        <Count label={t("excused")} value={totals.excusedCount} tone="info" locale={locale} />
       </div>
     </div>
   );
@@ -56,7 +55,6 @@ const TONE_TEXT = {
   success: "text-success",
   warning: "text-warning",
   danger: "text-danger",
-  info: "text-info",
 } as const;
 
 function Count({

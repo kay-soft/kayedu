@@ -14,6 +14,12 @@ import {
   type PermissionGrantWrite,
 } from "@/lib/db/permissions";
 import {
+  createPaymentMethod,
+  deletePaymentMethod,
+  renamePaymentMethod,
+  setPaymentMethodActive,
+} from "@/lib/db/payment-methods";
+import {
   countCenterGradeSelectionsUnderSystem,
   countCenterSubjectSelectionsUnderGrade,
   createCatalogSuggestion,
@@ -32,6 +38,8 @@ import {
   catalogSelectionUpdateSchema,
   catalogSuggestionSchema,
   generalSettingsSchema,
+  paymentMethodSchema,
+  paymentMethodUpdateSchema,
   permissionMatrixSchema,
   recordDeleteSchema,
   recordToggleSchema,
@@ -324,6 +332,138 @@ export async function deleteRoomAction(
   formData: FormData,
 ): Promise<ActionState> {
   return deleteRoomRecord(formData);
+}
+
+// ── Payment methods (R1) ───────────────────────────────────────────────────
+// Same gate as rooms (`center.settings.edit` — no new matrix action). Every
+// rule that can refuse a change (last active method, referenced → deactivate
+// instead of delete) lives in lib/db/payment-methods.ts; these actions only
+// resolve the scope, validate, call in, and audit. A recorded payment keeps
+// its own frozen `methodLabelSnapshot`, so nothing here can relabel history.
+
+export async function createPaymentMethodAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = paymentMethodSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const { name, locale } = parsed.data;
+  const result = await createPaymentMethod(prisma, scope.ctx.center.id, name);
+  if (!result.ok) return { fieldErrors: { name: result.error } };
+
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "paymentMethod.create",
+    entityType: "CenterPaymentMethod",
+    entityId: result.method.id,
+    after: { name: result.method.name, active: result.method.active },
+  });
+
+  revalidateSettings(locale);
+  return { status: "created" };
+}
+
+export async function updatePaymentMethodAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = paymentMethodUpdateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const { id, name, locale } = parsed.data;
+  const result = await renamePaymentMethod(prisma, scope.ctx.center.id, id, name);
+  if (!result.ok) {
+    return result.error === "duplicateName"
+      ? { fieldErrors: { name: "duplicateName" } }
+      : NOT_FOUND;
+  }
+
+  if (result.before.name !== name) {
+    await writeAuditLog({
+      centerId: scope.ctx.center.id,
+      actorUserId: scope.ctx.user.id,
+      action: "paymentMethod.rename",
+      entityType: "CenterPaymentMethod",
+      entityId: id,
+      before: { name: result.before.name },
+      after: { name },
+    });
+  }
+
+  revalidateSettings(locale);
+  return { status: "saved" };
+}
+
+export async function togglePaymentMethodAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { id, active, locale } = parsed.data;
+  const result = await setPaymentMethodActive(prisma, scope.ctx.center.id, id, active);
+  if (!result.ok) return { error: result.error };
+
+  if (result.before.active !== active) {
+    await writeAuditLog({
+      centerId: scope.ctx.center.id,
+      actorUserId: scope.ctx.user.id,
+      action: active ? "paymentMethod.activate" : "paymentMethod.deactivate",
+      entityType: "CenterPaymentMethod",
+      entityId: id,
+      before: { name: result.before.name, active: result.before.active },
+      after: { active },
+    });
+  }
+
+  revalidateSettings(locale);
+  return { status: "saved" };
+}
+
+export async function deletePaymentMethodAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { id, locale } = parsed.data;
+  const result = await deletePaymentMethod(prisma, scope.ctx.center.id, id);
+  if (!result.ok) return { error: result.error };
+
+  // A referenced method is deactivated instead (M18 convention) — audited as
+  // what actually happened, with the delete request noted.
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action:
+      result.outcome === "deleted" ? "paymentMethod.delete" : "paymentMethod.deactivate",
+    entityType: "CenterPaymentMethod",
+    entityId: id,
+    before: { name: result.before.name, active: result.before.active },
+    after:
+      result.outcome === "deleted"
+        ? null
+        : { active: false, reason: "deleteRequestedButReferencedByPayments" },
+  });
+
+  revalidateSettings(locale);
+  return { status: result.outcome };
 }
 
 // ── General settings (default center cut, timeout, late threshold) ─────────

@@ -29,7 +29,6 @@ type RequestPayload = {
   startTime: string;
   endTime: string;
   capacity: number;
-  attendanceRequired: boolean;
   lateThresholdMinutes: number;
   note?: string | null;
 };

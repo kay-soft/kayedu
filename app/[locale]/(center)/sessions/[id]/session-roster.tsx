@@ -16,7 +16,7 @@ import {
 } from "@/components/center/attendance-control";
 import {
   PaymentMethodSelector,
-  type PaymentMethodValue,
+  type PaymentMethodOption,
 } from "@/components/center/payment-method-selector";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -34,7 +34,8 @@ export type RosterRowData = {
   studentCode: string;
   isDropIn: boolean;
   status: AttendanceStatusValue | null;
-  payment: { id: string; amount: number; method: PaymentMethodValue; refunded: boolean } | null;
+  /** `methodLabel` is the payment's frozen `methodLabelSnapshot` (R1), never the live name. */
+  payment: { id: string; amount: number; methodLabel: string; refunded: boolean } | null;
   consecutiveAbsences: number;
 };
 
@@ -53,7 +54,7 @@ export function SessionRoster({
   canRecordPayment,
   canVoid,
   canRefund,
-  allowExcused,
+  paymentMethods,
   readOnly = false,
 }: {
   sessionId: string;
@@ -62,7 +63,8 @@ export function SessionRoster({
   canRecordPayment: boolean;
   canVoid: boolean;
   canRefund: boolean;
-  allowExcused: boolean;
+  /** The centre's active methods (R1), oldest first. */
+  paymentMethods: PaymentMethodOption[];
   /** Cancelled or already-rescheduled (M15) — no attendance/payment control renders. */
   readOnly?: boolean;
 }) {
@@ -83,7 +85,7 @@ export function SessionRoster({
           canRecordPayment={canRecordPayment}
           canVoid={canVoid}
           canRefund={canRefund}
-          allowExcused={allowExcused}
+          paymentMethods={paymentMethods}
           readOnly={readOnly}
         />
       ))}
@@ -98,7 +100,7 @@ function AttendeeRow({
   canRecordPayment,
   canVoid,
   canRefund,
-  allowExcused,
+  paymentMethods,
   readOnly,
 }: {
   sessionId: string;
@@ -107,7 +109,7 @@ function AttendeeRow({
   canRecordPayment: boolean;
   canVoid: boolean;
   canRefund: boolean;
-  allowExcused: boolean;
+  paymentMethods: PaymentMethodOption[];
   readOnly: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
@@ -172,7 +174,6 @@ function AttendeeRow({
             formAction={attendanceFormAction}
             value={row.status}
             pending={attendancePending || attendanceLocked}
-            allowExcused={allowExcused}
             hiddenFields={
               <>
                 <input type="hidden" name="locale" value={locale} />
@@ -192,7 +193,7 @@ function AttendeeRow({
           <p className="text-sm font-medium text-success">
             {t("paid", {
               amount: formatMoney(row.payment.amount, locale),
-              method: t(`method.${row.payment.method}`),
+              method: row.payment.methodLabel,
             })}
           </p>
         ) : null
@@ -202,7 +203,7 @@ function AttendeeRow({
             <p className="text-sm font-medium text-success">
               {t("paid", {
                 amount: formatMoney(row.payment.amount, locale),
-                method: t(`method.${row.payment.method}`),
+                method: row.payment.methodLabel,
               })}
               {row.payment.refunded ? (
                 <span className="ms-2 inline-flex items-center rounded-full bg-info-bg px-2 py-0.5 text-xs font-medium text-info">
@@ -284,7 +285,7 @@ function AttendeeRow({
           >
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="sessionAttendeeId" value={row.attendeeId ?? ""} />
-            <PaymentMethodSelector />
+            <PaymentMethodSelector methods={paymentMethods} />
             <SubmitButton className="w-full sm:w-auto" variant="outline">
               {t("recordPayment")}
             </SubmitButton>

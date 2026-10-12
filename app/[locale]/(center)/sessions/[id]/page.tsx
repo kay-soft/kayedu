@@ -75,12 +75,15 @@ export default async function SessionDetailPage({
   const tSettlementStatus = await getTranslations("Settlements.status");
   const locale = await getLocale();
 
-  const [enrollments, totals, existingSettlement] = await Promise.all([
+  const [enrollments, totals, existingSettlement, paymentMethods] = await Promise.all([
     db.enrollments.listForClass(session.classGroupId),
     sessionReceiptTotals(prisma, ctx.center.id, session.id),
     ctxCan(ctx, "settlement.manage")
       ? prisma.settlement.findFirst({ where: { centerId: ctx.center.id, sessionId: session.id } })
       : Promise.resolve(null),
+    // R1: only active methods are offered; recorded payments show their own
+    // frozen label regardless of what happens to the method afterwards.
+    db.paymentMethods.listActive(),
   ]);
 
   const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
@@ -109,7 +112,7 @@ export default async function SessionDetailPage({
         ? {
             id: activePayment.id,
             amount: activePayment.amount,
-            method: activePayment.method,
+            methodLabel: activePayment.methodLabelSnapshot,
             refunded: activePayment.refunded,
           }
         : null,
@@ -211,7 +214,7 @@ export default async function SessionDetailPage({
               canRecordPayment={ctxCan(ctx, "payment.record")}
               canVoid={ctxCan(ctx, "payment.void")}
               canRefund={ctxCan(ctx, "payment.refund")}
-              allowExcused={session.classGroup.allowExcused}
+              paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
               readOnly={rosterReadOnly}
             />
 

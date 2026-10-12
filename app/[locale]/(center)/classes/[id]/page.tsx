@@ -214,11 +214,9 @@ export default async function ClassDetailPage({
                     ? piastresToInputValue(classGroup.centerShareValue)
                     : String(classGroup.centerShareValue),
                 capacity: String(classGroup.capacity),
-                attendanceRequired: classGroup.attendanceRequired,
                 lateThresholdMinutes: String(classGroup.lateThresholdMinutes),
                 acceptsNewStudents: classGroup.acceptsNewStudents,
                 requiresConfirmation: classGroup.requiresConfirmation,
-                allowExcused: classGroup.allowExcused,
               }}
               teachers={teacherOptions}
               subjects={optionList(subjects)}

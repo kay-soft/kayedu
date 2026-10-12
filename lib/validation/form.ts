@@ -22,7 +22,11 @@ export function fieldErrorsFrom(error: ZodError): Record<string, string> {
 export type ActionState = {
   error?: string;
   fieldErrors?: Record<string, string>;
-  status?: "created" | "saved" | "deleted";
+  /**
+   * "deactivated": a delete that could not hard-delete because history
+   * references the row, so it deactivated instead (R1 payment methods).
+   */
+  status?: "created" | "saved" | "deleted" | "deactivated";
 };
 
 export const IDLE_ACTION_STATE: ActionState = {};

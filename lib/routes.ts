@@ -37,6 +37,7 @@ export const ROUTES = {
   // configuration screen is a child of it.
   centerSettings: "/settings",
   centerSettingsRooms: "/settings/rooms",
+  centerSettingsPaymentMethods: "/settings/payment-methods",
   centerSettingsCatalog: "/settings/catalog",
   centerSettingsCard: "/settings/card",
   centerSettingsPermissions: "/settings/permissions",

@@ -161,12 +161,6 @@ async function writeAttendance<T>(
   }
 }
 
-/** EXCUSED is offered only when the session's class allows it (M10). */
-async function excusedAllowed(db: ScopedDb, classGroupId: string): Promise<boolean> {
-  const classGroup = await db.classGroups.findById(classGroupId);
-  return classGroup?.allowExcused ?? true;
-}
-
 async function isBlockedFromSession(
   db: ScopedDb,
   classGroupId: string,
@@ -196,9 +190,6 @@ export async function setAttendanceAction(
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
-  if (status === "EXCUSED" && !(await excusedAllowed(db, session.classGroupId))) {
-    return { error: "excusedNotAllowed" };
-  }
 
   const existing = await findAttendee(prisma, ctx.center.id, sessionId, studentProfileId);
 
@@ -266,9 +257,6 @@ export async function addExistingAttendeeAction(
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
-  if (status === "EXCUSED" && !(await excusedAllowed(db, session.classGroupId))) {
-    return { error: "excusedNotAllowed" };
-  }
 
   if (await db.attendees.findExisting(sessionId, studentProfileId)) {
     return { error: "alreadyOnRoster" };
@@ -327,9 +315,6 @@ export async function addNewAttendeeAction(
 
   const session = await db.sessions.findById(sessionId);
   if (!session) return NOT_FOUND;
-  if (status === "EXCUSED" && !(await excusedAllowed(db, session.classGroupId))) {
-    return { error: "excusedNotAllowed" };
-  }
 
   const contact = { email, phone };
   const resolution = await resolveContact(contact);
@@ -441,10 +426,12 @@ export async function recordPaymentAction(
 
   const parsed = recordPaymentSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
-  const { locale, sessionAttendeeId, method } = parsed.data;
+  const { locale, sessionAttendeeId, paymentMethodId } = parsed.data;
 
+  // The method is resolved inside the transaction, scoped to this centre and
+  // to active methods only — a forged or stale id is refused there.
   const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, ctx.center.id, sessionAttendeeId, method, ctx.user.id),
+    recordPayment(tx, ctx.center.id, sessionAttendeeId, paymentMethodId, ctx.user.id),
   );
   if (!result.ok) return { error: result.error };
 
@@ -456,7 +443,8 @@ export async function recordPaymentAction(
     entityId: result.payment.id,
     after: {
       amount: result.payment.amount,
-      method: result.payment.method,
+      paymentMethodId: result.payment.paymentMethodId,
+      methodLabelSnapshot: result.payment.methodLabelSnapshot,
       centerShareSnapshot: result.payment.centerShareSnapshot,
       teacherShareSnapshot: result.payment.teacherShareSnapshot,
     },
@@ -490,7 +478,10 @@ export async function voidPaymentAction(
     action: "payment.void",
     entityType: "Payment",
     entityId: result.payment.id,
-    before: { amount: result.payment.amount, method: result.payment.method },
+    before: {
+      amount: result.payment.amount,
+      methodLabelSnapshot: result.payment.methodLabelSnapshot,
+    },
     after: { reason },
   });
 

@@ -4,6 +4,7 @@ import type { Center, CenterLifecycleState, Prisma, PrismaClient, Role } from "@
 // directly, outside the Next.js runtime (same reasoning as lib/db/payments.ts,
 // lib/db/approvals.ts, lib/db/analytics.ts).
 import { DEFAULT_ROLE_GRANTS } from "../auth/permissions.ts";
+import { defaultPaymentMethodRows } from "./payment-methods.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -201,6 +202,12 @@ export async function createCenterWithSettings(
         create: Object.entries(DEFAULT_ROLE_GRANTS).flatMap(([role, actions]) =>
           actions.map((action) => ({ role: role as Role, action, allowed: true })),
         ),
+      },
+      // R1: a centre must always have at least one active payment method
+      // (lib/db/payment-methods.ts), so it is born with the defaults —
+      // Cash / InstaPay / Vodafone Cash — and edits them at /settings.
+      paymentMethods: {
+        create: defaultPaymentMethodRows(),
       },
     },
   });

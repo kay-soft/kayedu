@@ -18,6 +18,10 @@
 import { PrismaClient } from "@prisma/client";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 import { revenueTotals } from "../lib/db/analytics.ts";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import {
@@ -29,6 +33,17 @@ import {
 import { startOfUtcDay } from "../lib/scheduling.ts";
 
 const prisma = new PrismaClient();
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
 
 const SLUG = "visibility-check";
 
@@ -185,8 +200,9 @@ async function main() {
       status: "PRESENT",
       recordedBy: teacherUser.id,
     });
+    const methodId = await fixtureMethodId(center.id);
     const result = await prisma.$transaction((tx) =>
-      recordPayment(tx, center.id, attendee.id, "CASH", teacherUser.id),
+      recordPayment(tx, center.id, attendee.id, methodId, teacherUser.id),
     );
     if (!result.ok) throw new Error(`recordPayment failed: ${result.error}`);
     return { session, payment: result.payment };

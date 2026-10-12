@@ -81,6 +81,15 @@ export const recordToggleSchema = z.object({
 
 export const recordDeleteSchema = z.object({ ...base, id: recordId });
 
+// ── Payment methods (R1) ───────────────────────────────────────────────────
+// One centre-entered name, like a room's. The "at least one active" and
+// "referenced → deactivate" rules are not shape rules, so they live in
+// lib/db/payment-methods.ts, not here.
+
+export const paymentMethodSchema = z.object({ ...base, name: entityName });
+
+export const paymentMethodUpdateSchema = paymentMethodSchema.extend({ id: recordId });
+
 // ── The academic catalog (M13) ──────────────────────────────────────────────
 // A centre picks a global catalog entry (never authors one), may edit only
 // its own display name + price for that pick, and may suggest a missing or

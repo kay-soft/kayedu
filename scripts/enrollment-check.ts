@@ -33,10 +33,25 @@ import {
   SessionClosedError,
 } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
 import { resolveChangeRequest } from "../lib/db/approvals.ts";
 
 const prisma = new PrismaClient();
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
 
 const SLUG = "enrollment-check";
 const TEACHER_SCOPE: BlockScope = "TEACHER";
@@ -499,8 +514,9 @@ async function main() {
     correctionRefused,
   );
 
+  const methodId = await fixtureMethodId(centerId);
   const paymentOnCancelled = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendeeBeforeCancel.id, "CASH", managerId),
+    recordPayment(tx, centerId, attendeeBeforeCancel.id, methodId, managerId),
   );
   check(
     "Recording a payment on a CANCELLED session's attendee is refused by direct call to recordPayment",
@@ -564,8 +580,9 @@ async function main() {
     reschedAttendanceRefused,
   );
 
+  const methodId2 = await fixtureMethodId(centerId);
   const paymentOnRescheduled = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendeeBeforeReschedule.id, "CASH", managerId),
+    recordPayment(tx, centerId, attendeeBeforeReschedule.id, methodId2, managerId),
   );
   check(
     "A payment on the original session's pre-existing attendee is refused as sessionRescheduled",
@@ -598,7 +615,7 @@ async function main() {
     data: scopedData(centerId, {
       type: "NEW_CLASS",
       requestedBy: wanderingTeacher.id,
-      payload: { dayOfWeek: 2, startTime: "10:00", endTime: "11:00", capacity: 5, attendanceRequired: true, lateThresholdMinutes: 5 },
+      payload: { dayOfWeek: 2, startTime: "10:00", endTime: "11:00", capacity: 5, lateThresholdMinutes: 5 },
     }),
   });
   check(

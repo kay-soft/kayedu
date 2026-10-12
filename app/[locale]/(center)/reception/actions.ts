@@ -83,16 +83,12 @@ export async function checkInAction(
 
   const parsed = receptionCheckInSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
-  const { locale, sessionId, studentProfileId, status, method } = parsed.data;
+  const { locale, sessionId, studentProfileId, status, paymentMethodId } = parsed.data;
 
   const session = await db.sessions.findById(sessionId);
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
-  if (status === "EXCUSED") {
-    const classGroup = await db.classGroups.findById(session.classGroupId);
-    if (!(classGroup?.allowExcused ?? true)) return { error: "excusedNotAllowed" };
-  }
 
   const existing = await findAttendee(prisma, centerId, sessionId, studentProfileId);
   let attendeeId: string;
@@ -142,11 +138,11 @@ export async function checkInAction(
   // "Attend = pay, or not counted" — only PRESENT/LATE is ever payable
   // (lib/db/payments.ts `recordPayment` enforces this too; this check just
   // avoids an unnecessary transaction when it plainly cannot apply).
-  if (method && (status === "PRESENT" || status === "LATE")) {
+  if (paymentMethodId && (status === "PRESENT" || status === "LATE")) {
     if (!ctxCan(ctx, "payment.record")) return FORBIDDEN;
 
     const result = await prisma.$transaction((tx) =>
-      recordPayment(tx, centerId, attendeeId, method, ctx.user.id),
+      recordPayment(tx, centerId, attendeeId, paymentMethodId, ctx.user.id),
     );
 
     if (result.ok) {
@@ -158,7 +154,8 @@ export async function checkInAction(
         entityId: result.payment.id,
         after: {
           amount: result.payment.amount,
-          method: result.payment.method,
+          paymentMethodId: result.payment.paymentMethodId,
+          methodLabelSnapshot: result.payment.methodLabelSnapshot,
           centerShareSnapshot: result.payment.centerShareSnapshot,
           teacherShareSnapshot: result.payment.teacherShareSnapshot,
         },

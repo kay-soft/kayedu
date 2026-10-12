@@ -34,11 +34,6 @@ const optionalText = (max: number) =>
     .optional()
     .transform((value) => (value && value.length > 0 ? value : null));
 
-const checkbox = z
-  .string()
-  .optional()
-  .transform((value) => value === "on" || value === "true");
-
 const wholeNumber = (max: number) =>
   z
     .string()
@@ -149,7 +144,6 @@ export const classRequestSchema = z
     startTime: timeValue,
     endTime: timeValue,
     capacity: wholeNumber(MAX_REQUEST_CAPACITY),
-    attendanceRequired: checkbox,
     lateThresholdMinutes: wholeNumber(MAX_REQUEST_LATE_THRESHOLD_MINUTES),
     note: optionalText(300),
   })
@@ -171,7 +165,6 @@ export const teachAtCenterRequestSchema = z
     startTime: timeValue,
     endTime: timeValue,
     capacity: wholeNumber(MAX_REQUEST_CAPACITY),
-    attendanceRequired: checkbox,
     lateThresholdMinutes: wholeNumber(MAX_REQUEST_LATE_THRESHOLD_MINUTES),
     note: optionalText(300),
   })

@@ -78,11 +78,9 @@ export function ClassForm({
               ? piastresToInputValue(defaults.centerShareValue)
               : String(defaults.centerShareValue),
           capacity: "0",
-          attendanceRequired: true,
           lateThresholdMinutes: String(defaults.lateThresholdMinutes),
           acceptsNewStudents: true,
           requiresConfirmation: false,
-          allowExcused: true,
         }}
         teachers={teachers}
         subjects={subjects}

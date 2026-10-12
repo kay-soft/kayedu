@@ -77,13 +77,9 @@ const classGroupFields = {
   centerShareType: z.enum(["FIXED", "PERCENTAGE"], { error: "invalidShareType" }),
   shareValue: z.string().trim().min(1, "required"),
   capacity: wholeNumber(MAX_CAPACITY),
-  attendanceRequired: checkbox,
   lateThresholdMinutes: wholeNumber(MAX_LATE_THRESHOLD_MINUTES),
   acceptsNewStudents: checkbox,
   requiresConfirmation: checkbox,
-  // Whether EXCUSED is offered as an attendance status on this class's
-  // sessions (M10, spec §5 "Excused configurable per class").
-  allowExcused: checkbox,
 };
 
 function resolveShareValue(
@@ -122,11 +118,9 @@ export const classGroupSchema = z
       centerShareType: value.centerShareType,
       centerShareValue,
       capacity: value.capacity,
-      attendanceRequired: value.attendanceRequired,
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
-      allowExcused: value.allowExcused,
     };
   });
 
@@ -147,11 +141,9 @@ export const classGroupUpdateSchema = z
       centerShareType: value.centerShareType,
       centerShareValue,
       capacity: value.capacity,
-      attendanceRequired: value.attendanceRequired,
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
-      allowExcused: value.allowExcused,
     };
   });
 

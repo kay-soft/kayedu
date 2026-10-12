@@ -30,6 +30,10 @@ import { PrismaClient, type CatalogGrade, type CatalogSubject } from "@prisma/cl
 import { createClient } from "@supabase/supabase-js";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 import { generateSessions } from "../lib/db/sessions.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 
@@ -473,6 +477,10 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
   // directly — through the same createAttendance/recordPayment the app
   // uses, never inventing a shortcut around them (CLAUDE.md rule 2).
   let historyWritten = 0;
+  // The branch's first active method (Cash, for a seeded branch) — history
+  // goes through the real `recordPayment`, which freezes its label.
+  const [historyMethod] = await listActivePaymentMethods(prisma, centerId);
+  if (!historyMethod) throw new Error(`${config.name} has no active payment method`);
   for (const classGroup of classGroups) {
     const schedule = await prisma.classSchedule.findFirst({ where: { centerId, classGroupId: classGroup.id } });
     if (!schedule) continue;
@@ -531,7 +539,7 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
 
         if (status === "PRESENT" || status === "LATE") {
           await prisma.$transaction((tx) =>
-            recordPayment(tx, centerId, attendee.id, "CASH", classGroup.teacherId),
+            recordPayment(tx, centerId, attendee.id, historyMethod.id, classGroup.teacherId),
           );
         }
       }
@@ -676,6 +684,9 @@ async function main() {
         timezone: "Africa/Cairo",
       },
     });
+
+    // R1: Cash / InstaPay / Vodafone Cash, only if the branch has none yet.
+    await ensureDefaultPaymentMethods(prisma, center.id);
 
     console.log(`Branch          ${center.name} (${center.slug}) — ${center.id}`);
     console.log(`  Settings      share ${settings.defaultShareType} ${settings.defaultShareValue}`);

@@ -19,6 +19,10 @@ import { PrismaClient } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 import { refundPayment } from "../lib/db/refunds.ts";
 import {
   approveSettlement,
@@ -30,6 +34,17 @@ import { revenueByTeacher, revenueTotals } from "../lib/db/analytics.ts";
 import { can } from "../lib/auth/permissions.ts";
 
 const prisma = new PrismaClient();
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
 
 const SLUG_A = "settlements-check-a";
 const SLUG_B = "settlements-check-b";
@@ -107,7 +122,8 @@ async function payAttendee(
     status: "PRESENT",
     recordedBy: actorId,
   });
-  const result = await prisma.$transaction((tx) => recordPayment(tx, centerId, attendee.id, "CASH", actorId));
+  const methodId = await fixtureMethodId(centerId);
+  const result = await prisma.$transaction((tx) => recordPayment(tx, centerId, attendee.id, methodId, actorId));
   if (!result.ok) throw new Error(`recordPayment failed unexpectedly: ${JSON.stringify(result)}`);
   return { session, attendee, payment: result.payment };
 }

@@ -126,7 +126,8 @@ export async function updateAttendanceStatus(
 /**
  * How many of a student's most recent sessions *in this class*, counting
  * backwards from (and including) `uptoDate`, were marked ABSENT with no
- * present/late/excused break in between (spec §7 acceptance criterion 13).
+ * PRESENT/LATE break in between (spec §7 acceptance criterion 13). With the
+ * three statuses (R1) every non-ABSENT mark breaks the streak.
  * Capped at 50 rows — a real "in a row" alert never needs more, and this
  * keeps the query bounded without an unnecessary second round-trip to count.
  */

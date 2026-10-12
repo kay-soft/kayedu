@@ -100,7 +100,6 @@ export default async function TeacherSessionPrintPage({
                 present: totals.presentCount,
                 late: totals.lateCount,
                 absent: totals.absentCount,
-                excused: totals.excusedCount,
               })}
             />
           </div>

@@ -28,6 +28,10 @@ import {
   scopedWhere,
 } from "@/lib/db/tenant-scope";
 import { visibilityWindowFloor } from "@/lib/db/visibility";
+import {
+  PAYMENT_METHOD_ORDER,
+  listActivePaymentMethods,
+} from "@/lib/db/payment-methods";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
@@ -537,6 +541,28 @@ export function scoped(ctx: TenantContext) {
 
       remove: (id: string) =>
         prisma.room.deleteMany({ where: scopedWhere(centerId, { id }) }),
+    },
+
+    /**
+     * Payment methods (R1) — reads only. Every state change (create, rename,
+     * activate/deactivate, delete) goes through `lib/db/payment-methods.ts`,
+     * which owns the "at least one active method" and "referenced → deactivate,
+     * never delete" rules; a generic `update`/`remove` here would be a way
+     * around both.
+     */
+    paymentMethods: {
+      /** Settings list: active first, then picker order. */
+      list: () =>
+        prisma.centerPaymentMethod.findMany({
+          where: scopedWhere(centerId),
+          orderBy: [{ active: "desc" }, ...PAYMENT_METHOD_ORDER],
+        }),
+
+      /** What a payment picker offers — active only, oldest first. */
+      listActive: () => listActivePaymentMethods(prisma, centerId),
+
+      findById: (id: string) =>
+        scopedFindById(prisma.centerPaymentMethod, centerId, id),
     },
 
     /**

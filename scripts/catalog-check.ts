@@ -41,9 +41,25 @@ import { classListSelect } from "../lib/db/classes.ts";
 import { sessionListSelect } from "../lib/db/sessions.ts";
 import { discoverClassesForCenter } from "../lib/db/discover.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 import { splitShare } from "../lib/money.ts";
 
 const prisma = new PrismaClient();
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
+
 const TEACHER_ROLE: Role = "TEACHER";
 
 const SLUG_A = "catalog-check-a";
@@ -377,8 +393,9 @@ async function main() {
     }),
   });
 
+  const methodId = await fixtureMethodId(centerA.id);
   const paymentInheriting = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeInheriting.id, "CASH", teacherUser.id),
+    recordPayment(tx, centerA.id, attendeeInheriting.id, methodId, teacherUser.id),
   );
   const expectedInheriting = splitShare(10_000, "FIXED", 4_000);
   check(
@@ -388,8 +405,9 @@ async function main() {
     JSON.stringify(paymentInheriting),
   );
 
+  const methodId2 = await fixtureMethodId(centerA.id);
   const paymentOverridden = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeOverridden.id, "CASH", teacherUser.id),
+    recordPayment(tx, centerA.id, attendeeOverridden.id, methodId2, teacherUser.id),
   );
   const expectedOverridden = splitShare(10_000, "PERCENTAGE", 50);
   check(

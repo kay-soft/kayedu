@@ -27,7 +27,6 @@ const ATTENDANCE_BADGE = {
   PRESENT: "success",
   LATE: "warning",
   ABSENT: "danger",
-  EXCUSED: "info",
 } as const;
 
 /**

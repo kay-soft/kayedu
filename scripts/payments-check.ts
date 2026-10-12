@@ -139,6 +139,15 @@ async function main() {
     data: { slug: SLUG_B, name: "Payments B", organization: { create: { name: "Payments B" } } },
   });
 
+  // R1: methods are per-centre rows now (fixture shape only — the assertions
+  // below are unchanged). `check:payment-methods` covers the method rules.
+  const [cashA, instapayA, walletA, cashB] = await Promise.all([
+    prisma.centerPaymentMethod.create({ data: { centerId: centerA.id, name: "Cash" } }),
+    prisma.centerPaymentMethod.create({ data: { centerId: centerA.id, name: "InstaPay" } }),
+    prisma.centerPaymentMethod.create({ data: { centerId: centerA.id, name: "Wallet" } }),
+    prisma.centerPaymentMethod.create({ data: { centerId: centerB.id, name: "Cash" } }),
+  ]);
+
   const teacherA = await makeTeacher(centerA.id, "payments-check-teacher-a@kayedu.test");
   const actorId = teacherA.id; // stands in for a recording staff member's userId
 
@@ -193,7 +202,7 @@ async function main() {
     recordedBy: actorId,
   });
   const paymentFixedResult = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, cashA.id, actorId),
   );
   check(
     "FIXED class: recordPayment freezes centerShareSnapshot=15 EGP, teacherShareSnapshot=105 EGP",
@@ -220,7 +229,7 @@ async function main() {
     recordedBy: actorId,
   });
   const paymentPercentageResult = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeePercentage.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, attendeePercentage.id, cashA.id, actorId),
   );
   check(
     "PERCENTAGE class: recordPayment freezes centerShareSnapshot=18 EGP, teacherShareSnapshot=102 EGP",
@@ -264,7 +273,7 @@ async function main() {
     recordedBy: actorId,
   });
   const paymentAfterChange = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeAfterChange.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, attendeeAfterChange.id, cashA.id, actorId),
   );
   check(
     "A new payment recorded after the config change uses the new cut (30 EGP)",
@@ -299,7 +308,7 @@ async function main() {
 
   // ── 4. Attempting a second active payment for the same attendee fails ───
   const secondAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, "INSTAPAY", actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, instapayA.id, actorId),
   );
   check(
     "recordPayment refuses a second active payment for the same attendee",
@@ -323,7 +332,7 @@ async function main() {
   );
 
   const recreated = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, "WALLET", actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, walletA.id, actorId),
   );
   check(
     "A corrected payment can be recorded for the same attendee once the old one is voided",
@@ -376,7 +385,7 @@ async function main() {
     recordedBy: actorId,
   });
   const absentPaymentAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, absentAttendee.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, absentAttendee.id, cashA.id, actorId),
   );
   check(
     "\"Attend = pay, or not counted\": an ABSENT attendee cannot have a payment recorded",
@@ -519,7 +528,7 @@ async function main() {
     (await scopedFindById(prisma.payment, centerB.id, recreated.ok ? recreated.payment.id : "")) === null,
   );
   const crossCenterPaymentAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerB.id, attendeePercentage.id, "CASH", actorId),
+    recordPayment(tx, centerB.id, attendeePercentage.id, cashB.id, actorId),
   );
   check(
     "Center B cannot record a payment against Center A's SessionAttendee",

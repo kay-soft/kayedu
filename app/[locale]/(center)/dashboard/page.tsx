@@ -89,7 +89,7 @@ export default async function CenterDashboardPage() {
 
   const liveCount = withStatus.filter((entry) => entry.displayStatus === "LIVE").length;
   const notStartedCount = withStatus.filter((entry) => entry.displayStatus === "SCHEDULED").length;
-  const markedToday = todayAttendance.PRESENT + todayAttendance.LATE + todayAttendance.ABSENT + todayAttendance.EXCUSED;
+  const markedToday = todayAttendance.PRESENT + todayAttendance.LATE + todayAttendance.ABSENT;
 
   return (
     <div className="flex flex-col gap-6">

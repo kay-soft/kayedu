@@ -1,13 +1,13 @@
 import type {
   Payment,
-  PaymentMethod,
   Prisma,
   PrismaClient,
 } from "@prisma/client";
-// Relative import on purpose — `npm run check:payments` exercises this
+// Relative imports on purpose — `npm run check:payments` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/sessions.ts and lib/validation/classes.ts).
 import { splitShare } from "../money.ts";
+import { findActivePaymentMethod } from "./payment-methods.ts";
 
 /**
  * The financial ledger's write path (M5, docs/01-data-model.md §3 — read that
@@ -36,7 +36,8 @@ export type RecordPaymentResult =
         | "attendanceNotPayable"
         | "alreadyPaid"
         | "sessionCancelled"
-        | "sessionRescheduled";
+        | "sessionRescheduled"
+        | "invalidMethod";
     };
 
 /**
@@ -59,8 +60,13 @@ export type RecordPaymentResult =
  *   affects only payments recorded after that change (spec §7 acceptance
  *   criterion 3).
  * - "No debt" (spec §5): only PRESENT/LATE attendees are payable. An
- *   ABSENT/EXCUSED attendee is simply not counted — there is nothing to
- *   freeze a payment against.
+ *   ABSENT attendee is simply not counted — there is nothing to freeze a
+ *   payment against.
+ * - The method (R1) is resolved **inside this transaction**, filtered by
+ *   `centerId` AND `active` — another centre's method id, or an inactive
+ *   one, is refused as `invalidMethod` whatever the caller sent. Its name is
+ *   frozen onto `methodLabelSnapshot` right here, so a later rename never
+ *   relabels this payment.
  * - At most one *active* (non-voided) payment exists per attendee at a time.
  *   `Payment.sessionAttendeeId` is deliberately not database-unique (see the
  *   schema comment) so a void-then-recreate leaves the voided row in place
@@ -71,7 +77,7 @@ export async function recordPayment(
   tx: Db,
   centerId: string,
   attendeeId: string,
-  method: PaymentMethod,
+  paymentMethodId: string,
   recordedBy: string,
 ): Promise<RecordPaymentResult> {
   const attendee = await tx.sessionAttendee.findFirst({
@@ -104,6 +110,9 @@ export async function recordPayment(
   });
   if (existingActive) return { ok: false, error: "alreadyPaid" };
 
+  const method = await findActivePaymentMethod(tx, centerId, paymentMethodId);
+  if (!method) return { ok: false, error: "invalidMethod" };
+
   const amount = attendee.session.priceSnapshot;
   // A session's own override (M13) wins when set; otherwise the class's
   // current cut. Both are read fresh, right now — this is the instant the
@@ -125,7 +134,8 @@ export async function recordPayment(
       // "never recompute" weight the share snapshots do.
       teacherId: attendee.session.teacherId,
       amount,
-      method,
+      paymentMethodId: method.id,
+      methodLabelSnapshot: method.name,
       priceSnapshot: amount,
       centerShareSnapshot: split.centerShare,
       teacherShareSnapshot: split.teacherShare,
@@ -181,20 +191,18 @@ export type SessionReceiptTotals = {
   presentCount: number;
   lateCount: number;
   absentCount: number;
-  excusedCount: number;
 };
 
 const EMPTY_STATUS_COUNTS = {
   PRESENT: 0,
   LATE: 0,
   ABSENT: 0,
-  EXCUSED: 0,
 } as const;
 
 /**
  * The money + attendance summary a session receipt shows (spec §4.1 item 7,
  * docs/04 §5 "Receipt / money summary"): total collected, the center/teacher
- * split, and present/late/absent/excused counts. Reads only non-voided
+ * split, and present/late/absent counts. Reads only non-voided
  * payments — a voided payment never contributes to "collected" again.
  */
 export async function sessionReceiptTotals(
@@ -230,6 +238,5 @@ export async function sessionReceiptTotals(
     presentCount: counts.PRESENT,
     lateCount: counts.LATE,
     absentCount: counts.ABSENT,
-    excusedCount: counts.EXCUSED,
   };
 }

@@ -8,7 +8,6 @@ import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
@@ -94,11 +93,6 @@ export function ClassRequestForm({
           <Input id="request-lateThresholdMinutes" name="lateThresholdMinutes" type="number" min={0} defaultValue={10} />
         </Field>
       </div>
-
-      <label className="flex items-center gap-2 text-sm text-text-secondary">
-        <Checkbox name="attendanceRequired" defaultChecked />
-        {t("attendanceRequired")}
-      </label>
 
       <Field id="request-note" label={t("note")} optional>
         <Textarea id="request-note" name="note" maxLength={300} rows={2} placeholder={t("notePlaceholder")} />
