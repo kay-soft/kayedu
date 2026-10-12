@@ -6,11 +6,6 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { checkInAction } from "@/app/[locale]/(center)/reception/actions";
 import {
-  ATTENDANCE_STATUS_ORDER,
-  ATTENDANCE_STATUS_TINT,
-  type AttendanceStatusValue,
-} from "@/components/center/attendance-control";
-import {
   PaymentMethodSelector,
   type PaymentMethodOption,
 } from "@/components/center/payment-method-selector";
@@ -22,12 +17,14 @@ import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
 import type { LiveSessionOption } from "@/app/[locale]/(center)/reception/live-session-rail";
 
 /**
- * The Reception Desk's "one flow" (spec §4.1 item 8): pick a session, an
- * attendance status and — only for PRESENT/LATE — a payment method, then one
- * submit does both writes via `checkInAction` (`attend = pay, or not
- * counted`, spec §2/§5). Session and status are picked with plain selection
- * state (not per-click submits like the roster's Attendance control) because
- * this form's single submit needs all three values together.
+ * The Reception Desk's "one flow" (spec §4.1 item 8): pick a session and a
+ * payment method, then one submit checks the student in and records the
+ * payment via `checkInAction` (`attend = pay, or not counted`, spec §2/§5).
+ * There is no attendance-status picker (R2): the server sets Present or Late
+ * from the arrival time and the class's late threshold, and a wrong mark is
+ * corrected afterwards from the session roster while the session is live.
+ * The session is picked with plain selection state because this form's
+ * single submit needs both values together.
  */
 export function CheckInForm({
   studentProfileId,
@@ -45,22 +42,17 @@ export function CheckInForm({
   paymentMethods: PaymentMethodOption[];
 }) {
   const t = useTranslations("Reception");
-  const tAttendance = useTranslations("Sessions.attendance");
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
 
   const [sessionId, setSessionId] = useState(sessions[0]?.sessionId ?? "");
-  const [status, setStatus] = useState<AttendanceStatusValue>("PRESENT");
   const [state, formAction] = useActionState(checkInAction, IDLE_SESSION_STATE);
-
-  const payable = status === "PRESENT" || status === "LATE";
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="studentProfileId" value={studentProfileId} />
       <input type="hidden" name="sessionId" value={sessionId} />
-      <input type="hidden" name="status" value={status} />
 
       <div className="flex items-center gap-3">
         {studentPhotoUrl ? (
@@ -111,33 +103,10 @@ export function CheckInForm({
       )}
 
       <div className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-text-secondary">{t("statusLabel")}</span>
-        <div className="inline-flex flex-wrap gap-1.5" role="group" aria-label={tAttendance("groupLabel")}>
-          {ATTENDANCE_STATUS_ORDER.map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setStatus(value)}
-              aria-pressed={status === value}
-              className={cn(
-                "min-h-12 min-w-12 rounded-lg px-4 text-base font-medium transition-ui",
-                status === value
-                  ? ATTENDANCE_STATUS_TINT[value]
-                  : "border border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
-              )}
-            >
-              {tAttendance(value)}
-            </button>
-          ))}
-        </div>
+        <span className="text-xs font-medium text-text-secondary">{t("methodLabel")}</span>
+        <PaymentMethodSelector methods={paymentMethods} />
+        <p className="text-xs text-text-muted">{t("statusAuto")}</p>
       </div>
-
-      {payable ? (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-text-secondary">{t("methodLabel")}</span>
-          <PaymentMethodSelector methods={paymentMethods} />
-        </div>
-      ) : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
       {state.status === "saved" ? (

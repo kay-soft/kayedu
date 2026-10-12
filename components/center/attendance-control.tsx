@@ -25,6 +25,10 @@ export const ATTENDANCE_STATUS_TINT: Record<AttendanceStatusValue, string> = {
  * already owns a `useActionState` for its own pending/error handling, exactly
  * like every other roster form in this codebase — see `class-roster.tsx`)
  * supplies `formAction` and the hidden fields the action needs.
+ *
+ * `interceptStatus` (R2): that one status's button does not submit — it
+ * calls `onIntercept` instead, so the caller can confirm first. The roster
+ * uses it for Absent on a paid student, whose payment the change voids.
  */
 export function AttendanceControl({
   formAction,
@@ -32,6 +36,8 @@ export function AttendanceControl({
   hiddenFields,
   pending,
   size = "md",
+  interceptStatus,
+  onIntercept,
 }: {
   formAction: (formData: FormData) => void;
   /** Currently recorded status, or null if this attendee has never been marked. */
@@ -39,6 +45,8 @@ export function AttendanceControl({
   hiddenFields: ReactNode;
   pending?: boolean;
   size?: "md" | "lg";
+  interceptStatus?: AttendanceStatusValue;
+  onIntercept?: () => void;
 }) {
   const t = useTranslations("Sessions.attendance");
 
@@ -52,12 +60,14 @@ export function AttendanceControl({
       {hiddenFields}
       {ATTENDANCE_STATUS_ORDER.map((status) => {
         const selected = value === status;
+        const intercepted = status === interceptStatus && !selected && onIntercept;
         return (
           <button
             key={status}
-            type="submit"
-            name="status"
-            value={status}
+            type={intercepted ? "button" : "submit"}
+            name={intercepted ? undefined : "status"}
+            value={intercepted ? undefined : status}
+            onClick={intercepted ? onIntercept : undefined}
             disabled={pending}
             aria-pressed={selected}
             className={cn(

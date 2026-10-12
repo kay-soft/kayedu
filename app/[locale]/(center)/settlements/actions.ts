@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
+import { WRITE_TRANSACTION_OPTIONS } from "@/lib/db/session-lifecycle";
 import {
   approveSettlement,
   createPeriodSettlement,
@@ -53,8 +54,9 @@ export async function createSessionSettlementAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, sessionId } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
-    createSessionSettlement(tx, ctx.center.id, sessionId, ctx.user.id),
+  const result = await prisma.$transaction(
+    (tx) => createSessionSettlement(tx, ctx.center.id, sessionId, ctx.user.id),
+    WRITE_TRANSACTION_OPTIONS,
   );
   if (!result.ok) return { error: result.error };
 
@@ -88,8 +90,12 @@ export async function createPeriodSettlementAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, teacherId, from, to } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
-    createPeriodSettlement(tx, ctx.center.id, teacherId, from, to, ctx.user.id),
+  // R2: creating a period settlement first closes every ended session in
+  // range (lib/db/settlements.ts), so it gets a longer transaction budget
+  // than a single-row write.
+  const result = await prisma.$transaction(
+    (tx) => createPeriodSettlement(tx, ctx.center.id, teacherId, from, to, ctx.user.id),
+    { ...WRITE_TRANSACTION_OPTIONS, timeout: 30_000 },
   );
   if (!result.ok) return { error: result.error };
 
@@ -122,8 +128,9 @@ export async function approveSettlementAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, id } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
-    approveSettlement(tx, ctx.center.id, id, ctx.user.id),
+  const result = await prisma.$transaction(
+    (tx) => approveSettlement(tx, ctx.center.id, id, ctx.user.id),
+    WRITE_TRANSACTION_OPTIONS,
   );
   if (!result.ok) return { error: result.error };
 
@@ -152,8 +159,9 @@ export async function paySettlementAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, id } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
-    paySettlement(tx, ctx.center.id, id, ctx.user.id),
+  const result = await prisma.$transaction(
+    (tx) => paySettlement(tx, ctx.center.id, id, ctx.user.id),
+    WRITE_TRANSACTION_OPTIONS,
   );
   if (!result.ok) return { error: result.error };
 

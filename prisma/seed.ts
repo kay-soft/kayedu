@@ -30,6 +30,7 @@ import { PrismaClient, type CatalogGrade, type CatalogSubject } from "@prisma/cl
 import { createClient } from "@supabase/supabase-js";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import { closeEndedSessions } from "../lib/db/session-lifecycle.ts";
 import {
   ensureDefaultPaymentMethods,
   listActivePaymentMethods,
@@ -532,20 +533,26 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
           studentProfileId: enrollment.studentProfileId,
           enrollmentId: enrollment.id,
           isDropIn: false,
-          status,
           recordedBy: classGroup.teacherId,
-        });
+        }, { historicalBackfill: true, status });
         historyWritten++;
 
         if (status === "PRESENT" || status === "LATE") {
           await prisma.$transaction((tx) =>
-            recordPayment(tx, centerId, attendee.id, historyMethod.id, classGroup.teacherId),
+            recordPayment(tx, centerId, attendee.id, historyMethod.id, classGroup.teacherId, { historicalBackfill: true }),
           );
         }
       }
     }
   }
   console.log(`  + ${historyWritten} historical attendance record(s) with payments, over the past 4 weeks`);
+
+  // The history above is written with `historicalBackfill` (R2 — those
+  // sessions' days have ended, so the live write path would refuse them).
+  // Close them now, the same lazy end-of-day close the app performs on its
+  // next touch, so their receipts render as the closed records they are.
+  const closedHistory = await closeEndedSessions(prisma, centerId);
+  console.log(`  + ${closedHistory} past session(s) closed (automatic end-of-day close)`);
 
   // ── A couple of expense categories + entries, for the Analytics demo ───
   const rentCategory = await findOrCreateByName(

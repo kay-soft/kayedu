@@ -58,6 +58,15 @@ enum SessionStatus {
   CANCELLED
 }
 
+// How a session was closed (R2, docs/00-master-product-spec.md §5.1 "Session
+// lifecycle"). MANUAL = staff pressed "End session"; AUTO = the session's
+// calendar day ended in the centre's timezone without anyone closing it, and
+// the next read/write that touched it closed it (lib/db/session-lifecycle.ts).
+enum SessionCloseMode {
+  MANUAL
+  AUTO
+}
+
 enum EnrollmentStatus {
   ACTIVE
   REMOVED
@@ -223,6 +232,7 @@ model Center {
   enrollments        Enrollment[]
   sessions           Session[]
   attendees          SessionAttendee[]
+  attendanceChanges  SessionAttendanceChange[]
   payments           Payment[]
   paymentMethods     CenterPaymentMethod[]
   expenseCategories  ExpenseCategory[]
@@ -233,7 +243,7 @@ model Center {
   holidays           Holiday[]
   auditLogs          AuditLog[]
   permissionGrants   PermissionGrant[]
-  branchGrants       MembershipBranchGrant[]  @relation("MembershipBranchGrantCenter")
+  branchGrants       MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
   refunds            Refund[]
   settlements        Settlement[]
   parentLinks        ParentLink[]
@@ -630,12 +640,14 @@ model StudentProfile {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  enrollments Enrollment[]
-  attendees   SessionAttendee[]
-  payments    Payment[]
+  enrollments       Enrollment[]
+  attendees         SessionAttendee[]
+  payments          Payment[]
+  // R2 — live-session attendance status changes made against this student.
+  attendanceChanges SessionAttendanceChange[]
   // M16 — every parent account that has matched (or been verified) against
   // this child, via `parentPhone`/`parentAltPhone` above.
-  parentLinks ParentLink[]
+  parentLinks       ParentLink[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
@@ -698,19 +710,19 @@ model StudentBlock {
 // ─────────────────────────────────────────────────────────────
 
 model Session {
-  id               String        @id @default(uuid())
+  id               String            @id @default(uuid())
   centerId         String
-  center           Center        @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center           Center            @relation(fields: [centerId], references: [id], onDelete: Cascade)
   classGroupId     String
-  classGroup       ClassGroup    @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  classGroup       ClassGroup        @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
   teacherId        String
-  teacher          User          @relation("SessionTeacher", fields: [teacherId], references: [id])
+  teacher          User              @relation("SessionTeacher", fields: [teacherId], references: [id])
   roomId           String?
-  room             Room?         @relation(fields: [roomId], references: [id])
+  room             Room?             @relation(fields: [roomId], references: [id])
   date             DateTime // the calendar day of the session
   startTime        String // "16:00"
   endTime          String // "18:00"
-  status           SessionStatus @default(SCHEDULED)
+  status           SessionStatus     @default(SCHEDULED)
   // The replacement session a reschedule created (M15, spec §5.1 "Reschedule
   // with linkage"). Written immediately — the original row is never silently
   // mutated into its new date/time — so history reads "this session moved to
@@ -718,10 +730,10 @@ model Session {
   // happens, just elsewhere) nor open for new attendance/payment (see
   // `lib/db/attendance.ts`/`lib/db/payments.ts`'s guard) — whatever attendance
   // it already carries stays exactly as recorded (CLAUDE.md rule 2).
-  rescheduledToId  String?       @unique
-  rescheduledTo    Session?      @relation("SessionReschedule", fields: [rescheduledToId], references: [id], onDelete: SetNull)
-  rescheduledFrom  Session?      @relation("SessionReschedule")
-  priceSnapshot    Int           @default(0) // piastres; frozen from class at generation
+  rescheduledToId  String?           @unique
+  rescheduledTo    Session?          @relation("SessionReschedule", fields: [rescheduledToId], references: [id], onDelete: SetNull)
+  rescheduledFrom  Session?          @relation("SessionReschedule")
+  priceSnapshot    Int               @default(0) // piastres; frozen from class at generation
   // Per-session centre-cut override (M13, spec §5.1 "Center cut" —
   // "overridable per class and per session"). Null on both = inherit the
   // class's own centerShareType/centerShareValue, which is every session's
@@ -731,17 +743,28 @@ model Session {
   centerShareType  ShareType?
   centerShareValue Int?
   description      String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  // R2 — a closed session is an immutable record: no attendance, payment,
+  // void, refund, cancel or reschedule is accepted once `closedAt` is set
+  // (lib/db/session-lifecycle.ts is the single owner of that rule). Closing
+  // also sets `status` to COMPLETED. `closedBy` is the closing user's id, or
+  // null when the close was automatic (`closeMode` AUTO, end of the
+  // session's day in the centre's timezone). There is no reopen path.
+  closedAt         DateTime?
+  closedBy         String?
+  closeMode        SessionCloseMode?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
-  attendees   SessionAttendee[]
-  payments    Payment[]
-  settlements Settlement[]
+  attendees         SessionAttendee[]
+  payments          Payment[]
+  settlements       Settlement[]
+  // R2 — every status change made while the session was live, in order.
+  attendanceChanges SessionAttendanceChange[]
   // M17 — ratings/skips students recorded against this exact session. Never
   // re-derived if the session is later rescheduled: a rating is for the
   // session actually attended, at the teacher who actually taught it.
-  ratings     SessionRating[]
-  ratingSkips SessionRatingSkip[]
+  ratings           SessionRating[]
+  ratingSkips       SessionRatingSkip[]
 
   // The idempotency key the session generator relies on (docs/02 §11):
   // regenerating a window is a `createMany({ skipDuplicates: true })` against
@@ -780,13 +803,44 @@ model SessionAttendee {
   @@index([sessionId])
 }
 
+/**
+ * One attendance status change made while a session was still live (R2,
+ * docs/00-master-product-spec.md §5.1 "Session lifecycle"). The session
+ * receipt's "Changes during session" section reads this table; `AuditLog`
+ * (`attendance.correct`, plus `payment.void` when a payment was voided) stays
+ * the audit trail — both are written in the same transaction as the change
+ * itself (`lib/db/attendance.ts`'s `changeAttendanceStatus`). Append-only:
+ * nothing updates or deletes a row here. `voidedPaymentId` is set when the
+ * change was PRESENT/LATE → ABSENT on a paid student and the payment was
+ * voided in that same transaction. `reason` is optional.
+ */
+model SessionAttendanceChange {
+  id               String           @id @default(uuid())
+  centerId         String
+  center           Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  sessionId        String
+  session          Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile   @relation(fields: [studentProfileId], references: [id])
+  fromStatus       AttendanceStatus
+  toStatus         AttendanceStatus
+  voidedPaymentId  String?
+  voidedPayment    Payment?         @relation(fields: [voidedPaymentId], references: [id], onDelete: SetNull)
+  reason           String?
+  changedBy        String
+  changedAt        DateTime         @default(now())
+
+  @@index([centerId])
+  @@index([centerId, sessionId])
+}
+
 // The financial ledger. Money fields are FROZEN at record time. Never recompute.
 model Payment {
-  id                   String              @id @default(uuid())
+  id                   String                    @id @default(uuid())
   centerId             String
-  center               Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center               Center                    @relation(fields: [centerId], references: [id], onDelete: Cascade)
   sessionId            String
-  session              Session             @relation(fields: [sessionId], references: [id])
+  session              Session                   @relation(fields: [sessionId], references: [id])
   // Denormalized from session.teacherId at record time (M6, docs/02 §14): the
   // by-teacher analytics breakdown needs a single-table `groupBy`, and Prisma
   // cannot `groupBy` on a related model's scalar column. Not a money field —
@@ -801,9 +855,9 @@ model Payment {
   // most one non-voided Payment per attendee at a time" instead of the
   // database. See docs/01-data-model.md §3.
   sessionAttendeeId    String
-  sessionAttendee      SessionAttendee     @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
+  sessionAttendee      SessionAttendee           @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
   studentProfileId     String
-  studentProfile       StudentProfile      @relation(fields: [studentProfileId], references: [id])
+  studentProfile       StudentProfile            @relation(fields: [studentProfileId], references: [id])
   amount               Int // piastres collected
   // The centre's configured method (R1). `methodLabelSnapshot` is the
   // method's name FROZEN at record time — renaming the method later never
@@ -812,13 +866,13 @@ model Payment {
   // `paymentMethod.name`. RESTRICT: a referenced method is deactivated, never
   // deleted (lib/db/payment-methods.ts).
   paymentMethodId      String
-  paymentMethod        CenterPaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethod        CenterPaymentMethod       @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
   methodLabelSnapshot  String
   priceSnapshot        Int // frozen
   centerShareSnapshot  Int // frozen
   teacherShareSnapshot Int // frozen
   receiptRef           String?
-  voided               Boolean             @default(false)
+  voided               Boolean                   @default(false)
   voidReason           String?
   voidedAt             DateTime?
   voidedBy             String?
@@ -826,12 +880,15 @@ model Payment {
   // the actual reversal amounts live on the `Refund` row, never here. A
   // voided payment is never refunded and vice versa (CLAUDE.md rule 7: void
   // and refund are different mechanisms, never collapsed into one flag).
-  refunded             Boolean             @default(false)
+  refunded             Boolean                   @default(false)
   refund               Refund?
+  // R2 — the live attendance change (PRESENT/LATE → ABSENT) that voided this
+  // payment, when that is how it was voided.
+  attendanceChanges    SessionAttendanceChange[]
   recordedBy           String
-  recordedAt           DateTime            @default(now())
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  recordedAt           DateTime                  @default(now())
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
 
   @@index([sessionAttendeeId])
   @@index([centerId])
@@ -915,8 +972,16 @@ model Settlement {
   periodFrom DateTime?
   periodTo   DateTime?
 
-  totalAmount Int
-  status      SettlementStatus @default(DRAFT)
+  totalAmount        Int
+  status             SettlementStatus @default(DRAFT)
+  // R2 — true for every settlement created since R2, whose total counts only
+  // payments of sessions already CLOSED at creation (so nothing in it can be
+  // voided or refunded afterwards — a closed session refuses both). False on
+  // rows that predate R2, whose total counted every non-voided, non-refunded
+  // payment in scope regardless of closure. `lib/db/settlements.ts`'s
+  // `adjustUnpaidSettlementsForReversal` reads it to decide whether a later
+  // void/refund was ever part of this total.
+  closedSessionsOnly Boolean          @default(true)
 
   createdBy  String
   createdAt  DateTime  @default(now())

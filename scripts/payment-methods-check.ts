@@ -101,9 +101,8 @@ async function makePayableAttendee(centerId: string, teacherId: string, code: st
     studentProfileId: profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: teacherId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
 }
 
 function checkStatusesWithoutDatabase() {
@@ -225,7 +224,7 @@ async function main() {
   // ── 2. The label snapshot survives a rename ─────────────────────────────
   const attendee1 = await makePayableAttendee(centerA.id, teacher.id, "PMC-001");
   const paid1 = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendee1.id, cashA.id, teacher.id),
+    recordPayment(tx, centerA.id, attendee1.id, cashA.id, teacher.id, { historicalBackfill: true }),
   );
   check(
     "recordPayment freezes the method's current name onto methodLabelSnapshot",
@@ -247,7 +246,7 @@ async function main() {
 
   const attendee2 = await makePayableAttendee(centerA.id, teacher.id, "PMC-002");
   const paid2 = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendee2.id, cashA.id, teacher.id),
+    recordPayment(tx, centerA.id, attendee2.id, cashA.id, teacher.id, { historicalBackfill: true }),
   );
   check(
     "A payment recorded after the rename carries the new label",
@@ -258,7 +257,7 @@ async function main() {
   // ── 3. A cross-centre method id is refused ──────────────────────────────
   const attendee3 = await makePayableAttendee(centerA.id, teacher.id, "PMC-003");
   const crossCentre = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendee3.id, cashB.id, teacher.id),
+    recordPayment(tx, centerA.id, attendee3.id, cashB.id, teacher.id, { historicalBackfill: true }),
   );
   check(
     "recordPayment refuses another centre's method id (invalidMethod)",
@@ -266,7 +265,7 @@ async function main() {
     JSON.stringify(crossCentre),
   );
   const forged = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendee3.id, "not-a-real-method-id", teacher.id),
+    recordPayment(tx, centerA.id, attendee3.id, "not-a-real-method-id", teacher.id, { historicalBackfill: true }),
   );
   check(
     "recordPayment refuses a made-up method id (invalidMethod)",
@@ -296,7 +295,7 @@ async function main() {
   const deactivated = await setPaymentMethodActive(prisma, centerA.id, instapayA.id, false);
   check("A non-last method can be deactivated", deactivated.ok);
   const inactive = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendee3.id, instapayA.id, teacher.id),
+    recordPayment(tx, centerA.id, attendee3.id, instapayA.id, teacher.id, { historicalBackfill: true }),
   );
   check(
     "recordPayment refuses an inactive method id (invalidMethod)",

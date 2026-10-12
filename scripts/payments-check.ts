@@ -198,11 +198,10 @@ async function main() {
     studentProfileId: student1.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const paymentFixedResult = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, cashA.id, actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "FIXED class: recordPayment freezes centerShareSnapshot=15 EGP, teacherShareSnapshot=105 EGP",
@@ -225,11 +224,10 @@ async function main() {
     studentProfileId: student1.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const paymentPercentageResult = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeePercentage.id, cashA.id, actorId),
+    recordPayment(tx, centerA.id, attendeePercentage.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "PERCENTAGE class: recordPayment freezes centerShareSnapshot=18 EGP, teacherShareSnapshot=102 EGP",
@@ -269,11 +267,10 @@ async function main() {
     studentProfileId: student2.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const paymentAfterChange = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeAfterChange.id, cashA.id, actorId),
+    recordPayment(tx, centerA.id, attendeeAfterChange.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "A new payment recorded after the config change uses the new cut (30 EGP)",
@@ -308,7 +305,7 @@ async function main() {
 
   // ── 4. Attempting a second active payment for the same attendee fails ───
   const secondAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, instapayA.id, actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, instapayA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "recordPayment refuses a second active payment for the same attendee",
@@ -318,7 +315,7 @@ async function main() {
 
   // ── 5. Void-then-recreate leaves history intact ──────────────────────────
   const voidResult = await prisma.$transaction((tx) =>
-    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "Paid by mistake", actorId),
+    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "Paid by mistake", actorId, { historicalBackfill: true }),
   );
   check(
     "voidPayment marks the row voided without touching its money fields",
@@ -332,7 +329,7 @@ async function main() {
   );
 
   const recreated = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, walletA.id, actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, walletA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "A corrected payment can be recorded for the same attendee once the old one is voided",
@@ -359,7 +356,7 @@ async function main() {
   );
 
   const doubleVoid = await prisma.$transaction((tx) =>
-    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "again", actorId),
+    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "again", actorId, { historicalBackfill: true }),
   );
   check(
     "Voiding an already-voided payment is refused, not silently repeated",
@@ -381,11 +378,10 @@ async function main() {
     studentProfileId: student3.profile.id,
     enrollmentId: null,
     isDropIn: false,
-    status: "ABSENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "ABSENT" });
   const absentPaymentAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, absentAttendee.id, cashA.id, actorId),
+    recordPayment(tx, centerA.id, absentAttendee.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "\"Attend = pay, or not counted\": an ABSENT attendee cannot have a payment recorded",
@@ -409,9 +405,8 @@ async function main() {
       studentProfileId: studentAbsentee.profile.id,
       enrollmentId: null,
       isDropIn: false,
-      status: "ABSENT",
       recordedBy: actorId,
-    });
+    }, { historicalBackfill: true, status: "ABSENT" });
     lastSession = session;
   }
   const threeInARow = await consecutiveAbsenceCount(
@@ -435,9 +430,8 @@ async function main() {
     studentProfileId: studentAbsentee.profile.id,
     enrollmentId: null,
     isDropIn: false,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const resetToZero = await consecutiveAbsenceCount(
     prisma,
     centerA.id,
@@ -461,9 +455,8 @@ async function main() {
     studentProfileId: studentAbsentee.profile.id,
     enrollmentId: null,
     isDropIn: false,
-    status: "ABSENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "ABSENT" });
   const startsOverAtOne = await consecutiveAbsenceCount(
     prisma,
     centerA.id,
@@ -487,7 +480,7 @@ async function main() {
     where: { centerId: centerA.id, sessionId: nextAbsentSession.id, studentProfileId: studentAbsentee.profile.id },
   });
   check("A roster row exists to correct", beforeCorrectionStatus !== null);
-  const corrected = await updateAttendanceStatus(prisma, beforeCorrectionStatus!, "PRESENT", actorId);
+  const corrected = await updateAttendanceStatus(prisma, beforeCorrectionStatus!, "PRESENT", actorId, { historicalBackfill: true });
   check(
     "attendance.correct changes the recorded status",
     corrected.attendanceStatus === "PRESENT",
@@ -528,7 +521,7 @@ async function main() {
     (await scopedFindById(prisma.payment, centerB.id, recreated.ok ? recreated.payment.id : "")) === null,
   );
   const crossCenterPaymentAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerB.id, attendeePercentage.id, cashB.id, actorId),
+    recordPayment(tx, centerB.id, attendeePercentage.id, cashB.id, actorId, { historicalBackfill: true }),
   );
   check(
     "Center B cannot record a payment against Center A's SessionAttendee",
@@ -536,7 +529,7 @@ async function main() {
     JSON.stringify(crossCenterPaymentAttempt),
   );
   const crossCenterVoidAttempt = await prisma.$transaction((tx) =>
-    voidPayment(tx, centerB.id, paymentPercentageResult.ok ? paymentPercentageResult.payment.id : "", "x", actorId),
+    voidPayment(tx, centerB.id, paymentPercentageResult.ok ? paymentPercentageResult.payment.id : "", "x", actorId, { historicalBackfill: true }),
   );
   check(
     "Center B cannot void Center A's Payment",

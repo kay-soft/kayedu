@@ -42,6 +42,11 @@ import { resolveChangeRequest } from "../lib/db/approvals.ts";
 
 const prisma = new PrismaClient();
 
+// R2 fixture clock: the cancel/reschedule fixtures below are hard-dated
+// December 2026 sessions. Pinning "now" before them keeps them open (not
+// closed by the end-of-day rule) on any date the gate runs.
+const LIFECYCLE_NOW = new Date("2026-11-30T08:00:00.000Z");
+
 /** R1 fixture shape: a centre's first active payment method, created on demand. */
 const fixtureMethodIds = new Map<string, string>();
 async function fixtureMethodId(centerId: string): Promise<string> {
@@ -392,9 +397,8 @@ async function main() {
         studentProfileId: profile.id,
         enrollmentId: null,
         isDropIn: true,
-        status: "PRESENT",
         recordedBy: managerId,
-      }),
+      }, { historicalBackfill: true, status: "PRESENT" }),
     ),
   );
   check(
@@ -426,6 +430,8 @@ async function main() {
     sessionToMoveDeny.id,
     { date: rescheduleDate, startTime: "16:00", endTime: "17:00" },
     "DENY",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "A target free at 16:00 but with the room busy from 16:30 (inside the 16:00–17:00 window) is refused under DENY",
@@ -448,6 +454,8 @@ async function main() {
     sessionToMoveWarn.id,
     { date: rescheduleDate, startTime: "16:00", endTime: "17:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "The identical target succeeds under WARN, flagged with the same whole-window conflict",
@@ -474,10 +482,9 @@ async function main() {
     studentProfileId: cancelProfile1.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: managerId,
-  });
-  const cancelled = await cancelSession(prisma, centerId, sessionCancel.id);
+  }, { historicalBackfill: true, status: "PRESENT" });
+  const cancelled = await cancelSession(prisma, centerId, sessionCancel.id, { now: LIFECYCLE_NOW });
   check("cancelSession succeeds", cancelled.ok, JSON.stringify(cancelled));
 
   let newAttendanceRefused = false;
@@ -489,9 +496,8 @@ async function main() {
       studentProfileId: cancelProfile2.id,
       enrollmentId: null,
       isDropIn: true,
-      status: "PRESENT",
       recordedBy: managerId,
-    });
+    }, { historicalBackfill: true, status: "PRESENT" });
   } catch (error) {
     if (error instanceof SessionClosedError) {
       newAttendanceRefused = true;
@@ -505,7 +511,7 @@ async function main() {
 
   let correctionRefused = false;
   try {
-    await updateAttendanceStatus(prisma, attendeeBeforeCancel, "ABSENT", managerId);
+    await updateAttendanceStatus(prisma, attendeeBeforeCancel, "ABSENT", managerId, { historicalBackfill: true });
   } catch (error) {
     correctionRefused = error instanceof SessionClosedError && error.reason === "sessionCancelled";
   }
@@ -516,7 +522,7 @@ async function main() {
 
   const methodId = await fixtureMethodId(centerId);
   const paymentOnCancelled = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendeeBeforeCancel.id, methodId, managerId),
+    recordPayment(tx, centerId, attendeeBeforeCancel.id, methodId, managerId, { historicalBackfill: true }),
   );
   check(
     "Recording a payment on a CANCELLED session's attendee is refused by direct call to recordPayment",
@@ -549,15 +555,16 @@ async function main() {
     studentProfileId: reschedProfile1.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: managerId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const reschedule = await rescheduleSession(
     prisma,
     centerId,
     sessionOriginal.id,
     { date: new Date("2026-12-21T00:00:00.000Z"), startTime: "10:00", endTime: "11:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check("rescheduleSession succeeds", reschedule.ok, JSON.stringify(reschedule));
 
@@ -569,9 +576,8 @@ async function main() {
       studentProfileId: reschedProfile2.id,
       enrollmentId: null,
       isDropIn: true,
-      status: "PRESENT",
       recordedBy: managerId,
-    });
+    }, { historicalBackfill: true, status: "PRESENT" });
   } catch (error) {
     reschedAttendanceRefused = error instanceof SessionClosedError && error.reason === "sessionRescheduled";
   }
@@ -582,7 +588,7 @@ async function main() {
 
   const methodId2 = await fixtureMethodId(centerId);
   const paymentOnRescheduled = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendeeBeforeReschedule.id, methodId2, managerId),
+    recordPayment(tx, centerId, attendeeBeforeReschedule.id, methodId2, managerId, { historicalBackfill: true }),
   );
   check(
     "A payment on the original session's pre-existing attendee is refused as sessionRescheduled",
@@ -597,9 +603,8 @@ async function main() {
     studentProfileId: reschedProfile2.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: managerId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   check(
     "The replacement session (the reschedule target) accepts attendance normally",
     attendanceOnReplacement.attendanceStatus === "PRESENT",

@@ -1,4 +1,14 @@
-import type { Payment, Prisma, PrismaClient, Refund, Settlement } from "@prisma/client";
+import type { Payment, Prisma, PrismaClient, Refund } from "@prisma/client";
+// Relative imports on purpose — `npm run check:settlements` exercises this
+// module directly, outside the Next.js runtime.
+import {
+  ensureSessionOpenOrAutoClose,
+  type SessionWriteOptions,
+} from "./session-lifecycle.ts";
+import {
+  adjustUnpaidSettlementsForReversal,
+  type AdjustedSettlement,
+} from "./settlements.ts";
 
 /**
  * Refunds (M14, docs/01-data-model.md "Finance-adjacent layer"). This is the
@@ -14,9 +24,6 @@ import type { Payment, Prisma, PrismaClient, Refund, Settlement } from "@prisma/
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-/** DRAFT/APPROVED — a settlement whose payout has not left the centre yet. */
-const UNPAID_SETTLEMENT_STATUSES = ["DRAFT", "APPROVED"] as const;
-
 export type RefundPaymentResult =
   | {
       ok: true;
@@ -30,9 +37,9 @@ export type RefundPaymentResult =
        * `settlement.adjust`. A PAID settlement is never adjusted and never
        * appears here; see the `Settlement` schema comment.
        */
-      adjustedSettlements: { settlement: Settlement; previousTotal: number }[];
+      adjustedSettlements: AdjustedSettlement[];
     }
-  | { ok: false; error: "notFound" | "alreadyVoided" | "alreadyRefunded" };
+  | { ok: false; error: "notFound" | "alreadyVoided" | "alreadyRefunded" | "sessionClosed" };
 
 /**
  * Refunds one payment in full — Phase 1 supports whole-payment refunds only
@@ -61,7 +68,13 @@ export type RefundPaymentResult =
  * centre, so it is excluded from this query entirely and never rewritten;
  * the loss (or its recovery from the teacher) is handled outside this
  * record, exactly as the void/refund table already says for a PAID
- * settlement.
+ * settlement. Which settlements had actually counted this payment is
+ * decided by `adjustUnpaidSettlementsForReversal` (lib/db/settlements.ts),
+ * the one rule a void (R2) follows too.
+ *
+ * R2: refused on a closed session (`sessionClosed`) — a closed session is an
+ * immutable record. A CANCELLED or rescheduled session is not "closed"; money
+ * it already carries can still be given back.
  */
 export async function refundPayment(
   tx: Db,
@@ -69,10 +82,23 @@ export async function refundPayment(
   paymentId: string,
   reason: string,
   refundedBy: string,
+  options: SessionWriteOptions = {},
 ): Promise<RefundPaymentResult> {
+  const located = await tx.payment.findFirst({
+    where: { centerId, id: paymentId },
+    select: { sessionId: true },
+  });
+  if (!located) return { ok: false, error: "notFound" };
+  const gate = await ensureSessionOpenOrAutoClose(tx, located.sessionId, centerId, options.now, {
+    allowTerminal: true,
+    historicalBackfill: options.historicalBackfill,
+  });
+  if (gate.status === "missing") return { ok: false, error: "notFound" };
+  if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
+
   const payment = await tx.payment.findFirst({
     where: { centerId, id: paymentId },
-    include: { session: { select: { date: true } } },
+    include: { session: { select: { date: true, closedAt: true } } },
   });
   if (!payment) return { ok: false, error: "notFound" };
   if (payment.voided) return { ok: false, error: "alreadyVoided" };
@@ -97,31 +123,12 @@ export async function refundPayment(
     }),
   ]);
 
-  const inScopeSettlements = await tx.settlement.findMany({
-    where: {
-      centerId,
-      teacherId: payment.teacherId,
-      status: { in: [...UNPAID_SETTLEMENT_STATUSES] },
-      OR: [
-        { sessionId: payment.sessionId },
-        { periodFrom: { lte: payment.session.date }, periodTo: { gte: payment.session.date } },
-      ],
-    },
-  });
-
-  const adjustedSettlements: { settlement: Settlement; previousTotal: number }[] = [];
-  for (const settlement of inScopeSettlements) {
-    const previousTotal = settlement.totalAmount;
-    // A payment inside a settlement's scope contributed exactly its own
-    // teacherShareSnapshot to that total at creation time (it could not have
-    // been refunded yet then) — the floor at 0 is a defensive safety net,
-    // never expected to bind in normal operation.
-    const updated = await tx.settlement.update({
-      where: { id: settlement.id },
-      data: { totalAmount: Math.max(0, previousTotal - refund.teacherShareReversed) },
-    });
-    adjustedSettlements.push({ settlement: updated, previousTotal });
-  }
+  const adjustedSettlements = await adjustUnpaidSettlementsForReversal(
+    tx,
+    centerId,
+    payment,
+    refund.teacherShareReversed,
+  );
 
   return { ok: true, refund, payment: updatedPayment, adjustedSettlements };
 }

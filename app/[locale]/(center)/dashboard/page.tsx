@@ -26,7 +26,8 @@ import { formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { startOfUtcDay } from "@/lib/scheduling";
+import { DEFAULT_TIMEZONE, startOfUtcDay } from "@/lib/scheduling";
+import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 
 const STATUS_BADGE = {
   SCHEDULED: "info",
@@ -57,6 +58,10 @@ export default async function CenterDashboardPage() {
 
   const today = startOfUtcDay(new Date());
   const todayRange = { from: today, to: today };
+  // R2's lazy end-of-day close: any earlier session nobody ended is closed
+  // (AUTO, absences materialized) before the day's numbers are read.
+  await closeEndedSessions(prisma, ctx.center.id);
+  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
 
   const [
     staffCount,
@@ -84,7 +89,7 @@ export default async function CenterDashboardPage() {
     teacherMemberships.map((teacher) => [teacher.userId, fullName(localName(teacher, teacher.user))]),
   );
   const withStatus = todaySessions
-    .map((row) => ({ row, displayStatus: deriveSessionDisplayStatus(row, now) }))
+    .map((row) => ({ row, displayStatus: deriveSessionDisplayStatus(row, now, timeZone) }))
     .sort((a, b) => a.row.startTime.localeCompare(b.row.startTime));
 
   const liveCount = withStatus.filter((entry) => entry.displayStatus === "LIVE").length;

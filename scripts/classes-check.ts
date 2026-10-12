@@ -56,6 +56,11 @@ import { catalogLabel } from "../lib/catalog.ts";
 
 const prisma = new PrismaClient();
 
+// R2 fixture clock: these lifecycle checks act on freshly generated sessions
+// (dated from UTC today onward). Pinning "now" to UTC midnight keeps every
+// one of them open in the centre's timezone whatever hour the gate runs.
+const LIFECYCLE_NOW = startOfUtcDay(new Date());
+
 const TEACHER_ROLE: Role = "TEACHER";
 const CLASS_SCOPE: BlockScope = "CLASS";
 const ACTIVE: EnrollmentStatus = "ACTIVE";
@@ -649,13 +654,13 @@ async function main() {
   );
 
   const sessionToCancel = classASessions[0];
-  const cancelled = await cancelSession(prisma, centerA.id, sessionToCancel.id);
+  const cancelled = await cancelSession(prisma, centerA.id, sessionToCancel.id, { now: LIFECYCLE_NOW });
   check(
     "cancelSession flips a SCHEDULED session to CANCELLED",
     cancelled.ok && cancelled.session.status === "CANCELLED",
     JSON.stringify(cancelled),
   );
-  const cancelledAgain = await cancelSession(prisma, centerA.id, sessionToCancel.id);
+  const cancelledAgain = await cancelSession(prisma, centerA.id, sessionToCancel.id, { now: LIFECYCLE_NOW });
   check(
     "Cancelling an already-cancelled session is refused as alreadyCancelled",
     !cancelledAgain.ok && cancelledAgain.error === "alreadyCancelled",
@@ -667,6 +672,8 @@ async function main() {
     sessionToCancel.id,
     { date: sessionToCancel.date, startTime: "10:00", endTime: "11:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "Rescheduling a cancelled session is refused",
@@ -682,6 +689,8 @@ async function main() {
     sessionToReschedule.id,
     { date: farDate, startTime: "12:00", endTime: "13:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "rescheduleSession moves date/startTime/endTime with no conflicts",
@@ -710,6 +719,8 @@ async function main() {
     sessionToReschedule.id,
     { date: farDate, startTime: "13:00", endTime: "14:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "Rescheduling an already-rescheduled session is refused",
@@ -738,6 +749,8 @@ async function main() {
     classASessions[2].id,
     { date: conflictDate, startTime: "14:30", endTime: "15:30" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "Under WARN, rescheduling into a teacher conflict still succeeds, flagged",
@@ -751,6 +764,8 @@ async function main() {
     classASessions[3].id,
     { date: conflictDate, startTime: "14:15", endTime: "15:15" },
     "DENY",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "Under DENY, rescheduling into a teacher conflict is refused",
@@ -765,6 +780,8 @@ async function main() {
     classASessions[4].id,
     { date: duplicateTarget.date, startTime: duplicateTarget.startTime, endTime: duplicateTarget.endTime },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "Rescheduling onto another session's exact slot on the same class is refused as duplicateSlot",
@@ -772,7 +789,7 @@ async function main() {
     JSON.stringify(rescheduleIntoDuplicateSlot),
   );
 
-  const crossCenterCancel = await cancelSession(prisma, centerB.id, sessionToReschedule.id);
+  const crossCenterCancel = await cancelSession(prisma, centerB.id, sessionToReschedule.id, { now: LIFECYCLE_NOW });
   check(
     "Center B cannot cancel Center A's session by id",
     !crossCenterCancel.ok && crossCenterCancel.error === "notFound",
@@ -784,6 +801,8 @@ async function main() {
     classASessions[2].id,
     { date: farDate, startTime: "09:00", endTime: "10:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW },
   );
   check(
     "Center B cannot reschedule Center A's session by id",

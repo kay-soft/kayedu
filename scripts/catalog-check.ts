@@ -395,7 +395,7 @@ async function main() {
 
   const methodId = await fixtureMethodId(centerA.id);
   const paymentInheriting = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeInheriting.id, methodId, teacherUser.id),
+    recordPayment(tx, centerA.id, attendeeInheriting.id, methodId, teacherUser.id, { historicalBackfill: true }),
   );
   const expectedInheriting = splitShare(10_000, "FIXED", 4_000);
   check(
@@ -407,7 +407,7 @@ async function main() {
 
   const methodId2 = await fixtureMethodId(centerA.id);
   const paymentOverridden = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeOverridden.id, methodId2, teacherUser.id),
+    recordPayment(tx, centerA.id, attendeeOverridden.id, methodId2, teacherUser.id, { historicalBackfill: true }),
   );
   const expectedOverridden = splitShare(10_000, "PERCENTAGE", 50);
   check(

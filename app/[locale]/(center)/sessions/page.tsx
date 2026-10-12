@@ -29,7 +29,8 @@ import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibili
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
-import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
+import { DEFAULT_TIMEZONE, resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
+import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { sessionListFilterSchema } from "@/lib/validation/sessions";
 import { dateFilterSchema, toSharedDateFilterInput } from "@/lib/validation/date-filter";
@@ -81,6 +82,11 @@ export default async function SessionsPage({
     visibilityWindowFloor(ctx, now),
   );
 
+  // R2's lazy end-of-day close for every session in view (one indexed query
+  // when there is nothing to close), so the list shows closed records as such.
+  await closeEndedSessions(prisma, ctx.center.id, now, { from, to });
+  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
+
   const db = scoped(ctx);
   const t = await getTranslations("Sessions");
   const tCommon = await getTranslations("Settings.common");
@@ -111,7 +117,7 @@ export default async function SessionsPage({
 
   const withStatus = rows.map((row) => ({
     row,
-    displayStatus: deriveSessionDisplayStatus(row, now),
+    displayStatus: deriveSessionDisplayStatus(row, now, timeZone),
   }));
   const filtered = filters.status
     ? withStatus.filter((entry) => entry.displayStatus === filters.status)

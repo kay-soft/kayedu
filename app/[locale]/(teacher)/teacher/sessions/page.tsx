@@ -25,7 +25,9 @@ import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
 import { formatDate, formatNumber, formatTimeRange } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { addDays, startOfUtcDay } from "@/lib/scheduling";
+import { DEFAULT_TIMEZONE, addDays, startOfUtcDay } from "@/lib/scheduling";
+import { closeEndedSessions } from "@/lib/db/session-lifecycle";
+import { prisma } from "@/lib/db/client";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import {
   teacherSessionDateSchema,
@@ -80,6 +82,9 @@ export default async function TeacherSessionsPage({
   const tStatus = await getTranslations("Sessions.status");
   const locale = await getLocale();
 
+  // R2's lazy end-of-day close for this teacher's sessions in view.
+  await closeEndedSessions(prisma, ctx.center.id, new Date(), { from, to, teacherId: ctx.user.id });
+
   const [rows, grades, ownClasses] = await Promise.all([
     db.sessions.search({
       where: teacherSessionListWhere({
@@ -108,9 +113,10 @@ export default async function TeacherSessionsPage({
   }));
 
   const now = new Date();
+  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
   const withStatus = rows.map((row) => ({
     row,
-    displayStatus: deriveSessionDisplayStatus(row, now),
+    displayStatus: deriveSessionDisplayStatus(row, now, timeZone),
   }));
   const filtered = filters.status
     ? withStatus.filter((entry) => entry.displayStatus === filters.status)

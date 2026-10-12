@@ -20,6 +20,35 @@ export function formatDate(value: Date, locale: string): string {
 }
 
 /**
+ * A real instant — when a session was closed, when an attendance change was
+ * made (R2) — rendered as date + 12-hour time **in the centre's timezone**,
+ * so "closed at 6:05 PM" reads the same on any server or browser. Distinct
+ * from `formatTime`, which renders a bare stored "HH:MM" wall-clock string.
+ */
+export function formatDateTime(value: Date, locale: string, timeZone: string): string {
+  const options: Intl.DateTimeFormatOptions = {
+    dateStyle: "medium",
+    timeStyle: "short",
+    hour12: true,
+    timeZone,
+  };
+  try {
+    return normalizeSpaces(
+      new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", options).format(value),
+    );
+  } catch {
+    // An unknown free-text `CenterSettings.timezone` falls back to Cairo,
+    // the default every centre is created with.
+    return normalizeSpaces(
+      new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+        ...options,
+        timeZone: "Africa/Cairo",
+      }).format(value),
+    );
+  }
+}
+
+/**
  * A teacher's published rating (M17, docs/00-master-product-spec.md §5
  * "Teacher ratings") — always the average alone, out of 5, never a count
  * alongside it.

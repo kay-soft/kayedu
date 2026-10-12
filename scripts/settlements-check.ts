@@ -119,11 +119,10 @@ async function payAttendee(
     studentProfileId,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const methodId = await fixtureMethodId(centerId);
-  const result = await prisma.$transaction((tx) => recordPayment(tx, centerId, attendee.id, methodId, actorId));
+  const result = await prisma.$transaction((tx) => recordPayment(tx, centerId, attendee.id, methodId, actorId, { historicalBackfill: true }));
   if (!result.ok) throw new Error(`recordPayment failed unexpectedly: ${JSON.stringify(result)}`);
   return { session, attendee, payment: result.payment };
 }
@@ -204,7 +203,7 @@ async function main() {
   await payAttendee(centerA.id, day1Session, s2.profile.id, actorId);
 
   const refundResult = await prisma.$transaction((tx) =>
-    refundPayment(tx, centerA.id, paid1.payment.id, "Student requested cash back", actorId),
+    refundPayment(tx, centerA.id, paid1.payment.id, "Student requested cash back", actorId, { historicalBackfill: true }),
   );
   check(
     "refundPayment reverses exactly the payment's own frozen amount/shares",
@@ -230,7 +229,7 @@ async function main() {
   );
 
   const doubleRefund = await prisma.$transaction((tx) =>
-    refundPayment(tx, centerA.id, paid1.payment.id, "again", actorId),
+    refundPayment(tx, centerA.id, paid1.payment.id, "again", actorId, { historicalBackfill: true }),
   );
   check(
     "Refunding an already-refunded payment is refused, not silently repeated",
@@ -294,7 +293,7 @@ async function main() {
   const day3 = new Date("2026-04-20T00:00:00Z");
   const paid4 = await payForSession(centerA.id, classFixed.id, teacherA.id, s1.profile.id, day3, actorId);
   const refund4 = await prisma.$transaction((tx) =>
-    refundPayment(tx, centerA.id, paid4.payment.id, "refunded before settling", actorId),
+    refundPayment(tx, centerA.id, paid4.payment.id, "refunded before settling", actorId, { historicalBackfill: true }),
   );
   check("Setup: payment4 is refunded before any settlement covers it", refund4.ok);
 
@@ -326,7 +325,7 @@ async function main() {
   if (!settlementBeforeLaterRefund.ok) throw new Error("settlementBeforeLaterRefund was not ok");
 
   const refund5 = await prisma.$transaction((tx) =>
-    refundPayment(tx, centerA.id, paid5.payment.id, "refunded after settling (still DRAFT)", actorId),
+    refundPayment(tx, centerA.id, paid5.payment.id, "refunded after settling (still DRAFT)", actorId, { historicalBackfill: true }),
   );
   check(
     "Refunding a payment inside a DRAFT settlement's scope live-adjusts that settlement's total down by the reversed teacher share",
@@ -381,7 +380,7 @@ async function main() {
   check("Setup: settlementToPayOut is now PAID", paidOut.ok && paidOut.settlement.status === "PAID");
 
   const refundAfterPayout = await prisma.$transaction((tx) =>
-    refundPayment(tx, centerA.id, paid5b.payment.id, "refunded after payout", actorId),
+    refundPayment(tx, centerA.id, paid5b.payment.id, "refunded after payout", actorId, { historicalBackfill: true }),
   );
   check(
     "Refunding a payment inside an already-PAID settlement's scope adjusts nothing — the settlement never appears in adjustedSettlements",

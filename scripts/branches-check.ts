@@ -149,12 +149,11 @@ async function seedPayment(centerId: string, teacherId: string, amount: number) 
     studentProfileId: student.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: teacherId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const methodId = await fixtureMethodId(centerId);
   const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendee.id, methodId, teacherId),
+    recordPayment(tx, centerId, attendee.id, methodId, teacherId, { historicalBackfill: true }),
   );
   if (!result.ok) throw new Error(`seedPayment failed: ${JSON.stringify(result)}`);
   return result.payment;

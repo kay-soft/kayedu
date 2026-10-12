@@ -197,12 +197,11 @@ async function main() {
       studentProfileId: student.id,
       enrollmentId: null,
       isDropIn: true,
-      status: "PRESENT",
       recordedBy: teacherUser.id,
-    });
+    }, { historicalBackfill: true, status: "PRESENT" });
     const methodId = await fixtureMethodId(center.id);
     const result = await prisma.$transaction((tx) =>
-      recordPayment(tx, center.id, attendee.id, methodId, teacherUser.id),
+      recordPayment(tx, center.id, attendee.id, methodId, teacherUser.id, { historicalBackfill: true }),
     );
     if (!result.ok) throw new Error(`recordPayment failed: ${result.error}`);
     return { session, payment: result.payment };

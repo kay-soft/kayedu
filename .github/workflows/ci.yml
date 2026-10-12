@@ -78,3 +78,4 @@ jobs:
       - run: npm run check:ratings
       - run: npm run check:visibility
       - run: npm run check:filters
+      - run: npm run check:session-lifecycle

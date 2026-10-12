@@ -33,6 +33,7 @@ import { PrismaClient } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import { WRITE_TRANSACTION_OPTIONS } from "../lib/db/session-lifecycle.ts";
 import {
   ensureDefaultPaymentMethods,
   listActivePaymentMethods,
@@ -108,12 +109,12 @@ async function checkIn(centerId: string, sessionId: string, studentProfileId: st
     studentProfileId,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const methodId = await fixtureMethodId(centerId);
-  const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendee.id, methodId, actorId),
+  const result = await prisma.$transaction(
+    (tx) => recordPayment(tx, centerId, attendee.id, methodId, actorId, { historicalBackfill: true }),
+    WRITE_TRANSACTION_OPTIONS,
   );
   return { attendee, result };
 }

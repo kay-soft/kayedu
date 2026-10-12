@@ -8,6 +8,16 @@ import type {
 // lib/db/sessions.ts and lib/validation/classes.ts).
 import { splitShare } from "../money.ts";
 import { findActivePaymentMethod } from "./payment-methods.ts";
+import {
+  ensureSessionOpenOrAutoClose,
+  loadGateSessionForAttendee,
+  lockAttendeeRow,
+  type SessionWriteOptions,
+} from "./session-lifecycle.ts";
+import {
+  adjustUnpaidSettlementsForReversal,
+  type AdjustedSettlement,
+} from "./settlements.ts";
 
 /**
  * The financial ledger's write path (M5, docs/01-data-model.md §3 — read that
@@ -37,6 +47,7 @@ export type RecordPaymentResult =
         | "alreadyPaid"
         | "sessionCancelled"
         | "sessionRescheduled"
+        | "sessionClosed"
         | "invalidMethod";
     };
 
@@ -67,6 +78,10 @@ export type RecordPaymentResult =
  *   one, is refused as `invalidMethod` whatever the caller sent. Its name is
  *   frozen onto `methodLabelSnapshot` right here, so a later rename never
  *   relabels this payment.
+ * - A closed session (R2) accepts no payment; a session whose day ended is
+ *   auto-closed by this call first (lib/db/session-lifecycle.ts) and the
+ *   payment is refused as `sessionClosed` — returned, not thrown, so the
+ *   caller's transaction still commits the close.
  * - At most one *active* (non-voided) payment exists per attendee at a time.
  *   `Payment.sessionAttendeeId` is deliberately not database-unique (see the
  *   schema comment) so a void-then-recreate leaves the voided row in place
@@ -79,60 +94,61 @@ export async function recordPayment(
   attendeeId: string,
   paymentMethodId: string,
   recordedBy: string,
+  options: SessionWriteOptions = {},
 ): Promise<RecordPaymentResult> {
-  const attendee = await tx.sessionAttendee.findFirst({
-    where: { centerId, id: attendeeId },
-    include: { session: { include: { classGroup: true } } },
+  // One unlocked read carries everything this payment needs from the
+  // session — the closure guard's own fields (passed to it as `peeked`, so it
+  // costs no extra round trip) and the price/cut the payment freezes. The
+  // money fields are read "right now", which is the instant the split is
+  // decided (CLAUDE.md rule 2).
+  const session = await loadGateSessionForAttendee(tx, centerId, attendeeId);
+  if (!session) return { ok: false, error: "notFound" };
+
+  // A cancelled session, one already superseded by a reschedule (M15, spec
+  // §7 criterion 17 / §5.1 "Reschedule with linkage"), or a closed one (R2)
+  // accepts no new payment — the one guard every write path shares
+  // (lib/db/session-lifecycle.ts), which also row-locks the session so a
+  // concurrent "End session" and this payment serialize.
+  const gate = await ensureSessionOpenOrAutoClose(tx, session.id, centerId, options.now, {
+    historicalBackfill: options.historicalBackfill,
+    peeked: session,
   });
-  if (!attendee || !attendee.studentProfileId) {
-    return { ok: false, error: "notFound" };
-  }
-  // A cancelled session, or one already superseded by a reschedule (M15,
-  // spec §7 criterion 17 / §5.1 "Reschedule with linkage"), accepts no new
-  // payment — the same closed-session rule `lib/db/attendance.ts` enforces
-  // for attendance, checked here too since a payment can be the very first
-  // write against an attendee row created moments earlier.
-  if (attendee.session.status === "CANCELLED") {
-    return { ok: false, error: "sessionCancelled" };
-  }
-  if (attendee.session.rescheduledToId) {
-    return { ok: false, error: "sessionRescheduled" };
-  }
-  if (
-    attendee.attendanceStatus !== "PRESENT" &&
-    attendee.attendanceStatus !== "LATE"
-  ) {
+  if (gate.status === "missing") return { ok: false, error: "notFound" };
+  if (gate.status === "refused") return { ok: false, error: gate.reason };
+
+  // Lock this roster row (after the session's shared lock — the order every
+  // attendee/payment write uses) and read, under that lock, the two facts a
+  // concurrent write could change: the attendance status and whether an
+  // active payment already exists. A correction to Absent or a second
+  // payment for the same student serializes here.
+  const roster = await lockAttendeeRow(tx, attendeeId);
+  if (!roster || !roster.studentProfileId) return { ok: false, error: "notFound" };
+  if (roster.attendanceStatus !== "PRESENT" && roster.attendanceStatus !== "LATE") {
     return { ok: false, error: "attendanceNotPayable" };
   }
-
-  const existingActive = await tx.payment.findFirst({
-    where: { centerId, sessionAttendeeId: attendeeId, voided: false },
-  });
-  if (existingActive) return { ok: false, error: "alreadyPaid" };
+  if (roster.hasActivePayment) return { ok: false, error: "alreadyPaid" };
 
   const method = await findActivePaymentMethod(tx, centerId, paymentMethodId);
   if (!method) return { ok: false, error: "invalidMethod" };
 
-  const amount = attendee.session.priceSnapshot;
+  const amount = session.priceSnapshot;
   // A session's own override (M13) wins when set; otherwise the class's
   // current cut. Both are read fresh, right now — this is the instant the
   // split is decided and frozen (CLAUDE.md rule 2).
-  const centerShareType =
-    attendee.session.centerShareType ?? attendee.session.classGroup.centerShareType;
-  const centerShareValue =
-    attendee.session.centerShareValue ?? attendee.session.classGroup.centerShareValue;
+  const centerShareType = session.centerShareType ?? session.classCenterShareType;
+  const centerShareValue = session.centerShareValue ?? session.classCenterShareValue;
   const split = splitShare(amount, centerShareType, centerShareValue);
 
   const payment = await tx.payment.create({
     data: {
       centerId,
-      sessionId: attendee.sessionId,
-      sessionAttendeeId: attendee.id,
-      studentProfileId: attendee.studentProfileId,
+      sessionId: session.id,
+      sessionAttendeeId: attendeeId,
+      studentProfileId: roster.studentProfileId,
       // Denormalized from the session for the M6 by-teacher analytics
       // groupBy (docs/02 §14) — not a money field, so it carries none of the
       // "never recompute" weight the share snapshots do.
-      teacherId: attendee.session.teacherId,
+      teacherId: session.teacherId,
       amount,
       paymentMethodId: method.id,
       methodLabelSnapshot: method.name,
@@ -147,8 +163,22 @@ export async function recordPayment(
 }
 
 export type VoidPaymentResult =
-  | { ok: true; payment: Payment }
-  | { ok: false; error: "notFound" | "alreadyVoided" };
+  | {
+      ok: true;
+      payment: Payment;
+      /**
+       * DRAFT/APPROVED settlements whose stored total had counted this
+       * payment and were live-adjusted down in this same transaction — the
+       * caller audits each as `settlement.adjust`. Only a pre-R2 settlement
+       * can ever appear here (lib/db/settlements.ts's
+       * `adjustUnpaidSettlementsForReversal`).
+       */
+      adjustedSettlements: AdjustedSettlement[];
+    }
+  | {
+      ok: false;
+      error: "notFound" | "alreadyVoided" | "alreadyRefunded" | "sessionClosed";
+    };
 
 /**
  * Voids a payment — never an `UPDATE` of its money fields (CLAUDE.md rule 2).
@@ -156,19 +186,60 @@ export type VoidPaymentResult =
  * `voidedBy` change. The caller writes the `AuditLog` row (docs/01 §3,
  * CLAUDE.md rule 7) and may then call `recordPayment` again for the same
  * attendee — now allowed, since no active payment remains.
+ *
+ * R2: refused on a closed session (a closed session is an immutable record).
+ * A CANCELLED or rescheduled session is *not* closed — undoing money it
+ * already carries is exactly this function's job (docs/02 §11), so the guard
+ * runs with `allowTerminal`. A refunded payment cannot also be voided: the
+ * money already went back, and voiding it too would subtract it from revenue
+ * a second time (void ≠ refund, never both on one row).
  */
 export async function voidPayment(
   tx: Db,
   centerId: string,
   paymentId: string,
-  reason: string,
+  reason: string | null,
+  voidedBy: string,
+  options: SessionWriteOptions = {},
+): Promise<VoidPaymentResult> {
+  const located = await tx.payment.findFirst({
+    where: { centerId, id: paymentId },
+    select: { sessionId: true },
+  });
+  if (!located) return { ok: false, error: "notFound" };
+
+  const gate = await ensureSessionOpenOrAutoClose(tx, located.sessionId, centerId, options.now, {
+    allowTerminal: true,
+    historicalBackfill: options.historicalBackfill,
+  });
+  if (gate.status === "missing") return { ok: false, error: "notFound" };
+  if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
+
+  return voidPaymentRow(tx, centerId, paymentId, reason, voidedBy);
+}
+
+/**
+ * The void itself, for a caller that already holds the session open under
+ * its lock — `voidPayment` above, and the void-on-absent inside
+ * `lib/db/attendance.ts`'s `changeAttendanceStatus` (one void
+ * implementation, two entry points). Also live-adjusts any unpaid
+ * settlement whose total had counted this payment (R2 item 10, the same
+ * rule a refund already followed since M14).
+ */
+export async function voidPaymentRow(
+  tx: Db,
+  centerId: string,
+  paymentId: string,
+  reason: string | null,
   voidedBy: string,
 ): Promise<VoidPaymentResult> {
   const payment = await tx.payment.findFirst({
     where: { centerId, id: paymentId },
+    include: { session: { select: { date: true, closedAt: true } } },
   });
   if (!payment) return { ok: false, error: "notFound" };
   if (payment.voided) return { ok: false, error: "alreadyVoided" };
+  if (payment.refunded) return { ok: false, error: "alreadyRefunded" };
 
   const updated = await tx.payment.update({
     where: { id: paymentId },
@@ -180,7 +251,14 @@ export async function voidPayment(
     },
   });
 
-  return { ok: true, payment: updated };
+  const adjustedSettlements = await adjustUnpaidSettlementsForReversal(
+    tx,
+    centerId,
+    payment,
+    payment.teacherShareSnapshot,
+  );
+
+  return { ok: true, payment: updated, adjustedSettlements };
 }
 
 export type SessionReceiptTotals = {

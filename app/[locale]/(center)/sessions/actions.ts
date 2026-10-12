@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import {
+  changeAttendanceStatus,
   createAttendance,
   findAttendee,
   SessionClosedError,
-  updateAttendanceStatus,
 } from "@/lib/db/attendance";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
@@ -20,6 +20,8 @@ import {
 import { recordPayment, voidPayment } from "@/lib/db/payments";
 import { refundPayment } from "@/lib/db/refunds";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { closeSession, WRITE_TRANSACTION_OPTIONS } from "@/lib/db/session-lifecycle";
+import type { AdjustedSettlement } from "@/lib/db/settlements";
 import {
   cancelSession,
   rescheduleSession,
@@ -35,6 +37,8 @@ import {
   addExistingAttendeeSchema,
   addNewAttendeeSchema,
   cancelSessionSchema,
+  checkInRosterSchema,
+  endSessionSchema,
   recordPaymentSchema,
   refundPaymentSchema,
   rescheduleSessionSchema,
@@ -49,10 +53,17 @@ import {
  * Every action follows docs/02 §7: getTenantContext() → permission check →
  * zod → scoped write → audit if sensitive → revalidate.
  *
- * Attendance: a first-time mark on a roster row is `attendance.record`
- * (RECEPTIONIST's baseline); changing an already-marked row is
- * `attendance.correct` (Owner/Manager, or a granted receptionist) and is
- * always audited (spec §5 "Attendance").
+ * Attendance: a first-time mark on a roster row is a check-in,
+ * `attendance.record` (RECEPTIONIST's baseline), whose PRESENT/LATE status
+ * the data layer decides from the clock (R2 — no status picker anywhere);
+ * changing an already-marked row is `attendance.correct` (Owner/Manager, or a
+ * granted receptionist), allowed only while the session is live, and is
+ * always audited (spec §5 "Attendance"). Switching a paid student to ABSENT
+ * voids their payment in the same transaction and needs `payment.void` too.
+ *
+ * Closed sessions (R2) refuse every write here by the data layer's own guard
+ * (lib/db/session-lifecycle.ts) — the refusal comes back as the same
+ * `{ error }` shape, `sessionClosed`, never a generic failure.
  *
  * Money: `recordPaymentAction`/`voidPaymentAction` never touch
  * `prisma.payment.*` directly — both call into `lib/db/payments.ts` inside a
@@ -174,69 +185,134 @@ async function isBlockedFromSession(
   return classBlocked || teacherBlocked;
 }
 
-// ── Mark / correct attendance on an already-listed roster row ──────────────
+/** Every `settlement.adjust` row a void's live adjustment owes (docs/00 §5). */
+async function auditSettlementAdjustments(
+  ctx: TenantContext,
+  adjusted: AdjustedSettlement[],
+  reason: "payment.void" | "payment.refund",
+  paymentId: string,
+): Promise<void> {
+  for (const { settlement, previousTotal } of adjusted) {
+    await writeAuditLog({
+      centerId: ctx.center.id,
+      actorUserId: ctx.user.id,
+      action: "settlement.adjust",
+      entityType: "Settlement",
+      entityId: settlement.id,
+      before: { totalAmount: previousTotal },
+      after: { totalAmount: settlement.totalAmount, reason, paymentId },
+    });
+  }
+}
 
-export async function setAttendanceAction(
+// ── Check in an enrolled roster row (first mark) ───────────────────────────
+
+/**
+ * The roster's "Check in" button on an unmarked enrolled student — the same
+ * `createAttendance` every check-in surface calls, which decides PRESENT vs
+ * LATE itself (R2). There is no client-chosen status.
+ */
+export async function checkInRosterAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
   const { ctx, db } = await sessionScope();
+  if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
 
-  const parsed = setAttendanceSchema.safeParse(Object.fromEntries(formData));
+  const parsed = checkInRosterSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
-  const { locale, sessionId, studentProfileId, status } = parsed.data;
+  const { locale, sessionId, studentProfileId } = parsed.data;
 
   const session = await db.sessions.findById(sessionId);
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
 
-  const existing = await findAttendee(prisma, ctx.center.id, sessionId, studentProfileId);
-
-  if (existing) {
-    if (!ctxCan(ctx, "attendance.correct")) return FORBIDDEN;
-    if (existing.attendanceStatus === status) return { status: "saved" };
-
-    const before = existing.attendanceStatus;
-    const result = await writeAttendance(() =>
-      updateAttendanceStatus(prisma, existing, status, ctx.user.id),
-    );
-    if (!result.ok) return result.error;
-
-    await writeAuditLog({
-      centerId: ctx.center.id,
-      actorUserId: ctx.user.id,
-      action: "attendance.correct",
-      entityType: "SessionAttendee",
-      entityId: existing.id,
-      before: { attendanceStatus: before },
-      after: { attendanceStatus: status },
-    });
-  } else {
-    if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
-    const { enrollmentId, isDropIn } = await resolveEnrollment(
-      db,
-      session.classGroupId,
-      studentProfileId,
-    );
-    const result = await writeAttendance(() =>
-      createAttendance(prisma, {
-        centerId: ctx.center.id,
-        sessionId,
-        studentProfileId,
-        enrollmentId,
-        isDropIn,
-        status,
-        recordedBy: ctx.user.id,
-      }),
-    );
-    if (!result.ok) return result.error;
+  if (await findAttendee(prisma, ctx.center.id, sessionId, studentProfileId)) {
+    return { error: "alreadyOnRoster" };
   }
+
+  const { enrollmentId, isDropIn } = await resolveEnrollment(
+    db,
+    session.classGroupId,
+    studentProfileId,
+  );
+  const result = await writeAttendance(() =>
+    createAttendance(prisma, {
+      centerId: ctx.center.id,
+      sessionId,
+      studentProfileId,
+      enrollmentId,
+      isDropIn,
+      recordedBy: ctx.user.id,
+    }),
+  );
+  if (!result.ok) return result.error;
 
   revalidateSessionDetail(locale, sessionId);
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);
   return { status: "saved" };
+}
+
+// ── Correct attendance on an already-marked roster row (live only) ─────────
+
+/**
+ * `attendance.correct` on a live session (R2). Every real change writes a
+ * `SessionAttendanceChange` row plus the `attendance.correct` audit row.
+ * PRESENT/LATE → ABSENT on a student holding an active payment voids that
+ * payment in the same transaction — it needs `payment.void` as well, and an
+ * explicit `confirmVoid` from the roster's confirmation dialog (which says
+ * plainly that the payment will be voided); the void adds its own
+ * `payment.void` audit row. All of it is written by `changeAttendanceStatus`
+ * inside one transaction. The reason is optional.
+ */
+export async function setAttendanceAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx, db } = await sessionScope();
+  if (!ctxCan(ctx, "attendance.correct")) return FORBIDDEN;
+
+  const parsed = setAttendanceSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const { locale, sessionId, studentProfileId, status, reason, confirmVoid } = parsed.data;
+
+  const session = await db.sessions.findById(sessionId);
+  if (!session) return NOT_FOUND;
+  const existing = await findAttendee(prisma, ctx.center.id, sessionId, studentProfileId);
+  if (!existing) return { error: "notCheckedIn" };
+  if (existing.attendanceStatus === status) return { status: "saved" };
+
+  const mayVoidPayment = ctxCan(ctx, "payment.void");
+  if (status === "ABSENT") {
+    const activePayment = await prisma.payment.findFirst({
+      where: { centerId: ctx.center.id, sessionAttendeeId: existing.id, voided: false, refunded: false },
+      select: { id: true },
+    });
+    if (activePayment && !mayVoidPayment) return FORBIDDEN;
+    if (activePayment && !confirmVoid) return { error: "voidConfirmationRequired" };
+  }
+
+  const result = await changeAttendanceStatus(prisma, {
+    centerId: ctx.center.id,
+    attendeeId: existing.id,
+    status,
+    changedBy: ctx.user.id,
+    reason,
+    mayVoidPayment,
+  });
+  if (!result.ok) {
+    return result.error === "voidNotPermitted" ? FORBIDDEN : { error: result.error };
+  }
+  // The change row and its audit rows (`attendance.correct`, and
+  // `payment.void`/`settlement.adjust` when a payment was voided) were
+  // written by `changeAttendanceStatus` in the same transaction as the change.
+
+  revalidateSessionDetail(locale, sessionId);
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  return { status: result.voidedPayment ? "voided" : "saved" };
 }
 
 // ── Add a student to the session's roster (spec §4.1 item 7) ───────────────
@@ -251,7 +327,7 @@ export async function addExistingAttendeeAction(
 
   const parsed = addExistingAttendeeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
-  const { locale, sessionId, studentProfileId, status } = parsed.data;
+  const { locale, sessionId, studentProfileId } = parsed.data;
 
   const session = await db.sessions.findById(sessionId);
   if (!session) return NOT_FOUND;
@@ -277,7 +353,6 @@ export async function addExistingAttendeeAction(
       studentProfileId,
       enrollmentId,
       isDropIn,
-      status,
       recordedBy: ctx.user.id,
     }),
   );
@@ -309,7 +384,7 @@ export async function addNewAttendeeAction(
   const parsed = addNewAttendeeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { locale, sessionId, firstName, lastName, email, phone, status, linkUserId } =
+  const { locale, sessionId, firstName, lastName, email, phone, linkUserId } =
     parsed.data;
   const centerId = ctx.center.id;
 
@@ -394,7 +469,6 @@ export async function addNewAttendeeAction(
       studentProfileId,
       enrollmentId: null,
       isDropIn: true,
-      status,
       recordedBy: ctx.user.id,
     }),
   );
@@ -430,8 +504,9 @@ export async function recordPaymentAction(
 
   // The method is resolved inside the transaction, scoped to this centre and
   // to active methods only — a forged or stale id is refused there.
-  const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, ctx.center.id, sessionAttendeeId, paymentMethodId, ctx.user.id),
+  const result = await prisma.$transaction(
+    (tx) => recordPayment(tx, ctx.center.id, sessionAttendeeId, paymentMethodId, ctx.user.id),
+    WRITE_TRANSACTION_OPTIONS,
   );
   if (!result.ok) return { error: result.error };
 
@@ -467,8 +542,9 @@ export async function voidPaymentAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, paymentId, reason } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
-    voidPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id),
+  const result = await prisma.$transaction(
+    (tx) => voidPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id),
+    WRITE_TRANSACTION_OPTIONS,
   );
   if (!result.ok) return { error: result.error };
 
@@ -484,6 +560,9 @@ export async function voidPaymentAction(
     },
     after: { reason },
   });
+  // A void inside a pre-R2 DRAFT/APPROVED settlement's counted total
+  // live-adjusts it (lib/db/settlements.ts) — audited like a refund's.
+  await auditSettlementAdjustments(ctx, result.adjustedSettlements, "payment.void", result.payment.id);
 
   revalidateSessionDetail(locale, result.payment.sessionId);
   revalidateSessionList(locale);
@@ -508,8 +587,9 @@ export async function refundPaymentAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, paymentId, reason } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
-    refundPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id),
+  const result = await prisma.$transaction(
+    (tx) => refundPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id),
+    WRITE_TRANSACTION_OPTIONS,
   );
   if (!result.ok) return { error: result.error };
 
@@ -532,17 +612,7 @@ export async function refundPaymentAction(
   // Any DRAFT/APPROVED settlement this payment was already claimed by just
   // had its total live-adjusted (lib/db/refunds.ts) — audited as its own
   // row, distinct from the refund itself (docs/00 §5 "Teacher settlements").
-  for (const { settlement, previousTotal } of result.adjustedSettlements) {
-    await writeAuditLog({
-      centerId: ctx.center.id,
-      actorUserId: ctx.user.id,
-      action: "settlement.adjust",
-      entityType: "Settlement",
-      entityId: settlement.id,
-      before: { totalAmount: previousTotal },
-      after: { totalAmount: settlement.totalAmount, reason: "payment.refund", paymentId: result.payment.id },
-    });
-  }
+  await auditSettlementAdjustments(ctx, result.adjustedSettlements, "payment.refund", result.payment.id);
 
   revalidateSessionDetail(locale, result.payment.sessionId);
   revalidateSessionList(locale);
@@ -580,6 +650,52 @@ export async function cancelSessionAction(
   revalidateSessionList(locale);
   revalidateReceptionDesk(locale);
   return { status: "cancelled" };
+}
+
+/**
+ * "End session" (R2) — `session.close`, audited as `session.close`. Closing
+ * is irreversible: attendance and money lock for good and every enrolled
+ * student with no roster row is marked ABSENT by the system. Refused on a
+ * cancelled/rescheduled session, an already-closed one, and one that has
+ * not started. Exposed for reuse — the reception desk's own "End session"
+ * button is R7's, and calls this same action.
+ */
+export async function endSessionAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "session.close")) return FORBIDDEN;
+
+  const parsed = endSessionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+  const { locale, sessionId } = parsed.data;
+
+  const result = await closeSession(prisma, ctx.center.id, sessionId, { closedBy: ctx.user.id });
+  if (!result.ok) {
+    revalidateSessionDetail(locale, sessionId);
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "session.close",
+    entityType: "Session",
+    entityId: sessionId,
+    before: { closedAt: null },
+    after: {
+      status: result.session.status,
+      closeMode: result.session.closeMode,
+      closedAt: result.session.closedAt,
+      absentCreated: result.absentCreated,
+    },
+  });
+
+  revalidateSessionDetail(locale, sessionId);
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  return { status: "closed" };
 }
 
 export async function rescheduleSessionAction(
@@ -653,7 +769,7 @@ export async function updateSessionShareOverrideAction(
   if (!before) return NOT_FOUND;
 
   const result = await updateSessionShareOverride(prisma, ctx.center.id, sessionId, override);
-  if (!result.ok) return NOT_FOUND;
+  if (!result.ok) return result.error === "sessionClosed" ? { error: "sessionClosed" } : NOT_FOUND;
 
   await writeAuditLog({
     centerId: ctx.center.id,

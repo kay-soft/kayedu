@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { SessionDescriptionForm } from "@/app/[locale]/(teacher)/teacher/sessions/[id]/description-form";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
+import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { PageHeader } from "@/components/shared/page-header";
 import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
@@ -18,12 +19,13 @@ import { getTenantContext } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
-import { sessionReceiptTotals } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
+import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LinkButton } from "@/components/shared/link-button";
 
@@ -61,6 +63,10 @@ export default async function TeacherSessionDetailPage({
   const { id } = await params;
 
   const db = scoped(ctx);
+  const owned = await db.sessions.findById(id);
+  if (!owned || owned.teacherId !== ctx.user.id) notFound();
+  // R2's lazy end-of-day close, on read (lib/db/session-lifecycle.ts).
+  await closeSessionIfDayOver(prisma, ctx.center.id, id);
   const session = await db.sessions.findDetailById(id);
   if (!session || session.teacherId !== ctx.user.id) notFound();
 
@@ -70,7 +76,8 @@ export default async function TeacherSessionDetailPage({
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  const totals = await sessionReceiptTotals(prisma, ctx.center.id, session.id);
+  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
+  const receipt = await loadSessionReceiptView(ctx.center.id, session);
 
   const roster = await Promise.all(
     session.attendees
@@ -94,7 +101,11 @@ export default async function TeacherSessionDetailPage({
       })),
   );
 
-  const displayStatus = deriveSessionDisplayStatus(session, new Date());
+  const displayStatus = deriveSessionDisplayStatus(
+    session,
+    new Date(),
+    timeZone,
+  );
   const className = sessionDisplayName(locale, { classGroup: session.classGroup });
   const absentCount = roster.filter((row) => row.status === "ABSENT").length;
 
@@ -236,7 +247,14 @@ export default async function TeacherSessionDetailPage({
                   center's cut on it are always shown here (spec §4.2 item 2),
                   unlike the center staff receipt which gates on
                   center.profit.view (a different, broader permission). */}
-              <SessionReceipt totals={totals} showProfit locale={locale} />
+              <SessionReceipt
+                totals={receipt.totals}
+                showProfit
+                locale={locale}
+                timeZone={timeZone}
+                closure={receipt.closure}
+                changes={receipt.changes}
+              />
             </CardContent>
           </Card>
         </div>

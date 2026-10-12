@@ -115,7 +115,7 @@ declare
     'Subject', 'Room', 'ClassGroup', 'ClassSchedule', 'StudentProfile',
     'Enrollment', 'StudentBlock', 'Session', 'SessionAttendee', 'Payment',
     'Holiday', 'ExpenseCategory', 'Expense', 'Reservation', 'ChangeRequest',
-    'CenterPaymentMethod',
+    'CenterPaymentMethod', 'SessionAttendanceChange',
     'CenterSettings'
   ];
 begin

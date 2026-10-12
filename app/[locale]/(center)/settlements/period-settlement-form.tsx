@@ -72,6 +72,10 @@ export function PeriodSettlementForm({
         </div>
       </div>
 
+      {/* R2: a period settlement counts only payments of sessions that are
+          already closed — said here, where the range is chosen. */}
+      <p className="text-xs text-text-muted">{t("periodClosedOnlyHint")}</p>
+
       <SubmitButton className="w-full sm:w-auto">{t("createPeriod")}</SubmitButton>
     </form>
   );

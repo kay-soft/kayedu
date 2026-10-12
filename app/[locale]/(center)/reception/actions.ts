@@ -7,12 +7,12 @@ import {
   createAttendance,
   findAttendee,
   SessionClosedError,
-  updateAttendanceStatus,
 } from "@/lib/db/attendance";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { recordPayment } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
+import { WRITE_TRANSACTION_OPTIONS } from "@/lib/db/session-lifecycle";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -23,11 +23,14 @@ import {
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 
 /**
- * Reception Desk (spec §4.1 item 8): search a student, pick today's session,
- * attendance status and payment method, and submit **one** action that marks
- * attendance and — only for PRESENT/LATE, per "attend = pay, or not counted"
- * (spec §2 "Financial model", §5 "No debt") — records the payment in the
- * same request. Both writes go through the exact same shared helpers
+ * Reception Desk (spec §4.1 item 8): search a student, pick today's session
+ * and a payment method, and submit **one** action that checks the student in
+ * and — only for PRESENT/LATE, per "attend = pay, or not counted" (spec §2
+ * "Financial model", §5 "No debt") — records the payment in the same
+ * request. There is no status picker (R2): `createAttendance` decides
+ * PRESENT or LATE from the clock and the class's late threshold. A student
+ * already on the roster keeps their mark — a correction is the roster's job,
+ * live only — and only the payment is attempted. Both writes go through the exact same shared helpers
  * `app/[locale]/(center)/sessions/actions.ts` uses
  * (`lib/db/attendance.ts`, `lib/db/payments.ts`), so there is one attendance
  * write path and one money write path in the whole app, not two.
@@ -83,66 +86,50 @@ export async function checkInAction(
 
   const parsed = receptionCheckInSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
-  const { locale, sessionId, studentProfileId, status, paymentMethodId } = parsed.data;
+  const { locale, sessionId, studentProfileId, paymentMethodId } = parsed.data;
 
   const session = await db.sessions.findById(sessionId);
   if (!session) return NOT_FOUND;
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
 
-  const existing = await findAttendee(prisma, centerId, sessionId, studentProfileId);
-  let attendeeId: string;
+  let attendee = await findAttendee(prisma, centerId, sessionId, studentProfileId);
 
-  try {
-    if (existing) {
-      if (existing.attendanceStatus !== status) {
-        if (!ctxCan(ctx, "attendance.correct")) return FORBIDDEN;
-        const before = existing.attendanceStatus;
-        await updateAttendanceStatus(prisma, existing, status, ctx.user.id);
-        await writeAuditLog({
-          centerId,
-          actorUserId: ctx.user.id,
-          action: "attendance.correct",
-          entityType: "SessionAttendee",
-          entityId: existing.id,
-          before: { attendanceStatus: before },
-          after: { attendanceStatus: status },
-        });
-      }
-      attendeeId = existing.id;
-    } else {
-      if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
-      const enrollment = await db.enrollments.findExisting(
-        session.classGroupId,
-        studentProfileId,
-      );
-      const active = enrollment?.status === "ACTIVE";
-      const created = await createAttendance(prisma, {
+  if (!attendee) {
+    if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
+    const enrollment = await db.enrollments.findExisting(
+      session.classGroupId,
+      studentProfileId,
+    );
+    const active = enrollment?.status === "ACTIVE";
+    try {
+      attendee = await createAttendance(prisma, {
         centerId,
         sessionId,
         studentProfileId,
         enrollmentId: active ? enrollment!.id : null,
         isDropIn: !active,
-        status,
         recordedBy: ctx.user.id,
       });
-      attendeeId = created.id;
+    } catch (error) {
+      // Cancelled, rescheduled or closed session (M15/R2) — refused
+      // server-side here too, not just hidden in the Reception UI.
+      if (error instanceof SessionClosedError) return { error: error.reason };
+      throw error;
     }
-  } catch (error) {
-    // Cancelled or already-rescheduled session (M15, spec §7 criterion 17) —
-    // refused server-side here too, not just hidden in the Reception UI.
-    if (error instanceof SessionClosedError) return { error: error.reason };
-    throw error;
   }
 
   // "Attend = pay, or not counted" — only PRESENT/LATE is ever payable
-  // (lib/db/payments.ts `recordPayment` enforces this too; this check just
-  // avoids an unnecessary transaction when it plainly cannot apply).
-  if (paymentMethodId && (status === "PRESENT" || status === "LATE")) {
+  // (lib/db/payments.ts `recordPayment` enforces this too, and refuses a
+  // closed session on its own; this check just avoids an unnecessary
+  // transaction when it plainly cannot apply).
+  const payable = attendee.attendanceStatus === "PRESENT" || attendee.attendanceStatus === "LATE";
+  if (paymentMethodId && payable) {
     if (!ctxCan(ctx, "payment.record")) return FORBIDDEN;
 
-    const result = await prisma.$transaction((tx) =>
-      recordPayment(tx, centerId, attendeeId, paymentMethodId, ctx.user.id),
+    const result = await prisma.$transaction(
+      (tx) => recordPayment(tx, centerId, attendee.id, paymentMethodId, ctx.user.id),
+      WRITE_TRANSACTION_OPTIONS,
     );
 
     if (result.ok) {

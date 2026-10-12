@@ -1,10 +1,11 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { AlertTriangle, Ban, Undo2, Users } from "lucide-react";
+import { AlertTriangle, Ban, LogIn, Undo2, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
+  checkInRosterAction,
   recordPaymentAction,
   refundPaymentAction,
   setAttendanceAction,
@@ -21,10 +22,22 @@ import {
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Link } from "@/lib/i18n/navigation";
 import { formatMoney } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import { IDLE_SESSION_STATE, type SessionActionState } from "@/lib/validation/sessions";
 import { EmptyState } from "@/components/shared/empty-state";
 
 export type RosterRowData = {
@@ -41,15 +54,25 @@ export type RosterRowData = {
 
 /**
  * The session roster (spec §4.1 item 7): every actively-enrolled student
- * (marked or not) plus any drop-ins, each with the Attendance control and,
- * once PRESENT/LATE, the money — record a payment, void one already
- * recorded, or (M14) refund one already recorded. `canCorrect`/
- * `canRecordPayment`/`canVoid`/`canRefund` only hide controls; the server
- * actions re-check every permission (docs/02 §6).
+ * (marked or not) plus any drop-ins. An unmarked row gets a **Check in**
+ * button — the server decides Present or Late from the clock (R2), there is
+ * no status picker. A marked row gets the Attendance control for
+ * corrections while the session is live, and, once PRESENT/LATE, the money —
+ * record a payment, void one already recorded, or (M14) refund one.
+ *
+ * Switching a paid student to Absent voids their payment (R2). The row says
+ * so in plain words before anyone clicks, and the click opens a
+ * confirmation dialog (optional reason) instead of submitting straight away.
+ *
+ * `canRecord`/`canCorrect`/`canRecordPayment`/`canVoid`/`canRefund` only
+ * hide controls; the server actions re-check every permission (docs/02 §6).
+ * `readOnly` — cancelled, rescheduled (M15) or closed (R2) — renders no
+ * attendance or payment control at all.
  */
 export function SessionRoster({
   sessionId,
   rows,
+  canRecord,
   canCorrect,
   canRecordPayment,
   canVoid,
@@ -59,13 +82,14 @@ export function SessionRoster({
 }: {
   sessionId: string;
   rows: RosterRowData[];
+  canRecord: boolean;
   canCorrect: boolean;
   canRecordPayment: boolean;
   canVoid: boolean;
   canRefund: boolean;
   /** The centre's active methods (R1), oldest first. */
   paymentMethods: PaymentMethodOption[];
-  /** Cancelled or already-rescheduled (M15) — no attendance/payment control renders. */
+  /** Cancelled, already-rescheduled (M15) or closed (R2) — no attendance/payment control renders. */
   readOnly?: boolean;
 }) {
   const t = useTranslations("Sessions.roster");
@@ -81,6 +105,7 @@ export function SessionRoster({
           key={row.studentProfileId}
           sessionId={sessionId}
           row={row}
+          canRecord={canRecord}
           canCorrect={canCorrect}
           canRecordPayment={canRecordPayment}
           canVoid={canVoid}
@@ -96,6 +121,7 @@ export function SessionRoster({
 function AttendeeRow({
   sessionId,
   row,
+  canRecord,
   canCorrect,
   canRecordPayment,
   canVoid,
@@ -105,6 +131,7 @@ function AttendeeRow({
 }: {
   sessionId: string;
   row: RosterRowData;
+  canRecord: boolean;
   canCorrect: boolean;
   canRecordPayment: boolean;
   canVoid: boolean;
@@ -115,10 +142,23 @@ function AttendeeRow({
   const t = useTranslations("Sessions.roster");
   const tErrors = useTranslations("Sessions.errors");
   const tAttendance = useTranslations("Sessions.attendance");
+  const tShared = useTranslations("Shared");
   const locale = useLocale();
 
-  const [attendanceState, attendanceFormAction, attendancePending] =
-    useActionState(setAttendanceAction, IDLE_SESSION_STATE);
+  const [absentConfirmOpen, setAbsentConfirmOpen] = useState(false);
+  const [attendanceState, attendanceFormAction, attendancePending] = useActionState(
+    async (previous: SessionActionState, formData: FormData) => {
+      const next = await setAttendanceAction(previous, formData);
+      // The void-on-absent dialog closes once the change has landed.
+      if (next.status) setAbsentConfirmOpen(false);
+      return next;
+    },
+    IDLE_SESSION_STATE,
+  );
+  const [checkInState, checkInFormAction] = useActionState(
+    checkInRosterAction,
+    IDLE_SESSION_STATE,
+  );
   const [paymentState, paymentFormAction] = useActionState(
     recordPaymentAction,
     IDLE_SESSION_STATE,
@@ -135,8 +175,18 @@ function AttendeeRow({
   );
 
   const alreadyMarked = row.status !== null;
-  const attendanceLocked = alreadyMarked && !canCorrect;
   const payable = row.status === "PRESENT" || row.status === "LATE";
+  // An active payment a switch to Absent would void (R2) — a refunded one
+  // already went back in cash and is left alone.
+  const voidableOnAbsent = Boolean(row.payment && !row.payment.refunded);
+
+  const hiddenRowFields = (
+    <>
+      <input type="hidden" name="locale" value={locale} />
+      <input type="hidden" name="sessionId" value={sessionId} />
+      <input type="hidden" name="studentProfileId" value={row.studentProfileId} />
+    </>
+  );
 
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border p-3">
@@ -164,26 +214,80 @@ function AttendeeRow({
         </p>
       ) : null}
 
-      {readOnly ? (
+      {readOnly || (!alreadyMarked && !canRecord) ? (
         <Badge variant="neutral">
           {row.status ? tAttendance(row.status) : t("unmarked")}
         </Badge>
+      ) : !alreadyMarked ? (
+        <form action={checkInFormAction} className="flex flex-col gap-2">
+          {hiddenRowFields}
+          <SubmitButton className="w-full sm:w-auto">
+            <LogIn className="size-4" aria-hidden />
+            {t("checkIn")}
+          </SubmitButton>
+          {checkInState.error ? <FormMessage>{tErrors(checkInState.error)}</FormMessage> : null}
+        </form>
       ) : (
         <>
           <AttendanceControl
             formAction={attendanceFormAction}
             value={row.status}
-            pending={attendancePending || attendanceLocked}
-            hiddenFields={
-              <>
-                <input type="hidden" name="locale" value={locale} />
-                <input type="hidden" name="sessionId" value={sessionId} />
-                <input type="hidden" name="studentProfileId" value={row.studentProfileId} />
-              </>
-            }
+            pending={attendancePending || !canCorrect}
+            hiddenFields={hiddenRowFields}
+            interceptStatus={voidableOnAbsent && canVoid ? "ABSENT" : undefined}
+            onIntercept={() => setAbsentConfirmOpen(true)}
           />
-          {attendanceState.error ? (
+          {voidableOnAbsent && canCorrect ? (
+            <p className="text-xs text-text-muted">{t("paidAbsentNote")}</p>
+          ) : null}
+          {attendanceState.error && !absentConfirmOpen ? (
             <FormMessage>{tErrors(attendanceState.error)}</FormMessage>
+          ) : null}
+          {row.payment && voidableOnAbsent ? (
+            <Dialog open={absentConfirmOpen} onOpenChange={setAbsentConfirmOpen}>
+              <DialogContent>
+                <form action={attendanceFormAction} className="flex flex-1 flex-col">
+                  {hiddenRowFields}
+                  <input type="hidden" name="status" value="ABSENT" />
+                  <input type="hidden" name="confirmVoid" value="true" />
+                  <DialogHeader>
+                    <DialogTitle>{t("voidDialog.title", { name: row.name })}</DialogTitle>
+                    <DialogDescription>
+                      {t("voidDialog.body", {
+                        name: row.name,
+                        amount: formatMoney(row.payment.amount, locale),
+                      })}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogBody className="flex flex-col gap-2">
+                    <Label htmlFor={`absent-reason-${row.studentProfileId}`}>
+                      {t("voidDialog.reasonLabel")}
+                      <span className="font-normal text-text-muted">{tShared("optional")}</span>
+                    </Label>
+                    <Input
+                      id={`absent-reason-${row.studentProfileId}`}
+                      name="reason"
+                      maxLength={200}
+                      placeholder={t("voidDialog.reasonPlaceholder")}
+                    />
+                    {attendanceState.error ? (
+                      <FormMessage>{tErrors(attendanceState.error)}</FormMessage>
+                    ) : null}
+                  </DialogBody>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 px-4"
+                      onClick={() => setAbsentConfirmOpen(false)}
+                    >
+                      {t("voidDialog.cancel")}
+                    </Button>
+                    <SubmitButton variant="destructive">{t("voidDialog.confirm")}</SubmitButton>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
           ) : null}
         </>
       )}

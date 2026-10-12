@@ -26,7 +26,7 @@ import { fullName, localName } from "@/lib/identity";
 import { parseStudentQrPayload } from "@/lib/id-card";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { startOfUtcDay } from "@/lib/scheduling";
+import { DEFAULT_TIMEZONE, startOfUtcDay } from "@/lib/scheduling";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
 import { storageConfigured } from "@/lib/supabase/admin";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -86,7 +86,7 @@ export default async function ReceptionPage({
     teacherName: teacherNameByUserId.get(row.teacherId) ?? tCommon("none"),
     startTime: row.startTime,
     endTime: row.endTime,
-    displayStatus: deriveSessionDisplayStatus(row, now),
+    displayStatus: deriveSessionDisplayStatus(row, now, ctx.settings?.timezone ?? DEFAULT_TIMEZONE),
   }));
 
   // A scanned QR resolves directly by exact student code — never the fuzzy

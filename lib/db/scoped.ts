@@ -32,6 +32,7 @@ import {
   PAYMENT_METHOD_ORDER,
   listActivePaymentMethods,
 } from "@/lib/db/payment-methods";
+import { listSessionAttendanceChanges } from "@/lib/db/session-lifecycle";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
@@ -443,6 +444,22 @@ export function scoped(ctx: TenantContext) {
         prisma.sessionAttendee.findFirst({
           where: scopedWhere(centerId, { sessionId, studentProfileId }),
         }),
+    },
+
+    /**
+     * Live-session attendance status changes (R2) — read-only here; the only
+     * writer is `lib/db/attendance.ts`'s `changeAttendanceStatus`, inside the
+     * same transaction as the change (and any void) it records.
+     */
+    attendanceChanges: {
+      count: (where?: Prisma.SessionAttendanceChangeWhereInput) =>
+        prisma.sessionAttendanceChange.count({ where: scopedWhere(centerId, where) }),
+
+      findById: (id: string) => scopedFindById(prisma.sessionAttendanceChange, centerId, id),
+
+      /** The receipt's "Changes during session" rows, oldest first, names resolved. */
+      listForSession: (sessionId: string) =>
+        listSessionAttendanceChanges(prisma, centerId, sessionId),
     },
 
     payments: {

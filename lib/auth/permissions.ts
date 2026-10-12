@@ -40,6 +40,10 @@ export const PERMISSIONS = [
   "session.manage",
   "session.cancel",
   // Daily loop
+  // Ending a session (R2) — closes it for good: attendance and money lock,
+  // enrolled no-shows become ABSENT. Core-loop, so RECEPTIONIST holds it by
+  // default and the R2 migration backfilled it onto every existing centre.
+  "session.close",
   "session.view",
   "reception.use",
   "attendance.record",
@@ -225,6 +229,7 @@ const MANAGER_BASELINE: readonly Permission[] = [
   "class.delete",
   "session.manage",
   "session.cancel",
+  "session.close",
   "session.view",
   "reception.use",
   "attendance.record",
@@ -246,6 +251,7 @@ export const DEFAULT_ROLE_GRANTS: Record<Role, readonly Permission[]> = {
   RECEPTIONIST: [
     "reception.use",
     "session.view",
+    "session.close",
     "attendance.record",
     "payment.record",
     "student.manage",

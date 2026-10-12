@@ -28,9 +28,10 @@ export type AttendeeCandidate = {
  * drop-in — reusing M3's duplicate-match flow exactly (`components/center/
  * match-panel.tsx`, `components/center/{person,contact}-fields.tsx`).
  *
- * Both paths default the new roster row to PRESENT — the natural default for
- * "add them, they are right here" — and staff correct it from the roster
- * (`session-roster.tsx`'s Attendance control) if that is wrong.
+ * Both paths are a check-in: the server decides Present or Late from the
+ * arrival time (R2, `createAttendance`) — there is no status to pick — and
+ * staff correct it from the roster (`session-roster.tsx`'s Attendance
+ * control) while the session is live if that is wrong.
  */
 export function AddAttendeePanel({
   sessionId,
@@ -101,7 +102,6 @@ function ExistingCandidateRow({
         <input type="hidden" name="locale" value={locale} />
         <input type="hidden" name="sessionId" value={sessionId} />
         <input type="hidden" name="studentProfileId" value={candidate.studentProfileId} />
-        <input type="hidden" name="status" value="PRESENT" />
         <SubmitButton className="w-full sm:w-auto">
           <UserPlus className="size-4" />
           {t("add")}
@@ -144,7 +144,6 @@ function NewAttendeeForm({
     >
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="sessionId" value={sessionId} />
-      <input type="hidden" name="status" value="PRESENT" />
       {match ? <input type="hidden" name="linkUserId" value={match.userId} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}

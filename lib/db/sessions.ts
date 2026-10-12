@@ -21,12 +21,19 @@ import {
 import {
   GENERATION_WINDOW_DAYS,
   addDays,
+  dateKey,
   findSessionConflicts,
   generateOccurrenceDates,
+  parseTimeToMinutes,
   startOfUtcDay,
+  zonedClock,
   type ExistingSession,
   type ScheduleConflict,
 } from "../scheduling.ts";
+import {
+  ensureSessionOpenOrAutoClose,
+  runInTransaction,
+} from "./session-lifecycle.ts";
 
 /**
  * The session generator (docs/02-architecture.md §11, spec §5 "Scheduling"):
@@ -280,7 +287,7 @@ const CANCELLED_ENUM: SessionStatus = "CANCELLED";
 
 export type CancelSessionResult =
   | { ok: true; session: Session }
-  | { ok: false; error: "notFound" | "alreadyCancelled" | "alreadyRescheduled" };
+  | { ok: false; error: "notFound" | "alreadyCancelled" | "alreadyRescheduled" | "sessionClosed" };
 
 /**
  * Cancels one session. Money is never touched here (CLAUDE.md rule 2) — a
@@ -290,27 +297,38 @@ export type CancelSessionResult =
  * correctly" (spec §7 criterion 11) is true by construction: `SessionAttendee`
  * rows are never deleted, and `deriveSessionDisplayStatus` already treats
  * `CANCELLED` as terminal regardless of the clock.
+ *
+ * R2: a closed session cannot be cancelled (`sessionClosed`) — it ran, and
+ * its record is final. A session whose day ended is auto-closed by this call
+ * first (lib/db/session-lifecycle.ts), then refused.
  */
 export async function cancelSession(
   db: SessionDb,
   centerId: string,
   sessionId: string,
+  options: { now?: Date } = {},
 ): Promise<CancelSessionResult> {
-  const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
-  if (!session) return { ok: false, error: "notFound" };
-  if (session.status === CANCELLED_ENUM) return { ok: false, error: "alreadyCancelled" };
-  if (session.rescheduledToId) return { ok: false, error: "alreadyRescheduled" };
+  return runInTransaction(db, async (tx): Promise<CancelSessionResult> => {
+    const gate = await ensureSessionOpenOrAutoClose(tx, sessionId, centerId, options.now, {
+      allowTerminal: true,
+      exclusive: true,
+    });
+    if (gate.status === "missing") return { ok: false, error: "notFound" };
+    if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
+    if (gate.session.status === CANCELLED_ENUM) return { ok: false, error: "alreadyCancelled" };
+    if (gate.session.rescheduledToId) return { ok: false, error: "alreadyRescheduled" };
 
-  const updated = await db.session.update({
-    where: { id: sessionId },
-    data: { status: CANCELLED_ENUM },
+    const updated = await tx.session.update({
+      where: { id: sessionId },
+      data: { status: CANCELLED_ENUM },
+    });
+    return { ok: true, session: updated };
   });
-  return { ok: true, session: updated };
 }
 
 export type UpdateSessionShareOverrideResult =
   | { ok: true; session: Session }
-  | { ok: false; error: "notFound" };
+  | { ok: false; error: "notFound" | "sessionClosed" };
 
 /**
  * Sets or clears this one session's centre-cut override (M13, spec §5.1
@@ -319,31 +337,47 @@ export type UpdateSessionShareOverrideResult =
  * centerShareValue" — every session's state until this is called. Only
  * consulted by `recordPayment` at the moment a payment is frozen; never
  * touches an already-recorded payment's snapshots (CLAUDE.md rule 2).
+ *
+ * R2: refused on a closed session (`sessionClosed`) — no payment can be
+ * recorded there any more, so an override would only rewrite its record.
  */
 export async function updateSessionShareOverride(
   db: SessionDb,
   centerId: string,
   sessionId: string,
   override: { centerShareType: ShareType; centerShareValue: number } | null,
+  options: { now?: Date } = {},
 ): Promise<UpdateSessionShareOverrideResult> {
-  const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
-  if (!session) return { ok: false, error: "notFound" };
+  return runInTransaction(db, async (tx): Promise<UpdateSessionShareOverrideResult> => {
+    const gate = await ensureSessionOpenOrAutoClose(tx, sessionId, centerId, options.now, {
+      allowTerminal: true,
+      exclusive: true,
+    });
+    if (gate.status === "missing") return { ok: false, error: "notFound" };
+    if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
 
-  const updated = await db.session.update({
-    where: { id: sessionId },
-    data: {
-      centerShareType: override?.centerShareType ?? null,
-      centerShareValue: override?.centerShareValue ?? null,
-    },
+    const updated = await tx.session.update({
+      where: { id: sessionId },
+      data: {
+        centerShareType: override?.centerShareType ?? null,
+        centerShareValue: override?.centerShareValue ?? null,
+      },
+    });
+    return { ok: true, session: updated };
   });
-  return { ok: true, session: updated };
 }
 
 export type RescheduleSessionResult =
   | { ok: true; session: Session; conflicts: GenerationConflict[] }
   | {
       ok: false;
-      error: "notFound" | "cancelled" | "alreadyRescheduled" | "conflict" | "duplicateSlot";
+      error:
+        | "notFound"
+        | "cancelled"
+        | "alreadyRescheduled"
+        | "sessionClosed"
+        | "conflict"
+        | "duplicateSlot";
     };
 
 /**
@@ -370,6 +404,10 @@ export type RescheduleSessionResult =
  * the new row — if this class already has another session at the target
  * slot, the write fails with `duplicateSlot` rather than silently merging
  * two sessions.
+ *
+ * R2: a closed session cannot be rescheduled (`sessionClosed`); the closure
+ * guard runs inside the same transaction as the write, so a session that
+ * closes between the conflict check and the write is still refused.
  */
 export async function rescheduleSession(
   db: PrismaClient,
@@ -379,11 +417,13 @@ export async function rescheduleSession(
   conflictPolicy: ConflictPolicy,
   // Only labels a conflict for display (`ScheduleConflict.className`, M13).
   locale = "en",
+  options: { now?: Date } = {},
 ): Promise<RescheduleSessionResult> {
   const session = await db.session.findFirst({ where: { centerId, id: sessionId } });
   if (!session) return { ok: false, error: "notFound" };
   if (session.status === CANCELLED_ENUM) return { ok: false, error: "cancelled" };
   if (session.rescheduledToId) return { ok: false, error: "alreadyRescheduled" };
+  if (session.closedAt) return { ok: false, error: "sessionClosed" };
 
   const existing = await loadExistingSessions(
     db,
@@ -417,7 +457,16 @@ export async function rescheduleSession(
     // One transaction: the new occurrence and the original's linkage are
     // written together, or not at all — never a replacement with no session
     // pointing at it, or a link to a replacement that doesn't exist.
-    const replacement = await db.$transaction(async (tx) => {
+    const outcome = await db.$transaction(async (tx) => {
+      // The closure guard, inside the write's own transaction (R2). A refusal
+      // is returned, not thrown, so a lazy end-of-day close still commits.
+      const gate = await ensureSessionOpenOrAutoClose(tx, sessionId, centerId, options.now, {
+        allowTerminal: true,
+        exclusive: true,
+      });
+      if (gate.status !== "open") return null;
+      if (gate.session.status === CANCELLED_ENUM || gate.session.rescheduledToId) return null;
+
       const created = await tx.session.create({
         data: {
           centerId,
@@ -439,7 +488,8 @@ export async function rescheduleSession(
       });
       return created;
     });
-    return { ok: true, session: replacement, conflicts };
+    if (!outcome) return { ok: false, error: "sessionClosed" };
+    return { ok: true, session: outcome, conflicts };
   } catch (error) {
     if (
       error instanceof Object &&
@@ -478,6 +528,7 @@ export function sessionListSelect(centerId: string) {
     endTime: true,
     status: true,
     rescheduledToId: true,
+    closedAt: true,
     priceSnapshot: true,
     teacherId: true,
     classGroupId: true,
@@ -555,21 +606,24 @@ export type SessionDisplayStatus =
   | "RESCHEDULED";
 
 /**
- * SCHEDULED/LIVE/COMPLETED are derived from the clock, not stored — nothing
- * in this codebase transitions `Session.status` between them yet (docs/02
- * §11 leaves session lifecycle writes, cancel included, to a later
- * milestone). CANCELLED is the one persisted value this passes through.
- * RESCHEDULED (M15) is derived from `rescheduledToId` rather than stored on
- * `status` at all — the original session is neither cancelled (it still
- * happens, just on its replacement) nor genuinely SCHEDULED/COMPLETED by the
- * clock (its own slot never occurred), so this takes precedence over both.
+ * The status a session *displays*. Precedence, highest first:
+ * - RESCHEDULED (M15) — derived from `rescheduledToId`, not stored: the
+ *   original is neither cancelled (it still happens, on its replacement) nor
+ *   SCHEDULED/COMPLETED by the clock (its own slot never occurred).
+ * - CANCELLED — the stored value, terminal regardless of the clock.
+ * - COMPLETED — the session is **closed** (R2): `closedAt` set (which also
+ *   stores `status: COMPLETED`), or its calendar day has ended in the
+ *   centre's timezone (it is closed AUTO on its next touch —
+ *   lib/db/session-lifecycle.ts). Stored and displayed status agree.
+ * - SCHEDULED — its start time has not come yet, in the centre's timezone.
+ * - LIVE — started and not closed. A session stays LIVE past its end time
+ *   until staff end it or its day ends, because until then it still accepts
+ *   attendance corrections and payments; "Live" is what tells staff it is
+ *   still open.
  *
- * Consistent with `generateOccurrenceDates`/`startOfUtcDay` elsewhere in this
- * file: `date` is a pure UTC-midnight calendar-day marker and `startTime`/
- * `endTime` are plain "HH:MM" wall-clock strings, compared here against the
- * server's current UTC clock with no timezone conversion — the same
- * simplification the M4 generator already makes (Phase 1 is Egypt-only, one
- * timezone, per spec §1).
+ * `date` is a UTC-midnight calendar-day marker and `startTime` a bare
+ * "HH:MM" wall-clock string in the centre's timezone, so `now` is read
+ * through `zonedClock` (lib/scheduling.ts) — never compared in UTC.
  */
 export function deriveSessionDisplayStatus(
   session: {
@@ -578,28 +632,30 @@ export function deriveSessionDisplayStatus(
     startTime: string;
     endTime: string;
     rescheduledToId?: string | null;
+    closedAt?: Date | null;
   },
   now: Date,
+  timeZone: string,
 ): SessionDisplayStatus {
   if (session.rescheduledToId) return "RESCHEDULED";
   if (session.status === CANCELLED_STATUS) return "CANCELLED";
+  if (session.closedAt || session.status === "COMPLETED") return "COMPLETED";
 
-  const dayKey = session.date.toISOString().slice(0, 10);
-  const nowKey = now.toISOString().slice(0, 10);
-  if (dayKey > nowKey) return "SCHEDULED";
-  if (dayKey < nowKey) return "COMPLETED";
-
-  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const startMinutes = parseTimeToMinutesSafe(session.startTime);
-  const endMinutes = parseTimeToMinutesSafe(session.endTime);
-  if (nowMinutes < startMinutes) return "SCHEDULED";
-  if (nowMinutes >= endMinutes) return "COMPLETED";
+  const clock = zonedClock(now, timeZone);
+  const dayKey = dateKey(session.date);
+  if (dayKey > clock.dayKey) return "SCHEDULED";
+  if (dayKey < clock.dayKey) return "COMPLETED";
+  if (clock.minutes < parseTimeToMinutesSafe(session.startTime)) return "SCHEDULED";
   return "LIVE";
 }
 
 function parseTimeToMinutesSafe(value: string): number {
-  const [hours, minutes] = value.split(":").map(Number);
-  return (hours || 0) * 60 + (minutes || 0);
+  try {
+    return parseTimeToMinutes(value);
+  } catch {
+    const [hours, minutes] = value.split(":").map(Number);
+    return (hours || 0) * 60 + (minutes || 0);
+  }
 }
 
 /** A short label for the session in a list/receipt ("Math · Grade 10"). */

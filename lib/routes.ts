@@ -26,6 +26,7 @@ export const ROUTES = {
   // The daily loop: sessions, attendance & payments (M5).
   centerSessions: "/sessions",
   centerSession: (id: string) => `/sessions/${id}`,
+  centerSessionPrint: (id: string) => `/sessions/${id}/print`,
   centerReception: "/reception",
   // Analytics & expenses (M6).
   centerAnalytics: "/analytics",

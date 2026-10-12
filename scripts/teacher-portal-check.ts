@@ -114,12 +114,11 @@ async function payFor(
     studentProfileId,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const methodId = await fixtureMethodId(centerId);
   const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendee.id, methodId, actorId),
+    recordPayment(tx, centerId, attendee.id, methodId, actorId, { historicalBackfill: true }),
   );
   if (!result.ok) throw new Error(`recordPayment failed: ${result.error}`);
   return { attendee, payment: result.payment };
@@ -233,9 +232,8 @@ async function main() {
     studentProfileId: studentB2.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "ABSENT",
     recordedBy: teacher.id,
-  });
+  }, { historicalBackfill: true, status: "ABSENT" });
 
   // ── 1. Per-center session queries never cross ────────────────────────────
   const sessionsA = await prisma.session.findMany({

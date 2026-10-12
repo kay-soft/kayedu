@@ -674,7 +674,7 @@
     },
     "roster": {
       "title": "Roster",
-      "description": "Every enrolled student, plus any drop-ins. Mark attendance, then record the payment.",
+      "description": "Every enrolled student, plus any drop-ins. Check students in — Present or Late is set from the arrival time — then record the payment. Corrections are possible until the session is ended.",
       "empty": "No students enrolled or added yet.",
       "dropIn": "Drop-in",
       "unmarked": "Not marked",
@@ -688,7 +688,17 @@
       "refunded": "Refunded",
       "refundReasonPlaceholder": "Reason for the refund",
       "confirmRefund": "Confirm refund",
-      "emptyHint": "Students enrolled in this class appear here once the session is generated."
+      "emptyHint": "Students enrolled in this class appear here once the session is generated.",
+      "checkIn": "Check in",
+      "voidDialog": {
+        "title": "Mark {name} absent?",
+        "body": "{name} has paid {amount}. Marking them absent voids that payment: it stops counting in this receipt and in analytics. This is a void, not a cash refund.",
+        "reasonLabel": "Reason",
+        "reasonPlaceholder": "e.g. Checked in by mistake",
+        "confirm": "Mark absent and void payment",
+        "cancel": "Keep as is"
+      },
+      "paidAbsentNote": "Paid — switching to Absent voids the payment."
     },
     "addAttendee": {
       "title": "Add a student",
@@ -731,10 +741,22 @@
       "teacherShare": "Teacher share",
       "present": "Present",
       "late": "Late",
-      "absent": "Absent"
+      "absent": "Absent",
+      "closed": "Closed",
+      "closedManual": "{time} · {name}",
+      "closedAuto": "{time} · automatically, end of day",
+      "notClosed": "Not closed yet — figures can still change.",
+      "changesTitle": "Changes during session",
+      "changeStatus": "{from} → {to}",
+      "changeMeta": "{time} · {name}",
+      "changeReason": "Reason: {reason}",
+      "paymentVoided": "Payment voided",
+      "unknownActor": "Staff member",
+      "print": "Print receipt"
     },
     "settlement": {
-      "status": "Settlement: {status}"
+      "status": "Settlement: {status}",
+      "notClosedHint": "The teacher's share can be settled once the session is ended."
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -760,11 +782,31 @@
       "conflict": "That time conflicts with another class's teacher or room, and this branch denies conflicting slots.",
       "duplicateSlot": "This class already has a session at that exact date and time.",
       "invalidDate": "Enter a valid date.",
-      "invalidTimeRange": "The end time must be after the start time."
+      "invalidTimeRange": "The end time must be after the start time.",
+      "sessionClosed": "This session is closed — attendance and payments can no longer be changed on it.",
+      "notCheckedIn": "This student hasn't been checked in yet. Check them in first.",
+      "voidConfirmationRequired": "This student has paid. Confirm that marking them absent voids the payment.",
+      "alreadyClosed": "This session is already closed.",
+      "notStarted": "This session hasn't started yet, so it can't be ended."
     },
     "emptyHint": "Sessions are generated from each class's weekly schedule. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
-    "zeroHint": "No activity in this range"
+    "zeroHint": "No activity in this range",
+    "closure": {
+      "closedManual": "Session closed {time} by {name}.",
+      "closedManualUnknown": "Session closed {time}.",
+      "closedAuto": "Closed automatically at the end of the day ({time}) because it was not closed manually.",
+      "locked": "Attendance and payments are locked. A closed session cannot be reopened or changed."
+    },
+    "endSession": {
+      "button": "End session",
+      "hint": "End the session when the class is over. A session nobody ends closes automatically at the end of the day.",
+      "dialogTitle": "End this session?",
+      "dialogBody": "Ending the session closes it for good. Attendance and payments lock, every enrolled student who did not check in is marked Absent, and the receipt becomes final.",
+      "irreversible": "This cannot be undone — there is no way to reopen a session.",
+      "confirm": "End session",
+      "cancel": "Not yet"
+    }
   },
   "Reception": {
     "title": "Reception Desk",
@@ -782,12 +824,12 @@
     "addSessionShortcut": "All sessions",
     "checkingIn": "Checking in {name}",
     "sessionLabel": "Session",
-    "statusLabel": "Attendance",
     "methodLabel": "Payment method",
     "submit": "Check in",
     "checkedIn": "Checked in.",
     "noMatchesHint": "Search by name, student code or phone — or scan an ID card.",
-    "noSessionsTodayHint": "Sessions marked live show up here as the day runs."
+    "noSessionsTodayHint": "Sessions marked live show up here as the day runs.",
+    "statusAuto": "Present or Late is set automatically from the arrival time."
   },
   "Analytics": {
     "title": "Analytics",
@@ -1017,10 +1059,12 @@
       "invalidDate": "Enter a valid date.",
       "overlappingSettlement": "This teacher already has a settlement covering part of that date range.",
       "notDraft": "This settlement has already been approved or paid.",
-      "notApproved": "This settlement must be approved before it can be marked paid."
+      "notApproved": "This settlement must be approved before it can be marked paid.",
+      "sessionNotClosed": "This session is still open. End it first — a live session's payments can still change."
     },
     "emptyHint": "A settlement rolls up what a teacher has earned across a period. Create the first one below.",
-    "teacherEmptyHint": "When the branch settles your earnings, each settlement appears here with its status."
+    "teacherEmptyHint": "When the branch settles your earnings, each settlement appears here with its status.",
+    "periodClosedOnlyHint": "Only sessions that are already closed count. A session still running today is left out — settle it once it has ended."
   },
   "Settings": {
     "title": "Branch configuration",
@@ -1250,7 +1294,8 @@
         "changeRequest_create": "Submit class/session requests",
         "reservation_manage_own": "Manage own class reservations",
         "audit_view": "View audit log",
-        "parent_link_manage": "Manage parent links"
+        "parent_link_manage": "Manage parent links",
+        "session_close": "End sessions"
       }
     }
   },
@@ -1383,13 +1428,7 @@
     "print": {
       "hint": "Only the sheet below is printed.",
       "print": "Print",
-      "back": "Back to the session",
-      "printedOn": "Printed {date}",
-      "collected": "Total collected",
-      "centerShare": "Branch share",
-      "teacherShare": "Your share",
-      "attendanceSummary": "Attendance",
-      "attendanceCounts": "{present} present · {late} late · {absent} absent"
+      "back": "Back to the session"
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -1770,5 +1809,19 @@
       "nov": "November",
       "dec": "December"
     }
+  },
+  "SessionPrint": {
+    "hint": "Only the sheet below is printed.",
+    "print": "Print",
+    "back": "Back to the session",
+    "printedOn": "Printed {date}",
+    "sessionTitle": "Session",
+    "receiptTitle": "Receipt",
+    "rosterTitle": "Roster",
+    "rosterEmpty": "No students on the roster.",
+    "grade": "Grade",
+    "room": "Room",
+    "price": "Price",
+    "teacher": "Teacher"
   }
 }

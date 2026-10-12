@@ -334,3 +334,121 @@ export function findSessionConflicts(
   }
   return conflicts;
 }
+
+// ── Centre-timezone clock (R2, docs/02-architecture.md §11 "Session lifecycle") ─
+// A `Session` stores its calendar day as a UTC-midnight marker (`date`) and
+// its times as bare "HH:MM" wall-clock strings in the centre's own timezone
+// (`CenterSettings.timezone`). Everything that compares "now" against a
+// session — is it live, has its day ended, is this check-in late — reads the
+// current instant through `zonedClock` so the comparison happens in that
+// timezone, never in the server's or in UTC. `now` is always a parameter, so
+// the gate can inject one.
+
+/** The timezone every centre is created with (lib/db/platform.ts). */
+export const DEFAULT_TIMEZONE = "Africa/Cairo";
+
+function safeTimeZone(timeZone: string | null | undefined): string {
+  if (!timeZone) return DEFAULT_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return timeZone;
+  } catch {
+    // `CenterSettings.timezone` is free text — an unknown zone must not take
+    // the whole session lifecycle down, so it falls back to the default.
+    return DEFAULT_TIMEZONE;
+  }
+}
+
+/** Wall-clock parts of `instant` in `timeZone`. */
+function zonedParts(instant: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: safeTimeZone(timeZone),
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour") % 24,
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+/**
+ * "What day and minute is it at the centre right now?" — the calendar-day key
+ * (same shape as `dateKey`) and minutes since local midnight.
+ */
+export function zonedClock(now: Date, timeZone: string): { dayKey: string; minutes: number } {
+  const p = zonedParts(now, timeZone);
+  const dayKey = `${String(p.year).padStart(4, "0")}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
+  return { dayKey, minutes: p.hour * 60 + p.minute };
+}
+
+/**
+ * The UTC instant of a wall-clock moment (`dayKey` + `minutes` after local
+ * midnight) in `timeZone`. Two passes, so a DST shift between the guess and
+ * the answer still resolves to the right offset.
+ */
+export function zonedDateTimeToUtc(dayKey: string, minutes: number, timeZone: string): Date {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const wallClockAsUtc = Date.UTC(year, month - 1, day, 0, minutes);
+  let guess = wallClockAsUtc;
+  for (let pass = 0; pass < 2; pass++) {
+    const p = zonedParts(new Date(guess), timeZone);
+    const shownAsUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    guess = guess - (shownAsUtc - wallClockAsUtc);
+  }
+  return new Date(guess);
+}
+
+/** True once the session's calendar day has ended in the centre's timezone. */
+export function isSessionDayOver(sessionDate: Date, now: Date, timeZone: string): boolean {
+  return zonedClock(now, timeZone).dayKey > dateKey(sessionDate);
+}
+
+/**
+ * The instant a session's day ends at the centre — local midnight after it.
+ * This is what an automatic close stamps as `closedAt`: "closed at the end of
+ * the day", whenever the next touch actually happened.
+ */
+export function endOfSessionDay(sessionDate: Date, timeZone: string): Date {
+  return zonedDateTimeToUtc(dateKey(addDays(sessionDate, 1)), 0, timeZone);
+}
+
+/** The class's own late threshold, else the centre default, else 10 minutes. */
+export function resolveLateThreshold(
+  classThreshold: number | null | undefined,
+  centerDefault: number | null | undefined,
+): number {
+  return classThreshold ?? centerDefault ?? 10;
+}
+
+/**
+ * The one place a check-in's status is decided (R2): PRESENT within
+ * `thresholdMinutes` of the session's start (inclusive — exactly on the
+ * threshold is still PRESENT), LATE from the minute after. Checking in
+ * before the session's day counts as on time; any time on a later day is
+ * late. Compared in the centre's timezone, at minute precision.
+ */
+export function checkInStatus(
+  session: { date: Date; startTime: string },
+  thresholdMinutes: number,
+  now: Date,
+  timeZone: string,
+): "PRESENT" | "LATE" {
+  const clock = zonedClock(now, timeZone);
+  const sessionDay = dateKey(session.date);
+  if (clock.dayKey < sessionDay) return "PRESENT";
+  if (clock.dayKey > sessionDay) return "LATE";
+  return clock.minutes > parseTimeToMinutes(session.startTime) + thresholdMinutes
+    ? "LATE"
+    : "PRESENT";
+}

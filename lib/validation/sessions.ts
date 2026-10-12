@@ -49,6 +49,13 @@ export const attendanceStatus = z.enum(["PRESENT", "LATE", "ABSENT"], {
 });
 
 /**
+ * A check-in never carries a status (R2): the server decides PRESENT/LATE
+ * from the clock (`lib/scheduling.ts`'s `checkInStatus`), so a client-sent
+ * status — any value at all — is refused rather than silently ignored.
+ */
+const noClientStatus = z.never({ error: "invalidStatus" }).optional();
+
+/**
  * A centre-configured method's id (R1). Shape only — whether it names an
  * *active* method of *this* centre is decided inside `recordPayment`'s
  * transaction, never here.
@@ -81,13 +88,37 @@ export const sessionListFilterSchema = dateFilterSchema.extend({
   status: optionalSessionStatus,
 });
 
-// ── Attendance (mark / correct) ─────────────────────────────────────────────
+// ── Attendance (check in / correct) ─────────────────────────────────────────
 
+/** First mark on an enrolled roster row — a check-in, status decided server-side (R2). */
+export const checkInRosterSchema = z.object({
+  ...base,
+  sessionId: recordId,
+  studentProfileId: recordId,
+  status: noClientStatus,
+});
+
+/**
+ * A correction of an already-marked row, while the session is live (R2).
+ * `reason` is optional; `confirmVoid` must be "true" when the change voids
+ * the student's payment (PRESENT/LATE → ABSENT on a paid student) — the
+ * roster's confirmation dialog sets it, so a void never happens unannounced.
+ */
 export const setAttendanceSchema = z.object({
   ...base,
   sessionId: recordId,
   studentProfileId: recordId,
   status: attendanceStatus,
+  reason: z
+    .string()
+    .trim()
+    .max(200, "tooLong")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+  confirmVoid: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
 });
 
 // ── Add student to a session's roster ───────────────────────────────────────
@@ -97,7 +128,7 @@ export const addExistingAttendeeSchema = z.object({
   ...base,
   sessionId: recordId,
   studentProfileId: recordId,
-  status: attendanceStatus,
+  status: noClientStatus,
 });
 
 /**
@@ -114,7 +145,7 @@ export const addNewAttendeeSchema = z.object({
   lastName: personName,
   email: optionalEmail,
   phone: optionalPhone,
-  status: attendanceStatus,
+  status: noClientStatus,
   /** Present only after the duplicate-match panel has been confirmed. */
   linkUserId: optionalRef,
 });
@@ -147,6 +178,12 @@ export const refundPaymentSchema = z.object({
 // ── Session lifecycle: cancel / reschedule (M10) ────────────────────────────
 
 export const cancelSessionSchema = z.object({
+  ...base,
+  sessionId: recordId,
+});
+
+/** "End session" (R2) — closes the session for good. */
+export const endSessionSchema = z.object({
   ...base,
   sessionId: recordId,
 });
@@ -228,8 +265,9 @@ export const receptionCheckInSchema = z.object({
   ...base,
   sessionId: recordId,
   studentProfileId: recordId,
-  status: attendanceStatus,
-  /** Absent = mark attendance only, no payment (spec §5 "No debt"). */
+  /** Decided server-side from the clock (R2) — a client-sent status is refused. */
+  status: noClientStatus,
+  /** No method = check in without recording a payment (spec §5 "No debt"). */
   paymentMethodId: optionalRef,
 });
 
@@ -262,7 +300,8 @@ export type SessionActionState = {
     | "refunded"
     | "cancelled"
     | "rescheduled"
-    | "shareUpdated";
+    | "shareUpdated"
+    | "closed";
   match?: SessionMatchCandidate;
   conflicts?: { type: "teacher" | "room"; className: string }[];
   /** The replacement session a reschedule created (M15) — for a link to it. */
