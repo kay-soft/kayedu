@@ -4,6 +4,10 @@ import { useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ShareType } from "@prisma/client";
 
+import {
+  ClassPeriodFields,
+  type TermOption,
+} from "@/components/center/class-period-fields";
 import { RoomSetPicker, type RoomOption } from "@/components/center/room-set-picker";
 import { Field } from "@/components/shared/field";
 import { ToggleRow } from "@/components/settings/toggle-row";
@@ -30,13 +34,21 @@ export type ClassFieldsValues = {
   lateThresholdMinutes: string;
   acceptsNewStudents: boolean;
   requiresConfirmation: boolean;
+  /** R4 — the class's period, "YYYY-MM-DD" ("" on a new class). */
+  startDate: string;
+  endDate: string;
 };
 
-/** The fields a class's weekly slots are checked against (R3 live preview). */
+/**
+ * What a class's sessions are checked against in the live preview: its
+ * teacher and room set (R3) and its period (R4) — the whole range.
+ */
 export type ClassSlotInputs = {
   teacherId: string;
   roomId: string | null;
   extraRoomIds: string[];
+  startDate: string;
+  endDate: string;
 };
 
 /**
@@ -44,7 +56,8 @@ export type ClassSlotInputs = {
  * it, what/whom it's for, its room set (R3 — a required primary room plus
  * any rooms combined with it; the set's summed capacity is the class's seat
  * limit, there is no separate class capacity), its price and center-cut and
- * the attendance/enrollment flags. Shared between the create form (the "Add
+ * the attendance/enrollment flags, and (R4) its period — typed, or filled
+ * from one of the centre's term presets. Shared between the create form (the "Add
  * class" dialog) and the edit form on the class detail page, exactly like
  * `student-fields.tsx` is shared between `StudentForm` and
  * `StudentProfileForm`.
@@ -59,6 +72,7 @@ export function ClassFields({
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
+  terms,
   noneLabel,
   fieldErrors,
   onSlotInputsChange,
@@ -79,9 +93,11 @@ export function ClassFields({
   educationSystemDefaultFixedShare: Record<string, number>;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
+  /** R4 — the centre's ACTIVE term presets, for "Choose a term". */
+  terms: TermOption[];
   noneLabel: string;
   fieldErrors?: Record<string, string>;
-  /** Teacher or room set changed — the edit form re-previews slot conflicts. */
+  /** Teacher, room set or period changed — the edit form re-previews conflicts. */
   onSlotInputsChange?: (next: ClassSlotInputs) => void;
 }) {
   const t = useTranslations("Classes.fields");
@@ -96,6 +112,8 @@ export function ClassFields({
     teacherId: values.teacherId,
     roomId: values.roomId || null,
     extraRoomIds: values.extraRoomIds,
+    startDate: values.startDate,
+    endDate: values.endDate,
   });
   function changeSlotInputs(patch: Partial<ClassSlotInputs>) {
     slotInputs.current = { ...slotInputs.current, ...patch };
@@ -237,6 +255,15 @@ export function ClassFields({
           />
         </div>
       </div>
+
+      <ClassPeriodFields
+        idPrefix={idPrefix}
+        terms={terms}
+        defaultValue={{ startDate: values.startDate, endDate: values.endDate }}
+        startError={error("startDate")}
+        endError={error("endDate")}
+        onChange={(next) => changeSlotInputs(next)}
+      />
 
       <div className="rounded-xl border border-border p-3 sm:p-4">
         <p className="mb-3 text-sm font-medium text-text-primary">

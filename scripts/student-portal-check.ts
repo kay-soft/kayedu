@@ -80,6 +80,7 @@ async function makeClass(
     : null;
   return prisma.classGroup.create({
     data: scopedData(centerId, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId,
       roomId: room?.id ?? null,
       price: 10_000,

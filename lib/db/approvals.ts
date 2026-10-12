@@ -104,7 +104,9 @@ export type ResolveSessionRequestResult =
  * (primary + a `SessionRoom` per extra) and applies the same confirmation
  * contract as every other slot write — DENY refuses, WARN refuses unless
  * `confirmConflicts` (then creates and audits the confirmation in the same
- * transaction). Omitting the option is the pre-R3 script path: policy only.
+ * transaction). R4: `confirmConflicts` is required (there is no "omitted"
+ * path any more), and a **deactivated** class takes no new session — the
+ * request resolves as `classNotFound`, exactly like a class that is gone.
  */
 export async function resolveSessionRequest(
   db: PrismaClient,
@@ -114,8 +116,8 @@ export async function resolveSessionRequest(
   resolvedBy: string,
   conflictPolicy: ConflictPolicy,
   // Only labels a conflict for display (`ScheduleConflict.className`, M13).
-  locale = "en",
-  options: { confirmConflicts?: boolean; actorUserId?: string | null } = {},
+  locale: string,
+  options: { confirmConflicts: boolean; actorUserId?: string | null },
 ): Promise<ResolveSessionRequestResult> {
   return db.$transaction(async (tx) => {
     const existing = await tx.changeRequest.findFirst({
@@ -134,7 +136,7 @@ export async function resolveSessionRequest(
 
     const payload = existing.payload as unknown as SessionRequestPayload;
     const classGroup = await tx.classGroup.findFirst({
-      where: scopedWhere(centerId, { id: payload.classGroupId }),
+      where: scopedWhere(centerId, { id: payload.classGroupId, active: true }),
       include: { extraRooms: { select: { roomId: true } } },
     });
     if (!classGroup) return { ok: false, error: "classNotFound" };
@@ -156,11 +158,7 @@ export async function resolveSessionRequest(
       },
       existingSessions,
     );
-    const conflictDecision = decideConflicts(
-      conflicts.length,
-      conflictPolicy,
-      options.confirmConflicts ?? true,
-    );
+    const conflictDecision = decideConflicts(conflicts.length, conflictPolicy, options.confirmConflicts);
     if (conflictDecision === "denied") return { ok: false, error: "conflict", conflicts };
     if (conflictDecision === "needsConfirmation") {
       return { ok: false, error: "conflictsNeedConfirmation", conflicts };
@@ -191,7 +189,7 @@ export async function resolveSessionRequest(
     }
 
     await writeSessionExtraRooms(tx, centerId, session.id, extraRoomIds);
-    if (options.confirmConflicts === true) {
+    if (options.confirmConflicts) {
       await writeConfirmedConflictAudit(tx, {
         centerId,
         actorUserId: options.actorUserId ?? resolvedBy,

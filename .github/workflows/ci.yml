@@ -80,3 +80,4 @@ jobs:
       - run: npm run check:filters
       - run: npm run check:session-lifecycle
       - run: npm run check:rooms
+      - run: npm run check:class-periods

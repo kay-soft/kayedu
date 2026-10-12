@@ -12,19 +12,14 @@ import type {
 // and lib/db/tenant-scope.ts). The Prisma client is *injected* rather than
 // imported from lib/db/client.ts for the same reason — the gate script
 // constructs its own `PrismaClient()`, the app passes the shared singleton.
-import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import {
-  catalogLabel,
   catalogLabelWithSelection,
   type CatalogWithSelection,
 } from "../catalog.ts";
 import {
-  GENERATION_WINDOW_DAYS,
-  addDays,
   dateKey,
   decideConflicts,
   findSessionConflicts,
-  generateOccurrenceDates,
   parseTimeToMinutes,
   startOfUtcDay,
   zonedClock,
@@ -39,296 +34,34 @@ import { resolveRoomSet, writeSessionExtraRooms, type RoomSetError } from "./roo
 import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 
 /**
- * The session generator (docs/02-architecture.md §11, spec §5 "Scheduling"):
- * materializes `Session` rows from `ClassSchedule` on a rolling window,
- * snapshotting the class price, skipping the holiday calendar, and detecting
- * teacher/room conflicts against every other class in the center.
+ * One session's own writes — cancel, reschedule, its centre-cut override,
+ * its room set — plus the read-side session policy the dashboards share.
  *
- * Regeneration is idempotent: `Session` is unique on
- * `(classGroupId, date, startTime)`, so a `createMany({ skipDuplicates: true })`
- * against that key never duplicates a session a previous run already created —
- * running this twice in a row creates zero new rows the second time. An
- * occurrence that already exists is not re-checked for conflicts either, so
- * a double-booking confirmed on an earlier run never asks again.
- *
- * R3: a generated session inherits its class's whole **room set** — the
- * primary `roomId` plus a `SessionRoom` row per extra room — and the conflict
- * check treats every room of either side's set as busy.
+ * R4: the rolling-window session generator that used to live here is gone.
+ * A class's sessions are created, re-fitted and removed by exactly one
+ * module, `lib/db/class-sessions.ts`, from the class's own period.
  */
 
 /**
- * The R3 confirmation contract, as every slot-writing function here takes it.
+ * The R3 confirmation contract, as every slot-writing function takes it.
  * `confirmConflicts` is what the person ticked ("I understand, create
- * anyway"); every Server Action passes it explicitly (`npm run check:rooms`
- * asserts that statically). **Omitted** means a pre-R3 script caller (the
- * seed, the older gates): conflicts then follow the policy alone, exactly as
- * before R3 — WARN saves, DENY refuses — and no confirmation audit is
- * written. `actorUserId` attributes the confirmation's audit row.
+ * anyway"). **Required since R4** — there is no default and no "omitted
+ * means save" script path any more: a caller that does not pass it does
+ * not compile. `actorUserId` attributes the confirmation's audit row.
  */
 export type ConflictConfirmation = {
-  confirmConflicts?: boolean;
+  confirmConflicts: boolean;
   actorUserId?: string | null;
 };
 
-export type GenerationConflict = ScheduleConflict & { date: string };
-
-export type GenerateSessionsResult = {
-  created: number;
-  conflicts: GenerationConflict[];
-  /**
-   * R3 — under WARN, conflicting occurrences were held back because the
-   * double-booking was not confirmed (non-conflicting ones were still
-   * created). Re-running with `confirmConflicts: true` creates them.
-   */
-  needsConfirmation: boolean;
-};
-
-type ClassForGeneration = {
-  id: string;
-  teacherId: string;
-  roomId: string | null;
-  extraRoomIds: string[];
-  price: number;
-  schedules: { dayOfWeek: number; startTime: string; endTime: string }[];
-  className: string;
-};
-
-/** The class fields the generator needs, loaded once per run. */
-async function loadClassesForGeneration(
-  db: PrismaClient,
-  centerId: string,
-  locale: string,
-  classGroupId?: string,
-): Promise<ClassForGeneration[]> {
-  const rows = await db.classGroup.findMany({
-    where: scopedWhere(centerId, {
-      active: true,
-      ...(classGroupId ? { id: classGroupId } : {}),
-    }),
-    select: {
-      id: true,
-      teacherId: true,
-      roomId: true,
-      extraRooms: { select: { roomId: true } },
-      price: true,
-      schedules: {
-        select: { dayOfWeek: true, startTime: true, endTime: true },
-      },
-      subject: { select: { nameAr: true, nameEn: true } },
-      grade: { select: { nameAr: true, nameEn: true } },
-    },
-  });
-
-  return rows
-    .filter((row) => row.schedules.length > 0)
-    .map((row) => ({
-      id: row.id,
-      teacherId: row.teacherId,
-      roomId: row.roomId,
-      extraRoomIds: row.roomId ? row.extraRooms.map((extra) => extra.roomId) : [],
-      price: row.price,
-      schedules: row.schedules,
-      className:
-        [
-          row.subject ? catalogLabel(locale, row.subject) : null,
-          row.grade ? catalogLabel(locale, row.grade) : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || "—",
-    }));
-}
-
-async function loadHolidayKeys(
-  db: PrismaClient,
-  centerId: string,
-  windowStart: Date,
-  windowEnd: Date,
-): Promise<Set<string>> {
-  const rows = await db.holiday.findMany({
-    where: scopedWhere(centerId, { date: { gte: windowStart, lte: windowEnd } }),
-    select: { date: true },
-  });
-  return new Set(rows.map((row) => row.date.toISOString().slice(0, 10)));
-}
-
-/** `(classGroupId, date, startTime)` — the generator's idempotency key. */
-function occurrenceKey(classGroupId: string, date: Date, startTime: string): string {
-  return `${classGroupId}|${dateKey(date)}|${startTime}`;
-}
-
-/**
- * Generates sessions for one class (or, when `classGroupId` is omitted, every
- * active class in the center) across the rolling window starting today.
- * A conflicting occurrence is skipped under `DENY`; under `WARN` it is
- * created only when the double-booking is confirmed (`confirmConflicts`,
- * audited) and otherwise held back with `needsConfirmation` — either way,
- * the caller gets back what happened so the UI can show it.
- */
-export async function generateSessions(
-  db: PrismaClient,
-  centerId: string,
-  conflictPolicy: ConflictPolicy,
-  classGroupId?: string,
-  // Only used to label a conflict for display (`GenerationConflict.className`)
-  // — the cron-triggered path (`app/api/cron/generate-sessions/route.ts`) has
-  // no user/locale to thread through, so it stays on this neutral default.
-  locale = "en",
-  options: ConflictConfirmation = {},
-): Promise<GenerateSessionsResult> {
-  const windowStart = startOfUtcDay(new Date());
-  // generateOccurrenceDates treats both ends inclusively (its own doc-comment
-  // contract, `lib/scheduling.ts`), so a window of GENERATION_WINDOW_DAYS
-  // calendar days is [windowStart, windowStart + (GENERATION_WINDOW_DAYS - 1)]
-  // — 42 distinct days, not 43. Off-by-one here previously made the window
-  // inclusive of a 43rd day, which silently added a bonus 7th occurrence of
-  // whichever weekday happened to equal "today"'s weekday on the day the
-  // generator ran — a date-dependent bug, not just a date-dependent test.
-  const windowEnd = addDays(windowStart, GENERATION_WINDOW_DAYS - 1);
-
-  const [classes, holidayKeys, existing] = await Promise.all([
-    loadClassesForGeneration(db, centerId, locale, classGroupId),
-    loadHolidayKeys(db, centerId, windowStart, windowEnd),
-    loadSessionOccupancy(db, centerId, locale, windowStart, windowEnd),
-  ]);
-
-  // Occurrences this run's classes already have (any status) — never
-  // re-inserted, never re-checked.
-  const existingKeys = new Set(
-    (
-      await db.session.findMany({
-        where: scopedWhere(centerId, {
-          classGroupId: { in: classes.map((row) => row.id) },
-          date: { gte: windowStart, lte: windowEnd },
-        }),
-        select: { classGroupId: true, date: true, startTime: true },
-      })
-    ).map((row) => occurrenceKey(row.classGroupId, row.date, row.startTime)),
-  );
-
-  // A pre-R3 caller that passes no flag keeps the policy-only behaviour.
-  const confirm = options.confirmConflicts ?? true;
-
-  // Accumulates as we go, so two classes generated in the same run still see
-  // each other's freshly-created occurrences when checking for conflicts.
-  const known = [...existing];
-  const conflicts: GenerationConflict[] = [];
-  const confirmed: GenerationConflict[] = [];
-  let needsConfirmation = false;
-  const toInsert: {
-    classGroupId: string;
-    teacherId: string;
-    roomId: string | null;
-    date: Date;
-    startTime: string;
-    endTime: string;
-    priceSnapshot: number;
-  }[] = [];
-  const extrasByKey = new Map<string, string[]>();
-
-  for (const classGroup of classes) {
-    const roomIds = effectiveRoomIds(classGroup.roomId, classGroup.extraRoomIds);
-    for (const schedule of classGroup.schedules) {
-      const dates = generateOccurrenceDates(
-        schedule,
-        windowStart,
-        windowEnd,
-        holidayKeys,
-      );
-
-      for (const date of dates) {
-        const key = occurrenceKey(classGroup.id, date, schedule.startTime);
-        if (existingKeys.has(key)) continue;
-
-        const candidate = {
-          classGroupId: classGroup.id,
-          teacherId: classGroup.teacherId,
-          roomId: classGroup.roomId,
-          roomIds,
-          date,
-          startTime: schedule.startTime,
-          endTime: schedule.endTime,
-        };
-
-        const found = findSessionConflicts(candidate, known).map((conflict) => ({
-          ...conflict,
-          date: dateKey(date),
-        }));
-        conflicts.push(...found);
-        const decision = decideConflicts(found.length, conflictPolicy, confirm);
-        if (decision === "denied") continue;
-        if (decision === "needsConfirmation") {
-          needsConfirmation = true;
-          continue;
-        }
-        if (found.length > 0) confirmed.push(...found);
-
-        existingKeys.add(key);
-        toInsert.push({
-          classGroupId: classGroup.id,
-          teacherId: classGroup.teacherId,
-          roomId: classGroup.roomId,
-          date,
-          startTime: schedule.startTime,
-          endTime: schedule.endTime,
-          priceSnapshot: classGroup.price,
-        });
-        if (classGroup.extraRoomIds.length > 0) {
-          extrasByKey.set(key, classGroup.extraRoomIds);
-        }
-        known.push({ ...candidate, className: classGroup.className });
-      }
-    }
-  }
-
-  if (toInsert.length === 0) return { created: 0, conflicts, needsConfirmation };
-
-  const result = await db.$transaction(async (tx) => {
-    const inserted = await tx.session.createMany({
-      data: toInsert.map((row) => scopedData(centerId, row)),
-      skipDuplicates: true,
-    });
-
-    // Copy each class's extra rooms onto the sessions just created (R3).
-    if (extrasByKey.size > 0) {
-      const created = await tx.session.findMany({
-        where: scopedWhere(centerId, {
-          classGroupId: { in: [...new Set(toInsert.map((row) => row.classGroupId))] },
-          date: { gte: windowStart, lte: windowEnd },
-        }),
-        select: { id: true, classGroupId: true, date: true, startTime: true },
-      });
-      const rows = created.flatMap((session) =>
-        (extrasByKey.get(occurrenceKey(session.classGroupId, session.date, session.startTime)) ?? []).map(
-          (roomId) => scopedData(centerId, { sessionId: session.id, roomId }),
-        ),
-      );
-      if (rows.length > 0) {
-        await tx.sessionRoom.createMany({ data: rows, skipDuplicates: true });
-      }
-    }
-
-    if (options.confirmConflicts === true && confirmed.length > 0) {
-      await writeConfirmedConflictAudit(tx, {
-        centerId,
-        actorUserId: options.actorUserId ?? null,
-        entityType: classGroupId ? "ClassGroup" : "Center",
-        entityId: classGroupId ?? centerId,
-        context: "session.generate",
-        conflicts: confirmed,
-      });
-    }
-    return inserted;
-  });
-
-  return { created: result.count, conflicts, needsConfirmation };
-}
+/** A dated double-booking: the clash plus the "YYYY-MM-DD" it happens on. */
+export type DatedConflict = ScheduleConflict & { date: string };
 
 // ─────────────────────────────────────────────────────────────────────────
 // Session lifecycle: cancel / reschedule (M10, spec §7 acceptance criterion
 // 11, closing the gap flagged since M5/docs §11: "Cancel/reschedule/edit of
-// an individual session is not yet built"). Kept in this file beside the
-// generator, for the same "no @/ imports" reason the rest of this module is
-// written that way (docs/02 §5).
+// an individual session is not yet built"). No `@/` imports, for the same
+// reason as the rest of this module (docs/02 §5).
 // ─────────────────────────────────────────────────────────────────────────
 
 type SessionDb = PrismaClient | Prisma.TransactionClient;
@@ -426,11 +159,11 @@ export async function updateSessionShareOverride(
 export type ConflictRefusal = {
   ok: false;
   error: "conflict" | "conflictsNeedConfirmation";
-  conflicts: GenerationConflict[];
+  conflicts: DatedConflict[];
 };
 
 export type RescheduleSessionResult =
-  | { ok: true; session: Session; conflicts: GenerationConflict[] }
+  | { ok: true; session: Session; conflicts: DatedConflict[] }
   | ConflictRefusal
   | {
       ok: false;
@@ -460,7 +193,7 @@ export type RescheduleSessionResult =
  * unless `next.roomId`/`next.extraRoomIds` choose another one, which must be
  * a valid combination (`lib/db/room-sets.ts`'s `resolveRoomSet`). The
  * teacher/room conflict check (`findSessionConflicts`, docs/02 §11) is the
- * same one the generator uses, over the whole room set: `timeRangesOverlap`
+ * same one every slot write uses, over the whole room set: `timeRangesOverlap`
  * compares the full start→end window, not just the start instant, so a
  * target slot free at its start but busy before it ends is still flagged.
  * DENY refuses; WARN refuses unless `confirmConflicts` (then saves and
@@ -491,8 +224,8 @@ export async function rescheduleSession(
   },
   conflictPolicy: ConflictPolicy,
   // Only labels a conflict for display (`ScheduleConflict.className`, M13).
-  locale = "en",
-  options: { now?: Date } & ConflictConfirmation = {},
+  locale: string,
+  options: { now?: Date } & ConflictConfirmation,
 ): Promise<RescheduleSessionResult> {
   const session = await db.session.findFirst({
     where: { centerId, id: sessionId },
@@ -536,16 +269,12 @@ export async function rescheduleSession(
     },
     existing,
   );
-  const conflicts: GenerationConflict[] = found.map((conflict) => ({
+  const conflicts: DatedConflict[] = found.map((conflict) => ({
     ...conflict,
     date: dateKey(next.date),
   }));
 
-  const decision = decideConflicts(
-    conflicts.length,
-    conflictPolicy,
-    options.confirmConflicts ?? true,
-  );
+  const decision = decideConflicts(conflicts.length, conflictPolicy, options.confirmConflicts);
   if (decision === "denied") return { ok: false, error: "conflict", conflicts };
   if (decision === "needsConfirmation") {
     return { ok: false, error: "conflictsNeedConfirmation", conflicts };
@@ -585,7 +314,7 @@ export async function rescheduleSession(
         where: { id: sessionId },
         data: { rescheduledToId: created.id },
       });
-      if (options.confirmConflicts === true) {
+      if (options.confirmConflicts) {
         await writeConfirmedConflictAudit(tx, {
           centerId,
           actorUserId: options.actorUserId ?? null,
@@ -612,7 +341,7 @@ export async function rescheduleSession(
 }
 
 export type UpdateSessionRoomsResult =
-  | { ok: true; session: Session; conflicts: GenerationConflict[] }
+  | { ok: true; session: Session; conflicts: DatedConflict[] }
   | ConflictRefusal
   | {
       ok: false;
@@ -635,8 +364,8 @@ export async function updateSessionRooms(
   sessionId: string,
   next: { roomId: string | null; extraRoomIds: string[] },
   conflictPolicy: ConflictPolicy,
-  locale = "en",
-  options: { now?: Date } & ConflictConfirmation = {},
+  locale: string,
+  options: { now?: Date } & ConflictConfirmation,
 ): Promise<UpdateSessionRoomsResult> {
   const session = await db.session.findFirst({
     where: { centerId, id: sessionId },
@@ -658,7 +387,7 @@ export async function updateSessionRooms(
   const extraRoomIds = next.roomId ? next.extraRoomIds : [];
 
   const existing = await loadSessionOccupancy(db, centerId, locale, session.date, session.date);
-  const conflicts: GenerationConflict[] = findSessionConflicts(
+  const conflicts: DatedConflict[] = findSessionConflicts(
     {
       classGroupId: session.classGroupId,
       teacherId: session.teacherId,
@@ -671,11 +400,7 @@ export async function updateSessionRooms(
     existing,
   ).map((conflict) => ({ ...conflict, date: dateKey(session.date) }));
 
-  const decision = decideConflicts(
-    conflicts.length,
-    conflictPolicy,
-    options.confirmConflicts ?? true,
-  );
+  const decision = decideConflicts(conflicts.length, conflictPolicy, options.confirmConflicts);
   if (decision === "denied") return { ok: false, error: "conflict", conflicts };
   if (decision === "needsConfirmation") {
     return { ok: false, error: "conflictsNeedConfirmation", conflicts };
@@ -694,7 +419,7 @@ export async function updateSessionRooms(
       data: { roomId: next.roomId },
     });
     await writeSessionExtraRooms(tx, centerId, sessionId, extraRoomIds);
-    if (options.confirmConflicts === true) {
+    if (options.confirmConflicts) {
       await writeConfirmedConflictAudit(tx, {
         centerId,
         actorUserId: options.actorUserId ?? null,
@@ -713,9 +438,9 @@ export async function updateSessionRooms(
 // ─────────────────────────────────────────────────────────────────────────
 // Read-side session policy (Today's Sessions dashboard + detail, M5).
 // Kept in this file — not lib/db/classes.ts or lib/db/scoped.ts — because
-// `npm run check:classes` already imports this module directly outside the
-// Next.js runtime for `generateSessions`, so everything here stays free of
-// `@/` aliases the same way (docs/02-architecture.md §5).
+// `npm run check:classes` imports this module directly outside the Next.js
+// runtime, so everything here stays free of `@/` aliases the same way
+// (docs/02-architecture.md §5).
 // ─────────────────────────────────────────────────────────────────────────
 
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";

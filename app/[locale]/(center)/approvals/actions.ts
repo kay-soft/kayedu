@@ -227,6 +227,9 @@ export async function declineSessionRequestAction(
     "DECLINED",
     ctx.user.id,
     ctx.settings?.scheduleConflictPolicy ?? "WARN",
+    locale,
+    // Declining writes no slot; the flag is required but has nothing to confirm.
+    { confirmConflicts: false, actorUserId: ctx.user.id },
   );
   if (!result.ok) return { error: result.error };
 

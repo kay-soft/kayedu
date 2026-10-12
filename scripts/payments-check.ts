@@ -164,6 +164,7 @@ async function main() {
   // ── 1. FIXED vs PERCENTAGE, both correct on a 120 EGP session ───────────
   const classFixed = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacherA.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -174,6 +175,7 @@ async function main() {
   });
   const classPercentage = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacherA.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,

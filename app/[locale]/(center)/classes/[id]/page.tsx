@@ -12,7 +12,6 @@ import {
   ScheduleBuilder,
   type ScheduleSlotRow,
 } from "@/app/[locale]/(center)/classes/[id]/schedule-builder";
-import { GenerateSessionsButton } from "@/app/[locale]/(center)/classes/generate-sessions-button";
 import { searchEnrollCandidatesAction } from "@/app/[locale]/(center)/classes/actions";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
@@ -25,21 +24,28 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { classSessionCounts, keptClassSessions } from "@/lib/db/class-sessions";
+import { prisma } from "@/lib/db/client";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
-import { formatMoney } from "@/lib/format";
+import { formatDay, formatDayRange, formatMoney, formatNumber, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { piastresToInputValue } from "@/lib/money";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { dateKey } from "@/lib/scheduling";
 import { LinkButton } from "@/components/shared/link-button";
+import { Link } from "@/lib/i18n/navigation";
 
 const MAX_CANDIDATES = 8;
 
 /**
- * One class at this center (spec §4.1 item 3): its config, its weekly
- * schedule (docs/04 §9 "Class Schedule Builder"), and its roster.
+ * One class at this center (spec §4.1 item 3): its config, its period and
+ * weekly schedule (docs/04 §9 "Class Schedule Builder"), its sessions, and
+ * its roster. R4: the "Sessions" card shows the period, how many sessions it
+ * has, and any upcoming session kept after an edit because it already
+ * carries records or custom changes — there is no generator to run.
  *
  * The id in the URL is resolved through the scoped helper, so a class id
  * from another center resolves to "not found", never to a row (docs/02 §5).
@@ -77,6 +83,9 @@ export default async function ClassDetailPage({
     roomLinks,
     enrollments,
     classBlocks,
+    terms,
+    sessionCounts,
+    kept,
   ] = await Promise.all([
     db.teachers.list({ active: true }),
     db.subjects.list(),
@@ -86,7 +95,11 @@ export default async function ClassDetailPage({
     db.roomLinks.list(),
     db.enrollments.listForClass(id),
     db.studentBlocks.list({ scope: "CLASS", refId: id }),
+    db.terms.listActive(),
+    classSessionCounts(prisma, ctx.center.id, [id]),
+    keptClassSessions(prisma, ctx.center.id, id),
   ]);
+  const sessionCount = sessionCounts.get(id) ?? 0;
 
   const roster: RosterRow[] = enrollments
     .filter((enrollment) => enrollment.status === "ACTIVE")
@@ -225,6 +238,8 @@ export default async function ClassDetailPage({
                 lateThresholdMinutes: String(classGroup.lateThresholdMinutes),
                 acceptsNewStudents: classGroup.acceptsNewStudents,
                 requiresConfirmation: classGroup.requiresConfirmation,
+                startDate: dateKey(classGroup.startDate),
+                endDate: dateKey(classGroup.endDate),
               }}
               teachers={teacherOptions}
               subjects={optionList(subjects)}
@@ -238,8 +253,15 @@ export default async function ClassDetailPage({
                 active: room.active,
               }))}
               roomLinks={roomLinks}
+              terms={terms.map((term) => ({
+                id: term.id,
+                name: term.name,
+                startDate: dateKey(term.startDate),
+                endDate: dateKey(term.endDate),
+              }))}
               noneLabel={tCommon("none")}
               canDelete={ctxCan(ctx, "class.delete")}
+              active={classGroup.active}
             />
           </CardContent>
         </Card>
@@ -289,11 +311,44 @@ export default async function ClassDetailPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>{t("generate.title")}</CardTitle>
-              <CardDescription>{t("generate.classDescription")}</CardDescription>
+              <CardTitle>{t("sessions.title")}</CardTitle>
+              <CardDescription>{t("sessions.description")}</CardDescription>
             </CardHeader>
-            <CardContent>
-              <GenerateSessionsButton classGroupId={classGroup.id} />
+            <CardContent className="flex flex-col gap-3 text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="text-text-secondary">{t("period.title")}</span>
+                <span className="text-end font-medium text-text-primary">
+                  {formatDayRange(classGroup.startDate, classGroup.endDate, locale)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-text-secondary">{t("sessions.count")}</span>
+                <span className="font-medium tabular-nums text-text-primary">
+                  {formatNumber(sessionCount, locale)}
+                </span>
+              </div>
+              {!classGroup.active ? (
+                <p className="text-xs text-text-muted">{t("sessions.inactiveHint")}</p>
+              ) : null}
+              {kept.length > 0 ? (
+                <div className="flex flex-col gap-2 rounded-lg border border-warning/30 bg-warning-bg p-3 text-warning" role="status">
+                  <p className="font-medium">{t("sessionsSync.kept", { count: kept.length })}</p>
+                  <ul className="flex flex-col gap-1 ps-5 text-text-primary">
+                    {kept.slice(0, 10).map((session) => (
+                      <li key={session.sessionId} className="list-disc">
+                        <Link href={ROUTES.centerSession(session.sessionId)} className="hover:underline">
+                          {formatDay(new Date(`${session.date}T00:00:00.000Z`), locale)} ·{" "}
+                          {formatTimeRange(session.startTime, session.endTime, locale)}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  {kept.length > 10 ? (
+                    <p className="text-xs">{t("sessions.keptMore", { count: kept.length - 10 })}</p>
+                  ) : null}
+                  <p className="text-xs text-text-secondary">{t("sessions.keptHint")}</p>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>

@@ -39,6 +39,7 @@ export const ROUTES = {
   centerSettings: "/settings",
   centerSettingsRooms: "/settings/rooms",
   centerSettingsPaymentMethods: "/settings/payment-methods",
+  centerSettingsTerms: "/settings/terms",
   centerSettingsCatalog: "/settings/catalog",
   centerSettingsCard: "/settings/card",
   centerSettingsPermissions: "/settings/permissions",

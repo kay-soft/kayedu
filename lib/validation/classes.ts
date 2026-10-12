@@ -11,6 +11,7 @@ import {
   extraRoomIdsField,
   type SlotConflictState,
 } from "./room-set.ts";
+import { dateOnlyField, withPeriodRule } from "./class-period.ts";
 
 /**
  * Class, schedule, enrollment and holiday schemas (M4). Every Server Action
@@ -91,6 +92,10 @@ const classGroupFields = {
   lateThresholdMinutes: wholeNumber(MAX_LATE_THRESHOLD_MINUTES),
   acceptsNewStudents: checkbox,
   requiresConfirmation: checkbox,
+  // R4 — the class's period, required on every new and edited class. A term
+  // preset only fills these two; nothing about the term is posted.
+  startDate: dateOnlyField,
+  endDate: dateOnlyField,
   confirmConflicts: confirmConflictsField,
 };
 
@@ -116,6 +121,7 @@ function resolveShareValue(
 
 export const classGroupSchema = z
   .object({ ...base, ...classGroupFields })
+  .superRefine(withPeriodRule)
   .transform((value, ctx) => {
     const centerShareValue = resolveShareValue(value, ctx);
     if (centerShareValue === z.NEVER) return z.NEVER;
@@ -133,12 +139,15 @@ export const classGroupSchema = z
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      startDate: value.startDate,
+      endDate: value.endDate,
       confirmConflicts: value.confirmConflicts,
     };
   });
 
 export const classGroupUpdateSchema = z
   .object({ ...base, ...classGroupFields, id: recordId })
+  .superRefine(withPeriodRule)
   .transform((value, ctx) => {
     const centerShareValue = resolveShareValue(value, ctx);
     if (centerShareValue === z.NEVER) return z.NEVER;
@@ -157,6 +166,8 @@ export const classGroupUpdateSchema = z
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      startDate: value.startDate,
+      endDate: value.endDate,
       confirmConflicts: value.confirmConflicts,
     };
   });
@@ -167,6 +178,8 @@ export const classActiveSchema = z.object({
   ...base,
   id: recordId,
   active: checkbox,
+  /** Reactivating regenerates the period's sessions — same contract (R4). */
+  confirmConflicts: confirmConflictsField,
 });
 
 // ── Class schedule (the Schedule Builder, docs/04 §9) ──────────────────────
@@ -212,7 +225,11 @@ export const classScheduleUpdateSchema = z
     message: "invalidTimeRange",
   });
 
-export const classScheduleDeleteSchema = z.object({ ...base, id: recordId });
+export const classScheduleDeleteSchema = z.object({
+  ...base,
+  id: recordId,
+  confirmConflicts: confirmConflictsField,
+});
 
 // ── Enrollment (add / remove / block a student to/from a class) ───────────
 
@@ -250,15 +267,6 @@ export const holidaySchema = z.object({
 
 export const holidayDeleteSchema = z.object({ ...base, id: recordId });
 
-// ── Session generation trigger ─────────────────────────────────────────────
-
-export const generateSessionsSchema = z.object({
-  ...base,
-  /** Absent = regenerate for the whole center. */
-  classGroupId: optionalRef,
-  confirmConflicts: confirmConflictsField,
-});
-
 // ── List filters (classes dashboard) ────────────────────────────────────────
 
 export const classListFilterSchema = z.object({
@@ -270,21 +278,27 @@ export const classListFilterSchema = z.object({
 // ── Action state ────────────────────────────────────────────────────────────
 
 /**
- * What the class/schedule/enrollment/generation actions return. `error` and
- * the values in `fieldErrors` are i18n keys under `Classes.errors`, not copy.
+ * What the class/schedule/enrollment actions return. `error` and the values
+ * in `fieldErrors` are i18n keys under `Classes.errors`, not copy.
  * `conflicts` (R3, print-ready `SlotConflictInfo`) is populated whenever a
- * save/generation found a teacher/room double-booking: with `error`
- * `conflictsNeedConfirmation` (WARN, not yet confirmed — nothing saved),
- * `scheduleConflict` (DENY — refused), or alongside a success status when
- * the person confirmed it.
+ * save found a teacher/room double-booking anywhere in the class's period:
+ * with `error` `conflictsNeedConfirmation` (WARN, not yet confirmed —
+ * nothing saved), `scheduleConflict` (DENY — refused), or alongside a
+ * success status when the person confirmed it.
+ *
+ * `sessions` (R4) is what the class-sessions engine did to the class's
+ * future sessions — created, removed, moved to the new teacher/rooms, and
+ * how many were kept because they carry records or custom changes.
+ * `blockers` names why a class cannot be deleted.
  */
 export type ClassActionState = SlotConflictState & {
   error?: string;
   /** ICU values for `error` (e.g. how many classes still use a room). */
   errorValues?: Record<string, number>;
   fieldErrors?: Record<string, string>;
-  status?: "created" | "saved" | "deleted" | "generated";
-  generated?: { created: number; conflicts: number; needsConfirmation: boolean };
+  status?: "created" | "saved" | "deleted";
+  sessions?: { created: number; deleted: number; updated: number; kept: number; cancelled?: number };
+  blockers?: Record<string, number>;
 };
 
 export const IDLE_CLASS_STATE: ClassActionState = {};

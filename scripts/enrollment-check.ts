@@ -112,6 +112,7 @@ async function makeClass(
 ) {
   return prisma.classGroup.create({
     data: scopedData(centerId, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId,
       roomId: opts.roomId ?? null,
       price: 10_000,
@@ -428,7 +429,7 @@ async function main() {
     { date: rescheduleDate, startTime: "16:00", endTime: "17:00" },
     "DENY",
     "en",
-    { now: LIFECYCLE_NOW },
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "A target free at 16:00 but with the room busy from 16:30 (inside the 16:00–17:00 window) is refused under DENY",
@@ -452,7 +453,7 @@ async function main() {
     { date: rescheduleDate, startTime: "16:00", endTime: "17:00" },
     "WARN",
     "en",
-    { now: LIFECYCLE_NOW },
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "The identical target succeeds under WARN, flagged with the same whole-window conflict",
@@ -561,7 +562,7 @@ async function main() {
     { date: new Date("2026-12-21T00:00:00.000Z"), startTime: "10:00", endTime: "11:00" },
     "WARN",
     "en",
-    { now: LIFECYCLE_NOW },
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check("rescheduleSession succeeds", reschedule.ok, JSON.stringify(reschedule));
 

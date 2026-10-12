@@ -244,6 +244,7 @@ model Center {
   changeRequests     ChangeRequest[]
   studentBlocks      StudentBlock[]
   holidays           Holiday[]
+  terms              CenterTerm[]
   auditLogs          AuditLog[]
   permissionGrants   PermissionGrant[]
   branchGrants       MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
@@ -264,8 +265,9 @@ model CenterSettings {
   defaultLateThreshold     Int            @default(10) // minutes
   cardLayout               Json? // ID-card customization (positions of name/id/logo…)
   timezone                 String         @default("Africa/Cairo")
-  // Teacher/room double-booking (docs/02-architecture.md §11): WARN saves the
-  // conflicting slot/session and surfaces it in the UI; DENY refuses it.
+  // Teacher/room double-booking (docs/02-architecture.md §11): WARN refuses
+  // the write with the conflict list until it is explicitly confirmed (R3,
+  // then saved and audited); DENY refuses it outright.
   scheduleConflictPolicy   ConflictPolicy @default(WARN)
   // A teacher's deadline to edit their own session description, in hours
   // after the session date (M10, closing the gap flagged at M5/M7). Null =
@@ -641,6 +643,13 @@ model ClassGroup {
   lateThresholdMinutes Int                     @default(10)
   acceptsNewStudents   Boolean                 @default(true)
   requiresConfirmation Boolean                 @default(false)
+  // R4 — the class's period, inclusive at both ends. Date-only, stored as a
+  // UTC-midnight day marker exactly like Session.date / Holiday.date. Either
+  // typed by hand or COPIED from a CenterTerm preset — there is no FK to the
+  // term, so editing a term never moves a class. Sessions exist for every
+  // matching weekday in this range from "now" on (lib/db/class-sessions.ts).
+  startDate            DateTime
+  endDate              DateTime
   active               Boolean                 @default(true)
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
@@ -804,7 +813,7 @@ model Session {
   rescheduledToId  String?           @unique
   rescheduledTo    Session?          @relation("SessionReschedule", fields: [rescheduledToId], references: [id], onDelete: SetNull)
   rescheduledFrom  Session?          @relation("SessionReschedule")
-  priceSnapshot    Int               @default(0) // piastres; frozen from class at generation
+  priceSnapshot    Int               @default(0) // piastres; frozen from the class when the session is created
   // Per-session centre-cut override (M13, spec §5.1 "Center cut" —
   // "overridable per class and per session"). Null on both = inherit the
   // class's own centerShareType/centerShareValue, which is every session's
@@ -839,9 +848,10 @@ model Session {
   ratings           SessionRating[]
   ratingSkips       SessionRatingSkip[]
 
-  // The idempotency key the session generator relies on (docs/02 §11):
-  // regenerating a window is a `createMany({ skipDuplicates: true })` against
-  // this constraint, so a class's own slot is never duplicated across runs.
+  // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
+  // lib/db/class-sessions.ts): materializing a class's range is a
+  // `createMany({ skipDuplicates: true })` against this constraint, so a
+  // class's own slot is never duplicated, however often its range is resynced.
   @@unique([classGroupId, date, startTime])
   @@index([centerId])
   @@index([centerId, date])
@@ -1094,6 +1104,26 @@ model Holiday {
 // deactivated rather than deleted. Both rules live in
 // lib/db/payment-methods.ts. New centres start with Cash / InstaPay /
 // Vodafone Cash (`DEFAULT_PAYMENT_METHOD_NAMES`).
+// R4 — a centre's own term presets ("Semester 1", "Full year"). A preset only
+// FILLS a class's startDate/endDate when the class form picks it; the dates
+// are copied, never linked, so renaming or redating a term moves no class and
+// a term can always be hard-deleted. Terms may overlap. The name is one
+// centre-entered string (like Room.name), unique per centre case-insensitively
+// — enforced by lib/db/terms.ts, not by a database index.
+model CenterTerm {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([centerId])
+}
+
 model CenterPaymentMethod {
   id        String   @id @default(uuid())
   centerId  String

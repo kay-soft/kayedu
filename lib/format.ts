@@ -20,6 +20,28 @@ export function formatDate(value: Date, locale: string): string {
 }
 
 /**
+ * A calendar day stored as a UTC-midnight marker (`Session.date`,
+ * `ClassGroup.startDate`/`endDate`, a term's dates — R4). Formatted in UTC so
+ * the stored day is the day shown, whatever timezone the server or the
+ * browser runs in.
+ */
+export function formatDay(value: Date, locale: string): string {
+  return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(value);
+}
+
+/** A class period or a term: "9 Oct 2026 – 1 Apr 2027", day markers in UTC. */
+export function formatDayRange(start: Date, end: Date, locale: string): string {
+  const format = new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  });
+  return normalizeSpaces(format.formatRange(start, end));
+}
+
+/**
  * A real instant — when a session was closed, when an attendance change was
  * made (R2) — rendered as date + 12-hour time **in the centre's timezone**,
  * so "closed at 6:05 PM" reads the same on any server or browser. Distinct

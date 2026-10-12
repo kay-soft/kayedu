@@ -478,10 +478,11 @@
     "addTitle": "Add a class",
     "addDescription": "A teacher teaching one subject to one grade — its price, branch cut, room and enrollment rules.",
     "listTitle": "Classes",
-    "listDescription": "Deactivated classes stay listed — their history and any generated sessions keep resolving.",
+    "listDescription": "Deactivated classes stay listed — their history keeps resolving, and they have no upcoming sessions until reactivated.",
     "empty": "No classes yet.",
     "noMatches": "No classes match these filters.",
     "open": "Open",
+    "activateAnyway": "Activate anyway",
     "backToList": "All classes",
     "deleteConfirm": "This removes the class. It cannot be undone.",
     "profileTitle": "Class record",
@@ -555,31 +556,61 @@
       "addSlot": "Add time slot",
       "cancel": "Cancel",
       "summary": "{day}",
-      "emptyHint": "Add a weekly time slot and sessions will be generated from it.",
+      "emptyHint": "Add a weekly time slot and its sessions are created for the whole class period.",
       "savedWithConflict": "Saved with {count, plural, one {# confirmed double-booking} other {# confirmed double-bookings}}."
+    },
+    "period": {
+      "title": "Class period",
+      "modeLabel": "How to set the period",
+      "modeTerm": "Choose a term",
+      "modeCustom": "Custom dates",
+      "term": "Term",
+      "termPlaceholder": "Choose a term",
+      "termHint": "Copies the term's dates below. Changing a date afterwards switches to custom dates.",
+      "noTerms": "No terms set up yet. <link>Add terms in Settings → Terms</link> to pick a period in one click.",
+      "startDate": "Start date",
+      "endDate": "End date",
+      "hint": "Sessions are created for every weekly slot from today until the end date, skipping holidays.",
+      "summary": "{period} · {count, plural, =0 {no sessions} one {# session} other {# sessions}}"
+    },
+    "sessions": {
+      "title": "Sessions",
+      "description": "Sessions exist for every weekly slot in the class period, skipping holidays. Editing the slots, period, teacher or rooms updates the upcoming ones.",
+      "count": "Sessions",
+      "inactiveHint": "This class is deactivated, so it has no upcoming sessions. Reactivate it to create them again.",
+      "keptMore": "…and {count} more.",
+      "keptHint": "They no longer match the class. Open each one to cancel or reschedule it."
+    },
+    "sessionsSync": {
+      "created": "{count, plural, one {# session created} other {# sessions created}}",
+      "deleted": "{count, plural, one {# upcoming session removed} other {# upcoming sessions removed}}",
+      "updated": "{count, plural, one {# upcoming session moved to the new teacher or rooms} other {# upcoming sessions moved to the new teacher or rooms}}",
+      "cancelled": "{count, plural, one {# upcoming session cancelled} other {# upcoming sessions cancelled}}",
+      "unchanged": "Saved. No sessions needed to change.",
+      "kept": "{count, plural, one {# upcoming session was kept because it already has records or custom changes.} other {# upcoming sessions were kept because they already have records or custom changes.}}"
+    },
+    "deleteBlockers": {
+      "title": "This class cannot be deleted because:",
+      "started": "{count, plural, one {# session has already started or ended} other {# sessions have already started or ended}}",
+      "attendees": "{count, plural, one {# attendance record} other {# attendance records}}",
+      "payments": "{count, plural, one {# payment} other {# payments}}",
+      "settlements": "{count, plural, one {# teacher settlement} other {# teacher settlements}}",
+      "ratings": "{count, plural, one {# session rating} other {# session ratings}}",
+      "rescheduled": "{count, plural, one {# rescheduled session} other {# rescheduled sessions}}",
+      "enrollments": "{count, plural, one {# student enrolment} other {# student enrolments}}",
+      "reservations": "{count, plural, one {# enrolment request} other {# enrolment requests}}",
+      "deactivateHint": "Deactivate it instead: its upcoming sessions are removed and its history is kept."
     },
     "holidays": {
       "title": "Holiday calendar",
-      "description": "Dates the session generator skips, for every class.",
+      "description": "Dates no class meets on. Adding one also removes that day's untouched sessions.",
       "empty": "No holidays added yet.",
       "date": "Date",
       "name": "Name",
       "namePlaceholder": "Eid al-Fitr",
       "add": "Add holiday",
       "remove": "Remove holiday",
-      "emptyHint": "A date added here is skipped by the session generator for every class."
-    },
-    "generate": {
-      "title": "Session generator",
-      "description": "Materializes upcoming sessions from every active class's schedule, skipping holidays, for the next six weeks.",
-      "classDescription": "Materializes this class's upcoming sessions for the next six weeks, skipping holidays.",
-      "generateForClass": "Generate sessions for this class",
-      "generateForCenter": "Generate sessions for the whole branch",
-      "result": "{created, plural, one {# session} other {# sessions}} created. {conflicts, plural, =0 {No conflicts.} one {# conflict flagged.} other {# conflicts flagged.}}",
-      "heldBack": "These sessions were not created because they double-book a room or a teacher. Tick the box and generate again to create them anyway.",
-      "skipped": "These sessions were skipped — this branch does not allow double-booking.",
-      "createdWithConflicts": "Created, including the double-bookings you confirmed (recorded in the audit log).",
-      "createConflicting": "Create them anyway"
+      "emptyHint": "A date added here is skipped by every class, and that day's untouched sessions are removed."
     },
     "roster": {
       "title": "Roster",
@@ -616,7 +647,7 @@
       "invalidDate": "Enter a valid date.",
       "duplicateDate": "That date is already on the holiday calendar.",
       "scheduleConflict": "This branch denies double-booked slots. Choose a different day, time or teacher.",
-      "classInUse": "This class still has enrollments or generated sessions, so it cannot be deleted. Deactivate it instead.",
+      "classInUse": "This class has already run or has students, so it cannot be deleted. Deactivate it instead.",
       "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it.",
       "alreadyEnrolled": "This student is already enrolled in this class.",
       "studentBlocked": "This student is blocked from this class or teacher.",
@@ -628,9 +659,13 @@
       "extraIsPrimary": "The main room cannot also be an extra room.",
       "duplicateExtra": "A room was picked twice.",
       "noPrimary": "Choose a main room before combining others with it.",
-      "conflictsNeedConfirmation": "This double-books a room or a teacher. Tick “I understand, create anyway” to save it."
+      "conflictsNeedConfirmation": "This double-books a room or a teacher. Tick “I understand, create anyway” to save it.",
+      "endBeforeStart": "The end date cannot be before the start date.",
+      "periodTooLong": "A class period can span at most 400 days — check the year.",
+      "classInactive": "This class is deactivated. Reactivate it before enrolling students.",
+      "periodEnded": "This class's period has already ended. Extend its end date before reactivating it."
     },
-    "emptyHint": "A class pairs a teacher, a subject and a weekly schedule. Add the first one to start generating sessions.",
+    "emptyHint": "A class pairs a teacher, a subject, a period and a weekly schedule. Add the first one and its sessions are created for the whole period.",
     "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
     "clearFilters": "Clear filters"
   },
@@ -725,7 +760,7 @@
       "refunded": "Refunded",
       "refundReasonPlaceholder": "Reason for the refund",
       "confirmRefund": "Confirm refund",
-      "emptyHint": "Students enrolled in this class appear here once the session is generated.",
+      "emptyHint": "Students enrolled in this class appear here.",
       "checkIn": "Check in",
       "voidDialog": {
         "title": "Mark {name} absent?",
@@ -841,7 +876,7 @@
       "duplicateExtra": "A room was picked twice.",
       "noPrimary": "Choose a main room before combining others with it."
     },
-    "emptyHint": "Sessions are generated from each class's weekly schedule. Widen the date range, or clear a filter.",
+    "emptyHint": "Sessions come from each class's weekly schedule and period. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
     "zeroHint": "No activity in this range",
     "closure": {
@@ -872,7 +907,7 @@
     "liveRailTitle": "Today's sessions",
     "liveRailDescription": "Everything scheduled today at this branch.",
     "noSessionsToday": "No sessions today yet.",
-    "noLiveSessions": "No sessions today — generate today's sessions from the Sessions dashboard first.",
+    "noLiveSessions": "No sessions today — check the classes' weekly schedules and periods.",
     "addSessionShortcut": "All sessions",
     "checkingIn": "Checking in {name}",
     "sessionLabel": "Session",
@@ -1045,7 +1080,7 @@
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
       "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it.",
-      "classNotFound": "The class this request was for no longer exists.",
+      "classNotFound": "The class this request was for no longer exists or has been deactivated.",
       "conflict": "That time double-books a room or the teacher, and this branch does not allow double-booking.",
       "duplicateSlot": "This class already has a session at that exact date and time.",
       "conflictsNeedConfirmation": "This double-books a room or the teacher. Tick “I understand, create anyway” and approve again."
@@ -1126,6 +1161,7 @@
       "general": "General",
       "rooms": "Rooms",
       "paymentMethods": "Payment methods",
+      "terms": "Terms",
       "catalog": "Academic catalog",
       "card": "ID card",
       "permissions": "Permissions",
@@ -1171,7 +1207,10 @@
       "lastActiveMethod": "This is the branch's only active payment method. Add or activate another one first.",
       "roomInCombination": "This room is part of a combined room used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first.",
       "combinationInUse": "That combination is still used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first, then unlink.",
-      "selfLink": "A room cannot be combined with itself."
+      "selfLink": "A room cannot be combined with itself.",
+      "invalidDate": "Enter a valid date.",
+      "endBeforeStart": "The end date cannot be before the start date.",
+      "periodTooLong": "A period can span at most 400 days."
     },
     "general": {
       "title": "General",
@@ -1204,7 +1243,7 @@
       "visibilityDays": "Window (days)",
       "visibilityHint": "Default: 30 days. A platform admin can also override this for support purposes.",
       "schedulingTitle": "Scheduling conflicts",
-      "schedulingDescription": "What happens when a class schedule or a generated session double-books a teacher or a room.",
+      "schedulingDescription": "What happens when a class's sessions, or a single session, would double-book a teacher or a room.",
       "denyConflictsLabel": "Deny double-booked slots and sessions",
       "denyConflictsDescription": "Off by default: a double-booked room or teacher can be saved only after staff tick “I understand, create anyway”, and the confirmation is recorded in the audit log. On: the conflicting slot or session is refused, with no override."
     },
@@ -1284,6 +1323,22 @@
       "emptyHint": "Add the first one with the Add button above.",
       "fields": {
         "name": "Name"
+      }
+    },
+    "terms": {
+      "title": "Terms",
+      "description": "Term presets for this branch, like \"Semester 1\" or \"Full year\". Picking a term on a class copies its dates onto the class — editing or deleting a term later never moves a class. Terms may overlap.",
+      "addTitle": "Add a term",
+      "addDescription": "A name and the dates it covers. The end date can be the same day as the start, never before it.",
+      "listTitle": "Terms",
+      "listDescription": "Only active terms are offered on the class form. Deleting a term removes only the preset; classes keep their own dates.",
+      "empty": "No terms yet.",
+      "emptyHint": "Add the first one with the Add button above.",
+      "fields": {
+        "name": "Name",
+        "namePlaceholder": "Semester 1",
+        "startDate": "Starts",
+        "endDate": "Ends"
       }
     },
     "card": {
@@ -1386,7 +1441,7 @@
       "teachers": "Teachers",
       "students": "Students"
     },
-    "emptyHint": "Nothing is scheduled for today. Sessions are generated from each class's weekly schedule.",
+    "emptyHint": "Nothing is scheduled for today. Sessions come from each class's weekly schedule and period.",
     "zeroHint": "No activity yet today"
   },
   "TeacherDashboard": {

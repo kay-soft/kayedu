@@ -185,6 +185,7 @@ async function main() {
   });
   const classFixed = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacherA.id,
       subjectId: subject.id,
       price: PRICE,

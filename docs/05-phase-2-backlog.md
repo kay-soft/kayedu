@@ -36,7 +36,7 @@
 
 **Why deferred.** Phase 1's rule is the simple one: enrollment is hard-capped by room capacity, a student may still *request* a full class, and staff cannot approve past the cap (`00-master-product-spec.md` §5 "Capacity"). A waitlist adds ordering, fairness, promotion timing, and a notification the moment a seat opens — and notifications are themselves deferred, so a waitlist would silently promote people who never find out.
 
-**Depends on.** The notification layer (entry 9's announcements, or an SMS/WhatsApp channel). Expiry additionally depends on a scheduled job beyond the single session-generation cron.
+**Depends on.** The notification layer (entry 9's announcements, or an SMS/WhatsApp channel). Expiry additionally depends on a scheduled job — and since R4 removed the session-generation cron, the product has none at all; expiry would introduce the first.
 
 ---
 
@@ -110,13 +110,15 @@
 
 ---
 
-## 11. Academic year and term entities
+## 11. Academic year and term entities (beyond R4's term presets)
 
-**What it is.** First-class `AcademicYear` / `Term` records that sessions, enrollments, analytics and grade promotion hang off.
+**What it is.** First-class `AcademicYear` / `Term` records that enrolments, billing, analytics and grade promotion **hang off**: term-based enrolment (enrol a student "for Semester 2" rather than in a class open-endedly), billing by term, term-scoped analytics, automatic grade promotion at a term boundary, and report cards.
 
-**Why deferred.** Phase 1 is date-ranged, not term-ranged: analytics filters by day/week/month, sessions generate on a rolling window, and no entity says "this is the end of a term." **This resolves a live inconsistency the docs carried until now** — `00-master-product-spec.md` §4.1 item 4 promised "promote grade **at term end**" while no `Term` or `AcademicYear` model exists anywhere in `prisma/schema.prisma`. The shipped behavior is a **manual, staff-initiated bulk grade promotion** with no term trigger, and §4.1 now says exactly that.
+**What R4 already built — and why it is not this.** R4 shipped centre **term presets** (`CenterTerm`: a name and two dates, Settings → Terms — `03-build-order.md` R4, `00-master-product-spec.md` §5.1 "Class periods and centre terms"). A preset only **fills** a class's `startDate`/`endDate`; the dates are copied and nothing references the preset, so renaming, redating or deleting it never moves a class. That is a form convenience over a class's own period, not an entity anything hangs off — which is exactly what this entry still describes, so it stays here and does not appear in `03-build-order.md`.
 
-**Depends on.** Nothing technical — this is a modelling decision waiting on demand. Everything that would consume it (term-scoped analytics, automatic promotion, term-bounded enrollment, report cards) is itself deferred, so introducing the entity first would add a dimension to every query for no current reader. Entries 5 (grades/progress) and 17 (reporting) are its real customers.
+**Why deferred.** Phase 1 is date-ranged, not term-ranged: analytics filters by day/week/month, a class's sessions come from its own period (R4), and no entity says "this is the end of a term" in a way enrolment, money or promotion could act on. **This resolves a live inconsistency the docs carried until now** — `00-master-product-spec.md` §4.1 item 4 promised "promote grade **at term end**" while no `Term` or `AcademicYear` model existed anywhere in `prisma/schema.prisma`. The shipped behavior is a **manual, staff-initiated bulk grade promotion** with no term trigger, and §4.1 now says exactly that.
+
+**Depends on.** Mostly a modelling decision waiting on demand. Everything that would consume it (term-scoped analytics, automatic promotion, term-bounded enrolment, report cards) is itself deferred, so introducing the entity first would add a dimension to every query for no current reader. Entries 5 (grades/progress) and 17 (reporting) are its real customers. **Billing by term** additionally depends on prepaid packages/subscriptions, which Phase 1 excludes outright (`00-master-product-spec.md` §2 "Prepaid / packages / discounts / monthly subscriptions" — pay-per-session only — and this file's "Also deferred" row on packages). A future entity should be able to adopt R4's presets (a preset becomes, or links to, a `Term`) without moving any class, since classes only ever stored dates.
 
 ---
 

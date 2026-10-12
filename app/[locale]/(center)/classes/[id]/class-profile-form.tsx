@@ -6,8 +6,11 @@ import { useLocale, useTranslations } from "next-intl";
 
 import {
   deleteClassAction,
+  setClassActiveAction,
   updateClassAction,
 } from "@/app/[locale]/(center)/classes/actions";
+import type { TermOption } from "@/components/center/class-period-fields";
+import { SessionSyncNotice } from "@/components/center/session-sync-notice";
 import {
   ClassFields,
   type ClassFieldsValues,
@@ -25,11 +28,32 @@ import { Button } from "@/components/ui/button";
 import type { RoomLinkPair } from "@/lib/rooms";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
 
+/** The delete blockers, in the order the refusal lists them (R4). */
+const BLOCKER_KEYS = [
+  "started",
+  "attendees",
+  "payments",
+  "settlements",
+  "ratings",
+  "rescheduled",
+  "enrollments",
+  "reservations",
+] as const;
+
+/** Errors the conflict notice already explains — never shown twice. */
+const CONFLICT_ERRORS = new Set(["scheduleConflict", "conflictsNeedConfirmation"]);
+
 /**
- * Edit a class's own fields — money config, room set and the enrollment
- * flags. Changing the teacher or the room set re-checks every weekly slot
- * the class already has (R3): the clashes show in `SlotConflictNotice` as
- * you edit, and saving needs the confirmation under WARN.
+ * Edit a class's own fields — money config, room set, period and the
+ * enrollment flags. Changing the teacher, the room set or the period
+ * resyncs the class's upcoming sessions on save (R4): the clashes across
+ * the whole period show in `SlotConflictNotice` as you edit, saving needs
+ * one confirmation under WARN, and the notice after a save says what
+ * happened to the sessions — including any kept because they already carry
+ * records or custom changes.
+ *
+ * Delete is allowed only for a class that never ran; otherwise the refusal
+ * names what stops it and offers Deactivate instead.
  */
 export function ClassProfileForm({
   classGroupId,
@@ -41,8 +65,10 @@ export function ClassProfileForm({
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
+  terms,
   noneLabel,
   canDelete,
+  active,
 }: {
   classGroupId: string;
   values: ClassFieldsValues;
@@ -53,8 +79,10 @@ export function ClassProfileForm({
   educationSystemDefaultFixedShare: Record<string, number>;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
+  terms: TermOption[];
   noneLabel: string;
   canDelete: boolean;
+  active: boolean;
 }) {
   const t = useTranslations("Classes");
   const tCommon = useTranslations("Settings.common");
@@ -66,12 +94,27 @@ export function ClassProfileForm({
     deleteClassAction,
     IDLE_CLASS_STATE,
   );
+  const [deactivateState, deactivateFormAction] = useActionState(
+    setClassActiveAction,
+    IDLE_CLASS_STATE,
+  );
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Only once the teacher or room set actually changes is there anything new
-  // to check — the stored combination was checked when it was saved.
+  const tBlockers = useTranslations("Classes.deleteBlockers");
+  // Only once the teacher, room set or period actually changes is there
+  // anything new to check — the stored class was checked when it was saved.
   const [slotInputs, setSlotInputs] = useState<ClassSlotInputs | null>(null);
   const slotConflicts = useSlotConflicts(
-    slotInputs ? { kind: "class", locale, classGroupId, ...slotInputs } : null,
+    slotInputs
+      ? {
+          kind: "class",
+          locale,
+          classGroupId,
+          ...slotInputs,
+          // A half-picked period previews against the stored dates.
+          startDate: slotInputs.startDate || undefined,
+          endDate: slotInputs.endDate || undefined,
+        }
+      : null,
     state.error ? state : undefined,
   );
 
@@ -80,14 +123,46 @@ export function ClassProfileForm({
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="id" value={classGroupId} />
 
-      {state.error && !state.conflicts ? (
+      {state.error && !CONFLICT_ERRORS.has(state.error) ? (
         <FormMessage>{tErrors(state.error)}</FormMessage>
       ) : null}
-      {deleteState.error ? (
+      {deleteState.error === "classInUse" && deleteState.blockers ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger" role="alert">
+          <p className="font-medium">{tBlockers("title")}</p>
+          <ul className="flex flex-col gap-1 ps-5">
+            {BLOCKER_KEYS.filter((key) => (deleteState.blockers?.[key] ?? 0) > 0).map((key) => (
+              <li key={key} className="list-disc">
+                {tBlockers(key, { count: deleteState.blockers?.[key] ?? 0 })}
+              </li>
+            ))}
+          </ul>
+          {active ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <span className="text-text-secondary">{tBlockers("deactivateHint")}</span>
+              <Button
+                type="submit"
+                variant="outline"
+                formAction={deactivateFormAction}
+                formNoValidate
+                className="h-11 w-full px-4 sm:ms-auto sm:w-auto"
+              >
+                {tCommon("deactivate")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : deleteState.error ? (
         <FormMessage>{tErrors(deleteState.error)}</FormMessage>
       ) : null}
+      {deactivateState.status === "saved" ? (
+        <SessionSyncNotice sessions={deactivateState.sessions} />
+      ) : null}
       {state.status === "saved" ? (
-        <FormMessage tone="success">{tCommon("saved")}</FormMessage>
+        state.sessions ? (
+          <SessionSyncNotice sessions={state.sessions} />
+        ) : (
+          <FormMessage tone="success">{tCommon("saved")}</FormMessage>
+        )
       ) : null}
 
       <ClassFields
@@ -100,6 +175,7 @@ export function ClassProfileForm({
         educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
         rooms={rooms}
         roomLinks={roomLinks}
+        terms={terms}
         noneLabel={noneLabel}
         fieldErrors={state.fieldErrors}
         onSlotInputsChange={setSlotInputs}

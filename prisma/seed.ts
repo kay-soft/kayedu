@@ -3,9 +3,10 @@
  * org-level roll-up (`npm run check:branches`) and every branch-aware screen
  * is exercisable against realistic two-branch data, not a single-branch
  * stand-in. Each branch gets its own CenterSettings, staff, teachers,
- * students, classes, a forward session window and payment/attendance
- * history — plus one login per role so every experience (center, teacher,
- * student) can be signed into and tested (M10, M18).
+ * students, term presets (R4: Semester 1, Semester 2, Full year), classes
+ * with a period and every session of it, and payment/attendance history —
+ * plus one login per role so every experience (center, teacher, student)
+ * can be signed into and tested (M10, M18).
  *
  * Run with:  npm run db:seed
  *
@@ -35,12 +36,10 @@ import {
   ensureDefaultPaymentMethods,
   listActivePaymentMethods,
 } from "../lib/db/payment-methods.ts";
-import { generateSessions } from "../lib/db/sessions.ts";
-import {
-  linkRooms,
-  writeClassExtraRooms,
-  writeSessionExtraRooms,
-} from "../lib/db/room-sets.ts";
+import { createClassWithSessions, updateClassWithSessions } from "../lib/db/class-sessions.ts";
+import { linkRooms, writeSessionExtraRooms } from "../lib/db/room-sets.ts";
+import { createTerm } from "../lib/db/terms.ts";
+import { addDays, dateKey, dayMarker } from "../lib/scheduling.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 
 const prisma = new PrismaClient();
@@ -240,12 +239,30 @@ type BranchConfig = {
 };
 
 /**
- * Fills one branch (Center row) with realistic people, classes, a forward
- * session window, and payment/attendance history — "seed a realistic demo
- * centre for meetings" (docs/03-build-order.md M10), extended at M18 to run
- * once per branch so the org-level roll-up sums two genuinely different,
- * non-zero branches rather than one branch and an empty sibling. Every
- * write goes through the same real functions the app uses (`generateSessions`,
+ * The academic year the demo runs in: September 1st to June 30th, starting
+ * this calendar year from August on and last year before it — so "Full
+ * year" always contains today (bar July) and the demo has upcoming
+ * sessions. Semester 1 runs Sep–Jan, Semester 2 Feb–Jun; the two overlap
+ * "Full year", which is exactly the overlap terms are allowed to have.
+ */
+function demoTerms(today: Date): { name: string; startDate: Date; endDate: Date }[] {
+  const year = today.getUTCMonth() >= 7 ? today.getUTCFullYear() : today.getUTCFullYear() - 1;
+  const day = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+  return [
+    { name: "Semester 1", startDate: day(year, 9, 1), endDate: day(year + 1, 1, 31) },
+    { name: "Semester 2", startDate: day(year + 1, 2, 1), endDate: day(year + 1, 6, 30) },
+    { name: "Full year", startDate: day(year, 9, 1), endDate: day(year + 1, 6, 30) },
+  ];
+}
+
+/**
+ * Fills one branch (Center row) with realistic people, term presets,
+ * classes with every session of their period, and payment/attendance
+ * history — "seed a realistic demo centre for meetings"
+ * (docs/03-build-order.md M10), extended at M18 to run once per branch so
+ * the org-level roll-up sums two genuinely different, non-zero branches
+ * rather than one branch and an empty sibling. Every write goes through the
+ * same real functions the app uses (`createTerm`, `createClassWithSessions`,
  * `createAttendance`, `recordPayment`, `claimStudentCode`), so the demo's
  * money/attendance data is exactly as trustworthy as a real centre's.
  * Idempotent by email/name within the branch.
@@ -430,49 +447,75 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
   }
   console.log(`  + ${students.length} demo students (or already present)`);
 
+  // ── Terms (R4): Semester 1, Semester 2 and Full year ─────────────────────
+  // Through the real writer (case-insensitive name rule); an existing term
+  // of the same name is left as it is.
+  const today = dayMarker(new Date().toISOString().slice(0, 10));
+  const terms = demoTerms(today);
+  for (const term of terms) {
+    const result = await createTerm(prisma, centerId, term);
+    if (result.ok) console.log(`  + Term: ${term.name} (${dateKey(term.startDate)} – ${dateKey(term.endDate)})`);
+  }
+  // Every seeded class copies "Full year" — the dates, never a link. Its
+  // start reaches back far enough to hold the 4 weeks of history below.
+  const fullYear = terms[2];
+  const historyStart = addDays(today, -4 * 7);
+  const classPeriod = {
+    startDate: historyStart < fullYear.startDate ? historyStart : fullYear.startDate,
+    endDate: fullYear.endDate,
+  };
+
   // ── Classes: one per definition, each with a single weekly slot ─────────
+  // Created through the class-sessions engine, so every session of the
+  // period exists from the moment the class does (R4 — no generator). The
+  // demo's double-bookings, if any, are confirmed explicitly.
   const classGroups = [];
   for (const def of config.classDefs) {
     const subject = catalog.subjects[def.subject];
     const teacher = teachers[def.teacher];
-    let classGroup = await prisma.classGroup.findFirst({
+    const input = {
+      teacherId: teacher.id,
+      subjectId: subject.id,
+      gradeId: subject.gradeId,
+      educationSystemId: catalog.educationSystemId,
+      roomId: rooms[def.room].id,
+      // R3 — a class on a combined room set: its seats are the rooms' sum.
+      extraRoomIds: (def.extraRooms ?? []).map((index) => rooms[index].id),
+      price: def.price,
+      centerShareType: def.shareType,
+      centerShareValue: def.shareValue,
+      lateThresholdMinutes: 10,
+      acceptsNewStudents: true,
+      requiresConfirmation: false,
+      ...classPeriod,
+    };
+    const existing = await prisma.classGroup.findFirst({
       where: { centerId, subjectId: subject.id, teacherId: teacher.id },
     });
-    if (!classGroup) {
-      classGroup = await prisma.classGroup.create({
-        data: {
-          centerId,
-          teacherId: teacher.id,
-          subjectId: subject.id,
-          gradeId: subject.gradeId,
-          educationSystemId: catalog.educationSystemId,
-          roomId: rooms[def.room].id,
-          price: def.price,
-          centerShareType: def.shareType,
-          centerShareValue: def.shareValue,
-        },
-      });
-      await prisma.classSchedule.create({
-        data: {
-          centerId,
-          classGroupId: classGroup.id,
-          dayOfWeek: def.day,
-          startTime: def.start,
-          endTime: def.end,
-        },
-      });
-      console.log(`  + Class: ${subject.nameEn} (${teacher.firstName} ${teacher.lastName})`);
-    }
-    // R3 — a class on a combined room set: its seats are the rooms' sum.
-    if (def.extraRooms?.length) {
-      await writeClassExtraRooms(
+    if (!existing) {
+      const created = await createClassWithSessions(
         prisma,
         centerId,
-        classGroup.id,
-        def.extraRooms.map((index) => rooms[index].id),
+        { ...input, slots: [{ dayOfWeek: def.day, startTime: def.start, endTime: def.end }] },
+        { confirmConflicts: true },
       );
+      if (!created.ok) throw new Error(`Class ${subject.nameEn}: ${created.error}`);
+      console.log(
+        `  + Class: ${subject.nameEn} (${teacher.firstName} ${teacher.lastName}) — ${created.report.created} session(s) for its period`,
+      );
+    } else {
+      // A re-run: bring an older class onto the seeded period (a no-op when
+      // it is already there — the resync is idempotent).
+      const updated = await updateClassWithSessions(prisma, centerId, existing.id, input, {
+        confirmConflicts: true,
+      });
+      if (!updated.ok) throw new Error(`Class ${subject.nameEn}: ${updated.error}`);
     }
-    classGroups.push(classGroup);
+    classGroups.push(
+      await prisma.classGroup.findFirstOrThrow({
+        where: { centerId, subjectId: subject.id, teacherId: teacher.id },
+      }),
+    );
   }
 
   // ── Enrollments: most students in one class, a few in two ───────────────
@@ -493,15 +536,10 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
     }
   }
 
-  // ── Forward rolling window (docs §11) — the real generator, unmodified ──
-  const generated = await generateSessions(prisma, centerId, "WARN");
-  console.log(`  + ${generated.created} upcoming session(s) generated for the next 6 weeks`);
-
-  // R3 — sessions generated before a class was combined (an earlier seed
-  // run) get the class's extra rooms too, so the demo's combined class is
-  // combined on every upcoming session. New ones were copied by the
-  // generator itself.
-  const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
+  // R3 — upcoming sessions an older seed run created before a class was
+  // combined get the class's extra rooms too, so the demo's combined class
+  // is combined on every upcoming session. New ones were copied by the
+  // class-sessions engine itself.
   for (const [index, def] of config.classDefs.entries()) {
     if (!def.extraRooms?.length) continue;
     const upcoming = await prisma.session.findMany({
@@ -525,9 +563,9 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
   }
 
   // ── Past attendance + payment history (4 weeks back per class) ─────────
-  // generateSessions only ever looks forward, so history is written
-  // directly — through the same createAttendance/recordPayment the app
-  // uses, never inventing a shortcut around them (CLAUDE.md rule 2).
+  // The class-sessions engine never creates a past session, so history is
+  // written directly — through the same createAttendance/recordPayment the
+  // app uses, never inventing a shortcut around them (CLAUDE.md rule 2).
   let historyWritten = 0;
   // The branch's first active method (Cash, for a seeded branch) — history
   // goes through the real `recordPayment`, which freezes its label.

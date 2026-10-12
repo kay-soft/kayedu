@@ -244,8 +244,10 @@ export async function confirmReservation(
   if (!reservation) return { ok: false, error: "notFound" };
   if (reservation.status !== "PENDING") return { ok: false, error: "notPending" };
 
+  // R4: a deactivated class takes no new students — its pending requests
+  // wait (off both approvals queues) until it is reactivated.
   const classGroup = await tx.classGroup.findFirst({
-    where: scopedWhere(centerId, { id: reservation.classGroupId }),
+    where: scopedWhere(centerId, { id: reservation.classGroupId, active: true }),
     include: { room: ROOM_SET_SELECT.room, extraRooms: ROOM_SET_SELECT.extraRooms },
   });
   if (!classGroup) return { ok: false, error: "notFound" };

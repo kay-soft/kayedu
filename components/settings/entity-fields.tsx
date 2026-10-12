@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { FieldError } from "@/components/shared/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Select } from "@/components/ui/select";
 
 /**
@@ -33,6 +34,8 @@ export type EntityField =
     }
   /** An EGP amount. Stored as piastres — the action converts (CLAUDE.md rule 2). */
   | { name: string; kind: "money"; label: string; hint?: string }
+  /** A calendar day, posted as "YYYY-MM-DD" through the shared DatePicker. */
+  | { name: string; kind: "date"; label: string; required?: boolean; hint?: string }
   | {
       name: string;
       kind: "select";
@@ -67,7 +70,7 @@ export function EntityFields({
         // The mandatory form convention (docs/04 §5 "Form fields"): a field
         // that is genuinely always optional gets a dimmed "(optional)" tag.
         const optional =
-          field.kind === "text"
+          field.kind === "text" || field.kind === "date"
             ? !field.required
             : field.kind === "select"
               ? field.emptyLabel !== undefined
@@ -84,7 +87,15 @@ export function EntityFields({
               ) : null}
             </Label>
 
-            {field.kind === "select" ? (
+            {field.kind === "date" ? (
+              <DatePicker
+                id={id}
+                name={field.name}
+                defaultValue={defaultValue}
+                required={field.required}
+                aria-invalid={invalid}
+              />
+            ) : field.kind === "select" ? (
               <Select
                 id={id}
                 name={field.name}

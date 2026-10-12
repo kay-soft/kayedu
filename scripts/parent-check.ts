@@ -292,7 +292,7 @@ async function main() {
     data: scopedData(centerA.id, { userId: teacher.id, role: "TEACHER", firstName: "T", lastName: "eacher", joinedAt: new Date() }),
   });
   const classGroup = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacher.id, price: 10_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacher.id, price: 10_000 }),
   });
   const session = await prisma.session.create({
     data: scopedData(centerA.id, {

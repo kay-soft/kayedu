@@ -147,7 +147,7 @@ async function main() {
     data: { nameAr: "Approvals-Check Physics", nameEn: "Approvals-Check Physics" },
   });
   const classForSession = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
   const sessionRequestDate = "2026-11-16"; // a Monday, arbitrary and far enough out not to collide
 
@@ -170,6 +170,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "resolveSessionRequest(APPROVED) creates a Session and flips the request to APPROVED",
@@ -188,6 +190,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Re-resolving an already-resolved NEW_SESSION request is refused as notPending",
@@ -203,6 +207,8 @@ async function main() {
     "DECLINED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "resolveSessionRequest(DECLINED) flips the request to DECLINED and creates no Session",
@@ -218,6 +224,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Approving a second request for the exact same class/date/time is refused as duplicateSlot",
@@ -227,7 +235,7 @@ async function main() {
 
   // A second class, sharing teacherA and overlapping the already-approved slot.
   const classConflicting = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
   const sessionRequestConflictWarn = await makeSessionRequest(classConflicting.id, "09:30", "10:30");
   const sessionConflictWarn = await resolveSessionRequest(
@@ -237,6 +245,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Under WARN, a teacher-conflicting session request is still approved, flagged with the conflict",
@@ -245,7 +255,7 @@ async function main() {
   );
 
   const classConflictingDeny = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
   const sessionRequestConflictDeny = await makeSessionRequest(classConflictingDeny.id, "09:15", "09:45");
   const sessionConflictDeny = await resolveSessionRequest(
@@ -255,6 +265,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "DENY",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Under DENY, a teacher-conflicting session request is refused as conflict, no Session created",
@@ -269,6 +281,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Center B cannot approve Center A's NEW_SESSION request by id — resolves to notFound",
@@ -281,7 +295,7 @@ async function main() {
     data: { nameAr: "Approvals-Check Math", nameEn: "Approvals-Check Math" },
   });
   const classConfirm = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
   });
   const studentToApprove = await makeStudentUser("studentApprove");
   const studentToDecline = await makeStudentUser("studentDecline");

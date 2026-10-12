@@ -8,7 +8,8 @@
  * Exercises the real production modules — `lib/rooms.ts` (the pure room-set
  * rules), `lib/capacity.ts`, `lib/db/room-sets.ts` (links, room sets, usage),
  * `lib/db/slot-conflicts.ts` (occupancy), `lib/db/sessions.ts`
- * (`generateSessions`/`rescheduleSession`/`updateSessionRooms`),
+ * (`rescheduleSession`/`updateSessionRooms`), `lib/db/class-sessions.ts`
+ * (`materializeClassSessions`, R4 — it replaced the generator),
  * `lib/db/approvals.ts` (`resolveSessionRequest`), `lib/db/reservations.ts`
  * (`reserveOrEnroll`) and `lib/db/attendance.ts` (`createAttendance`) —
  * against two throwaway centres, by direct call (a Server Action needs a
@@ -45,10 +46,10 @@ import {
 import { loadSessionOccupancy } from "../lib/db/slot-conflicts.ts";
 import {
   cancelSession,
-  generateSessions,
   rescheduleSession,
   updateSessionRooms,
 } from "../lib/db/sessions.ts";
+import { inClassTransaction, materializeClassSessions } from "../lib/db/class-sessions.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
 import { reserveOrEnroll } from "../lib/db/reservations.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
@@ -192,7 +193,16 @@ function staticChecks() {
   // Every slot-writing call from the app passes `confirmConflicts`
   // explicitly — omitting it is the pre-R3 script-only path.
   const appFiles = listFiles("app");
-  const writers = ["rescheduleSession", "updateSessionRooms", "generateSessions", "resolveSessionRequest"];
+  const writers = [
+    "rescheduleSession",
+    "updateSessionRooms",
+    "resolveSessionRequest",
+    // R4 — the class-sessions engine replaced the rolling-window generator.
+    "createClassWithSessions",
+    "updateClassWithSessions",
+    "writeClassSlot",
+    "reactivateClass",
+  ];
   const missing: string[] = [];
   let calls = 0;
   for (const file of appFiles) {
@@ -328,7 +338,7 @@ async function makeRoom(centerId: string, name: string, capacity: number) {
 
 async function makeClass(centerId: string, teacherId: string, roomId: string | null, extraRoomIds: string[] = []) {
   const classGroup = await prisma.classGroup.create({
-    data: scopedData(centerId, { teacherId, roomId, price: 10_000 }),
+    data: scopedData(centerId, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId, roomId, price: 10_000 }),
   });
   await writeClassExtraRooms(prisma, centerId, classGroup.id, extraRoomIds);
   return classGroup;
@@ -713,45 +723,57 @@ async function main() {
   );
   check("A non-conflicting room change needs no confirmation", roomsNoFlag.ok, JSON.stringify(roomsNoFlag));
 
-  // The generator: conflicting occurrences are held back until confirmed.
+  // The class-sessions engine (R4 — it replaced the generator): the whole
+  // period is ONE decision; nothing is created on a refusal.
   const genRoom = await makeRoom(A, "Gen", 10);
   const genExtra = await makeRoom(A, "Gen extra", 10);
   await linkRooms(prisma, A, genRoom.id, genExtra.id);
+  const genPeriod = { startDate: D1, endDate: new Date("2027-04-12T00:00:00.000Z") };
+  const genNow = cairo(1, 0, 30);
+  const setPolicy = (scheduleConflictPolicy: "WARN" | "DENY") =>
+    prisma.centerSettings.update({ where: { centerId: A }, data: { scheduleConflictPolicy } });
+  const materialize = (classGroupId: string, confirmConflicts: boolean, actorUserId?: string) =>
+    inClassTransaction(prisma, (tx) =>
+      materializeClassSessions(tx, A, classGroupId, { from: genNow, confirmConflicts, actorUserId }),
+    );
   const genFirst = await makeClass(A, teacher3.id, genExtra.id);
+  await prisma.classGroup.update({ where: { id: genFirst.id }, data: genPeriod });
   await prisma.classSchedule.create({
     data: scopedData(A, { classGroupId: genFirst.id, dayOfWeek: 1, startTime: "07:00", endTime: "08:00" }),
   });
-  await generateSessions(prisma, A, "WARN", genFirst.id, "en", { confirmConflicts: false });
+  await materialize(genFirst.id, false);
   const genSecond = await makeClass(A, teacher4.id, genRoom.id, [genExtra.id]);
+  await prisma.classGroup.update({ where: { id: genSecond.id }, data: genPeriod });
   await prisma.classSchedule.create({
     data: scopedData(A, { classGroupId: genSecond.id, dayOfWeek: 1, startTime: "07:30", endTime: "08:30" }),
   });
-  const genDenied = await generateSessions(prisma, A, "DENY", genSecond.id, "en", { confirmConflicts: true });
+  const genSessionCount = () => prisma.session.count({ where: { centerId: A, classGroupId: genSecond.id } });
+  await setPolicy("DENY");
+  const genDenied = await materialize(genSecond.id, true);
+  await setPolicy("WARN");
   check(
     "Generator under DENY: the class's extra room clashes, nothing created even with the flag",
-    genDenied.created === 0 && genDenied.conflicts.length > 0 && !genDenied.needsConfirmation,
+    "error" in genDenied && genDenied.error === "conflict" && genDenied.conflicts.length > 0 && (await genSessionCount()) === 0,
     JSON.stringify({ ...genDenied, conflicts: genDenied.conflicts.length }),
   );
-  const genHeld = await generateSessions(prisma, A, "WARN", genSecond.id, "en", { confirmConflicts: false });
+  const genHeld = await materialize(genSecond.id, false);
   check(
     "Generator under WARN without the flag: held back, needsConfirmation, conflicts listed",
-    genHeld.created === 0 && genHeld.needsConfirmation && genHeld.conflicts.length > 0,
+    "error" in genHeld && genHeld.error === "conflictsNeedConfirmation" && genHeld.conflicts.length > 0 && (await genSessionCount()) === 0,
     JSON.stringify({ ...genHeld, conflicts: genHeld.conflicts.length }),
   );
-  const genConfirmed = await generateSessions(prisma, A, "WARN", genSecond.id, "en", {
-    confirmConflicts: true,
-    actorUserId: teacher4.id,
-  });
+  const genConfirmed = await materialize(genSecond.id, true, teacher4.id);
   const genSessions = await prisma.session.findMany({
     where: { centerId: A, classGroupId: genSecond.id },
     select: { id: true, extraRooms: { select: { roomId: true } } },
   });
   check(
     "Generator under WARN with the flag: created, each session inheriting the class's extra room",
-    genConfirmed.created > 0 &&
+    "created" in genConfirmed &&
+      genConfirmed.created > 0 &&
       genSessions.length === genConfirmed.created &&
       genSessions.every((s) => s.extraRooms.length === 1 && s.extraRooms[0].roomId === genExtra.id),
-    JSON.stringify({ created: genConfirmed.created, sessions: genSessions.length }),
+    JSON.stringify({ created: "created" in genConfirmed ? genConfirmed.created : genConfirmed, sessions: genSessions.length }),
   );
   check(
     "…and the confirmed double-bookings are audited",

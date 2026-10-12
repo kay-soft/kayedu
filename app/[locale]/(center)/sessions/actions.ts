@@ -27,7 +27,7 @@ import {
   rescheduleSession,
   updateSessionRooms,
   updateSessionShareOverride,
-  type GenerationConflict,
+  type DatedConflict,
 } from "@/lib/db/sessions";
 import { describeConflicts } from "@/lib/db/slot-conflicts";
 import { claimStudentCode, studentSearchWhere } from "@/lib/db/students";
@@ -706,7 +706,7 @@ export async function endSessionAction(
 const MAX_SHOWN_CONFLICTS = 30;
 
 /** Conflicts → the print-ready list a form shows (R3, `SlotConflictNotice`). */
-async function shownConflicts(ctx: TenantContext, conflicts: GenerationConflict[]) {
+async function shownConflicts(ctx: TenantContext, conflicts: DatedConflict[]) {
   return conflicts.length > 0
     ? describeConflicts(prisma, ctx.center.id, conflicts.slice(0, MAX_SHOWN_CONFLICTS))
     : undefined;

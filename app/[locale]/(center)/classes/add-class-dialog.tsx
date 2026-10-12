@@ -19,6 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import type { SelectOption } from "@/components/center/class-fields";
+import type { TermOption } from "@/components/center/class-period-fields";
 import type { RoomOption } from "@/components/center/room-set-picker";
 import type { RoomLinkPair } from "@/lib/rooms";
 
@@ -31,6 +32,7 @@ export function AddClassDialog({
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
+  terms,
   noneLabel,
   defaults,
 }: {
@@ -41,6 +43,7 @@ export function AddClassDialog({
   educationSystemDefaultFixedShare: Record<string, number>;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
+  terms: TermOption[];
   noneLabel: string;
   defaults: ClassFormDefaults;
 }) {
@@ -71,6 +74,7 @@ export function AddClassDialog({
             educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={rooms}
             roomLinks={roomLinks}
+            terms={terms}
             noneLabel={noneLabel}
             defaults={defaults}
             onCreated={() => setOpen(false)}

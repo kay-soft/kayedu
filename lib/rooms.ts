@@ -3,8 +3,8 @@
  * combined, and how many seats do they add up to" (R3, docs/00 §5.1
  * "Joinable rooms / room sets", docs/02 §11). CLAUDE.md rule 10: there is no
  * second implementation of any of these anywhere — the class form, the
- * session room picker, the enrolment cap, the generator and the conflict
- * check all call in here.
+ * session room picker, the enrolment cap, the class-sessions engine and the
+ * conflict check all call in here.
  *
  * A room set is one **primary** room plus zero or more **extra** rooms. Every
  * extra must be linked to the primary (`RoomLink`) — a star around the

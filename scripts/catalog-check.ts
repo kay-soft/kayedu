@@ -313,6 +313,7 @@ async function main() {
   // configuration time, and nothing keeps them linked afterwards).
   const classGroup = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacherUser.id,
       subjectId: subject.id,
       gradeId: grade.id,
@@ -450,6 +451,7 @@ async function main() {
   const roomB = await prisma.room.create({ data: scopedData(centerB.id, { name: "Room 1" }) });
   const classGroupB = await prisma.classGroup.create({
     data: scopedData(centerB.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacherB.id,
       subjectId: subject.id,
       roomId: roomB.id,

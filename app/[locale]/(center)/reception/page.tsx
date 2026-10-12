@@ -39,11 +39,10 @@ import { LinkButton } from "@/components/shared/link-button";
  * scanner types like a keyboard and submits on Enter, so no camera/client
  * code is needed: the search box's own GET submit is the "scan" (`lib/id-
  * card.ts`'s `parseStudentQrPayload`, spec §2 "Check-in methods"). Finding a
- * session outside today, or before it has been generated, is the
- * "add-session shortcut" — a link to the full Today's Sessions dashboard,
- * which stays a Manager/Owner-only action (`session.manage`) for actually
- * running the generator (spec §4.1 item 3), since Reception is where
- * RECEPTIONIST — who does not hold that permission — spends the day.
+ * session outside today is the "add-session shortcut" — a link to the full
+ * Today's Sessions dashboard. (R4: there is nothing to generate — a class's
+ * sessions exist for its whole period; changing them is a Manager/Owner
+ * class edit, spec §4.1 item 3, not something Reception runs.)
  */
 export default async function ReceptionPage({
   searchParams,

@@ -86,7 +86,7 @@ async function makeStudentProfile(centerId: string, userId: string, tag: string)
 
 async function makeClassGroup(centerId: string, teacherId: string) {
   return prisma.classGroup.create({
-    data: { centerId, teacherId, price: 10_000 },
+    data: { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), centerId, teacherId, price: 10_000 },
   });
 }
 

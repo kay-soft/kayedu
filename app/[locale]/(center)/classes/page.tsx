@@ -7,7 +7,6 @@ import {
   type ClassRowData,
 } from "@/app/[locale]/(center)/classes/class-row";
 import { ClassFilters } from "@/app/[locale]/(center)/classes/class-filters";
-import { GenerateSessionsButton } from "@/app/[locale]/(center)/classes/generate-sessions-button";
 import { HolidayCalendar } from "@/app/[locale]/(center)/classes/holiday-calendar";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
@@ -21,10 +20,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { classSessionCounts } from "@/lib/db/class-sessions";
 import { classListWhere } from "@/lib/db/classes";
+import { prisma } from "@/lib/db/client";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { scoped } from "@/lib/db/scoped";
+import { formatDayRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
+import { dateKey } from "@/lib/scheduling";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { catalogLabelWithSelection } from "@/lib/catalog";
@@ -32,9 +35,10 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 /**
  * Classes (spec §4.1 item 3) — a filterable dashboard first, exactly like
  * Teachers/Students. "Add class" opens a dialog; the class detail page owns
- * its schedule (docs/04 §9), its roster and its own "generate sessions"
- * trigger. The holiday calendar and a center-wide "generate sessions" live
- * here because they apply to every class at once (docs/02 §11).
+ * its schedule (docs/04 §9) and its roster. Each row shows the class's period
+ * and how many sessions it has (R4 — they exist for the whole period, there
+ * is no generator to run). The holiday calendar lives here because it
+ * applies to every class at once (docs/02 §11).
  */
 export default async function ClassesPage({
   searchParams,
@@ -64,7 +68,7 @@ export default async function ClassesPage({
     gradeId: gradeId || null,
   });
 
-  const [classes, total, teachers, subjects, grades, educationSystems, rooms, roomLinks, holidays] =
+  const [classes, total, teachers, subjects, grades, educationSystems, rooms, roomLinks, holidays, terms] =
     await Promise.all([
       db.classGroups.search({
         where,
@@ -79,7 +83,13 @@ export default async function ClassesPage({
       db.rooms.list(),
       db.roomLinks.list(),
       db.holidays.list(),
+      db.terms.listActive(),
     ]);
+  const sessionCounts = await classSessionCounts(
+    prisma,
+    ctx.center.id,
+    classes.map((classGroup) => classGroup.id),
+  );
 
   const teacherByUserId = new Map(
     teachers.map((teacher) => [
@@ -100,6 +110,8 @@ export default async function ClassesPage({
       seats: roomSet.capacity,
       enrolledCount: classGroup._count.enrollments,
       scheduleCount: classGroup._count.schedules,
+      period: formatDayRange(classGroup.startDate, classGroup.endDate, locale),
+      sessionCount: sessionCounts.get(classGroup.id) ?? 0,
       active: classGroup.active,
     };
   });
@@ -158,6 +170,12 @@ export default async function ClassesPage({
             educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={roomOptions}
             roomLinks={roomLinks}
+            terms={terms.map((term) => ({
+              id: term.id,
+              name: term.name,
+              startDate: dateKey(term.startDate),
+              endDate: dateKey(term.endDate),
+            }))}
             noneLabel={tCommon("none")}
             defaults={{
               centerShareType: ctx.settings?.defaultShareType ?? "PERCENTAGE",
@@ -240,33 +258,21 @@ export default async function ClassesPage({
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("holidays.title")}</CardTitle>
-            <CardDescription>{t("holidays.description")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <HolidayCalendar
-              holidays={holidays.map((holiday) => ({
-                id: holiday.id,
-                date: holiday.date.toISOString(),
-                name: holiday.name,
-              }))}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("generate.title")}</CardTitle>
-            <CardDescription>{t("generate.description")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <GenerateSessionsButton />
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="lg:max-w-2xl">
+        <CardHeader>
+          <CardTitle>{t("holidays.title")}</CardTitle>
+          <CardDescription>{t("holidays.description")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <HolidayCalendar
+            holidays={holidays.map((holiday) => ({
+              id: holiday.id,
+              date: holiday.date.toISOString(),
+              name: holiday.name,
+            }))}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

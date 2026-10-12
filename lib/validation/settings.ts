@@ -6,6 +6,7 @@ import { z } from "zod";
 import { localeSchema } from "./auth.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 import { extraRoomIdsField } from "./room-set.ts";
+import { dateOnlyField, withPeriodRule } from "./class-period.ts";
 
 /**
  * Center-configuration schemas (M2). Every Server Action parses its input
@@ -100,6 +101,19 @@ export const recordDeleteSchema = z.object({ ...base, id: recordId });
 export const paymentMethodSchema = z.object({ ...base, name: entityName });
 
 export const paymentMethodUpdateSchema = paymentMethodSchema.extend({ id: recordId });
+
+// ── Terms (R4) ──────────────────────────────────────────────────────────────
+// A centre's term presets: one centre-entered name plus a period. The
+// case-insensitive name rule is not a shape rule, so it lives in
+// lib/db/terms.ts; the period rule is the shared one a class follows.
+
+const termFields = { ...base, name: entityName, startDate: dateOnlyField, endDate: dateOnlyField };
+
+export const termSchema = z.object(termFields).superRefine(withPeriodRule);
+
+export const termUpdateSchema = z
+  .object({ ...termFields, id: recordId })
+  .superRefine(withPeriodRule);
 
 // ── The academic catalog (M13) ──────────────────────────────────────────────
 // A centre picks a global catalog entry (never authors one), may edit only

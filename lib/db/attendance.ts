@@ -29,8 +29,8 @@ import type { AdjustedSettlement } from "./settlements.ts";
 
 /**
  * Roster / attendance writes (M5, spec §5 "Attendance"). Split out from
- * `lib/db/sessions.ts` (which owns session *metadata* — the dashboard, the
- * generator) because this module is specifically the write path CLAUDE.md
+ * `lib/db/sessions.ts` (which owns session *metadata* — the dashboard, one
+ * session's cancel/reschedule) because this module is specifically the write path CLAUDE.md
  * rule 7 requires an audit trail for: a first-time mark is "record", a
  * changed mark on an already-marked row is "correct" and must be audited.
  *

@@ -1,15 +1,13 @@
 /**
  * Pure scheduling primitives — time overlap, teacher/room conflict detection,
- * and rolling-window occurrence generation (docs/02-architecture.md §11,
- * docs/00-master-product-spec.md §5 "Scheduling").
+ * a class period's occurrence dates and its validity rule
+ * (docs/02-architecture.md §11, docs/00-master-product-spec.md §5
+ * "Scheduling").
  *
  * Deliberately free of runtime imports, exactly like lib/money.ts and
  * lib/identity.ts: `npm run check:classes` exercises this module directly,
  * outside the Next.js runtime and without a database.
  */
-
-/** How far ahead the generator materializes sessions (docs/02 §11: "~6 weeks"). */
-export const GENERATION_WINDOW_DAYS = 42;
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -136,6 +134,13 @@ function clashesWith(
  * free), and either the same teacher or a shared room (R3: any room of
  * either side's room set). `existing` should already exclude the candidate's
  * own class's other slots.
+ *
+ * R4: no writer checks weekly slots any more. A class's sessions now exist
+ * for its whole period, so every class write checks the real dated sessions
+ * it would create (`findSessionConflicts`) — which also knows that two
+ * classes on the same weekday slot with non-overlapping periods do not
+ * clash, something a weekday comparison cannot see. This stays as the pure
+ * weekday primitive `npm run check:classes` exercises.
  */
 export function findScheduleConflicts(
   candidate: ScheduleSlot & RoomOccupant & { teacherId: string },
@@ -165,7 +170,7 @@ export function findScheduleConflicts(
   return conflicts;
 }
 
-// ── Rolling-window occurrence generation (session generator) ───────────────
+// ── Class-period occurrence dates (lib/db/class-sessions.ts) ───────────────
 
 /** UTC calendar-day key, so a date compares by day regardless of time-of-day. */
 export function dateKey(date: Date): string {
@@ -185,11 +190,18 @@ export function startOfUtcDay(date: Date): Date {
   );
 }
 
+/** The UTC-midnight day marker for a "YYYY-MM-DD" key (Session.date's shape). */
+export function dayMarker(dayKey: string): Date {
+  return new Date(`${dayKey}T00:00:00.000Z`);
+}
+
 /**
  * Every calendar date in `[windowStart, windowEnd]` (inclusive) that falls on
  * `schedule.dayOfWeek`, skipping any date whose key is in `holidayKeys`.
  * Pure date math — `windowStart`/`windowEnd` should already be UTC-midnight
  * (docs/01-data-model.md §6 rounding-style rule: normalize once, at the edge).
+ * Since R4 the window is a class's period clipped to "from today"; there is
+ * no rolling window any more (docs/02 §11).
  */
 export function generateOccurrenceDates(
   schedule: Pick<ScheduleSlot, "dayOfWeek">,
@@ -208,6 +220,39 @@ export function generateOccurrenceDates(
     cursor = addDays(cursor, 7);
   }
   return dates;
+}
+
+// ── Class period (R4, docs/00 §5.1 "Class periods and centre terms") ───────
+
+/**
+ * The longest period a class may span: endDate − startDate, in days. A
+ * school year plus a margin — long enough for "Full year", short enough that
+ * a typo (2207 for 2027) is refused instead of materializing a decade.
+ */
+export const MAX_CLASS_PERIOD_DAYS = 400;
+
+export type ClassPeriodError = "endBeforeStart" | "periodTooLong";
+
+/** Whole days from `start` to `end` (both UTC-midnight markers). */
+export function daysBetween(start: Date, end: Date): number {
+  return Math.round((startOfUtcDay(end).getTime() - startOfUtcDay(start).getTime()) / 86_400_000);
+}
+
+/**
+ * The one rule for a class's period (and a term's, which only fills one):
+ * the end is on or after the start, and the span is at most
+ * `MAX_CLASS_PERIOD_DAYS`. `null` = valid. zod, the data layer and the term
+ * writer all call this — there is no second copy of the rule.
+ */
+export function classPeriodError(
+  startDate: Date,
+  endDate: Date,
+  maxDays: number | null = MAX_CLASS_PERIOD_DAYS,
+): ClassPeriodError | null {
+  const span = daysBetween(startDate, endDate);
+  if (span < 0) return "endBeforeStart";
+  if (maxDays !== null && span > maxDays) return "periodTooLong";
+  return null;
 }
 
 // ── Date-range windows (Today's Sessions dashboard filters, M5) ────────────
@@ -333,7 +378,7 @@ export function resolveSharedDateFilter(
   }
 }
 
-// ── Session conflicts (generation time) ────────────────────────────────────
+// ── Session conflicts (every dated slot write) ─────────────────────────────
 
 export type ExistingSession = RoomOccupant & {
   /** Optional so a pure fixture can omit it; every DB loader sets it. */
@@ -350,10 +395,10 @@ export type SessionCandidate = Omit<ExistingSession, "className" | "sessionId">;
 
 /**
  * Same shape as `findScheduleConflicts`, but keyed on a specific calendar date
- * rather than a recurring day-of-week — this is what the generator checks
- * right before materializing one `Session` row, and what every other
- * slot-writing path checks too (reschedule, NEW_SESSION approval, a
- * session's own room change). R3: a room is busy when it is the primary
+ * rather than a recurring day-of-week — this is what the class-sessions
+ * engine checks for every session it would create or re-room across a
+ * class's whole period (R4), and what every other slot-writing path checks
+ * too (reschedule, NEW_SESSION approval, a session's own room change). R3: a room is busy when it is the primary
  * **or an extra** of an overlapping session, in either direction. Which
  * sessions occupy anything at all (not CANCELLED, not the original slot of a
  * RESCHEDULED session; closed sessions do) is decided by the loader,

@@ -312,6 +312,7 @@ async function main() {
   });
   const classA = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacher.id,
       price: PRICE,
       centerShareType: "FIXED",
@@ -498,7 +499,7 @@ async function main() {
     { date: day(20), startTime: "10:00", endTime: "11:00" },
     "WARN",
     "en",
-    { now: live },
+    { now: live, confirmConflicts: true },
   );
   check("rescheduleSession is refused on a closed session", !rescheduleOnClosed.ok && rescheduleOnClosed.error === "sessionClosed");
   const overrideOnClosed = await updateSessionShareOverride(
@@ -730,7 +731,7 @@ async function main() {
     data: { firstName: "Omar", lastName: "Two", email: `${EMAIL_PREFIX}teacher2@kayedu.test`, locale: "en" },
   });
   const class2 = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacher2.id, price: PRICE, centerShareType: "FIXED", centerShareValue: FIXED_CUT }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacher2.id, price: PRICE, centerShareType: "FIXED", centerShareValue: FIXED_CUT }),
   });
   const q1 = await prisma.session.create({
     data: scopedData(centerA.id, { classGroupId: class2.id, teacherId: teacher2.id, date: day(14), startTime: "10:00", endTime: "11:00", priceSnapshot: PRICE }),

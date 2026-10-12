@@ -6,27 +6,25 @@ import { revalidatePath } from "next/cache";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
-import { classDeleteBlockers } from "@/lib/db/classes";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import {
-  loadClassRoomSet,
-  resolveRoomSet,
-  writeClassExtraRooms,
-  type RoomSetError,
-} from "@/lib/db/room-sets";
+  createClassWithSessions,
+  deactivateClass,
+  deleteClass,
+  reactivateClass,
+  removeSessionsOnHoliday,
+  updateClassWithSessions,
+  writeClassSlot,
+  type ConflictRefusal,
+  type SessionSyncReport,
+} from "@/lib/db/class-sessions";
+import { loadClassRoomSet, type RoomSetError } from "@/lib/db/room-sets";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
-import { generateSessions } from "@/lib/db/sessions";
-import {
-  describeConflicts,
-  loadClassSlotPlan,
-  weeklySlotConflicts,
-  writeConfirmedConflictAudit,
-} from "@/lib/db/slot-conflicts";
-import { scopedWhere } from "@/lib/db/tenant-scope";
+import { describeConflicts } from "@/lib/db/slot-conflicts";
+import { scopedData } from "@/lib/db/tenant-scope";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
-import { effectiveRoomIds } from "@/lib/rooms";
-import { decideConflicts, type ScheduleConflict } from "@/lib/scheduling";
+import { type ClassPeriodError, type ScheduleConflict } from "@/lib/scheduling";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
@@ -43,7 +41,6 @@ import {
   classScheduleUpdateSchema,
   enrollmentActionSchema,
   enrollmentCreateSchema,
-  generateSessionsSchema,
   holidayDeleteSchema,
   slotConfirmationSchema,
   holidaySchema,
@@ -51,19 +48,19 @@ import {
 } from "@/lib/validation/classes";
 
 /**
- * Classes, schedules, enrollment, the holiday calendar and the session
- * generator (M4). Every action follows docs/02 §7: getTenantContext() →
- * permission check → zod → scoped write → audit if sensitive → revalidate.
+ * Classes, schedules, enrollment and the holiday calendar (M4). Every action
+ * follows docs/02 §7: getTenantContext() → permission check → zod → scoped
+ * write → audit if sensitive → revalidate.
  *
- * Conflict detection (spec §5 "Scheduling") runs at schedule-save time
- * (`lib/scheduling.ts`'s `findScheduleConflicts`, against every *other*
- * class's slots in the center), when a class's teacher or room set changes
- * (every one of its slots is re-checked), and again at generation time
- * (`lib/db/sessions.ts`'s `generateSessions`). R3's confirmation contract
- * applies to all of them (docs/02 §11): under the centre's DENY policy a
- * conflict is refused outright; under WARN it is refused **with the conflict
- * list** until the person ticks "I understand" (`confirmConflicts`), and a
- * confirmed double-booking writes a `schedule.conflict.confirm` audit row.
+ * R4: every write that shapes a class's sessions — create, edit, a weekly
+ * slot, deactivate, reactivate, delete — is one call into
+ * `lib/db/class-sessions.ts`, which writes the class and its sessions in one
+ * transaction and audits both. Conflicts are checked across the class's
+ * whole period as ONE decision (R3's contract, docs/02 §11): under DENY the
+ * write is refused outright; under WARN it is refused **with the full
+ * conflict list** until the person ticks "I understand" (`confirmConflicts`,
+ * passed through explicitly), then everything is written and the confirmed
+ * conflicts audited. Nothing is ever partly written.
  */
 
 const FORBIDDEN: ClassActionState = { error: "forbidden" };
@@ -72,12 +69,11 @@ const NOT_FOUND: ClassActionState = { error: "notFound" };
 /** How many conflicts a form is shown — enough to act on, never a wall. */
 const MAX_SHOWN_CONFLICTS = 30;
 
-function conflictPolicy(ctx: TenantContext): "WARN" | "DENY" {
-  return ctx.settings?.scheduleConflictPolicy ?? "WARN";
-}
-
-/** A room-set refusal, attached to the field that caused it. */
-function roomSetFieldError(error: RoomSetError): ClassActionState {
+/** A room-set or period refusal, attached to the field that caused it. */
+function classFieldError(error: RoomSetError | ClassPeriodError): ClassActionState {
+  if (error === "endBeforeStart" || error === "periodTooLong") {
+    return { fieldErrors: { endDate: error } };
+  }
   if (error === "noPrimary") return { fieldErrors: { roomId: "roomRequired" } };
   if (error === "roomNotFound" || error === "roomInactive") {
     return { fieldErrors: { roomId: error } };
@@ -86,23 +82,47 @@ function roomSetFieldError(error: RoomSetError): ClassActionState {
 }
 
 /**
- * The refusal a conflicting slot write returns (R3) — never a generic
- * error: the described conflict list, the policy, and which refusal it is.
+ * The refusal a conflicting class write returns (R3/R4) — never a generic
+ * error: the described conflict list (from the whole period), the policy,
+ * and which refusal it is.
  */
 async function conflictRefusal(
   ctx: TenantContext,
-  conflicts: ScheduleConflict[],
+  refusal: ConflictRefusal,
 ): Promise<ClassActionState> {
-  const policy = conflictPolicy(ctx);
   return {
-    error: policy === "DENY" ? "scheduleConflict" : "conflictsNeedConfirmation",
+    error: refusal.error === "conflict" ? "scheduleConflict" : "conflictsNeedConfirmation",
     conflicts: await describeConflicts(
       prisma,
       ctx.center.id,
-      conflicts.slice(0, MAX_SHOWN_CONFLICTS),
+      refusal.conflicts.slice(0, MAX_SHOWN_CONFLICTS),
     ),
-    conflictPolicy: policy,
+    conflictPolicy: refusal.error === "conflict" ? "DENY" : "WARN",
   };
+}
+
+/** What a class write did to its sessions, for the form's success notice. */
+async function sessionsOutcome(
+  ctx: TenantContext,
+  report: SessionSyncReport | null,
+): Promise<Pick<ClassActionState, "sessions" | "conflicts">> {
+  if (!report) return {};
+  return {
+    sessions: {
+      created: report.created,
+      deleted: report.deleted,
+      updated: report.updated,
+      kept: report.kept.length,
+    },
+    conflicts:
+      report.conflicts.length > 0
+        ? await describeConflicts(prisma, ctx.center.id, shownConflicts(report.conflicts))
+        : undefined,
+  };
+}
+
+function shownConflicts(conflicts: readonly ScheduleConflict[]): ScheduleConflict[] {
+  return conflicts.slice(0, MAX_SHOWN_CONFLICTS);
 }
 
 // ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
@@ -205,6 +225,9 @@ export async function createClassAction(
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
+    startDate,
+    endDate,
+    confirmConflicts,
   } = parsed.data;
 
   // Every foreign key is re-resolved inside this center — an id from
@@ -223,46 +246,39 @@ export async function createClassAction(
   if (!educationSystem.ok) {
     return { fieldErrors: { educationSystemId: "notFound" } };
   }
-  // R3: the primary room and every extra, resolved in this centre, active,
-  // and each extra linked to the primary (lib/db/room-sets.ts).
-  const rooms = await resolveRoomSet(prisma, scope.ctx.center.id, roomId, extraRoomIds);
-  if (!rooms.ok) return roomSetFieldError(rooms.error);
-
-  const centerId = scope.ctx.center.id;
-  const created = await prisma.$transaction(async (tx) => {
-    const row = await tx.classGroup.create({
-      data: {
-        centerId,
-        teacherId,
-        subjectId: subject.id,
-        gradeId: grade.id,
-        educationSystemId: educationSystem.id,
-        roomId,
-        price,
-        centerShareType,
-        centerShareValue,
-        lateThresholdMinutes,
-        acceptsNewStudents,
-        requiresConfirmation,
-      },
-    });
-    await writeClassExtraRooms(tx, centerId, row.id, extraRoomIds);
-    return row;
-  });
-
-  // A class's price and center-cut are money configuration (CLAUDE.md rule 7)
-  // — never rewrites recorded payments, but the config change is audited.
-  await writeAuditLog({
-    centerId,
-    actorUserId: scope.ctx.user.id,
-    action: "classGroup.create",
-    entityType: "ClassGroup",
-    entityId: created.id,
-    after: { price, centerShareType, centerShareValue, teacherId, roomId, extraRoomIds },
-  });
+  // R4: the class, its room set (validated there — R3), its slots and every
+  // session of its period, in one transaction with one conflict decision.
+  const result = await createClassWithSessions(
+    prisma,
+    scope.ctx.center.id,
+    {
+      teacherId,
+      subjectId: subject.id,
+      gradeId: grade.id,
+      educationSystemId: educationSystem.id,
+      roomId,
+      extraRoomIds,
+      price,
+      centerShareType,
+      centerShareValue,
+      lateThresholdMinutes,
+      acceptsNewStudents,
+      requiresConfirmation,
+      startDate,
+      endDate,
+      // The create dialog has no slot rows yet (R6 re-lays it out); slots
+      // are added on the class page, each one resyncing the period.
+      slots: [],
+    },
+    { confirmConflicts, actorUserId: scope.ctx.user.id, locale },
+  );
+  if (!result.ok) {
+    if ("conflicts" in result) return conflictRefusal(scope.ctx, result);
+    return classFieldError(result.error);
+  }
 
   revalidateClassList(locale);
-  return { status: "created" };
+  return { status: "created", ...(await sessionsOutcome(scope.ctx, result.report)) };
 }
 
 export async function updateClassAction(
@@ -290,13 +306,13 @@ export async function updateClassAction(
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
+    startDate,
+    endDate,
     confirmConflicts,
   } = parsed.data;
 
-  const centerId = scope.ctx.center.id;
   const existing = await scope.db.classGroups.findById(id);
   if (!existing) return NOT_FOUND;
-  const currentRooms = await loadClassRoomSet(prisma, centerId, id);
 
   const teacher = await scope.db.teachers.findByUserId(teacherId);
   if (!teacher) return { fieldErrors: { teacherId: "notFound" } };
@@ -314,80 +330,41 @@ export async function updateClassAction(
   if (!educationSystem.ok) {
     return { fieldErrors: { educationSystemId: "notFound" } };
   }
-  // A room deactivated after this class chose it may stay on the class; it
-  // just cannot be newly picked.
-  const rooms = await resolveRoomSet(prisma, centerId, roomId, extraRoomIds, {
-    requireActiveExcept: effectiveRoomIds(currentRooms?.roomId, currentRooms?.extraRoomIds),
-  });
-  if (!rooms.ok) return roomSetFieldError(rooms.error);
-
-  // A new teacher or room set re-checks every weekly slot this class has.
-  const roomsChanged =
-    effectiveRoomIds(currentRooms?.roomId, currentRooms?.extraRoomIds).join(",") !==
-    rooms.set.roomIds.join(",");
-  const plan = await loadClassSlotPlan(prisma, centerId, id);
-  const conflicts =
-    plan && (roomsChanged || teacherId !== existing.teacherId)
-      ? await weeklySlotConflicts(prisma, centerId, locale, id, {
-          ...plan,
-          teacherId,
-          roomId,
-          roomIds: rooms.set.roomIds,
-        })
-      : [];
-  const decision = decideConflicts(conflicts.length, conflictPolicy(scope.ctx), confirmConflicts);
-  if (decision !== "proceed") return conflictRefusal(scope.ctx, conflicts);
-
-  await prisma.$transaction(async (tx) => {
-    await tx.classGroup.updateMany({
-      where: scopedWhere(centerId, { id }),
-      data: {
-        teacherId,
-        subjectId: subject.id,
-        gradeId: grade.id,
-        educationSystemId: educationSystem.id,
-        roomId,
-        price,
-        centerShareType,
-        centerShareValue,
-        lateThresholdMinutes,
-        acceptsNewStudents,
-        requiresConfirmation,
-      },
-    });
-    await writeClassExtraRooms(tx, centerId, id, extraRoomIds);
-    if (conflicts.length > 0) {
-      await writeConfirmedConflictAudit(tx, {
-        centerId,
-        actorUserId: scope.ctx.user.id,
-        entityType: "ClassGroup",
-        entityId: id,
-        context: "classGroup.update",
-        conflicts,
-      });
-    }
-  });
-
-  await writeAuditLog({
-    centerId,
-    actorUserId: scope.ctx.user.id,
-    action: "classGroup.update",
-    entityType: "ClassGroup",
-    entityId: id,
-    before: {
-      price: existing.price,
-      centerShareType: existing.centerShareType,
-      centerShareValue: existing.centerShareValue,
-      teacherId: existing.teacherId,
-      roomId: currentRooms?.roomId ?? null,
-      extraRoomIds: currentRooms?.extraRoomIds ?? [],
+  // R4: changing the period, teacher or room set resyncs the class's future
+  // sessions in the same transaction (resolves OD-9) — pristine ones follow
+  // the class, the rest are kept and reported. One conflict decision for the
+  // whole period; a refusal rolls the edit back too.
+  const result = await updateClassWithSessions(
+    prisma,
+    scope.ctx.center.id,
+    id,
+    {
+      teacherId,
+      subjectId: subject.id,
+      gradeId: grade.id,
+      educationSystemId: educationSystem.id,
+      roomId,
+      extraRoomIds,
+      price,
+      centerShareType,
+      centerShareValue,
+      lateThresholdMinutes,
+      acceptsNewStudents,
+      requiresConfirmation,
+      startDate,
+      endDate,
     },
-    after: { price, centerShareType, centerShareValue, teacherId, roomId, extraRoomIds },
-  });
+    { confirmConflicts, actorUserId: scope.ctx.user.id, locale },
+  );
+  if (!result.ok) {
+    if ("conflicts" in result) return conflictRefusal(scope.ctx, result);
+    if (result.error === "notFound") return NOT_FOUND;
+    return classFieldError(result.error);
+  }
 
   revalidateClassDetail(locale, id);
   revalidateClassList(locale);
-  return { status: "saved" };
+  return { status: "saved", ...(await sessionsOutcome(scope.ctx, result.report)) };
 }
 
 export async function setClassActiveAction(
@@ -400,16 +377,45 @@ export async function setClassActiveAction(
   const parsed = classActiveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
 
-  const { id, active, locale } = parsed.data;
+  const { id, active, locale, confirmConflicts } = parsed.data;
   const existing = await scope.db.classGroups.findById(id);
   if (!existing) return NOT_FOUND;
   if (existing.active === active) return { status: "saved" };
 
-  await scope.db.classGroups.update(id, { active });
+  if (!active) {
+    // R4: one transaction — inactive, pristine future sessions deleted, any
+    // other future session cancelled (attendance and payments untouched).
+    // Enrolments stay ACTIVE so reactivating restores the class.
+    const result = await deactivateClass(prisma, scope.ctx.center.id, id, {
+      actorUserId: scope.ctx.user.id,
+    });
+    if (!result.ok) return result.error === "notFound" ? NOT_FOUND : { status: "saved" };
+    revalidateClassList(locale);
+    revalidateClassDetail(locale, id);
+    return {
+      status: "saved",
+      sessions: { created: 0, deleted: result.deleted, updated: 0, kept: 0, cancelled: result.cancelled },
+    };
+  }
+
+  // Reactivating regenerates the period's sessions from today — refused once
+  // the period has ended (extend the end date first), and under the same
+  // whole-range confirmation contract as any other class write.
+  const result = await reactivateClass(prisma, scope.ctx.center.id, id, {
+    confirmConflicts,
+    actorUserId: scope.ctx.user.id,
+    locale,
+  });
+  if (!result.ok) {
+    if ("conflicts" in result) return conflictRefusal(scope.ctx, result);
+    if (result.error === "notFound") return NOT_FOUND;
+    if (result.error === "alreadyActive") return { status: "saved" };
+    return { error: "periodEnded" };
+  }
 
   revalidateClassList(locale);
   revalidateClassDetail(locale, id);
-  return { status: "saved" };
+  return { status: "saved", ...(await sessionsOutcome(scope.ctx, result.report)) };
 }
 
 export async function deleteClassAction(
@@ -423,35 +429,16 @@ export async function deleteClassAction(
   if (!parsed.success) return NOT_FOUND;
 
   const { id, locale } = parsed.data;
-  const existing = await scope.db.classGroups.findById(id);
-  if (!existing) return NOT_FOUND;
 
-  // Enrollments and generated sessions are append-only history (CLAUDE.md
-  // rule 2) — a class that carries either is deactivated, not deleted.
-  if ((await classDeleteBlockers(scope.db, id)) > 0) {
-    return { error: "classInUse" };
-  }
-
-  try {
-    await scope.db.classGroups.remove(id);
-  } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
-      return { error: "classInUse" };
-    }
-    throw error;
-  }
-
-  await writeAuditLog({
-    centerId: scope.ctx.center.id,
+  // R4: deletable only if the class never ran — otherwise it can only be
+  // deactivated, and the refusal says why (lib/db/class-sessions.ts).
+  const result = await deleteClass(prisma, scope.ctx.center.id, id, {
     actorUserId: scope.ctx.user.id,
-    action: "classGroup.delete",
-    entityType: "ClassGroup",
-    entityId: id,
-    before: { teacherId: existing.teacherId, price: existing.price },
   });
+  if (!result.ok) {
+    if (result.error === "notFound") return NOT_FOUND;
+    return { error: "classInUse", blockers: result.blockers };
+  }
 
   revalidateClassList(locale);
   // Same fix as deleteStudentAction (M18, docs/00 §7.1): the delete control
@@ -462,20 +449,24 @@ export async function deleteClassAction(
 }
 
 // ── Class schedule (Schedule Builder, docs/04 §9) ──────────────────────────
+// R4: adding, moving or removing a weekly slot resyncs the class's future
+// sessions in the same transaction (`writeClassSlot`), with one conflict
+// decision over the whole period.
 
-/** A candidate weekly slot against every other class's slots (R3: room sets). */
-async function scheduleSlotConflicts(
-  centerId: string,
+async function slotResult(
+  scope: Scope,
   locale: string,
   classGroupId: string,
-  candidate: { dayOfWeek: number; startTime: string; endTime: string },
-): Promise<ScheduleConflict[]> {
-  const plan = await loadClassSlotPlan(prisma, centerId, classGroupId);
-  if (!plan) return [];
-  return weeklySlotConflicts(prisma, centerId, locale, classGroupId, {
-    ...plan,
-    slots: [candidate],
-  });
+  result: Awaited<ReturnType<typeof writeClassSlot>>,
+  status: "created" | "saved" | "deleted",
+): Promise<ClassActionState> {
+  if (!result.ok) {
+    if ("conflicts" in result) return conflictRefusal(scope.ctx, result);
+    return NOT_FOUND;
+  }
+  revalidateClassDetail(locale, classGroupId);
+  revalidateClassList(locale);
+  return { status, ...(await sessionsOutcome(scope.ctx, result.report)) };
 }
 
 export async function createScheduleAction(
@@ -494,37 +485,13 @@ export async function createScheduleAction(
   const classGroup = await scope.db.classGroups.findById(classGroupId);
   if (!classGroup) return NOT_FOUND;
 
-  const conflicts = await scheduleSlotConflicts(scope.ctx.center.id, locale, classGroupId, {
-    dayOfWeek,
-    startTime,
-    endTime,
-  });
-  const decision = decideConflicts(conflicts.length, conflictPolicy(scope.ctx), confirmConflicts);
-  if (decision !== "proceed") return conflictRefusal(scope.ctx, conflicts);
-
-  const centerId = scope.ctx.center.id;
-  await prisma.$transaction(async (tx) => {
-    const slot = await tx.classSchedule.create({
-      data: { centerId, classGroupId, dayOfWeek, startTime, endTime },
-    });
-    await writeConfirmedConflictAudit(tx, {
-      centerId,
-      actorUserId: scope.ctx.user.id,
-      entityType: "ClassSchedule",
-      entityId: slot.id,
-      context: "classSchedule.create",
-      conflicts,
-    });
-  });
-
-  revalidateClassDetail(locale, classGroupId);
-  return {
-    status: "created",
-    conflicts:
-      conflicts.length > 0
-        ? await describeConflicts(prisma, centerId, conflicts.slice(0, MAX_SHOWN_CONFLICTS))
-        : undefined,
-  };
+  const result = await writeClassSlot(
+    prisma,
+    scope.ctx.center.id,
+    { kind: "add", classGroupId, slot: { dayOfWeek, startTime, endTime } },
+    { confirmConflicts, actorUserId: scope.ctx.user.id, locale },
+  );
+  return slotResult(scope, locale, classGroupId, result, "created");
 }
 
 export async function updateScheduleAction(
@@ -540,41 +507,14 @@ export async function updateScheduleAction(
 
   const { locale, id, classGroupId, dayOfWeek, startTime, endTime } = parsed.data;
   const confirmConflicts = slotConfirmationSchema.safeParse(input).data?.confirmConflicts ?? false;
-  const schedule = await scope.db.classSchedules.findById(id);
-  if (!schedule || schedule.classGroupId !== classGroupId) return NOT_FOUND;
 
-  const conflicts = await scheduleSlotConflicts(scope.ctx.center.id, locale, classGroupId, {
-    dayOfWeek,
-    startTime,
-    endTime,
-  });
-  const decision = decideConflicts(conflicts.length, conflictPolicy(scope.ctx), confirmConflicts);
-  if (decision !== "proceed") return conflictRefusal(scope.ctx, conflicts);
-
-  const centerId = scope.ctx.center.id;
-  await prisma.$transaction(async (tx) => {
-    await tx.classSchedule.updateMany({
-      where: scopedWhere(centerId, { id }),
-      data: { dayOfWeek, startTime, endTime },
-    });
-    await writeConfirmedConflictAudit(tx, {
-      centerId,
-      actorUserId: scope.ctx.user.id,
-      entityType: "ClassSchedule",
-      entityId: id,
-      context: "classSchedule.update",
-      conflicts,
-    });
-  });
-
-  revalidateClassDetail(locale, classGroupId);
-  return {
-    status: "saved",
-    conflicts:
-      conflicts.length > 0
-        ? await describeConflicts(prisma, centerId, conflicts.slice(0, MAX_SHOWN_CONFLICTS))
-        : undefined,
-  };
+  const result = await writeClassSlot(
+    prisma,
+    scope.ctx.center.id,
+    { kind: "update", scheduleId: id, classGroupId, slot: { dayOfWeek, startTime, endTime } },
+    { confirmConflicts, actorUserId: scope.ctx.user.id, locale },
+  );
+  return slotResult(scope, locale, classGroupId, result, "saved");
 }
 
 export async function removeScheduleAction(
@@ -587,13 +527,17 @@ export async function removeScheduleAction(
   const parsed = classScheduleDeleteSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
 
-  const { id, locale } = parsed.data;
+  const { id, locale, confirmConflicts } = parsed.data;
   const schedule = await scope.db.classSchedules.findById(id);
   if (!schedule) return NOT_FOUND;
 
-  await scope.db.classSchedules.remove(id);
-  revalidateClassDetail(locale, schedule.classGroupId);
-  return { status: "deleted" };
+  const result = await writeClassSlot(
+    prisma,
+    scope.ctx.center.id,
+    { kind: "remove", scheduleId: id },
+    { confirmConflicts, actorUserId: scope.ctx.user.id, locale },
+  );
+  return slotResult(scope, locale, schedule.classGroupId, result, "deleted");
 }
 
 // ── Enrollment (add / remove / block a student to/from a class) ───────────
@@ -612,6 +556,8 @@ export async function enrollStudentAction(
 
   const classGroup = await scope.db.classGroups.findById(classGroupId);
   if (!classGroup) return NOT_FOUND;
+  // R4: a deactivated class takes no new students — reactivate it first.
+  if (!classGroup.active) return { error: "classInactive" };
 
   const student = await scope.db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
@@ -788,9 +734,17 @@ export async function createHolidayAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
   const { locale, date, name } = parsed.data;
+  const centerId = scope.ctx.center.id;
 
+  // R4: sessions already exist for whole class periods, so a new holiday
+  // also removes that day's pristine sessions (same transaction); sessions
+  // with records or custom changes are kept and counted for staff to cancel.
+  let outcome: { deleted: number; kept: number };
   try {
-    await scope.db.holidays.create({ date, name });
+    outcome = await prisma.$transaction(async (tx) => {
+      await tx.holiday.create({ data: scopedData(centerId, { date, name }) });
+      return removeSessionsOnHoliday(tx, centerId, date);
+    });
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -802,7 +756,10 @@ export async function createHolidayAction(
   }
 
   revalidateClassList(locale);
-  return { status: "created" };
+  return {
+    status: "created",
+    sessions: { created: 0, deleted: outcome.deleted, updated: 0, kept: outcome.kept },
+  };
 }
 
 export async function removeHolidayAction(
@@ -821,59 +778,4 @@ export async function removeHolidayAction(
   await scope.db.holidays.remove(holiday.id);
   revalidateClassList(parsed.data.locale);
   return { status: "deleted" };
-}
-
-// ── Session generation ──────────────────────────────────────────────────
-
-export async function generateSessionsAction(
-  _state: ClassActionState,
-  formData: FormData,
-): Promise<ClassActionState> {
-  const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
-  const db = scoped(ctx);
-
-  const parsed = generateSessionsSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
-
-  const { locale, classGroupId, confirmConflicts } = parsed.data;
-
-  if (classGroupId) {
-    const classGroup = await db.classGroups.findById(classGroupId);
-    if (!classGroup) return NOT_FOUND;
-  }
-
-  const policy = conflictPolicy(ctx);
-  // Non-conflicting occurrences are always created; conflicting ones only
-  // under WARN with the double-booking confirmed (audited by the generator,
-  // in the same transaction as the insert).
-  const result = await generateSessions(
-    prisma,
-    ctx.center.id,
-    policy,
-    classGroupId ?? undefined,
-    locale,
-    { confirmConflicts, actorUserId: ctx.user.id },
-  );
-
-  if (classGroupId) revalidateClassDetail(locale, classGroupId);
-  else revalidateClassList(locale);
-
-  return {
-    status: "generated",
-    generated: {
-      created: result.created,
-      conflicts: result.conflicts.length,
-      needsConfirmation: result.needsConfirmation,
-    },
-    conflicts:
-      result.conflicts.length > 0
-        ? await describeConflicts(
-            prisma,
-            ctx.center.id,
-            result.conflicts.slice(0, MAX_SHOWN_CONFLICTS),
-          )
-        : undefined,
-    conflictPolicy: policy,
-  };
 }

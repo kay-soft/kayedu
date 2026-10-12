@@ -3,11 +3,12 @@ import type { Prisma } from "@prisma/client";
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts).
 import { catalogLabel } from "../catalog.ts";
 import { ROOM_SET_SELECT } from "./room-sets.ts";
-import type { ScopedDb } from "@/lib/db/scoped";
 
 /**
  * Class-group policy that is neither a scoping primitive nor UI: the lean
- * list select, the search/filter `where`, and what makes a class undeletable.
+ * list select and the search/filter `where`. What makes a class undeletable
+ * moved to `lib/db/class-sessions.ts` (`classDeleteBlockers`, R4) beside the
+ * engine that owns the class's sessions.
  */
 
 /**
@@ -28,6 +29,9 @@ export function classListSelect(centerId: string) {
   return {
     id: true,
     active: true,
+    // R4 — the class's period, shown on every row.
+    startDate: true,
+    endDate: true,
     price: true,
     centerShareType: true,
     centerShareValue: true,
@@ -91,23 +95,6 @@ export function classListWhere(filters: {
   if (filters.subjectId) where.subjectId = filters.subjectId;
   if (filters.gradeId) where.gradeId = filters.gradeId;
   return Object.keys(where).length > 0 ? where : undefined;
-}
-
-/**
- * A class that already carries enrollments or generated sessions is
- * deactivated, not deleted — the roster and the calendar must keep resolving
- * (CLAUDE.md rule 2, docs/01-data-model.md §6 "config master data …
- * deactivates by default").
- */
-export async function classDeleteBlockers(
-  db: ScopedDb,
-  classGroupId: string,
-): Promise<number> {
-  const [enrollments, sessions] = await Promise.all([
-    db.enrollments.count({ classGroupId }),
-    db.sessions.count({ classGroupId }),
-  ]);
-  return enrollments + sessions;
 }
 
 /**

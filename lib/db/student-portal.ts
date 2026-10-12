@@ -180,7 +180,12 @@ function studentUpcomingSessionInclude(centerId: string) {
   } satisfies Prisma.SessionInclude;
 }
 
-/** Every future, non-cancelled session for this student's active enrollments at one center. */
+/**
+ * Every future, non-cancelled session for this student's active enrollments
+ * at one center. R4: never a deactivated class's — its enrolments stay
+ * ACTIVE so reactivating restores it, but it is off every forward-looking
+ * list meanwhile.
+ */
 export function studentUpcomingSessions(
   db: Db,
   centerId: string,
@@ -191,7 +196,7 @@ export function studentUpcomingSessions(
     where: scopedWhere(centerId, {
       date: { gte: fromDate },
       status: { not: CANCELLED_STATUS },
-      classGroup: { enrollments: { some: { studentProfileId, status: ACTIVE_ENROLLMENT } } },
+      classGroup: { active: true, enrollments: { some: { studentProfileId, status: ACTIVE_ENROLLMENT } } },
     }),
     include: studentUpcomingSessionInclude(centerId),
     orderBy: [{ date: "asc" }, { startTime: "asc" }],

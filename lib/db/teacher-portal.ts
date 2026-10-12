@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/sessions.ts).
 import { type DateRange, revenueTotals } from "./analytics.ts";
+import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string` (matches lib/db/sessions.ts). */
@@ -47,14 +48,22 @@ export async function teacherCenterSummary(
   earningsRange: DateRange,
 ): Promise<TeacherCenterSummary> {
   const [sessionsToday, sessionsThisWeek, earnings] = await Promise.all([
+    // R4: a deactivated class's sessions count only once they are closed
+    // records (`OPEN_CLASS_SESSION`).
     db.session.count({
-      where: scopedWhere(centerId, { teacherId, date: today, status: { not: CANCELLED_STATUS } }),
+      where: scopedWhere(centerId, {
+        teacherId,
+        date: today,
+        status: { not: CANCELLED_STATUS },
+        ...OPEN_CLASS_SESSION,
+      }),
     }),
     db.session.count({
       where: scopedWhere(centerId, {
         teacherId,
         date: { gte: weekRange.start, lte: weekRange.end },
         status: { not: CANCELLED_STATUS },
+        ...OPEN_CLASS_SESSION,
       }),
     }),
     revenueTotals(db, centerId, earningsRange, teacherId),
@@ -98,6 +107,8 @@ export function combineTeacherSummaries(summaries: TeacherCenterSummary[]): {
  * within a center they both belong to. `studentQuery` matches a student
  * either enrolled in the class or ever an attendee of it (spec §4.2 item 2
  * "search by student"), covering both regulars and drop-ins/future roster.
+ * R4: a deactivated class's sessions show only once they are closed records
+ * (`OPEN_CLASS_SESSION`) — its history stays, its future is gone.
  */
 export function teacherSessionListWhere(filters: {
   teacherId: string;
@@ -109,6 +120,7 @@ export function teacherSessionListWhere(filters: {
   const where: Prisma.SessionWhereInput = {
     teacherId: filters.teacherId,
     date: { gte: filters.from, lte: filters.to },
+    AND: [OPEN_CLASS_SESSION],
   };
   if (filters.gradeId) where.classGroup = { gradeId: filters.gradeId };
 

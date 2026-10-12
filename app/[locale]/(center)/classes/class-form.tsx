@@ -9,7 +9,12 @@ import {
   ClassFields,
   type SelectOption,
 } from "@/components/center/class-fields";
+import type { TermOption } from "@/components/center/class-period-fields";
 import type { RoomOption } from "@/components/center/room-set-picker";
+import {
+  SlotConflictNotice,
+  useSlotConflicts,
+} from "@/components/center/slot-conflict-notice";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { piastresToInputValue } from "@/lib/money";
@@ -22,11 +27,19 @@ export type ClassFormDefaults = {
   lateThresholdMinutes: number;
 };
 
+/** Errors the conflict notice already explains — never shown twice. */
+const CONFLICT_ERRORS = new Set(["scheduleConflict", "conflictsNeedConfirmation"]);
+
 /**
  * Create a class (spec §4.1 item 3). Rendered inside the "Add class" dialog —
  * defaults come from the center's own general settings (docs/04 §5
  * "Dialog"), so a class starts from this center's usual cut and late
  * threshold rather than blank inputs.
+ *
+ * R4: the class needs a period (a term preset or custom dates); creating it
+ * creates every session of that period in the same transaction. Should the
+ * server refuse over a double-booking anywhere in the range, the full list
+ * shows in `SlotConflictNotice` with one "I understand" covering it all.
  */
 export function ClassForm({
   teachers,
@@ -36,6 +49,7 @@ export function ClassForm({
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
+  terms,
   noneLabel,
   defaults,
   onCreated,
@@ -47,6 +61,7 @@ export function ClassForm({
   educationSystemDefaultFixedShare: Record<string, number>;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
+  terms: TermOption[];
   noneLabel: string;
   defaults: ClassFormDefaults;
   onCreated: () => void;
@@ -56,6 +71,8 @@ export function ClassForm({
   const locale = useLocale();
 
   const [state, formAction] = useActionState(createClassAction, IDLE_CLASS_STATE);
+  // A new class has nothing to preview yet; a refusal's list is what shows.
+  const slotConflicts = useSlotConflicts(null, state.error ? state : undefined);
 
   useEffect(() => {
     if (state.status === "created") onCreated();
@@ -65,7 +82,9 @@ export function ClassForm({
     <form action={formAction} className="flex flex-col gap-5" noValidate>
       <input type="hidden" name="locale" value={locale} />
 
-      {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+      {state.error && !CONFLICT_ERRORS.has(state.error) ? (
+        <FormMessage>{tErrors(state.error)}</FormMessage>
+      ) : null}
 
       <ClassFields
         idPrefix="class-create"
@@ -85,6 +104,8 @@ export function ClassForm({
           lateThresholdMinutes: String(defaults.lateThresholdMinutes),
           acceptsNewStudents: true,
           requiresConfirmation: false,
+          startDate: "",
+          endDate: "",
         }}
         teachers={teachers}
         subjects={subjects}
@@ -93,11 +114,22 @@ export function ClassForm({
         educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
         rooms={rooms}
         roomLinks={roomLinks}
+        terms={terms}
         noneLabel={noneLabel}
         fieldErrors={state.fieldErrors}
       />
 
-      <SubmitButton className="w-full sm:w-auto">{t("add")}</SubmitButton>
+      <SlotConflictNotice
+        idPrefix="class-create"
+        conflicts={slotConflicts.conflicts}
+        policy={slotConflicts.policy}
+        confirmed={slotConflicts.confirmed}
+        onConfirmedChange={slotConflicts.setConfirmed}
+      />
+
+      <SubmitButton className="w-full sm:w-auto" disabled={slotConflicts.blocked}>
+        {t("add")}
+      </SubmitButton>
     </form>
   );
 }

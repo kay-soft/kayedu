@@ -125,6 +125,7 @@ async function seedPayment(centerId: string, teacherId: string, amount: number) 
   });
   const classGroup = await prisma.classGroup.create({
     data: scopedData(centerId, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId,
       subjectId: subject.id,
       price: amount,

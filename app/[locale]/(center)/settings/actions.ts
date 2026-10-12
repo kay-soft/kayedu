@@ -17,7 +17,8 @@ import {
   roomCombinationUsage,
   setRoomLinks,
 } from "@/lib/db/room-sets";
-import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
+import { DEFAULT_TIMEZONE, dateKey } from "@/lib/scheduling";
+import { createTerm, deleteTerm, setTermActive, updateTerm } from "@/lib/db/terms";
 import {
   createPaymentMethod,
   deletePaymentMethod,
@@ -51,6 +52,8 @@ import {
   roomLinksSchema,
   roomSchema,
   roomUpdateSchema,
+  termSchema,
+  termUpdateSchema,
 } from "@/lib/validation/settings";
 
 /**
@@ -557,6 +560,139 @@ export async function deletePaymentMethodAction(
 
   revalidateSettings(locale);
   return { status: result.outcome };
+}
+
+// ── Terms (R4) ─────────────────────────────────────────────────────────────
+// Same gate as rooms and payment methods (`center.settings.edit`). A term is
+// a preset whose dates a class COPIES — nothing references it — so renaming
+// or redating one moves no class and a delete is always a hard delete. The
+// case-insensitive name rule and the period rule live in lib/db/terms.ts.
+// Every change is audited.
+
+function termJson(term: { name: string; startDate: Date; endDate: Date; active: boolean }) {
+  return {
+    name: term.name,
+    startDate: dateKey(term.startDate),
+    endDate: dateKey(term.endDate),
+    active: term.active,
+  };
+}
+
+export async function createTermAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = termSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const { locale, name, startDate, endDate } = parsed.data;
+  const result = await createTerm(prisma, scope.ctx.center.id, { name, startDate, endDate });
+  if (!result.ok) {
+    return { fieldErrors: { [result.error === "duplicateName" ? "name" : "endDate"]: result.error } };
+  }
+
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "term.create",
+    entityType: "CenterTerm",
+    entityId: result.term.id,
+    after: termJson(result.term),
+  });
+
+  revalidateSettings(locale);
+  return { status: "created" };
+}
+
+export async function updateTermAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = termUpdateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const { locale, id, name, startDate, endDate } = parsed.data;
+  const result = await updateTerm(prisma, scope.ctx.center.id, id, { name, startDate, endDate });
+  if (!result.ok) {
+    if (result.error === "notFound") return NOT_FOUND;
+    return { fieldErrors: { [result.error === "duplicateName" ? "name" : "endDate"]: result.error } };
+  }
+
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "term.update",
+    entityType: "CenterTerm",
+    entityId: id,
+    before: termJson(result.before),
+    after: termJson(result.term),
+  });
+
+  revalidateSettings(locale);
+  return { status: "saved" };
+}
+
+export async function toggleTermAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { id, active, locale } = parsed.data;
+  const result = await setTermActive(prisma, scope.ctx.center.id, id, active);
+  if (!result.ok) return NOT_FOUND;
+
+  if (result.before.active !== active) {
+    await writeAuditLog({
+      centerId: scope.ctx.center.id,
+      actorUserId: scope.ctx.user.id,
+      action: active ? "term.activate" : "term.deactivate",
+      entityType: "CenterTerm",
+      entityId: id,
+      before: termJson(result.before),
+      after: { active },
+    });
+  }
+
+  revalidateSettings(locale);
+  return { status: "saved" };
+}
+
+export async function deleteTermAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { id, locale } = parsed.data;
+  const result = await deleteTerm(prisma, scope.ctx.center.id, id);
+  if (!result.ok) return NOT_FOUND;
+
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "term.delete",
+    entityType: "CenterTerm",
+    entityId: id,
+    before: termJson(result.before),
+  });
+
+  revalidateSettings(locale);
+  return { status: "deleted" };
 }
 
 // ── General settings (default center cut, timeout, late threshold) ─────────

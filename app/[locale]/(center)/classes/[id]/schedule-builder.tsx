@@ -9,6 +9,7 @@ import {
   removeScheduleAction,
   updateScheduleAction,
 } from "@/app/[locale]/(center)/classes/actions";
+import { SessionSyncNotice } from "@/components/center/session-sync-notice";
 import {
   SlotConflictNotice,
   useSlotConflicts,
@@ -34,11 +35,15 @@ const DAY_VALUES = [0, 1, 2, 3, 4, 5, 6] as const;
 /** Errors the conflict notice already explains — never shown twice. */
 const CONFLICT_ERRORS = new Set(["scheduleConflict", "conflictsNeedConfirmation"]);
 
-/** A slot being edited, and the live conflict state for it (R3). */
+/**
+ * A slot being edited, and the live conflict state for it (R3) — since R4,
+ * every session the slot would create across the class's whole period.
+ */
 function useSlotDraft(
   classGroupId: string,
   initial: { dayOfWeek: string; startTime: string; endTime: string },
   state: ClassActionState,
+  scheduleId?: string,
 ) {
   const locale = useLocale();
   const [draft, setDraft] = useState(initial);
@@ -53,6 +58,7 @@ function useSlotDraft(
           kind: "schedule",
           locale,
           classGroupId,
+          ...(scheduleId ? { scheduleId } : {}),
           dayOfWeek: Number(draft.dayOfWeek),
           startTime: draft.startTime,
           endTime: draft.endTime,
@@ -71,6 +77,10 @@ function useSlotDraft(
  * slot is edited; under WARN saving needs "I understand, create anyway",
  * under DENY it is refused. `+ Add time slot` appends a new row below the
  * last.
+ *
+ * R4: every add, move or removal resyncs the class's upcoming sessions for
+ * its whole period, so the conflict list covers the whole range, and the
+ * notice after a save says what happened to the sessions.
  *
  * The reference mockup shows a per-slot room picker; this build keeps the
  * room set per class (`ClassGroup.roomId` + extra rooms,
@@ -134,6 +144,7 @@ function ScheduleRow({
       endTime: slot.endTime,
     },
     state,
+    slot.id,
   );
 
   return (
@@ -243,6 +254,11 @@ function ScheduleRow({
           <FormMessage tone="warning">
             {t("savedWithConflict", { count: state.conflicts.length })}
           </FormMessage>
+        </div>
+      ) : null}
+      {state.status === "saved" && state.sessions ? (
+        <div className="mt-2">
+          <SessionSyncNotice sessions={state.sessions} />
         </div>
       ) : null}
     </li>
@@ -360,6 +376,11 @@ function AddSlotForm({ classGroupId }: { classGroupId: string }) {
           <FormMessage tone="warning">
             {t("savedWithConflict", { count: state.conflicts.length })}
           </FormMessage>
+        </div>
+      ) : null}
+      {state.status === "created" && state.sessions ? (
+        <div className="mt-2">
+          <SessionSyncNotice sessions={state.sessions} />
         </div>
       ) : null}
     </div>

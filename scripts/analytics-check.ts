@@ -211,6 +211,7 @@ async function main() {
 
   const class1 = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacher1.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -221,6 +222,7 @@ async function main() {
   });
   const class2 = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacher2.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,

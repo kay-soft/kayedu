@@ -118,6 +118,8 @@ declare
     'CenterPaymentMethod', 'SessionAttendanceChange',
     -- R3: joinable rooms and the extra rooms of a class / a session.
     'RoomLink', 'ClassGroupRoom', 'SessionRoom',
+    -- R4: a centre's term presets.
+    'CenterTerm',
     'CenterSettings'
   ];
 begin

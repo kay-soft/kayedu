@@ -34,7 +34,8 @@ import {
 } from "@/lib/db/payment-methods";
 import { listSessionAttendanceChanges } from "@/lib/db/session-lifecycle";
 import { loadRoomLinks } from "@/lib/db/room-sets";
-import { loadScheduleOccupancy } from "@/lib/db/slot-conflicts";
+import { OPEN_CLASS_SESSION } from "@/lib/db/slot-conflicts";
+import { listCenterTerms } from "@/lib/db/terms";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
@@ -682,9 +683,10 @@ export function scoped(ctx: TenantContext) {
     },
 
     /**
-     * Classes (M4). The teacher detail page and settings' reference counts
-     * already used `count`/`list` before this milestone — extended here with
-     * the full CRUD the classes screens need.
+     * Classes (M4) — reads only since R4. Every class write (create, edit,
+     * slots, deactivate, reactivate, delete) goes through
+     * `lib/db/class-sessions.ts`, which owns the class's sessions; a generic
+     * `create`/`update`/`remove` here would be a way around that engine.
      */
     classGroups: {
       count: (where?: Prisma.ClassGroupWhereInput) =>
@@ -722,29 +724,13 @@ export function scoped(ctx: TenantContext) {
           where: scopedWhere(centerId, { id }),
           include: classDetailInclude(centerId),
         }),
-
-      create: (data: Omit<Prisma.ClassGroupUncheckedCreateInput, "centerId">) =>
-        prisma.classGroup.create({ data: scopedData(centerId, data) }),
-
-      update: (
-        id: string,
-        data: Omit<Prisma.ClassGroupUncheckedUpdateManyInput, "centerId">,
-      ) =>
-        prisma.classGroup.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
-        }),
-
-      remove: (id: string) =>
-        prisma.classGroup.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     /**
      * Recurring weekly slots for a class — the Schedule Builder (docs/04 §9).
-     * `occupancy` is every *other* class's slots in the center, the
-     * candidate universe `lib/scheduling.ts`'s `findScheduleConflicts` checks
-     * against; it excludes the class being edited so a class never "conflicts"
-     * with its own other slots.
+     * Reads only since R4: adding, moving or removing a slot resyncs the
+     * class's sessions, so it goes through `lib/db/class-sessions.ts`'s
+     * `writeClassSlot`.
      */
     classSchedules: {
       list: (classGroupId: string) =>
@@ -753,30 +739,7 @@ export function scoped(ctx: TenantContext) {
           orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
         }),
 
-      /**
-       * Every *other* class's slots with its teacher and full room set (R3)
-       * — `lib/db/slot-conflicts.ts`'s `loadScheduleOccupancy`, the one
-       * loader every schedule-slot conflict check uses.
-       */
-      occupancy: (excludeClassGroupId: string, displayLocale: string) =>
-        loadScheduleOccupancy(prisma, centerId, displayLocale, excludeClassGroupId),
-
       findById: (id: string) => scopedFindById(prisma.classSchedule, centerId, id),
-
-      create: (data: Omit<Prisma.ClassScheduleUncheckedCreateInput, "centerId">) =>
-        prisma.classSchedule.create({ data: scopedData(centerId, data) }),
-
-      update: (
-        id: string,
-        data: Omit<Prisma.ClassScheduleUncheckedUpdateManyInput, "centerId">,
-      ) =>
-        prisma.classSchedule.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
-        }),
-
-      remove: (id: string) =>
-        prisma.classSchedule.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     /**
@@ -815,12 +778,17 @@ export function scoped(ctx: TenantContext) {
           include: sessionDetailInclude(centerId),
         }),
 
-      /** Today's non-cancelled sessions — the Reception Desk's live rail. */
+      /**
+       * Today's non-cancelled sessions — the Reception Desk's live rail and
+       * the dashboard's today list. R4: a deactivated class's sessions are
+       * not on it unless they are closed records (`OPEN_CLASS_SESSION`).
+       */
       listForDay: (date: Date) =>
         prisma.session.findMany({
           where: scopedWhere(centerId, {
             date,
             status: { not: CANCELLED_STATUS },
+            ...OPEN_CLASS_SESSION,
           }),
           orderBy: [{ startTime: "asc" }],
           select: sessionListSelect(centerId),
@@ -840,7 +808,11 @@ export function scoped(ctx: TenantContext) {
         }),
     },
 
-    /** The center's holiday calendar (docs/02 §11) — dates the generator skips. */
+    /**
+     * The center's holiday calendar (docs/02 §11) — dates the class-sessions
+     * engine skips. Adding one also removes that day's pristine sessions, so
+     * the insert lives in the holiday action's own transaction.
+     */
     holidays: {
       list: () =>
         prisma.holiday.findMany({
@@ -850,11 +822,21 @@ export function scoped(ctx: TenantContext) {
 
       findById: (id: string) => scopedFindById(prisma.holiday, centerId, id),
 
-      create: (data: Omit<Prisma.HolidayUncheckedCreateInput, "centerId">) =>
-        prisma.holiday.create({ data: scopedData(centerId, data) }),
-
       remove: (id: string) =>
         prisma.holiday.deleteMany({ where: scopedWhere(centerId, { id }) }),
+    },
+
+    /**
+     * The centre's term presets (R4) — reads only. Every write (and its
+     * case-insensitive name rule) is `lib/db/terms.ts`'s.
+     */
+    terms: {
+      list: () => listCenterTerms(prisma, centerId),
+
+      /** What the class form's "Choose a term" offers. */
+      listActive: () => listCenterTerms(prisma, centerId, { activeOnly: true }),
+
+      findById: (id: string) => scopedFindById(prisma.centerTerm, centerId, id),
     },
 
     /** Expense categories (M6) — same shape as the other master-data entities. */
@@ -992,7 +974,9 @@ export function scoped(ctx: TenantContext) {
       /** The Approvals queue's own section: this center's PENDING requests. */
       listPending: () =>
         prisma.reservation.findMany({
-          where: scopedWhere(centerId, { status: PENDING_RESERVATION }),
+          // R4: a deactivated class's requests wait, unseen, until it is
+          // reactivated — `confirmReservation` refuses them meanwhile.
+          where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
           orderBy: { requestedAt: "asc" },
           include: {
             student: true,
@@ -1015,7 +999,7 @@ export function scoped(ctx: TenantContext) {
         prisma.reservation.findMany({
           where: scopedWhere(centerId, {
             status: PENDING_RESERVATION,
-            classGroup: { teacherId },
+            classGroup: { teacherId, active: true },
           }),
           orderBy: { requestedAt: "asc" },
           include: {

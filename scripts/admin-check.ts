@@ -343,7 +343,7 @@ async function main() {
       data: { nameAr: "Admin-Check Math", nameEn: "Admin-Check Math" },
     });
     const classGroup = await prisma.classGroup.create({
-      data: { centerId, teacherId: teacherIds[0], subjectId: subject.id, price: 10_000 },
+      data: { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), centerId, teacherId: teacherIds[0], subjectId: subject.id, price: 10_000 },
     });
     const sessionCount = teacherCount; // arbitrary but deterministic per center
     for (let i = 0; i < sessionCount; i += 1) {
