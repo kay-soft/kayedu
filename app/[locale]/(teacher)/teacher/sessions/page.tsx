@@ -7,6 +7,7 @@ import { searchOwnSessionStudentsTypeAheadAction } from "@/app/[locale]/(teacher
 import { Pagination } from "@/components/center/pagination";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
+import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,8 @@ import {
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
-import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
+import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
+import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
 import { formatDate, formatNumber, formatTimeRange } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
@@ -227,8 +229,9 @@ export default async function TeacherSessionsPage({
                     className="flex flex-col gap-2 rounded-xl border border-border p-4 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-text-primary">
-                        {sessionDisplayName(locale, row)}
+                      <p className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-text-primary">
+                        <span className="min-w-0 truncate">{sessionDisplayName(locale, row)}</span>
+                        <SessionKindBadge kind={sessionKind(row)} />
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                         <span>{formatDate(row.date, locale)}</span>

@@ -485,7 +485,7 @@ async function main() {
   });
   check(
     "Centre A's own session-list read resolves the same subject rename through the class",
-    catalogLabelWithSelection("en", sessionListRowsA[0]?.classGroup.subject ?? null) === "Centre A's Physics",
+    catalogLabelWithSelection("en", sessionListRowsA[0]?.classGroup?.subject ?? null) === "Centre A's Physics",
   );
 
   const discoverRowsA = await discoverClassesForCenter(prisma, centerA.id);

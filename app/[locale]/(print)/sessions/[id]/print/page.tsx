@@ -9,7 +9,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
-import { sessionDisplayName } from "@/lib/db/sessions";
+import { sessionDisplayName } from "@/lib/session-label";
 import { isWithinVisibilityWindow, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
@@ -59,7 +59,7 @@ export default async function SessionPrintPage({
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const className = sessionDisplayName(locale, { classGroup: session.classGroup });
+  const className = sessionDisplayName(locale, session);
 
   return (
     <>
@@ -82,7 +82,9 @@ export default async function SessionPrintPage({
           {
             label: tSheet("grade"),
             value:
-              catalogLabelWithSelection(locale, session.classGroup.grade) ?? tCommon("none"),
+              // A one-time session (R5) carries its own optional grade.
+              catalogLabelWithSelection(locale, session.classGroup ? session.classGroup.grade : session.grade) ??
+              tCommon("none"),
           },
           { label: tSheet("room"), value: session.room?.name ?? tCommon("none") },
           { label: tSheet("price"), value: formatMoney(session.priceSnapshot, locale) },

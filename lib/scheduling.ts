@@ -76,7 +76,8 @@ export type ExistingScheduleSlot = ScheduleSlot &
  */
 export type ScheduleConflict = {
   type: "teacher" | "room";
-  classGroupId: string;
+  /** The other booking's class — null when it is a one-time session (R5). */
+  classGroupId: string | null;
   className: string;
   roomId?: string;
   teacherId?: string;
@@ -101,7 +102,7 @@ export function occupiedRoomIds(occupant: RoomOccupant): string[] {
  */
 function clashesWith(
   candidate: RoomOccupant & { teacherId: string },
-  other: RoomOccupant & { teacherId: string; classGroupId: string; className: string },
+  other: RoomOccupant & { teacherId: string; classGroupId: string | null; className: string },
   detail: Partial<ScheduleConflict>,
 ): ScheduleConflict[] {
   const conflicts: ScheduleConflict[] = [];
@@ -383,7 +384,8 @@ export function resolveSharedDateFilter(
 export type ExistingSession = RoomOccupant & {
   /** Optional so a pure fixture can omit it; every DB loader sets it. */
   sessionId?: string;
-  classGroupId: string;
+  /** Null for a one-time session (R5) — it belongs to no class. */
+  classGroupId: string | null;
   className: string;
   teacherId: string;
   date: Date;
@@ -391,7 +393,14 @@ export type ExistingSession = RoomOccupant & {
   endTime: string;
 };
 
-export type SessionCandidate = Omit<ExistingSession, "className" | "sessionId">;
+export type SessionCandidate = Omit<ExistingSession, "className" | "sessionId"> & {
+  /**
+   * R5 — a session that is never a conflict with the candidate: the session
+   * being moved or re-roomed itself. A class session never needed this (its
+   * own class is skipped wholesale); a one-time session has no class to skip.
+   */
+  excludeSessionId?: string | null;
+};
 
 /**
  * Same shape as `findScheduleConflicts`, but keyed on a specific calendar date
@@ -411,7 +420,12 @@ export function findSessionConflicts(
   const conflicts: ScheduleConflict[] = [];
   const candidateKey = dateKey(candidate.date);
   for (const session of existing) {
-    if (session.classGroupId === candidate.classGroupId) continue;
+    // A class's own sessions never clash with each other (M4). A candidate
+    // with no class (R5: a one-time session, or a manual session checked
+    // against its own class too) skips nothing by class — `null === null`
+    // must never make two one-time sessions invisible to each other.
+    if (candidate.classGroupId !== null && session.classGroupId === candidate.classGroupId) continue;
+    if (candidate.excludeSessionId && session.sessionId === candidate.excludeSessionId) continue;
     if (dateKey(session.date) !== candidateKey) continue;
     if (
       !timeRangesOverlap(

@@ -36,7 +36,12 @@ import {
   ensureDefaultPaymentMethods,
   listActivePaymentMethods,
 } from "../lib/db/payment-methods.ts";
-import { createClassWithSessions, updateClassWithSessions } from "../lib/db/class-sessions.ts";
+import {
+  createClassWithSessions,
+  createManualSession,
+  createOneOffSession,
+  updateClassWithSessions,
+} from "../lib/db/class-sessions.ts";
 import { linkRooms, writeSessionExtraRooms } from "../lib/db/room-sets.ts";
 import { createTerm } from "../lib/db/terms.ts";
 import { addDays, dateKey, dayMarker } from "../lib/scheduling.ts";
@@ -236,6 +241,8 @@ type BranchConfig = {
     shareType: "FIXED" | "PERCENTAGE";
     shareValue: number;
   }[];
+  /** R5 — seed one one-time session and one extra session on a class. */
+  manualSessions?: boolean;
 };
 
 /**
@@ -643,6 +650,65 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
   const closedHistory = await closeEndedSessions(prisma, centerId);
   console.log(`  + ${closedHistory} past session(s) closed (automatic end-of-day close)`);
 
+  // ── R5: a one-time session tomorrow and an extra session on a class ─────
+  // Through the real writers (`createOneOffSession`/`createManualSession`),
+  // so both are `isManual`, audited and conflict-checked like the app's own.
+  // Skipped on a re-run when they already exist.
+  if (config.manualSessions) {
+    const tomorrow = addDays(today, 1);
+    const title = "Exam revision day";
+    const hasOneOff = await prisma.session.count({ where: { centerId, classGroupId: null, title } });
+    if (hasOneOff === 0) {
+      const settings = await prisma.centerSettings.findUnique({ where: { centerId } });
+      const subject = catalog.subjects[config.classDefs[0].subject];
+      const created = await createOneOffSession(
+        prisma,
+        centerId,
+        {
+          title,
+          subjectId: subject.id,
+          gradeId: subject.gradeId,
+          teacherId: teachers[0].id,
+          roomId: rooms[0].id,
+          extraRoomIds: [],
+          date: tomorrow,
+          startTime: "19:00",
+          endTime: "21:00",
+          price: 15_000,
+          centerShareType: settings?.defaultShareType ?? "PERCENTAGE",
+          centerShareValue: settings?.defaultShareValue ?? 15,
+        },
+        { confirmConflicts: true },
+      );
+      if (!created.ok) throw new Error(`One-time session: ${created.error}`);
+      console.log(`  + One-time session: "${title}" on ${dateKey(tomorrow)}`);
+    }
+    const extraClass = classGroups[0];
+    const hasExtra = await prisma.session.count({ where: { centerId, classGroupId: extraClass.id, isManual: true } });
+    if (hasExtra === 0 && extraClass.roomId) {
+      const extraDate = addDays(today, 2);
+      const extraRoomIds = (
+        await prisma.classGroupRoom.findMany({ where: { centerId, classGroupId: extraClass.id }, select: { roomId: true } })
+      ).map((row) => row.roomId);
+      const created = await createManualSession(
+        prisma,
+        centerId,
+        {
+          classGroupId: extraClass.id,
+          teacherId: extraClass.teacherId,
+          roomId: extraClass.roomId,
+          extraRoomIds,
+          date: extraDate,
+          startTime: "10:00",
+          endTime: "11:30",
+        },
+        { confirmConflicts: true },
+      );
+      if (!created.ok) throw new Error(`Extra session: ${created.error}`);
+      console.log(`  + Extra session on the first class: ${dateKey(extraDate)} 10:00–11:30`);
+    }
+  }
+
   // ── A couple of expense categories + entries, for the Analytics demo ───
   const rentCategory = await findOrCreateByName(
     "Expense category: Rent",
@@ -673,6 +739,7 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
 const BRANCH_A: BranchConfig = {
   slug: "center-60-downtown",
   name: "Center 60 — Downtown",
+  manualSessions: true,
   themeColor: "#2563EB",
   manager: { first: "Olivia", last: "Bennett", email: "demo-manager-downtown@center60-demo.test" },
   receptionist: { first: "Daniel", last: "Carter", email: "demo-receptionist-downtown@center60-demo.test" },

@@ -153,7 +153,8 @@ export function isSessionClosed(
 export type GateSession = {
   id: string;
   centerId: string;
-  classGroupId: string;
+  /** Null for a one-time session (R5) — every `class*` column below is then null too. */
+  classGroupId: string | null;
   teacherId: string;
   date: Date;
   startTime: string;
@@ -166,9 +167,9 @@ export type GateSession = {
   priceSnapshot: number;
   centerShareType: ShareType | null;
   centerShareValue: number | null;
-  classLateThresholdMinutes: number;
-  classCenterShareType: ShareType;
-  classCenterShareValue: number;
+  classLateThresholdMinutes: number | null;
+  classCenterShareType: ShareType | null;
+  classCenterShareValue: number | null;
   timezone: string | null;
   defaultLateThreshold: number | null;
 };
@@ -181,8 +182,12 @@ const GATE_COLUMNS = Prisma.sql`s."id", s."centerId", s."classGroupId", s."teach
   cg."centerShareValue" AS "classCenterShareValue",
   cs."timezone", cs."defaultLateThreshold"`;
 
+// LEFT JOIN since R5: a one-time session has no class, and an inner join
+// would make it look "missing" to every write path. Its late threshold then
+// falls back to the centre's default (`resolveLateThreshold`) and its cut is
+// its own (`recordPayment`).
 const GATE_FROM = Prisma.sql`"Session" s
-  JOIN "ClassGroup" cg ON cg."id" = s."classGroupId"
+  LEFT JOIN "ClassGroup" cg ON cg."id" = s."classGroupId"
   LEFT JOIN "CenterSettings" cs ON cs."centerId" = s."centerId"`;
 
 /** One session's `GateSession` row, scoped to `centerId` — unlocked. */
@@ -207,7 +212,7 @@ export async function loadGateSessionForAttendee(
     SELECT ${GATE_COLUMNS}
     FROM "SessionAttendee" a
     JOIN "Session" s ON s."id" = a."sessionId"
-    JOIN "ClassGroup" cg ON cg."id" = s."classGroupId"
+    LEFT JOIN "ClassGroup" cg ON cg."id" = s."classGroupId"
     LEFT JOIN "CenterSettings" cs ON cs."centerId" = s."centerId"
     WHERE a."id" = ${attendeeId} AND a."centerId" = ${centerId} AND s."centerId" = ${centerId}`;
   return rows[0] ?? null;
@@ -381,14 +386,17 @@ export async function ensureSessionOpenOrAutoClose(
  * closes racing — never duplicates a row. Only enrolments that existed
  * before the session's day ended count: a student who enrols next week is
  * not absent from a session that a late lazy close happens to touch.
- * A student never enrolled and never checked in gets nothing.
+ * A student never enrolled and never checked in gets nothing — which is
+ * everyone at a one-time session (R5): it has no class, so nobody is enrolled
+ * and nobody is marked absent.
  */
 export async function materializeAbsences(
   tx: Db,
-  session: { id: string; centerId: string; classGroupId: string; date: Date },
+  session: { id: string; centerId: string; classGroupId: string | null; date: Date },
   recordedAt: Date,
   timeZone: string,
 ): Promise<number> {
+  if (session.classGroupId === null) return 0;
   const enrollments = await tx.enrollment.findMany({
     where: {
       centerId: session.centerId,

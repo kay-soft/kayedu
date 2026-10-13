@@ -2,9 +2,9 @@ import type { Prisma, PrismaClient, Role, SessionStatus } from "@prisma/client";
 
 // Relative imports on purpose — `npm run check:rooms` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/sessions.ts).
-import { catalogLabel } from "../catalog.ts";
 import { fullName, localName } from "../identity.ts";
 import { effectiveRoomIds } from "../rooms.ts";
+import { sessionDisplayName } from "../session-label.ts";
 import {
   type ExistingSession,
   type ScheduleConflict,
@@ -40,25 +40,20 @@ import { scopedWhere } from "./tenant-scope.ts";
  * student's upcoming sessions (docs/00 §5.1 "Deactivate, reactivate,
  * delete") — so a deactivated class disappears from every forward surface
  * while its closed history stays readable everywhere else.
+ *
+ * R5: a one-time session (`classGroupId` null) belongs to no class that
+ * could be deactivated, so it is always open here — without this branch a
+ * relation filter on a null `classGroup` would silently drop every one-time
+ * session from every forward list and from conflict detection.
  */
 export const OPEN_CLASS_SESSION = {
-  OR: [{ classGroup: { active: true } }, { closedAt: { not: null } }],
+  OR: [{ classGroupId: null }, { classGroup: { active: true } }, { closedAt: { not: null } }],
 } satisfies Prisma.SessionWhereInput;
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
 const CANCELLED: SessionStatus = "CANCELLED";
 const TEACHER: Role = "TEACHER";
-
-type CatalogName = { nameAr: string; nameEn: string } | null;
-
-function classLabel(locale: string, subject: CatalogName, grade: CatalogName): string {
-  return (
-    [subject ? catalogLabel(locale, subject) : null, grade ? catalogLabel(locale, grade) : null]
-      .filter(Boolean)
-      .join(" · ") || "—"
-  );
-}
 
 /**
  * Every session in `[from, to]` (UTC-midnight day markers, inclusive) that
@@ -87,6 +82,11 @@ export async function loadSessionOccupancy(
       startTime: true,
       endTime: true,
       extraRooms: { select: { roomId: true } },
+      // Canonical catalog names on purpose — a conflict line is ephemeral
+      // text, not a centre-facing record (docs/01 "Academic catalog layer").
+      title: true,
+      subject: { select: { nameAr: true, nameEn: true } },
+      grade: { select: { nameAr: true, nameEn: true } },
       classGroup: {
         select: {
           subject: { select: { nameAr: true, nameEn: true } },
@@ -105,7 +105,7 @@ export async function loadSessionOccupancy(
     date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
-    className: classLabel(locale, row.classGroup.subject, row.classGroup.grade),
+    className: sessionDisplayName(locale, row),
   }));
 }
 

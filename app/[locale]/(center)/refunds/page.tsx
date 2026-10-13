@@ -11,10 +11,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
+import { sessionDisplayName } from "@/lib/session-label";
 
 /**
  * The refunds ledger (spec §4.1 item 12): every payment marked `REFUNDED` at
@@ -50,7 +50,6 @@ export default async function RefundsPage() {
             />
           ) : (
             refunds.map((refund) => {
-              const classGroup = refund.payment.session.classGroup;
               const studentProfile = refund.payment.studentProfile;
               return (
                 <div
@@ -66,12 +65,7 @@ export default async function RefundsPage() {
                     </p>
                   </div>
                   <p className="text-xs text-text-secondary">
-                    {[
-                      classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
-                      classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
+                    {sessionDisplayName(locale, refund.payment.session)}
                     {" · "}
                     {formatDate(refund.payment.session.date, locale)}
                   </p>

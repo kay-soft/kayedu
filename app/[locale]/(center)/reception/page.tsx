@@ -19,7 +19,8 @@ import {
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
-import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
+import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
+import { sessionDisplayName } from "@/lib/session-label";
 import { studentSearchWhere } from "@/lib/db/students";
 import { signedUrlFor } from "@/lib/db/storage";
 import { fullName, localName } from "@/lib/identity";

@@ -500,6 +500,9 @@ export function scoped(ctx: TenantContext) {
                         grade: { include: { selections: { where: { centerId } } } },
                       },
                     },
+                    // R5 — a one-time session's own subject/grade (no class).
+                    subject: { include: { selections: { where: { centerId } } } },
+                    grade: { include: { selections: { where: { centerId } } } },
                   },
                 },
               },
@@ -528,6 +531,9 @@ export function scoped(ctx: TenantContext) {
                     grade: { include: { selections: { where: { centerId } } } },
                   },
                 },
+                // R5 — a one-time session's own subject/grade (no class).
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
               },
             },
           },
@@ -723,6 +729,41 @@ export function scoped(ctx: TenantContext) {
         prisma.classGroup.findFirst({
           where: scopedWhere(centerId, { id }),
           include: classDetailInclude(centerId),
+        }),
+
+      /**
+       * R5 — what the "New session" dialog's "For a class" mode defaults
+       * from: every **active** class (a deactivated one takes no new
+       * session) with its teacher, room set and weekly slots.
+       */
+      listForNewSession: () =>
+        prisma.classGroup.findMany({
+          where: scopedWhere(centerId, { active: true }),
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            teacherId: true,
+            roomId: true,
+            extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } },
+            schedules: {
+              select: { dayOfWeek: true, startTime: true, endTime: true },
+              orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+            },
+            subject: {
+              select: {
+                nameAr: true,
+                nameEn: true,
+                selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+              },
+            },
+            grade: {
+              select: {
+                nameAr: true,
+                nameEn: true,
+                selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+              },
+            },
+          },
         }),
     },
 

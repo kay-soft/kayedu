@@ -97,10 +97,10 @@ export async function checkInAction(
 
   if (!attendee) {
     if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
-    const enrollment = await db.enrollments.findExisting(
-      session.classGroupId,
-      studentProfileId,
-    );
+    // A one-time session (R5) has no class: everyone is a drop-in.
+    const enrollment = session.classGroupId
+      ? await db.enrollments.findExisting(session.classGroupId, studentProfileId)
+      : null;
     const active = enrollment?.status === "ACTIVE";
     try {
       attendee = await createAttendance(prisma, {

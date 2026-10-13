@@ -13,10 +13,6 @@ import type {
 // imported from lib/db/client.ts for the same reason — the gate script
 // constructs its own `PrismaClient()`, the app passes the shared singleton.
 import {
-  catalogLabelWithSelection,
-  type CatalogWithSelection,
-} from "../catalog.ts";
-import {
   dateKey,
   decideConflicts,
   findSessionConflicts,
@@ -56,6 +52,35 @@ export type ConflictConfirmation = {
 
 /** A dated double-booking: the clash plus the "YYYY-MM-DD" it happens on. */
 export type DatedConflict = ScheduleConflict & { date: string };
+
+// ─────────────────────────────────────────────────────────────────────────
+// The one-time-session invariant (R5). "The kind says which fields apply",
+// the same application-layer style `Settlement` and `CenterCatalogSelection`
+// use: a session with no class must carry its own title, teacher, price and
+// BOTH halves of its centre cut, because there is no class to inherit any of
+// them from. Enforced here — by every writer that could produce or clear one
+// of these fields — and asserted by `npm run check:one-off-sessions`.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type OneOffShapeError = "titleRequired" | "teacherRequired" | "priceRequired" | "cutRequired";
+
+export function oneOffSessionShapeError(session: {
+  classGroupId: string | null;
+  title: string | null;
+  teacherId: string | null;
+  priceSnapshot: number | null;
+  centerShareType: ShareType | null;
+  centerShareValue: number | null;
+}): OneOffShapeError | null {
+  if (session.classGroupId !== null) return null;
+  if (!session.title || session.title.trim().length === 0) return "titleRequired";
+  if (!session.teacherId) return "teacherRequired";
+  if (session.priceSnapshot === null || !Number.isInteger(session.priceSnapshot) || session.priceSnapshot < 0) {
+    return "priceRequired";
+  }
+  if (session.centerShareType === null || session.centerShareValue === null) return "cutRequired";
+  return null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Session lifecycle: cancel / reschedule (M10, spec §7 acceptance criterion
@@ -111,7 +136,7 @@ export async function cancelSession(
 
 export type UpdateSessionShareOverrideResult =
   | { ok: true; session: Session }
-  | { ok: false; error: "notFound" | "sessionClosed" };
+  | { ok: false; error: "notFound" | "sessionClosed" | "cutRequired" };
 
 /**
  * Sets or clears this one session's centre-cut override (M13, spec §5.1
@@ -123,6 +148,11 @@ export type UpdateSessionShareOverrideResult =
  *
  * R2: refused on a closed session (`sessionClosed`) — no payment can be
  * recorded there any more, so an override would only rewrite its record.
+ *
+ * R5: on a one-time session the two fields are not an override but the
+ * session's only cut, so clearing them is refused (`cutRequired`) — the
+ * invariant above, enforced at the one writer that could break it. Changing
+ * them to another valid cut is allowed, exactly as for a class session.
  */
 export async function updateSessionShareOverride(
   db: SessionDb,
@@ -138,6 +168,9 @@ export async function updateSessionShareOverride(
     });
     if (gate.status === "missing") return { ok: false, error: "notFound" };
     if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
+    if (gate.session.classGroupId === null && override === null) {
+      return { ok: false, error: "cutRequired" };
+    }
 
     const updated = await tx.session.update({
       where: { id: sessionId },
@@ -260,6 +293,9 @@ export async function rescheduleSession(
   const found = findSessionConflicts(
     {
       classGroupId: session.classGroupId,
+      // R5: a one-time session has no class to skip; the slot it vacates
+      // must still never count as a clash with its own replacement.
+      excludeSessionId: session.id,
       teacherId: session.teacherId,
       roomId,
       roomIds: effectiveRoomIds(roomId, extraRoomIds),
@@ -307,6 +343,13 @@ export async function rescheduleSession(
           centerShareType: session.centerShareType,
           centerShareValue: session.centerShareValue,
           description: session.description,
+          // R5: the replacement is the same kind of session as the original —
+          // a one-time session keeps its title, subject, grade and own cut
+          // (the invariant), and a manual one stays manual.
+          title: session.title,
+          subjectId: session.subjectId,
+          gradeId: session.gradeId,
+          isManual: session.isManual,
         },
       });
       await writeSessionExtraRooms(tx, centerId, created.id, extraRoomIds);
@@ -390,6 +433,7 @@ export async function updateSessionRooms(
   const conflicts: DatedConflict[] = findSessionConflicts(
     {
       classGroupId: session.classGroupId,
+      excludeSessionId: session.id,
       teacherId: session.teacherId,
       roomId: next.roomId,
       roomIds: resolved.set.roomIds,
@@ -465,6 +509,23 @@ export function sessionListSelect(centerId: string) {
     priceSnapshot: true,
     teacherId: true,
     classGroupId: true,
+    // R5 — a one-time session's own name; `isManual` badges an extra session.
+    title: true,
+    isManual: true,
+    subject: {
+      select: {
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      },
+    },
+    grade: {
+      select: {
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      },
+    },
     classGroup: {
       select: {
         subject: {
@@ -505,7 +566,10 @@ export function sessionDetailInclude(centerId: string) {
     teacher: true,
     room: true,
     extraRooms: { include: { room: true }, orderBy: { createdAt: "asc" } },
+    // Null on a one-time session (R5) — its own subject/grade below label it.
     classGroup: { include: { subject: withSelection, grade: withSelection } },
+    subject: withSelection,
+    grade: withSelection,
     attendees: {
       include: {
         studentProfile: { include: { user: true } },
@@ -533,7 +597,13 @@ export function sessionListWhere(filters: {
   };
   if (filters.teacherId) where.teacherId = filters.teacherId;
   if (filters.classGroupId) where.classGroupId = filters.classGroupId;
-  if (filters.subjectId) where.classGroup = { subjectId: filters.subjectId };
+  // A class session's subject is its class's; a one-time session's is its own (R5).
+  if (filters.subjectId) {
+    where.OR = [
+      { classGroup: { subjectId: filters.subjectId } },
+      { classGroupId: null, subjectId: filters.subjectId },
+    ];
+  }
   return where;
 }
 
@@ -595,24 +665,4 @@ function parseTimeToMinutesSafe(value: string): number {
     const [hours, minutes] = value.split(":").map(Number);
     return (hours || 0) * 60 + (minutes || 0);
   }
-}
-
-/** A short label for the session in a list/receipt ("Math · Grade 10"). */
-export function sessionDisplayName(
-  locale: string,
-  row: {
-    classGroup: {
-      subject: CatalogWithSelection | null;
-      grade: CatalogWithSelection | null;
-    };
-  },
-): string {
-  return (
-    [
-      catalogLabelWithSelection(locale, row.classGroup.subject),
-      catalogLabelWithSelection(locale, row.classGroup.grade),
-    ]
-      .filter(Boolean)
-      .join(" · ") || "—"
-  );
 }

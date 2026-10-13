@@ -107,6 +107,8 @@ export type ResolveSessionRequestResult =
  * transaction). R4: `confirmConflicts` is required (there is no "omitted"
  * path any more), and a **deactivated** class takes no new session — the
  * request resolves as `classNotFound`, exactly like a class that is gone.
+ * R5: the session it creates is `isManual` — an extra session on the class,
+ * which the engine never deletes or rewrites.
  */
 export async function resolveSessionRequest(
   db: PrismaClient,
@@ -175,6 +177,10 @@ export async function resolveSessionRequest(
           startTime: payload.startTime,
           endTime: payload.endTime,
           priceSnapshot: classGroup.price,
+          // R5 — made by hand (a teacher asked, a person approved), not by
+          // the class-sessions engine, so no resync, holiday or class edit
+          // ever deletes or rewrites it.
+          isManual: true,
         }),
       });
     } catch (error) {

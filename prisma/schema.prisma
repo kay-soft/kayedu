@@ -436,6 +436,7 @@ model CatalogGrade {
   selections      CenterCatalogSelection[]
   classGroups     ClassGroup[]
   studentProfiles StudentProfile[]
+  sessions        Session[] // R5 — one-time sessions
 
   @@index([educationSystemId])
 }
@@ -452,6 +453,7 @@ model CatalogSubject {
 
   selections  CenterCatalogSelection[]
   classGroups ClassGroup[]
+  sessions    Session[] // R5 — one-time sessions
 
   @@index([gradeId])
 }
@@ -793,8 +795,30 @@ model Session {
   id               String            @id @default(uuid())
   centerId         String
   center           Center            @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  classGroupId     String
-  classGroup       ClassGroup        @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  // R5 — null for a **one-time session** that belongs to no class. The kind
+  // decides which fields apply (an application-layer invariant enforced by
+  // lib/db/sessions.ts's `oneOffSessionShapeError`, asserted by
+  // `npm run check:one-off-sessions`): classGroupId null => `title`,
+  // `teacherId`, `priceSnapshot` and BOTH `centerShareType` and
+  // `centerShareValue` are set — a one-time session carries its own cut,
+  // since there is no class to inherit one from.
+  classGroupId     String?
+  classGroup       ClassGroup?       @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  // R5 — a one-time session's own name and optional catalog references
+  // (global entries, labelled through the centre's CenterCatalogSelection
+  // exactly like ClassGroup's). Unused on a class session, whose name comes
+  // from its class (lib/session-label.ts).
+  title            String?
+  subjectId        String?
+  subject          CatalogSubject?   @relation(fields: [subjectId], references: [id])
+  gradeId          String?
+  grade            CatalogGrade?     @relation(fields: [gradeId], references: [id])
+  // R5 — created by hand (an extra session on a class, a one-time session,
+  // or an approved teacher NEW_SESSION request) rather than by the
+  // class-sessions engine. A manual session is never pristine to the engine:
+  // no resync, period change, holiday or class edit deletes or rewrites it
+  // (lib/db/class-sessions.ts).
+  isManual         Boolean           @default(false)
   teacherId        String
   teacher          User              @relation("SessionTeacher", fields: [teacherId], references: [id])
   roomId           String?

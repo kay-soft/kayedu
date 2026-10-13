@@ -8,10 +8,14 @@ import { formatDate, formatMoney, formatNumber, formatTimeRange } from "@/lib/fo
 import { ROUTES } from "@/lib/routes";
 import type { SessionDisplayStatus } from "@/lib/db/sessions";
 import { LinkButton } from "@/components/shared/link-button";
+import { SessionKindBadge } from "@/components/shared/session-kind-badge";
+import type { SessionKind } from "@/lib/session-label";
 
 export type SessionRowData = {
   sessionId: string;
   className: string;
+  /** R5 — "One-time" / "Extra session" badge beside the name. */
+  kind: SessionKind;
   teacherName: string;
   roomName: string | null;
   date: Date;
@@ -50,12 +54,15 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
 
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.class")}</span>
-        <Link
-          href={ROUTES.centerSession(session.sessionId)}
-          className="truncate text-sm font-medium text-brand hover:underline"
-        >
-          {session.className}
-        </Link>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <Link
+            href={ROUTES.centerSession(session.sessionId)}
+            className="min-w-0 truncate text-sm font-medium text-brand hover:underline"
+          >
+            {session.className}
+          </Link>
+          <SessionKindBadge kind={session.kind} />
+        </div>
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">

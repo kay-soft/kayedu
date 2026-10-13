@@ -6,6 +6,7 @@ import { SessionDescriptionForm } from "@/app/[locale]/(teacher)/teacher/session
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { PageHeader } from "@/components/shared/page-header";
+import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -21,7 +22,8 @@ import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
-import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
+import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
+import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -88,8 +90,9 @@ export default async function TeacherSessionDetailPage({
         studentCode: attendee.studentProfile!.studentCode,
         status: attendee.attendanceStatus,
         isDropIn: attendee.isDropIn,
+        // An absence streak is per class; a one-time session (R5) has none.
         consecutiveAbsences:
-          attendee.attendanceStatus === "ABSENT"
+          attendee.attendanceStatus === "ABSENT" && session.classGroupId
             ? await consecutiveAbsenceCount(
                 prisma,
                 ctx.center.id,
@@ -106,7 +109,9 @@ export default async function TeacherSessionDetailPage({
     new Date(),
     timeZone,
   );
-  const className = sessionDisplayName(locale, { classGroup: session.classGroup });
+  const className = sessionDisplayName(locale, session);
+  // A class session's grade is its class's; a one-time session's is its own (R5).
+  const grade = session.classGroup ? session.classGroup.grade : session.grade;
   const absentCount = roster.filter((row) => row.status === "ABSENT").length;
 
   return (
@@ -114,11 +119,12 @@ export default async function TeacherSessionDetailPage({
       <PageHeader
         title={className}
         description={t("detailSubtitle", {
-          grade: catalogLabelWithSelection(locale, session.classGroup.grade) ?? tCommon("none"),
+          grade: catalogLabelWithSelection(locale, grade) ?? tCommon("none"),
           date: formatDate(session.date, locale),
         })}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <SessionKindBadge kind={sessionKind(session)} />
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
             <LinkButton href={ROUTES.teacherSessionPrint(session.id)}>
               {t("printAction")}
@@ -225,7 +231,7 @@ export default async function TeacherSessionDetailPage({
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.grade")}</span>
                 <span className="font-medium text-text-primary">
-                  {session.classGroup.grade ? catalogLabelWithSelection(locale, session.classGroup.grade) : tCommon("none")}
+                  {catalogLabelWithSelection(locale, grade) ?? tCommon("none")}
                 </span>
               </div>
               <div className="flex justify-between gap-3">

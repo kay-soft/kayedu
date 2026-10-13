@@ -29,6 +29,8 @@ If the docs are silent on something that touches **money, permissions, or tenant
 
 **6. Deferrals and open questions get written down.** A "we'll decide later" goes into the **Open Decisions register** (`docs/00-master-product-spec.md` §2.2) with who decides and what it blocks. A "we'll build later" goes into the backlog. An unrecorded decision is the same failure mode as an undocumented shortcut.
 
+**7. Never reset a database.** Never run `prisma migrate reset`, `prisma migrate diff` with a `--shadow-database-url`, `prisma db push --force-reset`, or any other command that can drop or reset a schema, against **any** URL taken from `.env` (that is the shared dev Supabase database — a shadow-DB diff against it wiped it once, in R4). Schema comparison uses a throwaway local shadow database, or none: a read-only `prisma migrate diff --from-url <.env URL> --to-schema-datamodel prisma/schema.prisma --script` is fine, and so is `prisma migrate deploy` (it only applies pending migrations). Anything destructive needs the user's explicit approval first.
+
 ---
 
 ## Stack

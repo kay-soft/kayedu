@@ -221,11 +221,17 @@ function staticChecks() {
     calls >= 5 && missing.length === 0,
     missing.join("; "),
   );
-  const classActions = readFileSync("app/[locale]/(center)/classes/actions.ts", "utf8");
+  // R5 Step 0 (decided): since R4 the class schedule/class-edit conflict
+  // decision lives in the single engine, lib/db/class-sessions.ts — assert
+  // it there (every decision takes the caller's confirmation flag) instead of
+  // counting decideConflicts calls in the class actions.
+  const engine = readFileSync("lib/db/class-sessions.ts", "utf8");
+  const engineDecisions = callArguments(engine, "decideConflicts");
   check(
-    "Class schedule/class-edit actions decide conflicts with the confirmation flag",
-    callArguments(classActions, "decideConflicts").filter((args) => /confirmConflicts\s*$/.test(args.trim()))
-      .length >= 3,
+    "Class schedule/class-edit conflicts are decided inside lib/db/class-sessions.ts with the confirmation flag",
+    engineDecisions.length >= 1 &&
+      engineDecisions.every((args) => /options\.confirmConflicts\s*$/.test(args.trim())),
+    engineDecisions.join(" | "),
   );
 }
 

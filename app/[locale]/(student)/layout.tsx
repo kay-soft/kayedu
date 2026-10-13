@@ -62,7 +62,11 @@ async function pendingRatingViews(
     date: formatDate(row.date, locale),
     centerName: centerNameById.get(row.centerId) ?? "",
     teacherName: teacherNamesByCenter.get(row.centerId)?.get(row.teacherId) ?? "—",
-    subjectName: row.subjectId ? catalogLabel(locale, subjectById.get(row.subjectId)!) : null,
+    // R5: a one-time session leads with its own title.
+    subjectName:
+      [row.title, row.subjectId ? catalogLabel(locale, subjectById.get(row.subjectId)!) : null]
+        .filter(Boolean)
+        .join(" · ") || null,
   }));
 }
 

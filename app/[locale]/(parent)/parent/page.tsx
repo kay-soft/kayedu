@@ -5,7 +5,6 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireParentUser } from "@/lib/auth/tenant";
-import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
@@ -14,6 +13,7 @@ import { startOfUtcDay } from "@/lib/scheduling";
 import { ChildSelector } from "./child-selector";
 import { ParentDateFilter } from "./parent-date-filter";
 import { EmptyState } from "@/components/shared/empty-state";
+import { sessionLabelParts } from "@/lib/session-label";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
@@ -75,9 +75,8 @@ async function loadChildSchedule(
     date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
-    subjectName: row.classGroup.subject ? catalogLabelWithSelection(locale, row.classGroup.subject) : null,
-    gradeName: row.classGroup.grade ? catalogLabelWithSelection(locale, row.classGroup.grade) : null,
-    roomName: row.room?.name ?? row.classGroup.room?.name ?? null,
+    ...sessionLabelParts(locale, row),
+    roomName: row.room?.name ?? row.classGroup?.room?.name ?? null,
     teacherName: names.get(row.teacherId) ?? "—",
   }));
 
@@ -85,8 +84,8 @@ async function loadChildSchedule(
     attendeeId: row.id,
     date: row.session.date,
     startTime: row.session.startTime,
-    subjectName: row.session.classGroup.subject ? catalogLabelWithSelection(locale, row.session.classGroup.subject) : null,
-    gradeName: row.session.classGroup.grade ? catalogLabelWithSelection(locale, row.session.classGroup.grade) : null,
+    // R5 — a one-time (drop-in only) session shows its own title here.
+    ...sessionLabelParts(locale, row.session),
     attendanceStatus: row.attendanceStatus,
     isDropIn: row.isDropIn,
     paidAmount: row.payments[0]?.amount ?? null,

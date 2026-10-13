@@ -35,7 +35,8 @@
     "check:visibility": "node --env-file-if-exists=.env scripts/visibility-check.ts",
     "check:session-lifecycle": "node --env-file-if-exists=.env scripts/session-lifecycle-check.ts",
     "check:rooms": "node --env-file-if-exists=.env scripts/rooms-check.ts",
-    "check:class-periods": "node --env-file-if-exists=.env scripts/class-periods-check.ts"
+    "check:class-periods": "node --env-file-if-exists=.env scripts/class-periods-check.ts",
+    "check:one-off-sessions": "node --env-file-if-exists=.env scripts/one-off-sessions-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

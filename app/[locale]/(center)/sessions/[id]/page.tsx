@@ -3,6 +3,7 @@ import { Lock, Printer } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
+import { DeleteSessionButton } from "@/app/[locale]/(center)/sessions/[id]/delete-session-button";
 import { EndSessionButton } from "@/app/[locale]/(center)/sessions/[id]/end-session-button";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { SessionLifecycleActions } from "@/app/[locale]/(center)/sessions/[id]/session-lifecycle-actions";
@@ -12,6 +13,7 @@ import { SessionSettlementAction } from "@/app/[locale]/(center)/settlements/ses
 import { searchAddAttendeeCandidatesAction } from "@/app/[locale]/(center)/sessions/actions";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
+import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -22,11 +24,13 @@ import {
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
+import { manualSessionDeleteState } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { isWithinVisibilityWindow, visibilityWindowFloor } from "@/lib/db/visibility";
-import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
+import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
+import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { studentSearchWhere } from "@/lib/db/students";
 import {
   formatDate,
@@ -92,8 +96,9 @@ export default async function SessionDetailPage({
 
   const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
   const canReschedule = ctxCan(ctx, "session.manage");
-  const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks] = await Promise.all([
-    db.enrollments.listForClass(session.classGroupId),
+  const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks, deleteBlockers] = await Promise.all([
+    // A one-time session (R5) has no class, so no enrolled roster: everyone is a drop-in.
+    session.classGroupId ? db.enrollments.listForClass(session.classGroupId) : Promise.resolve([]),
     loadSessionReceiptView(ctx.center.id, session),
     ctxCan(ctx, "settlement.manage")
       ? prisma.settlement.findFirst({ where: { centerId: ctx.center.id, sessionId: session.id } })
@@ -104,6 +109,9 @@ export default async function SessionDetailPage({
     // R3: the room pickers in reschedule / "Rooms" — only for who can use them.
     canReschedule ? db.rooms.list() : Promise.resolve([]),
     canReschedule ? db.roomLinks.list() : Promise.resolve([]),
+    // R5 — Delete is offered only for a manual/one-time session that passes
+    // the data layer's own rule (it re-checks on submit regardless).
+    canReschedule ? manualSessionDeleteState(prisma, ctx.center.id, session.id) : Promise.resolve(null),
   ]);
   // R3 — this session's own room set (primary + extras) and what it seats.
   const sessionRooms = session.room
@@ -158,19 +166,23 @@ export default async function SessionDetailPage({
 
   const roster = [...rosterMap.values()].sort((a, b) => a.name.localeCompare(b.name));
 
-  await Promise.all(
-    roster
-      .filter((row) => row.status === "ABSENT")
-      .map(async (row) => {
-        row.consecutiveAbsences = await consecutiveAbsenceCount(
-          prisma,
-          ctx.center.id,
-          session.classGroupId,
-          row.studentProfileId,
-          session.date,
-        );
-      }),
-  );
+  // An absence streak is per class; a one-time session (R5) belongs to none.
+  const streakClassId = session.classGroupId;
+  if (streakClassId) {
+    await Promise.all(
+      roster
+        .filter((row) => row.status === "ABSENT")
+        .map(async (row) => {
+          row.consecutiveAbsences = await consecutiveAbsenceCount(
+            prisma,
+            ctx.center.id,
+            streakClassId,
+            row.studentProfileId,
+            session.date,
+          );
+        }),
+    );
+  }
 
   const rosterStudentIds = new Set(roster.map((row) => row.studentProfileId));
   const candidates: AttendeeCandidate[] =
@@ -195,7 +207,9 @@ export default async function SessionDetailPage({
 
   const displayStatus = deriveSessionDisplayStatus(session, new Date(), timeZone);
   const teacherName = fullName(session.teacher);
-  const className = sessionDisplayName(locale, { classGroup: session.classGroup });
+  const className = sessionDisplayName(locale, session);
+  const kind = sessionKind(session);
+  const canDelete = deleteBlockers !== null && deleteBlockers.length === 0;
   // A cancelled session never happened; a rescheduled one moved to its
   // replacement (M15); a closed one is a final record (R2). None accepts
   // attendance or payment changes, and the server actions refuse every one
@@ -258,6 +272,7 @@ export default async function SessionDetailPage({
         })}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <SessionKindBadge kind={kind} />
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
             {displayStatus === "RESCHEDULED" && session.rescheduledToId ? (
               <LinkButton href={ROUTES.centerSession(session.rescheduledToId)}>
@@ -389,7 +404,7 @@ export default async function SessionDetailPage({
                   {formatMoney(session.priceSnapshot, locale)}
                 </span>
               </div>
-              <div className="border-t border-border pt-3">
+              <div className="flex flex-col gap-2 border-t border-border pt-3">
                 <SessionLifecycleActions
                   sessionId={session.id}
                   date={session.date.toISOString().slice(0, 10)}
@@ -413,6 +428,12 @@ export default async function SessionDetailPage({
                     noneLabel: tCommon("none"),
                   }}
                 />
+                {canDelete ? (
+                  <div className="flex flex-col gap-1">
+                    <DeleteSessionButton sessionId={session.id} />
+                    <p className="text-xs text-text-muted">{t("deleteSession.hint")}</p>
+                  </div>
+                ) : null}
               </div>
             </CardContent>
           </Card>

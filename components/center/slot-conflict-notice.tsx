@@ -141,7 +141,11 @@ export function useSlotConflicts(
   input: SlotConflictCheckInput | null,
   refused?: { conflicts?: SlotConflictInfo[]; conflictPolicy?: "WARN" | "DENY" },
 ) {
-  const [preview, setPreview] = useState<{ conflicts: SlotConflictInfo[]; policy: "WARN" | "DENY" }>({
+  const [preview, setPreview] = useState<{
+    conflicts: SlotConflictInfo[];
+    policy: "WARN" | "DENY";
+    holiday?: boolean;
+  }>({
     conflicts: [],
     policy: "WARN",
   });
@@ -177,5 +181,7 @@ export function useSlotConflicts(
     confirmed,
     setConfirmed: (value: boolean) => setConfirmedKey(value ? key : null),
     blocked: conflicts.length > 0 && (policy === "DENY" || !confirmed),
+    /** R5 — the previewed date is a holiday (a non-blocking notice). */
+    holiday: Boolean(inputKey && preview.holiday),
   };
 }

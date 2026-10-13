@@ -14,10 +14,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
+import { sessionDisplayName } from "@/lib/session-label";
 
 const STATUS_BADGE = {
   DRAFT: "neutral",
@@ -100,16 +100,7 @@ export default async function SettlementsPage() {
                     {settlement.session
                       ? t("scopeSession", {
                           date: formatDate(settlement.session.date, locale),
-                          class: [
-                            settlement.session.classGroup.subject
-                              ? catalogLabelWithSelection(locale, settlement.session.classGroup.subject)
-                              : null,
-                            settlement.session.classGroup.grade
-                              ? catalogLabelWithSelection(locale, settlement.session.classGroup.grade)
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · "),
+                          class: sessionDisplayName(locale, settlement.session),
                         })
                       : t("scopePeriod", {
                           from: formatDate(settlement.periodFrom!, locale),

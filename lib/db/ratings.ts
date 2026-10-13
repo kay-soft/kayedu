@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 // Relative imports on purpose — `npm run check:ratings` exercises this module
 // directly, outside the Next.js runtime (same reasoning as
 // lib/db/student-portal.ts and lib/db/parents.ts).
+import { sessionCatalogIds } from "../session-label.ts";
 
 /**
  * Teacher ratings (M17, docs/00-master-product-spec.md §5 "Teacher ratings").
@@ -35,6 +36,8 @@ export type PendingRatingSession = {
   centerId: string;
   teacherId: string;
   date: Date;
+  /** A one-time session's own title (R5); null for a class session. */
+  title: string | null;
   subjectId: string | null;
   gradeId: string | null;
 };
@@ -68,6 +71,10 @@ export async function attendedSessionsToRate(
           centerId: true,
           teacherId: true,
           date: true,
+          // R5 — a one-time session has no class: its own title/subject/grade.
+          title: true,
+          subjectId: true,
+          gradeId: true,
           classGroup: { select: { subjectId: true, gradeId: true } },
         },
       },
@@ -98,8 +105,8 @@ export async function attendedSessionsToRate(
       centerId: row.session.centerId,
       teacherId: row.session.teacherId,
       date: row.session.date,
-      subjectId: row.session.classGroup.subjectId,
-      gradeId: row.session.classGroup.gradeId,
+      title: row.session.classGroup ? null : row.session.title,
+      ...sessionCatalogIds(row.session),
     }));
 }
 

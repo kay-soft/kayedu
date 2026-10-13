@@ -176,6 +176,9 @@ function studentUpcomingSessionInclude(centerId: string) {
   const withSelection = { include: { selections: { where: { centerId } } } } as const;
   return {
     classGroup: { include: { subject: withSelection, grade: withSelection, room: true } },
+    // R5 — a one-time session's own subject/grade (no class).
+    subject: withSelection,
+    grade: withSelection,
     room: true,
   } satisfies Prisma.SessionInclude;
 }
@@ -227,6 +230,9 @@ export function studentPastAttendance(
       session: {
         include: {
           classGroup: { include: { subject: withSelection, grade: withSelection } },
+          // R5 — a one-time session's own subject/grade (no class).
+          subject: withSelection,
+          grade: withSelection,
           room: true,
         },
       },

@@ -15,7 +15,7 @@ import { getTenantContext } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import { sessionDisplayName } from "@/lib/db/sessions";
+import { sessionDisplayName } from "@/lib/session-label";
 import { studentSessionsWithTeacher } from "@/lib/db/teacher-portal";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";

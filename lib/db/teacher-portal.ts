@@ -117,12 +117,18 @@ export function teacherSessionListWhere(filters: {
   gradeId?: string | null;
   studentQuery?: string | null;
 }): Prisma.SessionWhereInput {
+  const and: Prisma.SessionWhereInput[] = [OPEN_CLASS_SESSION];
+  // A class session's grade is its class's; a one-time session's its own (R5).
+  if (filters.gradeId) {
+    and.push({
+      OR: [{ classGroup: { gradeId: filters.gradeId } }, { classGroupId: null, gradeId: filters.gradeId }],
+    });
+  }
   const where: Prisma.SessionWhereInput = {
     teacherId: filters.teacherId,
     date: { gte: filters.from, lte: filters.to },
-    AND: [OPEN_CLASS_SESSION],
+    AND: and,
   };
-  if (filters.gradeId) where.classGroup = { gradeId: filters.gradeId };
 
   const query = filters.studentQuery?.trim();
   if (query) {
@@ -193,6 +199,9 @@ export function studentSessionsWithTeacher(
       session: {
         include: {
           classGroup: { include: { subject: withSelection, grade: withSelection } },
+          // R5 — a one-time session's own subject/grade (no class).
+          subject: withSelection,
+          grade: withSelection,
         },
       },
       payments: { where: { voided: false }, orderBy: { recordedAt: "desc" }, take: 1 },

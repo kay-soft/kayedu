@@ -2,6 +2,7 @@ import type {
   ConflictPolicy,
   Prisma,
   PrismaClient,
+  Role,
   SessionStatus,
   ShareType,
 } from "@prisma/client";
@@ -10,6 +11,7 @@ import type {
 // exercise this module directly, outside the Next.js runtime — the same
 // reason lib/db/sessions.ts and lib/db/room-sets.ts are written this way
 // (docs/02 §5). The Prisma client is injected, never imported.
+import { MAX_PIASTRES } from "../money.ts";
 import { effectiveRoomIds } from "../rooms.ts";
 import {
   DEFAULT_TIMEZONE,
@@ -24,8 +26,15 @@ import {
   type ClassPeriodError,
   type ExistingSession,
 } from "../scheduling.ts";
+import { centerGradeById, centerSubjectById } from "./catalog.ts";
 import { resolveRoomSet, writeClassExtraRooms, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
-import { cancelSession, type ConflictRefusal, type DatedConflict } from "./sessions.ts";
+import {
+  cancelSession,
+  oneOffSessionShapeError,
+  type ConflictRefusal,
+  type DatedConflict,
+  type OneOffShapeError,
+} from "./sessions.ts";
 
 export type { ConflictRefusal, DatedConflict };
 import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
@@ -58,6 +67,15 @@ import { scopedData, scopedWhere } from "./tenant-scope.ts";
  *   centre's dated occupancy; DENY refuses the whole write, WARN refuses it
  *   with the full list unless `confirmConflicts`, then writes everything and
  *   audits the confirmed conflicts. No partial write, no "held back" state.
+ *
+ * - **Manual sessions** (R5) — an extra session on a class and a one-time
+ *   session with no class are created and deleted here too
+ *   (`createManualSession`, `createOneOffSession`, `deleteManualSession`),
+ *   so every session delete in the codebase lives in this one module and
+ *   passes through the pristine predicate. A manual session (`isManual`) is
+ *   **never** pristine to the engine: no resync, period change, holiday or
+ *   class edit deletes or rewrites it. Deactivating its class treats it by
+ *   the normal rule (deleted if otherwise pristine, else cancelled).
  *
  * Every public write here takes `confirmConflicts` as a **required**
  * parameter (no default, no "missing means save") and runs in one
@@ -99,7 +117,9 @@ export type SessionDisqualifier =
   | "description"
   | "rescheduled"
   | "teacherChanged"
-  | "roomsChanged";
+  | "roomsChanged"
+  /** R5 — created by hand; the engine never deletes or rewrites it. */
+  | "manual";
 
 /** A future session a resync left alone, and why. */
 export type KeptSession = {
@@ -157,6 +177,7 @@ function hasStarted(session: { date: Date; startTime: string }, clock: CentreClo
 /** Everything `sessionDisqualifiers` reads, selected once. */
 const SESSION_STATE_SELECT = {
   id: true,
+  isManual: true,
   date: true,
   startTime: true,
   endTime: true,
@@ -190,11 +211,14 @@ function sessionRoomIds(session: SessionState): string[] {
  * holiday — empty = **pristine**. A session is pristine only when ALL hold:
  * SCHEDULED, not closed, no attendees, no payments, no settlement, no
  * ratings, no per-session share override, no description, not rescheduled
- * from or to, and its teacher and room set still equal `baseline` (the
- * class's values before the edit). The one definition every caller shares.
+ * from or to, its teacher and room set still equal `baseline` (the class's
+ * values before the edit), and — R5 — not created by hand (`isManual`). The
+ * one definition every caller shares.
  */
 export function sessionDisqualifiers(
   session: {
+    /** Optional so a pure fixture predating R5 can omit it (= false). */
+    isManual?: boolean;
     status: SessionStatus;
     closedAt: Date | null;
     teacherId: string;
@@ -220,26 +244,44 @@ export function sessionDisqualifiers(
   if (session.rescheduledToId || session.rescheduledFrom) reasons.push("rescheduled");
   if (session.teacherId !== baseline.teacherId) reasons.push("teacherChanged");
   if (!sameRooms(roomIds, baseline.roomIds)) reasons.push("roomsChanged");
+  if (session.isManual) reasons.push("manual");
   return reasons;
 }
 
 /**
- * The database's own restatement of "pristine" (minus the teacher/room
- * comparison, already decided), re-asserted inside every delete. A check-in
- * or payment that lands between the classification and the delete makes
- * the row no longer match, so it is kept instead of being deleted under it.
+ * Nothing has happened on this session — the part of "pristine" every
+ * delete shares (R5: including `deleteManualSession`): still SCHEDULED, not
+ * closed, no attendee, payment, settlement or rating, no reschedule link.
+ * A closed session can therefore never match any session delete.
  */
-const STILL_PRISTINE = {
+const UNTOUCHED = {
   status: SCHEDULED,
   closedAt: null,
-  centerShareType: null,
-  centerShareValue: null,
   rescheduledToId: null,
   rescheduledFrom: { is: null },
   attendees: { none: {} },
   payments: { none: {} },
   settlements: { none: {} },
   ratings: { none: {} },
+} satisfies Prisma.SessionWhereInput;
+
+/** `UNTOUCHED`, and no per-session centre-cut override. */
+const NO_OVERRIDE = {
+  ...UNTOUCHED,
+  centerShareType: null,
+  centerShareValue: null,
+} satisfies Prisma.SessionWhereInput;
+
+/**
+ * The database's own restatement of "pristine" (minus the teacher/room
+ * comparison, already decided), re-asserted inside every engine delete. A
+ * check-in or payment that lands between the classification and the delete
+ * makes the row no longer match, so it is kept instead of being deleted
+ * under it. R5: a manual session never matches.
+ */
+const STILL_PRISTINE = {
+  ...NO_OVERRIDE,
+  isManual: false,
 } satisfies Prisma.SessionWhereInput;
 
 /** A class's sessions that have not started yet, with their state. */
@@ -378,6 +420,12 @@ async function computeSync(
     const matches = wanted !== undefined && wanted.endTime === session.endTime;
     const roomIds = sessionRoomIds(session);
     const reasons = sessionDisqualifiers(session, roomIds, baseline);
+
+    // R5: a manual session is deliberately off the class's plan. It is never
+    // deleted or rewritten (it is not pristine), and it is not reported as
+    // "kept" either — nothing about it needs staff attention. Its slot stays
+    // in `heldKeys`, so the class never creates a second session on top of it.
+    if (session.isManual) continue;
 
     if (reasons.length === 0) {
       if (!matches) {
@@ -927,12 +975,18 @@ export async function deactivateClass(
     const pristine: string[] = [];
     const others: SessionState[] = [];
     for (const session of sessions) {
-      if (sessionDisqualifiers(session, sessionRoomIds(session), current.baseline).length === 0) pristine.push(session.id);
+      // R5: deactivation is the one engine path where a manual session
+      // follows the normal rule — deleted if nothing else disqualifies it,
+      // cancelled otherwise — so "manual" alone does not keep it.
+      const reasons = sessionDisqualifiers(session, sessionRoomIds(session), current.baseline).filter(
+        (reason) => reason !== "manual",
+      );
+      if (reasons.length === 0) pristine.push(session.id);
       else others.push(session);
     }
     const deleted =
       pristine.length > 0
-        ? (await tx.session.deleteMany({ where: scopedWhere(centerId, { id: { in: pristine }, ...STILL_PRISTINE }) })).count
+        ? (await tx.session.deleteMany({ where: scopedWhere(centerId, { id: { in: pristine }, ...NO_OVERRIDE }) })).count
         : 0;
     // A pristine row that stopped being pristine since it was read survived
     // the delete above — cancel it like any other kept session.
@@ -1111,6 +1165,11 @@ export async function deleteClass(
  * staff to cancel by hand. Runs in the caller's transaction, beside the
  * holiday insert. Removing a holiday does not bring sessions back — see
  * OD-10 (docs/00 §2.2).
+ *
+ * R5: a manual session — an extra session on a class, or a one-time session
+ * with no class — is never deleted by a holiday (it was put on its date by
+ * hand, and a holiday never blocks one); it is counted with the kept ones so
+ * staff see it and can cancel it if the holiday means it too.
  */
 export async function removeSessionsOnHoliday(
   tx: Tx,
@@ -1122,7 +1181,7 @@ export async function removeSessionsOnHoliday(
   const clock = centreClock(now, timeZone);
   if (dateKey(date) < clock.todayKey) return { deleted: 0, kept: 0 };
   const rows = await tx.session.findMany({
-    where: scopedWhere(centerId, { date, classGroup: { active: true } }),
+    where: scopedWhere(centerId, { date, OR: [{ classGroupId: null }, { classGroup: { active: true } }] }),
     select: {
       ...SESSION_STATE_SELECT,
       classGroup: { select: { teacherId: true, roomId: true, extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } } } },
@@ -1132,6 +1191,10 @@ export async function removeSessionsOnHoliday(
   let kept = 0;
   for (const row of rows) {
     if (hasStarted(row, clock)) continue;
+    if (!row.classGroup) {
+      if (row.status !== CANCELLED && !row.rescheduledToId) kept += 1;
+      continue;
+    }
     const baseline = {
       teacherId: row.classGroup.teacherId,
       roomIds: effectiveRoomIds(row.classGroup.roomId, row.classGroup.extraRooms.map((extra) => extra.roomId)),
@@ -1239,5 +1302,506 @@ export async function classSessionCounts(
     where: scopedWhere(centerId, { classGroupId: { in: classGroupIds }, status: { not: CANCELLED } }),
     _count: { _all: true },
   });
-  return new Map(rows.map((row) => [row.classGroupId, row._count._all]));
+  return new Map(
+    rows.flatMap((row) => (row.classGroupId ? [[row.classGroupId, row._count._all] as const] : [])),
+  );
+}
+
+// ── Manual sessions (R5) ───────────────────────────────────────────────────
+//
+// Two modes, one entry point ("New session" on the Sessions tab,
+// docs/00 §5.1 "Manual and one-time sessions"):
+// - **For a class** (`createManualSession`) — an extra session on an active
+//   class. Price and cut are the class's, exactly as for a generated session
+//   (`priceSnapshot` frozen now, cut read at payment time); the teacher
+//   defaults to the class's and may be a substitute. Its enrolled students
+//   are its roster and are marked absent at close like any class session.
+// - **One-time** (`createOneOffSession`) — no class at all: its own title,
+//   optional catalog subject/grade, teacher, room set, price and centre cut.
+//   Everyone attending is a drop-in; late threshold = the centre's default.
+//
+// Both are `isManual`, so the engine never deletes or rewrites them. Both
+// refuse a date before today in the centre's timezone (no backdating, ever —
+// a time earlier today is fine), take R3's confirmation contract with a
+// required `confirmConflicts`, and never refuse a holiday (the result says
+// one is there, for a non-blocking notice).
+
+const MAX_TITLE_LENGTH = 80;
+const TEACHER: Role = "TEACHER";
+
+/** What both modes share: who teaches, where, and when. */
+export type ManualSessionSlot = {
+  teacherId: string;
+  roomId: string;
+  extraRoomIds: string[];
+  /** UTC-midnight day marker, like `Session.date`. */
+  date: Date;
+  startTime: string;
+  endTime: string;
+};
+
+export type ManualSessionInput = ManualSessionSlot & { classGroupId: string };
+
+export type OneOffSessionInput = ManualSessionSlot & {
+  title: string;
+  subjectId: string | null;
+  gradeId: string | null;
+  /** Piastres. */
+  price: number;
+  centerShareType: ShareType;
+  /** A percent (PERCENTAGE) or the piastres the centre takes (FIXED). */
+  centerShareValue: number;
+};
+
+export type ManualSessionError =
+  | "pastDate"
+  | "invalidTimeRange"
+  | "classNotFound"
+  | "teacherNotFound"
+  | "subjectNotFound"
+  | "gradeNotFound"
+  | "invalidTitle"
+  | "invalidPrice"
+  | "invalidCut"
+  | "duplicateSlot"
+  | OneOffShapeError
+  | RoomSetError;
+
+export type CreateManualSessionResult =
+  | { ok: true; sessionId: string; conflicts: DatedConflict[]; holiday: boolean }
+  | ConflictRefusal
+  | { ok: false; error: ManualSessionError };
+
+type ManualSessionOptions = {
+  confirmConflicts: boolean;
+  actorUserId?: string | null;
+  /** Injectable clock — the gate pins it; the app passes nothing. */
+  now?: Date;
+  locale?: string;
+};
+
+type CheckedSlot = {
+  extraRoomIds: string[];
+  conflicts: DatedConflict[];
+  policy: ConflictPolicy;
+  holiday: boolean;
+};
+
+/**
+ * Everything both modes validate about the slot, read inside the write's own
+ * transaction: the time range, no backdating (centre timezone), an active
+ * teacher of THIS centre, a valid room set of this centre, the slot not
+ * already held by the class, the holiday flag, and the conflict list. A
+ * manual session is checked against **every** booking that day — its own
+ * class's included (a substitute double-booked with the class's regular
+ * session is a real clash), which is why the candidate carries no class.
+ */
+async function checkManualSlot(
+  db: Db,
+  centerId: string,
+  slot: ManualSessionSlot,
+  classGroupId: string | null,
+  options: { now?: Date; locale?: string },
+): Promise<{ ok: true; checked: CheckedSlot } | { ok: false; error: ManualSessionError }> {
+  if (!isValidSlotTime(slot.startTime) || !isValidSlotTime(slot.endTime) || slot.startTime >= slot.endTime) {
+    return { ok: false, error: "invalidTimeRange" };
+  }
+  const { timeZone, policy } = await centreScheduling(db, centerId);
+  const clock = centreClock(options.now ?? new Date(), timeZone);
+  if (dateKey(slot.date) < clock.todayKey) return { ok: false, error: "pastDate" };
+
+  const teacher = await db.membership.findFirst({
+    where: scopedWhere(centerId, { userId: slot.teacherId, role: TEACHER, active: true }),
+    select: { id: true },
+  });
+  if (!teacher) return { ok: false, error: "teacherNotFound" };
+
+  if (!slot.roomId) return { ok: false, error: "noPrimary" };
+  const rooms = await resolveRoomSet(db, centerId, slot.roomId, slot.extraRoomIds);
+  if (!rooms.ok) return { ok: false, error: rooms.error };
+
+  if (classGroupId) {
+    const held = await db.session.count({
+      where: scopedWhere(centerId, { classGroupId, date: slot.date, startTime: slot.startTime }),
+    });
+    if (held > 0) return { ok: false, error: "duplicateSlot" };
+  }
+
+  const [occupancy, holiday] = await Promise.all([
+    loadSessionOccupancy(db, centerId, options.locale ?? "en", slot.date, slot.date),
+    db.holiday.count({ where: scopedWhere(centerId, { date: slot.date }) }),
+  ]);
+  const conflicts: DatedConflict[] = findSessionConflicts(
+    {
+      classGroupId: null,
+      teacherId: slot.teacherId,
+      roomId: slot.roomId,
+      roomIds: rooms.set.roomIds,
+      date: slot.date,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+    },
+    occupancy,
+  ).map((conflict) => ({ ...conflict, date: dateKey(slot.date) }));
+
+  return {
+    ok: true,
+    checked: { extraRoomIds: [...slot.extraRoomIds], conflicts, policy, holiday: holiday > 0 },
+  };
+}
+
+function isValidSlotTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
+}
+
+function isP2002(error: unknown): boolean {
+  return error instanceof Object && "code" in error && (error as { code?: string }).code === "P2002";
+}
+
+/** Thrown inside the write transaction so any refusal writes nothing. */
+class ManualSessionRefusal extends Error {
+  readonly result: Exclude<CreateManualSessionResult, { ok: true }>;
+  constructor(result: Exclude<CreateManualSessionResult, { ok: true }>) {
+    super("Manual session refused.");
+    this.result = result;
+  }
+}
+
+/**
+ * The one writer both modes share: check the slot, decide conflicts under
+ * R3's contract, create the session and its extra rooms, audit the
+ * confirmation (if any) and the create — all in one transaction.
+ */
+async function writeManualSession(
+  db: PrismaClient,
+  centerId: string,
+  slot: ManualSessionSlot,
+  classGroupId: string | null,
+  data: (tx: Tx) => Promise<
+    | { ok: true; fields: Prisma.SessionUncheckedCreateInput; mode: "extra" | "oneOff"; audit: Prisma.InputJsonObject }
+    | { ok: false; error: ManualSessionError }
+  >,
+  options: ManualSessionOptions,
+): Promise<CreateManualSessionResult> {
+  try {
+    return await db.$transaction(async (tx): Promise<CreateManualSessionResult> => {
+      const resolved = await data(tx);
+      if (!resolved.ok) throw new ManualSessionRefusal(resolved);
+      const shapeError = oneOffSessionShapeError({
+        classGroupId: resolved.fields.classGroupId ?? null,
+        title: resolved.fields.title ?? null,
+        teacherId: resolved.fields.teacherId ?? null,
+        priceSnapshot: resolved.fields.priceSnapshot ?? null,
+        centerShareType: resolved.fields.centerShareType ?? null,
+        centerShareValue: resolved.fields.centerShareValue ?? null,
+      });
+      if (shapeError) throw new ManualSessionRefusal({ ok: false, error: shapeError });
+
+      const check = await checkManualSlot(tx, centerId, slot, classGroupId, options);
+      if (!check.ok) throw new ManualSessionRefusal(check);
+      const { conflicts, policy, holiday, extraRoomIds } = check.checked;
+      const decision = decideConflicts(conflicts.length, policy, options.confirmConflicts);
+      if (decision === "denied") throw new ManualSessionRefusal({ ok: false, error: "conflict", conflicts });
+      if (decision === "needsConfirmation") {
+        throw new ManualSessionRefusal({ ok: false, error: "conflictsNeedConfirmation", conflicts });
+      }
+
+      const session = await tx.session.create({ data: { ...resolved.fields, centerId, isManual: true } });
+      await writeSessionExtraRooms(tx, centerId, session.id, extraRoomIds);
+      if (options.confirmConflicts && conflicts.length > 0) {
+        await writeConfirmedConflictAudit(tx, {
+          centerId,
+          actorUserId: options.actorUserId ?? null,
+          entityType: "Session",
+          entityId: session.id,
+          context: "session.create",
+          conflicts,
+        });
+      }
+      await audit(tx, {
+        centerId,
+        actorUserId: options.actorUserId,
+        action: "session.create",
+        entityType: "Session",
+        entityId: session.id,
+        after: {
+          mode: resolved.mode,
+          ...resolved.audit,
+          teacherId: slot.teacherId,
+          roomId: slot.roomId,
+          extraRoomIds,
+          date: dateKey(slot.date),
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          priceSnapshot: resolved.fields.priceSnapshot ?? 0,
+          holiday,
+        },
+      });
+      return { ok: true, sessionId: session.id, conflicts: options.confirmConflicts ? conflicts : [], holiday };
+    }, WRITE_TRANSACTION_OPTIONS);
+  } catch (error) {
+    if (error instanceof ManualSessionRefusal) return error.result;
+    // The (classGroupId, date, startTime) backstop: a concurrent create won.
+    if (isP2002(error)) return { ok: false, error: "duplicateSlot" };
+    throw error;
+  }
+}
+
+/**
+ * **For a class** — an extra session on an existing, active class of this
+ * centre. Price frozen from the class now (`priceSnapshot`), cut inherited
+ * from the class at payment time (no per-session cut is set). `teacherId`
+ * is the class's teacher or a substitute — either way an active teacher here.
+ */
+export async function createManualSession(
+  db: PrismaClient,
+  centerId: string,
+  input: ManualSessionInput,
+  options: ManualSessionOptions,
+): Promise<CreateManualSessionResult> {
+  return writeManualSession(
+    db,
+    centerId,
+    input,
+    input.classGroupId,
+    async (tx) => {
+      const classGroup = await tx.classGroup.findFirst({
+        where: scopedWhere(centerId, { id: input.classGroupId, active: true }),
+        select: { id: true, price: true, teacherId: true },
+      });
+      if (!classGroup) return { ok: false, error: "classNotFound" };
+      return {
+        ok: true,
+        mode: "extra",
+        audit: { classGroupId: classGroup.id, substitute: input.teacherId !== classGroup.teacherId },
+        fields: {
+          centerId,
+          classGroupId: classGroup.id,
+          teacherId: input.teacherId,
+          roomId: input.roomId,
+          date: input.date,
+          startTime: input.startTime,
+          endTime: input.endTime,
+          priceSnapshot: classGroup.price,
+        },
+      };
+    },
+    options,
+  );
+}
+
+/**
+ * **One-time** — a session that belongs to no class. Its title, price and
+ * centre cut are its own (the invariant in lib/db/sessions.ts), its optional
+ * subject and grade must be catalog entries THIS centre has selected and
+ * keeps active, and its cut follows the class form's bounds (a whole percent
+ * 0–100, or FIXED piastres). The split itself stays lib/money.ts's.
+ */
+export async function createOneOffSession(
+  db: PrismaClient,
+  centerId: string,
+  input: OneOffSessionInput,
+  options: ManualSessionOptions,
+): Promise<CreateManualSessionResult> {
+  return writeManualSession(
+    db,
+    centerId,
+    input,
+    null,
+    async (tx) => {
+      const title = input.title.trim();
+      if (title.length === 0 || title.length > MAX_TITLE_LENGTH) return { ok: false, error: "invalidTitle" };
+      if (!Number.isInteger(input.price) || input.price < 0 || input.price > MAX_PIASTRES) {
+        return { ok: false, error: "invalidPrice" };
+      }
+      const value = input.centerShareValue;
+      const cutValid =
+        Number.isInteger(value) &&
+        value >= 0 &&
+        (input.centerShareType === "PERCENTAGE" ? value <= 100 : value <= MAX_PIASTRES);
+      if (!cutValid) return { ok: false, error: "invalidCut" };
+      if (input.subjectId) {
+        const subject = await centerSubjectById(tx, centerId, input.subjectId);
+        if (!subject || !subject.active) return { ok: false, error: "subjectNotFound" };
+      }
+      if (input.gradeId) {
+        const grade = await centerGradeById(tx, centerId, input.gradeId);
+        if (!grade || !grade.active) return { ok: false, error: "gradeNotFound" };
+      }
+      return {
+        ok: true,
+        mode: "oneOff",
+        audit: {
+          title,
+          subjectId: input.subjectId,
+          gradeId: input.gradeId,
+          centerShareType: input.centerShareType,
+          centerShareValue: value,
+        },
+        fields: {
+          centerId,
+          classGroupId: null,
+          title,
+          subjectId: input.subjectId,
+          gradeId: input.gradeId,
+          teacherId: input.teacherId,
+          roomId: input.roomId,
+          date: input.date,
+          startTime: input.startTime,
+          endTime: input.endTime,
+          priceSnapshot: input.price,
+          centerShareType: input.centerShareType,
+          centerShareValue: value,
+        },
+      };
+    },
+    options,
+  );
+}
+
+/**
+ * The live, read-only preview of a manual session (`checkSlotConflictsAction`
+ * in its "session" mode): the conflict list and holiday flag the create
+ * would decide on — the same `checkManualSlot` — so the list a person
+ * confirms is the list the save checks. Anything not yet valid previews as
+ * nothing; the save reports the actual error.
+ */
+export async function previewManualSession(
+  db: Db,
+  centerId: string,
+  slot: ManualSessionSlot & { classGroupId: string | null },
+  options: { now?: Date; locale?: string } = {},
+): Promise<{ conflicts: DatedConflict[]; holiday: boolean }> {
+  const check = await checkManualSlot(db, centerId, slot, slot.classGroupId, options);
+  if (!check.ok) return { conflicts: [], holiday: false };
+  return { conflicts: check.checked.conflicts, holiday: check.checked.holiday };
+}
+
+// ── Deleting a manual session (R5) ─────────────────────────────────────────
+
+/** Why a manual session may not be deleted — empty = it may be. */
+export type ManualSessionDeleteBlocker =
+  | "notManual"
+  | "started"
+  | "notScheduled"
+  | "closed"
+  | "attendees"
+  | "payments"
+  | "settlement"
+  | "ratings"
+  | "shareOverride"
+  | "rescheduled";
+
+/**
+ * The delete rule for a manual or one-time session: it must be manual (an
+ * engine-made class session is the engine's to remove), not yet started in
+ * the centre's timezone, and untouched — SCHEDULED, not closed, no
+ * attendee, payment, settlement or rating, no reschedule link, and no
+ * per-session cut override (on a class session; a one-time session's cut is
+ * its own, not an override). Anything else can only be cancelled.
+ */
+export function manualSessionDeleteBlockers(
+  session: {
+    classGroupId: string | null;
+    isManual: boolean;
+    date: Date;
+    startTime: string;
+    status: SessionStatus;
+    closedAt: Date | null;
+    centerShareType: ShareType | null;
+    centerShareValue: number | null;
+    rescheduledToId: string | null;
+    rescheduledFrom: { id: string } | null;
+    _count: { attendees: number; payments: number; settlements: number; ratings: number };
+  },
+  now: Date,
+  timeZone: string,
+): ManualSessionDeleteBlocker[] {
+  const blockers: ManualSessionDeleteBlocker[] = [];
+  if (session.classGroupId !== null && !session.isManual) blockers.push("notManual");
+  if (hasStarted(session, centreClock(now, timeZone))) blockers.push("started");
+  if (session.status !== SCHEDULED) blockers.push("notScheduled");
+  if (session.closedAt) blockers.push("closed");
+  if (session._count.attendees > 0) blockers.push("attendees");
+  if (session._count.payments > 0) blockers.push("payments");
+  if (session._count.settlements > 0) blockers.push("settlement");
+  if (session._count.ratings > 0) blockers.push("ratings");
+  if (session.classGroupId !== null && (session.centerShareType !== null || session.centerShareValue !== null)) {
+    blockers.push("shareOverride");
+  }
+  if (session.rescheduledToId || session.rescheduledFrom) blockers.push("rescheduled");
+  return blockers;
+}
+
+const DELETE_STATE_SELECT = {
+  ...SESSION_STATE_SELECT,
+  classGroupId: true,
+  title: true,
+} satisfies Prisma.SessionSelect;
+
+/** A session's delete blockers as the detail page shows them (no write). */
+export async function manualSessionDeleteState(
+  db: Db,
+  centerId: string,
+  sessionId: string,
+  now: Date = new Date(),
+): Promise<ManualSessionDeleteBlocker[] | null> {
+  const row = await db.session.findFirst({ where: scopedWhere(centerId, { id: sessionId }), select: DELETE_STATE_SELECT });
+  if (!row) return null;
+  const { timeZone } = await centreScheduling(db, centerId);
+  return manualSessionDeleteBlockers(row, now, timeZone);
+}
+
+export type DeleteManualSessionResult =
+  | { ok: true }
+  | { ok: false; error: "notFound" }
+  | { ok: false; error: "sessionInUse"; blockers: ManualSessionDeleteBlocker[] };
+
+/**
+ * Hard-deletes a manual or one-time session that passes
+ * `manualSessionDeleteBlockers` — refused by direct call otherwise (staff
+ * cancel it instead). The row is locked first, and the delete re-asserts
+ * "untouched" in its own `WHERE` (`UNTOUCHED`, which pins `closedAt: null`),
+ * so a check-in or payment landing mid-delete keeps the session, and a
+ * closed session can never be deleted. Audited (`session.delete`).
+ */
+export async function deleteManualSession(
+  db: PrismaClient,
+  centerId: string,
+  sessionId: string,
+  options: { actorUserId?: string | null; now?: Date } = {},
+): Promise<DeleteManualSessionResult> {
+  return db.$transaction(async (tx): Promise<DeleteManualSessionResult> => {
+    await tx.$queryRaw`SELECT "id" FROM "Session" WHERE "id" = ${sessionId} AND "centerId" = ${centerId} FOR UPDATE`;
+    const row = await tx.session.findFirst({ where: scopedWhere(centerId, { id: sessionId }), select: DELETE_STATE_SELECT });
+    if (!row) return { ok: false, error: "notFound" };
+    const { timeZone } = await centreScheduling(tx, centerId);
+    const blockers = manualSessionDeleteBlockers(row, options.now ?? new Date(), timeZone);
+    if (blockers.length > 0) return { ok: false, error: "sessionInUse", blockers };
+
+    const pristineWhere: Prisma.SessionWhereInput =
+      row.classGroupId === null
+        ? { ...UNTOUCHED, classGroupId: null }
+        : { ...NO_OVERRIDE, isManual: true };
+    const deleted = await tx.session.deleteMany({ where: scopedWhere(centerId, { id: sessionId, ...pristineWhere }) });
+    if (deleted.count === 0) return { ok: false, error: "sessionInUse", blockers: ["attendees"] };
+    await audit(tx, {
+      centerId,
+      actorUserId: options.actorUserId,
+      action: "session.delete",
+      entityType: "Session",
+      entityId: sessionId,
+      before: {
+        mode: row.classGroupId === null ? "oneOff" : "extra",
+        classGroupId: row.classGroupId,
+        title: row.title,
+        teacherId: row.teacherId,
+        roomId: row.roomId,
+        date: dateKey(row.date),
+        startTime: row.startTime,
+        endTime: row.endTime,
+      },
+    });
+    return { ok: true };
+  }, WRITE_TRANSACTION_OPTIONS);
 }

@@ -1,6 +1,10 @@
 import { CalendarClock, CalendarSearch, ClipboardCheck, Radio, Wallet } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import {
+  NewSessionDialog,
+  type NewSessionClassOption,
+} from "@/app/[locale]/(center)/sessions/new-session-dialog";
 import { SessionFilters } from "@/app/[locale]/(center)/sessions/session-filters";
 import { SessionRow, type SessionRowData } from "@/app/[locale]/(center)/sessions/session-row";
 import { Pagination } from "@/components/center/pagination";
@@ -16,20 +20,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import {
-  deriveSessionDisplayStatus,
-  sessionDisplayName,
-  sessionListWhere,
-} from "@/lib/db/sessions";
+import { deriveSessionDisplayStatus, sessionListWhere } from "@/lib/db/sessions";
+import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
-import { DEFAULT_TIMEZONE, resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
+import {
+  DEFAULT_TIMEZONE,
+  resolveSharedDateFilter,
+  startOfUtcDay,
+  zonedClock,
+} from "@/lib/scheduling";
 import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { sessionListFilterSchema } from "@/lib/validation/sessions";
@@ -135,6 +141,7 @@ export default async function SessionsPage({
   const tableRows: SessionRowData[] = pageEntries.map(({ row, displayStatus }) => ({
     sessionId: row.id,
     className: sessionDisplayName(locale, row),
+    kind: sessionKind(row),
     teacherName: teacherByUserId.get(row.teacherId) ?? tCommon("none"),
     roomName: row.room?.name ?? null,
     date: row.date,
@@ -142,7 +149,8 @@ export default async function SessionsPage({
     endTime: row.endTime,
     price: row.priceSnapshot,
     attendeeCount: row._count.attendees,
-    enrolledCount: row.classGroup._count.enrollments,
+    // A one-time session (R5) has no class, so nobody is enrolled in it.
+    enrolledCount: row.classGroup?._count.enrollments ?? 0,
     displayStatus,
   }));
 
@@ -168,6 +176,40 @@ export default async function SessionsPage({
         .join(" · ") || t("columns.untitled"),
   }));
 
+  // R5 — "New session" (an extra session on a class, or a one-time one).
+  // Only loaded for who may create one; the action re-checks regardless.
+  const canCreate = ctxCan(ctx, "session.manage");
+  const newSession = canCreate
+    ? await Promise.all([
+        db.classGroups.listForNewSession(),
+        db.subjects.list({ active: true }),
+        db.grades.list({ active: true }),
+        db.rooms.list(),
+        db.roomLinks.list(),
+      ]).then(([activeClasses, activeSubjects, activeGrades, rooms, roomLinks]) => ({
+        classes: activeClasses.map((classGroup): NewSessionClassOption => {
+          const label = sessionDisplayName(locale, { classGroup });
+          return {
+            id: classGroup.id,
+            label: label === "—" ? t("columns.untitled") : label,
+            teacherId: classGroup.teacherId,
+            roomId: classGroup.roomId ?? "",
+            extraRoomIds: classGroup.roomId ? classGroup.extraRooms.map((extra) => extra.roomId) : [],
+            slots: classGroup.schedules,
+          };
+        }),
+        subjects: activeSubjects.map((subject) => ({ value: subject.id, label: subject.name })),
+        grades: activeGrades.map((grade) => ({ value: grade.id, label: grade.name })),
+        rooms: rooms.map((room) => ({
+          id: room.id,
+          name: room.name,
+          capacity: room.capacity,
+          active: room.active,
+        })),
+        roomLinks,
+      }))
+    : null;
+
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();
     if (filters.range !== "day") params.set("range", filters.range);
@@ -185,7 +227,28 @@ export default async function SessionsPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} description={t("subtitle", { count: total })} />
+      <PageHeader
+        title={t("title")}
+        description={t("subtitle", { count: total })}
+        action={
+          newSession ? (
+            <NewSessionDialog
+              classes={newSession.classes}
+              teachers={teacherOptions}
+              subjects={newSession.subjects}
+              grades={newSession.grades}
+              rooms={newSession.rooms}
+              roomLinks={newSession.roomLinks}
+              defaultCut={{
+                centerShareType: ctx.settings?.defaultShareType ?? "PERCENTAGE",
+                centerShareValue: ctx.settings?.defaultShareValue ?? 15,
+              }}
+              todayIso={zonedClock(now, timeZone).dayKey}
+              noneLabel={tCommon("none")}
+            />
+          ) : undefined
+        }
+      />
 
       <StatGrid count={4}>
         <StatCard

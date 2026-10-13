@@ -6,9 +6,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
-import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
+import { sessionDisplayName } from "@/lib/session-label";
 
 const STATUS_BADGE = {
   DRAFT: "neutral",
@@ -72,16 +72,7 @@ export default async function TeacherSettlementsPage() {
                   {settlement.session
                     ? t("scopeSession", {
                         date: formatDate(settlement.session.date, locale),
-                        class: [
-                          settlement.session.classGroup.subject
-                            ? catalogLabelWithSelection(locale, settlement.session.classGroup.subject)
-                            : null,
-                          settlement.session.classGroup.grade
-                            ? catalogLabelWithSelection(locale, settlement.session.classGroup.grade)
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · "),
+                        class: sessionDisplayName(locale, settlement.session),
                       })
                     : t("scopePeriod", {
                         from: formatDate(settlement.periodFrom!, locale),

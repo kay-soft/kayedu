@@ -147,13 +147,67 @@ function checkStatic() {
     backfillInApp.join(", "),
   );
 
+  // R5 Step 0 (decided): R4 and R5 delete *pristine* sessions on purpose
+  // (resync, deactivation, a holiday, a class that never ran, and R5's
+  // deleteManualSession), so "no delete path anywhere" became "session
+  // deletes exist only in lib/db/class-sessions.ts, and every one passes
+  // through the pristine predicate". A closed session is still never deletable.
   const sessionDeletes = [...appFiles, ...libFiles].filter((file) =>
     /\.session\.(delete|deleteMany)\(|sessions\.(remove|delete)\b/.test(readFileSync(file, "utf8")),
   );
+  const isEngineFile = (file: string) => file.replace(/\\/g, "/").endsWith("lib/db/class-sessions.ts");
+  const engine = readFileSync("lib/db/class-sessions.ts", "utf8");
+  const deleteCalls = [...engine.matchAll(/\.session\.(delete|deleteMany)\(/g)].map((match) => {
+    let depth = 1;
+    let i = (match.index ?? 0) + match[0].length;
+    const start = i;
+    for (; i < engine.length && depth > 0; i++) {
+      if (engine[i] === "(") depth += 1;
+      else if (engine[i] === ")") depth -= 1;
+    }
+    return engine.slice(start, i - 1);
+  });
+  const constantBody = (name: string) => {
+    const at = engine.indexOf(`const ${name} = {`);
+    return at === -1 ? "" : engine.slice(at, engine.indexOf("} satisfies", at));
+  };
+  const untouched = constantBody("UNTOUCHED");
+  const noOverride = constantBody("NO_OVERRIDE");
+  const stillPristine = constantBody("STILL_PRISTINE");
+  const pristineWhereAt = engine.indexOf("const pristineWhere");
+  const pristineWhere =
+    pristineWhereAt === -1 ? "" : engine.slice(pristineWhereAt, engine.indexOf(";", pristineWhereAt));
+  const predicateComplete =
+    [
+      "status: SCHEDULED",
+      "closedAt: null",
+      "attendees: { none: {} }",
+      "payments: { none: {} }",
+      "settlements: { none: {} }",
+      "ratings: { none: {} }",
+      "rescheduledToId: null",
+      "rescheduledFrom: { is: null }",
+    ].every((clause) => untouched.includes(clause)) &&
+    noOverride.includes("...UNTOUCHED") &&
+    noOverride.includes("centerShareType: null") &&
+    noOverride.includes("centerShareValue: null") &&
+    stillPristine.includes("...NO_OVERRIDE") &&
+    // deleteManualSession: a class session needs NO_OVERRIDE; a one-time
+    // session (no class) needs UNTOUCHED — its cut is its own, not an
+    // override of a class's, so there is no override to be free of.
+    /\.\.\.UNTOUCHED,\s*classGroupId: null/.test(pristineWhere) &&
+    pristineWhere.includes("...NO_OVERRIDE");
   check(
-    "No session delete path exists anywhere in app/ or lib/",
-    sessionDeletes.length === 0,
+    "Session deletes exist only in lib/db/class-sessions.ts (the engine and R5's deleteManualSession)",
+    sessionDeletes.length === 1 && isEngineFile(sessionDeletes[0]),
     sessionDeletes.join(", "),
+  );
+  check(
+    "Every session delete passes the pristine predicate: not closed, no attendees/payments/settlement/ratings, no share override, no reschedule link",
+    deleteCalls.length > 0 &&
+      deleteCalls.every((args) => /\.\.\.(STILL_PRISTINE|NO_OVERRIDE)\b|\bpristineWhere\b/.test(args)) &&
+      predicateComplete,
+    deleteCalls.join(" | "),
   );
 
   const closedAtWriters = [...appFiles, ...libFiles].filter((file) => {

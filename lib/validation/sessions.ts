@@ -240,6 +240,102 @@ export const sessionRoomsSchema = z.object({
   confirmConflicts: confirmConflictsField,
 });
 
+// ── New session: an extra session on a class, or a one-time one (R5) ──────
+
+/** A manual session needs a primary room in both modes (R3 room set). */
+const requiredSessionRoom = z.string().trim().min(1, "roomRequired").max(64, "notFound");
+
+const newSessionSlotFields = {
+  ...base,
+  teacherId: z.string().trim().min(1, "teacherRequired").max(64, "notFound"),
+  roomId: requiredSessionRoom,
+  extraRoomIds: extraRoomIdsField,
+  // Shape only: "today or later in the centre's timezone" needs the centre's
+  // clock and is decided by the data layer (lib/db/class-sessions.ts), so a
+  // direct call is refused exactly like the form.
+  date: sessionDate,
+  startTime: sessionTime,
+  endTime: sessionTime,
+  confirmConflicts: confirmConflictsField,
+};
+
+const timeOrder = <T extends { startTime: string; endTime: string }>(value: T) =>
+  value.startTime < value.endTime;
+
+/** "For a class" — price and cut are the class's, so neither is posted. */
+export const newClassSessionSchema = z
+  .object({
+    ...newSessionSlotFields,
+    mode: z.literal("class"),
+    classGroupId: z.string().trim().min(1, "classRequired").max(64, "notFound"),
+  })
+  .refine(timeOrder, { path: ["endTime"], message: "invalidTimeRange" });
+
+/**
+ * "One-time session" — no class: its own title (≤ 80), optional catalog
+ * subject/grade, price (EGP → piastres through lib/money.ts's parser) and
+ * centre cut, resolved exactly like the class form's (a whole percent 0–100,
+ * or a FIXED EGP amount the centre takes).
+ */
+export const newOneOffSessionSchema = z
+  .object({
+    ...newSessionSlotFields,
+    mode: z.literal("oneOff"),
+    title: z.string().trim().min(1, "titleRequired").max(80, "tooLong"),
+    subjectId: optionalRef,
+    gradeId: optionalRef,
+    price: z.string().trim().min(1, "priceRequired"),
+    centerShareType: z.enum(["FIXED", "PERCENTAGE"], { error: "invalidShareType" }),
+    shareValue: z.string().trim().min(1, "required"),
+  })
+  .refine(timeOrder, { path: ["endTime"], message: "invalidTimeRange" })
+  .transform((value, ctx) => {
+    const price = parseEgpToPiastres(value.price);
+    if (price === null) {
+      ctx.addIssue({ code: "custom", path: ["price"], message: "invalidAmount" });
+      return z.NEVER;
+    }
+    let centerShareValue: number;
+    if (value.centerShareType === "PERCENTAGE") {
+      const percent = Number(value.shareValue);
+      if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
+        ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidPercent" });
+        return z.NEVER;
+      }
+      centerShareValue = percent;
+    } else {
+      const piastres = parseEgpToPiastres(value.shareValue);
+      if (piastres === null || piastres > MAX_PIASTRES) {
+        ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidAmount" });
+        return z.NEVER;
+      }
+      centerShareValue = piastres;
+    }
+    return {
+      locale: value.locale,
+      mode: value.mode,
+      title: value.title,
+      subjectId: value.subjectId,
+      gradeId: value.gradeId,
+      teacherId: value.teacherId,
+      roomId: value.roomId,
+      extraRoomIds: value.extraRoomIds,
+      date: value.date,
+      startTime: value.startTime,
+      endTime: value.endTime,
+      price,
+      centerShareType: value.centerShareType,
+      centerShareValue,
+      confirmConflicts: value.confirmConflicts,
+    };
+  });
+
+/** Delete a pristine, future manual or one-time session (R5). */
+export const deleteSessionSchema = z.object({
+  ...base,
+  sessionId: recordId,
+});
+
 // ── Per-session centre-cut override (M13, spec §5.1 "Center cut") ─────────
 
 /**

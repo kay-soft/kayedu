@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
-import { previewClassSessions } from "@/lib/db/class-sessions";
+import { previewClassSessions, previewManualSession } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
 import { resolveRoomSet } from "@/lib/db/room-sets";
 import { describeConflicts, loadSessionOccupancy } from "@/lib/db/slot-conflicts";
@@ -60,6 +60,19 @@ const inputSchema = z.discriminatedUnion("kind", [
     startDate: day.optional(),
     endDate: day.optional(),
   }),
+  // R5 — a new manual session ("New session" on the Sessions tab): an extra
+  // session on a class (`classGroupId` set) or a one-time one (null).
+  z.object({
+    kind: z.literal("newSession"),
+    locale: z.string().max(5),
+    classGroupId: id.nullable(),
+    teacherId: id,
+    roomId: id,
+    extraRoomIds: roomIds,
+    date: day,
+    startTime: time,
+    endTime: time,
+  }),
   // One session's reschedule target and/or room set.
   z.object({
     kind: z.literal("session"),
@@ -78,6 +91,8 @@ export type SlotConflictCheckInput = z.input<typeof inputSchema>;
 export type SlotConflictCheckResult = {
   conflicts: SlotConflictInfo[];
   policy: "WARN" | "DENY";
+  /** R5 (`newSession` only): the date is on the centre's holiday calendar — a notice, never a block. */
+  holiday?: boolean;
 };
 
 const NONE: SlotConflictCheckResult = { conflicts: [], policy: "WARN" };
@@ -90,7 +105,7 @@ export async function checkSlotConflictsAction(
   const value = parsed.data;
 
   const ctx = await getTenantContext("center");
-  const permission = value.kind === "session" ? "session.manage" : "class.manage";
+  const permission = value.kind === "session" || value.kind === "newSession" ? "session.manage" : "class.manage";
   if (!ctxCan(ctx, permission)) return NONE;
 
   const centerId = ctx.center.id;
@@ -98,7 +113,28 @@ export async function checkSlotConflictsAction(
   const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
   let conflicts: ScheduleConflict[] = [];
 
-  if (value.kind === "schedule") {
+  if (value.kind === "newSession") {
+    if (!isValidTimeRange(value.startTime, value.endTime)) return { ...NONE, policy };
+    const preview = await previewManualSession(
+      prisma,
+      centerId,
+      {
+        classGroupId: value.classGroupId,
+        teacherId: value.teacherId,
+        roomId: value.roomId,
+        extraRoomIds: value.extraRoomIds,
+        date: dayMarker(value.date),
+        startTime: value.startTime,
+        endTime: value.endTime,
+      },
+      { locale },
+    );
+    return {
+      conflicts: await describeConflicts(prisma, centerId, preview.conflicts.slice(0, MAX_SHOWN_CONFLICTS)),
+      policy,
+      holiday: preview.holiday,
+    };
+  } else if (value.kind === "schedule") {
     if (!isValidTimeRange(value.startTime, value.endTime)) return { ...NONE, policy };
     conflicts = (
       await previewClassSessions(
@@ -149,6 +185,7 @@ export async function checkSlotConflictsAction(
     conflicts = findSessionConflicts(
       {
         classGroupId: session.classGroupId,
+        excludeSessionId: value.sessionId,
         teacherId: session.teacherId,
         roomId: value.roomId,
         roomIds: effectiveRoomIds(value.roomId, value.extraRoomIds),

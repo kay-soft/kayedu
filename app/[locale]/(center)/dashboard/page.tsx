@@ -21,7 +21,8 @@ import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { attendanceStatusCounts, revenueTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
+import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
+import { sessionDisplayName } from "@/lib/session-label";
 import { formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
@@ -191,8 +192,9 @@ export default async function CenterDashboardPage() {
                   </span>
                   <span className="shrink-0 text-sm tabular-nums text-text-secondary">
                     {formatNumber(row._count.attendees, locale)}
-                    {row.classGroup._count.enrollments > 0
-                      ? ` / ${formatNumber(row.classGroup._count.enrollments, locale)}`
+                    {/* A one-time session (R5) has no class and no enrolled count. */}
+                    {(row.classGroup?._count.enrollments ?? 0) > 0
+                      ? ` / ${formatNumber(row.classGroup?._count.enrollments ?? 0, locale)}`
                       : ""}
                   </span>
                   <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>

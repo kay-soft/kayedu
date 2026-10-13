@@ -10,6 +10,12 @@ import {
   SessionClosedError,
 } from "@/lib/db/attendance";
 import { writeAuditLog } from "@/lib/db/audit";
+import {
+  createManualSession,
+  createOneOffSession,
+  deleteManualSession,
+  type CreateManualSessionResult,
+} from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
 import {
   createPerson,
@@ -33,6 +39,7 @@ import { describeConflicts } from "@/lib/db/slot-conflicts";
 import { claimStudentCode, studentSearchWhere } from "@/lib/db/students";
 import { scopedData } from "@/lib/db/tenant-scope";
 import { fullName, localName } from "@/lib/identity";
+import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { fieldErrorsFrom } from "@/lib/validation/form";
@@ -41,7 +48,10 @@ import {
   addNewAttendeeSchema,
   cancelSessionSchema,
   checkInRosterSchema,
+  deleteSessionSchema,
   endSessionSchema,
+  newClassSessionSchema,
+  newOneOffSessionSchema,
   recordPaymentSchema,
   refundPaymentSchema,
   rescheduleSessionSchema,
@@ -106,7 +116,8 @@ export async function searchAddAttendeeCandidatesAction(
   const session = await db.sessions.findDetailById(sessionId);
   if (!session) return [];
 
-  const enrollments = await db.enrollments.listForClass(session.classGroupId);
+  // A one-time session (R5) has no class, so nobody is enrolled in it.
+  const enrollments = session.classGroupId ? await db.enrollments.listForClass(session.classGroupId) : [];
   const rosterIds = new Set<string>([
     ...enrollments
       .filter((enrollment) => enrollment.status === "ACTIVE")
@@ -147,12 +158,16 @@ function revalidateReceptionDesk(locale: string): void {
   revalidatePath(`/${locale}${ROUTES.centerReception}`);
 }
 
-/** Active-enrollment lookup shared by every "add/mark" path below. */
+/**
+ * Active-enrollment lookup shared by every "add/mark" path below. A one-time
+ * session (R5, no class) has no enrolment to find: everyone is a drop-in.
+ */
 async function resolveEnrollment(
   db: ScopedDb,
-  classGroupId: string,
+  classGroupId: string | null,
   studentProfileId: string,
 ): Promise<{ enrollmentId: string | null; isDropIn: boolean }> {
+  if (!classGroupId) return { enrollmentId: null, isDropIn: true };
   const enrollment = await db.enrollments.findExisting(classGroupId, studentProfileId);
   const active = enrollment?.status === "ACTIVE";
   return { enrollmentId: active ? enrollment!.id : null, isDropIn: !active };
@@ -178,12 +193,13 @@ async function writeAttendance<T>(
 
 async function isBlockedFromSession(
   db: ScopedDb,
-  classGroupId: string,
+  classGroupId: string | null,
   teacherId: string,
   studentUserId: string,
 ): Promise<boolean> {
+  // A one-time session (R5) has no class block to check — the teacher's still applies.
   const [classBlocked, teacherBlocked] = await Promise.all([
-    db.studentBlocks.isBlocked("CLASS", classGroupId, studentUserId),
+    classGroupId ? db.studentBlocks.isBlocked("CLASS", classGroupId, studentUserId) : false,
     db.studentBlocks.isBlocked("TEACHER", teacherId, studentUserId),
   ]);
   return classBlocked || teacherBlocked;
@@ -898,7 +914,10 @@ export async function updateSessionShareOverrideAction(
   if (!before) return NOT_FOUND;
 
   const result = await updateSessionShareOverride(prisma, ctx.center.id, sessionId, override);
-  if (!result.ok) return result.error === "sessionClosed" ? { error: "sessionClosed" } : NOT_FOUND;
+  if (!result.ok) {
+    if (result.error === "sessionClosed" || result.error === "cutRequired") return { error: result.error };
+    return NOT_FOUND;
+  }
 
   await writeAuditLog({
     centerId: ctx.center.id,
@@ -914,3 +933,147 @@ export async function updateSessionShareOverrideAction(
   return { status: "shareUpdated" };
 }
 
+// ── New session: an extra session on a class, or a one-time one (R5) ──────
+
+/** Which form field a manual-session refusal belongs to. */
+const NEW_SESSION_FIELD_ERRORS: Record<string, string> = {
+  pastDate: "date",
+  invalidTimeRange: "endTime",
+  classNotFound: "classGroupId",
+  teacherNotFound: "teacherId",
+  teacherRequired: "teacherId",
+  subjectNotFound: "subjectId",
+  gradeNotFound: "gradeId",
+  invalidTitle: "title",
+  titleRequired: "title",
+  invalidPrice: "price",
+  priceRequired: "price",
+  invalidCut: "shareValue",
+  cutRequired: "shareValue",
+};
+
+/**
+ * "New session" on the Sessions tab (R5) — `session.manage`, the same matrix
+ * action that gates reschedule and a session's rooms; no new role check.
+ * Two modes (the dialog's segmented control posts `mode`): **for a class**
+ * (`lib/db/class-sessions.ts`'s `createManualSession` — price and cut stay
+ * the class's) or **one-time** (`createOneOffSession` — its own title,
+ * price and cut). Both refuse a past date by the centre's clock, take the
+ * R3 confirmation contract (the refusal carries the conflict list), and
+ * write their own `session.create` audit row in the same transaction.
+ */
+export async function createSessionAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
+
+  const raw = Object.fromEntries(formData);
+  const centerId = ctx.center.id;
+  const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
+  let locale: string;
+  let result: CreateManualSessionResult;
+
+  if (raw.mode === "oneOff") {
+    const parsed = newOneOffSessionSchema.safeParse(raw);
+    if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+    const value = parsed.data;
+    locale = value.locale;
+    result = await createOneOffSession(
+      prisma,
+      centerId,
+      {
+        title: value.title,
+        subjectId: value.subjectId,
+        gradeId: value.gradeId,
+        teacherId: value.teacherId,
+        roomId: value.roomId,
+        extraRoomIds: value.extraRoomIds,
+        date: value.date,
+        startTime: value.startTime,
+        endTime: value.endTime,
+        price: value.price,
+        centerShareType: value.centerShareType,
+        centerShareValue: value.centerShareValue,
+      },
+      { confirmConflicts: value.confirmConflicts, actorUserId: ctx.user.id, locale },
+    );
+  } else {
+    const parsed = newClassSessionSchema.safeParse(raw);
+    if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+    const value = parsed.data;
+    locale = value.locale;
+    result = await createManualSession(
+      prisma,
+      centerId,
+      {
+        classGroupId: value.classGroupId,
+        teacherId: value.teacherId,
+        roomId: value.roomId,
+        extraRoomIds: value.extraRoomIds,
+        date: value.date,
+        startTime: value.startTime,
+        endTime: value.endTime,
+      },
+      { confirmConflicts: value.confirmConflicts, actorUserId: ctx.user.id, locale },
+    );
+  }
+
+  if (!result.ok) {
+    if ("conflicts" in result) {
+      return {
+        error: result.error,
+        conflicts: await shownConflicts(ctx, result.conflicts),
+        conflictPolicy: policy,
+      };
+    }
+    if (ROOM_SET_ERRORS.has(result.error)) return roomSetFieldErrors(result.error);
+    const field = NEW_SESSION_FIELD_ERRORS[result.error];
+    if (field) return { fieldErrors: { [field]: result.error } };
+    return { error: result.error };
+  }
+
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  revalidatePath(`/${locale}${ROUTES.centerDashboard}`);
+  return {
+    status: "created",
+    newSessionId: result.sessionId,
+    conflicts: await shownConflicts(ctx, result.conflicts),
+    conflictPolicy: policy,
+  };
+}
+
+/**
+ * Deletes a manual or one-time session (R5) — only one that has not started
+ * and has nothing on it (`deleteManualSession` re-checks both under a row
+ * lock and refuses by direct call otherwise; a closed session never
+ * qualifies). Audited by the data layer as `session.delete`. The control
+ * lives on the session's own page, so success leaves for the list (the M18
+ * delete-redirect rule) rather than re-rendering a page that no longer exists.
+ */
+export async function deleteSessionAction(
+  _state: SessionActionState,
+  formData: FormData,
+): Promise<SessionActionState> {
+  const { ctx } = await sessionScope();
+  if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
+
+  const parsed = deleteSessionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+  const { locale, sessionId } = parsed.data;
+
+  const result = await deleteManualSession(prisma, ctx.center.id, sessionId, {
+    actorUserId: ctx.user.id,
+  });
+  if (!result.ok) {
+    revalidateSessionDetail(locale, sessionId);
+    return { error: result.error };
+  }
+
+  revalidateSessionList(locale);
+  revalidateReceptionDesk(locale);
+  redirect({ href: ROUTES.centerSessions, locale });
+  return { status: "deleted" };
+}

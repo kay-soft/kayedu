@@ -48,7 +48,8 @@ export type RecordPaymentResult =
         | "sessionCancelled"
         | "sessionRescheduled"
         | "sessionClosed"
-        | "invalidMethod";
+        | "invalidMethod"
+        | "missingCut";
     };
 
 /**
@@ -82,6 +83,11 @@ export type RecordPaymentResult =
  *   auto-closed by this call first (lib/db/session-lifecycle.ts) and the
  *   payment is refused as `sessionClosed` — returned, not thrown, so the
  *   caller's transaction still commits the close.
+ * - A **one-time session** (R5, no class) has no class cut to fall back to:
+ *   its own `centerShareType` + `centerShareValue` are the cut, frozen here
+ *   exactly like an override would be. If either is missing the payment is
+ *   refused (`missingCut`) — money is never guessed at (CLAUDE.md rule 2).
+ *   The split itself is still `lib/money.ts`'s, the only place it lives.
  * - At most one *active* (non-voided) payment exists per attendee at a time.
  *   `Payment.sessionAttendeeId` is deliberately not database-unique (see the
  *   schema comment) so a void-then-recreate leaves the voided row in place
@@ -134,10 +140,17 @@ export async function recordPayment(
   const amount = session.priceSnapshot;
   // A session's own override (M13) wins when set; otherwise the class's
   // current cut. Both are read fresh, right now — this is the instant the
-  // split is decided and frozen (CLAUDE.md rule 2).
-  const centerShareType = session.centerShareType ?? session.classCenterShareType;
-  const centerShareValue = session.centerShareValue ?? session.classCenterShareValue;
-  const split = splitShare(amount, centerShareType, centerShareValue);
+  // split is decided and frozen (CLAUDE.md rule 2). A one-time session (R5)
+  // has no class: its own two fields ARE the cut, and both must be present.
+  const cut =
+    session.classGroupId === null
+      ? { type: session.centerShareType, value: session.centerShareValue }
+      : {
+          type: session.centerShareType ?? session.classCenterShareType,
+          value: session.centerShareValue ?? session.classCenterShareValue,
+        };
+  if (cut.type === null || cut.value === null) return { ok: false, error: "missingCut" };
+  const split = splitShare(amount, cut.type, cut.value);
 
   const payment = await tx.payment.create({
     data: {
