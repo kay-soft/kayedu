@@ -7,7 +7,7 @@ import type {
 } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import * as catalog from "@/lib/db/catalog";
-import { catalogLabel } from "@/lib/catalog";
+import { CATALOG_OVERRIDE_SELECT, catalogLabel } from "@/lib/catalog";
 import type { TenantContext } from "@/lib/auth/tenant";
 import {
   TEACHER_LIST_SELECT,
@@ -627,26 +627,33 @@ export function scoped(ctx: TenantContext) {
      * this centre's own `CenterCatalogSelection` picks joined with the
      * global catalog entry, resolved into the same flat `{ id, active,
      * name, ... }` shape every existing consumer already expects (`name` is
-     * the centre's own display-name override if set, else the catalog
-     * entry's bilingual name in the account's locale — `lib/catalog.ts`'s
-     * `catalogLabel`). `findById` returning non-null **is** the tenant
+     * resolved by `lib/catalog.ts`'s `catalogLabel`: the centre's override in
+     * the account's language if it set one, else the catalog entry's own name
+     * in that language). `findById` returning non-null **is** the tenant
      * boundary: a catalog id this centre never selected resolves to
      * nothing, exactly like an id from another centre used to. Selecting,
-     * customizing, deselecting and suggesting go through `lib/db/catalog.ts`
-     * directly (`app/[locale]/(center)/settings/actions.ts`), since they are
-     * a materially different write shape than "author a new row."
+     * renaming and deselecting go through `lib/db/catalog.ts` directly
+     * (`app/[locale]/(center)/settings/actions.ts`), since they are a
+     * materially different write shape than "author a new row."
+     *
+     * **`list({ active: true })` is the picker list (R8):** a pick the centre
+     * switched off *and* an entry the platform deactivated are both left out.
+     * `list()` / `findById` still return them — that is what lets a class, a
+     * session or a student that already uses a deactivated entry keep
+     * resolving its name; each row carries `catalogActive` for callers that
+     * need to tell the two apart.
      */
     educationSystems: {
       list: async (opts?: { active?: boolean }) => {
         const rows = await catalog.centerEducationSystems(prisma, centerId);
         return rows
-          .filter((row) => (opts?.active ? row.active : true))
-          .map((row) => ({ ...row, name: catalogLabel(locale, row, row.displayName) }));
+          .filter((row) => (opts?.active ? row.active && row.catalogActive : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row) }));
       },
 
       findById: async (id: string) => {
         const row = await catalog.centerEducationSystemById(prisma, centerId, id);
-        return row ? { ...row, name: catalogLabel(locale, row, row.displayName) } : null;
+        return row ? { ...row, name: catalogLabel(locale, row, row) } : null;
       },
     },
 
@@ -654,13 +661,13 @@ export function scoped(ctx: TenantContext) {
       list: async (opts?: { active?: boolean }) => {
         const rows = await catalog.centerGrades(prisma, centerId);
         return rows
-          .filter((row) => (opts?.active ? row.active : true))
-          .map((row) => ({ ...row, name: catalogLabel(locale, row, row.displayName) }));
+          .filter((row) => (opts?.active ? row.active && row.catalogActive : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row) }));
       },
 
       findById: async (id: string) => {
         const row = await catalog.centerGradeById(prisma, centerId, id);
-        return row ? { ...row, name: catalogLabel(locale, row, row.displayName) } : null;
+        return row ? { ...row, name: catalogLabel(locale, row, row) } : null;
       },
     },
 
@@ -668,24 +675,14 @@ export function scoped(ctx: TenantContext) {
       list: async (opts?: { active?: boolean }) => {
         const rows = await catalog.centerSubjects(prisma, centerId);
         return rows
-          .filter((row) => (opts?.active ? row.active : true))
-          .map((row) => ({ ...row, name: catalogLabel(locale, row, row.displayName) }));
+          .filter((row) => (opts?.active ? row.active && row.catalogActive : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row) }));
       },
 
       findById: async (id: string) => {
         const row = await catalog.centerSubjectById(prisma, centerId, id);
-        return row ? { ...row, name: catalogLabel(locale, row, row.displayName) } : null;
+        return row ? { ...row, name: catalogLabel(locale, row, row) } : null;
       },
-    },
-
-    /** A centre's own proposed catalog additions/corrections (M13). */
-    catalogSuggestions: {
-      list: () => catalog.listCenterCatalogSuggestions(prisma, centerId),
-
-      create: (
-        createdBy: string,
-        input: Parameters<typeof catalog.createCatalogSuggestion>[3],
-      ) => catalog.createCatalogSuggestion(prisma, centerId, createdBy, input),
     },
 
     /**
@@ -753,14 +750,14 @@ export function scoped(ctx: TenantContext) {
               select: {
                 nameAr: true,
                 nameEn: true,
-                selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+                selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
               },
             },
             grade: {
               select: {
                 nameAr: true,
                 nameEn: true,
-                selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+                selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
               },
             },
           },

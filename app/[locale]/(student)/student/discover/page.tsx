@@ -26,7 +26,7 @@ import { nameInitial } from "@/lib/initials";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { subjectAccentColor } from "@/lib/subject-accent";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -140,8 +140,8 @@ export default async function StudentDiscoverPage({
         centerName: center.name,
         centerLogoUrl: center.logoUrl,
         classGroupId: row.id,
-        subjectName: row.subject ? catalogLabel(locale, row.subject) : null,
-        gradeName: row.grade ? catalogLabel(locale, row.grade) : null,
+        subjectName: catalogLabelWithSelection(locale, row.subject),
+        gradeName: catalogLabelWithSelection(locale, row.grade),
         teacherName: teacherNames.get(row.teacherId) ?? "—",
         teacherRating: teacherRatings.get(row.teacherId) ?? null,
         roomName: classRoomSetFrom(row).rooms.map((room) => room.name).join(" + ") || null,

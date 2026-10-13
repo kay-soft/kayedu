@@ -7,7 +7,6 @@ import { useLocale, useTranslations } from "next-intl";
 import {
   deselectCatalogEntryAction,
   selectCatalogEntryAction,
-  suggestCatalogEntryAction,
   toggleCatalogSelectionAction,
   updateCatalogSelectionAction,
 } from "@/app/[locale]/(center)/settings/actions";
@@ -26,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
+import { CATALOG_NAME_MAX } from "@/lib/catalog";
 import { piastresToInputValue } from "@/lib/money";
 import { EmptyState } from "@/components/shared/empty-state";
 
@@ -34,9 +34,20 @@ export type CatalogEntryKind = "EDUCATION_SYSTEM" | "GRADE" | "SUBJECT";
 export type CatalogSelectionItem = {
   selectionId: string;
   catalogId: string;
+  /** What the centre sees in this language: its own rename if it set one, else the catalog name (`catalogLabel`). */
   name: string;
-  displayName: string | null;
+  /** The catalog's own name in this language, shown beside a rename so staff see what it overrides. */
+  canonicalName: string;
+  /** The catalog's names in both languages: the placeholders of the two rename fields. */
+  nameAr: string;
+  nameEn: string;
+  /** The centre's own optional renames, one per language. */
+  displayNameAr: string | null;
+  displayNameEn: string | null;
+  /** The centre's own switch for this pick. */
   active: boolean;
+  /** False once the platform has deactivated the entry: it keeps resolving in history but cannot be picked again. */
+  catalogActive: boolean;
   /** Piastres — only meaningful for kind EDUCATION_SYSTEM. */
   basePrice?: number;
   /** e.g. the parent education system's name, for a grade row. */
@@ -47,208 +58,105 @@ export type CatalogPickOption = { value: string; label: string };
 
 /**
  * One academic-catalog section (Education Systems / Grades / Subjects, M13)
- * on `/settings/catalog`: this centre's own picks (rename-for-itself + price,
- * deactivate, deselect), a picker for anything in the global catalog not yet
- * selected, and a form to suggest something missing or wrong. Nothing here
- * ever writes to the canonical catalog row — only to this centre's own
- * `CenterCatalogSelection`/`CatalogSuggestion` rows.
+ * on `/settings/catalog`: this centre's own picks (rename-for-itself in both
+ * languages + price, deactivate, deselect) and a picker for anything active in
+ * the global catalog not yet selected. Nothing here ever writes to the
+ * canonical catalog row, only to this centre's own `CenterCatalogSelection`
+ * rows. There is no "suggest" control (R8): a centre that needs an entry the
+ * catalog lacks contacts the platform, who adds it.
  */
 export function CatalogSection({
   kind,
   hasPricing,
   items,
   pickOptions,
-  parentOptions,
   labels,
 }: {
   kind: CatalogEntryKind;
   hasPricing: boolean;
   items: CatalogSelectionItem[];
   pickOptions: CatalogPickOption[];
-  /** Parent picker for a NEW suggestion — grades pick a system, subjects pick a grade. */
-  parentOptions: CatalogPickOption[];
   labels: {
     title: string;
     description: string;
     pickTitle: string;
     pickPlaceholder: string;
     empty: string;
-    suggestTitle: string;
-    suggestDescription: string;
   };
 }) {
   const t = useTranslations("Settings.catalog");
-  const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("Settings.errors");
   const locale = useLocale();
 
   const [pickState, pickFormAction] = useActionState(selectCatalogEntryAction, IDLE_ACTION_STATE);
-  const [suggestState, suggestFormAction] = useActionState(
-    suggestCatalogEntryAction,
-    IDLE_ACTION_STATE,
-  );
-  const [correcting, setCorrecting] = useState(false);
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>{labels.title}</CardTitle>
-          <CardDescription>{labels.description}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {pickOptions.length > 0 ? (
-            <form
-              key={`pick-${items.length}`}
-              action={pickFormAction}
-              className="flex flex-col gap-3 rounded-xl border border-border p-3 sm:flex-row sm:items-end sm:gap-3"
-            >
-              <input type="hidden" name="locale" value={locale} />
-              <input type="hidden" name="kind" value={kind} />
-
-              <Field id={`${kind}-pick`} label={labels.pickTitle} className="flex-1">
-                <Select id={`${kind}-pick`} name="catalogId" required defaultValue="">
-                  <option value="" disabled>
-                    {labels.pickPlaceholder}
-                  </option>
-                  {pickOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
-              {hasPricing ? (
-                <Field id={`${kind}-pick-price`} label={t("fields.basePrice")} className="sm:w-40">
-                  <Input
-                    id={`${kind}-pick-price`}
-                    name="basePrice"
-                    type="number"
-                    dir="ltr"
-                    inputMode="decimal"
-                    min={0}
-                    step="0.01"
-                    defaultValue="0.00"
-                  />
-                </Field>
-              ) : null}
-
-              <SubmitButton className="sm:w-auto">
-                <Plus className="size-4" />
-                {t("select")}
-              </SubmitButton>
-            </form>
-          ) : (
-            <FormMessage tone="info">{t("nothingLeftToPick")}</FormMessage>
-          )}
-          {pickState.error ? <FormMessage>{tErrors(pickState.error)}</FormMessage> : null}
-
-          {items.length === 0 ? (
-            <EmptyState
-              compact
-              icon={<Inbox />}
-              title={labels.empty}
-              description={tCommon("emptyHint")}
-            />
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {items.map((item) => (
-                <CatalogRow key={item.selectionId} hasPricing={hasPricing} item={item} />
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{labels.suggestTitle}</CardTitle>
-          <CardDescription>{labels.suggestDescription}</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <Card>
+      <CardHeader>
+        <CardTitle>{labels.title}</CardTitle>
+        <CardDescription>{labels.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {pickOptions.length > 0 ? (
           <form
-            key={`suggest-${correcting}`}
-            action={suggestFormAction}
-            className="flex flex-col gap-4"
-            noValidate
+            key={`pick-${items.length}`}
+            action={pickFormAction}
+            className="flex flex-col gap-3 rounded-xl border border-border p-3 sm:flex-row sm:items-end sm:gap-3"
           >
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="kind" value={kind} />
 
-            {suggestState.error ? <FormMessage>{tErrors(suggestState.error)}</FormMessage> : null}
-            {suggestState.status === "created" ? (
-              <FormMessage tone="success">{t("suggestionSubmitted")}</FormMessage>
-            ) : null}
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant={correcting ? "outline" : "default"}
-                className="h-9 px-3 text-xs"
-                onClick={() => setCorrecting(false)}
-              >
-                {t("suggestNew")}
-              </Button>
-              <Button
-                type="button"
-                variant={correcting ? "default" : "outline"}
-                className="h-9 px-3 text-xs"
-                onClick={() => setCorrecting(true)}
-                disabled={items.length === 0}
-              >
-                {t("suggestCorrection")}
-              </Button>
-            </div>
-
-            {correcting ? (
-              <Field id={`${kind}-suggest-target`} label={t("fields.existingEntry")}>
-                <Select id={`${kind}-suggest-target`} name="targetId" required defaultValue="">
-                  <option value="" disabled>
-                    {labels.pickPlaceholder}
+            <Field id={`${kind}-pick`} label={labels.pickTitle} className="flex-1">
+              <Select id={`${kind}-pick`} name="catalogId" required defaultValue="">
+                <option value="" disabled>
+                  {labels.pickPlaceholder}
+                </option>
+                {pickOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
-                  {items.map((item) => (
-                    <option key={item.catalogId} value={item.catalogId}>
-                      {item.displayName ?? item.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            ) : parentOptions.length > 0 ? (
-              <Field
-                id={`${kind}-suggest-parent`}
-                label={kind === "GRADE" ? t("fields.educationSystem") : t("fields.grade")}
-                optional
-              >
-                <Select id={`${kind}-suggest-parent`} name="parentId" defaultValue="">
-                  <option value="">{t("noParent")}</option>
-                  {parentOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            ) : null}
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field id={`${kind}-suggest-ar`} label={t("fields.nameAr")}>
-                <Input id={`${kind}-suggest-ar`} name="proposedNameAr" dir="rtl" required maxLength={120} />
-              </Field>
-              <Field id={`${kind}-suggest-en`} label={t("fields.nameEn")}>
-                <Input id={`${kind}-suggest-en`} name="proposedNameEn" dir="ltr" required maxLength={120} />
-              </Field>
-            </div>
-
-            <Field id={`${kind}-suggest-note`} label={t("fields.note")} optional>
-              <Input id={`${kind}-suggest-note`} name="note" maxLength={400} />
+                ))}
+              </Select>
             </Field>
 
-            <SubmitButton className="w-full sm:w-auto">{t("submitSuggestion")}</SubmitButton>
+            {hasPricing ? (
+              <Field id={`${kind}-pick-price`} label={t("fields.basePrice")} className="sm:w-40">
+                <Input
+                  id={`${kind}-pick-price`}
+                  name="basePrice"
+                  type="number"
+                  dir="ltr"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  defaultValue="0.00"
+                  placeholder="1500.00"
+                />
+              </Field>
+            ) : null}
+
+            <SubmitButton className="sm:w-auto">
+              <Plus className="size-4" />
+              {t("select")}
+            </SubmitButton>
           </form>
-        </CardContent>
-      </Card>
-    </div>
+        ) : (
+          <FormMessage tone="info">{t("nothingLeftToPick")}</FormMessage>
+        )}
+        {pickState.error ? <FormMessage>{tErrors(pickState.error)}</FormMessage> : null}
+        <p className="text-xs text-text-muted">{t("contactUs")}</p>
+
+        {items.length === 0 ? (
+          <EmptyState compact icon={<Inbox />} title={labels.empty} description={t("emptyHint")} />
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {items.map((item) => (
+              <CatalogRow key={item.selectionId} hasPricing={hasPricing} item={item} />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -291,19 +199,40 @@ function CatalogRow({
             </div>
           ) : null}
 
-          <Field
-            id={`edit-${item.selectionId}-name`}
-            label={t("fields.displayName")}
-            hint={t("fields.displayNameHint", { name: item.name })}
-            className="flex-1"
-          >
-            <Input
-              id={`edit-${item.selectionId}-name`}
-              name="displayName"
-              defaultValue={item.displayName ?? ""}
-              maxLength={80}
-            />
-          </Field>
+          <div className="grid gap-3 sm:basis-full sm:grid-cols-2">
+            <Field
+              id={`edit-${item.selectionId}-name-ar`}
+              label={t("fields.displayNameAr")}
+              hint={t("fields.displayNameHint")}
+              optional
+            >
+              <Input
+                id={`edit-${item.selectionId}-name-ar`}
+                name="displayNameAr"
+                dir="rtl"
+                lang="ar"
+                defaultValue={item.displayNameAr ?? ""}
+                placeholder={item.nameAr}
+                maxLength={CATALOG_NAME_MAX}
+              />
+            </Field>
+            <Field
+              id={`edit-${item.selectionId}-name-en`}
+              label={t("fields.displayNameEn")}
+              hint={t("fields.displayNameHint")}
+              optional
+            >
+              <Input
+                id={`edit-${item.selectionId}-name-en`}
+                name="displayNameEn"
+                dir="ltr"
+                lang="en"
+                defaultValue={item.displayNameEn ?? ""}
+                placeholder={item.nameEn}
+                maxLength={CATALOG_NAME_MAX}
+              />
+            </Field>
+          </div>
 
           {hasPricing ? (
             <Field id={`edit-${item.selectionId}-price`} label={t("fields.basePrice")} className="sm:w-40">
@@ -335,9 +264,9 @@ function CatalogRow({
     <li className="flex flex-col gap-2 rounded-xl border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-text-primary">
-          {item.displayName ?? item.name}
-          {item.displayName ? (
-            <span className="ms-2 text-xs font-normal text-text-muted">({item.name})</span>
+          {item.name}
+          {item.name !== item.canonicalName ? (
+            <span className="ms-2 text-xs font-normal text-text-muted">({item.canonicalName})</span>
           ) : null}
         </p>
         <p className="text-xs text-text-muted">
@@ -348,6 +277,7 @@ function CatalogRow({
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {item.catalogActive ? null : <Badge variant="warning">{t("retired")}</Badge>}
         <Badge variant={item.active ? "success" : "neutral"}>
           {item.active ? tCommon("active") : tCommon("inactive")}
         </Badge>

@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 // Relative imports on purpose — `npm run check:classes` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts).
-import { catalogLabel } from "../catalog.ts";
+import { CATALOG_OVERRIDE_SELECT, catalogLabel } from "../catalog.ts";
 import { ROOM_SET_SELECT } from "./room-sets.ts";
 
 /**
@@ -41,7 +41,7 @@ export function classListSelect(centerId: string) {
         id: true,
         nameAr: true,
         nameEn: true,
-        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
       },
     },
     grade: {
@@ -49,7 +49,7 @@ export function classListSelect(centerId: string) {
         id: true,
         nameAr: true,
         nameEn: true,
-        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
       },
     },
     // R3 — the class's room set (primary + extras) and the seats it adds up to.

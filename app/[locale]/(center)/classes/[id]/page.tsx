@@ -170,13 +170,20 @@ export default async function ClassDetailPage({
     endTime: schedule.endTime,
   }));
 
+  // A picker never offers an entry the platform has deactivated — except the
+  // one this class already has, which stays selectable (and labelled) so the
+  // class can be saved unchanged.
   const optionList = (
-    rows: { id: string; name: string; active: boolean }[],
+    rows: { id: string; name: string; active: boolean; catalogActive: boolean }[],
+    currentId: string | null,
   ) =>
-    rows.map((row) => ({
-      value: row.id,
-      label: row.active ? row.name : `${row.name} · ${tCommon("inactive")}`,
-    }));
+    rows
+      .filter((row) => row.catalogActive || row.id === currentId)
+      .map((row) => ({
+        value: row.id,
+        label:
+          row.active && row.catalogActive ? row.name : `${row.name} · ${tCommon("inactive")}`,
+      }));
 
   const teacherOptions = teachers.map((row) => ({
     value: row.userId,
@@ -235,9 +242,9 @@ export default async function ClassDetailPage({
                 endDate: dateKey(classGroup.endDate),
               }}
               teachers={teacherOptions}
-              subjects={optionList(subjects)}
-              grades={optionList(grades)}
-              educationSystems={optionList(educationSystems)}
+              subjects={optionList(subjects, classGroup.subjectId)}
+              grades={optionList(grades, classGroup.gradeId)}
+              educationSystems={optionList(educationSystems, classGroup.educationSystemId)}
               educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
               rooms={rooms.map((room) => ({
                 id: room.id,

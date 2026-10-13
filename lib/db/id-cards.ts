@@ -9,11 +9,11 @@ import {
   studentQrPayload,
 } from "@/lib/id-card";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
-import { catalogLabelWithSelection } from "@/lib/catalog";
+import { catalogLabelWithSelection, type CatalogNameOverride } from "@/lib/catalog";
 
 export type CardStudent = StudentProfile & {
   user: User;
-  grade: (CatalogGrade & { selections?: { displayName: string | null }[] }) | null;
+  grade: (CatalogGrade & { selections?: CatalogNameOverride[] }) | null;
 };
 
 /**

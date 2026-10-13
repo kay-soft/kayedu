@@ -1818,11 +1818,11 @@ export async function createOneOffSession(
       if (!cutValid) return { ok: false, error: "invalidCut" };
       if (input.subjectId) {
         const subject = await centerSubjectById(tx, centerId, input.subjectId);
-        if (!subject || !subject.active) return { ok: false, error: "subjectNotFound" };
+        if (!subject || !subject.active || !subject.catalogActive) return { ok: false, error: "subjectNotFound" };
       }
       if (input.gradeId) {
         const grade = await centerGradeById(tx, centerId, input.gradeId);
-        if (!grade || !grade.active) return { ok: false, error: "gradeNotFound" };
+        if (!grade || !grade.active || !grade.catalogActive) return { ok: false, error: "gradeNotFound" };
       }
       return {
         ok: true,

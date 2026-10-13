@@ -243,6 +243,12 @@ type BranchConfig = {
   }[];
   /** R5 — seed one one-time session and one extra session on a class. */
   manualSessions?: boolean;
+  /**
+   * R8 — this branch's own per-language renames of picked subjects (index into
+   * the shared catalog's subjects). One language only is deliberate: it shows
+   * the Arabic UI and the English UI resolving independently.
+   */
+  subjectRenames?: { subject: number; displayNameAr?: string; displayNameEn?: string }[];
 };
 
 /**
@@ -291,6 +297,17 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
       where: { centerId_kind_subjectId: { centerId, kind: "SUBJECT", subjectId: subject.id } },
       update: {},
       create: { centerId, kind: "SUBJECT", subjectId: subject.id },
+    });
+  }
+  for (const rename of config.subjectRenames ?? []) {
+    await prisma.centerCatalogSelection.update({
+      where: {
+        centerId_kind_subjectId: { centerId, kind: "SUBJECT", subjectId: catalog.subjects[rename.subject].id },
+      },
+      data: {
+        displayNameAr: rename.displayNameAr ?? null,
+        displayNameEn: rename.displayNameEn ?? null,
+      },
     });
   }
   await prisma.centerCatalogSelection.upsert({
@@ -740,6 +757,12 @@ const BRANCH_A: BranchConfig = {
   slug: "center-60-downtown",
   name: "Center 60 — Downtown",
   manualSessions: true,
+  // Mathematics renamed in both languages; Science in Arabic only (its English
+  // name stays the catalog's "Science").
+  subjectRenames: [
+    { subject: 0, displayNameAr: "الرياضيات البحتة", displayNameEn: "Pure Maths" },
+    { subject: 1, displayNameAr: "العلوم المتكاملة" },
+  ],
   themeColor: "#2563EB",
   manager: { first: "Olivia", last: "Bennett", email: "demo-manager-downtown@center60-demo.test" },
   receptionist: { first: "Daniel", last: "Carter", email: "demo-receptionist-downtown@center60-demo.test" },
@@ -786,6 +809,8 @@ const BRANCH_A: BranchConfig = {
 const BRANCH_B: BranchConfig = {
   slug: "center-60-nasr-city",
   name: "Center 60 — Nasr City",
+  // Physics renamed in English only (its Arabic name stays the catalog's).
+  subjectRenames: [{ subject: 4, displayNameEn: "Physics (Advanced)" }],
   themeColor: "#2563EB",
   manager: { first: "Rachel", last: "Thompson", email: "demo-manager-nasrcity@center60-demo.test" },
   receptionist: { first: "Tyler", last: "Morgan", email: "demo-receptionist-nasrcity@center60-demo.test" },

@@ -4,6 +4,7 @@ import { z } from "zod";
 // schemas outside the Next.js runtime (same reasoning as
 // lib/validation/settings.ts).
 import { localeSchema } from "./auth.ts";
+import { parseEgpToPiastres } from "../money.ts";
 
 /**
  * Platform-admin schemas (M9). Messages are i18n keys under
@@ -70,10 +71,57 @@ export const centerLifecycleTransitionSchema = z.object({
   to: centerLifecycleState,
 });
 
-/** M13's admin review queue — CatalogSuggestion ids are also `@default(uuid())`. */
-export const catalogSuggestionIdSchema = z.object({
+// ── The global catalog (R8) ─────────────────────────────────────────────────
+// Shape checks only. The rules that decide whether a catalog write is allowed
+// (both names present and 1..80, no duplicate within a parent, the parent
+// exists, the share is a sane piastre amount) live in `lib/db/catalog-admin.ts`
+// — that is the authority, so a direct call and a form post cannot disagree —
+// and come back as `AdminCatalog.errors` keys.
+
+const catalogKind = z.enum(["EDUCATION_SYSTEM", "GRADE", "SUBJECT"], { error: "notFound" });
+const catalogEntryId = z.string().trim().min(1, "notFound").max(64, "notFound");
+
+/** A name field as typed; emptiness and length are the authority's call, so it can name which language. */
+const catalogNameField = z.string().default("");
+
+/** The default centre cut, typed in EGP and parsed once (CLAUDE.md rule 2 — stored as piastres). */
+const catalogShareEgp = z
+  .string()
+  .trim()
+  .default("")
+  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value)))
+  .refine((value): value is number => value !== null, "invalidAmount");
+
+const catalogEntryFields = {
   locale: localeSchema,
-  id: z.string().uuid("notFound"),
+  kind: catalogKind,
+  nameAr: catalogNameField,
+  nameEn: catalogNameField,
+  /** "" (the "none" option) means no parent. */
+  parentId: z
+    .string()
+    .trim()
+    .max(64, "parentNotFound")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+  defaultFixedCenterShare: catalogShareEgp,
+};
+
+export const catalogEntryCreateSchema = z.object(catalogEntryFields);
+
+export const catalogEntryUpdateSchema = z.object({ ...catalogEntryFields, id: catalogEntryId });
+
+export const catalogEntryToggleSchema = z.object({
+  locale: localeSchema,
+  kind: catalogKind,
+  id: catalogEntryId,
+  active: z.enum(["true", "false"], { error: "notFound" }).transform((value) => value === "true"),
+});
+
+export const catalogEntryDeleteSchema = z.object({
+  locale: localeSchema,
+  kind: catalogKind,
+  id: catalogEntryId,
 });
 
 /** M19 — per-centre override of the data-visibility window (docs/01 §7). */

@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient, Role } from "@prisma/client";
 // lib/db/teacher-portal.ts).
 import { fullName, localName } from "../identity.ts";
 import { scopedWhere } from "./tenant-scope.ts";
+import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 
 /**
  * Discover/Browse read helpers (M8, docs/04-design-system.md §10). A class
@@ -40,7 +41,7 @@ export function discoverClassSelect(centerId: string) {
         id: true,
         nameAr: true,
         nameEn: true,
-        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
       },
     },
     grade: {
@@ -48,7 +49,7 @@ export function discoverClassSelect(centerId: string) {
         id: true,
         nameAr: true,
         nameEn: true,
-        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
       },
     },
     // A card's "full" state is hard-capped by the class's room set (M15,

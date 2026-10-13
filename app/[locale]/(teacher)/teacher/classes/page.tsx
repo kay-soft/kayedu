@@ -51,13 +51,22 @@ export default async function TeacherClassesPage() {
   const locale = await getLocale();
 
   const [subjects, grades, requests] = await Promise.all([
-    db.subjects.list({ active: true }),
-    db.grades.list({ active: true }),
+    db.subjects.list(),
+    db.grades.list(),
     db.changeRequests.list({ requestedBy: ctx.user.id, type: "NEW_CLASS" }),
   ]);
 
-  const subjectOptions = subjects.map((subject) => ({ value: subject.id, label: subject.name }));
-  const gradeOptions = grades.map((grade) => ({ value: grade.id, label: grade.name }));
+  // The form offers only entries still on offer; a past request keeps naming
+  // the entry it asked for even if the platform has since deactivated it (R8),
+  // so the history lookup reads the full lists.
+  const subjectOptions = subjects
+    .filter((subject) => subject.active && subject.catalogActive)
+    .map((subject) => ({ value: subject.id, label: subject.name }));
+  const gradeOptions = grades
+    .filter((grade) => grade.active && grade.catalogActive)
+    .map((grade) => ({ value: grade.id, label: grade.name }));
+  const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));
+  const gradeNameById = new Map(grades.map((grade) => [grade.id, grade.name]));
   const dayNames = tDays.raw("dayNames") as string[];
 
   const canRequest =
@@ -91,8 +100,8 @@ export default async function TeacherClassesPage() {
             <ul className="flex flex-col gap-2">
               {requests.map((request) => {
                 const payload = request.payload as unknown as RequestPayload;
-                const subject = subjectOptions.find((s) => s.value === payload.subjectId);
-                const grade = gradeOptions.find((g) => g.value === payload.gradeId);
+                const subject = payload.subjectId ? subjectNameById.get(payload.subjectId) : undefined;
+                const grade = payload.gradeId ? gradeNameById.get(payload.gradeId) : undefined;
                 return (
                   <li
                     key={request.id}
@@ -100,7 +109,7 @@ export default async function TeacherClassesPage() {
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-text-primary">
-                        {[subject?.label, grade?.label].filter(Boolean).join(" · ") ||
+                        {[subject, grade].filter(Boolean).join(" · ") ||
                           tCommon("none")}
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">

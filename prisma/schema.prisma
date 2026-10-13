@@ -108,19 +108,13 @@ enum InvitationStatus {
   REVOKED
 }
 
-// The kind a CenterCatalogSelection/CatalogSuggestion targets (M13). One
-// discriminator shared by both — a suggestion resolves into exactly the kind
-// of canonical row a selection of the same kind points at.
+// The kind a CenterCatalogSelection targets (M13) — which of the three
+// nullable catalog FKs on the row is the populated one. (R8 removed the
+// suggestion queue that used to share this discriminator.)
 enum CatalogEntryKind {
   EDUCATION_SYSTEM
   GRADE
   SUBJECT
-}
-
-enum CatalogSuggestionStatus {
-  PENDING
-  ACCEPTED
-  REJECTED
 }
 
 // A teacher payout's lifecycle (M14, spec §5 "Teacher settlements"). No
@@ -225,7 +219,6 @@ model Center {
   memberships        Membership[]
   invitations        Invitation[]
   catalogSelections  CenterCatalogSelection[]
-  catalogSuggestions CatalogSuggestion[]
   rooms              Room[]
   roomLinks          RoomLink[]
   classGroupRooms    ClassGroupRoom[]
@@ -396,11 +389,13 @@ model MembershipBranchGrant {
 // ─────────────────────────────────────────────────────────────
 // ACADEMIC CATALOG (M13 — GLOBAL, no centerId; docs/01-data-model.md
 // "Academic catalog layer"). Education systems, grades and subjects are
-// platform-owned reference data. A centre no longer authors these rows — it
-// picks one via CenterCatalogSelection, and may propose a new or corrected
-// entry via CatalogSuggestion for a platform admin to resolve. Every entry
-// carries both an Arabic and an English name; a centre's own display-name/
-// price choices live only on its CenterCatalogSelection row, never here.
+// platform-owned reference data. A centre never authors these rows — it
+// picks one via CenterCatalogSelection; only a platform admin adds, edits,
+// deactivates or deletes an entry (R8 — the M13 suggestion queue is gone: a
+// centre that needs an entry contacts the platform). Every entry carries both
+// an Arabic and an English name; a centre's own display-name (one per
+// language) and price choices live only on its CenterCatalogSelection row,
+// never here.
 // ─────────────────────────────────────────────────────────────
 
 model CatalogEducationSystem {
@@ -482,14 +477,18 @@ model CenterCatalogSelection {
   subject           CatalogSubject?         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
   // The two things a centre may edit about a picked entry — never the
-  // canonical row itself (CLAUDE.md M13 brief). Null displayName = render the
-  // catalog entry's own bilingual name. basePrice is only meaningful for
+  // canonical row itself (CLAUDE.md M13 brief). R8: the rename is two optional
+  // fields, one per language. In the Arabic UI the label is displayNameAr, else
+  // the canonical nameAr; in the English UI displayNameEn, else the canonical
+  // nameEn — an Arabic override never shows in English and vice versa
+  // (lib/catalog.ts is the one resolver). basePrice is only meaningful for
   // kind = EDUCATION_SYSTEM; null elsewhere.
-  displayName String?
-  basePrice   Int?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  displayNameAr String?
+  displayNameEn String?
+  basePrice     Int?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([centerId, kind, educationSystemId])
   @@unique([centerId, kind, gradeId])
@@ -498,39 +497,6 @@ model CenterCatalogSelection {
   @@index([educationSystemId])
   @@index([gradeId])
   @@index([subjectId])
-}
-
-/**
- * A centre-submitted proposal — a brand-new entry or a correction to an
- * existing one — queued for platform-admin review (`00-master-product-spec.md`
- * §4.4). `targetId`/`parentId` are plain unenforced references (like
- * `AuditLog.entityId`/`StudentBlock.refId`) rather than three sets of
- * optional relations, because which table they point into varies with
- * `kind`: `targetId` names the existing catalog row being corrected (null =
- * propose a new entry), `parentId` names the new row's parent when proposing
- * a new GRADE (an education-system id) or SUBJECT (a grade id).
- */
-model CatalogSuggestion {
-  id       String           @id @default(uuid())
-  centerId String
-  center   Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  kind     CatalogEntryKind
-
-  targetId String?
-  parentId String?
-
-  proposedNameAr String
-  proposedNameEn String
-  note           String?
-
-  status     CatalogSuggestionStatus @default(PENDING)
-  resolvedBy String?
-  resolvedAt DateTime?
-  createdBy  String
-  createdAt  DateTime                @default(now())
-
-  @@index([centerId])
-  @@index([status])
 }
 
 // ─────────────────────────────────────────────────────────────

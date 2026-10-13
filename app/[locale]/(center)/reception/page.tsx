@@ -235,10 +235,12 @@ export default async function ReceptionPage({
   const receiptView =
     receiptCard && receiptSession ? await loadSessionReceiptView(centerId, receiptSession) : null;
 
-  const gradeOptions = grades.map((grade) => ({
-    value: grade.id,
-    label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
-  }));
+  const gradeOptions = grades
+    .filter((grade) => grade.catalogActive)
+    .map((grade) => ({
+      value: grade.id,
+      label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
+    }));
 
   const summaryOf = (card: (typeof cards)[number]) =>
     [...sessionPickerParts(card), formatTimeRange(card.startTime, card.endTime, locale)].join(" · ");

@@ -4,6 +4,7 @@ import { z } from "zod";
 // resolvable outside the Next.js runtime, so `npm run check:config` can
 // exercise the real schemas (same reasoning as lib/db/tenant-scope.ts).
 import { localeSchema } from "./auth.ts";
+import { CATALOG_NAME_MAX } from "../catalog.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 import { extraRoomIdsField } from "./room-set.ts";
 import { dateOnlyField, withPeriodRule } from "./class-period.ts";
@@ -24,14 +25,6 @@ import { dateOnlyField, withPeriodRule } from "./class-period.ts";
 const recordId = z.string().trim().min(1, "notFound").max(64, "notFound");
 
 const entityName = z.string().trim().min(1, "required").max(80, "tooLong");
-
-/** An optional foreign-key select — "" (the placeholder option) means null. */
-const optionalRef = z
-  .string()
-  .trim()
-  .max(64, "notFound")
-  .optional()
-  .transform((value) => (value && value.length > 0 ? value : null));
 
 /** An unchecked checkbox is absent from FormData, which means false. */
 const checkbox = z
@@ -115,27 +108,30 @@ export const termUpdateSchema = z
   .object({ ...termFields, id: recordId })
   .superRefine(withPeriodRule);
 
-// ── The academic catalog (M13) ──────────────────────────────────────────────
-// A centre picks a global catalog entry (never authors one), may edit only
-// its own display name + price for that pick, and may suggest a missing or
-// wrong entry into the platform-admin review queue.
-// (docs/00-master-product-spec.md §5.1 "Global academic catalog".)
+// ── The academic catalog (M13, R8) ──────────────────────────────────────────
+// A centre picks a global catalog entry (never authors one — a platform admin
+// adds entries; a centre that needs one contacts us), and may edit only its
+// own price and its own display name for that pick — one optional name per
+// language, a blank field reverting to the catalog's name. There is no
+// suggestion path. (docs/00-master-product-spec.md §5.1 "Global academic
+// catalog".)
 
 export const catalogEntryKindSchema = z.enum(["EDUCATION_SYSTEM", "GRADE", "SUBJECT"], {
   error: "notFound",
 });
 
+/** One optional per-language rename: trimmed, blank = "no override" (null), 80 characters at most. */
+const catalogRename = z
+  .string()
+  .trim()
+  .max(CATALOG_NAME_MAX, "tooLong")
+  .optional()
+  .transform((value) => (value && value.length > 0 ? value : null));
+
 export const catalogSelectSchema = z.object({
   ...base,
   kind: catalogEntryKindSchema,
   catalogId: recordId,
-  /** Optional at select time — a centre can rename later from its own list. */
-  displayName: z
-    .string()
-    .trim()
-    .max(80, "tooLong")
-    .optional()
-    .transform((value) => (value && value.length > 0 ? value : null)),
   /** Only meaningful for kind = EDUCATION_SYSTEM; ignored otherwise. */
   basePrice: moneyEgp,
 });
@@ -143,12 +139,8 @@ export const catalogSelectSchema = z.object({
 export const catalogSelectionUpdateSchema = z.object({
   ...base,
   selectionId: recordId,
-  displayName: z
-    .string()
-    .trim()
-    .max(80, "tooLong")
-    .optional()
-    .transform((value) => (value && value.length > 0 ? value : null)),
+  displayNameAr: catalogRename,
+  displayNameEn: catalogRename,
   basePrice: moneyEgp,
 });
 
@@ -158,28 +150,6 @@ export const catalogSelectionToggleSchema = z.object({
   ...base,
   selectionId: recordId,
   active: checkbox,
-});
-
-export const catalogSuggestionSchema = z.object({
-  ...base,
-  kind: catalogEntryKindSchema,
-  /** Set only when suggesting a correction to an existing entry. */
-  targetId: optionalRef,
-  /** The parent a new GRADE/SUBJECT should hang off — ignored for EDUCATION_SYSTEM. */
-  parentId: optionalRef,
-  proposedNameAr: z.string().trim().min(1, "required").max(120, "tooLong"),
-  proposedNameEn: z.string().trim().min(1, "required").max(120, "tooLong"),
-  note: z
-    .string()
-    .trim()
-    .max(400, "tooLong")
-    .optional()
-    .transform((value) => (value && value.length > 0 ? value : null)),
-});
-
-export const catalogSuggestionResolveSchema = z.object({
-  ...base,
-  suggestionId: recordId,
 });
 
 // ── General settings (default center cut, timeout, late threshold) ─────────

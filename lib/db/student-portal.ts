@@ -2,6 +2,7 @@ import type { EnrollmentStatus, Prisma, PrismaClient, SessionStatus } from "@pri
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/discover.ts).
+import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
@@ -123,15 +124,18 @@ export async function listReservationsForStudent(db: Db, studentUserId: string) 
               : { kind: "GRADE" as const, centerId: pair.centerId, gradeId: pair.catalogId },
           ),
         },
-        select: { centerId: true, kind: true, subjectId: true, gradeId: true, displayName: true },
+        select: { centerId: true, kind: true, subjectId: true, gradeId: true, ...CATALOG_OVERRIDE_SELECT },
       })
     : [];
 
-  const displayNameByKey = new Map<string, string | null>();
+  const overrideByKey = new Map<string, CatalogNameOverride>();
   for (const selection of selections) {
     const catalogId = selection.kind === "SUBJECT" ? selection.subjectId : selection.gradeId;
     if (catalogId) {
-      displayNameByKey.set(`${selection.kind}:${selection.centerId}:${catalogId}`, selection.displayName);
+      overrideByKey.set(`${selection.kind}:${selection.centerId}:${catalogId}`, {
+        displayNameAr: selection.displayNameAr,
+        displayNameEn: selection.displayNameEn,
+      });
     }
   }
 
@@ -139,9 +143,9 @@ export async function listReservationsForStudent(db: Db, studentUserId: string) 
     kind: "SUBJECT" | "GRADE",
     centerId: string,
     catalogId: string | null,
-  ) => {
-    const displayName = catalogId ? (displayNameByKey.get(`${kind}:${centerId}:${catalogId}`) ?? null) : null;
-    return [{ displayName }];
+  ): CatalogNameOverride[] => {
+    const override = catalogId ? overrideByKey.get(`${kind}:${centerId}:${catalogId}`) : undefined;
+    return [override ?? { displayNameAr: null, displayNameEn: null }];
   };
 
   return rows.map((row) => ({

@@ -100,13 +100,21 @@ function revalidateStudentPrintables(locale: string, studentId: string): void {
   revalidatePath(`/${locale}${ROUTES.centerStudentPaper(studentId)}`);
 }
 
-/** Re-resolves a form-supplied grade inside this center. */
+/**
+ * Re-resolves a form-supplied grade inside this center. A grade the platform
+ * has deactivated cannot be newly assigned (R8) — only kept, when it is the
+ * student's current one (`currentGradeId`).
+ */
 async function resolveGrade(
   db: ScopedDb,
   gradeId: string | null,
+  currentGradeId: string | null = null,
 ): Promise<{ ok: true; id: string | null } | { ok: false }> {
   if (gradeId === null) return { ok: true, id: null };
-  return (await db.grades.findById(gradeId)) ? { ok: true, id: gradeId } : { ok: false };
+  const grade = await db.grades.findById(gradeId);
+  if (!grade) return { ok: false };
+  if (!grade.catalogActive && gradeId !== currentGradeId) return { ok: false };
+  return { ok: true, id: gradeId };
 }
 
 // ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
@@ -323,7 +331,7 @@ export async function updateStudentAction(
   const student = await scope.db.students.findDetailById(studentProfileId);
   if (!student) return NOT_FOUND;
 
-  const grade = await resolveGrade(scope.db, gradeId);
+  const grade = await resolveGrade(scope.db, gradeId, student.gradeId);
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
 
   // This center's own record — name included — is always editable, with no
@@ -464,6 +472,8 @@ export async function promoteGradeAction(
     db.grades.findById(toGradeId),
   ]);
   if (!from || !to) return { fieldErrors: { fromGradeId: "notFound" } };
+  // Students may be moved *out of* a grade the platform has deactivated, never into one (R8).
+  if (!to.catalogActive) return { fieldErrors: { toGradeId: "notFound" } };
 
   const result = await db.students.promoteGrade(from.id, to.id);
   if (result.count === 0) return { error: "noStudentsToPromote" };
@@ -498,7 +508,7 @@ export async function setStudentGradeAction(
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
 
-  const grade = await resolveGrade(db, gradeId);
+  const grade = await resolveGrade(db, gradeId, student.gradeId);
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
   if (student.gradeId === grade.id) return { status: "saved" };
 

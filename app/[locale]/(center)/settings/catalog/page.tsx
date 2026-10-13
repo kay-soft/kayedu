@@ -7,7 +7,7 @@ import {
 } from "@/components/settings/catalog-section";
 import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import {
   listCatalogEducationSystems,
   listCatalogGrades,
@@ -17,11 +17,12 @@ import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 
 /**
- * The academic catalog (M13, docs/00-master-product-spec.md §4.1 item 10).
- * Replaces the three centre-authored Education Systems/Grades/Subjects
- * screens: a centre picks from the platform-owned global catalog, edits only
- * its own display name + price for a pick, and may suggest a missing or
- * wrong entry for a platform admin to review at `/admin/catalog`.
+ * The academic catalog (M13, R8; docs/00-master-product-spec.md §4.1 item 10).
+ * A centre picks from the platform-owned global catalog and edits only its own
+ * display names (Arabic and English) + price for a pick. It cannot add or
+ * correct a global entry, and there is no suggestion path: a centre that needs
+ * an entry contacts the platform, and a platform admin adds it at
+ * `/admin/catalog`.
  */
 export default async function CatalogPage() {
   const ctx = await getTenantContext("center");
@@ -31,6 +32,9 @@ export default async function CatalogPage() {
   const t = await getTranslations("Settings.catalog");
   const db = scoped(ctx);
 
+  // The "add" lists read the global catalog's *active* entries only — a
+  // deactivated one is never offered again. The centre's own picks come from
+  // its selections, deactivated entries included, so history stays readable.
   const [
     centerSystems,
     centerGrades,
@@ -54,26 +58,41 @@ export default async function CatalogPage() {
   const systemItems: CatalogSelectionItem[] = centerSystems.map((s) => ({
     selectionId: s.selectionId,
     catalogId: s.id,
-    name: catalogLabel(locale, s),
-    displayName: s.displayName,
+    name: s.name,
+    canonicalName: catalogLabel(locale, s),
+    nameAr: s.nameAr,
+    nameEn: s.nameEn,
+    displayNameAr: s.displayNameAr,
+    displayNameEn: s.displayNameEn,
     active: s.active,
+    catalogActive: s.catalogActive,
     basePrice: s.basePrice,
   }));
   const gradeItems: CatalogSelectionItem[] = centerGrades.map((g) => ({
     selectionId: g.selectionId,
     catalogId: g.id,
-    name: catalogLabel(locale, g),
-    displayName: g.displayName,
+    name: g.name,
+    canonicalName: catalogLabel(locale, g),
+    nameAr: g.nameAr,
+    nameEn: g.nameEn,
+    displayNameAr: g.displayNameAr,
+    displayNameEn: g.displayNameEn,
     active: g.active,
-    parentName: g.educationSystemName,
+    catalogActive: g.catalogActive,
+    parentName: catalogLabelWithSelection(locale, g.educationSystem),
   }));
   const subjectItems: CatalogSelectionItem[] = centerSubjects.map((s) => ({
     selectionId: s.selectionId,
     catalogId: s.id,
-    name: catalogLabel(locale, s),
-    displayName: s.displayName,
+    name: s.name,
+    canonicalName: catalogLabel(locale, s),
+    nameAr: s.nameAr,
+    nameEn: s.nameEn,
+    displayNameAr: s.displayNameAr,
+    displayNameEn: s.displayNameEn,
     active: s.active,
-    parentName: s.gradeName,
+    catalogActive: s.catalogActive,
+    parentName: catalogLabelWithSelection(locale, s.grade),
   }));
 
   const systemPickOptions: CatalogPickOption[] = allSystems
@@ -86,15 +105,6 @@ export default async function CatalogPage() {
     .filter((s) => !selectedSubjectIds.has(s.id))
     .map((s) => ({ value: s.id, label: catalogLabel(locale, s) }));
 
-  const systemParentOptions: CatalogPickOption[] = systemItems.map((s) => ({
-    value: s.catalogId,
-    label: s.displayName ?? s.name,
-  }));
-  const gradeParentOptions: CatalogPickOption[] = gradeItems.map((g) => ({
-    value: g.catalogId,
-    label: g.displayName ?? g.name,
-  }));
-
   return (
     <div className="flex flex-col gap-8">
       <SectionHeader title={t("title")} description={t("description")} />
@@ -104,15 +114,12 @@ export default async function CatalogPage() {
         hasPricing
         items={systemItems}
         pickOptions={systemPickOptions}
-        parentOptions={[]}
         labels={{
           title: t("educationSystems.title"),
           description: t("educationSystems.description"),
           pickTitle: t("pickTitle"),
           pickPlaceholder: t("pickPlaceholder"),
           empty: t("educationSystems.empty"),
-          suggestTitle: t("educationSystems.suggestTitle"),
-          suggestDescription: t("suggestDescription"),
         }}
       />
 
@@ -121,15 +128,12 @@ export default async function CatalogPage() {
         hasPricing={false}
         items={gradeItems}
         pickOptions={gradePickOptions}
-        parentOptions={systemParentOptions}
         labels={{
           title: t("grades.title"),
           description: t("grades.description"),
           pickTitle: t("pickTitle"),
           pickPlaceholder: t("pickPlaceholder"),
           empty: t("grades.empty"),
-          suggestTitle: t("grades.suggestTitle"),
-          suggestDescription: t("suggestDescription"),
         }}
       />
 
@@ -138,15 +142,12 @@ export default async function CatalogPage() {
         hasPricing={false}
         items={subjectItems}
         pickOptions={subjectPickOptions}
-        parentOptions={gradeParentOptions}
         labels={{
           title: t("subjects.title"),
           description: t("subjects.description"),
           pickTitle: t("pickTitle"),
           pickPlaceholder: t("pickPlaceholder"),
           empty: t("subjects.empty"),
-          suggestTitle: t("subjects.suggestTitle"),
-          suggestDescription: t("suggestDescription"),
         }}
       />
     </div>

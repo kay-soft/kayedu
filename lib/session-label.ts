@@ -2,7 +2,11 @@
 // exercise this module directly, outside the Next.js runtime — the same
 // reasoning as lib/catalog.ts and lib/money.ts. No Prisma import: this is the
 // naming rule, not a query.
-import { catalogLabelWithSelection, type CatalogWithSelection } from "./catalog.ts";
+import {
+  CATALOG_OVERRIDE_SELECT,
+  catalogLabelWithSelection,
+  type CatalogWithSelection,
+} from "./catalog.ts";
 
 /**
  * **The single owner of "what is this session called"** (R5). Since R5 a
@@ -109,7 +113,7 @@ export function sessionLabelSelect(centerId: string) {
     select: {
       nameAr: true,
       nameEn: true,
-      selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+      selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
     },
   } as const;
   return {

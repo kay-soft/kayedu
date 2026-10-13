@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 // reasoning as lib/identity.ts).
 import { normalizePhone } from "../phone.ts";
 import type { ScopedDb } from "@/lib/db/scoped";
+import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 
 /**
  * Student & teacher policies that are neither scoping primitives nor UI: how
@@ -71,7 +72,7 @@ export function studentListSelect(centerId: string) {
       select: {
         nameAr: true,
         nameEn: true,
-        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
       },
     },
   } satisfies Prisma.StudentProfileSelect;

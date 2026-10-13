@@ -202,7 +202,7 @@ function pureChecks() {
     oneOffSessionShapeError({ classGroupId: "c", title: null, teacherId: "t", priceSnapshot: 0, centerShareType: null, centerShareValue: null }) === null,
   );
 
-  const subject = { nameAr: "فيزياء", nameEn: "Physics", selections: [{ displayName: null }] };
+  const subject = { nameAr: "فيزياء", nameEn: "Physics", selections: [{ displayNameAr: null, displayNameEn: null }] };
   check(
     "sessionDisplayName: one-time → title · subject; class → subject · grade; nothing → —",
     sessionDisplayName("en", { title: "Revision day", subject, classGroup: null }) === "Revision day · Physics" &&
@@ -346,7 +346,7 @@ async function main() {
   );
   await prisma.centerCatalogSelection.createMany({
     data: [
-      { centerId: A, kind: "SUBJECT", subjectId: subjectA.id, displayName: "A's Physics" },
+      { centerId: A, kind: "SUBJECT", subjectId: subjectA.id, displayNameEn: "A's Physics" },
       { centerId: A, kind: "SUBJECT", subjectId: subjectOff.id, active: false },
       { centerId: A, kind: "GRADE", gradeId: gradeA.id },
       { centerId: B, kind: "SUBJECT", subjectId: subjectB.id },

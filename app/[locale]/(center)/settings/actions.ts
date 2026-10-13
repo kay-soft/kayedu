@@ -28,7 +28,6 @@ import {
 import {
   countCenterGradeSelectionsUnderSystem,
   countCenterSubjectSelectionsUnderGrade,
-  createCatalogSuggestion,
   findSelectionById,
   removeCatalogSelection,
   selectCatalogEntry,
@@ -42,7 +41,6 @@ import {
   catalogSelectSchema,
   catalogSelectionToggleSchema,
   catalogSelectionUpdateSchema,
-  catalogSuggestionSchema,
   generalSettingsSchema,
   paymentMethodSchema,
   paymentMethodUpdateSchema,
@@ -173,12 +171,13 @@ async function deleteRoomRecord(formData: FormData): Promise<ActionState> {
   return { status: "deleted" };
 }
 
-// ── The academic catalog (M13) ──────────────────────────────────────────────
-// A centre picks from the platform-owned global catalog, edits only its own
-// display name + price for that pick, and may suggest a missing or wrong
-// entry into the platform-admin review queue at /admin/catalog. Nothing here
-// ever writes to a canonical CatalogEducationSystem/CatalogGrade/
-// CatalogSubject row (docs/00-master-product-spec.md §5.1).
+// ── The academic catalog (M13, R8) ──────────────────────────────────────────
+// A centre picks from the platform-owned global catalog and edits only its own
+// display names (Arabic and English) + price for that pick. Nothing here ever
+// writes to a canonical CatalogEducationSystem/CatalogGrade/CatalogSubject
+// row, and there is no way to suggest one: a centre that needs an entry
+// contacts the platform, and a platform admin adds it (/admin/catalog,
+// docs/00-master-product-spec.md §5.1).
 
 export async function selectCatalogEntryAction(
   _state: ActionState,
@@ -190,13 +189,13 @@ export async function selectCatalogEntryAction(
   const parsed = catalogSelectSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { kind, catalogId, displayName, basePrice, locale } = parsed.data;
+  const { kind, catalogId, basePrice, locale } = parsed.data;
   const result = await selectCatalogEntry(
     prisma,
     scope.ctx.center.id,
     kind,
     catalogId,
-    displayName,
+    null,
     basePrice,
   );
   if (!result.ok) {
@@ -219,14 +218,40 @@ export async function updateCatalogSelectionAction(
   const parsed = catalogSelectionUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { selectionId, displayName, basePrice, locale } = parsed.data;
+  const { selectionId, displayNameAr, displayNameEn, basePrice, locale } = parsed.data;
   const existing = await findSelectionById(prisma, scope.ctx.center.id, selectionId);
   if (!existing) return NOT_FOUND;
 
-  await updateCatalogSelection(prisma, selectionId, {
-    displayName,
-    basePrice: existing.kind === "EDUCATION_SYSTEM" ? basePrice : null,
+  const nextBasePrice = existing.kind === "EDUCATION_SYSTEM" ? basePrice : null;
+  const updated = await updateCatalogSelection(prisma, selectionId, {
+    displayNameAr,
+    displayNameEn,
+    basePrice: nextBasePrice,
   });
+
+  // A rename (or a price change) is a centre-visible change to what staff,
+  // teachers and students read — audited with before/after (CLAUDE.md rule 7).
+  const before = {
+    displayNameAr: existing.displayNameAr,
+    displayNameEn: existing.displayNameEn,
+    basePrice: existing.basePrice,
+  };
+  const after = {
+    displayNameAr: updated.displayNameAr,
+    displayNameEn: updated.displayNameEn,
+    basePrice: updated.basePrice,
+  };
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    await writeAuditLog({
+      centerId: scope.ctx.center.id,
+      actorUserId: scope.ctx.user.id,
+      action: "catalog.selection.update",
+      entityType: "CenterCatalogSelection",
+      entityId: selectionId,
+      before: { kind: existing.kind, ...before },
+      after: { kind: existing.kind, ...after },
+    });
+  }
   revalidateSettings(locale);
   return { status: "saved" };
 }
@@ -288,30 +313,6 @@ export async function deselectCatalogEntryAction(
   await removeCatalogSelection(prisma, selectionId);
   revalidateSettings(locale);
   return { status: "deleted" };
-}
-
-export async function suggestCatalogEntryAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = catalogSuggestionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const { kind, targetId, parentId, proposedNameAr, proposedNameEn, note, locale } = parsed.data;
-  await createCatalogSuggestion(prisma, scope.ctx.center.id, scope.ctx.user.id, {
-    kind,
-    targetId,
-    parentId,
-    proposedNameAr,
-    proposedNameEn,
-    note,
-  });
-
-  revalidateSettings(locale);
-  return { status: "created" };
 }
 
 // ── Rooms ──────────────────────────────────────────────────────────────────

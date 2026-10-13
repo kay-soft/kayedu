@@ -4,15 +4,22 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
+import {
+  CATALOG_OVERRIDE_SELECT,
+  normalizeCatalogName,
+  type CatalogNameOverride,
+  type CatalogWithSelection,
+} from "../catalog.ts";
+
 /**
- * The global academic catalog (M13, docs/01-data-model.md "Academic catalog
- * layer"). `CatalogEducationSystem`/`CatalogGrade`/`CatalogSubject` carry no
- * `centerId` — they are platform-owned reference data. A centre's own view of
- * them lives entirely on `CenterCatalogSelection` (its pick, plus its own
- * display name and price) and `CatalogSuggestion` (its proposed additions or
- * corrections). Nothing here writes to a canonical catalog row except
- * `approveCatalogSuggestion`, which only a platform admin may call
- * (`requirePlatformAdmin()` in the caller, docs/02 §6).
+ * The global academic catalog, as a *centre* sees it (M13, docs/01-data-model.md
+ * "Academic catalog layer"). `CatalogEducationSystem`/`CatalogGrade`/
+ * `CatalogSubject` carry no `centerId` — they are platform-owned reference
+ * data, and since R8 **nothing in this file writes one**: a centre's own view
+ * of them lives entirely on `CenterCatalogSelection` (its pick, plus its own
+ * per-language display names and price). The only code that writes a global
+ * row is `lib/db/catalog-admin.ts`, and every function there re-checks that the
+ * acting user is a platform admin.
  */
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -24,6 +31,10 @@ const KIND: Record<"EDUCATION_SYSTEM" | "GRADE" | "SUBJECT", CatalogEntryKind> =
 };
 
 // ── Platform-wide catalog reads (no centerId — genuinely global rows) ──────
+// `activeOnly` (the default) is what every picker, Discover filter and the
+// centre's "add" list use: a deactivated entry never appears there. Anything
+// that must still *resolve* a deactivated entry (history, a class that already
+// uses it) reads through the centre's own selection views below instead.
 
 export function listCatalogEducationSystems(db: Db, activeOnly = true) {
   return db.catalogEducationSystem.findMany({
@@ -64,16 +75,47 @@ export function listCatalogSubjects(
 
 // ── A centre's own selections, joined with the catalog entry ──────────────
 
-export type CenterEducationSystemView = {
+/** The part of a view every kind shares. `active` is the centre's pick; `catalogActive` is the platform's flag on the entry itself. */
+type CenterEntryBase = CatalogNameOverride & {
   selectionId: string;
-  id: string; // the CatalogEducationSystem id — what ClassGroup.educationSystemId stores
   nameAr: string;
   nameEn: string;
-  displayName: string | null;
+  /** The centre switched this pick off (its own `CenterCatalogSelection.active`). */
+  active: boolean;
+  /** The platform has not deactivated the underlying entry. A deactivated one still resolves for history but is never offered in a picker. */
+  catalogActive: boolean;
+};
+
+export type CenterEducationSystemView = CenterEntryBase & {
+  id: string; // the CatalogEducationSystem id — what ClassGroup.educationSystemId stores
   basePrice: number;
   defaultFixedCenterShare: number;
-  active: boolean;
 };
+
+/** The parent shown beside a grade/subject, with this centre's own rename already joined in. */
+const PARENT_WITH_OVERRIDE = (centerId: string) =>
+  ({
+    include: {
+      selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
+    },
+  }) as const;
+
+function systemView(
+  row: Prisma.CenterCatalogSelectionGetPayload<{ include: { educationSystem: true } }>,
+): CenterEducationSystemView {
+  return {
+    selectionId: row.id,
+    id: row.educationSystem!.id,
+    nameAr: row.educationSystem!.nameAr,
+    nameEn: row.educationSystem!.nameEn,
+    displayNameAr: row.displayNameAr,
+    displayNameEn: row.displayNameEn,
+    basePrice: row.basePrice ?? 0,
+    defaultFixedCenterShare: row.educationSystem!.defaultFixedCenterShare,
+    active: row.active,
+    catalogActive: row.educationSystem!.active,
+  };
+}
 
 export async function centerEducationSystems(
   db: Db,
@@ -84,18 +126,7 @@ export async function centerEducationSystems(
     include: { educationSystem: true },
     orderBy: [{ active: "desc" }, { createdAt: "asc" }],
   });
-  return rows
-    .filter((row) => row.educationSystem)
-    .map((row) => ({
-      selectionId: row.id,
-      id: row.educationSystem!.id,
-      nameAr: row.educationSystem!.nameAr,
-      nameEn: row.educationSystem!.nameEn,
-      displayName: row.displayName,
-      basePrice: row.basePrice ?? 0,
-      defaultFixedCenterShare: row.educationSystem!.defaultFixedCenterShare,
-      active: row.active,
-    }));
+  return rows.filter((row) => row.educationSystem).map(systemView);
 }
 
 export async function centerEducationSystemById(
@@ -107,29 +138,34 @@ export async function centerEducationSystemById(
     where: { centerId, kind: KIND.EDUCATION_SYSTEM, educationSystemId: catalogId },
     include: { educationSystem: true },
   });
-  if (!row || !row.educationSystem) return null;
-  return {
-    selectionId: row.id,
-    id: row.educationSystem.id,
-    nameAr: row.educationSystem.nameAr,
-    nameEn: row.educationSystem.nameEn,
-    displayName: row.displayName,
-    basePrice: row.basePrice ?? 0,
-    defaultFixedCenterShare: row.educationSystem.defaultFixedCenterShare,
-    active: row.active,
-  };
+  return row?.educationSystem ? systemView(row) : null;
 }
 
-export type CenterGradeView = {
-  selectionId: string;
+export type CenterGradeView = CenterEntryBase & {
   id: string; // CatalogGrade id
-  nameAr: string;
-  nameEn: string;
-  displayName: string | null;
   educationSystemId: string | null;
-  educationSystemName: string | null; // the canonical bilingual-resolved-by-caller name is out of scope here; raw nameEn kept for a quick label
-  active: boolean;
+  /** The parent system, resolvable with `catalogLabelWithSelection` (this centre's rename of it included). */
+  educationSystem: CatalogWithSelection | null;
 };
+
+type GradeRow = Prisma.CenterCatalogSelectionGetPayload<{
+  include: { grade: { include: { educationSystem: { include: { selections: { select: typeof CATALOG_OVERRIDE_SELECT } } } } } };
+}>;
+
+function gradeView(row: GradeRow): CenterGradeView {
+  return {
+    selectionId: row.id,
+    id: row.grade!.id,
+    nameAr: row.grade!.nameAr,
+    nameEn: row.grade!.nameEn,
+    displayNameAr: row.displayNameAr,
+    displayNameEn: row.displayNameEn,
+    educationSystemId: row.grade!.educationSystemId,
+    educationSystem: row.grade!.educationSystem,
+    active: row.active,
+    catalogActive: row.grade!.active,
+  };
+}
 
 export async function centerGrades(
   db: Db,
@@ -137,21 +173,10 @@ export async function centerGrades(
 ): Promise<CenterGradeView[]> {
   const rows = await db.centerCatalogSelection.findMany({
     where: { centerId, kind: KIND.GRADE },
-    include: { grade: { include: { educationSystem: true } } },
+    include: { grade: { include: { educationSystem: PARENT_WITH_OVERRIDE(centerId) } } },
     orderBy: [{ active: "desc" }, { createdAt: "asc" }],
   });
-  return rows
-    .filter((row) => row.grade)
-    .map((row) => ({
-      selectionId: row.id,
-      id: row.grade!.id,
-      nameAr: row.grade!.nameAr,
-      nameEn: row.grade!.nameEn,
-      displayName: row.displayName,
-      educationSystemId: row.grade!.educationSystemId,
-      educationSystemName: row.grade!.educationSystem?.nameEn ?? null,
-      active: row.active,
-    }));
+  return rows.filter((row) => row.grade).map((row) => gradeView(row as GradeRow));
 }
 
 export async function centerGradeById(
@@ -161,31 +186,36 @@ export async function centerGradeById(
 ): Promise<CenterGradeView | null> {
   const row = await db.centerCatalogSelection.findFirst({
     where: { centerId, kind: KIND.GRADE, gradeId: catalogId },
-    include: { grade: { include: { educationSystem: true } } },
+    include: { grade: { include: { educationSystem: PARENT_WITH_OVERRIDE(centerId) } } },
   });
-  if (!row || !row.grade) return null;
-  return {
-    selectionId: row.id,
-    id: row.grade.id,
-    nameAr: row.grade.nameAr,
-    nameEn: row.grade.nameEn,
-    displayName: row.displayName,
-    educationSystemId: row.grade.educationSystemId,
-    educationSystemName: row.grade.educationSystem?.nameEn ?? null,
-    active: row.active,
-  };
+  return row?.grade ? gradeView(row as GradeRow) : null;
 }
 
-export type CenterSubjectView = {
-  selectionId: string;
+export type CenterSubjectView = CenterEntryBase & {
   id: string; // CatalogSubject id
-  nameAr: string;
-  nameEn: string;
-  displayName: string | null;
   gradeId: string | null;
-  gradeName: string | null;
-  active: boolean;
+  /** The parent grade, resolvable with `catalogLabelWithSelection` (this centre's rename of it included). */
+  grade: CatalogWithSelection | null;
 };
+
+type SubjectRow = Prisma.CenterCatalogSelectionGetPayload<{
+  include: { subject: { include: { grade: { include: { selections: { select: typeof CATALOG_OVERRIDE_SELECT } } } } } };
+}>;
+
+function subjectView(row: SubjectRow): CenterSubjectView {
+  return {
+    selectionId: row.id,
+    id: row.subject!.id,
+    nameAr: row.subject!.nameAr,
+    nameEn: row.subject!.nameEn,
+    displayNameAr: row.displayNameAr,
+    displayNameEn: row.displayNameEn,
+    gradeId: row.subject!.gradeId,
+    grade: row.subject!.grade,
+    active: row.active,
+    catalogActive: row.subject!.active,
+  };
+}
 
 export async function centerSubjects(
   db: Db,
@@ -193,21 +223,10 @@ export async function centerSubjects(
 ): Promise<CenterSubjectView[]> {
   const rows = await db.centerCatalogSelection.findMany({
     where: { centerId, kind: KIND.SUBJECT },
-    include: { subject: { include: { grade: true } } },
+    include: { subject: { include: { grade: PARENT_WITH_OVERRIDE(centerId) } } },
     orderBy: [{ active: "desc" }, { createdAt: "asc" }],
   });
-  return rows
-    .filter((row) => row.subject)
-    .map((row) => ({
-      selectionId: row.id,
-      id: row.subject!.id,
-      nameAr: row.subject!.nameAr,
-      nameEn: row.subject!.nameEn,
-      displayName: row.displayName,
-      gradeId: row.subject!.gradeId,
-      gradeName: row.subject!.grade?.nameEn ?? null,
-      active: row.active,
-    }));
+  return rows.filter((row) => row.subject).map((row) => subjectView(row as SubjectRow));
 }
 
 export async function centerSubjectById(
@@ -217,34 +236,36 @@ export async function centerSubjectById(
 ): Promise<CenterSubjectView | null> {
   const row = await db.centerCatalogSelection.findFirst({
     where: { centerId, kind: KIND.SUBJECT, subjectId: catalogId },
-    include: { subject: { include: { grade: true } } },
+    include: { subject: { include: { grade: PARENT_WITH_OVERRIDE(centerId) } } },
   });
-  if (!row || !row.subject) return null;
-  return {
-    selectionId: row.id,
-    id: row.subject.id,
-    nameAr: row.subject.nameAr,
-    nameEn: row.subject.nameEn,
-    displayName: row.displayName,
-    gradeId: row.subject.gradeId,
-    gradeName: row.subject.grade?.nameEn ?? null,
-    active: row.active,
-  };
+  return row?.subject ? subjectView(row as SubjectRow) : null;
 }
 
-// ── Selecting / customizing / deselecting a catalog entry ─────────────────
+// ── Selecting / renaming / deselecting a catalog entry ────────────────────
 
 export type SelectCatalogEntryResult =
   | { ok: true; selectionId: string }
   | { ok: false; error: "notFound" | "alreadySelected" };
 
-/** A centre picks one global catalog entry — never writes to the canonical row. */
+/** A blank name is "no override" — one normalizer, so `"  "` and `""` and `null` all store null. */
+function overrideColumns(names: Partial<CatalogNameOverride> | null | undefined): CatalogNameOverride {
+  return {
+    displayNameAr: normalizeCatalogName(names?.displayNameAr),
+    displayNameEn: normalizeCatalogName(names?.displayNameEn),
+  };
+}
+
+/**
+ * A centre picks one global catalog entry — never writes to the canonical
+ * row, and only an *active* entry can be picked (a deactivated one is
+ * `notFound`, exactly as if it were not in the add list).
+ */
 export async function selectCatalogEntry(
   db: Db,
   centerId: string,
   kind: "EDUCATION_SYSTEM" | "GRADE" | "SUBJECT",
   catalogId: string,
-  displayName: string | null,
+  names: Partial<CatalogNameOverride> | null,
   basePrice: number | null,
 ): Promise<SelectCatalogEntryResult> {
   const exists =
@@ -272,7 +293,7 @@ export async function selectCatalogEntry(
     data: {
       centerId,
       kind: KIND[kind],
-      displayName,
+      ...overrideColumns(names),
       basePrice: kind === "EDUCATION_SYSTEM" ? (basePrice ?? 0) : null,
       ...(kind === "EDUCATION_SYSTEM"
         ? { educationSystemId: catalogId }
@@ -289,12 +310,17 @@ export function findSelectionById(db: Db, centerId: string, selectionId: string)
   return db.centerCatalogSelection.findFirst({ where: { id: selectionId, centerId } });
 }
 
+/** A centre edits only its own pick: the two optional names, and (for an education system) the price. */
 export function updateCatalogSelection(
   db: Db,
   selectionId: string,
-  data: { displayName: string | null; basePrice?: number | null },
+  data: Partial<CatalogNameOverride> & { basePrice?: number | null },
 ) {
-  return db.centerCatalogSelection.update({ where: { id: selectionId }, data });
+  const { basePrice, ...names } = data;
+  return db.centerCatalogSelection.update({
+    where: { id: selectionId },
+    data: { ...overrideColumns(names), ...(basePrice === undefined ? {} : { basePrice }) },
+  });
 }
 
 export function removeCatalogSelection(db: Db, selectionId: string) {
@@ -326,138 +352,4 @@ export function countCenterSubjectSelectionsUnderGrade(
   return db.centerCatalogSelection.count({
     where: { centerId, kind: KIND.SUBJECT, subject: { gradeId } },
   });
-}
-
-// ── Suggestions (a centre proposes; a platform admin resolves) ────────────
-
-export type CatalogSuggestionInput = {
-  kind: "EDUCATION_SYSTEM" | "GRADE" | "SUBJECT";
-  targetId: string | null;
-  parentId: string | null;
-  proposedNameAr: string;
-  proposedNameEn: string;
-  note: string | null;
-};
-
-export function createCatalogSuggestion(
-  db: Db,
-  centerId: string,
-  createdBy: string,
-  input: CatalogSuggestionInput,
-) {
-  return db.catalogSuggestion.create({
-    data: {
-      centerId,
-      createdBy,
-      kind: KIND[input.kind],
-      targetId: input.targetId,
-      parentId: input.parentId,
-      proposedNameAr: input.proposedNameAr,
-      proposedNameEn: input.proposedNameEn,
-      note: input.note,
-    },
-  });
-}
-
-export function listCenterCatalogSuggestions(db: Db, centerId: string) {
-  return db.catalogSuggestion.findMany({
-    where: { centerId },
-    orderBy: { createdAt: "desc" },
-  });
-}
-
-/** The platform-admin review queue (`/admin/catalog`) — spans every centre by design. */
-export function listPendingCatalogSuggestions(db: Db) {
-  return db.catalogSuggestion.findMany({
-    where: { status: "PENDING" },
-    include: { center: { select: { id: true, name: true, nameEn: true } } },
-    orderBy: { createdAt: "asc" },
-  });
-}
-
-export function findCatalogSuggestionById(db: Db, id: string) {
-  return db.catalogSuggestion.findUnique({ where: { id } });
-}
-
-export type ResolveCatalogSuggestionResult =
-  | { ok: true; catalogId: string | null }
-  | { ok: false; error: "notFound" | "alreadyResolved" };
-
-/**
- * Approving creates (targetId null) or corrects (targetId set) the canonical
- * catalog row — the only path in this codebase allowed to write one. Only
- * ever called after `requirePlatformAdmin()` in the caller.
- */
-export async function approveCatalogSuggestion(
-  db: Db,
-  suggestionId: string,
-  resolvedBy: string,
-): Promise<ResolveCatalogSuggestionResult> {
-  const suggestion = await db.catalogSuggestion.findUnique({ where: { id: suggestionId } });
-  if (!suggestion) return { ok: false, error: "notFound" };
-  if (suggestion.status !== "PENDING") return { ok: false, error: "alreadyResolved" };
-
-  let catalogId: string;
-  if (suggestion.kind === "EDUCATION_SYSTEM") {
-    const row = suggestion.targetId
-      ? await db.catalogEducationSystem.update({
-          where: { id: suggestion.targetId },
-          data: { nameAr: suggestion.proposedNameAr, nameEn: suggestion.proposedNameEn },
-        })
-      : await db.catalogEducationSystem.create({
-          data: { nameAr: suggestion.proposedNameAr, nameEn: suggestion.proposedNameEn },
-        });
-    catalogId = row.id;
-  } else if (suggestion.kind === "GRADE") {
-    const row = suggestion.targetId
-      ? await db.catalogGrade.update({
-          where: { id: suggestion.targetId },
-          data: { nameAr: suggestion.proposedNameAr, nameEn: suggestion.proposedNameEn },
-        })
-      : await db.catalogGrade.create({
-          data: {
-            nameAr: suggestion.proposedNameAr,
-            nameEn: suggestion.proposedNameEn,
-            educationSystemId: suggestion.parentId,
-          },
-        });
-    catalogId = row.id;
-  } else {
-    const row = suggestion.targetId
-      ? await db.catalogSubject.update({
-          where: { id: suggestion.targetId },
-          data: { nameAr: suggestion.proposedNameAr, nameEn: suggestion.proposedNameEn },
-        })
-      : await db.catalogSubject.create({
-          data: {
-            nameAr: suggestion.proposedNameAr,
-            nameEn: suggestion.proposedNameEn,
-            gradeId: suggestion.parentId,
-          },
-        });
-    catalogId = row.id;
-  }
-
-  await db.catalogSuggestion.update({
-    where: { id: suggestionId },
-    data: { status: "ACCEPTED", resolvedBy, resolvedAt: new Date() },
-  });
-
-  return { ok: true, catalogId };
-}
-
-export async function rejectCatalogSuggestion(
-  db: Db,
-  suggestionId: string,
-  resolvedBy: string,
-): Promise<ResolveCatalogSuggestionResult> {
-  const suggestion = await db.catalogSuggestion.findUnique({ where: { id: suggestionId } });
-  if (!suggestion) return { ok: false, error: "notFound" };
-  if (suggestion.status !== "PENDING") return { ok: false, error: "alreadyResolved" };
-
-  await db.catalogSuggestion.update({
-    where: { id: suggestionId },
-    data: { status: "REJECTED", resolvedBy, resolvedAt: new Date() },
-  });
-  return { ok: true, catalogId: null };
 }

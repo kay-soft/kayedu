@@ -61,6 +61,8 @@ export async function completeStudentProfileAction(
     // Selection lookup applies here, unlike a receptionist's own picker.
     const grade = await prisma.catalogGrade.findUnique({ where: { id: gradeId } });
     if (!grade) return { fieldErrors: { gradeId: "notFound" } };
+    // A deactivated grade cannot be newly chosen (R8) — only kept, if it is already theirs.
+    if (!grade.active && grade.id !== profile.gradeId) return { fieldErrors: { gradeId: "notFound" } };
   }
 
   await prisma.studentProfile.update({

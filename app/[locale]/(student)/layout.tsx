@@ -11,7 +11,7 @@ import { AppShell } from "@/components/shell/app-shell";
 import { shellScope, shellUser } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireStudentUser, studentBrand } from "@/lib/auth/tenant";
-import { catalogLabel } from "@/lib/catalog";
+import { CATALOG_OVERRIDE_SELECT, catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { listCatalogGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
@@ -42,7 +42,17 @@ async function pendingRatingViews(
   const [centers, subjects, teacherNamesByCenter] = await Promise.all([
     prisma.center.findMany({ where: { id: { in: centerIds } }, select: { id: true, name: true } }),
     subjectIds.length > 0
-      ? prisma.catalogSubject.findMany({ where: { id: { in: subjectIds } } })
+      ? // Each centre's own rename travels with the subject (R8): a row is
+        // labelled with the selections of *its* centre only.
+        prisma.catalogSubject.findMany({
+          where: { id: { in: subjectIds } },
+          include: {
+            selections: {
+              where: { centerId: { in: centerIds } },
+              select: { centerId: true, ...CATALOG_OVERRIDE_SELECT },
+            },
+          },
+        })
       : Promise.resolve([]),
     Promise.all(
       centerIds.map(async (centerId) => {
@@ -56,6 +66,12 @@ async function pendingRatingViews(
 
   const centerNameById = new Map(centers.map((center) => [center.id, center.name]));
   const subjectById = new Map(subjects.map((subject) => [subject.id, subject]));
+  const subjectForCenter = (subjectId: string, centerId: string) => {
+    const subject = subjectById.get(subjectId);
+    return subject
+      ? { ...subject, selections: subject.selections.filter((selection) => selection.centerId === centerId) }
+      : null;
+  };
 
   return pending.map((row) => ({
     sessionId: row.sessionId,
@@ -64,7 +80,12 @@ async function pendingRatingViews(
     teacherName: teacherNamesByCenter.get(row.centerId)?.get(row.teacherId) ?? "—",
     // R5: a one-time session leads with its own title.
     subjectName:
-      [row.title, row.subjectId ? catalogLabel(locale, subjectById.get(row.subjectId)!) : null]
+      [
+        row.title,
+        row.subjectId
+          ? catalogLabelWithSelection(locale, subjectForCenter(row.subjectId, row.centerId))
+          : null,
+      ]
         .filter(Boolean)
         .join(" · ") || null,
   }));

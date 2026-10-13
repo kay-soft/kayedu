@@ -44,6 +44,23 @@ export async function requestToTeachAction(
   });
   if (!center) return { error: "notFound" };
 
+  // The directory form offers only active catalog entries (R8); hold a direct
+  // post to the same line — a deactivated or unknown id is "not found".
+  if (payload.subjectId) {
+    const subject = await prisma.catalogSubject.findFirst({
+      where: { id: payload.subjectId, active: true },
+      select: { id: true },
+    });
+    if (!subject) return { fieldErrors: { subjectId: "notFound" } };
+  }
+  if (payload.gradeId) {
+    const grade = await prisma.catalogGrade.findFirst({
+      where: { id: payload.gradeId, active: true },
+      select: { id: true },
+    });
+    if (!grade) return { fieldErrors: { gradeId: "notFound" } };
+  }
+
   await prisma.changeRequest.create({
     data: {
       centerId,

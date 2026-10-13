@@ -206,12 +206,17 @@ function revalidateStudentDetail(locale: string, studentProfileId: string): void
 
 /** Re-resolves a form-supplied foreign key inside the active center. */
 async function resolveRef(
-  lookup: (id: string) => Promise<unknown>,
+  lookup: (id: string) => Promise<{ catalogActive: boolean } | null>,
   id: string | null,
+  currentId: string | null = null,
 ): Promise<{ ok: true; id: string | null } | { ok: false }> {
   if (id === null) return { ok: true, id: null };
   const row = await lookup(id);
-  return row ? { ok: true, id } : { ok: false };
+  if (!row) return { ok: false };
+  // An entry the platform has deactivated cannot be newly chosen (R8); a class
+  // that already has one keeps it (`currentId`) and can still be saved.
+  if (!row.catalogActive && id !== currentId) return { ok: false };
+  return { ok: true, id };
 }
 
 // ── Class group ─────────────────────────────────────────────────────────────
@@ -457,11 +462,12 @@ export async function updateClassAction(
   if (!teacher) return { fieldErrors: { teacherId: "notFound" } };
 
   const [subject, grade, educationSystem] = await Promise.all([
-    resolveRef((refId) => scope.db.subjects.findById(refId), subjectId),
-    resolveRef((refId) => scope.db.grades.findById(refId), gradeId),
+    resolveRef((refId) => scope.db.subjects.findById(refId), subjectId, existing.subjectId),
+    resolveRef((refId) => scope.db.grades.findById(refId), gradeId, existing.gradeId),
     resolveRef(
       (refId) => scope.db.educationSystems.findById(refId),
       educationSystemId,
+      existing.educationSystemId,
     ),
   ]);
   if (!subject.ok) return { fieldErrors: { subjectId: "notFound" } };

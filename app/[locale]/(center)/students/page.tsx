@@ -78,10 +78,16 @@ export default async function StudentsPage({
   // `grades` comes from `scoped(ctx).grades.list()`, which already resolves
   // `.name` to this centre's own display-name override or the catalog
   // entry's bilingual name.
-  const gradeOptions = grades.map((grade) => ({
+  const toOption = (grade: (typeof grades)[number]) => ({
     value: grade.id,
     label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
-  }));
+  });
+  // New students are placed only in a grade still on offer (R8). Promotion
+  // keeps every grade selectable as the source — students may still sit in a
+  // grade the platform has since deactivated — and the action refuses a
+  // deactivated destination.
+  const gradeOptions = grades.filter((grade) => grade.catalogActive).map(toOption);
+  const promoteGradeOptions = grades.map(toOption);
 
   const canPromote = ctxCan(ctx, "student.promote");
 
@@ -108,10 +114,10 @@ export default async function StudentsPage({
             <CardDescription>{t("promote.description")}</CardDescription>
           </CardHeader>
           <CardContent>
-            {gradeOptions.length < 2 ? (
+            {promoteGradeOptions.length < 2 ? (
               <FormMessage tone="info">{t("promote.needsGrades")}</FormMessage>
             ) : (
-              <PromoteForm grades={gradeOptions} />
+              <PromoteForm grades={promoteGradeOptions} />
             )}
           </CardContent>
         </Card>

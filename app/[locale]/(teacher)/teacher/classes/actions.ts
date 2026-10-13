@@ -35,6 +35,22 @@ export async function createClassRequestAction(
 
   const { locale, ...payload } = parsed.data;
 
+  // A request names only entries this branch has picked and the platform
+  // still offers — a deactivated one is no more requestable than it is
+  // pickable (R8).
+  if (payload.subjectId) {
+    const subject = await db.subjects.findById(payload.subjectId);
+    if (!subject || !subject.active || !subject.catalogActive) {
+      return { fieldErrors: { subjectId: "notFound" } };
+    }
+  }
+  if (payload.gradeId) {
+    const grade = await db.grades.findById(payload.gradeId);
+    if (!grade || !grade.active || !grade.catalogActive) {
+      return { fieldErrors: { gradeId: "notFound" } };
+    }
+  }
+
   await db.changeRequests.create({
     type: "NEW_CLASS",
     requestedBy: ctx.user.id,

@@ -28,6 +28,7 @@ import {
 } from "./session-lifecycle.ts";
 import { resolveRoomSet, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
 import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
+import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 
 /**
  * One session's own writes — cancel, reschedule, its centre-cut override,
@@ -516,14 +517,14 @@ export function sessionListSelect(centerId: string) {
       select: {
         nameAr: true,
         nameEn: true,
-        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
       },
     },
     grade: {
       select: {
         nameAr: true,
         nameEn: true,
-        selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
       },
     },
     classGroup: {
@@ -532,14 +533,14 @@ export function sessionListSelect(centerId: string) {
           select: {
             nameAr: true,
             nameEn: true,
-            selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+            selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
           },
         },
         grade: {
           select: {
             nameAr: true,
             nameEn: true,
-            selections: { where: { centerId }, select: { displayName: true }, take: 1 },
+            selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
           },
         },
         _count: { select: { enrollments: { where: { status: ACTIVE_ENROLLMENT_STATUS } } } },

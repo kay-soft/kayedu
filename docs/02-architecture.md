@@ -51,7 +51,7 @@ app/
                                 #   + "Can be combined with" per room (R3, RoomLink)
         payment-methods/        # the centre's own payment methods, add via dialog (R1)
         terms/                  # the centre's term presets (name + dates), add via dialog (R4)
-        catalog/                # pick global subjects/grades/systems, suggest new ones (M13)
+        catalog/                # pick global subjects/grades/systems, rename them per language, price a system (M13, R8)
                                 #   (replaces education-systems/ grades/ subjects/)
         card/                   # visual ID-card layout editor — no JSON shown (M18)
         permissions/            # the action × role matrix + role/branch grants, OWNER only (M12)
@@ -67,7 +67,7 @@ app/
       student/                  # /student/schedule, /student/discover, /student/reservations (M8)
     (parent)/parent/            # child selector + per-child mirror of the student portal (delivered M16)
     (admin)/admin/              # /admin/centers, /admin/centers/[id], /admin/platform (M9)
-                                #   + /admin/catalog (global entries + suggestion queue, M13)
+                                #   + /admin/catalog (manage the global entries: add/edit/deactivate/delete, R8)
     (print)/                    # role-gated print views, no app shell — students/[id]/{card,paper} (M3),
                                  # teacher/sessions/[id]/print (M7), sessions/[id]/print (staff receipt, R2);
                                  # layout accepts "center" or "teacher"
@@ -133,7 +133,8 @@ lib/
     organizations.ts              # org-level analytics roll-up — one centerId-scoped lib/db/analytics.ts
                                   #   call per branch, summed in memory, no @/ imports (M11, §4)
     permissions.ts                # the ONLY PermissionGrant/role/branch-grant writes, OWNER-gated + audited (M12)
-    catalog.ts                    # global catalog reads + a centre's selections/suggestions (M13)
+    catalog.ts                    # global catalog reads + a centre's own selections (pick/rename/price) (M13, R8)
+    catalog-admin.ts              # the ONLY writes to a global catalog row — platform-admin-checked on every call, audited (R8)
     settlements.ts                # the ONLY Settlement writes — DRAFT→APPROVED→PAID, totals derived from
                                   #   frozen snapshots of CLOSED sessions, never recomputed (M14, R2)
     refunds.ts                    # the ONLY Refund writes — original Payment row never touched (M14)
@@ -187,7 +188,7 @@ scripts/
   admin-check.ts                 # center provisioning/lifecycle transitions, platform-KPI reconciliation, support-access audit gate (M9; the plan-edit assertion is removed at M19 with the column)
   branches-check.ts              # org roll-up = exact sum of per-branch scoped queries; branch-A-can't-read-branch-B (M11)
   permissions-check.ts           # matrix resolution, deny-by-default, OWNER-only granting, grantable ceiling, session invalidation, teacher-detail leak (M12)
-  catalog-check.ts               # catalog is global, a centre edits only its own display name/prices, suggestion queue, bilingual names (M13)
+  catalog-check.ts               # catalog is global, a centre edits only its own per-language names/price; platform-admin-only writes, delete/deactivate rules, bilingual resolution (M13, R8)
   settlements-check.ts           # settlement totals derive from frozen snapshots; refund arithmetic on revenue + both shares (M14)
   enrollment-check.ts            # block scopes, 7-day cooling-off, capacity cap vs. uncapped attendance, full-window reschedule (M15)
   parent-check.ts                # privileged-phone refusal, inert-until-verified, parent sees no more than the child (delivered M16)
@@ -376,6 +377,8 @@ All gates import only modules free of `@/` aliases and of Next-runtime imports �
 
 **The OD-6 placeholder seam adds one action (delivered M16).** `parent.link.manage` joins `PERMISSIONS` and the `MANAGER_BASELINE` seeded rows — OWNER/MANAGER hold it by default on a freshly provisioned centre, and it is genuinely configurable through `/settings/permissions` like any other post-M12 action (not on `OWNER_ONLY_ACTIONS` or `FORBIDDEN_CEILING`). It gates exactly one thing: flipping a `ParentLink` from `PENDING` to `VERIFIED` from a student's profile — the manual seam standing in for OD-6's still-undecided real verification mechanism, not that decision itself. `PARENT` itself never holds any permission at all, by a `can()`-level ceiling identical to `STUDENT`'s (`role === "STUDENT" || role === "PARENT"` → deny), so no stored `PermissionGrant` row — real or hypothetical — could ever open a write path for the parent portal.
 
+**The global catalog adds no matrix action (R8).** Adding, editing, deactivating, reactivating and deleting a catalog entry is a **platform-admin** capability, not a centre permission, so nothing is added to `PERMISSIONS` and nothing can be granted: `/admin/catalog` and its four Server Actions call `requirePlatformAdmin()` first, and — the structural lock — every function in `lib/db/catalog-admin.ts` re-loads the acting user and refuses (`forbidden`) unless `user.isPlatformAdmin`, so a direct call by an OWNER, MANAGER, RECEPTIONIST, ACCOUNTANT, TEACHER, student, parent or anonymous caller is refused whatever the caller checked first. A centre's own catalog screen (`/settings/catalog`) stays on `center.settings.edit`: it can pick, rename (its own names) and price, and nothing else.
+
 **Payment methods add no action (R1).** Settings → Payment methods (`/settings/payment-methods`) is gated by the same `center.settings.edit` that already gates rooms and the rest of centre configuration — the page's `requirePermission` and every one of its four Server Actions' `ctxCan`. No new matrix row, no hardcoded role check. Recording a payment with a method stays `payment.record`; the method's centre and `active` flag are checked inside `recordPayment`'s transaction, not by a permission.
 
 **Ending a session adds one action (R2).** `session.close` joins `PERMISSIONS` and `DEFAULT_ROLE_GRANTS` for **OWNER, MANAGER and RECEPTIONIST** — ending a session is the reception desk's daily job, not an elevated one. Unlike M14's money actions it **is backfilled**: the R2 migration (`prisma/migrations/20261012120000_r2_session_lifecycle`) inserts the three rows for every existing centre (`ON CONFLICT DO NOTHING`, so a centre's own explicit row survives), because without it no existing centre could end a session at all and the end-of-day auto-close would be the only way one ever closed. Not on `OWNER_ONLY_ACTIONS` or `FORBIDDEN_CEILING` — configurable like any other action. It gates `endSessionAction` (`app/[locale]/(center)/sessions/actions.ts`, re-checked server-side) and the "End session" button. Switching a paid student to Absent on a live session (which voids the payment) needs **both** `attendance.correct` and `payment.void` — checked in the action and re-checked under the row lock inside `changeAttendanceStatus` (`mayVoidPayment`), so a status change can never void money its actor could not void directly. `npm run check:session-lifecycle` asserts the defaults, a refusal without the grant, and the backfill.
@@ -408,6 +411,8 @@ All gates import only modules free of `@/` aliases and of Next-runtime imports �
 1. **No code renames.** Models, columns, variables, route segments and helper names keep the schema vocabulary. A developer reading `centerId` in a loader and "Branch" on the screen is the intended, documented state — `00-master-product-spec.md` §9's glossary is the mapping, and the full DB rename is `05-phase-2-backlog.md` entry 18, to be done alone or not at all.
 2. **No hardcoded strings, as always** (CLAUDE.md rule 5). This is the existing rule doing the work: because every label already comes from `messages/*.json`, the naming decision is a translation edit, not a refactor.
 3. **One key per concept, never per model.** `Nav.branchSwitcher`, `Branch.title`, `Organization.title` — do not introduce a `Center.title` that sometimes means one and sometimes the other, or the layer that was supposed to remove the confusion becomes the source of it.
+
+**Catalog label resolution (R8) — one resolver, one rule.** A catalog entry is shown through `lib/catalog.ts`'s `catalogLabel(locale, entry, override)` (or `catalogLabelWithSelection(locale, entry)` for a relation that carries the centre's nested `selections`). In the **Arabic** UI the label is the centre's `displayNameAr` if it set one, else the canonical `nameAr`; in the **English** UI its `displayNameEn`, else the canonical `nameEn`. An Arabic override never appears in the English UI and an English one never in the Arabic UI; blank/whitespace counts as no override; only if a canonical name is itself blank (impossible for an entry created since R8, which requires both) does it fall back to the *other language's canonical name* — never the other language's override. **No reader reads the override columns directly:** every live read selects `CATALOG_OVERRIDE_SELECT` (both columns, nothing else) and hands the result to the resolver — class, session, student, Discover, reservations, approvals, receipts and print views, the teacher and student portals, the ID card, the student rating pop-up, and `scoped()`'s `educationSystems`/`grades`/`subjects` collections (whose `.name` is the resolved label). `npm run check:catalog` fails the build if any code (comments aside) mentions the dropped single-name column. A **deactivated** entry still resolves here (history stays readable); pickers use `scoped().x.list({ active: true })`, which excludes both a pick the centre switched off *and* an entry the platform deactivated, and write paths refuse to *newly* assign a deactivated entry while letting an existing record keep the one it already has.
 
 **Catalog entries are bilingual; person names are not (M13).** Every `Catalog*` row carries `nameAr` and `nameEn` and renders in the active locale, so "IGCSE Physics" reads correctly in both. **A person's name is single-valued** — one name per relationship (`01-data-model.md` §6), not one per locale. This is a modelling decision, not an i18n gap: a human's name is not a translatable string, and storing two produces two records of the same person that drift apart. Render a name as stored, in either locale.
 

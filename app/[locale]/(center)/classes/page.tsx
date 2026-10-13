@@ -122,22 +122,25 @@ export default async function ClassesPage({
     // The centre's own phone for them (docs/01 §6) — what the picker searches.
     phone: teacher.phone,
   }));
-  const subjectOptions = subjects.map((subject) => ({
-    value: subject.id,
-    label: subject.active
-      ? subject.name
-      : `${subject.name} · ${tCommon("inactive")}`,
-  }));
-  const gradeOptions = grades.map((grade) => ({
-    value: grade.id,
-    label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
-  }));
-  const educationSystemOptions = educationSystems.map((system) => ({
-    value: system.id,
-    label: system.active
-      ? system.name
-      : `${system.name} · ${tCommon("inactive")}`,
-  }));
+  // The list filter keeps every entry (an existing class may use one the
+  // platform has since deactivated); the New class dialog offers only the
+  // entries still on offer (R8).
+  const toOption = (row: { id: string; name: string; active: boolean }) => ({
+    value: row.id,
+    label: row.active ? row.name : `${row.name} · ${tCommon("inactive")}`,
+  });
+  const subjectOptions = subjects.map(toOption);
+  const gradeOptions = grades.map(toOption);
+  const pickableSubjectOptions = subjects.filter((row) => row.catalogActive).map(toOption);
+  const pickableGradeOptions = grades.filter((row) => row.catalogActive).map(toOption);
+  const educationSystemOptions = educationSystems
+    .filter((system) => system.catalogActive)
+    .map((system) => ({
+      value: system.id,
+      label: system.active
+        ? system.name
+        : `${system.name} · ${tCommon("inactive")}`,
+    }));
   const roomOptions = rooms.map((room) => ({
     id: room.id,
     name: room.name,
@@ -166,8 +169,8 @@ export default async function ClassesPage({
         action={
           <AddClassDialog
             teachers={teacherOptions}
-            subjects={subjectOptions}
-            grades={gradeOptions}
+            subjects={pickableSubjectOptions}
+            grades={pickableGradeOptions}
             educationSystems={educationSystemOptions}
             educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={roomOptions}

@@ -1429,46 +1429,35 @@
     },
     "catalog": {
       "title": "Academic catalog",
-      "description": "Education systems, grades and subjects are shared platform-wide. Pick the ones this branch teaches, rename or price your own pick, and suggest anything missing or wrong.",
+      "description": "Education systems, grades and subjects are shared platform-wide. Pick the ones this branch teaches, and rename or price your own pick, in Arabic and English.",
       "pickTitle": "Pick from the catalog",
       "pickPlaceholder": "Choose an entry…",
       "nothingLeftToPick": "This branch has already picked everything currently in the catalog.",
+      "contactUs": "Can't find what you need? Contact us and we'll add it to the catalog.",
+      "emptyHint": "Pick an entry above to make it available here.",
+      "retired": "No longer offered",
       "select": "Add",
       "deselect": "Remove",
-      "suggestNew": "Suggest a new entry",
-      "suggestCorrection": "Suggest a correction",
-      "suggestDescription": "Reviewed by a platform admin. Approving creates or corrects the shared catalog entry; rejecting leaves your own pick as it is.",
-      "suggestionSubmitted": "Suggestion submitted for review.",
-      "submitSuggestion": "Submit suggestion",
-      "noParent": "No parent",
       "fields": {
         "basePrice": "Base price",
-        "displayName": "Your own name for this",
-        "displayNameHint": "Leave blank to use the catalog name ({name}).",
-        "nameAr": "Arabic name",
-        "nameEn": "English name",
-        "note": "Note to the reviewer",
-        "existingEntry": "Which entry",
-        "educationSystem": "Education system",
-        "grade": "Grade"
+        "displayNameAr": "Your name in Arabic",
+        "displayNameEn": "Your name in English",
+        "displayNameHint": "Shown only in this language. Leave blank to use the catalog name."
       },
       "educationSystems": {
         "title": "Education systems",
         "description": "The curricula this branch teaches (National, Languages, IG…) and the price each one starts from.",
-        "empty": "No education systems picked yet.",
-        "suggestTitle": "Suggest an education system"
+        "empty": "No education systems picked yet."
       },
       "grades": {
         "title": "Grades",
         "description": "The year groups this branch teaches.",
-        "empty": "No grades picked yet.",
-        "suggestTitle": "Suggest a grade"
+        "empty": "No grades picked yet."
       },
       "subjects": {
         "title": "Subjects",
         "description": "What is taught, per grade.",
-        "empty": "No subjects picked yet.",
-        "suggestTitle": "Suggest a subject"
+        "empty": "No subjects picked yet."
       }
     },
     "rooms": {
@@ -1811,7 +1800,8 @@
       "invalidTime": "Enter a valid time.",
       "invalidTimeRange": "The end time must be after the start time.",
       "invalidNumber": "Enter a whole number.",
-      "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here."
+      "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here.",
+      "notFound": "That option is no longer available."
     },
     "emptyHint": "Classes a branch assigns to you appear here. You can also request a new one below."
   },
@@ -2053,27 +2043,112 @@
   },
   "AdminCatalog": {
     "title": "Academic catalog",
-    "subtitle": "{count, plural, =0 {No suggestions pending review} one {# suggestion pending review} other {# suggestions pending review}}",
-    "empty": "No suggestions waiting on review.",
-    "approve": "Approve",
-    "reject": "Reject",
-    "newEntry": "New entry",
-    "correctionOf": "Correction to \"{name}\"",
-    "kinds": {
-      "educationSystem": "Education system",
-      "grade": "Grade",
-      "subject": "Subject"
+    "subtitle": "The education systems, grades and subjects every branch picks from. Add an entry when a branch asks for one; branches can rename their own pick but never change these.",
+    "tabs": {
+      "educationSystem": "Education systems",
+      "grade": "Grades",
+      "subject": "Subjects"
+    },
+    "sections": {
+      "educationSystem": {
+        "title": "Education systems",
+        "description": "Curricula such as National, Languages or IG, with the default centre cut a new class starts from.",
+        "empty": "No education systems yet."
+      },
+      "grade": {
+        "title": "Grades",
+        "description": "Year groups, optionally under an education system.",
+        "empty": "No grades yet."
+      },
+      "subject": {
+        "title": "Subjects",
+        "description": "What is taught, optionally under a grade.",
+        "empty": "No subjects yet."
+      }
+    },
+    "add": "Add",
+    "save": "Save",
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteYes": "Yes, delete permanently",
+    "deleteConfirm": "Delete this entry permanently? This is only possible while no branch, class, student or session uses it.",
+    "deleteBlocked": "Can't delete it: still used by {parts}. Deactivate it instead to hide it from every picker.",
+    "deactivate": "Deactivate",
+    "deactivateYes": "Yes, deactivate",
+    "deactivateInstead": "Deactivate instead",
+    "deactivateConfirm": "Hide this entry from every picker, filter and branch catalog list? Classes, sessions and history that already use it keep showing it.",
+    "reactivate": "Reactivate",
+    "active": "Active",
+    "inactive": "Inactive",
+    "search": "Search the catalog",
+    "searchPlaceholder": "Search by name in English or Arabic…",
+    "noMatches": "Nothing matches that search.",
+    "noMatchesHint": "Try a different spelling, or clear the search.",
+    "emptyHint": "Anything you add here becomes available for every branch to pick.",
+    "defaultShareValue": "Default centre cut {amount} EGP",
+    "noEducationSystem": "No education system",
+    "noGrade": "No grade",
+    "usage": {
+      "summary": "{centres, plural, =0 {Not picked by any branch} one {Picked by # branch} other {Picked by # branches}} · {classes, plural, =0 {no classes} one {# class} other {# classes}}",
+      "centres": "{count, plural, =0 {} one {# branch} other {# branches}}",
+      "classes": "{count, plural, =0 {} one {# class} other {# classes}}",
+      "students": "{count, plural, =0 {} one {# student} other {# students}}",
+      "sessions": "{count, plural, =0 {} one {# one-time session} other {# one-time sessions}}",
+      "children": "{count, plural, =0 {} one {# child entry} other {# child entries}}"
+    },
+    "dialog": {
+      "description": "Both names are required; branches see the one that matches their language.",
+      "create": {
+        "educationSystem": "Add an education system",
+        "grade": "Add a grade",
+        "subject": "Add a subject"
+      },
+      "edit": {
+        "educationSystem": "Edit education system",
+        "grade": "Edit grade",
+        "subject": "Edit subject"
+      }
     },
     "fields": {
-      "nameAr": "Arabic name",
       "nameEn": "English name",
-      "parent": "Parent"
+      "nameAr": "Arabic name",
+      "educationSystem": "Education system",
+      "educationSystemHint": "Leave empty for a grade that belongs to no system.",
+      "grade": "Grade",
+      "gradeHint": "Leave empty for a subject that belongs to no grade.",
+      "defaultShare": "Default centre cut (EGP)",
+      "defaultShareHint": "The amount a new class starts from when its cut is a fixed amount. It is a starting point only: changing it never moves an existing class or a recorded payment."
+    },
+    "placeholders": {
+      "educationSystem": {
+        "en": "e.g. IGCSE",
+        "ar": "مثال: آي جي سي إس إي"
+      },
+      "grade": {
+        "en": "e.g. Grade 10",
+        "ar": "مثال: الصف الأول الثانوي"
+      },
+      "subject": {
+        "en": "e.g. Mathematics",
+        "ar": "مثال: الرياضيات"
+      }
     },
     "errors": {
-      "notFound": "That suggestion no longer exists.",
-      "alreadyResolved": "That suggestion has already been resolved."
-    },
-    "emptyHint": "Subjects and grades you add here become selectable at every centre on the platform."
+      "forbidden": "Only a platform admin can change the catalog.",
+      "notFound": "That entry no longer exists.",
+      "inUse": "That entry is still in use.",
+      "alreadyInState": "That entry is already in that state.",
+      "nameEnRequired": "Enter the English name.",
+      "nameArRequired": "Enter the Arabic name.",
+      "nameEnTooLong": "The English name is too long (80 characters at most).",
+      "nameArTooLong": "The Arabic name is too long (80 characters at most).",
+      "duplicateNameEn": "Another entry in the same place already has this English name.",
+      "duplicateNameAr": "Another entry in the same place already has this Arabic name.",
+      "parentNotFound": "That parent no longer exists.",
+      "invalidShare": "Enter a valid amount in EGP.",
+      "invalidAmount": "Enter a valid amount in EGP."
+    }
   },
   "AdminPlatform": {
     "title": "Platform",

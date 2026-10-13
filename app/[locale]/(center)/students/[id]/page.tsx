@@ -130,10 +130,15 @@ export default async function StudentDetailPage({
   // `grades` comes from `scoped(ctx).grades.list()`, which already resolves
   // `.name` to this centre's own display-name override or the catalog
   // entry's bilingual name.
-  const gradeOptions = grades.map((grade) => ({
-    value: grade.id,
-    label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
-  }));
+  // A grade the platform has deactivated is not offered — except the one this
+  // student already has, which stays selectable so the record saves unchanged.
+  const gradeOptions = grades
+    .filter((grade) => grade.catalogActive || grade.id === student.gradeId)
+    .map((grade) => ({
+      value: grade.id,
+      label:
+        grade.active && grade.catalogActive ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
+    }));
 
   return (
     <div className="flex flex-col gap-6">
