@@ -44,7 +44,7 @@ import { effectiveCapacity } from "@/lib/rooms";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { LinkButton } from "@/components/shared/link-button";
-import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
+import { centreTimeZone, dateKey } from "@/lib/scheduling";
 
 const MAX_CANDIDATES = 8;
 
@@ -95,7 +95,7 @@ export default async function SessionDetailPage({
   const tSettlementStatus = await getTranslations("Settlements.status");
   const locale = await getLocale();
 
-  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
+  const timeZone = centreTimeZone(ctx.settings);
   const canReschedule = ctxCan(ctx, "session.manage");
   const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks, deleteBlockers] = await Promise.all([
     // A one-time session (R5) has no class, so no enrolled roster: everyone is a drop-in.
@@ -409,7 +409,7 @@ export default async function SessionDetailPage({
                 <ActionBar>
                 <SessionLifecycleActions
                   sessionId={session.id}
-                  date={session.date.toISOString().slice(0, 10)}
+                  date={dateKey(session.date)}
                   startTime={session.startTime}
                   endTime={session.endTime}
                   locked={rosterReadOnly}

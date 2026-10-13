@@ -9,7 +9,8 @@ import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
 import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
-import { startOfUtcDay } from "@/lib/scheduling";
+import { centerTimeZone } from "@/lib/db/session-lifecycle";
+import { dateKey, todayInTimezone } from "@/lib/scheduling";
 import { ChildSelector } from "./child-selector";
 import { ParentDateFilter } from "./parent-date-filter";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -135,7 +136,9 @@ export default async function ParentPage({
     session.children[0];
   const dateFilter = rawParams.date?.trim() || "";
 
-  const today = startOfUtcDay(new Date());
+  // R7b: "today" is the selected child's own centre's calendar day.
+  const timeZone = await centerTimeZone(prisma, selected.centerId);
+  const today = todayInTimezone(timeZone);
   const { upcoming, past } = await loadChildSchedule(
     selected.centerId,
     selected.studentProfileId,
@@ -143,9 +146,8 @@ export default async function ParentPage({
     locale,
   );
 
-  const dayKey = (date: Date) => date.toISOString().slice(0, 10);
-  const upcomingFiltered = dateFilter ? upcoming.filter((row) => dayKey(row.date) === dateFilter) : upcoming;
-  const pastFiltered = dateFilter ? past.filter((row) => dayKey(row.date) === dateFilter) : past;
+  const upcomingFiltered = dateFilter ? upcoming.filter((row) => dateKey(row.date) === dateFilter) : upcoming;
+  const pastFiltered = dateFilter ? past.filter((row) => dateKey(row.date) === dateFilter) : past;
 
   return (
     <div className="flex flex-col gap-6">
@@ -173,7 +175,7 @@ export default async function ParentPage({
         <ParentDateFilter
           date={dateFilter}
           childId={selected.studentProfileId}
-          todayIso={today.toISOString().slice(0, 10)}
+          todayIso={dateKey(today)}
           dateLabel={t("filterDate")}
         />
       </div>

@@ -11,7 +11,7 @@ import {
   type RoomCombinationError,
   type RoomLinkPair,
 } from "../rooms.ts";
-import { zonedClock } from "../scheduling.ts";
+import { todayInTimezone } from "../scheduling.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -178,7 +178,7 @@ class RoomLinkWriteError extends Error {
  * after today in the centre's timezone.
  */
 function futureOpenSessionWhere(clock: { now: Date; timeZone: string }): Prisma.SessionWhereInput {
-  const today = new Date(`${zonedClock(clock.now, clock.timeZone).dayKey}T00:00:00.000Z`);
+  const today = todayInTimezone(clock.timeZone, clock.now);
   return {
     status: { not: CANCELLED },
     rescheduledToId: null,

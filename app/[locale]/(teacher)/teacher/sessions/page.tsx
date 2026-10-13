@@ -27,7 +27,7 @@ import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
 import { formatDate, formatNumber, formatTimeRange } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { DEFAULT_TIMEZONE, addDays, startOfUtcDay } from "@/lib/scheduling";
+import { addDays, centreTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 import { prisma } from "@/lib/db/client";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
@@ -72,9 +72,12 @@ export default async function TeacherSessionsPage({
     ? parsed.data
     : { ...dates, gradeId: null, status: null, q: null };
 
-  const anchor = filters.date
-    ? new Date(`${filters.date}T00:00:00.000Z`)
-    : startOfUtcDay(new Date());
+  // R7b: the active centre's calendar day — the same "today" the centre's own
+  // sessions list and the reception desk use.
+  const now = new Date();
+  const timeZone = centreTimeZone(ctx.settings);
+  const today = todayInTimezone(timeZone, now);
+  const anchor = filters.date ? new Date(`${filters.date}T00:00:00.000Z`) : today;
   const from = anchor;
   const to = addDays(anchor, RANGE_SPAN_DAYS[filters.range]);
 
@@ -85,7 +88,7 @@ export default async function TeacherSessionsPage({
   const locale = await getLocale();
 
   // R2's lazy end-of-day close for this teacher's sessions in view.
-  await closeEndedSessions(prisma, ctx.center.id, new Date(), { from, to, teacherId: ctx.user.id });
+  await closeEndedSessions(prisma, ctx.center.id, now, { from, to, teacherId: ctx.user.id });
 
   const [rows, grades, ownClasses] = await Promise.all([
     db.sessions.search({
@@ -114,8 +117,6 @@ export default async function TeacherSessionsPage({
         .join(" · ") || tCommon("none"),
   }));
 
-  const now = new Date();
-  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
   const withStatus = rows.map((row) => ({
     row,
     displayStatus: deriveSessionDisplayStatus(row, now, timeZone),
@@ -209,8 +210,8 @@ export default async function TeacherSessionsPage({
 
           <TeacherSessionFilters
             range={filters.range}
-            date={filters.date ?? anchor.toISOString().slice(0, 10)}
-            todayIso={startOfUtcDay(new Date()).toISOString().slice(0, 10)}
+            date={filters.date ?? dateKey(anchor)}
+            todayIso={dateKey(today)}
             gradeId={filters.gradeId ?? ""}
             status={filters.status ?? ""}
             q={filters.q ?? ""}

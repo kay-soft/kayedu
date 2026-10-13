@@ -44,7 +44,7 @@ import {
 } from "../lib/db/class-sessions.ts";
 import { linkRooms, writeSessionExtraRooms } from "../lib/db/room-sets.ts";
 import { createTerm } from "../lib/db/terms.ts";
-import { addDays, dateKey, dayMarker } from "../lib/scheduling.ts";
+import { DEFAULT_TIMEZONE, addDays, dateKey, todayInTimezone } from "../lib/scheduling.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 
 const prisma = new PrismaClient();
@@ -474,7 +474,8 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
   // ── Terms (R4): Semester 1, Semester 2 and Full year ─────────────────────
   // Through the real writer (case-insensitive name rule); an existing term
   // of the same name is left as it is.
-  const today = dayMarker(new Date().toISOString().slice(0, 10));
+  // The demo centre is created in Africa/Cairo (below), so "today" is Cairo's.
+  const today = todayInTimezone(DEFAULT_TIMEZONE);
   const terms = demoTerms(today);
   for (const term of terms) {
     const result = await createTerm(prisma, centerId, term);
@@ -602,9 +603,7 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
     if (roster.length === 0) continue;
 
     for (let weeksAgo = 4; weeksAgo >= 1; weeksAgo--) {
-      const date = new Date();
-      date.setUTCDate(date.getUTCDate() - weeksAgo * 7);
-      date.setUTCHours(0, 0, 0, 0);
+      const date = addDays(todayInTimezone(DEFAULT_TIMEZONE), -weeksAgo * 7);
 
       const existingSession = await prisma.session.findFirst({
         where: { centerId, classGroupId: classGroup.id, date, startTime: schedule.startTime },
@@ -739,8 +738,7 @@ async function seedBranch(centerId: string, catalog: Catalog, config: BranchConf
   );
   const existingExpenses = await prisma.expense.count({ where: { centerId } });
   if (existingExpenses === 0) {
-    const lastWeek = new Date();
-    lastWeek.setUTCDate(lastWeek.getUTCDate() - 7);
+    const lastWeek = addDays(todayInTimezone(DEFAULT_TIMEZONE), -7);
     await prisma.expense.createMany({
       data: [
         { centerId, categoryId: rentCategory.id, amount: 500_000, date: lastWeek, note: "Monthly rent", recordedBy: "seed" },

@@ -9,6 +9,7 @@ import { studentSearchWhere } from "@/lib/db/students";
 import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import { centreTimeZone, startOfSessionDay } from "@/lib/scheduling";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   sessionRequestSchema,
@@ -79,8 +80,10 @@ export async function updateSessionDescriptionAction(
   // null means no deadline, the original M7 behavior.
   const deadlineHours = ctx.settings?.teacherEditDeadlineHours ?? null;
   if (deadlineHours !== null) {
-    const deadline = new Date(session.date);
-    deadline.setUTCHours(deadline.getUTCHours() + deadlineHours);
+    // R7b: the deadline counts hours from the start of the session's day *at
+    // the centre* (local midnight), not from UTC midnight.
+    const dayStart = startOfSessionDay(session.date, centreTimeZone(ctx.settings));
+    const deadline = new Date(dayStart.getTime() + deadlineHours * 60 * 60 * 1000);
     if (new Date() > deadline) return EDIT_DEADLINE_PASSED;
   }
 

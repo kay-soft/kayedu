@@ -11,6 +11,7 @@ import { scoped } from "@/lib/db/scoped";
 import { formatDate } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import { centreTimeZone, todayInTimezone } from "@/lib/scheduling";
 
 /**
  * "Print as paper" (spec §4.1 item 4) — the student's record on A4, for the
@@ -61,7 +62,9 @@ export default async function StudentPaperPrintPage({
             </p>
           </div>
           <p className="text-xs text-text-muted">
-            {t("print.printedOn", { date: formatDate(new Date(), locale) })}
+            {t("print.printedOn", {
+              date: formatDate(todayInTimezone(centreTimeZone(ctx.settings)), locale),
+            })}
           </p>
         </header>
 

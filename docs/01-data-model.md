@@ -204,7 +204,7 @@ Center 1─* CenterTerm                (R4 — presets; a class COPIES the dates
 
 **The rule.** By default, **no centre-side role (OWNER/MANAGER/RECEPTIONIST/ACCOUNTANT) may read data older than 1 calendar month** — analytics, money, old sessions, attendance history. Configurable per centre (`CenterSettings.dataVisibilityDays`, default 30), adjustable by a platform admin, and **bypassed entirely by a platform admin's own reads**. TEACHER/STUDENT/PARENT reads are never windowed — this is scoped to centre-side ERP roles only.
 
-**Expressed as a rolling day count, not a calendar-month anchor.** `dataVisibilityDays` days back from *today*, computed fresh on every request (`lib/db/visibility.ts`'s `visibilityWindowFloor`) — deliberately not "since the 1st of this calendar month," which would silently jump the visible horizon backwards by up to 30 days at the start of every new month. A rolling window also keeps the "widen it and see more instantly" property exact: the floor moves by exactly the days added, nothing else.
+**Expressed as a rolling day count, not a calendar-month anchor.** `dataVisibilityDays` days back from *today* — **the centre's calendar day** (R7b: `todayInTimezone(CenterSettings.timezone)`, `02-architecture.md` §11 "One owner of today"), so the floor flips at the centre's midnight, not UTC's; between 00:00 and 03:00 Cairo time a UTC-anchored floor was a day too old — computed fresh on every request (`lib/db/visibility.ts`'s `visibilityWindowFloor`) — deliberately not "since the 1st of this calendar month," which would silently jump the visible horizon backwards by up to 30 days at the start of every new month. A rolling window also keeps the "widen it and see more instantly" property exact: the floor moves by exactly the days added, nothing else.
 
 **Four properties that are part of the decision, not implementation detail** (`00-master-product-spec.md` §5.1):
 
@@ -215,4 +215,4 @@ Center 1─* CenterTerm                (R4 — presets; a class COPIES the dates
 
 **What it is not.** It is not a retention policy, not a compliance control, and not a security boundary against a hostile insider (a centre-side user who could read last month's data can read it, write it down, and keep it). It is an operational guardrail: it keeps day-to-day screens focused on the live window and limits the blast radius of a compromised or over-curious account. Say that plainly rather than letting it be mistaken for something stronger.
 
-Gated by `npm run check:visibility` (`scripts/visibility-check.ts`).
+Gated by `npm run check:visibility` (`scripts/visibility-check.ts`); the floor's anchor day is pinned at 00:30 and 23:30 Cairo under both offsets by `npm run check:timezone` (R7b).

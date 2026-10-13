@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:teacher-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/sessions.ts).
+import { monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
 import { type DateRange, revenueTotals } from "./analytics.ts";
 import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
@@ -24,6 +25,22 @@ const CANCELLED_STATUS: SessionStatus = "CANCELLED";
 type Db = PrismaClient | Prisma.TransactionClient;
 
 // ── Dashboard: per-center summary, unioned into a combined view ────────────
+
+/**
+ * One centre's "today", calendar week (Sunday-start) and calendar month for
+ * the teacher dashboard (R7b). Resolved from **that centre's own timezone** —
+ * a teacher's centres may sit in different zones, so each per-centre query
+ * gets its own day and only the resulting counts are summed
+ * (`combineTeacherSummaries`); there is no single global "today". `now` is
+ * injectable so the gate can pin the boundary.
+ */
+export function teacherDashboardAnchors(
+  timeZone: string,
+  now: Date = new Date(),
+): { today: Date; week: { start: Date; end: Date }; month: { start: Date; end: Date } } {
+  const today = todayInTimezone(timeZone, now);
+  return { today, week: weekRangeUtc(today), month: monthRangeUtc(today) };
+}
 
 export type TeacherCenterSummary = {
   centerId: string;

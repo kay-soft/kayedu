@@ -37,7 +37,6 @@ import { recordPayment } from "../lib/db/payments.ts";
 import {
   loadReceptionSessions,
   openSessionsForStudent,
-  receptionToday,
   recentCheckIns,
   resolveStudentInput,
   studentSessionState,
@@ -56,7 +55,7 @@ import {
   studentQrPayload,
 } from "../lib/id-card.ts";
 import { splitShare } from "../lib/money.ts";
-import { dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
+import { dayMarker, todayInTimezone, zonedDateTimeToUtc } from "../lib/scheduling.ts";
 
 const prisma = new PrismaClient();
 
@@ -652,7 +651,7 @@ async function main() {
   );
   check(
     "'Today' is the centre's day: at 00:30 Cairo (still 11 Oct in UTC) the 12 Oct sessions are today",
-    receptionToday(NOW_EARLY, TZ).toISOString() === day("2026-10-12").toISOString() &&
+    todayInTimezone(TZ, NOW_EARLY).toISOString() === day("2026-10-12").toISOString() &&
       (await cardsAt(NOW_EARLY)).length >= 3,
   );
 

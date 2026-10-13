@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient, Settlement, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:settlements` and
 // `npm run check:session-lifecycle` exercise this module directly.
-import { zonedClock } from "../scheduling.ts";
+import { todayInTimezone } from "../scheduling.ts";
 import { centerTimeZone, ensureSessionOpenOrAutoClose } from "./session-lifecycle.ts";
 
 /**
@@ -200,7 +200,7 @@ export async function createPeriodSettlement(
   // Lazily close every session in range whose day has ended (R2), so the
   // sum below sees them as the closed records they already are.
   const timeZone = await centerTimeZone(tx, centerId);
-  const todayStart = new Date(`${zonedClock(now, timeZone).dayKey}T00:00:00.000Z`);
+  const todayStart = todayInTimezone(timeZone, now);
   const cancelled: SessionStatus = "CANCELLED";
   const endedOpen = await tx.session.findMany({
     where: {

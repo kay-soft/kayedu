@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { dateKey } from "@/lib/scheduling";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   expenseCategoryDeleteSchema,
@@ -202,7 +203,7 @@ export async function deleteExpenseAction(
     before: {
       categoryId: row.categoryId,
       amount: row.amount,
-      date: row.date.toISOString().slice(0, 10),
+      date: dateKey(row.date),
       note: row.note,
     },
     after: null,

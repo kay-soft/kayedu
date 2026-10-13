@@ -17,10 +17,14 @@ import {
 import { getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { teacherRatingAverage } from "@/lib/db/ratings";
-import { combineTeacherSummaries, teacherCenterSummary } from "@/lib/db/teacher-portal";
+import {
+  combineTeacherSummaries,
+  teacherCenterSummary,
+  teacherDashboardAnchors,
+} from "@/lib/db/teacher-portal";
 import { formatMoney, formatNumber, formatRating } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { monthRangeUtc, startOfUtcDay, weekRangeUtc } from "@/lib/scheduling";
+import { centreTimeZone } from "@/lib/scheduling";
 import { LinkButton } from "@/components/shared/link-button";
 
 /**
@@ -39,22 +43,25 @@ export default async function TeacherDashboardPage() {
   const tRoles = await getTranslations("Roles");
   const locale = await getLocale();
 
+  // R7b: a teacher works at centres that may sit in different timezones, so
+  // "today", "this week" and "this month" are resolved **per centre** — each
+  // centre's own calendar day anchors its own scoped query, and only the
+  // resulting counts/totals are summed in memory (`combineTeacherSummaries`).
+  // There is no single global day.
   const now = new Date();
-  const today = startOfUtcDay(now);
-  const week = weekRangeUtc(now);
-  const month = monthRangeUtc(now);
 
   const summaries = await Promise.all(
-    contexts.map((centerCtx) =>
-      teacherCenterSummary(
+    contexts.map((centerCtx) => {
+      const { today, week, month } = teacherDashboardAnchors(centreTimeZone(centerCtx.settings), now);
+      return teacherCenterSummary(
         prisma,
         centerCtx.center.id,
         ctx.user.id,
         today,
         week,
         { from: month.start, to: month.end },
-      ),
-    ),
+      );
+    }),
   );
   const combined = combineTeacherSummaries(summaries);
   const summaryByCenter = new Map(summaries.map((summary) => [summary.centerId, summary]));

@@ -84,3 +84,4 @@ jobs:
       - run: npm run check:one-off-sessions
       - run: npm run check:class-creation
       - run: npm run check:reception
+      - run: npm run check:timezone

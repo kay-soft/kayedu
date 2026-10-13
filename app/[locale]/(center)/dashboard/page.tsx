@@ -27,7 +27,7 @@ import { formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { DEFAULT_TIMEZONE, startOfUtcDay } from "@/lib/scheduling";
+import { centreTimeZone, todayInTimezone } from "@/lib/scheduling";
 import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 
 const STATUS_BADGE = {
@@ -57,12 +57,14 @@ export default async function CenterDashboardPage() {
   const tStatus = await getTranslations("Sessions.status");
   const showProfit = ctxCan(ctx, "center.profit.view");
 
-  const today = startOfUtcDay(new Date());
+  // R7b: one `now`, one centre-timezone "today" for the whole page.
+  const now = new Date();
+  const timeZone = centreTimeZone(ctx.settings);
+  const today = todayInTimezone(timeZone, now);
   const todayRange = { from: today, to: today };
   // R2's lazy end-of-day close: any earlier session nobody ended is closed
   // (AUTO, absences materialized) before the day's numbers are read.
-  await closeEndedSessions(prisma, ctx.center.id);
-  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
+  await closeEndedSessions(prisma, ctx.center.id, now);
 
   const [
     staffCount,
@@ -85,7 +87,6 @@ export default async function CenterDashboardPage() {
     attendanceStatusCounts(prisma, ctx.center.id, todayRange),
   ]);
 
-  const now = new Date();
   const teacherNameByUserId = new Map(
     teacherMemberships.map((teacher) => [teacher.userId, fullName(localName(teacher, teacher.user))]),
   );

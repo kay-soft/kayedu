@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 // Relative imports on purpose — `npm run check:ratings` exercises this module
 // directly, outside the Next.js runtime (same reasoning as
 // lib/db/student-portal.ts and lib/db/parents.ts).
+import { addDays, centreTimeZone, todayInTimezone } from "../scheduling.ts";
 import { sessionCatalogIds } from "../session-label.ts";
 
 /**
@@ -22,7 +23,10 @@ import { sessionCatalogIds } from "../session-label.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+/** The pop-up looks back this many calendar days, today included (7 days = today and the 6 before). */
+const RATING_WINDOW_DAYS = 7;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Rounded to one decimal — "however's sensible" per the M17 brief. */
 function roundRating(value: number): number {
@@ -49,18 +53,25 @@ export type PendingRatingSession = {
  * Identity-scoped across every centre the student has ever attended a
  * session at, the same cross-centre shape `lib/db/student-portal.ts` already
  * uses for a student's own reservations/enrollments.
+ *
+ * R7b: "the last 7 days" is counted in **calendar days of the session's own
+ * centre** (`todayInTimezone` of that centre's zone, applied per row) — a
+ * student's centres may sit in different timezones, so there is no one global
+ * day. The database read is only a deliberately generous coarse bound; the
+ * per-centre window is applied in memory.
  */
 export async function attendedSessionsToRate(
   db: Db,
   studentUserId: string,
   now: Date,
 ): Promise<PendingRatingSession[]> {
-  const from = new Date(now.getTime() - SEVEN_DAYS_MS);
+  const coarseFrom = new Date(now.getTime() - (RATING_WINDOW_DAYS + 2) * MS_PER_DAY);
+  const coarseTo = new Date(now.getTime() + 2 * MS_PER_DAY);
 
-  const attendeeRows = await db.sessionAttendee.findMany({
+  const candidateRows = await db.sessionAttendee.findMany({
     where: {
       studentProfile: { userId: studentUserId },
-      session: { date: { gte: from, lte: now } },
+      session: { date: { gte: coarseFrom, lte: coarseTo } },
     },
     distinct: ["sessionId"],
     select: {
@@ -76,9 +87,20 @@ export async function attendedSessionsToRate(
           subjectId: true,
           gradeId: true,
           classGroup: { select: { subjectId: true, gradeId: true } },
+          center: { select: { settings: { select: { timezone: true } } } },
         },
       },
     },
+  });
+  // Each row is held to its own centre's window: [today − 6, today], where
+  // "today" is that centre's calendar day. `< today + 1` (not `<= today`) so a
+  // session dated today is in regardless of any time-of-day on the stored date.
+  const attendeeRows = candidateRows.filter((row) => {
+    const today = todayInTimezone(centreTimeZone(row.session.center.settings), now);
+    return (
+      row.session.date.getTime() >= addDays(today, -(RATING_WINDOW_DAYS - 1)).getTime() &&
+      row.session.date.getTime() < addDays(today, 1).getTime()
+    );
   });
   if (attendeeRows.length === 0) return [];
 

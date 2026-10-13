@@ -10,7 +10,7 @@ import {
   formatMonthYear,
   formatWeekdayNarrow,
 } from "@/lib/format";
-import { addDays, dateKey } from "@/lib/scheduling";
+import { addDays, dateKey, deviceTodayKey } from "@/lib/scheduling";
 import { cn } from "@/lib/utils";
 
 /**
@@ -80,7 +80,7 @@ export function Calendar({
 
   const from = parseIso(value.from);
   const to = parseIso(value.to);
-  const today = parseIso(todayIso) ?? new Date();
+  const today = parseIso(todayIso) ?? parseIso(deviceTodayKey()) ?? new Date(0);
 
   const [month, setMonth] = React.useState(() =>
     startOfMonthUtc(from ?? today),

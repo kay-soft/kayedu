@@ -4,6 +4,7 @@ import type { SessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/r
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { DetailRow } from "@/components/shared/field";
 import { formatDate, formatTimeRange } from "@/lib/format";
+import { todayInTimezone } from "@/lib/scheduling";
 
 export type PrintRosterRow = {
   id: string;
@@ -57,7 +58,7 @@ export async function SessionPrintSheet({
           </p>
         </div>
         <p className="text-xs text-text-muted">
-          {t("printedOn", { date: formatDate(new Date(), locale) })}
+          {t("printedOn", { date: formatDate(todayInTimezone(timeZone), locale) })}
         </p>
       </header>
 

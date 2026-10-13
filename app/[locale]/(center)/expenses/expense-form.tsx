@@ -23,16 +23,18 @@ export type ExpenseCategoryOption = { value: string; label: string };
 export function ExpenseForm({
   categories,
   rowCount,
+  todayIso,
 }: {
   categories: ExpenseCategoryOption[];
   /** Remounts the form (clearing it) after a successful create. */
   rowCount: number;
+  /** The centre's calendar day (R7b), computed on the server — never the browser's. */
+  todayIso: string;
 }) {
   const t = useTranslations("Expenses");
   const tErrors = useTranslations("Expenses.errors");
   const locale = useLocale();
   const [state, formAction] = useActionState(createExpenseAction, IDLE_ACTION_STATE);
-  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <form key={`expense-${rowCount}`} action={formAction} className="flex flex-col gap-4" noValidate>
@@ -83,8 +85,8 @@ export function ExpenseForm({
           <DatePicker
             id="expense-date"
             name="date"
-            defaultValue={today}
-            todayIso={today}
+            defaultValue={todayIso}
+            todayIso={todayIso}
             required
           />
         </Field>

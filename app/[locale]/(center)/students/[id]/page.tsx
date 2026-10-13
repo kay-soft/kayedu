@@ -31,6 +31,7 @@ import { formatDate } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { centreTimeZone, todayInTimezone } from "@/lib/scheduling";
 import { storageConfigured } from "@/lib/supabase/admin";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LinkButton } from "@/components/shared/link-button";
@@ -121,7 +122,8 @@ export default async function StudentDetailPage({
         ctx.center.id,
         enrollment.classGroupId,
         student.id,
-        new Date(),
+        // R7b: the centre's calendar day, so today's sessions count at 00:30 Cairo time.
+        todayInTimezone(centreTimeZone(ctx.settings)),
       ),
     })),
   );

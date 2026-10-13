@@ -5,7 +5,7 @@ import type { AttendanceStatus, Prisma, PrismaClient } from "@prisma/client";
 // The Prisma client is injected for the same reason.
 import { centerIdsMatch, parseScannedStudentInput } from "../id-card.ts";
 import { fullName, localName } from "../identity.ts";
-import { dateKey, dayMarker, zonedClock } from "../scheduling.ts";
+import { dateKey, todayInTimezone, zonedClock } from "../scheduling.ts";
 import { sessionDisplayName, sessionKind, type SessionKind } from "../session-label.ts";
 import { findAttendee, isStudentBlockedFromSession } from "./attendance.ts";
 import {
@@ -73,11 +73,6 @@ const STATUS_ORDER: Record<SessionDisplayStatus, number> = {
   RESCHEDULED: 3,
 };
 
-/** Today in the centre's timezone as the UTC-midnight marker `Session.date` uses. */
-export function receptionToday(now: Date, timeZone: string): Date {
-  return dayMarker(zonedClock(now, timeZone).dayKey);
-}
-
 export async function loadReceptionSessions(
   db: Db,
   params: {
@@ -93,7 +88,7 @@ export async function loadReceptionSessions(
   const rows = await db.session.findMany({
     where: {
       centerId,
-      date: receptionToday(now, timeZone),
+      date: todayInTimezone(timeZone, now),
       // A cancelled or rescheduled session never happened at this desk, and a
       // deactivated class's sessions are gone unless they are closed records.
       status: { not: CANCELLED },

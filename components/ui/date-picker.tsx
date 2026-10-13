@@ -11,6 +11,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { formatDate } from "@/lib/format";
+import { deviceTodayKey } from "@/lib/scheduling";
 import { cn } from "@/lib/utils";
 
 /**
@@ -44,7 +45,8 @@ export function DatePicker({
    * Today, for the "today" marker and the month the calendar opens on. Pass
    * it from the server wherever the page already computes a server "now" (the
    * filter bars do), so the two cannot disagree; where there is no such value
-   * it falls back to the viewer's own date. Nothing is submitted from it, and
+   * it falls back to the viewer's own device date (`deviceTodayKey` — cosmetic
+   * only, R7b; never a UTC day). Nothing is submitted from it, and
    * the calendar only mounts once the popover opens, so the fallback cannot
    * cause a hydration mismatch.
    */
@@ -64,9 +66,7 @@ export function DatePicker({
   const t = useTranslations("Shared.calendar");
   const locale = useLocale();
   const [value, setValue] = React.useState(defaultValue);
-  const [fallbackToday] = React.useState(() =>
-    new Date().toISOString().slice(0, 10),
-  );
+  const [fallbackToday] = React.useState(deviceTodayKey);
   const [open, setOpen] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const pendingSubmit = React.useRef(false);

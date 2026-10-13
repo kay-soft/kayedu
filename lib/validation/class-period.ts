@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // Relative imports on purpose, like the other validation modules, so the
 // gates parse through the real schemas outside the Next.js runtime.
-import { classPeriodError, dayMarker } from "../scheduling.ts";
+import { classPeriodError, dateKey, dayMarker } from "../scheduling.ts";
 
 /**
  * The R4 period fields — a class's `startDate`/`endDate` and a term's — as
@@ -19,7 +19,7 @@ export const dateOnlyField = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, "invalidDate")
   .refine((value) => {
     const parsed = dayMarker(value);
-    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    return !Number.isNaN(parsed.getTime()) && dateKey(parsed) === value;
   }, "invalidDate")
   .transform((value) => dayMarker(value));
 

@@ -38,7 +38,8 @@
     "check:class-periods": "node --env-file-if-exists=.env scripts/class-periods-check.ts",
     "check:one-off-sessions": "node --env-file-if-exists=.env scripts/one-off-sessions-check.ts",
     "check:class-creation": "node --env-file-if-exists=.env scripts/class-creation-check.ts",
-    "check:reception": "node --env-file-if-exists=.env scripts/reception-check.ts"
+    "check:reception": "node --env-file-if-exists=.env scripts/reception-check.ts",
+    "check:timezone": "node --env-file-if-exists=.env scripts/timezone-check.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

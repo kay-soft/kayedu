@@ -36,7 +36,12 @@ import { scoped } from "@/lib/db/scoped";
 import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
+import {
+  centreTimeZone,
+  dateKey,
+  resolveSharedDateFilter,
+  todayInTimezone,
+} from "@/lib/scheduling";
 import { analyticsFilterSchema } from "@/lib/validation/analytics";
 import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
 import { ROUTES } from "@/lib/routes";
@@ -64,12 +69,19 @@ export default async function AnalyticsPage({
     ? parsedFilters.data
     : { range: "day" as const, date: null, from: null, to: null, teacherId: null };
 
+  // R7b: "today" is the active centre's calendar day. The "Whole Management"
+  // rollup below shares this one `range` across every branch (a single
+  // combined value is unavoidable there), so it is resolved once against the
+  // *active* branch's timezone — the viewing context's own rule — and applied
+  // to each branch's scoped query unchanged. Branches are Egyptian centres on
+  // one timezone in practice; `check:timezone` pins the rule.
   const now = new Date();
+  const timeZone = centreTimeZone(ctx.settings);
   // Clamped to the data-visibility window (M19, docs/01 §7) before it ever
   // reaches a query — covers the rollup path below too, since both branches
   // share this same `range`.
   const { start: from, end: to } = clampRangeToVisibility(
-    resolveSharedDateFilter(toSharedDateFilterInput(filters), now),
+    resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
     visibilityWindowFloor(ctx, now),
   );
 
@@ -173,7 +185,7 @@ export default async function AnalyticsPage({
                 from: filters.from ?? "",
                 to: filters.to ?? "",
               }}
-              todayIso={startOfUtcDay(now).toISOString().slice(0, 10)}
+              todayIso={dateKey(todayInTimezone(timeZone, now))}
               resetHref={ROUTES.centerAnalytics}
             />
             <TeacherFilter teacherId={filters.teacherId ?? ""} teachers={teacherOptions} />

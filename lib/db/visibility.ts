@@ -1,7 +1,7 @@
 // Relative import on purpose — `npm run check:visibility` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/organizations.ts).
-import { startOfUtcDay } from "../scheduling.ts";
+import { addDays, centreTimeZone, todayInTimezone } from "../scheduling.ts";
 
 /**
  * The data-visibility window (M19, docs/00-master-product-spec.md §5.1 "Data
@@ -24,17 +24,16 @@ import { startOfUtcDay } from "../scheduling.ts";
  */
 export const DEFAULT_VISIBILITY_WINDOW_DAYS = 30;
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
 /**
  * A minimal, structural slice of `TenantContext` (`lib/auth/tenant.ts`) — a
  * real `TenantContext` satisfies this directly (its `settings` is a full
  * `CenterSettings | null`), and a gate script can build one without
- * constructing a whole fake tenant context just to reach `dataVisibilityDays`.
+ * constructing a whole fake tenant context just to reach
+ * `dataVisibilityDays`/`timezone`.
  */
 type VisibilityAwareContext = {
   isPlatformAdmin: boolean;
-  settings: { dataVisibilityDays: number } | null;
+  settings: { dataVisibilityDays: number; timezone: string } | null;
 };
 
 /**
@@ -43,7 +42,12 @@ type VisibilityAwareContext = {
  * ... Bypasses the data-visibility window"). A centre with no `CenterSettings`
  * row yet (should not happen post-M2, but every other reader of this table
  * treats a missing row as "use the default" the same way) falls back to
- * `DEFAULT_VISIBILITY_WINDOW_DAYS`.
+ * `DEFAULT_VISIBILITY_WINDOW_DAYS` and the default timezone.
+ *
+ * R7b: "today minus N days" counts back from the **centre's** calendar day
+ * (`todayInTimezone`), so the floor flips at the centre's midnight, not
+ * UTC's. Between 00:00 and 03:00 Cairo time the UTC-anchored floor was a day
+ * too old.
  */
 export function visibilityWindowFloor(
   ctx: VisibilityAwareContext,
@@ -51,7 +55,7 @@ export function visibilityWindowFloor(
 ): Date | null {
   if (ctx.isPlatformAdmin) return null;
   const days = ctx.settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS;
-  return new Date(startOfUtcDay(now).getTime() - days * MS_PER_DAY);
+  return addDays(todayInTimezone(centreTimeZone(ctx.settings), now), -days);
 }
 
 /** Whether `date` falls on or after the window floor — always true when unbounded. */

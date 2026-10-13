@@ -9,7 +9,7 @@ import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
 import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
-import { startOfUtcDay } from "@/lib/scheduling";
+import { centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 import { ScheduleDateFilter } from "./schedule-date-filter";
 import { EmptyState } from "@/components/shared/empty-state";
 import { sessionLabelParts } from "@/lib/session-label";
@@ -51,9 +51,12 @@ async function loadCenterSchedule(
   centerId: string,
   centerName: string,
   studentProfileId: string,
-  today: Date,
+  timeZone: string,
+  now: Date,
   locale: string,
 ): Promise<{ upcoming: UpcomingRow[]; past: PastRow[] }> {
+  // R7b: each centre's own calendar day splits its upcoming from its past.
+  const today = todayInTimezone(timeZone, now);
   const [futureSessions, history] = await Promise.all([
     studentUpcomingSessions(prisma, centerId, studentProfileId, today),
     studentPastAttendance(prisma, centerId, studentProfileId, today),
@@ -119,12 +122,34 @@ export default async function StudentSchedulePage({
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  const today = startOfUtcDay(new Date());
+  const now = new Date();
 
   const perCenter = await Promise.all(
     contexts
       .filter((ctx) => ctx.studentProfile)
-      .map((ctx) => loadCenterSchedule(ctx.center.id, ctx.center.name, ctx.studentProfile!.id, today, locale)),
+      .map((ctx) =>
+        loadCenterSchedule(
+          ctx.center.id,
+          ctx.center.name,
+          ctx.studentProfile!.id,
+          centreTimeZone(ctx.settings),
+          now,
+          locale,
+        ),
+      ),
+  );
+
+  // The date picker's "today" marker is the one combined value on this page.
+  // Rule (`commonTimeZone`): the zone all this student's centres share, else
+  // the platform default — a cosmetic marker only; every query above used its
+  // own centre's day. Pinned by `check:timezone`.
+  const todayIso = dateKey(
+    todayInTimezone(
+      commonTimeZone(
+        contexts.filter((ctx) => ctx.studentProfile).map((ctx) => centreTimeZone(ctx.settings)),
+      ),
+      now,
+    ),
   );
 
   const upcoming = perCenter
@@ -134,9 +159,8 @@ export default async function StudentSchedulePage({
     .flatMap((entry) => entry.past)
     .sort((a, b) => b.date.getTime() - a.date.getTime() || b.startTime.localeCompare(a.startTime));
 
-  const dayKey = (date: Date) => date.toISOString().slice(0, 10);
-  const upcomingFiltered = dateFilter ? upcoming.filter((row) => dayKey(row.date) === dateFilter) : upcoming;
-  const pastFiltered = dateFilter ? past.filter((row) => dayKey(row.date) === dateFilter) : past;
+  const upcomingFiltered = dateFilter ? upcoming.filter((row) => dateKey(row.date) === dateFilter) : upcoming;
+  const pastFiltered = dateFilter ? past.filter((row) => dateKey(row.date) === dateFilter) : past;
 
   return (
     <div className="flex flex-col gap-6">
@@ -144,7 +168,7 @@ export default async function StudentSchedulePage({
 
       <ScheduleDateFilter
         date={dateFilter}
-        todayIso={today.toISOString().slice(0, 10)}
+        todayIso={todayIso}
         dateLabel={t("filterDate")}
       />
 

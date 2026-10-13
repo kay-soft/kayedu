@@ -309,7 +309,7 @@ Replaces the raw `cardLayout` JSON textarea. **A centre never sees JSON** — th
 
 Replaces every ad-hoc date filter in the product. Analytics, Expenses, Sessions and every later screen use **this** and nothing else.
 
-- A segmented button row: **Day** · **Week** (today −7) · **Month** (1st → today), plus a **specific-date** picker and a **range** picker, an **Apply**, and a **reset to today's default**.
+- A segmented button row: **Day** · **Week** (today −7) · **Month** (1st → today), plus a **specific-date** picker and a **range** picker, an **Apply**, and a **reset to today's default**. *"Today" here is the centre's calendar day (`CenterSettings.timezone`, R7b), passed to the control as `todayIso` by the server — never the browser's or UTC's.*
 - **Buttons apply immediately; the pickers wait for Apply.** A range that re-queries on the first of the two dates is a range that queries a nonsense window.
 - The active selection is always readable as text next to the control ("1–6 Sep") — a highlighted segment alone is not enough once a specific date or range is in play.
 - **State lives in the URL** (`02-architecture.md` §14), like pagination, so a filtered view is shareable and back-button-safe.

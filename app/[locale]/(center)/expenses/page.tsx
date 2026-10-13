@@ -29,7 +29,12 @@ import { scoped } from "@/lib/db/scoped";
 import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { resolveSharedDateFilter, startOfUtcDay } from "@/lib/scheduling";
+import {
+  centreTimeZone,
+  dateKey,
+  resolveSharedDateFilter,
+  todayInTimezone,
+} from "@/lib/scheduling";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { expenseFilterSchema } from "@/lib/validation/analytics";
 import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
@@ -55,11 +60,15 @@ export default async function ExpensesPage({
     ? parsedFilters.data
     : { range: "day" as const, date: null, from: null, to: null };
 
+  // R7b: the centre's calendar day anchors the filter, the floor, the
+  // picker's today marker and the add-expense form's default date.
   const now = new Date();
+  const timeZone = centreTimeZone(ctx.settings);
+  const todayIso = dateKey(todayInTimezone(timeZone, now));
   // Clamped to the data-visibility window (M19, docs/01 §7) before it reaches
   // either the aggregate below or the ledger's own `where`.
   const { start: from, end: to } = clampRangeToVisibility(
-    resolveSharedDateFilter(toSharedDateFilterInput(filters), now),
+    resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
     visibilityWindowFloor(ctx, now),
   );
 
@@ -86,7 +95,7 @@ export default async function ExpensesPage({
 
   const tableRows: ExpenseRowData[] = rows.map((expense) => ({
     id: expense.id,
-    date: expense.date.toISOString().slice(0, 10),
+    date: dateKey(expense.date),
     categoryName: expense.category?.name ?? null,
     amount: expense.amount,
     note: expense.note,
@@ -136,7 +145,7 @@ export default async function ExpensesPage({
           <CardTitle>{t("addTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <ExpenseForm categories={categoryOptions} rowCount={total} />
+          <ExpenseForm categories={categoryOptions} rowCount={total} todayIso={todayIso} />
         </CardContent>
       </Card>
 
@@ -153,7 +162,7 @@ export default async function ExpensesPage({
                 from: filters.from ?? "",
                 to: filters.to ?? "",
               }}
-              todayIso={startOfUtcDay(now).toISOString().slice(0, 10)}
+              todayIso={todayIso}
               resetHref={ROUTES.centerExpenses}
             />
           </form>

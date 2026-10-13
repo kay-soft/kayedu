@@ -302,7 +302,12 @@ export function classPeriodError(
 
 // ── Date-range windows (Today's Sessions dashboard filters, M5) ────────────
 
-/** Sunday-start week containing `date`, as a `[start, end]` UTC-midnight pair. */
+// R7b: every range helper below takes a **day marker** — `todayInTimezone`'s
+// result (or any other UTC-midnight `Session.date`-shaped value) — and does
+// pure calendar arithmetic on it. None of them reads a clock; "which day is
+// it" is decided once, by `todayInTimezone`, in the centre's own timezone.
+
+/** Sunday-start week containing the day `date`, as a `[start, end]` UTC-midnight pair. */
 export function weekRangeUtc(date: Date): { start: Date; end: Date } {
   const start = startOfUtcDay(date);
   const offset = start.getUTCDay();
@@ -310,14 +315,14 @@ export function weekRangeUtc(date: Date): { start: Date; end: Date } {
   return { start: weekStart, end: addDays(weekStart, 6) };
 }
 
-/** Calendar month containing `date`, as a `[start, end]` UTC-midnight pair. */
+/** Calendar month containing the day `date`, as a `[start, end]` UTC-midnight pair. */
 export function monthRangeUtc(date: Date): { start: Date; end: Date } {
   const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
   const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
   return { start, end };
 }
 
-/** Calendar year containing `date`, as a `[start, end]` UTC-midnight pair (M6 Analytics). */
+/** Calendar year containing the day `date`, as a `[start, end]` UTC-midnight pair (M6 Analytics). */
 export function yearRangeUtc(date: Date): { start: Date; end: Date } {
   const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   const end = new Date(Date.UTC(date.getUTCFullYear(), 11, 31));
@@ -368,15 +373,15 @@ export function resolveDateRangeUtc(
 // KPIs), while "Week"/"Month" here are trailing windows ending today, per the
 // design system's literal definition.
 
-/** The last `days` days up to and including `now`. */
-export function lastNDaysUtc(now: Date, days: number): { start: Date; end: Date } {
-  const end = startOfUtcDay(now);
+/** The last `days` days up to and including the day marker `today`. */
+export function lastNDaysUtc(today: Date, days: number): { start: Date; end: Date } {
+  const end = startOfUtcDay(today);
   return { start: addDays(end, -days), end };
 }
 
-/** The 1st of `now`'s month through `now` itself — not the full calendar month. */
-export function monthToDateUtc(now: Date): { start: Date; end: Date } {
-  const end = startOfUtcDay(now);
+/** The 1st of `today`'s month through `today` itself — not the full calendar month. */
+export function monthToDateUtc(today: Date): { start: Date; end: Date } {
+  const end = startOfUtcDay(today);
   const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
   return { start, end };
 }
@@ -397,27 +402,32 @@ export type SharedDateFilterInput = {
  * Always returns real bounds — there is no "all-time" mode here (§11.7 never
  * lists one; a custom range is the closest equivalent, and the visibility
  * window (M19) is the actual mechanism for "how far back can this role see").
+ *
+ * R7b: "today" — the anchor of Day, Week (trailing) and Month (month-to-date)
+ * and the default of the pickers — is the **centre's** calendar day
+ * (`todayInTimezone(timeZone, now)`), never the server's or UTC's. `timeZone`
+ * is required so no caller can fall back to a UTC day by omission.
  */
 export function resolveSharedDateFilter(
   filter: SharedDateFilterInput,
+  timeZone: string,
   now: Date = new Date(),
 ): { start: Date; end: Date } {
+  const today = todayInTimezone(timeZone, now);
   switch (filter.kind) {
-    case "day": {
-      const day = startOfUtcDay(now);
-      return { start: day, end: day };
-    }
+    case "day":
+      return { start: today, end: today };
     case "week":
-      return lastNDaysUtc(now, 7);
+      return lastNDaysUtc(today, 7);
     case "month":
-      return monthToDateUtc(now);
+      return monthToDateUtc(today);
     case "date": {
-      const day = startOfUtcDay(filter.date ?? now);
+      const day = startOfUtcDay(filter.date ?? today);
       return { start: day, end: day };
     }
     case "range": {
-      const a = startOfUtcDay(filter.from ?? filter.to ?? now);
-      const b = startOfUtcDay(filter.to ?? filter.from ?? now);
+      const a = startOfUtcDay(filter.from ?? filter.to ?? today);
+      const b = startOfUtcDay(filter.to ?? filter.from ?? today);
       return a.getTime() <= b.getTime() ? { start: a, end: b } : { start: b, end: a };
     }
   }
@@ -581,6 +591,32 @@ function zonedParts(instant: Date, timeZone: string) {
 }
 
 /**
+ * A centre's IANA timezone from its settings row, with the same unknown-zone
+ * fallback `zonedClock` applies. `CenterSettings` may be absent (a centre
+ * created before M2) — that is the default timezone too. Every page and
+ * data-layer function reads the zone through this, never `?.timezone ?? …`.
+ */
+export function centreTimeZone(
+  settings: { timezone?: string | null } | null | undefined,
+): string {
+  return safeTimeZone(settings?.timezone);
+}
+
+/**
+ * The one timezone a **combined** cross-centre value uses, for the rare case
+ * where a single value is unavoidable (a date picker's today marker spanning
+ * several centres). Every centre's own query still resolves its own day via
+ * `todayInTimezone`; this is only for the one shared, cosmetic value. Rule:
+ * the zone all the centres share, else the platform default
+ * (`DEFAULT_TIMEZONE`) — never "whichever centre happened to be first".
+ */
+export function commonTimeZone(zones: readonly string[]): string {
+  const [first, ...rest] = zones.map((zone) => safeTimeZone(zone));
+  if (first === undefined) return DEFAULT_TIMEZONE;
+  return rest.every((zone) => zone === first) ? first : DEFAULT_TIMEZONE;
+}
+
+/**
  * "What day and minute is it at the centre right now?" — the calendar-day key
  * (same shape as `dateKey`) and minutes since local midnight.
  */
@@ -588,6 +624,47 @@ export function zonedClock(now: Date, timeZone: string): { dayKey: string; minut
   const p = zonedParts(now, timeZone);
   const dayKey = `${String(p.year).padStart(4, "0")}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
   return { dayKey, minutes: p.hour * 60 + p.minute };
+}
+
+/**
+ * THE one owner of "today" (R7b, docs/02-architecture.md §11). The calendar
+ * day it currently is in `timeZone`, as the UTC-midnight marker `Session.date`
+ * is stored as — so the result compares and filters directly against any
+ * stored date. Resolved through `Intl` (IANA data), so the offset — +03:00
+ * until the late-October DST end, +02:00 after — is never hard-coded.
+ *
+ * Every "today", "this week" (trailing), "this month" (month-to-date), default
+ * date filter and visibility-window floor derives from this and nothing
+ * else: `new Date().toISOString().slice(0, 10)` and `startOfUtcDay(new Date())`
+ * are the UTC-day bug (00:00–03:00 Cairo time still read as yesterday).
+ * `npm run check:timezone` fails the build on a second derivation.
+ *
+ * `now` is injectable so a gate can pin the boundary. A cross-centre view
+ * calls this once per centre with that centre's own zone.
+ */
+export function todayInTimezone(timeZone: string, now: Date = new Date()): Date {
+  return dayMarker(zonedClock(now, timeZone).dayKey);
+}
+
+/**
+ * The instant a session's day begins at the centre — local midnight of its
+ * date. The mirror of `endOfSessionDay`; what "N hours into the session day"
+ * (the teacher edit deadline) is measured from.
+ */
+export function startOfSessionDay(sessionDate: Date, timeZone: string): Date {
+  return zonedDateTimeToUtc(dateKey(sessionDate), 0, timeZone);
+}
+
+/**
+ * The browser's own calendar date as "YYYY-MM-DD" — **cosmetic only**: the
+ * `DatePicker`/`Calendar` "today" ring and opening month where a caller passed
+ * no `todayIso`. Never submitted, never used to filter or write anything;
+ * every query's "today" comes from `todayInTimezone` on the server. Reads the
+ * device's local date parts, so it is not a UTC day.
+ */
+export function deviceTodayKey(): string {
+  const d = new Date();
+  return `${String(d.getFullYear()).padStart(4, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /**

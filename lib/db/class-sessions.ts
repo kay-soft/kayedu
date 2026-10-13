@@ -17,11 +17,11 @@ import {
   DEFAULT_TIMEZONE,
   classPeriodError,
   dateKey,
-  dayMarker,
   decideConflicts,
   findSessionConflicts,
   generateOccurrenceDates,
   parseTimeToMinutes,
+  todayInTimezone,
   weeklySlotsError,
   zonedClock,
   type ClassPeriodError,
@@ -172,7 +172,7 @@ async function centreScheduling(
 
 function centreClock(now: Date, timeZone: string): CentreClock {
   const clock = zonedClock(now, timeZone);
-  return { todayKey: clock.dayKey, today: dayMarker(clock.dayKey), minutes: clock.minutes };
+  return { todayKey: clock.dayKey, today: todayInTimezone(timeZone, now), minutes: clock.minutes };
 }
 
 /** True once a session's start has come, in the centre's timezone. */

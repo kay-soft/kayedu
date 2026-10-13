@@ -31,10 +31,10 @@ import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import {
-  DEFAULT_TIMEZONE,
+  centreTimeZone,
+  dateKey,
   resolveSharedDateFilter,
-  startOfUtcDay,
-  zonedClock,
+  todayInTimezone,
 } from "@/lib/scheduling";
 import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
@@ -79,19 +79,22 @@ export default async function SessionsPage({
         status: null,
       };
 
+  // R7b: the filter's "today", the visibility floor and the picker's today
+  // marker are all the centre's calendar day (`todayInTimezone`).
   const now = new Date();
+  const timeZone = centreTimeZone(ctx.settings);
+  const todayIso = dateKey(todayInTimezone(timeZone, now));
   // Clamped to the data-visibility window (M19, docs/01 §7): a receptionist
   // (etc.) manipulating `?from=` cannot read further back than their centre's
   // window, regardless of what the shared date filter itself would allow.
   const { start: from, end: to } = clampRangeToVisibility(
-    resolveSharedDateFilter(toSharedDateFilterInput(filters), now),
+    resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
     visibilityWindowFloor(ctx, now),
   );
 
   // R2's lazy end-of-day close for every session in view (one indexed query
   // when there is nothing to close), so the list shows closed records as such.
   await closeEndedSessions(prisma, ctx.center.id, now, { from, to });
-  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
 
   const db = scoped(ctx);
   const t = await getTranslations("Sessions");
@@ -245,7 +248,7 @@ export default async function SessionsPage({
                 centerShareType: ctx.settings?.defaultShareType ?? "PERCENTAGE",
                 centerShareValue: ctx.settings?.defaultShareValue ?? 15,
               }}
-              todayIso={zonedClock(now, timeZone).dayKey}
+              todayIso={todayIso}
               noneLabel={tCommon("none")}
             />
           ) : undefined
@@ -292,7 +295,7 @@ export default async function SessionsPage({
               from: filters.from ?? "",
               to: filters.to ?? "",
             }}
-            todayIso={startOfUtcDay(now).toISOString().slice(0, 10)}
+            todayIso={todayIso}
             resetHref={ROUTES.centerSessions}
             teacherId={filters.teacherId ?? ""}
             subjectId={filters.subjectId ?? ""}

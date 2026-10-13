@@ -89,7 +89,7 @@ async function main() {
   );
 
   const floor14 = visibilityWindowFloor(
-    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS } },
+    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
     NOW,
   );
   check(
@@ -275,7 +275,7 @@ async function main() {
   });
 
   const floor = visibilityWindowFloor(
-    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS } },
+    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
     NOW,
   ) as Date;
 
@@ -345,7 +345,7 @@ async function main() {
     data: { dataVisibilityDays: 200 },
   });
   const widenedFloor = visibilityWindowFloor(
-    { isPlatformAdmin: false, settings: { dataVisibilityDays: 200 } },
+    { isPlatformAdmin: false, settings: { dataVisibilityDays: 200, timezone: "Africa/Cairo" } },
     NOW,
   ) as Date;
   const widenedRange = clampRangeToVisibility({ start: OLD_SESSION_DATE, end: NOW }, widenedFloor);

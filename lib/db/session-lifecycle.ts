@@ -17,6 +17,7 @@ import {
   endOfSessionDay,
   isSessionDayOver,
   parseTimeToMinutes,
+  todayInTimezone,
   zonedClock,
 } from "../scheduling.ts";
 
@@ -564,7 +565,7 @@ export async function closeEndedSessions(
   scope: { from?: Date; to?: Date; teacherId?: string; classGroupId?: string } = {},
 ): Promise<number> {
   const timeZone = await centerTimeZone(db, centerId);
-  const todayStart = new Date(`${zonedClock(now, timeZone).dayKey}T00:00:00.000Z`);
+  const todayStart = todayInTimezone(timeZone, now);
   const dateFilter: Prisma.DateTimeFilter = { lt: todayStart };
   if (scope.from) dateFilter.gte = scope.from;
   if (scope.to && scope.to < todayStart) {
