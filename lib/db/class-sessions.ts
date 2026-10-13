@@ -22,9 +22,11 @@ import {
   findSessionConflicts,
   generateOccurrenceDates,
   parseTimeToMinutes,
+  weeklySlotsError,
   zonedClock,
   type ClassPeriodError,
   type ExistingSession,
+  type WeeklySlotsError,
 } from "../scheduling.ts";
 import { centerGradeById, centerSubjectById } from "./catalog.ts";
 import { resolveRoomSet, writeClassExtraRooms, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
@@ -37,7 +39,15 @@ import {
 } from "./sessions.ts";
 
 export type { ConflictRefusal, DatedConflict };
+import type { PersonInput } from "./identity.ts";
 import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
+import {
+  addTeacherMembership,
+  isUniqueViolation,
+  type TeacherMembershipResult,
+  type TeacherRefusal,
+} from "./teacher-membership.ts";
+import type { MatchCandidate } from "../validation/people.ts";
 import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
@@ -718,13 +728,71 @@ export type CreateClassResult =
   | { ok: true; classGroupId: string; report: SessionSyncReport }
   | ConflictRefusal
   | ClassPeriodRefusal
-  | { ok: false; error: RoomSetError };
+  | { ok: false; error: RoomSetError | WeeklySlotsError };
+
+/**
+ * The create write itself, on the caller's transaction client (R6): the class
+ * row, its extra rooms, its weekly slots and — through the engine's one
+ * resync — every session of its period, plus the `classGroup.create` audit.
+ * `createClassWithSessions` wraps it in its own transaction;
+ * `createClassWithNewTeacher` runs it in the same transaction as the teacher
+ * it creates. Throws `ClassSessionsRefusedError` on a refused conflict
+ * decision so whichever transaction it is in rolls back whole.
+ */
+async function writeClassWithSessions(
+  tx: Tx,
+  centerId: string,
+  input: ClassInput & { slots: ClassSlot[] },
+  roomIds: readonly string[],
+  options: ClassSessionsOptions,
+): Promise<{ ok: true; classGroupId: string; report: SessionSyncReport }> {
+  const { slots, extraRoomIds, ...fields } = input;
+  const row = await tx.classGroup.create({ data: scopedData(centerId, fields) });
+  await writeClassExtraRooms(tx, centerId, row.id, extraRoomIds);
+  if (slots.length > 0) {
+    await tx.classSchedule.createMany({
+      data: slots.map((slot) => scopedData(centerId, { classGroupId: row.id, ...slot })),
+    });
+  }
+  const report = await resyncClassSessions(
+    tx,
+    centerId,
+    { classGroupId: row.id, teacherId: input.teacherId, roomId: input.roomId, extraRoomIds, price: input.price, startDate: input.startDate, endDate: input.endDate, slots },
+    { teacherId: input.teacherId, roomIds },
+    options,
+    "classGroup.create",
+  );
+  // A class's price and centre cut are money configuration (CLAUDE.md
+  // rule 7) — never rewrites recorded payments, but the config is audited.
+  await audit(tx, {
+    centerId,
+    actorUserId: options.actorUserId,
+    action: "classGroup.create",
+    entityType: "ClassGroup",
+    entityId: row.id,
+    after: {
+      price: input.price,
+      centerShareType: input.centerShareType,
+      centerShareValue: input.centerShareValue,
+      teacherId: input.teacherId,
+      roomId: input.roomId,
+      extraRoomIds,
+      startDate: dateKey(input.startDate),
+      endDate: dateKey(input.endDate),
+      sessions: reportJson(report),
+    },
+  });
+  return { ok: true as const, classGroupId: row.id, report };
+}
 
 /**
  * Creates a class, its weekly slots and every session of its period in ONE
  * transaction (R4). The room set is validated here (R3); the teacher and
  * catalog references are resolved by the caller inside the same centre.
  * Any refusal — including a conflict decision — writes nothing at all.
+ * (R6: the rows are checked by the one rule, `weeklySlotsError` — a valid
+ * range each, none overlapping on a weekday; "at least one row" is the new
+ * class dialog's rule, enforced by its schema and by `createClassWithNewTeacher`.)
  */
 export async function createClassWithSessions(
   db: PrismaClient,
@@ -734,49 +802,177 @@ export async function createClassWithSessions(
 ): Promise<CreateClassResult> {
   const periodError = classPeriodError(input.startDate, input.endDate);
   if (periodError) return { ok: false, error: periodError };
+  const slotsProblem = weeklySlotsError(input.slots, { required: false });
+  if (slotsProblem) return { ok: false, error: slotsProblem.error };
   const rooms = await resolveRoomSet(db, centerId, input.roomId, input.extraRoomIds);
   if (!rooms.ok) return { ok: false, error: rooms.error };
 
-  const result = await inClassTransaction(db, async (tx) => {
-    const { slots, extraRoomIds, ...fields } = input;
-    const row = await tx.classGroup.create({ data: scopedData(centerId, fields) });
-    await writeClassExtraRooms(tx, centerId, row.id, extraRoomIds);
-    if (slots.length > 0) {
-      await tx.classSchedule.createMany({
-        data: slots.map((slot) => scopedData(centerId, { classGroupId: row.id, ...slot })),
-      });
+  return inClassTransaction(db, (tx) => writeClassWithSessions(tx, centerId, input, rooms.set.roomIds, options));
+}
+
+// ── Create, with a brand-new teacher (R6) ──────────────────────────────────
+
+/** The permission actions "create a class with a new teacher" needs — both. */
+export type NewTeacherClassPermission = "teacher.manage" | "class.manage";
+
+export type NewTeacherClassInput = {
+  /** The new teacher's typed details (the Add teacher form's own fields). */
+  teacher: PersonInput;
+  /** Set only after staff confirmed a match ("Use this person"). */
+  linkUserId: string | null;
+  /** The class, without its teacher — the teacher is created first. */
+  class: Omit<ClassInput, "teacherId">;
+  slots: ClassSlot[];
+};
+
+export type NewTeacherClassOptions = ClassSessionsOptions & {
+  /**
+   * The caller's permission check (`ctxCan` in the action, the stored matrix
+   * in a gate). Both `teacher.manage` and `class.manage` are required; either
+   * missing refuses before anything is read or written.
+   */
+  can: (permission: NewTeacherClassPermission) => boolean;
+};
+
+export type NewTeacherClassResult =
+  | {
+      ok: true;
+      classGroupId: string;
+      teacherUserId: string;
+      teacherOutcome: "created" | "linked" | "reactivated";
+      report: SessionSyncReport;
     }
-    const report = await resyncClassSessions(
-      tx,
-      centerId,
-      { classGroupId: row.id, teacherId: input.teacherId, roomId: input.roomId, extraRoomIds, price: input.price, startDate: input.startDate, endDate: input.endDate, slots },
-      { teacherId: input.teacherId, roomIds: rooms.set.roomIds },
-      options,
-      "classGroup.create",
-    );
-    // A class's price and centre cut are money configuration (CLAUDE.md
-    // rule 7) — never rewrites recorded payments, but the config is audited.
-    await audit(tx, {
-      centerId,
-      actorUserId: options.actorUserId,
-      action: "classGroup.create",
-      entityType: "ClassGroup",
-      entityId: row.id,
-      after: {
-        price: input.price,
-        centerShareType: input.centerShareType,
-        centerShareValue: input.centerShareValue,
-        teacherId: input.teacherId,
-        roomId: input.roomId,
-        extraRoomIds,
-        startDate: dateKey(input.startDate),
-        endDate: dateKey(input.endDate),
-        sessions: reportJson(report),
-      },
-    });
-    return { ok: true as const, classGroupId: row.id, report };
-  });
-  return result;
+  | { ok: false; part: "permission"; error: "forbidden" }
+  /** The teacher step refused (`matchFound` carries the match to confirm). */
+  | { ok: false; part: "teacher"; error: TeacherRefusal | "matchFound"; match?: MatchCandidate }
+  /** The class step refused — everything, the teacher included, was rolled back. */
+  | { ok: false; part: "class"; error: ClassPeriodError | RoomSetError | WeeklySlotsError }
+  | { ok: false; part: "class"; error: ConflictRefusal["error"]; conflicts: DatedConflict[] };
+
+class TeacherStepRefusedError extends Error {
+  readonly refusal: Extract<TeacherMembershipResult, { ok: false }>;
+  constructor(refusal: Extract<TeacherMembershipResult, { ok: false }>) {
+    super("Teacher step refused.");
+    this.name = "TeacherStepRefusedError";
+    this.refusal = refusal;
+  }
+}
+
+/**
+ * **Create a class with a brand-new teacher, atomically** (R6, docs/00 §5.1).
+ * One transaction, in this order: the teacher (`addTeacherMembership` — the
+ * one teacher-creation path, run on this transaction's client), then the class
+ * + its weekly slots + every session (`writeClassWithSessions` → the engine's
+ * single resync). Any error — validation, a duplicate phone awaiting
+ * confirmation, a privileged phone, a conflict refusal under DENY or an
+ * unconfirmed WARN, an engine failure — rolls the whole transaction back:
+ * no orphan `User`, `Membership` or audit row. Which half refused comes back
+ * as `part`, so the form can say "The teacher could not be created" or "The
+ * class could not be created".
+ *
+ * Both `teacher.manage` and `class.manage` are required (`options.can`),
+ * checked first. Audit rows — `membership.create` for the teacher,
+ * `classGroup.create` (+ `schedule.conflict.confirm` when confirmed) for the
+ * class — are written in the same transaction.
+ */
+export async function createClassWithNewTeacher(
+  db: PrismaClient,
+  centerId: string,
+  input: NewTeacherClassInput,
+  options: NewTeacherClassOptions,
+): Promise<NewTeacherClassResult> {
+  if (!options.can("teacher.manage") || !options.can("class.manage")) {
+    return { ok: false, part: "permission", error: "forbidden" };
+  }
+
+  // The class half's cheap, read-only checks first, so an invalid class never
+  // gets as far as creating anyone.
+  const periodError = classPeriodError(input.class.startDate, input.class.endDate);
+  if (periodError) return { ok: false, part: "class", error: periodError };
+  const slotsProblem = weeklySlotsError(input.slots, { required: true });
+  if (slotsProblem) return { ok: false, part: "class", error: slotsProblem.error };
+  const rooms = await resolveRoomSet(db, centerId, input.class.roomId, input.class.extraRoomIds);
+  if (!rooms.ok) return { ok: false, part: "class", error: rooms.error };
+
+  try {
+    return await db.$transaction(async (tx) => {
+      const teacher = await addTeacherMembership(tx, centerId, input.teacher, {
+        actorUserId: options.actorUserId ?? null,
+        linkUserId: input.linkUserId,
+        via: "class.create",
+        refusePrivileged: true,
+      });
+      if (!teacher.ok) throw new TeacherStepRefusedError(teacher);
+
+      const created = await writeClassWithSessions(
+        tx,
+        centerId,
+        { ...input.class, teacherId: teacher.userId, slots: input.slots },
+        // The teacher is new, so the baseline room set is the class's own.
+        rooms.set.roomIds,
+        options,
+      );
+      return {
+        ok: true as const,
+        classGroupId: created.classGroupId,
+        teacherUserId: teacher.userId,
+        teacherOutcome: teacher.outcome,
+        report: created.report,
+      };
+    }, WRITE_TRANSACTION_OPTIONS);
+  } catch (error) {
+    if (error instanceof TeacherStepRefusedError) {
+      return { ok: false, part: "teacher", error: error.refusal.error, ...(error.refusal.match ? { match: error.refusal.match } : {}) };
+    }
+    if (error instanceof ClassSessionsRefusedError) {
+      return { ok: false, part: "class", error: error.refusal.error, conflicts: error.refusal.conflicts };
+    }
+    if (isUniqueViolation(error)) return { ok: false, part: "teacher", error: "contactInUse" };
+    throw error;
+  }
+}
+
+/**
+ * The live, read-only preview for a class that does not exist yet (the New
+ * class dialog, R6): every session the create would make across the whole
+ * period, checked against the centre's occupancy by the engine's own
+ * `computeSync` — so the list a person confirms is the list the save checks.
+ * `teacherId` is null while a brand-new teacher is typed (nobody to clash
+ * with, only the rooms). Writes nothing.
+ */
+export async function previewNewClassSessions(
+  db: Db,
+  centerId: string,
+  input: {
+    teacherId: string | null;
+    roomId: string | null;
+    extraRoomIds: string[];
+    startDate: Date;
+    endDate: Date;
+    slots: ClassSlot[];
+  },
+  options: { now?: Date; locale?: string } = {},
+): Promise<{ conflicts: DatedConflict[]; created: number }> {
+  const none = { conflicts: [], created: 0 };
+  if (!input.roomId || input.slots.length === 0) return none;
+  if (classPeriodError(input.startDate, input.endDate)) return none;
+  if (weeklySlotsError(input.slots, { required: true })) return none;
+  const rooms = await resolveRoomSet(db, centerId, input.roomId, input.extraRoomIds);
+  if (!rooms.ok) return none;
+  const plan: ClassSessionPlan = {
+    // No such class yet: nothing to match, nothing to delete, only the
+    // sessions it WOULD create to compare against the centre's bookings.
+    classGroupId: "new-class-preview",
+    teacherId: input.teacherId ?? "",
+    roomId: input.roomId,
+    extraRoomIds: input.extraRoomIds,
+    price: 0,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    slots: input.slots,
+  };
+  const sync = await computeSync(db, centerId, plan, { teacherId: plan.teacherId, roomIds: [] }, options);
+  return { conflicts: sync.conflicts, created: sync.toCreate.length };
 }
 
 // ── Edit ───────────────────────────────────────────────────────────────────

@@ -5,10 +5,10 @@ import { BookOpen } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createSessionRequestAction } from "@/app/[locale]/(teacher)/teacher/sessions/actions";
+import { TimeRangeFields } from "@/components/center/time-range-fields";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { DatePicker } from "@/components/ui/date-picker";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
@@ -70,33 +70,18 @@ export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] 
             <FieldError>{tErrors(state.fieldErrors.date)}</FieldError>
           ) : null}
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="session-request-start" className="text-xs font-medium text-text-secondary">
-            {t("start")}
-          </label>
-          <Input
-            id="session-request-start"
-            type="time"
-            name="startTime"
-            dir="ltr"
-            required
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="session-request-end" className="text-xs font-medium text-text-secondary">
-            {t("end")}
-          </label>
-          <Input
-            id="session-request-end"
-            type="time"
-            name="endTime"
-            dir="ltr"
-            required
-          />
-          {state.fieldErrors?.endTime ? (
-            <FieldError>{tErrors(state.fieldErrors.endTime)}</FieldError>
-          ) : null}
-        </div>
+        <TimeRangeFields
+          idPrefix="session-request-time"
+          startLabel={t("start")}
+          endLabel={t("end")}
+          error={
+            state.fieldErrors?.startTime || state.fieldErrors?.endTime
+              ? tErrors((state.fieldErrors.startTime ?? state.fieldErrors.endTime)!)
+              : undefined
+          }
+          required
+          className="sm:col-span-2"
+        />
       </div>
 
       <div className="flex flex-col gap-1.5">

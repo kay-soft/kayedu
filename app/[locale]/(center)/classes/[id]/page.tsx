@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { ClassProfileForm } from "@/app/[locale]/(center)/classes/[id]/class-profile-form";
+import { EditClassDialog } from "@/app/[locale]/(center)/classes/[id]/class-profile-form";
 import {
   ClassRoster,
   type BlockedRow,
@@ -181,7 +181,17 @@ export default async function ClassDetailPage({
   const teacherOptions = teachers.map((row) => ({
     value: row.userId,
     label: fullName(localName(row, row.user)),
+    phone: row.phone,
   }));
+  // A class whose teacher has since been deactivated still shows them as
+  // chosen (and can be saved unchanged) instead of an empty picker.
+  if (teacher && !teacherOptions.some((option) => option.value === classGroup.teacherId)) {
+    teacherOptions.push({
+      value: classGroup.teacherId,
+      label: `${fullName(localName(teacher, teacher.user))} · ${tCommon("inactive")}`,
+      phone: teacher.phone,
+    });
+  }
 
   const subjectGrade = [
     classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
@@ -201,24 +211,7 @@ export default async function ClassDetailPage({
         description={teacher ? fullName(localName(teacher, teacher.user)) : tCommon("none")}
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={classGroup.active ? "success" : "neutral"}>
-              {classGroup.active ? tCommon("active") : tCommon("inactive")}
-            </Badge>
-            <LinkButton href={ROUTES.centerClasses}>
-              {t("backToList")}
-            </LinkButton>
-          </div>
-        }
-      />
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("profileTitle")}</CardTitle>
-            <CardDescription>{t("profileDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ClassProfileForm
+            <EditClassDialog
               classGroupId={classGroup.id}
               values={{
                 teacherId: classGroup.teacherId,
@@ -263,10 +256,18 @@ export default async function ClassDetailPage({
               canDelete={ctxCan(ctx, "class.delete")}
               active={classGroup.active}
             />
-          </CardContent>
-        </Card>
+            <Badge variant={classGroup.active ? "success" : "neutral"}>
+              {classGroup.active ? tCommon("active") : tCommon("inactive")}
+            </Badge>
+            <LinkButton href={ROUTES.centerClasses}>
+              {t("backToList")}
+            </LinkButton>
+          </div>
+        }
+      />
 
-        <div className="flex flex-col gap-6">
+      <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
+        <div className="contents">
           <Card>
             <CardHeader>
               <CardTitle>{t("context.title")}</CardTitle>

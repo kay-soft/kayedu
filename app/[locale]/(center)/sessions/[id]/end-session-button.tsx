@@ -5,18 +5,9 @@ import { Lock } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { endSessionAction } from "@/app/[locale]/(center)/sessions/actions";
+import { ActionBarButton } from "@/components/shared/action-bar";
+import { DialogShell } from "@/components/shared/dialog-shell";
 import { FormMessage } from "@/components/shared/form-message";
-import { SubmitButton } from "@/components/shared/submit-button";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { IDLE_SESSION_STATE, type SessionActionState } from "@/lib/validation/sessions";
 
 /**
@@ -26,6 +17,8 @@ import { IDLE_SESSION_STATE, type SessionActionState } from "@/lib/validation/se
  * `endSessionAction` (`session.close`, re-checked server-side). Built to be
  * dropped anywhere a session can be ended — the session detail page now, the
  * reception desk's live rail in R7 — so it takes nothing but the session id.
+ * R6: the button is an `ActionBarButton` (44px, red like every destructive
+ * verb) and the confirmation is the shared `DialogShell`.
  */
 export function EndSessionButton({
   sessionId,
@@ -38,7 +31,7 @@ export function EndSessionButton({
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
   const [open, setOpen] = useState(false);
-  const [state, formAction] = useActionState(
+  const [state, formAction, pending] = useActionState(
     async (previous: SessionActionState, formData: FormData) => {
       const next = await endSessionAction(previous, formData);
       if (next.status === "closed") setOpen(false);
@@ -49,44 +42,31 @@ export function EndSessionButton({
 
   return (
     <>
-      <Button
-        type="button"
-        variant="destructive"
-        className={className ?? "h-11 px-4"}
-        onClick={() => setOpen(true)}
-      >
+      <ActionBarButton variant="destructive" className={className} onClick={() => setOpen(true)}>
         <Lock className="size-4" aria-hidden />
         {t("button")}
-      </Button>
+      </ActionBarButton>
       {state.error && !open ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <form action={formAction} className="flex flex-1 flex-col">
-            <input type="hidden" name="locale" value={locale} />
-            <input type="hidden" name="sessionId" value={sessionId} />
-            <DialogHeader>
-              <DialogTitle>{t("dialogTitle")}</DialogTitle>
-              <DialogDescription>{t("dialogBody")}</DialogDescription>
-            </DialogHeader>
-            <DialogBody className="flex flex-col gap-3">
-              <FormMessage tone="warning">{t("irreversible")}</FormMessage>
-              {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
-            </DialogBody>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 px-4"
-                onClick={() => setOpen(false)}
-              >
-                {t("cancel")}
-              </Button>
-              <SubmitButton variant="destructive">{t("confirm")}</SubmitButton>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <DialogShell
+        open={open}
+        onOpenChange={setOpen}
+        size="narrow"
+        title={t("dialogTitle")}
+        description={t("dialogBody")}
+        formProps={{ action: formAction }}
+        cancelLabel={t("cancel")}
+        submitLabel={t("confirm")}
+        submitVariant="destructive"
+        submitPending={pending}
+      >
+        <input type="hidden" name="locale" value={locale} />
+        <input type="hidden" name="sessionId" value={sessionId} />
+        <div className="flex flex-col gap-3">
+          <FormMessage tone="warning">{t("irreversible")}</FormMessage>
+          {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+        </div>
+      </DialogShell>
     </>
   );
 }

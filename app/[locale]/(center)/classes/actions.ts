@@ -8,6 +8,7 @@ import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import {
+  createClassWithNewTeacher,
   createClassWithSessions,
   deactivateClass,
   deleteClass,
@@ -24,11 +25,15 @@ import { describeConflicts } from "@/lib/db/slot-conflicts";
 import { scopedData } from "@/lib/db/tenant-scope";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
-import { type ClassPeriodError, type ScheduleConflict } from "@/lib/scheduling";
+import {
+  type ClassPeriodError,
+  type ScheduleConflict,
+  type WeeklySlotsError,
+} from "@/lib/scheduling";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
-import { blockRemoveSchema } from "@/lib/validation/people";
+import { blockRemoveSchema, teacherCreateSchema } from "@/lib/validation/people";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   classActiveSchema,
@@ -37,6 +42,7 @@ import {
   classGroupUpdateSchema,
   classRecordSchema,
   classScheduleDeleteSchema,
+  classSlotsSchema,
   classScheduleSchema,
   classScheduleUpdateSchema,
   enrollmentActionSchema,
@@ -70,9 +76,18 @@ const NOT_FOUND: ClassActionState = { error: "notFound" };
 const MAX_SHOWN_CONFLICTS = 30;
 
 /** A room-set or period refusal, attached to the field that caused it. */
-function classFieldError(error: RoomSetError | ClassPeriodError): ClassActionState {
+function classFieldError(error: RoomSetError | ClassPeriodError | WeeklySlotsError): ClassActionState {
   if (error === "endBeforeStart" || error === "periodTooLong") {
     return { fieldErrors: { endDate: error } };
+  }
+  if (
+    error === "slotsRequired" ||
+    error === "slotOverlap" ||
+    error === "invalidDay" ||
+    error === "invalidTime" ||
+    error === "invalidTimeRange"
+  ) {
+    return { fieldErrors: { slots: error } };
   }
   if (error === "noPrimary") return { fieldErrors: { roomId: "roomRequired" } };
   if (error === "roomNotFound" || error === "roomInactive") {
@@ -201,6 +216,49 @@ async function resolveRef(
 
 // ── Class group ─────────────────────────────────────────────────────────────
 
+/**
+ * The create form's class half, parsed once for both create actions (R6):
+ * the class fields (`classGroupSchema`) and the weekly rows (`classSlotsSchema`
+ * — at least one, none overlapping on a weekday). A new teacher has no id yet,
+ * so the combined action parses with a placeholder the data layer never sees.
+ */
+const NEW_TEACHER_PLACEHOLDER_ID = "new-teacher";
+
+function parseNewClass(raw: Record<string, FormDataEntryValue>, teacherPending: boolean) {
+  const classResult = classGroupSchema.safeParse(
+    teacherPending ? { ...raw, teacherId: NEW_TEACHER_PLACEHOLDER_ID } : raw,
+  );
+  const slotsResult = classSlotsSchema.safeParse(raw.slots);
+  const fieldErrors: Record<string, string> = {};
+  if (!classResult.success) Object.assign(fieldErrors, fieldErrorsFrom(classResult.error));
+  if (!slotsResult.success) {
+    fieldErrors.slots = slotsResult.error.issues[0]?.message ?? "invalidTime";
+  }
+  if (!classResult.success || !slotsResult.success) {
+    return { ok: false as const, fieldErrors };
+  }
+  return { ok: true as const, data: classResult.data, slots: slotsResult.data };
+}
+
+/** The foreign keys a class names, re-resolved inside this centre (docs/02 §5). */
+async function resolveClassRefs(
+  scope: Scope,
+  ids: { subjectId: string | null; gradeId: string | null; educationSystemId: string | null },
+): Promise<
+  | { ok: true; subjectId: string | null; gradeId: string | null; educationSystemId: string | null }
+  | { ok: false; fieldErrors: Record<string, string> }
+> {
+  const [subject, grade, educationSystem] = await Promise.all([
+    resolveRef((id) => scope.db.subjects.findById(id), ids.subjectId),
+    resolveRef((id) => scope.db.grades.findById(id), ids.gradeId),
+    resolveRef((id) => scope.db.educationSystems.findById(id), ids.educationSystemId),
+  ]);
+  if (!subject.ok) return { ok: false, fieldErrors: { subjectId: "notFound" } };
+  if (!grade.ok) return { ok: false, fieldErrors: { gradeId: "notFound" } };
+  if (!educationSystem.ok) return { ok: false, fieldErrors: { educationSystemId: "notFound" } };
+  return { ok: true, subjectId: subject.id, gradeId: grade.id, educationSystemId: educationSystem.id };
+}
+
 export async function createClassAction(
   _state: ClassActionState,
   formData: FormData,
@@ -208,8 +266,8 @@ export async function createClassAction(
   const scope = await classScope();
   if (!scope) return FORBIDDEN;
 
-  const parsed = classGroupSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const parsed = parseNewClass(Object.fromEntries(formData), false);
+  if (!parsed.ok) return { fieldErrors: parsed.fieldErrors };
 
   const {
     locale,
@@ -236,26 +294,20 @@ export async function createClassAction(
   const teacher = await scope.db.teachers.findByUserId(teacherId);
   if (!teacher) return { fieldErrors: { teacherId: "notFound" } };
 
-  const [subject, grade, educationSystem] = await Promise.all([
-    resolveRef((id) => scope.db.subjects.findById(id), subjectId),
-    resolveRef((id) => scope.db.grades.findById(id), gradeId),
-    resolveRef((id) => scope.db.educationSystems.findById(id), educationSystemId),
-  ]);
-  if (!subject.ok) return { fieldErrors: { subjectId: "notFound" } };
-  if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
-  if (!educationSystem.ok) {
-    return { fieldErrors: { educationSystemId: "notFound" } };
-  }
-  // R4: the class, its room set (validated there — R3), its slots and every
-  // session of its period, in one transaction with one conflict decision.
+  const refs = await resolveClassRefs(scope, { subjectId, gradeId, educationSystemId });
+  if (!refs.ok) return { fieldErrors: refs.fieldErrors };
+
+  // R4/R6: the class, its room set (validated there — R3), its weekly rows
+  // and every session of its period, in one transaction with one conflict
+  // decision.
   const result = await createClassWithSessions(
     prisma,
     scope.ctx.center.id,
     {
       teacherId,
-      subjectId: subject.id,
-      gradeId: grade.id,
-      educationSystemId: educationSystem.id,
+      subjectId: refs.subjectId,
+      gradeId: refs.gradeId,
+      educationSystemId: refs.educationSystemId,
       roomId,
       extraRoomIds,
       price,
@@ -266,9 +318,7 @@ export async function createClassAction(
       requiresConfirmation,
       startDate,
       endDate,
-      // The create dialog has no slot rows yet (R6 re-lays it out); slots
-      // are added on the class page, each one resyncing the period.
-      slots: [],
+      slots: parsed.slots,
     },
     { confirmConflicts, actorUserId: scope.ctx.user.id, locale },
   );
@@ -278,6 +328,95 @@ export async function createClassAction(
   }
 
   revalidateClassList(locale);
+  return { status: "created", ...(await sessionsOutcome(scope.ctx, result.report)) };
+}
+
+/**
+ * Create a class **and its brand-new teacher** in one go (R6, docs/00 §5.1).
+ * One data-layer call (`createClassWithNewTeacher`) runs the teacher, then
+ * the class + weekly rows + every session, in ONE transaction — if any part
+ * fails nothing is written, and the answer says which part (`part`). Needs
+ * both `teacher.manage` and `class.manage`; the data layer checks them again
+ * by direct call. The teacher half is the Add teacher form's own schema and
+ * the one teacher-creation path, including the "Use this person" match step
+ * (`linkUserId`) — a phone that already belongs to someone comes back as a
+ * match, never as a second identity.
+ */
+export async function createClassWithNewTeacherAction(
+  _state: ClassActionState,
+  formData: FormData,
+): Promise<ClassActionState> {
+  const scope = await classScope();
+  if (!scope || !ctxCan(scope.ctx, "teacher.manage")) return FORBIDDEN;
+
+  const raw = Object.fromEntries(formData);
+  const parsedClass = parseNewClass(raw, true);
+  const parsedTeacher = teacherCreateSchema.safeParse(raw);
+  if (!parsedClass.ok || !parsedTeacher.success) {
+    return {
+      ...(parsedClass.ok ? {} : { fieldErrors: parsedClass.fieldErrors }),
+      ...(parsedTeacher.success ? {} : { teacherFieldErrors: fieldErrorsFrom(parsedTeacher.error) }),
+    };
+  }
+
+  const classData = parsedClass.data;
+  const refs = await resolveClassRefs(scope, {
+    subjectId: classData.subjectId,
+    gradeId: classData.gradeId,
+    educationSystemId: classData.educationSystemId,
+  });
+  if (!refs.ok) return { fieldErrors: refs.fieldErrors };
+
+  const { firstName, lastName, email, phone, altPhone, linkUserId } = parsedTeacher.data;
+  const result = await createClassWithNewTeacher(
+    prisma,
+    scope.ctx.center.id,
+    {
+      teacher: { firstName, lastName, email, phone, altPhone, locale: classData.locale },
+      linkUserId,
+      class: {
+        subjectId: refs.subjectId,
+        gradeId: refs.gradeId,
+        educationSystemId: refs.educationSystemId,
+        roomId: classData.roomId,
+        extraRoomIds: classData.extraRoomIds,
+        price: classData.price,
+        centerShareType: classData.centerShareType,
+        centerShareValue: classData.centerShareValue,
+        lateThresholdMinutes: classData.lateThresholdMinutes,
+        acceptsNewStudents: classData.acceptsNewStudents,
+        requiresConfirmation: classData.requiresConfirmation,
+        startDate: classData.startDate,
+        endDate: classData.endDate,
+      },
+      slots: parsedClass.slots,
+    },
+    {
+      confirmConflicts: classData.confirmConflicts,
+      actorUserId: scope.ctx.user.id,
+      locale: classData.locale,
+      can: (permission) => ctxCan(scope.ctx, permission),
+    },
+  );
+
+  if (!result.ok) {
+    if (result.part === "permission") return FORBIDDEN;
+    if (result.part === "teacher") {
+      return result.error === "matchFound" && result.match
+        ? { status: "matchFound", part: "teacher", match: result.match }
+        : { part: "teacher", error: result.error, ...(result.match ? { match: result.match } : {}) };
+    }
+    if ("conflicts" in result) {
+      return {
+        part: "class",
+        ...(await conflictRefusal(scope.ctx, { ok: false, error: result.error, conflicts: result.conflicts })),
+      };
+    }
+    return { part: "class", ...classFieldError(result.error) };
+  }
+
+  revalidateClassList(classData.locale);
+  revalidatePath(`/${classData.locale}${ROUTES.centerTeachers}`);
   return { status: "created", ...(await sessionsOutcome(scope.ctx, result.report)) };
 }
 

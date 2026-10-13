@@ -160,6 +160,8 @@ export default async function SessionsPage({
   const teacherOptions = teachers.map((teacher) => ({
     value: teacher.userId,
     label: fullName(localName(teacher, teacher.user)),
+    // The centre's own phone for them (docs/01 §6) — what the picker searches.
+    phone: teacher.phone,
   }));
   // `subjects` comes from `scoped(ctx).subjects.list()`, which already
   // resolves `.name` to this centre's own display-name override or the

@@ -82,3 +82,4 @@ jobs:
       - run: npm run check:rooms
       - run: npm run check:class-periods
       - run: npm run check:one-off-sessions
+      - run: npm run check:class-creation

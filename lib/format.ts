@@ -13,6 +13,14 @@ export function formatNumber(value: number, locale: string): string {
   return new Intl.NumberFormat(NUMBER_LOCALE[locale] ?? "en-US").format(value);
 }
 
+/** A whole number padded to two digits — "05", "٠٥" — for minute lists. */
+export function formatTwoDigits(value: number, locale: string): string {
+  return new Intl.NumberFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+    minimumIntegerDigits: 2,
+    useGrouping: false,
+  }).format(value);
+}
+
 export function formatDate(value: Date, locale: string): string {
   return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
     dateStyle: "medium",

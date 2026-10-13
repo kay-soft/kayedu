@@ -74,12 +74,15 @@ app/
                                  # experience, then each page resolves its own tighter context
   # (no app/api/ — R4 removed the only route, the session-generation cron; nothing runs on a schedule)
 components/
-  ui/                           # shadcn primitives, incl. dialog.tsx (docs/04 §5)
+  ui/                           # shadcn primitives, incl. dialog.tsx (docs/04 §5); R6: combobox.tsx, time-picker.tsx (docs/04 §11.15-16)
   shell/                        # app shell: sidebar (collapsible, docs/04 §5), drawer, header, nav config
   settings/                     # entity-manager (shared config CRUD), settings nav, catalog-section (M13)
-  center/                       # person-fields, contact-fields, student-fields, pagination, add-entity dialogs
+  center/                       # person-fields, contact-fields, student-fields, pagination, add-entity dialogs;
+                                #   R6: class-fields (sectioned), new-teacher-fields (shared with Add teacher),
+                                #   teacher-picker, weekly-schedule-rows, time-range-fields
   teacher/  student/            # experience-specific composed components
-  shared/                       # tables, filters, receipt, id-card, kpi-card, field.tsx
+  shared/                       # tables, filters, receipt, id-card, kpi-card, field.tsx;
+                                #   R6: dialog-shell.tsx (DialogShell, FormSection, DialogLauncher), action-bar.tsx
 lib/
   auth/
     session.ts                  # Supabase auth user + User mirror
@@ -95,7 +98,11 @@ lib/
     tenant-scope.ts             # pure scoping primitives (no runtime imports)
     scoped.ts                   # tenant-scoped query helpers
     audit.ts                    # writeAuditLog()
-    identity.ts                 # global-identity reads/writes (findPeopleByContact, createPerson, …)
+    identity.ts                 # global-identity reads/writes (findPeopleByContact, createPerson, …); R6: relative
+                                #   imports and an optional client, so it runs inside another transaction
+    teacher-membership.ts       # the ONE teacher-creation path — addTeacherMembership(tx, …): resolve the contact,
+                                #   new User or new Membership on the existing one, audit, all on the caller's
+                                #   transaction; no @/ imports (R6, §11)
     students.ts                 # lean list selects, search, claimStudentCode, delete-blockers
     classes.ts                  # lean list select (incl. the room set), delete-blockers (M4, R3)
     room-sets.ts                # the ONLY RoomLink/ClassGroupRoom/SessionRoom writes — link/unlink + "in use"
@@ -105,7 +112,8 @@ lib/
                                 #   descriptions, the confirmed-conflict audit row, no @/ imports (R3, R4, §11)
     class-sessions.ts           # the ONE class-sessions engine: materialize/resync a class's period, pristine
                                 #   rule, create/edit/slots/deactivate/reactivate/delete, holiday prune,
-                                #   whole-range conflict decision + preview, no @/ imports (R4, §11)
+                                #   whole-range conflict decision + preview; R6: createClassWithNewTeacher
+                                #   (teacher + class in one transaction) + previewNewClassSessions, no @/ imports (R4, §11)
     terms.ts                    # the ONLY CenterTerm writes — case-insensitive names, period rule (R4)
     sessions.ts                 # one session's cancel/reschedule/rooms/override + dashboard/detail read-side
                                 #   policy, no @/ imports (M4 §11, M5; the generator was removed at R4)
@@ -134,7 +142,12 @@ lib/
     visibility.ts                 # the data-visibility window bound + its Settlement/AuditLog carve-outs (M19)
   money.ts                      # the ONLY center-cut math + piastre helpers
   phone.ts                      # the ONE phone normalizer, 11–15 digits, +20…/20…/0… → 01…;
-                                #   used by validation, duplicate-matching AND search alike (M18)
+                                #   used by validation, duplicate-matching AND search alike (M18);
+                                #   R6: phoneSearchDigits/phoneMatchesQuery — partial-phone search in any format
+  digits.ts                     # Arabic-Indic → ASCII digit folding, shared by phone search and the time parser (R6)
+  time-input.ts                 # the ONE typed-time parser (4, 4pm, 16:30, ٤:٣٠ م → "HH:mm") + 12/24h parts and
+                                #   end-time suggestion (R6); display stays in format.ts
+  picker-search.ts              # the searchable pickers' name + phone matcher, via phone.ts (R6)
   scheduling.ts                 # pure time-overlap, conflict-detection and period date math (M4, R4);
                                 #   room-set-aware conflicts + decideConflicts, the confirmConflicts rule (R3);
                                 #   classPeriodError — the ONE class/term period rule (R4)
@@ -183,6 +196,8 @@ scripts/
   rooms-check.ts                 # room links, star rule, capacity = sum, busy-ness through extras, confirmConflicts contract (R3)
   class-periods-check.ts         # class periods + terms, the engine, whole-range conflicts, resync, deactivate/
                                  #   reactivate/delete, forward readers, no generator/cron (R4)
+  class-creation-check.ts        # class + rows + sessions in one transaction, new teacher + class atomic, time
+                                 #   parser and picker-search unit tests, no native time input (R6)
 proxy.ts                        # Next 16's middleware file: i18n + auth refresh
 docs/
 ```
@@ -331,7 +346,7 @@ Either way, **write the two isolation tests early** (shared-teacher no-leak; cro
 
 **M11–M19 add nine more gates** (`check:branches`, `check:permissions`, `check:catalog`, `check:settlements`, `check:enrollment`, `check:parent`, `check:ratings`, `check:visibility`, and updates to `check:admin`/`check:classes`) — listed with their milestones in `03-build-order.md`, and built to the same rules as the twelve below. Every gate touching money, permissions or isolation asserts the **denial** shape as well as the happy path, the way `check:analytics` asserts on `can()` directly rather than on a rendered page.
 
-All gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/session-lifecycle.ts`, `lib/db/settlements.ts`, `lib/db/refunds.ts`, `lib/db/analytics.ts`, `lib/db/teacher-portal.ts`, `lib/db/discover.ts`, `lib/db/student-portal.ts`, `lib/db/reservations.ts`, `lib/db/approvals.ts`, `lib/db/platform.ts`, `lib/rooms.ts`, `lib/db/room-sets.ts` and `lib/db/slot-conflicts.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
+All gates import only modules free of `@/` aliases and of Next-runtime imports — which is why `lib/db/tenant-scope.ts`, `lib/money.ts`, `lib/auth/permissions.ts`, `lib/validation/settings.ts`, `lib/scheduling.ts`, `lib/db/sessions.ts`, `lib/db/attendance.ts`, `lib/db/payments.ts`, `lib/db/session-lifecycle.ts`, `lib/db/settlements.ts`, `lib/db/refunds.ts`, `lib/db/analytics.ts`, `lib/db/teacher-portal.ts`, `lib/db/discover.ts`, `lib/db/student-portal.ts`, `lib/db/reservations.ts`, `lib/db/approvals.ts`, `lib/db/platform.ts`, `lib/rooms.ts`, `lib/db/room-sets.ts`, `lib/db/slot-conflicts.ts`, `lib/db/class-sessions.ts` and — R6 — `lib/db/teacher-membership.ts`, `lib/db/identity.ts` (now relative imports, an optional client), `lib/time-input.ts`, `lib/picker-search.ts` and `lib/digits.ts` are written that way. `lib/db/sessions.ts` takes its `PrismaClient` as a parameter rather than importing `lib/db/client.ts`'s singleton for exactly this reason — the app passes the shared instance, the gate script passes its own. Keep it so.
 
 ---
 
@@ -446,6 +461,7 @@ The gate asserts every filter bar parses its own form's untouched submission —
 - **One read-only computation, `computeSync`**, feeds both the write and the live preview (`previewClassSessions` ← `checkSlotConflictsAction`), so the conflict list a person confirms is the list the save checks. `keptClassSessions` reads the same classification for the class page.
 - **Writes, each one transaction with its resync** — `createClassWithSessions` (class + extra rooms + slots + every session), `updateClassWithSessions` (resync only when the period, teacher or room set changes and the class is active), `writeClassSlot` (add / move / remove a weekly slot), `deactivateClass` (inactive + pristine future sessions deleted + the rest cancelled through `cancelSession`; started/closed untouched), `reactivateClass` (refused once `endDate` has passed; regenerates under the confirmation contract), `deleteClass` (refused while `classDeleteBlockers` finds anything — a session started or closed, attendees, payments, a settlement, ratings, a reschedule link, any enrolment or reservation; locks the class row first) and `removeSessionsOnHoliday` (called beside a holiday insert). Every one audits (`classGroup.create/update/deactivate/reactivate/delete`, `classGroup.sessions.resync`, `schedule.conflict.confirm`).
 - **Manual sessions (R5), same module.** `createManualSession` (an **extra session** on an active class: the class's price frozen into `priceSnapshot`, its cut read at payment time; teacher defaulted to the class's, a substitute allowed) and `createOneOffSession` (a **one-time session**, `classGroupId` null: its own title, optional centre-selected catalog subject/grade, price and cut) share one writer (`writeManualSession`): one transaction that re-resolves every id inside the centre (an inactive or other-centre class/teacher/room/catalog id is refused by direct call), refuses a date before today **in the centre's timezone** (`pastDate`; an earlier time today is fine), refuses a slot the class already holds (`duplicateSlot`), checks the no-class invariant (`lib/db/sessions.ts`'s `oneOffSessionShapeError`), runs R3's conflict decision (`confirmConflicts` required; the candidate carries **no** class so its own class's sessions and other one-time sessions are compared too), writes `SessionRoom` extras, and audits `session.create` (`mode`) plus any `schedule.conflict.confirm`. A holiday never blocks one — the result (and the preview) only flags it. `previewManualSession` is the same check, read-only, behind `checkSlotConflictsAction`'s `newSession` kind. Both set **`isManual`** (as does `resolveSessionRequest` for an approved `NEW_SESSION`), and `isManual` is a **disqualifier in `sessionDisqualifiers`** and pinned `false` in `STILL_PRISTINE`: a resync, end-date change or holiday never deletes or rewrites one, and `computeSync` does not report it as kept (its slot still counts as held). `deactivateClass` ignores the `"manual"` reason only, so a manual session is deleted if otherwise pristine and cancelled otherwise. **`deleteManualSession`** is the one staff delete: manual or one-time only, not started, SCHEDULED, not closed, nothing recorded, no reschedule link, no cut override on a class session (`manualSessionDeleteBlockers`) — under a row lock, with `UNTOUCHED`/`NO_OVERRIDE` re-asserted in the delete's own `WHERE`, audited `session.delete`. **Every session delete in the codebase lives in this module** and passes the pristine predicate (asserted by `check:session-lifecycle`).
+- **Create with a brand-new teacher (R6), same module.** `createClassWithNewTeacher(db, centerId, { teacher, linkUserId, class, slots }, options)` runs, in ONE `db.$transaction`, `addTeacherMembership(tx, …)` (`lib/db/teacher-membership.ts` — the one teacher-creation path: `createTeacherAction` calls it through `createTeacherMembership`; it resolves the typed contact, creates a `User` only when nobody matches, otherwise requires `linkUserId` and attaches a **new `Membership`** to the existing person, and writes its audit row on the same client) and then `writeClassWithSessions(tx, …)` — the very write `createClassWithSessions` wraps in its own transaction (class row, extra rooms, `ClassSchedule` rows, the engine's single `resyncClassSessions`, the `classGroup.create` audit). Any refusal or error throws out of the transaction, so nothing from either half survives; the result carries `part` (`permission` | `teacher` | `class`) so the form says which half failed. The caller passes `options.can`; **both** `teacher.manage` and `class.manage` are required and checked first, by direct call. Cheap class checks (period, `weeklySlotsError` with at least one row, the room set) run before anyone is created. `refusePrivileged` makes the inline flow refuse a platform administrator and any holder of another role at this centre before offering the match. `previewNewClassSessions` is the read-only preview for a class that does not exist yet — `computeSync` over a synthetic plan, the teacher optional while a new one is typed.
 - **Idempotent.** `Session` is unique on `(classGroupId, date, startTime)` and inserts go through `createMany({ skipDuplicates: true })`; every key the class already holds from today on (any status) is treated as taken. Re-running any of the above with nothing changed creates, deletes and updates nothing.
 
 **The class period rule** is `lib/scheduling.ts`'s `classPeriodError` — end on or after start, at most `MAX_CLASS_PERIOD_DAYS` (400) — used by the zod schemas (`lib/validation/class-period.ts`'s `withPeriodRule`), the engine and `lib/db/terms.ts`. **Terms** (`CenterTerm`, `lib/db/terms.ts`) are presets whose dates the class form copies; nothing references them.
@@ -476,7 +492,7 @@ Which conflicts **deny** versus **need confirmation** is `CenterSettings.schedul
 
 **The `confirmConflicts` contract.** Every slot-writing path takes the flag: the class-sessions engine's writes (create, edit, weekly slots, reactivate — R4), `rescheduleSession`, `updateSessionRooms` (a session's own room set — this session only, never the class or its enrolment cap), `resolveSessionRequest` (NEW_SESSION approval), and — R5 — `createManualSession`/`createOneOffSession`. `lib/scheduling.ts`'s `decideConflicts(count, policy, confirmConflicts)` is the one decision: no conflicts → proceed; **DENY** → refused (`conflict`/`scheduleConflict`) whatever the flag; **WARN** without the flag → refused as `conflictsNeedConfirmation`; WARN with it → saved, and the confirmed conflicts audited **in the same transaction** as the write where there is one. A refusal always returns the conflict list, never a generic error, so a direct action call can neither skip the check nor be left guessing. A class write is **one decision for its whole period** (R4 — the R3 generator's per-occurrence "hold conflicting ones back" is gone with the generator). A session that already exists and keeps its slot is not re-checked, so a double-booking confirmed once never asks again. A class's, an approved and a rescheduled session copy the class's (or original's) room set into `SessionRoom` rows. **No script path:** since R4 `confirmConflicts` is a **required** parameter on every data-layer slot writer — the R3 "omitted flag = pre-R3 policy-only behaviour" path is removed; the seed and the four pre-R3 gate assertions pass `confirmConflicts: true` explicitly. `npm run check:rooms` asserts every call from `app/` passes the flag, and `npm run check:class-periods` asserts no writer declares it optional or defaults it.
 
-**Live preview.** `checkSlotConflictsAction` (`app/[locale]/(center)/conflicts/actions.ts`) is read-only and advisory: the same loaders and comparison as the writes, gated by the same permission as the write it previews (`class.manage` for weekly slots and class room/teacher/period changes, `session.manage` for reschedule, session rooms and — R5 — a new manual session, whose `newSession` preview also returns a `holiday` flag). For a class (R4) it runs the engine's own `computeSync` through `previewClassSessions`, so it previews every session the save would create or re-room across the **whole period**. The forms call it debounced (`useSlotConflicts` in `components/center/slot-conflict-notice.tsx`) and render `SlotConflictNotice`; the submit stays disabled until a WARN list is confirmed (a tick resets whenever the list changes) and under DENY. The server re-checks on submit regardless.
+**Live preview.** `checkSlotConflictsAction` (`app/[locale]/(center)/conflicts/actions.ts`) is read-only and advisory: the same loaders and comparison as the writes, gated by the same permission as the write it previews (`class.manage` for weekly slots and class room/teacher/period changes, `session.manage` for reschedule, session rooms and — R5 — a new manual session, whose `newSession` preview also returns a `holiday` flag). For a class (R4) it runs the engine's own `computeSync` through `previewClassSessions`, so it previews every session the save would create or re-room across the **whole period**; R6's `newClass` kind does the same for a class that does not exist yet (`previewNewClassSessions`, gated by `class.manage`). The forms call it debounced (`useSlotConflicts` in `components/center/slot-conflict-notice.tsx`) and render `SlotConflictNotice`; the submit stays disabled until a WARN list is confirmed (a tick resets whenever the list changes) and under DENY. The server re-checks on submit regardless.
 
 **Two changes delivered at M15, both closing real gaps.**
 

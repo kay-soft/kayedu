@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { Banknote, CalendarClock, DoorOpen, Layers, UserRound, UsersRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ShareType } from "@prisma/client";
 
@@ -10,6 +11,7 @@ import {
 } from "@/components/center/class-period-fields";
 import { RoomSetPicker, type RoomOption } from "@/components/center/room-set-picker";
 import { Field } from "@/components/shared/field";
+import { FormSection } from "@/components/shared/dialog-shell";
 import { ToggleRow } from "@/components/settings/toggle-row";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -40,11 +42,11 @@ export type ClassFieldsValues = {
 };
 
 /**
- * What a class's sessions are checked against in the live preview: its
- * teacher and room set (R3) and its period (R4) — the whole range.
+ * What a class's sessions are checked against in the live preview besides its
+ * teacher (which the caller owns — R6 moved the teacher into its own section):
+ * its room set (R3) and its period (R4) — the whole range.
  */
-export type ClassSlotInputs = {
-  teacherId: string;
+export type ClassPlacementInputs = {
   roomId: string | null;
   extraRoomIds: string[];
   startDate: string;
@@ -52,20 +54,27 @@ export type ClassSlotInputs = {
 };
 
 /**
- * Every field a `ClassGroup` carries (docs/01-data-model.md §2): who teaches
- * it, what/whom it's for, its room set (R3 — a required primary room plus
- * any rooms combined with it; the set's summed capacity is the class's seat
- * limit, there is no separate class capacity), its price and center-cut and
- * the attendance/enrollment flags, and (R4) its period — typed, or filled
- * from one of the centre's term presets. Shared between the create form (the "Add
- * class" dialog) and the edit form on the class detail page, exactly like
- * `student-fields.tsx` is shared between `StudentForm` and
- * `StudentProfileForm`.
+ * Every field a `ClassGroup` carries (docs/01-data-model.md §2), laid out as
+ * titled cards (R6, docs/04 §11.15) so the common path fits a 1280px dialog
+ * with little or no scrolling:
+ *
+ * - **Basics** — subject, grade, education system, side by side;
+ * - **Teacher** — whatever the caller puts there (a searchable picker; on
+ *   create, also "New teacher") — next to **Room(s)** (R3 — a required
+ *   primary room plus any rooms combined with it; the set's summed capacity is
+ *   the seat limit) and **Class period** (R4, a term preset or typed dates);
+ * - **Weekly schedule** — the caller's rows and the conflict notice that
+ *   concerns them (new classes only; an existing class edits its slots on its
+ *   own page);
+ * - **Pricing & centre cut** and **Attendance & enrolment**.
+ *
+ * Two columns from `lg`, one below. Shared between the New class dialog and
+ * the Edit class dialog, exactly like `student-fields.tsx` is shared between
+ * `StudentForm` and `StudentProfileForm`.
  */
 export function ClassFields({
   idPrefix,
   values,
-  teachers,
   subjects,
   grades,
   educationSystems,
@@ -75,11 +84,13 @@ export function ClassFields({
   terms,
   noneLabel,
   fieldErrors,
-  onSlotInputsChange,
+  teacherSection,
+  scheduleSection,
+  placementNotice,
+  onPlacementChange,
 }: {
   idPrefix: string;
   values: ClassFieldsValues;
-  teachers: SelectOption[];
   subjects: SelectOption[];
   grades: SelectOption[];
   educationSystems: SelectOption[];
@@ -97,10 +108,21 @@ export function ClassFields({
   terms: TermOption[];
   noneLabel: string;
   fieldErrors?: Record<string, string>;
-  /** Teacher, room set or period changed — the edit form re-previews conflicts. */
-  onSlotInputsChange?: (next: ClassSlotInputs) => void;
+  /** The contents of the Teacher card. */
+  teacherSection: ReactNode;
+  /** The contents of the Weekly schedule card; omitted = no such card. */
+  scheduleSection?: ReactNode;
+  /**
+   * A conflict notice that concerns the teacher / rooms / period above it
+   * (Edit class), shown full-width right under them instead of at the foot of
+   * the dialog. (New class puts its notice in the schedule card.)
+   */
+  placementNotice?: ReactNode;
+  /** Room set or period changed — the form re-previews conflicts. */
+  onPlacementChange?: (next: ClassPlacementInputs) => void;
 }) {
   const t = useTranslations("Classes.fields");
+  const tSections = useTranslations("Classes.sections");
   const tErrors = useTranslations("Classes.errors");
   const locale = useLocale();
 
@@ -108,16 +130,15 @@ export function ClassFields({
   const [shareValue, setShareValue] = useState(values.centerShareValue);
   const [priceInput, setPriceInput] = useState(values.price);
   const [educationSystemId, setEducationSystemId] = useState(values.educationSystemId);
-  const slotInputs = useRef<ClassSlotInputs>({
-    teacherId: values.teacherId,
+  const placement = useRef<ClassPlacementInputs>({
     roomId: values.roomId || null,
     extraRoomIds: values.extraRoomIds,
     startDate: values.startDate,
     endDate: values.endDate,
   });
-  function changeSlotInputs(patch: Partial<ClassSlotInputs>) {
-    slotInputs.current = { ...slotInputs.current, ...patch };
-    onSlotInputsChange?.(slotInputs.current);
+  function changePlacement(patch: Partial<ClassPlacementInputs>) {
+    placement.current = { ...placement.current, ...patch };
+    onPlacementChange?.(placement.current);
   }
   // Once the person types into shareValue themselves, the FIXED-default
   // auto-fill below stops touching it — an explicit edit always wins.
@@ -150,97 +171,81 @@ export function ClassFields({
     : null;
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          id={`${idPrefix}-teacherId`}
-          label={t("teacher")}
-          error={error("teacherId")}
-        >
-          <Select
-            id={`${idPrefix}-teacherId`}
-            name="teacherId"
-            defaultValue={values.teacherId}
-            onValueChange={(teacherId) => changeSlotInputs({ teacherId })}
-            required
-            aria-invalid={fieldErrors?.teacherId ? true : undefined}
-          >
-            <option value="" disabled>
-              {t("teacherPlaceholder")}
-            </option>
-            {teachers.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field
-          id={`${idPrefix}-subjectId`}
-          label={t("subject")}
-          optional
-          error={error("subjectId")}
-        >
-          <Select
+    <div className="grid items-start gap-4 lg:grid-cols-2">
+      <FormSection title={tSections("basics")} icon={<Layers />} wide>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field
             id={`${idPrefix}-subjectId`}
-            name="subjectId"
-            defaultValue={values.subjectId}
+            label={t("subject")}
+            optional
+            error={error("subjectId")}
           >
-            <option value="">{noneLabel}</option>
-            {subjects.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+            <Select
+              id={`${idPrefix}-subjectId`}
+              name="subjectId"
+              defaultValue={values.subjectId}
+            >
+              <option value="">{noneLabel}</option>
+              {subjects.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-        <Field
-          id={`${idPrefix}-gradeId`}
-          label={t("grade")}
-          optional
-          error={error("gradeId")}
-        >
-          <Select
+          <Field
             id={`${idPrefix}-gradeId`}
-            name="gradeId"
-            defaultValue={values.gradeId}
+            label={t("grade")}
+            optional
+            error={error("gradeId")}
           >
-            <option value="">{noneLabel}</option>
-            {grades.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+            <Select
+              id={`${idPrefix}-gradeId`}
+              name="gradeId"
+              defaultValue={values.gradeId}
+            >
+              <option value="">{noneLabel}</option>
+              {grades.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-        <Field
-          id={`${idPrefix}-educationSystemId`}
-          label={t("educationSystem")}
-          optional
-          error={error("educationSystemId")}
-        >
-          <Select
+          <Field
             id={`${idPrefix}-educationSystemId`}
-            name="educationSystemId"
-            value={educationSystemId}
-            onValueChange={(next) => {
-              setEducationSystemId(next);
-              applyInheritedFixedShare(next, shareType);
-            }}
+            label={t("educationSystem")}
+            optional
+            error={error("educationSystemId")}
           >
-            <option value="">{noneLabel}</option>
-            {educationSystems.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+            <Select
+              id={`${idPrefix}-educationSystemId`}
+              name="educationSystemId"
+              value={educationSystemId}
+              onValueChange={(next) => {
+                setEducationSystemId(next);
+                applyInheritedFixedShare(next, shareType);
+              }}
+            >
+              <option value="">{noneLabel}</option>
+              {educationSystems.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      </FormSection>
 
-        <div className="sm:col-span-2">
+      <div className="flex min-w-0 flex-col gap-4">
+        <FormSection title={tSections("teacher")} icon={<UserRound />}>
+          {teacherSection}
+        </FormSection>
+
+        <FormSection title={tSections("rooms")} icon={<DoorOpen />}>
           <RoomSetPicker
             idPrefix={idPrefix}
             rooms={rooms}
@@ -251,9 +256,9 @@ export function ClassFields({
             noneLabel={noneLabel}
             roomError={error("roomId")}
             extraError={error("extraRoomIds")}
-            onChange={(next) => changeSlotInputs(next)}
+            onChange={(next) => changePlacement(next)}
           />
-        </div>
+        </FormSection>
       </div>
 
       <ClassPeriodFields
@@ -262,13 +267,23 @@ export function ClassFields({
         defaultValue={{ startDate: values.startDate, endDate: values.endDate }}
         startError={error("startDate")}
         endError={error("endDate")}
-        onChange={(next) => changeSlotInputs(next)}
+        onChange={(next) => changePlacement(next)}
       />
 
-      <div className="rounded-xl border border-border p-3 sm:p-4">
-        <p className="mb-3 text-sm font-medium text-text-primary">
-          {t("moneyTitle")}
-        </p>
+      {placementNotice ? <div className="empty:hidden lg:col-span-2">{placementNotice}</div> : null}
+
+      {scheduleSection ? (
+        <FormSection
+          title={tSections("schedule")}
+          description={tSections("scheduleHint")}
+          icon={<CalendarClock />}
+          wide
+        >
+          {scheduleSection}
+        </FormSection>
+      ) : null}
+
+      <FormSection title={tSections("pricing")} icon={<Banknote />}>
         <div className="grid gap-4 sm:grid-cols-3">
           <Field id={`${idPrefix}-price`} label={t("price")} error={error("price")}>
             <Input
@@ -304,7 +319,6 @@ export function ClassFields({
           <Field
             id={`${idPrefix}-shareValue`}
             label={shareType === "FIXED" ? t("shareValueEgp") : t("shareValuePct")}
-            hint={shareType === "FIXED" ? t("shareValueInheritedHint") : undefined}
             error={error("shareValue")}
           >
             <Input
@@ -327,8 +341,12 @@ export function ClassFields({
           </Field>
         </div>
 
+        {shareType === "FIXED" ? (
+          <p className="-mt-1 text-xs text-text-muted">{t("shareValueInheritedHint")}</p>
+        ) : null}
+
         {preview ? (
-          <dl className="mt-3 flex flex-col gap-1 text-sm sm:flex-row sm:gap-6">
+          <dl className="flex flex-col gap-1 text-sm sm:flex-row sm:gap-6">
             <div className="flex justify-between gap-3 sm:block">
               <dt className="text-text-secondary">{t("centerShare")}</dt>
               <dd className="font-semibold tabular-nums">
@@ -343,33 +361,31 @@ export function ClassFields({
             </div>
           </dl>
         ) : null}
-        <p className="mt-2 text-xs text-text-muted">{t("snapshotNote")}</p>
-      </div>
+        <p className="text-xs text-text-muted">{t("snapshotNote")}</p>
+      </FormSection>
 
-      <div className="flex flex-col gap-3">
-        <div className="grid gap-4 sm:grid-cols-2 sm:items-end">
-          <Field
+      <FormSection title={tSections("attendance")} icon={<UsersRound />}>
+        <Field
+          id={`${idPrefix}-lateThresholdMinutes`}
+          label={t("lateThreshold")}
+          hint={t("lateThresholdHint")}
+          error={error("lateThresholdMinutes")}
+        >
+          <Input
             id={`${idPrefix}-lateThresholdMinutes`}
-            label={t("lateThreshold")}
-            hint={t("lateThresholdHint")}
-            error={error("lateThresholdMinutes")}
-          >
-            <Input
-              id={`${idPrefix}-lateThresholdMinutes`}
-              name="lateThresholdMinutes"
-              type="number"
-              dir="ltr"
-              inputMode="numeric"
-              min={0}
-              max={MAX_LATE_THRESHOLD_MINUTES}
-              step={1}
-              defaultValue={values.lateThresholdMinutes}
-              aria-invalid={
-                fieldErrors?.lateThresholdMinutes ? true : undefined
-              }
-            />
-          </Field>
-        </div>
+            name="lateThresholdMinutes"
+            type="number"
+            dir="ltr"
+            inputMode="numeric"
+            min={0}
+            max={MAX_LATE_THRESHOLD_MINUTES}
+            step={1}
+            defaultValue={values.lateThresholdMinutes}
+            aria-invalid={
+              fieldErrors?.lateThresholdMinutes ? true : undefined
+            }
+          />
+        </Field>
 
         <ToggleRow
           name="acceptsNewStudents"
@@ -384,7 +400,7 @@ export function ClassFields({
           description={t("requiresConfirmationHint")}
           defaultChecked={values.requiresConfirmation}
         />
-      </div>
+      </FormSection>
     </div>
   );
 }

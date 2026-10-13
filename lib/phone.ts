@@ -6,11 +6,12 @@
  * this the same number" would be three different answers to "is this the
  * same person."
  *
- * Deliberately free of runtime imports (no `@/` aliases, no Next.js, no
- * Prisma) so `npm run check:people`'s single-normalizer gate can both import
+ * Deliberately free of runtime imports beyond `lib/digits.ts` (itself
+ * import-free; no `@/` aliases, no Next.js, no Prisma) so `npm run check:people`'s single-normalizer gate can both import
  * the real function and grep the rest of the tree for anything that looks
  * like a second implementation.
  */
+import { toAsciiDigits } from "./digits.ts";
 
 /**
  * Egyptian mobile numbers, 11-15 raw digits, to one canonical `01XXXXXXXXX`:
@@ -28,6 +29,33 @@ export function normalizePhone(input: string | null | undefined): string | null 
   if (!local.startsWith("0")) local = `0${local}`;
 
   return /^01[0125]\d{8}$/.test(local) ? local : null;
+}
+
+/**
+ * The digits a partly-typed phone query is searched by (R6 — the searchable
+ * pickers). A full number would go through `normalizePhone`; a *prefix or
+ * tail* of one cannot, so this keeps whatever was typed, in ASCII digits, and
+ * drops only the Egypt prefix a person adds out of habit: `+20 100…`,
+ * `0020100…` and `20100…` all search as `100…`, exactly as `0100…` does.
+ * Local numbers never start with 20, so the prefix is only dropped before a
+ * mobile prefix (10/11/12/15). Empty when no digits were typed.
+ */
+export function phoneSearchDigits(input: string): string {
+  const digits = toAsciiDigits(input).replace(/[^\d]/g, "");
+  return digits.replace(/^(?:00)?20(?=1[0125])/, "");
+}
+
+/**
+ * Whether a stored phone matches a typed query, in any format (`+20…`, `0100…`,
+ * `100…`, a tail, Arabic digits). The stored value is the canonical form
+ * `normalizePhone` produced; a legacy un-normalized value is normalized here
+ * first so both sides are compared in the one canonical shape.
+ */
+export function phoneMatchesQuery(phone: string | null | undefined, query: string): boolean {
+  const wanted = phoneSearchDigits(query);
+  if (wanted === "" || !phone) return false;
+  const stored = normalizePhone(phone) ?? phone.replace(/[^\d]/g, "");
+  return stored.includes(wanted);
 }
 
 /** Shape guard only — no normalization. Used to decide whether a raw search

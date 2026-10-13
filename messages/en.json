@@ -55,6 +55,20 @@
       "noResults": "Nothing matched this filter",
       "noResultsHint": "Widen the date range or clear a filter to see more.",
       "noData": "Nothing here yet"
+    },
+    "timePicker": {
+      "placeholder": "e.g. 4:30 PM",
+      "open": "Pick a time",
+      "hours": "Hour",
+      "minutes": "Minute",
+      "quickMinutes": "Quick minutes",
+      "period": "AM / PM",
+      "am": "AM",
+      "pm": "PM",
+      "done": "Done",
+      "invalid": "Enter a time like 4:30 PM or 16:30.",
+      "outOfRange": "That isn't a valid time — use 1–12 with AM/PM, or 00–23.",
+      "endAfterStart": "The end time must be after the start time."
     }
   },
   "Shell": {
@@ -293,7 +307,9 @@
       "photoType": "Photos must be PNG, JPEG or WebP.",
       "photoTooLarge": "That photo is larger than 5 MB.",
       "storage": "File storage is unavailable right now. Try again in a moment.",
-      "alreadyVerified": "This parent link is already verified."
+      "alreadyVerified": "This parent link is already verified.",
+      "staffMember": "They are already a staff member at this branch.",
+      "privilegedPerson": "That phone belongs to a platform administrator, so it cannot be used for a teacher."
     }
   },
   "Teachers": {
@@ -557,7 +573,10 @@
       "cancel": "Cancel",
       "summary": "{day}",
       "emptyHint": "Add a weekly time slot and its sessions are created for the whole class period.",
-      "savedWithConflict": "Saved with {count, plural, one {# confirmed double-booking} other {# confirmed double-bookings}}."
+      "savedWithConflict": "Saved with {count, plural, one {# confirmed double-booking} other {# confirmed double-bookings}}.",
+      "removeRow": "Remove row",
+      "addRow": "Add row",
+      "rowsHint": "At least one row. Back-to-back rows are fine; two rows on the same day cannot overlap."
     },
     "period": {
       "title": "Class period",
@@ -663,11 +682,37 @@
       "endBeforeStart": "The end date cannot be before the start date.",
       "periodTooLong": "A class period can span at most 400 days — check the year.",
       "classInactive": "This class is deactivated. Reactivate it before enrolling students.",
-      "periodEnded": "This class's period has already ended. Extend its end date before reactivating it."
+      "periodEnded": "This class's period has already ended. Extend its end date before reactivating it.",
+      "slotsRequired": "Add at least one weekly time slot.",
+      "slotOverlap": "This row overlaps another row on the same day.",
+      "tooManySlots": "That is too many weekly rows."
     },
     "emptyHint": "A class pairs a teacher, a subject, a period and a weekly schedule. Add the first one and its sessions are created for the whole period.",
     "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
-    "clearFilters": "Clear filters"
+    "clearFilters": "Clear filters",
+    "edit": "Edit class",
+    "editTitle": "Edit class",
+    "editDescription": "Price and branch-cut changes never rewrite money already recorded — only new sessions use them.",
+    "sections": {
+      "basics": "Basics",
+      "teacher": "Teacher",
+      "rooms": "Room(s)",
+      "schedule": "Weekly schedule",
+      "scheduleHint": "Each row creates a session every week of the class period. A clash with the teacher or a room shows right here.",
+      "pricing": "Pricing & branch cut",
+      "attendance": "Attendance & enrollment"
+    },
+    "newTeacher": {
+      "modeLabel": "Teacher",
+      "modeSelect": "Select teacher",
+      "modeNew": "New teacher",
+      "modeNewHint": "Creates the teacher and the class together. If anything fails, nothing is saved.",
+      "alreadyTeacher": "{name} already teaches at this branch — select them instead of creating them again.",
+      "selectThem": "Select {name}",
+      "teacherFailed": "The teacher could not be created: {reason}",
+      "classFailed": "The class could not be created: {reason}",
+      "checkFields": "check the highlighted fields."
+    }
   },
   "RoomSets": {
     "room": "Room",
@@ -806,11 +851,18 @@
         "startTime": "Start time",
         "endTime": "End time"
       },
-      "rooms": "Rooms",
+      "rooms": "Edit rooms",
       "roomsHint": "Change the rooms for this session only. The class keeps its own rooms and its seat limit.",
       "saveRooms": "Save rooms",
       "roomsSaved": "Rooms updated for this session.",
-      "roomsSavedWithConflict": "Rooms updated, with {count, plural, one {# confirmed double-booking} other {# confirmed double-bookings}}."
+      "roomsSavedWithConflict": "Rooms updated, with {count, plural, one {# confirmed double-booking} other {# confirmed double-bookings}}.",
+      "roomsTitle": "Edit rooms",
+      "rescheduleTitle": "Reschedule session",
+      "rescheduleDescription": "Move this session to another day or time. A new session is created at the new time; this one keeps what was recorded on it.",
+      "sections": {
+        "when": "Date & time",
+        "rooms": "Room(s)"
+      }
     },
     "receipt": {
       "title": "Receipt",
@@ -938,7 +990,14 @@
       "classMoneyNote": "Price and centre cut come from the class, exactly as for its scheduled sessions.",
       "oneOffMoneyNote": "The price is fixed when the session is created; the cut is frozen onto each payment when it is recorded.",
       "holidayNotice": "This date is on the holiday calendar. The session will still be created.",
-      "submit": "Create session"
+      "submit": "Create session",
+      "sections": {
+        "session": "Session",
+        "teacher": "Teacher",
+        "when": "Date & time",
+        "rooms": "Room(s)",
+        "money": "Price & branch cut"
+      }
     },
     "deleteSession": {
       "button": "Delete session",
@@ -1990,5 +2049,19 @@
     "room": "Room",
     "price": "Price",
     "teacher": "Teacher"
+  },
+  "Pickers": {
+    "teacher": {
+      "placeholder": "Search by name or phone",
+      "empty": "No teachers match that name or phone.",
+      "clear": "Clear teacher",
+      "open": "Show all teachers"
+    },
+    "class": {
+      "placeholder": "Search classes",
+      "empty": "No classes match.",
+      "clear": "Clear class",
+      "open": "Show all classes"
+    }
   }
 }

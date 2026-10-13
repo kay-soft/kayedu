@@ -9,6 +9,7 @@ import {
   removeScheduleAction,
   updateScheduleAction,
 } from "@/app/[locale]/(center)/classes/actions";
+import { TimeRangeFields } from "@/components/center/time-range-fields";
 import { SessionSyncNotice } from "@/components/center/session-sync-notice";
 import {
   SlotConflictNotice,
@@ -17,7 +18,6 @@ import {
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { isValidTimeRange } from "@/lib/scheduling";
 import { IDLE_CLASS_STATE, type ClassActionState } from "@/lib/validation/classes";
@@ -172,33 +172,16 @@ function ScheduleRow({
             </Select>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <label className="text-xs font-medium text-text-secondary">
-              {t("start")}
-            </label>
-            <Input
-              name="startTime"
-              type="time"
-              dir="ltr"
-              value={draft.startTime}
-              onChange={(event) => setDraft({ ...draft, startTime: event.target.value })}
-              required
-            />
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <label className="text-xs font-medium text-text-secondary">
-              {t("end")}
-            </label>
-            <Input
-              name="endTime"
-              type="time"
-              dir="ltr"
-              value={draft.endTime}
-              onChange={(event) => setDraft({ ...draft, endTime: event.target.value })}
-              required
-            />
-          </div>
+          <TimeRangeFields
+            idPrefix={`slot-${slot.id}`}
+            startLabel={t("start")}
+            endLabel={t("end")}
+            start={draft.startTime}
+            end={draft.endTime}
+            onChange={({ start, end }) => setDraft({ ...draft, startTime: start, endTime: end })}
+            required
+            className="min-w-0 flex-[2]"
+          />
 
           <div className="flex shrink-0 gap-2">
             <SubmitButton variant="outline" disabled={conflicts.blocked}>
@@ -316,33 +299,16 @@ function AddSlotForm({ classGroupId }: { classGroupId: string }) {
             </Select>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <label className="text-xs font-medium text-text-secondary">
-              {t("start")}
-            </label>
-            <Input
-              name="startTime"
-              type="time"
-              dir="ltr"
-              value={draft.startTime}
-              onChange={(event) => setDraft({ ...draft, startTime: event.target.value })}
-              required
-            />
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <label className="text-xs font-medium text-text-secondary">
-              {t("end")}
-            </label>
-            <Input
-              name="endTime"
-              type="time"
-              dir="ltr"
-              value={draft.endTime}
-              onChange={(event) => setDraft({ ...draft, endTime: event.target.value })}
-              required
-            />
-          </div>
+          <TimeRangeFields
+            idPrefix={`slot-new-${classGroupId}`}
+            startLabel={t("start")}
+            endLabel={t("end")}
+            start={draft.startTime}
+            end={draft.endTime}
+            onChange={({ start, end }) => setDraft({ ...draft, startTime: start, endTime: end })}
+            required
+            className="min-w-0 flex-[2]"
+          />
 
           <div className="flex shrink-0 gap-2">
             <SubmitButton disabled={conflicts.blocked}>{t("addSlot")}</SubmitButton>

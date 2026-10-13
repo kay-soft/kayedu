@@ -28,6 +28,50 @@ export function isValidTimeRange(startTime: string, endTime: string): boolean {
   return parseTimeToMinutes(startTime) < parseTimeToMinutes(endTime);
 }
 
+/** One weekly row of a class's schedule, as the class dialog collects it (R6). */
+export type WeeklySlotRow = { dayOfWeek: number; startTime: string; endTime: string };
+
+export type WeeklySlotsError =
+  /** A new class needs at least one weekly row. */
+  | "slotsRequired"
+  | "invalidDay"
+  | "invalidTime"
+  | "invalidTimeRange"
+  /** Two rows on the same weekday cover some of the same minutes. */
+  | "slotOverlap";
+
+/**
+ * The one rule for a class's weekly rows (R6): every row has a weekday and a
+ * valid time range, and no two rows on the same weekday overlap (half-open,
+ * so back-to-back 4–5 and 5–6 are fine). Used by the zod schema, the create
+ * data-layer function and the dialog's inline message — never re-derived.
+ * Returns the first problem and the row it is on, or null.
+ */
+export function weeklySlotsError(
+  rows: readonly WeeklySlotRow[],
+  { required }: { required: boolean },
+): { error: WeeklySlotsError; index: number } | null {
+  if (required && rows.length === 0) return { error: "slotsRequired", index: -1 };
+  for (const [index, row] of rows.entries()) {
+    if (!Number.isInteger(row.dayOfWeek) || row.dayOfWeek < 0 || row.dayOfWeek > 6) {
+      return { error: "invalidDay", index };
+    }
+    if (!isValidTime(row.startTime) || !isValidTime(row.endTime)) return { error: "invalidTime", index };
+    if (!isValidTimeRange(row.startTime, row.endTime)) return { error: "invalidTimeRange", index };
+  }
+  for (const [index, row] of rows.entries()) {
+    for (const earlier of rows.slice(0, index)) {
+      if (
+        earlier.dayOfWeek === row.dayOfWeek &&
+        timeRangesOverlap(earlier.startTime, earlier.endTime, row.startTime, row.endTime)
+      ) {
+        return { error: "slotOverlap", index };
+      }
+    }
+  }
+  return null;
+}
+
 /** Half-open interval overlap: [aStart, aEnd) intersects [bStart, bEnd). */
 export function timeRangesOverlap(
   aStart: string,

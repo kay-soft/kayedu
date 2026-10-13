@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
-import { previewClassSessions, previewManualSession } from "@/lib/db/class-sessions";
+import { previewClassSessions, previewManualSession, previewNewClassSessions } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
 import { resolveRoomSet } from "@/lib/db/room-sets";
 import { describeConflicts, loadSessionOccupancy } from "@/lib/db/slot-conflicts";
@@ -60,6 +60,27 @@ const inputSchema = z.discriminatedUnion("kind", [
     startDate: day.optional(),
     endDate: day.optional(),
   }),
+  // R6 — a class that does not exist yet (the New class dialog): its weekly
+  // rows, period, rooms and — unless a brand-new teacher is being typed — teacher.
+  z.object({
+    kind: z.literal("newClass"),
+    locale: z.string().max(5),
+    teacherId: id.nullable(),
+    roomId: id,
+    extraRoomIds: roomIds,
+    startDate: day,
+    endDate: day,
+    slots: z
+      .array(
+        z.object({
+          dayOfWeek: z.number().int().min(0).max(6),
+          startTime: time,
+          endTime: time,
+        }),
+      )
+      .min(1)
+      .max(14),
+  }),
   // R5 — a new manual session ("New session" on the Sessions tab): an extra
   // session on a class (`classGroupId` set) or a one-time one (null).
   z.object({
@@ -113,7 +134,25 @@ export async function checkSlotConflictsAction(
   const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
   let conflicts: ScheduleConflict[] = [];
 
-  if (value.kind === "newSession") {
+  if (value.kind === "newClass") {
+    const preview = await previewNewClassSessions(
+      prisma,
+      centerId,
+      {
+        teacherId: value.teacherId,
+        roomId: value.roomId,
+        extraRoomIds: value.extraRoomIds,
+        startDate: dayMarker(value.startDate),
+        endDate: dayMarker(value.endDate),
+        slots: value.slots,
+      },
+      { locale },
+    );
+    return {
+      conflicts: await describeConflicts(prisma, centerId, preview.conflicts.slice(0, MAX_SHOWN_CONFLICTS)),
+      policy,
+    };
+  } else if (value.kind === "newSession") {
     if (!isValidTimeRange(value.startTime, value.endTime)) return { ...NONE, policy };
     const preview = await previewManualSession(
       prisma,

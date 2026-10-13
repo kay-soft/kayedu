@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createClassRequestAction } from "@/app/[locale]/(teacher)/teacher/classes/actions";
+import { TimeRangeFields } from "@/components/center/time-range-fields";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -75,13 +76,20 @@ export function ClassRequestForm({
           </Select>
         </Field>
 
-        <Field id="request-startTime" label={t("start")} error={state.fieldErrors?.startTime ? tErrors(state.fieldErrors.startTime) : undefined}>
-          <Input id="request-startTime" name="startTime" type="time" defaultValue="16:00" />
-        </Field>
-
-        <Field id="request-endTime" label={t("end")} error={state.fieldErrors?.endTime ? tErrors(state.fieldErrors.endTime) : undefined}>
-          <Input id="request-endTime" name="endTime" type="time" defaultValue="18:00" />
-        </Field>
+        <TimeRangeFields
+          idPrefix="request-time"
+          startLabel={t("start")}
+          endLabel={t("end")}
+          defaultStart="16:00"
+          defaultEnd="18:00"
+          error={
+            state.fieldErrors?.startTime || state.fieldErrors?.endTime
+              ? tErrors((state.fieldErrors.startTime ?? state.fieldErrors.endTime)!)
+              : undefined
+          }
+          required
+          className="sm:col-span-2"
+        />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

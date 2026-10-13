@@ -1,14 +1,22 @@
-import type { Prisma, User } from "@prisma/client";
-import { prisma } from "@/lib/db/client";
+import type { Prisma, PrismaClient, User } from "@prisma/client";
+// Relative imports on purpose (R6): `lib/db/teacher-membership.ts` — the one
+// teacher-creation path — runs inside the class-creation transaction, and
+// `npm run check:class-creation` calls it outside the Next.js runtime, so this
+// module and everything it pulls in must resolve without the `@/` alias (same
+// reasoning as lib/db/students.ts). The reads below take an optional client so
+// that path can read through its own transaction; the default is the shared one.
+import { prisma } from "./client.ts";
 import {
   fullName,
   normalizeContact,
   normalizeEmail,
   type ContactInput,
   type ContactMatchField,
-} from "@/lib/identity";
-import { normalizePhone } from "@/lib/phone";
-import type { MatchCandidate } from "@/lib/validation/people";
+} from "../identity.ts";
+import { normalizePhone } from "../phone.ts";
+import type { MatchCandidate } from "../validation/people.ts";
+
+type Db = PrismaClient | Prisma.TransactionClient;
 
 /**
  * The global identity layer (docs/01-data-model.md §1, §6, spec §5).
@@ -39,6 +47,7 @@ type ContactMatch = { user: User; matchedOn: ContactMatchField[] };
  */
 export async function findPeopleByContact(
   input: ContactInput,
+  db: Db = prisma,
 ): Promise<ContactMatch[]> {
   const { email, phone } = normalizeContact(input);
   if (!email && !phone) return [];
@@ -55,12 +64,12 @@ export async function findPeopleByContact(
   }
 
   const [globalUsers, localStudents, localTeachers] = await Promise.all([
-    prisma.user.findMany({ where: { OR: userOr } }),
-    prisma.studentProfile.findMany({
+    db.user.findMany({ where: { OR: userOr } }),
+    db.studentProfile.findMany({
       where: { OR: localOr },
       include: { user: true },
     }),
-    prisma.membership.findMany({
+    db.membership.findMany({
       where: { OR: localOr },
       include: { user: true },
     }),
@@ -117,12 +126,13 @@ export async function describeMatch(
   centerId: string,
   match: ContactMatch,
   input: ContactInput,
+  db: Db = prisma,
 ): Promise<MatchCandidate> {
   const { user, matchedOn } = match;
   const { email, phone } = normalizeContact(input);
   const [studentProfile, membership] = await Promise.all([
-    prisma.studentProfile.findFirst({ where: { userId: user.id, centerId } }),
-    prisma.membership.findFirst({ where: { userId: user.id, centerId } }),
+    db.studentProfile.findFirst({ where: { userId: user.id, centerId } }),
+    db.membership.findFirst({ where: { userId: user.id, centerId } }),
   ]);
 
   let existingHere: MatchCandidate["existingHere"] = null;
@@ -159,8 +169,9 @@ export type ContactResolution =
 
 export async function resolveContact(
   input: ContactInput,
+  db: Db = prisma,
 ): Promise<ContactResolution> {
-  const people = await findPeopleByContact(input);
+  const people = await findPeopleByContact(input, db);
   if (people.length === 0) return { kind: "none" };
   if (people.length === 1) return { kind: "matched", match: people[0] };
   return { kind: "conflict" };
@@ -204,7 +215,7 @@ export type PersonInput = {
  */
 export function createPerson(
   data: PersonInput,
-  tx: Prisma.TransactionClient = prisma,
+  tx: Db = prisma,
 ): Promise<User> {
   return tx.user.create({
     data: {

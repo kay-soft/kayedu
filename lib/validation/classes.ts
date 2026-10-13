@@ -5,13 +5,14 @@ import { z } from "zod";
 // exercise the real schemas (same reasoning as ./settings.ts and ./people.ts).
 import { localeSchema } from "./auth.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
-import { isValidTime } from "../scheduling.ts";
+import { isValidTime, weeklySlotsError, type WeeklySlotRow } from "../scheduling.ts";
 import {
   confirmConflictsField,
   extraRoomIdsField,
   type SlotConflictState,
 } from "./room-set.ts";
 import { dateOnlyField, withPeriodRule } from "./class-period.ts";
+import type { MatchCandidate } from "./people.ts";
 
 /**
  * Class, schedule, enrollment and holiday schemas (M4). Every Server Action
@@ -172,6 +173,54 @@ export const classGroupUpdateSchema = z
     };
   });
 
+// ── Weekly rows of a new class (R6) ─────────────────────────────────────────
+
+/** More than this many weekly rows is a typo, not a timetable. */
+export const MAX_WEEKLY_SLOT_ROWS = 14;
+
+/**
+ * The class dialog's weekly rows, posted as one JSON field (`slots`). A new
+ * class needs at least one; rows on the same weekday must not overlap
+ * (`lib/scheduling.ts`'s `weeklySlotsError`, the one rule). The issue is
+ * attached to the `slots` field with an i18n key under `Classes.errors`.
+ */
+export const classSlotsSchema = z
+  .string()
+  .trim()
+  .default("[]")
+  .transform((raw, ctx): WeeklySlotRow[] => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw === "" ? "[]" : raw);
+    } catch {
+      ctx.addIssue({ code: "custom", message: "invalidTime" });
+      return z.NEVER;
+    }
+    const rows = z
+      .array(
+        z.object({
+          dayOfWeek: z.number(),
+          startTime: z.string(),
+          endTime: z.string(),
+        }),
+      )
+      .max(MAX_WEEKLY_SLOT_ROWS, "tooManySlots")
+      .safeParse(parsed);
+    if (!rows.success) {
+      ctx.addIssue({
+        code: "custom",
+        message: rows.error.issues[0]?.message === "tooManySlots" ? "tooManySlots" : "invalidTime",
+      });
+      return z.NEVER;
+    }
+    const problem = weeklySlotsError(rows.data, { required: true });
+    if (problem) {
+      ctx.addIssue({ code: "custom", message: problem.error });
+      return z.NEVER;
+    }
+    return rows.data;
+  });
+
 export const classRecordSchema = z.object({ ...base, id: recordId });
 
 export const classActiveSchema = z.object({
@@ -296,9 +345,19 @@ export type ClassActionState = SlotConflictState & {
   /** ICU values for `error` (e.g. how many classes still use a room). */
   errorValues?: Record<string, number>;
   fieldErrors?: Record<string, string>;
-  status?: "created" | "saved" | "deleted";
+  status?: "created" | "saved" | "deleted" | "matchFound";
+  /** R6 — field errors of the new teacher's own fields (keys under `People.errors`). */
+  teacherFieldErrors?: Record<string, string>;
   sessions?: { created: number; deleted: number; updated: number; kept: number; cancelled?: number };
   blockers?: Record<string, number>;
+  /**
+   * R6 — which half of "create a class with a new teacher" refused. `error`
+   * is then the *reason*, and the UI says "The teacher could not be created:
+   * …" or "The class could not be created: …".
+   */
+  part?: "teacher" | "class";
+  /** R6 — the person the new teacher's phone/email already belongs to. */
+  match?: MatchCandidate;
 };
 
 export const IDLE_CLASS_STATE: ClassActionState = {};

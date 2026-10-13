@@ -57,6 +57,13 @@ export function PhoneLookupField({
             setPhone(event.currentTarget.value);
             setResult(null);
           }}
+          onKeyDown={(event) => {
+            // Enter looks the number up — it must not submit the form this sits in
+            // (inside the class dialog that would try to create the class).
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            void runLookup();
+          }}
           placeholder="01xxxxxxxxx"
           className="h-10"
         />

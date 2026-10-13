@@ -119,6 +119,8 @@ export default async function ClassesPage({
   const teacherOptions = teachers.map((teacher) => ({
     value: teacher.userId,
     label: fullName(localName(teacher, teacher.user)),
+    // The centre's own phone for them (docs/01 §6) — what the picker searches.
+    phone: teacher.phone,
   }));
   const subjectOptions = subjects.map((subject) => ({
     value: subject.id,

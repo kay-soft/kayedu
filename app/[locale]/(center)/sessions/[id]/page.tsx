@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
 import { DeleteSessionButton } from "@/app/[locale]/(center)/sessions/[id]/delete-session-button";
+import { ActionBar } from "@/components/shared/action-bar";
 import { EndSessionButton } from "@/app/[locale]/(center)/sessions/[id]/end-session-button";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { SessionLifecycleActions } from "@/app/[locale]/(center)/sessions/[id]/session-lifecycle-actions";
@@ -405,6 +406,7 @@ export default async function SessionDetailPage({
                 </span>
               </div>
               <div className="flex flex-col gap-2 border-t border-border pt-3">
+                <ActionBar>
                 <SessionLifecycleActions
                   sessionId={session.id}
                   date={session.date.toISOString().slice(0, 10)}
@@ -428,11 +430,10 @@ export default async function SessionDetailPage({
                     noneLabel: tCommon("none"),
                   }}
                 />
+                {canDelete ? <DeleteSessionButton sessionId={session.id} /> : null}
+                </ActionBar>
                 {canDelete ? (
-                  <div className="flex flex-col gap-1">
-                    <DeleteSessionButton sessionId={session.id} />
-                    <p className="text-xs text-text-muted">{t("deleteSession.hint")}</p>
-                  </div>
+                  <p className="text-xs text-text-muted">{t("deleteSession.hint")}</p>
                 ) : null}
               </div>
             </CardContent>
