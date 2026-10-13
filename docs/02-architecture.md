@@ -82,7 +82,8 @@ components/
                                 #   teacher-picker, weekly-schedule-rows, time-range-fields
   teacher/  student/            # experience-specific composed components
   shared/                       # tables, filters, receipt, id-card, kpi-card, field.tsx;
-                                #   R6: dialog-shell.tsx (DialogShell, FormSection, DialogLauncher), action-bar.tsx
+                                #   R6: dialog-shell.tsx (DialogShell, FormSection, DialogLauncher), action-bar.tsx;
+                                #   R10b: detail-layout.tsx (DetailLayout, DetailCard), person-avatar.tsx; center/delete-record-card.tsx
 lib/
   auth/
     session.ts                  # Supabase auth user + User mirror

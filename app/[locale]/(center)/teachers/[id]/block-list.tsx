@@ -123,7 +123,7 @@ export function BlockList({
               >
                 <form
                   action={blockFormAction}
-                  className="flex flex-col gap-3 sm:flex-row sm:items-end"
+                  className="flex flex-col gap-3"
                 >
                   <input type="hidden" name="locale" value={locale} />
                   <input
@@ -161,7 +161,7 @@ export function BlockList({
                     />
                   </div>
 
-                  <SubmitButton variant="destructive" className="w-full sm:w-auto">
+                  <SubmitButton variant="destructive" className="w-full">
                     <Ban className="size-4" />
                     {t("block")}
                   </SubmitButton>

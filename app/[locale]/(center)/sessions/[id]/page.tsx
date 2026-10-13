@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Lock, Printer } from "lucide-react";
+import { Clock, DoorOpen, Lock, Printer } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
@@ -13,16 +13,11 @@ import { SessionRoster, type RosterRowData } from "@/app/[locale]/(center)/sessi
 import { SessionSettlementAction } from "@/app/[locale]/(center)/settlements/session-settlement-action";
 import { searchAddAttendeeCandidatesAction } from "@/app/[locale]/(center)/sessions/actions";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
+import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
+import { DetailRow } from "@/components/shared/field";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { manualSessionDeleteState } from "@/lib/db/class-sessions";
@@ -60,6 +55,14 @@ const STATUS_BADGE = {
  * One session's roster, attendance and receipt (spec §4.1 item 7). The id in
  * the URL resolves through the scoped helper, so a session id from another
  * center resolves to "not found", never a row (docs/02 §5).
+ *
+ * R10b layout (docs/04 §5 "Detail page"): the header carries the name, kind and
+ * status badges, time and rooms, and **all of the session's verbs as one
+ * action bar** (End session · Reschedule · Edit rooms · Cancel · Delete —
+ * each still shown only to who may use it, and none once the session is
+ * closed, cancelled or rescheduled); the closed banner (R2) sits under it; the
+ * roster is the main column; the details and the receipt are the side column,
+ * which stays in view beside a long roster.
  */
 export default async function SessionDetailPage({
   params,
@@ -222,45 +225,46 @@ export default async function SessionDetailPage({
   const tClosure = await getTranslations("Sessions.closure");
   const tEnd = await getTranslations("Sessions.endSession");
 
+  const sessionRoomNames = sessionRooms.map((room) => room.name).join(" + ");
+  const canCancelSession = ctxCan(ctx, "session.cancel");
+  // The verbs live in the header's action bar (R10b). It exists only when at
+  // least one of them is on offer — an empty bar would leave a gap on a phone.
+  const hasActions =
+    canEnd || canDelete || (!rosterReadOnly && (canCancelSession || canReschedule));
+
   const receiptCard = (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("receipt.title")}</CardTitle>
-        <CardDescription>{t("receipt.description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <SessionReceipt
-          totals={receipt.totals}
-          showProfit={ctxCan(ctx, "center.profit.view")}
-          locale={locale}
-          timeZone={timeZone}
-          closure={receipt.closure}
-          changes={receipt.changes}
-          showOpenNote={!closed && !rosterReadOnly}
-        />
-        {closed ? (
-          <LinkButton href={ROUTES.centerSessionPrint(session.id)} className="w-full sm:w-fit">
-            <Printer className="size-4" aria-hidden />
-            {t("receipt.print")}
-          </LinkButton>
-        ) : null}
-        {ctxCan(ctx, "settlement.manage") ? (
-          <div className="border-t border-border-subtle pt-4">
-            {existingSettlement ? (
-              <p className="text-sm text-text-secondary">
-                {t("settlement.status", {
-                  status: tSettlementStatus(existingSettlement.status),
-                })}
-              </p>
-            ) : closed ? (
-              <SessionSettlementAction sessionId={session.id} />
-            ) : (
-              <p className="text-sm text-text-muted">{t("settlement.notClosedHint")}</p>
-            )}
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
+    <DetailCard title={t("receipt.title")} description={t("receipt.description")}>
+      <SessionReceipt
+        totals={receipt.totals}
+        showProfit={ctxCan(ctx, "center.profit.view")}
+        locale={locale}
+        timeZone={timeZone}
+        closure={receipt.closure}
+        changes={receipt.changes}
+        showOpenNote={!closed && !rosterReadOnly}
+      />
+      {closed ? (
+        <LinkButton href={ROUTES.centerSessionPrint(session.id)} className="w-full sm:w-fit">
+          <Printer className="size-4" aria-hidden />
+          {t("receipt.print")}
+        </LinkButton>
+      ) : null}
+      {ctxCan(ctx, "settlement.manage") ? (
+        <div className="border-t border-border-subtle pt-4">
+          {existingSettlement ? (
+            <p className="text-sm text-text-secondary">
+              {t("settlement.status", {
+                status: tSettlementStatus(existingSettlement.status),
+              })}
+            </p>
+          ) : closed ? (
+            <SessionSettlementAction sessionId={session.id} />
+          ) : (
+            <p className="text-sm text-text-muted">{t("settlement.notClosedHint")}</p>
+          )}
+        </div>
+      ) : null}
+    </DetailCard>
   );
 
   return (
@@ -271,19 +275,58 @@ export default async function SessionDetailPage({
           teacher: teacherName,
           date: formatDate(session.date, locale),
         })}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
+        back={{ href: ROUTES.centerSessions, label: t("backToList") }}
+        meta={
+          <>
             <SessionKindBadge kind={kind} />
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
+            <span className="inline-flex items-center gap-1.5 tabular-nums">
+              <Clock className="size-4 text-text-muted" aria-hidden />
+              {formatTimeRange(session.startTime, session.endTime, locale)}
+            </span>
+            {sessionRoomNames ? (
+              <span className="inline-flex items-center gap-1.5">
+                <DoorOpen className="size-4 text-text-muted" aria-hidden />
+                {sessionRoomNames}
+              </span>
+            ) : null}
             {displayStatus === "RESCHEDULED" && session.rescheduledToId ? (
               <LinkButton href={ROUTES.centerSession(session.rescheduledToId)}>
                 {t("lifecycle.viewNewSession")}
               </LinkButton>
             ) : null}
-            <LinkButton href={ROUTES.centerSessions}>
-              {t("backToList")}
-            </LinkButton>
-          </div>
+          </>
+        }
+        action={
+          hasActions ? (
+            <ActionBar inHeader>
+              {canEnd ? <EndSessionButton sessionId={session.id} /> : null}
+              <SessionLifecycleActions
+                sessionId={session.id}
+                date={dateKey(session.date)}
+                startTime={session.startTime}
+                endTime={session.endTime}
+                locked={rosterReadOnly}
+                canCancel={canCancelSession}
+                canReschedule={canReschedule}
+                roomSet={{
+                  rooms: rooms.map((room) => ({
+                    id: room.id,
+                    name: room.name,
+                    capacity: room.capacity,
+                    active: room.active,
+                  })),
+                  roomLinks,
+                  roomId: session.roomId ?? "",
+                  extraRoomIds: session.roomId
+                    ? session.extraRooms.map((extra) => extra.roomId)
+                    : [],
+                  noneLabel: tCommon("none"),
+                }}
+              />
+              {canDelete ? <DeleteSessionButton sessionId={session.id} /> : null}
+            </ActionBar>
+          ) : null
         }
       />
 
@@ -311,22 +354,18 @@ export default async function SessionDetailPage({
             <p className="text-text-secondary">{tClosure("locked")}</p>
           </div>
         </div>
-      ) : canEnd ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-text-secondary">{tEnd("hint")}</p>
-          <div className="flex flex-col gap-2 sm:items-end">
-            <EndSessionButton sessionId={session.id} />
-          </div>
+      ) : canEnd || canDelete ? (
+        // What the bar's destructive verbs do, in one place under the header.
+        <div className="flex flex-col gap-1 text-xs text-text-muted">
+          {canEnd ? <p>{tEnd("hint")}</p> : null}
+          {canDelete ? <p>{t("deleteSession.hint")}</p> : null}
         </div>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("roster.title")}</CardTitle>
-            <CardDescription>{t("roster.description")}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+      <DetailLayout
+        stickySide
+        main={
+          <DetailCard title={t("roster.title")} description={t("roster.description")}>
             <SessionRoster
               sessionId={session.id}
               rows={roster}
@@ -360,88 +399,35 @@ export default async function SessionDetailPage({
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-col gap-6">
-          {/* Once closed, the receipt is the record — it leads the column. */}
-          {closed ? receiptCard : null}
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("context.title")}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2 text-sm">
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("fields.date")}</span>
-                <span className="font-medium text-text-primary">
-                  {formatDate(session.date, locale)}
-                </span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("fields.time")}</span>
-                <span className="font-medium tabular-nums text-text-primary">
-                  {formatTimeRange(session.startTime, session.endTime, locale)}
-                </span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("fields.room")}</span>
-                <span className="text-end font-medium text-text-primary">
-                  {sessionRooms.map((room) => room.name).join(" + ") || tCommon("none")}
-                </span>
-              </div>
+          </DetailCard>
+        }
+        side={
+          <>
+            {/* Once closed, the receipt is the record — it leads the column. */}
+            {closed ? receiptCard : null}
+            <DetailCard title={t("context.title")} contentClassName="gap-0">
+              <DetailRow label={t("fields.date")} value={formatDate(session.date, locale)} />
+              <DetailRow
+                label={t("fields.time")}
+                value={formatTimeRange(session.startTime, session.endTime, locale)}
+              />
+              <DetailRow label={t("fields.room")} value={sessionRoomNames || tCommon("none")} />
               {sessionRooms.length > 0 ? (
-                <div className="flex justify-between gap-3">
-                  <span className="text-text-secondary">{t("fields.seats")}</span>
-                  <span className="font-medium tabular-nums text-text-primary">
-                    {sessionSeats > 0
+                <DetailRow
+                  label={t("fields.seats")}
+                  value={
+                    sessionSeats > 0
                       ? formatNumber(sessionSeats, locale)
-                      : t("fields.seatsUnlimited")}
-                  </span>
-                </div>
-              ) : null}
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("fields.price")}</span>
-                <span className="font-medium tabular-nums text-text-primary">
-                  {formatMoney(session.priceSnapshot, locale)}
-                </span>
-              </div>
-              <div className="flex flex-col gap-2 border-t border-border pt-3">
-                <ActionBar>
-                <SessionLifecycleActions
-                  sessionId={session.id}
-                  date={dateKey(session.date)}
-                  startTime={session.startTime}
-                  endTime={session.endTime}
-                  locked={rosterReadOnly}
-                  canCancel={ctxCan(ctx, "session.cancel")}
-                  canReschedule={canReschedule}
-                  roomSet={{
-                    rooms: rooms.map((room) => ({
-                      id: room.id,
-                      name: room.name,
-                      capacity: room.capacity,
-                      active: room.active,
-                    })),
-                    roomLinks,
-                    roomId: session.roomId ?? "",
-                    extraRoomIds: session.roomId
-                      ? session.extraRooms.map((extra) => extra.roomId)
-                      : [],
-                    noneLabel: tCommon("none"),
-                  }}
+                      : t("fields.seatsUnlimited")
+                  }
                 />
-                {canDelete ? <DeleteSessionButton sessionId={session.id} /> : null}
-                </ActionBar>
-                {canDelete ? (
-                  <p className="text-xs text-text-muted">{t("deleteSession.hint")}</p>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-
-          {closed ? null : receiptCard}
-        </div>
-      </div>
+              ) : null}
+              <DetailRow label={t("fields.price")} value={formatMoney(session.priceSnapshot, locale)} />
+            </DetailCard>
+            {closed ? null : receiptCard}
+          </>
+        }
+      />
     </div>
   );
 }

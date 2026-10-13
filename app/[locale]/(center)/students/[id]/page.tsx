@@ -1,23 +1,23 @@
 import { notFound } from "next/navigation";
-import { ShieldOff, Users } from "lucide-react";
+import { IdCard, Printer, ShieldOff, Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { IdCardPanel } from "@/app/[locale]/(center)/students/[id]/id-card-panel";
 import { PhotoForm } from "@/app/[locale]/(center)/students/[id]/photo-form";
 import { StudentProfileForm } from "@/app/[locale]/(center)/students/[id]/student-profile-form";
 import { VerifyParentLinkButton } from "@/app/[locale]/(center)/students/[id]/verify-parent-link-button";
+import { deleteStudentAction } from "@/app/[locale]/(center)/students/actions";
+import { DeleteRecordCard } from "@/components/center/delete-record-card";
 import { IdCardPreview } from "@/components/center/id-card-preview";
+import { ActionBar } from "@/components/shared/action-bar";
+import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
+import { EmptyState } from "@/components/shared/empty-state";
 import { DetailRow } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
+import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
+import { PersonAvatar } from "@/components/shared/person-avatar";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
@@ -26,19 +26,24 @@ import { countOtherCenterRelations } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { parentLinksForStudent } from "@/lib/db/parents";
 import { scoped } from "@/lib/db/scoped";
-import { idCardGeneratedAt } from "@/lib/db/storage";
+import { idCardGeneratedAt, signedUrlFor } from "@/lib/db/storage";
 import { formatDate } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, todayInTimezone } from "@/lib/scheduling";
+import { AVATARS_BUCKET } from "@/lib/storage-paths";
 import { storageConfigured } from "@/lib/supabase/admin";
-import { EmptyState } from "@/components/shared/empty-state";
-import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * One student at this center (spec §4.1 item 4): their record, their enrolment
  * view, their ID card, and who has blocked them.
+ *
+ * R10b layout (docs/04 §5 "Detail page"): a header with the student's photo
+ * (or first letter), code, active state and grade, and the print actions as
+ * one action bar; a main column of the record, enrolments (with the absence
+ * streak alerts) and "blocked by"; a side column of the ID card, photo, parent
+ * summary and parent links; and the danger zone set apart at the foot.
  *
  * The id in the URL is resolved through the scoped helper, so a student id
  * from another center resolves to "not found", never to a row (docs/02 §5).
@@ -142,186 +147,99 @@ export default async function StudentDetailPage({
         grade.active && grade.catalogActive ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
     }));
 
+  const personName = fullName(localName(student, student.user));
+  // A short-lived signed URL (the same helper Reception uses), or null with no
+  // photo on file / Storage unset — the avatar then shows the first letter.
+  const photoUrl =
+    hasStorage && student.photoUrl
+      ? await signedUrlFor(ctx.center.id, AVATARS_BUCKET, student.photoUrl)
+      : null;
+  const gradeLabel = gradeOptions.find((option) => option.value === student.gradeId)?.label ?? null;
+  const parentName = [student.parentFirstName, student.parentLastName].filter(Boolean).join(" ");
+  const visibleEnrollments = enrollments.filter((e) => e.status !== "REMOVED");
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={fullName(localName(student, student.user))}
+        title={personName}
         description={t("detailSubtitle")}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="brand">{student.studentCode}</Badge>
+        back={{ href: ROUTES.centerStudents, label: t("backToList") }}
+        leading={<PersonAvatar name={personName} photoUrl={photoUrl} />}
+        meta={
+          <>
+            <Badge variant="brand">
+              <span dir="ltr">{student.studentCode}</span>
+            </Badge>
             <Badge variant={student.active ? "success" : "neutral"}>
               {student.active ? tCommon("active") : tCommon("inactive")}
             </Badge>
-            <LinkButton href={ROUTES.centerStudents}>
-              {t("backToList")}
+            {gradeLabel ? <span>{gradeLabel}</span> : null}
+          </>
+        }
+        action={
+          <ActionBar inHeader>
+            <LinkButton href={ROUTES.centerStudentCard(student.id)} className="w-full sm:w-auto">
+              <IdCard className="size-4" aria-hidden />
+              {t("card.printCard")}
             </LinkButton>
-          </div>
+            <LinkButton href={ROUTES.centerStudentPaper(student.id)} className="w-full sm:w-auto">
+              <Printer className="size-4" aria-hidden />
+              {t("card.printPaper")}
+            </LinkButton>
+          </ActionBar>
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("profileTitle")}</CardTitle>
-            <CardDescription>{t("profileDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <StudentProfileForm
-              studentProfileId={student.id}
-              name={localName(student, student.user)}
-              contact={{
-                email: student.email ?? "",
-                phone: student.phone ?? "",
-                altPhone: student.altPhone ?? "",
-              }}
-              student={{
-                gradeId: student.gradeId ?? "",
-                studentCode: student.studentCode,
-                parentFirstName: student.parentFirstName ?? "",
-                parentLastName: student.parentLastName ?? "",
-                parentPhone: student.parentPhone ?? "",
-                parentAltPhone: student.parentAltPhone ?? "",
-              }}
-              grades={gradeOptions}
-              noneLabel={tCommon("none")}
-              canDelete={ctxCan(ctx, "student.delete")}
-            />
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("card.title")}</CardTitle>
-              <CardDescription>{t("card.description")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <IdCardPanel
+      <DetailLayout
+        main={
+          <>
+            <DetailCard title={t("profileTitle")} description={t("profileDescription")}>
+              <StudentProfileForm
                 studentProfileId={student.id}
-                generatedAt={cardStamp ? formatDate(cardStamp, locale) : null}
-                storageEnabled={hasStorage}
-              >
-                <IdCardPreview svg={cardSvg} />
-              </IdCardPanel>
-            </CardContent>
-          </Card>
+                name={localName(student, student.user)}
+                contact={{
+                  email: student.email ?? "",
+                  phone: student.phone ?? "",
+                  altPhone: student.altPhone ?? "",
+                }}
+                student={{
+                  gradeId: student.gradeId ?? "",
+                  studentCode: student.studentCode,
+                  parentFirstName: student.parentFirstName ?? "",
+                  parentLastName: student.parentLastName ?? "",
+                  parentPhone: student.parentPhone ?? "",
+                  parentAltPhone: student.parentAltPhone ?? "",
+                }}
+                grades={gradeOptions}
+                noneLabel={tCommon("none")}
+              />
+            </DetailCard>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("photo.title")}</CardTitle>
-              <CardDescription>{t("photo.description")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {hasStorage ? (
-                <PhotoForm
-                  studentProfileId={student.id}
-                  hasPhoto={Boolean(student.photoUrl)}
-                />
-              ) : (
-                <FormMessage tone="warning">{t("card.noStorage")}</FormMessage>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("parentTitle")}</CardTitle>
-              <CardDescription>{t("parentDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DetailRow
-                label={t("fields.parentName")}
-                value={[student.parentFirstName, student.parentLastName]
-                  .filter(Boolean)
-                  .join(" ")}
-              />
-              <DetailRow
-                label={t("fields.parentPhone")}
-                value={student.parentPhone}
-                ltr
-              />
-              <DetailRow
-                label={t("fields.parentAltPhone")}
-                value={student.parentAltPhone}
-                ltr
-              />
-              <DetailRow
-                label={t("fields.otherCenters")}
-                value={String(otherRelations)}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("parentLinks.title")}</CardTitle>
-              <CardDescription>{t("parentLinks.description")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {parentLinks.length === 0 ? (
-                <EmptyState compact icon={<Users />} title={t("parentLinks.empty")} description={t("parentLinks.emptyHint")} />
-              ) : (
+            <DetailCard title={t("enrollments.title")} description={t("enrollments.description")}>
+              {activeStreaks.length > 0 ? (
                 <ul className="flex flex-col gap-2">
-                  {parentLinks.map((link) => (
-                    <li
-                      key={link.id}
-                      className="flex flex-col gap-2 rounded-xl border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-text-primary">
-                          {fullName(link.parentUser)}
-                        </p>
-                        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-                          <span dir="ltr">{link.matchedPhone}</span>
-                          <span>{formatDate(link.createdAt, locale)}</span>
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={link.status === "VERIFIED" ? "success" : "warning"}>
-                          {t(`parentLinks.status.${link.status}`)}
-                        </Badge>
-                        {link.status === "PENDING" && ctxCan(ctx, "parent.link.manage") ? (
-                          <VerifyParentLinkButton parentLinkId={link.id} />
-                        ) : null}
-                      </div>
+                  {activeStreaks.map((streak) => (
+                    <li key={streak.classGroupId}>
+                      <FormMessage tone="warning">
+                        {t("enrollments.consecutiveAbsentAlert", {
+                          className: streak.className,
+                          count: streak.count,
+                        })}
+                      </FormMessage>
                     </li>
                   ))}
                 </ul>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("enrollments.title")}</CardTitle>
-            <CardDescription>{t("enrollments.description")}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {activeStreaks.length > 0 ? (
-              <ul className="flex flex-col gap-2">
-                {activeStreaks.map((streak) => (
-                  <li key={streak.classGroupId}>
-                    <FormMessage tone="warning">
-                      {t("enrollments.consecutiveAbsentAlert", {
-                        className: streak.className,
-                        count: streak.count,
-                      })}
-                    </FormMessage>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {enrollments.filter((e) => e.status !== "REMOVED").length === 0 ? (
-              <FormMessage tone="info">{t("enrollments.empty")}</FormMessage>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {enrollments
-                  .filter((enrollment) => enrollment.status !== "REMOVED")
-                  .map((enrollment) => (
+              ) : null}
+              {visibleEnrollments.length === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<Users />}
+                  title={t("enrollments.empty")}
+                  description={t("enrollments.emptyHint")}
+                />
+              ) : (
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {visibleEnrollments.map((enrollment) => (
                     <li
                       key={enrollment.id}
                       className="flex flex-col gap-1 rounded-xl border border-border p-3"
@@ -340,74 +258,159 @@ export default async function StudentDetailPage({
                       </span>
                     </li>
                   ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+                </ul>
+              )}
+            </DetailCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("blockedBy.title")}</CardTitle>
-            <CardDescription>{t("blockedBy.description")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {blocks.length === 0 ? (
-              <EmptyState compact icon={<ShieldOff />} title={t("blockedBy.empty")} description={t("blockedBy.emptyHint")} />
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {blocks.map((block) => {
-                  const teacher =
-                    block.scope === "TEACHER"
-                      ? teacherByUserId.get(block.refId)
-                      : undefined;
-                  const classGroup =
-                    block.scope === "CLASS" ? classById.get(block.refId) : undefined;
-                  return (
-                    <li
-                      key={block.id}
-                      className="flex flex-col gap-1 rounded-xl border border-border p-3"
-                    >
-                      <span className="text-sm font-medium text-text-primary">
-                        {block.scope === "TEACHER" ? (
-                          teacher ? (
+            <DetailCard title={t("blockedBy.title")} description={t("blockedBy.description")}>
+              {blocks.length === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<ShieldOff />}
+                  title={t("blockedBy.empty")}
+                  description={t("blockedBy.emptyHint")}
+                />
+              ) : (
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {blocks.map((block) => {
+                    const teacher =
+                      block.scope === "TEACHER"
+                        ? teacherByUserId.get(block.refId)
+                        : undefined;
+                    const classGroup =
+                      block.scope === "CLASS" ? classById.get(block.refId) : undefined;
+                    return (
+                      <li
+                        key={block.id}
+                        className="flex flex-col gap-1 rounded-xl border border-border p-3"
+                      >
+                        <span className="text-sm font-medium text-text-primary">
+                          {block.scope === "TEACHER" ? (
+                            teacher ? (
+                              <Link
+                                href={ROUTES.centerTeacher(teacher.id)}
+                                className="text-brand hover:underline"
+                              >
+                                {fullName(localName(teacher, teacher.user))}
+                              </Link>
+                            ) : (
+                              tTeachers("blocks.unknownTeacher")
+                            )
+                          ) : classGroup ? (
                             <Link
-                              href={ROUTES.centerTeacher(teacher.id)}
+                              href={ROUTES.centerClass(classGroup.id)}
                               className="text-brand hover:underline"
                             >
-                              {fullName(localName(teacher, teacher.user))}
+                              {[
+                                classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+                                classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
                             </Link>
                           ) : (
-                            tTeachers("blocks.unknownTeacher")
-                          )
-                        ) : classGroup ? (
-                          <Link
-                            href={ROUTES.centerClass(classGroup.id)}
-                            className="text-brand hover:underline"
-                          >
-                            {[
-                              classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
-                              classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </Link>
-                        ) : (
-                          t("blockedBy.unknownClass")
-                        )}
-                      </span>
-                      {block.reason ? (
-                        <span className="text-xs text-text-muted">
-                          {block.reason}
+                            t("blockedBy.unknownClass")
+                          )}
                         </span>
-                      ) : null}
+                        {block.reason ? (
+                          <span className="text-xs text-text-muted">
+                            {block.reason}
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </DetailCard>
+          </>
+        }
+        side={
+          <>
+            <DetailCard title={t("card.title")} description={t("card.description")}>
+              <IdCardPanel
+                studentProfileId={student.id}
+                generatedAt={cardStamp ? formatDate(cardStamp, locale) : null}
+                storageEnabled={hasStorage}
+              >
+                <IdCardPreview svg={cardSvg} />
+              </IdCardPanel>
+            </DetailCard>
+
+            <DetailCard title={t("photo.title")} description={t("photo.description")}>
+              {hasStorage ? (
+                <PhotoForm
+                  studentProfileId={student.id}
+                  hasPhoto={Boolean(student.photoUrl)}
+                />
+              ) : (
+                <FormMessage tone="warning">{t("card.noStorage")}</FormMessage>
+              )}
+            </DetailCard>
+
+            <DetailCard
+              title={t("parentTitle")}
+              description={t("parentDescription")}
+              contentClassName="gap-0"
+            >
+              <DetailRow label={t("fields.parentName")} value={parentName} />
+              <DetailRow label={t("fields.parentPhone")} value={student.parentPhone} ltr />
+              <DetailRow label={t("fields.parentAltPhone")} value={student.parentAltPhone} ltr />
+              <DetailRow label={t("fields.otherCenters")} value={String(otherRelations)} />
+            </DetailCard>
+
+            <DetailCard title={t("parentLinks.title")} description={t("parentLinks.description")}>
+              {parentLinks.length === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<Users />}
+                  title={t("parentLinks.empty")}
+                  description={t("parentLinks.emptyHint")}
+                />
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {parentLinks.map((link) => (
+                    <li
+                      key={link.id}
+                      className="flex flex-col gap-2 rounded-xl border border-border p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-text-primary">
+                          {fullName(link.parentUser)}
+                        </p>
+                        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                          <span dir="ltr">{link.matchedPhone}</span>
+                          <span>{formatDate(link.createdAt, locale)}</span>
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={link.status === "VERIFIED" ? "success" : "warning"}>
+                          {t(`parentLinks.status.${link.status}`)}
+                        </Badge>
+                        {link.status === "PENDING" && ctxCan(ctx, "parent.link.manage") ? (
+                          <VerifyParentLinkButton parentLinkId={link.id} />
+                        ) : null}
+                      </div>
                     </li>
-                  );
-                })}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  ))}
+                </ul>
+              )}
+            </DetailCard>
+          </>
+        }
+        below={
+          ctxCan(ctx, "student.delete") ? (
+            <DeleteRecordCard
+              action={deleteStudentAction}
+              idField="studentProfileId"
+              recordId={student.id}
+              title={t("danger.title")}
+              description={t("danger.description")}
+              confirmMessage={t("deleteConfirm")}
+            />
+          ) : null
+        }
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { CalendarRange, DoorOpen } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { EditClassDialog } from "@/app/[locale]/(center)/classes/[id]/class-profile-form";
@@ -14,15 +15,11 @@ import {
 } from "@/app/[locale]/(center)/classes/[id]/schedule-builder";
 import { searchEnrollCandidatesAction } from "@/app/[locale]/(center)/classes/actions";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
+import { ActionBar } from "@/components/shared/action-bar";
+import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
+import { DetailRow } from "@/components/shared/field";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { classSessionCounts, keptClassSessions } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
@@ -35,7 +32,6 @@ import { ROUTES } from "@/lib/routes";
 import { piastresToInputValue } from "@/lib/money";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { dateKey } from "@/lib/scheduling";
-import { LinkButton } from "@/components/shared/link-button";
 import { Link } from "@/lib/i18n/navigation";
 
 const MAX_CANDIDATES = 8;
@@ -46,6 +42,12 @@ const MAX_CANDIDATES = 8;
  * its roster. R4: the "Sessions" card shows the period, how many sessions it
  * has, and any upcoming session kept after an edit because it already
  * carries records or custom changes — there is no generator to run.
+ *
+ * R10b layout (docs/04 §5 "Detail page"): a header with the class name,
+ * teacher, rooms, period and active state and **Edit class** as its action bar;
+ * the kept-sessions warning, when there is one, directly under it; a main
+ * column of the weekly schedule and the roster; a side column of the key facts
+ * and the sessions summary, which stays in view beside a long roster.
  *
  * The id in the URL is resolved through the scoped helper, so a class id
  * from another center resolves to "not found", never to a row (docs/02 §5).
@@ -211,13 +213,34 @@ export default async function ClassDetailPage({
     educationSystems.map((system) => [system.id, system.defaultFixedCenterShare]),
   );
 
+  const roomNames = roomSet.rooms.map((room) => room.name).join(" + ");
+  const showCut = ctxCan(ctx, "center.profit.view");
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={subjectGrade || t("columns.untitled")}
         description={teacher ? fullName(localName(teacher, teacher.user)) : tCommon("none")}
+        back={{ href: ROUTES.centerClasses, label: t("backToList") }}
+        meta={
+          <>
+            <Badge variant={classGroup.active ? "success" : "neutral"}>
+              {classGroup.active ? tCommon("active") : tCommon("inactive")}
+            </Badge>
+            <span className="inline-flex items-center gap-1.5">
+              <CalendarRange className="size-4 text-text-muted" aria-hidden />
+              {formatDayRange(classGroup.startDate, classGroup.endDate, locale)}
+            </span>
+            {roomNames ? (
+              <span className="inline-flex items-center gap-1.5">
+                <DoorOpen className="size-4 text-text-muted" aria-hidden />
+                {roomNames}
+              </span>
+            ) : null}
+          </>
+        }
         action={
-          <div className="flex flex-wrap items-center gap-2">
+          <ActionBar inHeader>
             <EditClassDialog
               classGroupId={classGroup.id}
               values={{
@@ -263,127 +286,112 @@ export default async function ClassDetailPage({
               canDelete={ctxCan(ctx, "class.delete")}
               active={classGroup.active}
             />
-            <Badge variant={classGroup.active ? "success" : "neutral"}>
-              {classGroup.active ? tCommon("active") : tCommon("inactive")}
-            </Badge>
-            <LinkButton href={ROUTES.centerClasses}>
-              {t("backToList")}
-            </LinkButton>
-          </div>
+          </ActionBar>
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
-        <div className="contents">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("context.title")}</CardTitle>
-              <CardDescription>{t("context.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2 text-sm">
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("fields.room")}</span>
-                <span className="text-end font-medium text-text-primary">
-                  {roomSet.rooms.map((room) => room.name).join(" + ") || tCommon("none")}
-                </span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("fields.seats")}</span>
-                <span className="font-medium tabular-nums text-text-primary">
-                  {roomSet.capacity > 0
+      {kept.length > 0 ? (
+        <div
+          className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning-bg p-4 text-sm text-warning"
+          role="status"
+        >
+          <p className="font-medium">{t("sessionsSync.kept", { count: kept.length })}</p>
+          <ul className="grid gap-x-6 gap-y-1 ps-5 text-text-primary sm:grid-cols-2">
+            {kept.slice(0, 10).map((session) => (
+              <li key={session.sessionId} className="list-disc">
+                <Link href={ROUTES.centerSession(session.sessionId)} className="hover:underline">
+                  {formatDay(new Date(`${session.date}T00:00:00.000Z`), locale)} ·{" "}
+                  {formatTimeRange(session.startTime, session.endTime, locale)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+          {kept.length > 10 ? (
+            <p className="text-xs">{t("sessions.keptMore", { count: kept.length - 10 })}</p>
+          ) : null}
+          <p className="text-xs text-text-secondary">{t("sessions.keptHint")}</p>
+        </div>
+      ) : null}
+
+      <DetailLayout
+        stickySide
+        main={
+          <>
+            <DetailCard title={t("schedule.title")} description={t("schedule.description")}>
+              <ScheduleBuilder classGroupId={classGroup.id} slots={schedules} />
+            </DetailCard>
+
+            <DetailCard title={t("roster.title")} description={t("roster.description")}>
+              <TypeAheadSearch
+                value={query}
+                label={t("roster.searchLabel")}
+                placeholder={t("roster.searchPlaceholder")}
+                submitLabel={t("roster.searchSubmit")}
+                search={searchEnrollCandidatesAction.bind(null, classGroup.id)}
+              />
+              <ClassRoster
+                classGroupId={classGroup.id}
+                roster={roster}
+                blocked={blocked}
+                candidates={candidates}
+                query={query}
+              />
+            </DetailCard>
+          </>
+        }
+        side={
+          <>
+            <DetailCard
+              title={t("context.title")}
+              description={t("context.description")}
+              contentClassName="gap-0"
+            >
+              <DetailRow label={t("fields.room")} value={roomNames || tCommon("none")} />
+              <DetailRow
+                label={t("fields.seats")}
+                value={
+                  roomSet.capacity > 0
                     ? t("fields.seatsValue", {
                         enrolled: roster.length,
                         seats: roomSet.capacity,
                       })
-                    : t("fields.seatsUnlimited", { enrolled: roster.length })}
-                </span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("fields.price")}</span>
-                <span className="font-medium tabular-nums text-text-primary">
-                  {formatMoney(classGroup.price, ctx.user.locale)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+                    : t("fields.seatsUnlimited", { enrolled: roster.length })
+                }
+              />
+              <DetailRow label={t("fields.price")} value={formatMoney(classGroup.price, ctx.user.locale)} />
+              {showCut ? (
+                <DetailRow
+                  label={t("fields.centerShare")}
+                  value={
+                    classGroup.centerShareType === "FIXED"
+                      ? t("fields.centerCutFixed", {
+                          amount: formatMoney(classGroup.centerShareValue, ctx.user.locale),
+                        })
+                      : t("fields.centerCutPercent", {
+                          value: formatNumber(classGroup.centerShareValue, locale),
+                        })
+                  }
+                />
+              ) : null}
+            </DetailCard>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("schedule.title")}</CardTitle>
-              <CardDescription>{t("schedule.description")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScheduleBuilder classGroupId={classGroup.id} slots={schedules} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("sessions.title")}</CardTitle>
-              <CardDescription>{t("sessions.description")}</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3 text-sm">
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("period.title")}</span>
-                <span className="text-end font-medium text-text-primary">
-                  {formatDayRange(classGroup.startDate, classGroup.endDate, locale)}
-                </span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-text-secondary">{t("sessions.count")}</span>
-                <span className="font-medium tabular-nums text-text-primary">
-                  {formatNumber(sessionCount, locale)}
-                </span>
-              </div>
+            <DetailCard
+              title={t("sessions.title")}
+              description={t("sessions.description")}
+              contentClassName="gap-0"
+            >
+              <DetailRow
+                label={t("period.title")}
+                value={formatDayRange(classGroup.startDate, classGroup.endDate, locale)}
+              />
+              <DetailRow label={t("sessions.count")} value={formatNumber(sessionCount, locale)} />
               {!classGroup.active ? (
-                <p className="text-xs text-text-muted">{t("sessions.inactiveHint")}</p>
+                <p className="pt-3 text-xs text-text-muted">{t("sessions.inactiveHint")}</p>
               ) : null}
-              {kept.length > 0 ? (
-                <div className="flex flex-col gap-2 rounded-lg border border-warning/30 bg-warning-bg p-3 text-warning" role="status">
-                  <p className="font-medium">{t("sessionsSync.kept", { count: kept.length })}</p>
-                  <ul className="flex flex-col gap-1 ps-5 text-text-primary">
-                    {kept.slice(0, 10).map((session) => (
-                      <li key={session.sessionId} className="list-disc">
-                        <Link href={ROUTES.centerSession(session.sessionId)} className="hover:underline">
-                          {formatDay(new Date(`${session.date}T00:00:00.000Z`), locale)} ·{" "}
-                          {formatTimeRange(session.startTime, session.endTime, locale)}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                  {kept.length > 10 ? (
-                    <p className="text-xs">{t("sessions.keptMore", { count: kept.length - 10 })}</p>
-                  ) : null}
-                  <p className="text-xs text-text-secondary">{t("sessions.keptHint")}</p>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("roster.title")}</CardTitle>
-          <CardDescription>{t("roster.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <TypeAheadSearch
-            value={query}
-            label={t("roster.searchLabel")}
-            placeholder={t("roster.searchPlaceholder")}
-            submitLabel={t("roster.searchSubmit")}
-            search={searchEnrollCandidatesAction.bind(null, classGroup.id)}
-          />
-          <ClassRoster
-            classGroupId={classGroup.id}
-            roster={roster}
-            blocked={blocked}
-            candidates={candidates}
-            query={query}
-          />
-        </CardContent>
-      </Card>
+            </DetailCard>
+          </>
+        }
+      />
     </div>
   );
 }

@@ -1,11 +1,10 @@
 "use client";
 
-import { UserCheck } from "lucide-react";
+import { Loader2, UserCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ROUTES } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
-import { SubmitButton } from "@/components/shared/submit-button";
 import type { MatchCandidate } from "@/lib/validation/people";
 import { LinkButton } from "@/components/shared/link-button";
 
@@ -17,12 +16,18 @@ import { LinkButton } from "@/components/shared/link-button";
  * and wait for staff to confirm — the new membership or student profile is then
  * attached to that existing person. Nothing is ever merged silently, and no
  * second identity is created.
+ *
+ * R10b: the panel sits full width directly under the phone field that caused
+ * it, and its one affirmative action — **Use this person** — is the only solid
+ * brand button on screen while the dialog's own submit is held back, with the
+ * "different details" way out beside it as a plain outline button.
  */
 export function MatchPanel({
   match,
   linkLabel,
   blocked,
   onCancel,
+  pending,
 }: {
   match: MatchCandidate;
   /** e.g. "Link to this person as a teacher". */
@@ -34,6 +39,8 @@ export function MatchPanel({
    */
   blocked: boolean;
   onCancel: () => void;
+  /** The enclosing form is submitting (it submits through a transition). */
+  pending?: boolean;
 }) {
   const t = useTranslations("People.match");
 
@@ -94,7 +101,16 @@ export function MatchPanel({
         ) : null}
       </dl>
 
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="flex flex-col-reverse gap-2 border-t border-info/20 pt-3 sm:flex-row sm:items-center">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 w-full px-4 sm:w-auto"
+          onClick={onCancel}
+        >
+          {t("cancel")}
+        </Button>
+
         {blocked ? (
           match.existingProfileId ? (
             <LinkButton href={ROUTES.centerStudent(match.existingProfileId)} variant="default" className="w-full sm:w-auto">
@@ -104,17 +120,19 @@ export function MatchPanel({
         ) : (
           // Submitting the same form again — now carrying linkUserId — is what
           // attaches this center's record to the existing person.
-          <SubmitButton className="w-full sm:w-auto">{linkLabel}</SubmitButton>
+          <Button
+            type="submit"
+            disabled={pending}
+            className="h-11 w-full gap-2 px-5 shadow-card sm:w-auto"
+          >
+            {pending ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <UserCheck className="size-4" aria-hidden />
+            )}
+            {linkLabel}
+          </Button>
         )}
-
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 w-full px-4 sm:w-auto"
-          onClick={onCancel}
-        >
-          {t("cancel")}
-        </Button>
       </div>
     </div>
   );

@@ -383,7 +383,16 @@
     "emptyHint": "Teachers you add appear here, with the classes and blocks attached to them.",
     "noMatchesHint": "Check the spelling, or search by phone number or email.",
     "classesEmptyHint": "Assign this teacher to a class and it will show up here.",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "addSections": {
+      "person": "Person",
+      "personHint": "Their name and how to reach them. Look the phone up first to avoid a duplicate."
+    },
+    "settingsTitle": "Branch settings",
+    "danger": {
+      "title": "Delete this teacher",
+      "description": "Removes the teacher from this branch. A teacher who already has classes or sessions cannot be deleted."
+    }
   },
   "Students": {
     "title": "Students",
@@ -464,7 +473,8 @@
       "empty": "Not enrolled in any class yet.",
       "emptyPrint": "Not enrolled in any class yet.",
       "blocked": "blocked from this class",
-      "consecutiveAbsentAlert": "{className}: absent {count} times in a row."
+      "consecutiveAbsentAlert": "{className}: absent {count} times in a row.",
+      "emptyHint": "Enrol them in a class from the class page and it will show here."
     },
     "blockedBy": {
       "title": "Blocked by",
@@ -493,7 +503,22 @@
     },
     "emptyHint": "Students you register appear here with their code, grade and contact.",
     "noMatchesHint": "Check the spelling, or search by student code or phone number.",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "addSections": {
+      "person": "Person",
+      "personHint": "Their name and how to reach them. Look the phone up first to avoid a duplicate.",
+      "grade": "Grade",
+      "gradeHint": "Optional — you can set it later.",
+      "parent": "Parent contact",
+      "parentHint": "Who this branch calls. All optional.",
+      "photo": "Photo",
+      "photoHint": "For the ID card.",
+      "photoNote": "Add a photo after registering — open the student and use Photo."
+    },
+    "danger": {
+      "title": "Delete this student",
+      "description": "Removes the student from this branch. A student who already has attendance or payments cannot be deleted."
+    }
   },
   "Classes": {
     "title": "Classes",
@@ -551,11 +576,13 @@
       "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate.",
       "seats": "Seats",
       "seatsValue": "{enrolled} of {seats}",
-      "seatsUnlimited": "{enrolled} · no seat limit"
+      "seatsUnlimited": "{enrolled} · no seat limit",
+      "centerCutPercent": "{value}% of each payment",
+      "centerCutFixed": "{amount} per payment"
     },
     "context": {
-      "title": "Class context",
-      "description": "Read-only — edit these from the record on the left."
+      "title": "Key facts",
+      "description": "Rooms, seats and price at a glance. Change any of it with Edit class."
     },
     "dayNames": [
       "Sunday",

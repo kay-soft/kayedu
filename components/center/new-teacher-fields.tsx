@@ -32,6 +32,7 @@ export function NewTeacherFields({
   serverMatch,
   showHeader = true,
   onPendingChange,
+  pending,
 }: {
   idPrefix: string;
   /** Keys under `People.errors`. */
@@ -39,6 +40,8 @@ export function NewTeacherFields({
   serverMatch?: MatchCandidate | null;
   showHeader?: boolean;
   onPendingChange?: (pending: boolean) => void;
+  /** The enclosing form is submitting — shown on the match panel's button. */
+  pending?: boolean;
 }) {
   const t = useTranslations("Teachers");
   const [dismissedMatch, setDismissedMatch] = useState<string | null>(null);
@@ -82,16 +85,19 @@ export function NewTeacherFields({
         values={linkedMatch ? { phone: linkedMatch.phone ?? "", email: linkedMatch.email ?? "" } : undefined}
         fieldErrors={fieldErrors}
         atLeastOneRequired
+        // R10b: the match reads straight after the phone that produced it.
+        belowPhone={
+          match ? (
+            <MatchPanel
+              match={match}
+              linkLabel={t("linkAsTeacher")}
+              blocked={match.existingHere === "teacher"}
+              onCancel={() => setDismissedMatch(match.userId)}
+              pending={pending}
+            />
+          ) : null
+        }
       />
-
-      {match ? (
-        <MatchPanel
-          match={match}
-          linkLabel={t("linkAsTeacher")}
-          blocked={match.existingHere === "teacher"}
-          onCancel={() => setDismissedMatch(match.userId)}
-        />
-      ) : null}
     </div>
   );
 }

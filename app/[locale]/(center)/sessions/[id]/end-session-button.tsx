@@ -64,7 +64,11 @@ export function EndSessionButton({
         <Lock className="size-4" aria-hidden />
         {t("button")}
       </ActionBarButton>
-      {state.error && !open ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+      {state.error && !open ? (
+        <div className="col-span-2 sm:basis-full">
+          <FormMessage>{tErrors(state.error)}</FormMessage>
+        </div>
+      ) : null}
 
       <DialogShell
         open={open}

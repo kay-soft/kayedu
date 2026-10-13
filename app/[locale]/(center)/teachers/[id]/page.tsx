@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { GraduationCap, Phone } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import {
@@ -7,19 +8,18 @@ import {
   type BlockedStudent,
 } from "@/app/[locale]/(center)/teachers/[id]/block-list";
 import { TeacherProfileForm } from "@/app/[locale]/(center)/teachers/[id]/teacher-profile-form";
-import { searchBlockCandidatesAction } from "@/app/[locale]/(center)/teachers/actions";
-import { TypeAheadSearch } from "@/components/center/type-ahead-search";
-import { DetailRow } from "@/components/shared/field";
-import { FormMessage } from "@/components/shared/form-message";
-import { PageHeader } from "@/components/shared/page-header";
-import { Badge } from "@/components/ui/badge";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  deleteTeacherAction,
+  searchBlockCandidatesAction,
+} from "@/app/[locale]/(center)/teachers/actions";
+import { DeleteRecordCard } from "@/components/center/delete-record-card";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
+import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
+import { EmptyState } from "@/components/shared/empty-state";
+import { DetailRow } from "@/components/shared/field";
+import { PageHeader } from "@/components/shared/page-header";
+import { PersonAvatar } from "@/components/shared/person-avatar";
+import { Badge } from "@/components/ui/badge";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
@@ -30,13 +30,18 @@ import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { LinkButton } from "@/components/shared/link-button";
 
 const MAX_BLOCK_CANDIDATES = 8;
 
 /**
  * One teacher at this center (spec §4.1 item 2): their record, the classes they
  * carry, and their student block-list.
+ *
+ * R10b layout (docs/04 §5 "Detail page"): a header with the teacher's first
+ * letter, phone and active state; a main column of the record (including the
+ * trusted-teacher setting) and the classes they teach; a side column of the
+ * rating (average only) and the block list; the danger zone set apart at the
+ * foot.
  *
  * The id in the URL is a **membership** id and is resolved through the scoped
  * helper, so a teacher id from another center resolves to "not found" rather
@@ -121,74 +126,57 @@ export default async function TeacherDetailPage({
         }))
       : [];
 
+  const personName = fullName(localName(teacher, teacher.user));
+  const canBlock = ctxCan(ctx, "student.block");
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={fullName(localName(teacher, teacher.user))}
+        title={personName}
         description={t("detailSubtitle")}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
+        back={{ href: ROUTES.centerTeachers, label: t("backToList") }}
+        leading={<PersonAvatar name={personName} />}
+        meta={
+          <>
             <Badge variant={teacher.active ? "success" : "neutral"}>
               {teacher.active ? tCommon("active") : tCommon("inactive")}
             </Badge>
-            <LinkButton href={ROUTES.centerTeachers}>
-              {t("backToList")}
-            </LinkButton>
-          </div>
+            {teacher.phone ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Phone className="size-4 text-text-muted" aria-hidden />
+                <span dir="ltr">{teacher.phone}</span>
+              </span>
+            ) : null}
+          </>
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("profileTitle")}</CardTitle>
-            <CardDescription>{t("profileDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <TeacherProfileForm
-              membershipId={teacher.id}
-              name={localName(teacher, teacher.user)}
-              contact={{
-                email: teacher.email ?? "",
-                phone: teacher.phone ?? "",
-                altPhone: teacher.altPhone ?? "",
-              }}
-              isTrustedTeacher={teacher.isTrustedTeacher}
-              canDelete={ctxCan(ctx, "teacher.delete")}
-            />
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("identityTitle")}</CardTitle>
-              <CardDescription>{t("identityDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DetailRow
-                label={t("fields.accountClaimed")}
-                value={
-                  teacher.user.authId ? tCommon("active") : tCommon("inactive")
-                }
+      <DetailLayout
+        main={
+          <>
+            <DetailCard title={t("profileTitle")} description={t("profileDescription")}>
+              <TeacherProfileForm
+                membershipId={teacher.id}
+                name={localName(teacher, teacher.user)}
+                contact={{
+                  email: teacher.email ?? "",
+                  phone: teacher.phone ?? "",
+                  altPhone: teacher.altPhone ?? "",
+                }}
+                isTrustedTeacher={teacher.isTrustedTeacher}
               />
-              <DetailRow
-                label={t("rating.title")}
-                value={rating.average !== null ? formatRating(rating.average, locale) : t("rating.none")}
-              />
-            </CardContent>
-          </Card>
+            </DetailCard>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("classesTitle")}</CardTitle>
-              <CardDescription>{t("classesDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent>
+            <DetailCard title={t("classesTitle")} description={t("classesDescription")}>
               {classes.length === 0 ? (
-                <FormMessage tone="info">{t("classesEmpty")}</FormMessage>
+                <EmptyState
+                  compact
+                  icon={<GraduationCap />}
+                  title={t("classesEmpty")}
+                  description={t("classesEmptyHint")}
+                />
               ) : (
-                <ul className="flex flex-col gap-2">
+                <ul className="grid gap-2 sm:grid-cols-2">
                   {classes.map((classGroup) => (
                     <li
                       key={classGroup.id}
@@ -209,35 +197,59 @@ export default async function TeacherDetailPage({
                   ))}
                 </ul>
               )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </DetailCard>
+          </>
+        }
+        side={
+          <>
+            <DetailCard
+              title={t("identityTitle")}
+              description={t("identityDescription")}
+              contentClassName="gap-0"
+            >
+              <DetailRow
+                label={t("fields.accountClaimed")}
+                value={teacher.user.authId ? tCommon("active") : tCommon("inactive")}
+              />
+              <DetailRow
+                label={t("rating.title")}
+                value={rating.average !== null ? formatRating(rating.average, locale) : t("rating.none")}
+              />
+            </DetailCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("blocks.title")}</CardTitle>
-          <CardDescription>{t("blocks.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {ctxCan(ctx, "student.block") ? (
-            <TypeAheadSearch
-              value={query}
-              label={t("blocks.searchLabel")}
-              placeholder={t("blocks.searchPlaceholder")}
-              submitLabel={t("blocks.searchSubmit")}
-              search={searchBlockCandidatesAction.bind(null, teacher.id)}
+            <DetailCard title={t("blocks.title")} description={t("blocks.description")}>
+              {canBlock ? (
+                <TypeAheadSearch
+                  value={query}
+                  label={t("blocks.searchLabel")}
+                  placeholder={t("blocks.searchPlaceholder")}
+                  submitLabel={t("blocks.searchSubmit")}
+                  search={searchBlockCandidatesAction.bind(null, teacher.id)}
+                />
+              ) : null}
+
+              <BlockList
+                teacherUserId={teacher.userId}
+                blocked={blocked}
+                candidates={canBlock ? candidates : []}
+                query={canBlock ? query : ""}
+              />
+            </DetailCard>
+          </>
+        }
+        below={
+          ctxCan(ctx, "teacher.delete") ? (
+            <DeleteRecordCard
+              action={deleteTeacherAction}
+              idField="membershipId"
+              recordId={teacher.id}
+              title={t("danger.title")}
+              description={t("danger.description")}
+              confirmMessage={t("deleteConfirm")}
             />
-          ) : null}
-
-          <BlockList
-            teacherUserId={teacher.userId}
-            blocked={blocked}
-            candidates={ctxCan(ctx, "student.block") ? candidates : []}
-            query={ctxCan(ctx, "student.block") ? query : ""}
-          />
-        </CardContent>
-      </Card>
+          ) : null
+        }
+      />
     </div>
   );
 }

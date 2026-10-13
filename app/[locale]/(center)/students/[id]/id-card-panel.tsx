@@ -2,21 +2,20 @@
 
 import type { ReactNode } from "react";
 import { useActionState } from "react";
-import { Download, IdCard } from "lucide-react";
+import { Download } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { generateIdCardAction } from "@/app/[locale]/(center)/students/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { ROUTES } from "@/lib/routes";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
-import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * The ID-card panel: the live preview (rendered on the server and passed in as
- * `children`), the two print views, and "generate" — which writes the same SVG
- * to `id-cards/{centerId}/…` in Supabase Storage and hands back a short-lived
- * signed link (docs/02 §10).
+ * `children`) and "generate" — which writes the same SVG to
+ * `id-cards/{centerId}/…` in Supabase Storage and hands back a short-lived
+ * signed link (docs/02 §10). R10b: the two print views (card, paper form) moved
+ * up to the page header's action bar; this panel keeps the stored-card control.
  */
 export function IdCardPanel({
   studentProfileId,
@@ -54,30 +53,19 @@ export function IdCardPanel({
           : t("noStorage")}
       </p>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <LinkButton href={ROUTES.centerStudentCard(studentProfileId)} variant="default">
-          <IdCard className="size-4" aria-hidden />
-          {t("printCard")}
-        </LinkButton>
-
-        <LinkButton href={ROUTES.centerStudentPaper(studentProfileId)}>
-          {t("printPaper")}
-        </LinkButton>
-
-        {storageEnabled ? (
-          <form action={formAction}>
-            <input type="hidden" name="locale" value={locale} />
-            <input
-              type="hidden"
-              name="studentProfileId"
-              value={studentProfileId}
-            />
-            <SubmitButton variant="outline" className="w-full sm:w-auto">
-              {t("generate")}
-            </SubmitButton>
-          </form>
-        ) : null}
-      </div>
+      {storageEnabled ? (
+        <form action={formAction}>
+          <input type="hidden" name="locale" value={locale} />
+          <input
+            type="hidden"
+            name="studentProfileId"
+            value={studentProfileId}
+          />
+          <SubmitButton variant="outline" className="w-full">
+            {t("generate")}
+          </SubmitButton>
+        </form>
+      ) : null}
 
       {state.status === "generated" && state.downloadUrl ? (
         <FormMessage tone="success">

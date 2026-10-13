@@ -45,7 +45,7 @@ export function PhoneLookupField({
   const match = result?.status === "found" ? result.match : null;
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface-subtle p-3">
+    <div className="flex flex-col gap-2 rounded-lg bg-surface-subtle p-3">
       <span className="text-xs font-medium text-text-secondary">{t("label")}</span>
       <div className="flex gap-2">
         <Input
@@ -65,12 +65,12 @@ export function PhoneLookupField({
             void runLookup();
           }}
           placeholder="01xxxxxxxxx"
-          className="h-10"
+          className="h-11"
         />
         <Button
           type="button"
           variant="outline"
-          className="h-10 px-3"
+          className="h-11 px-3"
           disabled={pending || phone.trim().length === 0}
           onClick={runLookup}
         >
@@ -105,12 +105,13 @@ export function PhoneLookupField({
           </div>
           <Button
             type="button"
-            className="h-9 w-full sm:w-auto"
+            className="h-11 w-full gap-2 px-5 shadow-card sm:w-auto"
             onClick={() => {
               onMatch(match);
               setUsed(true);
             }}
           >
+            <UserCheck className="size-4" aria-hidden />
             {t("usePerson")}
           </Button>
         </div>

@@ -1,24 +1,21 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
-import {
-  deleteStudentAction,
-  updateStudentAction,
-} from "@/app/[locale]/(center)/students/actions";
+import { updateStudentAction } from "@/app/[locale]/(center)/students/actions";
 import { ContactFields, type ContactValues } from "@/components/center/contact-fields";
 import { PersonFields, type PersonValues } from "@/components/center/person-fields";
 import {
-  StudentFields,
+  GradeField,
+  ParentFields,
+  StudentCodeField,
   type GradeOption,
   type StudentValues,
 } from "@/components/center/student-fields";
+import { FormGroup } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
-import { SectionHeader } from "@/components/shared/section-header";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { Button } from "@/components/ui/button";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
 
 /**
@@ -29,6 +26,10 @@ import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
  * when this center registered the student, then always editable here,
  * independently of any other center, with no lock of any kind. The student
  * code is never edited here — it was assigned once, at registration.
+ *
+ * R10b: three titled groups (person, grade, parent contact) instead of one
+ * run of fields, and Delete lives in the page's danger zone
+ * (`DeleteRecordCard`), not beside Save.
  */
 export function StudentProfileForm({
   studentProfileId,
@@ -37,7 +38,6 @@ export function StudentProfileForm({
   student,
   grades,
   noneLabel,
-  canDelete,
 }: {
   studentProfileId: string;
   name: PersonValues;
@@ -45,9 +45,9 @@ export function StudentProfileForm({
   student: StudentValues;
   grades: GradeOption[];
   noneLabel: string;
-  canDelete: boolean;
 }) {
   const t = useTranslations("Students");
+  const tSections = useTranslations("Students.addSections");
   const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
@@ -56,11 +56,7 @@ export function StudentProfileForm({
     updateStudentAction,
     IDLE_PEOPLE_STATE,
   );
-  const [deleteState, deleteFormAction] = useActionState(
-    deleteStudentAction,
-    IDLE_PEOPLE_STATE,
-  );
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const idPrefix = `student-${studentProfileId}`;
 
   return (
     <form action={formAction} className="flex flex-col gap-5" noValidate>
@@ -68,79 +64,53 @@ export function StudentProfileForm({
       <input type="hidden" name="studentProfileId" value={studentProfileId} />
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
-      {deleteState.error ? (
-        <FormMessage>{tErrors(deleteState.error)}</FormMessage>
-      ) : null}
       {state.status === "saved" ? (
         <FormMessage tone="success">{tCommon("saved")}</FormMessage>
       ) : null}
 
-      <SectionHeader
-        title={t("centerSectionTitle")}
+      <FormGroup
+        title={tSections("person")}
         description={t("centerSectionDescription")}
-      />
-      <PersonFields
-        idPrefix={`student-${studentProfileId}`}
-        values={name}
-        fieldErrors={state.fieldErrors}
-      />
-      <ContactFields
-        idPrefix={`student-${studentProfileId}`}
-        values={contact}
-        fieldErrors={state.fieldErrors}
-      />
-      <StudentFields
-        idPrefix={`student-${studentProfileId}`}
-        values={student}
-        grades={grades}
-        fieldErrors={state.fieldErrors}
-        noneLabel={noneLabel}
-      />
+      >
+        <PersonFields
+          idPrefix={idPrefix}
+          values={name}
+          fieldErrors={state.fieldErrors}
+        />
+        <ContactFields
+          idPrefix={idPrefix}
+          values={contact}
+          fieldErrors={state.fieldErrors}
+        />
+      </FormGroup>
+
+      <FormGroup title={tSections("grade")}>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {student.studentCode ? (
+            <StudentCodeField idPrefix={idPrefix} studentCode={student.studentCode} />
+          ) : null}
+          <GradeField
+            idPrefix={idPrefix}
+            gradeId={student.gradeId}
+            grades={grades}
+            fieldErrors={state.fieldErrors}
+            noneLabel={noneLabel}
+          />
+        </div>
+      </FormGroup>
+
+      <FormGroup title={tSections("parent")} description={tSections("parentHint")}>
+        <ParentFields
+          idPrefix={idPrefix}
+          values={student}
+          fieldErrors={state.fieldErrors}
+        />
+      </FormGroup>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <SubmitButton className="w-full sm:w-auto">
           {tCommon("save")}
         </SubmitButton>
-
-        {canDelete ? (
-          <div className="sm:ms-auto">
-            {confirmingDelete ? (
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <span className="text-xs text-text-secondary">
-                  {t("deleteConfirm")}
-                </span>
-                {/* formAction re-targets this one submit — no nested form. */}
-                <Button
-                  type="submit"
-                  variant="destructive"
-                  formAction={deleteFormAction}
-                  formNoValidate
-                  className="h-11 w-full px-4 sm:w-auto"
-                >
-                  {tCommon("deleteYes")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full px-4 sm:w-auto"
-                  onClick={() => setConfirmingDelete(false)}
-                >
-                  {tCommon("cancel")}
-                </Button>
-              </div>
-            ) : (
-              <Button
-                type="button"
-                variant="destructive"
-                className="h-11 w-full px-4 sm:w-auto"
-                onClick={() => setConfirmingDelete(true)}
-              >
-                <Trash2 className="size-4" />
-                {tCommon("delete")}
-              </Button>
-            )}
-          </div>
-        ) : null}
       </div>
     </form>
   );

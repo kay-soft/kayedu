@@ -77,3 +77,33 @@ export function DetailRow({
     </div>
   );
 }
+
+/**
+ * A titled group of fields inside a form that lives in a card (R10b, the edit
+ * form on the student and teacher pages): a 14px semibold heading, an optional
+ * one-line hint, then the fields. Groups are separated by a hairline, not
+ * boxed — a bordered `FormSection` inside a `Card` would be a card in a card.
+ * (`FormSection` in `dialog-shell.tsx` is the boxed form of the same idea,
+ * for a dialog body.)
+ */
+export function FormGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-3 border-t border-border-subtle pt-5 first:border-t-0 first:pt-0">
+      <header>
+        <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+        {description ? (
+          <p className="mt-0.5 text-xs text-text-muted">{description}</p>
+        ) : null}
+      </header>
+      {children}
+    </section>
+  );
+}

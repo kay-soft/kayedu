@@ -23,6 +23,7 @@ import {
   useSlotConflicts,
 } from "@/components/center/slot-conflict-notice";
 import { TeacherPicker, type TeacherOption } from "@/components/center/teacher-picker";
+import { ActionBarButton } from "@/components/shared/action-bar";
 import { DialogLauncher, DialogShell } from "@/components/shared/dialog-shell";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
@@ -82,10 +83,10 @@ export function EditClassDialog(props: EditClassProps) {
   return (
     <DialogLauncher
       button={(openDialog) => (
-        <Button variant="outline" className="h-11 gap-2 px-4" onClick={openDialog}>
+        <ActionBarButton onClick={openDialog}>
           <Pencil className="size-4" aria-hidden />
           {t("edit")}
-        </Button>
+        </ActionBarButton>
       )}
       render={(dialog) => <EditClassDialogContent {...dialog} {...props} />}
     />

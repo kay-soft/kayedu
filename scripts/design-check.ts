@@ -26,12 +26,25 @@
  *      name from the same `brand.name`, so the avatar initial cannot drift
  *      from the label beside it.
  *
+ *   8. (R10b) The initials rule: the first letter of the displayed name, no
+ *      leading-word skipping, Arabic and Latin — asserted by running
+ *      `lib/initials.ts`, not by reading it.
+ *   9. (R10b) The four detail pages open with `PageHeader` and lay out with
+ *      `DetailLayout`; their verbs are one `ActionBar`; the student and teacher
+ *      Delete lives in `DeleteRecordCard`, not in the edit form.
+ *  10. (R10b) The Add student / Add teacher dialogs are the shared
+ *      `DialogShell` with `FormSection`s (mounted by `DialogLauncher`), keep
+ *      what was typed on a refused submit, and put the duplicate-match panel
+ *      under the phone field.
+ *
  * Pure static analysis — no database needed. (The "no change under prisma/,
  * lib/db/, lib/money.ts, lib/auth/" constraint is reported with
  * `git diff --stat` in the R10a summary rather than gated here.)
  */
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
+
+import { centerInitial, nameInitial, personInitials } from "../lib/initials.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -297,6 +310,180 @@ function checkShellBrandName() {
   check("No screen derives a centre initial with name.charAt(0)", rawInitials.length === 0, rawInitials.join(", "));
 }
 
+// ── 8. Initials: the first letter of the displayed name ─────────────────────
+
+function checkInitials() {
+  console.log("\nInitials");
+
+  const cases: [string, string, string][] = [
+    // [name as displayed, expected, why]
+    ["مركز النور", "م", "Arabic: no skipping of the generic word مركز"],
+    ["النور", "ا", "Arabic: the literal first letter (the article ال is not skipped either)"],
+    ["أحمد علي", "أ", "Arabic person: the hamza stays on the letter"],
+    ["Nour Academy", "N", "Latin: first letter"],
+    ["Academy of Nour", "A", "Latin: a generic leading word is not skipped"],
+    ["The Nile School", "T", "Latin: 'The' is not skipped"],
+    ["nour", "N", "Latin: upper-cased"],
+    ['"نور"', "ن", "a leading quote mark is not the initial"],
+    ["  (Nour)", "N", "leading whitespace and a bracket are not the initial"],
+    ["\u{1D4D0}bc", "\u{1D4D0}", "astral code point is kept whole, not half a surrogate"],
+    ["7 Stars", "7", "a digit counts"],
+    ["", "?", "empty"],
+    ["—", "?", "no letter or digit at all"],
+  ];
+  for (const [name, expected, why] of cases) {
+    check(
+      `nameInitial(${JSON.stringify(name)}) = ${expected} — ${why}`,
+      nameInitial(name) === expected,
+      `got ${nameInitial(name)}`,
+    );
+  }
+
+  check("centerInitial is the same rule as nameInitial", centerInitial === nameInitial);
+  check(
+    "centerInitial('مركز النور') = م (the sidebar shows the first letter it displays)",
+    centerInitial("مركز النور") === "م",
+  );
+  check("personInitials('Mona', 'Salem') = MS", personInitials("Mona", "Salem") === "MS");
+  check("personInitials('منى', 'سالم') = مس", personInitials("منى", "سالم") === "مس");
+  check("personInitials('Mona', '-') = M (single-name placeholder)", personInitials("Mona", "-") === "M");
+
+  const source = stripComments(read("lib/initials.ts"));
+  check("lib/initials.ts has no generic-word list", !/GENERIC|academy|مركز/i.test(source));
+
+  for (const file of ["components/shared/brand-avatar.tsx", "components/shared/person-avatar.tsx"]) {
+    check(`${file} takes its letter from lib/initials.ts`, /from\s+["']@\/lib\/initials["']/.test(read(file)));
+  }
+}
+
+// ── 9. Detail pages ─────────────────────────────────────────────────────────
+
+const DETAIL_PAGES = [
+  "app/[locale]/(center)/classes/[id]/page.tsx",
+  "app/[locale]/(center)/sessions/[id]/page.tsx",
+  "app/[locale]/(center)/teachers/[id]/page.tsx",
+  "app/[locale]/(center)/students/[id]/page.tsx",
+];
+
+function checkDetailPages() {
+  console.log("\nDetail pages");
+
+  for (const page of DETAIL_PAGES) {
+    const source = stripComments(read(page));
+    check(`${page} opens with <PageHeader>`, /<PageHeader\b/.test(source));
+    check(`${page} lays out with <DetailLayout>`, /<DetailLayout\b/.test(source));
+    check(`${page} links back through PageHeader's back prop`, /\bback=\{\{/.test(source));
+    check(`${page} hand-rolls no two-column grid`, !/xl:grid-cols-|lg:grid-cols-\[/.test(source));
+    check(`${page} uses no raw <Card> (DetailCard carries the card)`, !/<Card\b/.test(source));
+  }
+
+  // The verbs are one ActionBar in the header, on the pages that have verbs.
+  for (const page of [DETAIL_PAGES[0], DETAIL_PAGES[1], DETAIL_PAGES[3]]) {
+    const flat = stripComments(read(page)).replace(/\n/g, " ");
+    check(`${page} puts its verbs in <ActionBar inHeader>`, /<ActionBar\s+inHeader\b/.test(flat));
+  }
+
+  const layout = stripComments(read("components/shared/detail-layout.tsx"));
+  check(
+    "DetailLayout is main (2fr) + side (1fr) from lg",
+    /lg:grid-cols-\[minmax\(0,2fr\)_minmax\(0,1fr\)\]/.test(layout),
+  );
+  check("DetailLayout is one column below lg", !/(^|[\s"`])grid-cols-\[/.test(layout));
+
+  const header = stripComments(read("components/shared/page-header.tsx"));
+  check(
+    "PageHeader supports back / leading / meta",
+    /\bback\b/.test(header) && /\bleading\b/.test(header) && /\bmeta\b/.test(header),
+  );
+  check("PageHeader's back arrow mirrors in Arabic", /rtl:-scale-x-100/.test(header));
+
+  // Delete is a danger zone at the foot, not a button beside Save.
+  for (const form of [
+    "app/[locale]/(center)/students/[id]/student-profile-form.tsx",
+    "app/[locale]/(center)/teachers/[id]/teacher-profile-form.tsx",
+  ]) {
+    const source = stripComments(read(form));
+    check(`${form} no longer carries Delete`, !/delete(Student|Teacher)Action|confirmingDelete|canDelete/.test(source));
+  }
+  for (const page of [DETAIL_PAGES[2], DETAIL_PAGES[3]]) {
+    const source = stripComments(read(page));
+    check(
+      `${page} renders the danger zone (DeleteRecordCard) only behind its delete permission`,
+      /ctxCan\(ctx,\s*"(student|teacher)\.delete"\)[\s\S]{0,40}<DeleteRecordCard/.test(source),
+    );
+  }
+  check(
+    "The class page keeps Delete/Deactivate in the Edit class dialog (unchanged)",
+    /deleteClassAction/.test(stripComments(read("app/[locale]/(center)/classes/[id]/class-profile-form.tsx"))),
+  );
+
+  const session = stripComments(read(DETAIL_PAGES[1]));
+  check(
+    "The session page still gates End session, Delete session and the lifecycle verbs behind the same conditions",
+    /canEnd\s*=\s*!rosterReadOnly\s*&&\s*displayStatus === "LIVE"\s*&&\s*ctxCan\(ctx,\s*"session\.close"\)/.test(session) &&
+      /canDelete\s*=\s*deleteBlockers !== null && deleteBlockers\.length === 0/.test(session) &&
+      /locked=\{rosterReadOnly\}/.test(session),
+  );
+}
+
+// ── 10. Add student / Add teacher dialogs ───────────────────────────────────
+
+function checkAddDialogs() {
+  console.log("\nAdd dialogs");
+
+  const dialogs: [string, string][] = [
+    ["app/[locale]/(center)/students/add-student-dialog.tsx", "app/[locale]/(center)/students/student-form.tsx"],
+    ["app/[locale]/(center)/teachers/add-teacher-dialog.tsx", "app/[locale]/(center)/teachers/teacher-form.tsx"],
+  ];
+  for (const [launcher, form] of dialogs) {
+    const launcherSource = stripComments(read(launcher));
+    const formSource = stripComments(read(form));
+    check(`${launcher} mounts through DialogLauncher (fresh on every open)`, /<DialogLauncher\b/.test(launcherSource));
+    check(`${launcher} does not use the bare Dialog primitives`, !/components\/ui\/dialog/.test(launcherSource));
+    check(`${form} is the shared <DialogShell>`, /<DialogShell\b/.test(formSource));
+    check(
+      `${form} is built from <FormSection>s in <DialogSections>`,
+      /<FormSection\b/.test(formSource) && /<DialogSections>/.test(formSource),
+    );
+    check(
+      `${form} has Cancel + a primary in the shell footer (cancelLabel / submitLabel)`,
+      /cancelLabel=/.test(formSource) && /submitLabel=/.test(formSource),
+    );
+    check(
+      `${form} keeps what was typed on a refused submit (startTransition, not <form action>)`,
+      /startTransition\(\(\) => formAction\(formData\)\)/.test(formSource) && !/<form\b[^>]*\baction=/.test(formSource),
+    );
+  }
+
+  const studentForm = stripComments(read(dialogs[0][1])).replace(/\n/g, " ");
+  check(
+    "Add student: the match panel is passed to ContactFields' belowPhone slot",
+    /belowPhone=\{[\s\S]*<MatchPanel\b/.test(studentForm),
+  );
+  check("Add student: the primary is held back while a match waits", /submitDisabled=\{match !== null\}/.test(studentForm));
+  const newTeacherFields = stripComments(read("components/center/new-teacher-fields.tsx")).replace(/\n/g, " ");
+  check(
+    "Add teacher: the match panel is passed to ContactFields' belowPhone slot",
+    /belowPhone=\{[\s\S]*<MatchPanel\b/.test(newTeacherFields),
+  );
+
+  const contact = stripComments(read("components/center/contact-fields.tsx"));
+  const phoneAt = contact.indexOf("-phone`}");
+  const altAt = contact.indexOf("-altPhone`}");
+  const belowAt = contact.indexOf("belowPhone ?");
+  const emailAt = contact.indexOf("-email`}");
+  check(
+    "ContactFields renders the phone, then the alternate, then belowPhone, then the email",
+    phoneAt > 0 && phoneAt < altAt && altAt < belowAt && belowAt < emailAt,
+  );
+
+  const match = stripComments(read("components/center/match-panel.tsx"));
+  check(
+    "The match panel's affirmative action is its own solid button (not a SubmitButton)",
+    /<Button\s+type="submit"/.test(match) && !/SubmitButton/.test(match),
+  );
+}
+
 checkLocaleToggle();
 checkNav();
 checkNativeSelect();
@@ -305,6 +492,9 @@ checkTokens();
 checkNoDecorativeAccents();
 checkPages();
 checkShellBrandName();
+checkInitials();
+checkDetailPages();
+checkAddDialogs();
 
 if (failures > 0) {
   console.error(`\n${failures} design check(s) failed.`);

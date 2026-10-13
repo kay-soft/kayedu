@@ -12,9 +12,28 @@ import { cn } from "@/lib/utils";
  * same type size; a destructive action differs by **colour only**
  * (`variant="destructive"`), never by size.
  */
-export function ActionBar({ children, className }: { children: ReactNode; className?: string }) {
+export function ActionBar({
+  children,
+  className,
+  inHeader,
+}: {
+  children: ReactNode;
+  className?: string;
+  /**
+   * The bar that sits in a `PageHeader` (R10b): full width on a phone, and
+   * packed to the end edge from `sm`, beside the title.
+   */
+  inHeader?: boolean;
+}) {
   return (
-    <div role="group" className={cn("grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center", className)}>
+    <div
+      role="group"
+      className={cn(
+        "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center",
+        inHeader && "w-full sm:w-auto sm:justify-end",
+        className,
+      )}
+    >
       {children}
     </div>
   );
