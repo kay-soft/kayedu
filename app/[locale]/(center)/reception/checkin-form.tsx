@@ -1,20 +1,31 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { UserRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { checkInAction } from "@/app/[locale]/(center)/reception/actions";
+import { RECEPTION_SEARCH_INPUT_ID } from "@/app/[locale]/(center)/reception/constants";
 import {
   PaymentMethodSelector,
   type PaymentMethodOption,
 } from "@/components/center/payment-method-selector";
 import { FormMessage } from "@/components/shared/form-message";
+import { LinkButton } from "@/components/shared/link-button";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { formatTime } from "@/lib/format";
+import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
-import type { LiveSessionOption } from "@/app/[locale]/(center)/reception/live-session-rail";
+
+/** One open session a student can be checked in to — the shape the picker needs. */
+export type OpenSessionOption = {
+  sessionId: string;
+  /** Session name (`lib/session-label.ts`) — a one-time session shows its own title. */
+  label: string;
+  teacherName: string | null;
+  startTime: string;
+};
 
 /**
  * The Reception Desk's "one flow" (spec §4.1 item 8): pick a session and a
@@ -25,28 +36,67 @@ import type { LiveSessionOption } from "@/app/[locale]/(center)/reception/live-s
  * corrected afterwards from the session roster while the session is live.
  * The session is picked with plain selection state because this form's
  * single submit needs both values together.
+ *
+ * R7: every session reads "name · teacher · time"; only sessions that still
+ * accept check-in are offered (the page passes the open ones); and when
+ * exactly one of them is on the student's active enrolments it starts
+ * selected — the submit is still the confirm. With no preselection nothing is
+ * chosen and the submit stays disabled. After a successful check-in the form
+ * gives way to "Next student" and the keyboard returns to the search input.
  */
 export function CheckInForm({
   studentProfileId,
   studentName,
   studentPhotoUrl,
   sessions,
+  preselectSessionId,
   paymentMethods,
 }: {
   studentProfileId: string;
   studentName: string;
   /** A short-lived signed URL, or null with no photo on file / Storage unset. */
   studentPhotoUrl: string | null;
-  sessions: LiveSessionOption[];
+  sessions: OpenSessionOption[];
+  /** The one open session on the student's enrolments, if exactly one. */
+  preselectSessionId: string | null;
   /** The centre's active methods (R1), oldest first. */
   paymentMethods: PaymentMethodOption[];
 }) {
   const t = useTranslations("Reception");
   const tErrors = useTranslations("Sessions.errors");
+  const tAttendance = useTranslations("Sessions.attendance");
   const locale = useLocale();
 
-  const [sessionId, setSessionId] = useState(sessions[0]?.sessionId ?? "");
+  const [sessionId, setSessionId] = useState(preselectSessionId ?? "");
   const [state, formAction] = useActionState(checkInAction, IDLE_SESSION_STATE);
+  const saved = state.status === "saved";
+
+  // A completed action hands the keyboard back to the search input, text
+  // selected so the next scan or typing replaces it.
+  useEffect(() => {
+    if (!saved) return;
+    const input = document.getElementById(RECEPTION_SEARCH_INPUT_ID) as HTMLInputElement | null;
+    input?.focus();
+    input?.select();
+  }, [saved]);
+
+  if (saved) {
+    return (
+      <div className="flex flex-col gap-3">
+        <FormMessage tone="success">
+          {state.alreadyCheckedIn
+            ? t("sessionMode.alreadyCheckedInShort", { name: studentName })
+            : t("sessionMode.checkedInAs", {
+                name: studentName,
+                status: tAttendance(state.attendanceStatus ?? "PRESENT"),
+              })}
+        </FormMessage>
+        <LinkButton href={ROUTES.centerReception} className="w-full sm:w-fit">
+          {t("nextStudent")}
+        </LinkButton>
+      </div>
+    );
+  }
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -79,25 +129,28 @@ export function CheckInForm({
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-text-secondary">{t("sessionLabel")}</span>
           <div className="flex flex-col gap-2">
-            {sessions.map((session) => (
-              <button
-                key={session.sessionId}
-                type="button"
-                onClick={() => setSessionId(session.sessionId)}
-                aria-pressed={sessionId === session.sessionId}
-                className={cn(
-                  "flex min-h-11 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-start text-sm transition-ui",
-                  sessionId === session.sessionId
-                    ? "border-brand bg-brand/10 text-brand"
-                    : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
-                )}
-              >
-                <span className="min-w-0 truncate font-medium">{session.className}</span>
-                <span className="shrink-0 tabular-nums" dir="ltr">
-                  {formatTime(session.startTime, locale)}
-                </span>
-              </button>
-            ))}
+            {sessions.map((session) => {
+              const text = [session.label, session.teacherName].filter(Boolean).join(" · ");
+              return (
+                <button
+                  key={session.sessionId}
+                  type="button"
+                  onClick={() => setSessionId(session.sessionId)}
+                  aria-pressed={sessionId === session.sessionId}
+                  className={cn(
+                    "flex min-h-11 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-start text-sm transition-ui focus-ring",
+                    sessionId === session.sessionId
+                      ? "border-brand bg-brand/10 text-brand"
+                      : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
+                  )}
+                >
+                  <span className="min-w-0 truncate font-medium">{text}</span>
+                  <span className="shrink-0 tabular-nums" dir="ltr">
+                    {formatTime(session.startTime, locale)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -109,12 +162,11 @@ export function CheckInForm({
       </div>
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
-      {state.status === "saved" ? (
-        <FormMessage tone="success">{t("checkedIn")}</FormMessage>
-      ) : null}
 
       {sessions.length > 0 ? (
-        <SubmitButton className="w-full sm:w-auto">{t("submit")}</SubmitButton>
+        <SubmitButton className="w-full sm:w-auto" disabled={sessionId === ""}>
+          {t("submit")}
+        </SubmitButton>
       ) : null}
     </form>
   );

@@ -2,13 +2,23 @@ import { CalendarPlus, SearchX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
-import { CheckInForm } from "@/app/[locale]/(center)/reception/checkin-form";
 import { searchStudentsForReceptionAction } from "@/app/[locale]/(center)/reception/actions";
+import { CheckInForm } from "@/app/[locale]/(center)/reception/checkin-form";
+import { RECEPTION_SEARCH_INPUT_ID } from "@/app/[locale]/(center)/reception/constants";
+import { ReceiptDialog } from "@/app/[locale]/(center)/reception/receipt-dialog";
 import {
-  LiveSessionRail,
-  type LiveSessionOption,
-} from "@/app/[locale]/(center)/reception/live-session-rail";
+  RecentCheckIns,
+  type RecentCheckInRow,
+} from "@/app/[locale]/(center)/reception/recent-check-ins";
+import { SessionBanner } from "@/app/[locale]/(center)/reception/session-banner";
+import { SessionCards } from "@/app/[locale]/(center)/reception/session-cards";
+import { SessionCheckIn } from "@/app/[locale]/(center)/reception/session-check-in";
+import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
+import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
+import { EmptyState } from "@/components/shared/empty-state";
+import { FormMessage } from "@/components/shared/form-message";
+import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   Card,
@@ -17,119 +27,171 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { prisma } from "@/lib/db/client";
+import {
+  loadReceptionSessions,
+  openSessionsForStudent,
+  recentCheckIns,
+  sessionPickerParts,
+  validateReceptionSession,
+} from "@/lib/db/reception";
 import { scoped } from "@/lib/db/scoped";
-import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
-import { sessionDisplayName } from "@/lib/session-label";
 import { studentSearchWhere } from "@/lib/db/students";
 import { signedUrlFor } from "@/lib/db/storage";
+import { formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { parseStudentQrPayload } from "@/lib/id-card";
-import { Link } from "@/lib/i18n/navigation";
+import { centerIdsMatch, parseScannedStudentInput } from "@/lib/id-card";
+import { Link, redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { DEFAULT_TIMEZONE, startOfUtcDay } from "@/lib/scheduling";
+import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
 import { storageConfigured } from "@/lib/supabase/admin";
-import { EmptyState } from "@/components/shared/empty-state";
-import { LinkButton } from "@/components/shared/link-button";
 
 /**
- * Reception Desk (spec §4.1 item 8): search by code/name/phone — or a
- * scanned ID-card QR — today's sessions marked live, and one check-in flow
- * that records attendance and (for PRESENT/LATE) payment together. A USB QR
- * scanner types like a keyboard and submits on Enter, so no camera/client
- * code is needed: the search box's own GET submit is the "scan" (`lib/id-
- * card.ts`'s `parseStudentQrPayload`, spec §2 "Check-in methods"). Finding a
- * session outside today is the "add-session shortcut" — a link to the full
- * Today's Sessions dashboard. (R4: there is nothing to generate — a class's
- * sessions exist for its whole period; changing them is a Manager/Owner
- * class edit, spec §4.1 item 3, not something Reception runs.)
+ * Reception Desk (spec §4.1 item 8, reworked in R7): **Find a student** is a
+ * full-width block at the top — search by code/name/phone or scan an ID-card
+ * QR — and **Today's sessions** sit below it as cards, never beside it.
+ *
+ * Two modes, one input:
+ * - *Plain*: the search box is a GET form (the scan is its own submit, parsed
+ *   by `lib/id-card.ts`'s `parseScannedStudentInput`); a found student gets
+ *   the check-in form, offering only today's sessions that are still open,
+ *   each labelled "name · teacher · time".
+ * - *Session mode* (`?session=<id>`): staff pick one of today's sessions
+ *   first and every scan or typed student goes to a confirm panel for that
+ *   session. The id in the URL is untrusted — it is re-validated here on every
+ *   request (`validateReceptionSession`) and an invalid one leaves session
+ *   mode with a notice.
+ *
+ * Finding a session outside today is the "add-session shortcut" — a link to
+ * the full Sessions dashboard. (R4: a class's sessions exist for its whole
+ * period; changing them is a Manager/Owner class edit, not something Reception
+ * runs.) Ending a session reuses R2's `EndSessionButton` →
+ * `endSessionAction`, and the receipt is R2's `SessionReceipt`.
  */
 export default async function ReceptionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; studentId?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    studentId?: string;
+    session?: string;
+    receipt?: string;
+    notice?: string;
+  }>;
 }) {
   const ctx = await getTenantContext("center");
   await requirePermission(ctx, "reception.use");
 
-  const { q, studentId } = await searchParams;
+  const { q, studentId, session: sessionParam, receipt: receiptParam, notice } = await searchParams;
   const query = (q ?? "").trim();
 
   const db = scoped(ctx);
+  const centerId = ctx.center.id;
   const locale = await getLocale();
   const t = await getTranslations("Reception");
   const tCommon = await getTranslations("Settings.common");
 
-  const today = startOfUtcDay(new Date());
   const now = new Date();
+  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
+  const permissions = { checkIn: ctxCan(ctx, "attendance.record"), end: ctxCan(ctx, "session.close") };
 
-  const [todaySessions, grades, paymentMethods] = await Promise.all([
-    db.sessions.listForDay(today),
+  const [cards, grades, paymentMethods] = await Promise.all([
+    loadReceptionSessions(prisma, { centerId, locale, timeZone, now, permissions }),
     db.grades.list(),
     // R1: the centre's own active methods — a deactivated one never reaches
     // the picker (the action re-checks "this centre, active" regardless).
     db.paymentMethods.listActive(),
   ]);
 
-  // Batch teacher names once, matching the pattern on /classes and /sessions.
-  const teacherIds = [...new Set(todaySessions.map((row) => row.teacherId))];
-  const teachers =
-    teacherIds.length > 0 ? await db.teachers.list({ userId: { in: teacherIds } }) : [];
-  const teacherNameByUserId = new Map(
-    teachers.map((teacher) => [teacher.userId, fullName(localName(teacher, teacher.user))]),
-  );
+  // Session mode: the id in the URL is untrusted input, re-validated on every
+  // request — same centre, today in the centre's timezone, not cancelled,
+  // rescheduled or closed, and the signed-in role may check students in.
+  let attending: (typeof cards)[number] | null = null;
+  if (sessionParam) {
+    const check = await validateReceptionSession(prisma, {
+      centerId,
+      sessionId: sessionParam,
+      timeZone,
+      now,
+    });
+    attending = check.ok ? (cards.find((card) => card.id === sessionParam && card.canAttend) ?? null) : null;
+    if (!attending) {
+      // Silently out of session mode, with a notice (and the receipt, if one was asked for).
+      redirect({
+        href: `${ROUTES.centerReception}?notice=sessionUnavailable${
+          receiptParam ? `&receipt=${encodeURIComponent(receiptParam)}` : ""
+        }`,
+        locale,
+      });
+    }
+  }
+  const attendingId = attending?.id ?? null;
 
-  const liveSessions: LiveSessionOption[] = todaySessions.map((row) => ({
-    sessionId: row.id,
-    className: sessionDisplayName(locale, row),
-    teacherName: teacherNameByUserId.get(row.teacherId) ?? tCommon("none"),
-    startTime: row.startTime,
-    endTime: row.endTime,
-    displayStatus: deriveSessionDisplayStatus(row, now, ctx.settings?.timezone ?? DEFAULT_TIMEZONE),
-  }));
-
-  // A scanned QR resolves directly by exact student code — never the fuzzy
-  // multi-token search — and only if it was issued by *this* center.
-  const qrPayload = query.length > 0 ? parseStudentQrPayload(query) : null;
-  const qrStudent =
-    qrPayload && qrPayload.centerId === ctx.center.id
-      ? await db.students.findByCode(qrPayload.studentCode)
-      : null;
-
-  const results =
-    query.length > 0 && !qrPayload
-      ? (
-          await db.students.search({
-            where: { ...studentSearchWhere(query), active: true },
-            take: 8,
-          })
-        ).map((profile) => ({
-          studentProfileId: profile.id,
-          name: fullName(localName(profile, profile.user)),
-          studentCode: profile.studentCode,
-        }))
-      : [];
-
+  // ── Plain mode: resolve what was scanned or typed ──────────────────────────
   let selectedStudent:
     | { id: string; name: string; code: string; photoUrl: string | null }
     | null = null;
-  if (qrStudent) {
-    selectedStudent = {
-      id: qrStudent.id,
-      name: fullName(localName(qrStudent, qrStudent.user)),
-      code: qrStudent.studentCode,
-      photoUrl: qrStudent.photoUrl,
-    };
-  } else if (studentId) {
-    const student = await db.students.findDetailById(studentId);
-    if (student) {
+  let scanProblem: "otherBranch" | "unreadable" | "notFound" | "inactive" | null = null;
+  let results: { studentProfileId: string; name: string; studentCode: string }[] = [];
+
+  const parsed = !attending && query.length > 0 ? parseScannedStudentInput(query) : null;
+  if (!attending) {
+    type FoundStudent = NonNullable<Awaited<ReturnType<typeof db.students.findByCode>>>;
+    let found: FoundStudent | null = null;
+
+    const runSearch = async (text: string) =>
+      (
+        await db.students.search({
+          where: { ...studentSearchWhere(text), active: true },
+          take: 8,
+        })
+      ).map((profile) => ({
+        studentProfileId: profile.id,
+        name: fullName(localName(profile, profile.user)),
+        studentCode: profile.studentCode,
+      }));
+
+    if (parsed?.kind === "payload") {
+      // A card issued by another centre is refused on its centre id alone.
+      if (centerIdsMatch(parsed.centerId, centerId)) {
+        found = await db.students.findByCode(parsed.studentCode);
+        if (!found) scanProblem = "notFound";
+      } else {
+        scanProblem = "otherBranch";
+      }
+    } else if (parsed?.kind === "code") {
+      found = await db.students.findByCode(parsed.studentCode);
+      if (!found) results = await runSearch(query);
+    } else if (parsed?.kind === "unreadable") {
+      scanProblem = "unreadable";
+    } else if (parsed?.kind === "text") {
+      results = await runSearch(parsed.text);
+    }
+
+    if (found && !found.active) {
+      scanProblem = "inactive";
+      found = null;
+    }
+
+    if (found) {
       selectedStudent = {
-        id: student.id,
-        name: fullName(localName(student, student.user)),
-        code: student.studentCode,
-        photoUrl: student.photoUrl,
+        id: found.id,
+        name: fullName(localName(found, found.user)),
+        code: found.studentCode,
+        photoUrl: found.photoUrl,
       };
+    } else if (studentId && !scanProblem) {
+      const student = await db.students.findDetailById(studentId);
+      if (student) {
+        selectedStudent = {
+          id: student.id,
+          name: fullName(localName(student, student.user)),
+          code: student.studentCode,
+          photoUrl: student.photoUrl,
+        };
+      }
     }
   }
 
@@ -138,15 +200,48 @@ export default async function ReceptionPage({
   // human comparing the face on screen to the person in front of them. A
   // short-lived signed URL, not a data URI — this is a live render, not a
   // stored artifact that must outlive the request (unlike the ID card SVG).
-  const selectedStudentPhotoUrl =
-    selectedStudent?.photoUrl && storageConfigured()
-      ? await signedUrlFor(ctx.center.id, AVATARS_BUCKET, selectedStudent.photoUrl)
-      : null;
+  const sign = (path: string | null) =>
+    path && storageConfigured() ? signedUrlFor(centerId, AVATARS_BUCKET, path) : Promise.resolve(null);
+
+  const selectedStudentPhotoUrl = selectedStudent ? await sign(selectedStudent.photoUrl) : null;
+
+  const studentSessions = selectedStudent
+    ? await openSessionsForStudent(prisma, {
+        centerId,
+        studentProfileId: selectedStudent.id,
+        cards,
+      })
+    : null;
+
+  // Session mode: the last few check-ins on the selected session.
+  const recent = attending ? await recentCheckIns(prisma, { centerId, sessionId: attending.id }) : [];
+  const recentRows: RecentCheckInRow[] = await Promise.all(
+    recent.map(async (row) => ({
+      id: row.id,
+      studentName: row.studentName,
+      studentCode: row.studentCode,
+      photoUrl: await sign(row.photoPath),
+      status: row.status,
+      recordedAt: row.recordedAt,
+    })),
+  );
+
+  // A closed session's receipt in the shared dialog — only for a card on
+  // today's list that is closed (the URL is untrusted here too).
+  const receiptCard = receiptParam
+    ? cards.find((card) => card.id === receiptParam && card.canViewReceipt)
+    : undefined;
+  const receiptSession = receiptCard ? await db.sessions.findById(receiptCard.id) : null;
+  const receiptView =
+    receiptCard && receiptSession ? await loadSessionReceiptView(centerId, receiptSession) : null;
 
   const gradeOptions = grades.map((grade) => ({
     value: grade.id,
     label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
   }));
+
+  const summaryOf = (card: (typeof cards)[number]) =>
+    [...sessionPickerParts(card), formatTimeRange(card.startTime, card.endTime, locale)].join(" · ");
 
   return (
     <div className="flex flex-col gap-6">
@@ -164,69 +259,147 @@ export default async function ReceptionPage({
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("searchTitle")}</CardTitle>
-            <CardDescription>{t("searchDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <TypeAheadSearch
-              value={query}
-              label={t("searchLabel")}
-              placeholder={t("searchPlaceholder")}
-              submitLabel={t("searchSubmit")}
-              search={searchStudentsForReceptionAction}
-            />
+      {notice === "sessionUnavailable" ? (
+        <FormMessage tone="info">{t("sessionMode.sessionUnavailable")}</FormMessage>
+      ) : null}
 
-            {query.length > 0 && !selectedStudent ? (
-              results.length === 0 ? (
-                <EmptyState compact icon={<SearchX />} tone="warning" title={t("noMatches")} description={t("noMatchesHint")} />
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {results.map((result) => (
-                    <li key={result.studentProfileId}>
-                      <Link
-                        href={`${ROUTES.centerReception}?studentId=${result.studentProfileId}`}
-                        className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border p-3 transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
-                      >
-                        <span className="truncate text-sm font-medium text-text-primary">
-                          {result.name}
-                        </span>
-                        <span className="shrink-0 text-xs text-text-muted" dir="ltr">
-                          {result.studentCode}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )
-            ) : null}
+      {attending ? <SessionBanner summary={summaryOf(attending)} /> : null}
 
-            {selectedStudent ? (
-              <div className="rounded-xl border border-brand/30 bg-brand/5 p-4">
-                <CheckInForm
-                  studentProfileId={selectedStudent.id}
-                  studentName={selectedStudent.name}
-                  studentPhotoUrl={selectedStudentPhotoUrl}
-                  sessions={liveSessions}
-                  paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
-                />
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("searchTitle")}</CardTitle>
+          <CardDescription>
+            {attending ? t("sessionMode.searchDescription") : t("searchDescription")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {attending ? (
+            <>
+              <SessionCheckIn
+                sessionId={attending.id}
+                priceLabel={attending.price > 0 ? formatMoney(attending.price, locale) : null}
+                paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
+              />
+              <RecentCheckIns
+                sessionId={attending.id}
+                rows={recentRows}
+                total={attending.checkedIn}
+                locale={locale}
+                timeZone={timeZone}
+              />
+            </>
+          ) : (
+            <>
+              <TypeAheadSearch
+                inputId={RECEPTION_SEARCH_INPUT_ID}
+                autoFocus
+                // A scanned payload (a long UUID) is shown as the student's code, not as raw text.
+                value={selectedStudent && parsed?.kind === "payload" ? selectedStudent.code : query}
+                label={t("searchLabel")}
+                placeholder={t("searchPlaceholder")}
+                submitLabel={t("searchSubmit")}
+                search={searchStudentsForReceptionAction}
+              />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("liveRailTitle")}</CardTitle>
-            <CardDescription>{t("liveRailDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <LiveSessionRail sessions={liveSessions} locale={locale} />
-          </CardContent>
-        </Card>
-      </div>
+              {scanProblem ? (
+                <FormMessage tone={scanProblem === "otherBranch" ? "error" : "warning"}>
+                  {t(`scan.${scanProblem}`)}
+                </FormMessage>
+              ) : null}
+
+              {query.length > 0 && !selectedStudent && !scanProblem ? (
+                results.length === 0 ? (
+                  <EmptyState compact icon={<SearchX />} tone="warning" title={t("noMatches")} description={t("noMatchesHint")} />
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {results.map((result) => (
+                      <li key={result.studentProfileId}>
+                        <Link
+                          href={`${ROUTES.centerReception}?studentId=${result.studentProfileId}`}
+                          className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border p-3 transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
+                        >
+                          <span className="truncate text-sm font-medium text-text-primary">
+                            {result.name}
+                          </span>
+                          <span className="shrink-0 text-xs text-text-muted" dir="ltr">
+                            {result.studentCode}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : null}
+
+              {selectedStudent && studentSessions ? (
+                <div className="rounded-xl border border-brand/30 bg-brand/5 p-4">
+                  <CheckInForm
+                    studentProfileId={selectedStudent.id}
+                    studentName={selectedStudent.name}
+                    studentPhotoUrl={selectedStudentPhotoUrl}
+                    sessions={studentSessions.options.map((card) => ({
+                      sessionId: card.id,
+                      label: card.label,
+                      teacherName: card.teacherName,
+                      startTime: card.startTime,
+                    }))}
+                    preselectSessionId={studentSessions.preselectId}
+                    paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
+                  />
+                </div>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card id="today-sessions" className="scroll-mt-20">
+        <CardHeader>
+          <CardTitle>{t("liveRailTitle")}</CardTitle>
+          <CardDescription>{t("liveRailDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SessionCards
+            attendingId={attendingId}
+            cards={cards.map((card) => ({
+              id: card.id,
+              label: card.label,
+              teacherName: card.teacherName,
+              startTime: card.startTime,
+              endTime: card.endTime,
+              rooms: card.rooms,
+              displayStatus: card.displayStatus,
+              autoClosed: card.autoClosed,
+              checkedIn: card.checkedIn,
+              canAttend: card.canAttend,
+              end: card.end,
+              canViewReceipt: card.canViewReceipt,
+            }))}
+          />
+        </CardContent>
+      </Card>
+
+      {receiptCard && receiptView ? (
+        <ReceiptDialog
+          title={t("receipt.title", { session: receiptCard.label })}
+          description={[receiptCard.teacherName, formatTimeRange(receiptCard.startTime, receiptCard.endTime, locale)]
+            .filter(Boolean)
+            .join(" · ")}
+          closeHref={attendingId ? `${ROUTES.centerReception}?session=${attendingId}` : ROUTES.centerReception}
+          printHref={ROUTES.centerSessionPrint(receiptCard.id)}
+          closeLabel={t("receipt.close")}
+          printLabel={t("receipt.print")}
+        >
+          <SessionReceipt
+            totals={receiptView.totals}
+            showProfit={ctxCan(ctx, "center.profit.view")}
+            locale={locale}
+            timeZone={timeZone}
+            closure={receiptView.closure}
+            changes={receiptView.changes}
+          />
+        </ReceiptDialog>
+      ) : null}
     </div>
   );
 }

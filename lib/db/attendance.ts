@@ -64,6 +64,33 @@ export function findAttendeeById(
   return db.sessionAttendee.findFirst({ where: { centerId, id } });
 }
 
+/**
+ * Is this student blocked from the session — by its **teacher** (scope
+ * TEACHER, `refId` = the teacher's User id) or, for a class session, by its
+ * **class** (scope CLASS)? One centre-scoped query; a one-time session (R5)
+ * has no class, so only the teacher's block can apply. The single owner of
+ * the rule: the session roster's add paths and the reception check-in both
+ * ask here, so the two scopes cannot drift apart (R7).
+ */
+export async function isStudentBlockedFromSession(
+  db: Db,
+  centerId: string,
+  session: { classGroupId: string | null; teacherId: string },
+  studentUserId: string,
+): Promise<boolean> {
+  const count = await db.studentBlock.count({
+    where: {
+      centerId,
+      blockedUserId: studentUserId,
+      OR: [
+        { scope: "TEACHER", refId: session.teacherId },
+        ...(session.classGroupId ? [{ scope: "CLASS" as const, refId: session.classGroupId }] : []),
+      ],
+    },
+  });
+  return count > 0;
+}
+
 // The closed-session error and the guard live in lib/db/session-lifecycle.ts
 // (R2) — the single owner of that rule. Re-exported so the M15 import path
 // every Server Action already uses keeps working.

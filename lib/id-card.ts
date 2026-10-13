@@ -13,6 +13,7 @@
  * card outside the Next.js runtime.
  */
 import { DEFAULT_CARD_LAYOUT } from "./card-layout.ts";
+import { toAsciiDigits } from "./digits.ts";
 import { qrMatrix } from "./qr.ts";
 
 /** Card face in layout units. 320 × 202 ≈ credit-card 85.6 × 54 mm. */
@@ -115,13 +116,126 @@ export function studentQrPayload(centerId: string, studentCode: string): string 
   return `KAYEDU|${centerId}|${studentCode}`;
 }
 
+/**
+ * **The one place a scanned or typed string is turned into a student
+ * reference** (R7). A USB keyboard-wedge scanner does not hand over a clean
+ * string: it types the QR text like a keyboard, so what arrives can carry a
+ * symbology prefix (`]Q1`), a leading STX or trailing CR/LF/TAB the scanner is
+ * configured to append, stray invisible characters, full-width or Arabic-Indic
+ * digits from an Arabic input method, or a different case. Everything that
+ * reads one — the reception search, the session-mode check-in, the gates —
+ * goes through `parseScannedStudentInput`; nothing else parses a payload.
+ *
+ * The payload FORMAT is unchanged (`studentQrPayload` above): the static QR
+ * is a locked decision (docs/00 §5.1 "Check-in & the QR payload").
+ */
+
+/** Characters a scanner or an input method can add that are never part of the text. */
+function isNoiseCodePoint(code: number): boolean {
+  return (
+    code <= 0x1f || // C0 controls (CR, LF, TAB, STX, ETX, …)
+    (code >= 0x7f && code <= 0x9f) || // DEL + C1 controls
+    (code >= 0x200b && code <= 0x200f) || // zero-width + LRM/RLM
+    (code >= 0x202a && code <= 0x202e) || // bidi embeddings/overrides
+    (code >= 0x2060 && code <= 0x2064) || // word joiner, invisible operators
+    (code >= 0x2066 && code <= 0x2069) || // bidi isolates
+    code === 0xfeff // BOM / zero-width no-break space
+  );
+}
+
+/**
+ * Trim, fold full-width and compatibility forms (NFKC: `ＫＡＹ｜` → `KAY|`),
+ * fold Arabic-Indic digits to ASCII (`lib/digits.ts`, the one folder), turn the
+ * whitespace controls into spaces and drop every other control or invisible
+ * character. The result is what both parsers below read.
+ */
+export function cleanScannedText(raw: string): string {
+  const folded = toAsciiDigits(raw.normalize("NFKC"));
+  let out = "";
+  for (const char of folded) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code === 0x09 || code === 0x0a || code === 0x0b || code === 0x0c || code === 0x0d) {
+      out += " ";
+    } else if (!isNoiseCodePoint(code)) {
+      out += char;
+    }
+  }
+  return out.replace(/ {2,}/g, " ").trim();
+}
+
+/** `|` plus the look-alikes an input method or a font substitution can produce. */
+const PAYLOAD_SEPARATORS = /[|¦∣│]/;
+const ID_TOKEN = /^[A-Za-z0-9_-]+$/;
+
+function extractCardPayload(cleaned: string): { centerId: string; studentCode: string } | null {
+  const prefix = /KAYEDU/i.exec(cleaned);
+  if (!prefix) return null;
+  // Anything before the prefix is symbology/prefix noise; read from the prefix on.
+  const parts = cleaned.slice(prefix.index + prefix[0].length).split(PAYLOAD_SEPARATORS);
+  if (parts.length < 3 || parts[0].trim() !== "") return null;
+  const centerId = parts[1].trim();
+  if (!ID_TOKEN.test(centerId)) return null;
+  // Anything after the code (a suffix the scanner appends) is not part of it.
+  const studentCode = /^[A-Za-z0-9_-]+/.exec(parts[2].trim())?.[0];
+  if (!studentCode) return null;
+  return { centerId, studentCode };
+}
+
+/** A card's centre id against this centre's — case-insensitive (ids are lower-case UUIDs). */
+export function centerIdsMatch(fromCard: string, centerId: string): boolean {
+  return fromCard.toLowerCase() === centerId.toLowerCase();
+}
+
+/**
+ * The strict card reader: a full `KAYEDU|{centerId}|{studentCode}` payload
+ * (tolerant of the noise described above) or `null`. A bare student code is
+ * deliberately **not** a payload — use `parseScannedStudentInput` for what a
+ * person or a scanner may have entered.
+ */
 export function parseStudentQrPayload(
   payload: string,
 ): { centerId: string; studentCode: string } | null {
-  const parts = payload.trim().split("|");
-  if (parts.length !== 3 || parts[0] !== "KAYEDU") return null;
-  if (!parts[1] || !parts[2]) return null;
-  return { centerId: parts[1], studentCode: parts[2] };
+  return extractCardPayload(cleanScannedText(payload));
+}
+
+/** What a reception input holds. */
+export type ScannedStudentInput =
+  | { kind: "empty" }
+  /** A full card payload — the centre id still has to match this centre's. */
+  | { kind: "payload"; centerId: string; studentCode: string }
+  /** Digits only: a student code typed by hand (or a numeric-only scan). */
+  | { kind: "code"; studentCode: string }
+  /**
+   * Shaped like a card (`…|…|digits`) but without a readable `KAYEDU` prefix —
+   * what a scanner sends when the OS keyboard layout is not English: the
+   * letters of the prefix and of the centre id arrive as other characters.
+   * The centre id cannot be verified, so it is refused rather than guessed at
+   * (student codes restart at 1001 in every centre).
+   */
+  | { kind: "unreadable" }
+  /** Anything else — a name or phone fragment, searched as before. */
+  | { kind: "text"; text: string };
+
+const MAX_CODE_DIGITS = 15;
+
+export function parseScannedStudentInput(raw: string): ScannedStudentInput {
+  const text = cleanScannedText(raw);
+  if (text.length === 0) return { kind: "empty" };
+
+  const card = extractCardPayload(text);
+  if (card) return { kind: "payload", ...card };
+
+  const compact = text.replace(/ /g, "");
+  if (new RegExp(`^[0-9]{1,${MAX_CODE_DIGITS}}$`).test(compact)) {
+    return { kind: "code", studentCode: compact };
+  }
+
+  const segments = compact.split(PAYLOAD_SEPARATORS);
+  if (segments.length >= 3 && /^[0-9]+$/.test(segments[segments.length - 1])) {
+    return { kind: "unreadable" };
+  }
+
+  return { kind: "text", text };
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────

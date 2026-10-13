@@ -430,6 +430,10 @@ export type SessionActionState = SlotConflictState & {
   match?: SessionMatchCandidate;
   /** The replacement session a reschedule created (M15) — for a link to it. */
   newSessionId?: string;
+  /** Reception check-in (R7): the status the server stored — decided from the clock (R2), never client-sent. */
+  attendanceStatus?: "PRESENT" | "LATE" | "ABSENT";
+  /** Reception check-in (R7): the roster row already existed, so no new attendance was written. */
+  alreadyCheckedIn?: boolean;
 };
 
 export const IDLE_SESSION_STATE: SessionActionState = {};

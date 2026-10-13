@@ -945,7 +945,8 @@
       "invalidCut": "Enter a valid centre cut.",
       "cutRequired": "A one-time session needs its own centre cut.",
       "missingCut": "This session has no centre cut set, so the payment can't be recorded. Set the session's cut first.",
-      "sessionInUse": "This session can no longer be deleted — it has started or has records on it. Cancel it instead."
+      "sessionInUse": "This session can no longer be deleted — it has started or has records on it. Cancel it instead.",
+      "sessionNotToday": "Only today's sessions can be checked in from the reception desk."
     },
     "emptyHint": "Sessions come from each class's weekly schedule and period. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
@@ -1029,7 +1030,73 @@
     "checkedIn": "Checked in.",
     "noMatchesHint": "Search by name, student code or phone — or scan an ID card.",
     "noSessionsTodayHint": "Sessions marked live show up here as the day runs.",
-    "statusAuto": "Present or Late is set automatically from the arrival time."
+    "statusAuto": "Present or Late is set automatically from the arrival time.",
+    "nextStudent": "Next student",
+    "filters": {
+      "label": "Filter sessions",
+      "ALL": "All",
+      "LIVE": "Live",
+      "SCHEDULED": "Upcoming",
+      "COMPLETED": "Ended",
+      "textLabel": "Filter sessions by name or teacher",
+      "textPlaceholder": "Filter by session or teacher",
+      "noMatches": "No sessions match this filter."
+    },
+    "status": {
+      "LIVE": "Live",
+      "SCHEDULED": "Upcoming",
+      "COMPLETED": "Ended",
+      "autoClosed": "Auto-closed"
+    },
+    "card": {
+      "teacher": "Teacher",
+      "time": "Time",
+      "rooms": "Rooms",
+      "checkedIn": "Checked in",
+      "startAttending": "Start attending",
+      "attending": "Attending now",
+      "viewReceipt": "View receipt",
+      "endNotStarted": "You can end this session once it has started."
+    },
+    "scan": {
+      "notFound": "No student found for that code.",
+      "otherBranch": "This card isn't valid at this branch.",
+      "unreadable": "That card couldn't be read. Make sure the keyboard language is English, then scan it again.",
+      "inactive": "This student's profile is inactive at this branch."
+    },
+    "sessionMode": {
+      "attending": "Attending:",
+      "change": "Change session",
+      "exit": "Exit",
+      "placeholder": "Scan card or search student",
+      "searchDescription": "Scan a card or search a student — one confirm checks them in to the session above.",
+      "looking": "Looking up…",
+      "pickOne": "Several students match — pick one:",
+      "code": "Code",
+      "enrolled": "Enrolled in this class",
+      "dropIn": "Drop-in — not enrolled in this class",
+      "price": "Session price",
+      "enterHint": "Press Enter to confirm.",
+      "cancel": "Cancel",
+      "checkedInAs": "{name} checked in — {status}.",
+      "alreadyCheckedIn": "{name} is already checked in at {time}.",
+      "alreadyCheckedInShort": "{name} is already checked in.",
+      "blocked": "{name} is blocked from this class or teacher and can't be checked in.",
+      "inactive": "{name}'s profile is inactive at this branch.",
+      "sessionUnavailable": "That session is no longer open for check-in, so session mode was closed.",
+      "failed": "Something went wrong. Try again."
+    },
+    "recent": {
+      "title": "Recent check-ins",
+      "total": "Checked in",
+      "empty": "No one has been checked in yet.",
+      "fullRoster": "Full roster"
+    },
+    "receipt": {
+      "title": "Receipt — {session}",
+      "print": "Print",
+      "close": "Close"
+    }
   },
   "Analytics": {
     "title": "Analytics",

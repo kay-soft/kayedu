@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -19,6 +19,9 @@ export type TypeAheadResult = {
   /** Where selecting this result navigates (a detail page, or `?studentId=…`). */
   href: string;
 };
+
+/** What a screen can do to the input from outside (R7: clear and refocus after a completed check-in). */
+export type TypeAheadHandle = { clear: () => void; focus: () => void };
 
 /** Debounce, minimum query length and result bound (docs/02-architecture.md §14,
  * docs/04-design-system.md §11.8) — stated here since every screen shares them. */
@@ -50,6 +53,18 @@ const useIsomorphicLayoutEffect =
  * bounded dropdown of matches, each an explicit link — never an auto-submit
  * on select, since choosing a result and submitting the underlying search
  * are two different actions here.
+ *
+ * **Scanner contract (R7).** A handheld USB scanner types the whole code in a
+ * few milliseconds and ends with Enter, usually inside the 300 ms debounce
+ * window. So: (1) a submit reads the value from the input element itself
+ * (`inputRef.current.value`), never from React state or a debounced copy;
+ * (2) a submit cancels the pending debounce and any in-flight search, so a
+ * late result can neither reopen the panel nor be applied after the scan;
+ * (3) Enter selects a suggestion only when it was highlighted **with the
+ * arrow keys** — hovering never arms Enter, and typing clears the highlight,
+ * so a scan can never select a stale suggestion under a resting mouse.
+ * Session mode (R7) passes `onSubmitValue`/`onSelect` to take over both
+ * paths without a page navigation.
  */
 export function TypeAheadSearch({
   name = "q",
@@ -60,6 +75,11 @@ export function TypeAheadSearch({
   keep,
   search,
   emptyAction,
+  autoFocus,
+  inputId: inputIdProp,
+  controlRef,
+  onSubmitValue,
+  onSelect,
 }: {
   name?: string;
   value?: string;
@@ -71,10 +91,24 @@ export function TypeAheadSearch({
   search: (query: string) => Promise<TypeAheadResult[]>;
   /** Rendered in the "no results" state — e.g. an "add new" link. */
   emptyAction?: React.ReactNode;
+  /** Focus the input on load (the reception desk's scan input). */
+  autoFocus?: boolean;
+  /** A stable id for the input, when another component needs to find it to refocus it. */
+  inputId?: string;
+  /** Imperative clear/focus for the screen that owns the input. */
+  controlRef?: React.Ref<TypeAheadHandle>;
+  /**
+   * When set, a submit (Enter / the button) does not navigate: it hands over
+   * the input element's own value instead.
+   */
+  onSubmitValue?: (value: string) => void;
+  /** When set, choosing a suggestion calls this instead of navigating to its `href`. */
+  onSelect?: (result: TypeAheadResult) => void;
 }) {
   const t = useTranslations("Shared.typeAhead");
   const router = useRouter();
-  const inputId = useId();
+  const generatedInputId = useId();
+  const inputId = inputIdProp ?? generatedInputId;
   const listboxId = useId();
 
   const [query, setQuery] = useState(value ?? "");
@@ -86,6 +120,8 @@ export function TypeAheadSearch({
   const containerRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
 
   const queryTooShort = query.trim().length < MIN_QUERY_LENGTH;
@@ -100,6 +136,7 @@ export function TypeAheadSearch({
 
     const id = ++requestId.current;
     const timer = setTimeout(() => {
+      timerRef.current = null;
       setLoading(true);
       search(trimmed)
         .then((rows) => {
@@ -113,9 +150,32 @@ export function TypeAheadSearch({
           if (requestId.current === id) setLoading(false);
         });
     }, DEBOUNCE_MS);
+    timerRef.current = timer;
 
     return () => clearTimeout(timer);
   }, [query, search]);
+
+  /** Drop the pending debounce and any in-flight search; close the panel. */
+  function cancelPending() {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    requestId.current += 1;
+    setLoading(false);
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+
+  useImperativeHandle(controlRef, () => ({
+    clear: () => {
+      cancelPending();
+      setQuery("");
+      setResults([]);
+      setSearched(false);
+      if (inputRef.current) inputRef.current.value = "";
+      inputRef.current?.focus();
+    },
+    focus: () => inputRef.current?.focus(),
+  }));
 
   useEffect(() => {
     function onPointerDown(event: PointerEvent) {
@@ -173,8 +233,20 @@ export function TypeAheadSearch({
   }, [open, queryTooShort, results, loading, searched, activeIndex]);
 
   function select(result: TypeAheadResult) {
-    setOpen(false);
-    router.push(result.href);
+    cancelPending();
+    if (onSelect) onSelect(result);
+    else router.push(result.href);
+  }
+
+  function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    // The element's own value: a scan can finish between two React renders.
+    const submitted = inputRef.current?.value ?? query;
+    cancelPending();
+    if (onSubmitValue) {
+      event.preventDefault();
+      onSubmitValue(submitted);
+    }
+    // Otherwise the plain GET form submits the input's own value, as before.
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -188,16 +260,20 @@ export function TypeAheadSearch({
     } else if (event.key === "Escape") {
       setOpen(false);
     } else if (event.key === "Enter" && activeIndex >= 0) {
-      // Only intercept Enter when a suggestion is actually highlighted —
-      // otherwise the barcode scanner's Enter must reach the real <form>
-      // submit untouched (docs/04 §11.8).
+      // Only intercept Enter when a suggestion is actually highlighted *with
+      // the arrow keys* — otherwise the barcode scanner's Enter must reach
+      // the real <form> submit untouched (docs/04 §11.8).
       event.preventDefault();
       select(results[activeIndex]);
     }
   }
 
   return (
-    <form className="flex flex-col gap-2 sm:flex-row sm:items-end" role="search">
+    <form
+      className="flex flex-col gap-2 sm:flex-row sm:items-end"
+      role="search"
+      onSubmit={onSubmit}
+    >
       {Object.entries(keep ?? {}).map(([key, keepValue]) =>
         keepValue ? (
           <input key={key} type="hidden" name={key} value={keepValue} />
@@ -210,12 +286,18 @@ export function TypeAheadSearch({
         </label>
         <div ref={fieldRef} className="relative">
           <Input
+            ref={inputRef}
             id={inputId}
             name={name}
             type="search"
             autoComplete="off"
+            autoFocus={autoFocus}
             value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
+            onChange={(event) => {
+              setQuery(event.currentTarget.value);
+              // A new character invalidates any highlight made for the old text.
+              setActiveIndex(-1);
+            }}
             onKeyDown={onKeyDown}
             onFocus={() => {
               if (results.length > 0) setOpen(true);
@@ -252,7 +334,6 @@ export function TypeAheadSearch({
                       <li key={result.id} role="option" aria-selected={index === activeIndex}>
                         <button
                           type="button"
-                          onMouseEnter={() => setActiveIndex(index)}
                           onClick={() => select(result)}
                           className={cn(
                             "flex w-full flex-col gap-0.5 px-3 py-2 text-start text-sm",

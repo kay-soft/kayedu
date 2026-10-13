@@ -192,6 +192,16 @@
 
 ---
 
+## 19. Layout-independent card payload (a digits-only code a scanner types identically under any keyboard layout)
+
+**What it is.** A card payload — printed in the QR, or an additional short numeric code beside it — that a USB keyboard-wedge scanner types as the *same characters* whatever the OS keyboard layout is. Today `KAYEDU|{centerId}|{studentCode}` carries Latin letters (the prefix and the hex centre id) that arrive as Arabic letters when an Arabic layout is active, so the desk has to scan with the English layout.
+
+**Why deferred.** The static payload is a recorded decision (`00-master-product-spec.md` §5.1 "Check-in & the QR payload") and R7 was explicitly told not to change the format; changing it invalidates every card already printed. R7 instead makes the failure *visible* (a payload-shaped scan with an unreadable prefix says "check the keyboard language" rather than "no student") and keeps the bare digits-only code working under any layout. Student codes also restart at 1001 in every centre, so a digits-only payload cannot identify the centre by itself — the desk's own centre scoping would have to carry that, and a card from another branch would then be indistinguishable from a student of this one.
+
+**Depends on.** A decision on transition (accept both payloads for a period, or reprint), a way to keep a card from another branch refusable without the centre id in the text (a per-centre numeric prefix, or a check digit over centre + code), and the ID-card editor milestone (R9) since the card layout and the QR block are edited there.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

@@ -23,12 +23,17 @@ export type PaymentMethodOption = { id: string; name: string };
 export function PaymentMethodSelector({
   methods,
   name = "paymentMethodId",
+  defaultMethodId,
 }: {
   methods: PaymentMethodOption[];
   name?: string;
+  /** Preselect this method when it is still offered (R7: the last one used at the desk). */
+  defaultMethodId?: string | null;
 }) {
   const t = useTranslations("Sessions.paymentMethod");
-  const [selected, setSelected] = useState<string>(methods[0]?.id ?? "");
+  const [selected, setSelected] = useState<string>(
+    methods.find((method) => method.id === defaultMethodId)?.id ?? methods[0]?.id ?? "",
+  );
 
   if (methods.length === 0) {
     return <p className="text-sm text-text-muted">{t("noneActive")}</p>;

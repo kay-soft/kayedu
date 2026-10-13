@@ -7,6 +7,7 @@ import {
   changeAttendanceStatus,
   createAttendance,
   findAttendee,
+  isStudentBlockedFromSession,
   SessionClosedError,
 } from "@/lib/db/attendance";
 import { writeAuditLog } from "@/lib/db/audit";
@@ -191,20 +192,6 @@ async function writeAttendance<T>(
   }
 }
 
-async function isBlockedFromSession(
-  db: ScopedDb,
-  classGroupId: string | null,
-  teacherId: string,
-  studentUserId: string,
-): Promise<boolean> {
-  // A one-time session (R5) has no class block to check — the teacher's still applies.
-  const [classBlocked, teacherBlocked] = await Promise.all([
-    classGroupId ? db.studentBlocks.isBlocked("CLASS", classGroupId, studentUserId) : false,
-    db.studentBlocks.isBlocked("TEACHER", teacherId, studentUserId),
-  ]);
-  return classBlocked || teacherBlocked;
-}
-
 /** Every `settlement.adjust` row a void's live adjustment owes (docs/00 §5). */
 async function auditSettlementAdjustments(
   ctx: TenantContext,
@@ -357,7 +344,7 @@ export async function addExistingAttendeeAction(
   if (await db.attendees.findExisting(sessionId, studentProfileId)) {
     return { error: "alreadyOnRoster" };
   }
-  if (await isBlockedFromSession(db, session.classGroupId, session.teacherId, student.userId)) {
+  if (await isStudentBlockedFromSession(prisma, ctx.center.id, session, student.userId)) {
     return { error: "studentBlocked" };
   }
 
@@ -477,7 +464,7 @@ export async function addNewAttendeeAction(
   const student = await db.students.findById(studentProfileId);
   if (
     student &&
-    (await isBlockedFromSession(db, session.classGroupId, session.teacherId, student.userId))
+    (await isStudentBlockedFromSession(prisma, ctx.center.id, session, student.userId))
   ) {
     return { error: "studentBlocked" };
   }

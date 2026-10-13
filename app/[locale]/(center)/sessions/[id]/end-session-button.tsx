@@ -16,16 +16,26 @@ import { IDLE_SESSION_STATE, type SessionActionState } from "@/lib/validation/se
  * no-shows become Absent, there is no reopen. The dialog's own form submits
  * `endSessionAction` (`session.close`, re-checked server-side). Built to be
  * dropped anywhere a session can be ended — the session detail page now, the
- * reception desk's live rail in R7 — so it takes nothing but the session id.
+ * reception desk's session cards in R7 — so it takes little but the session id.
  * R6: the button is an `ActionBarButton` (44px, red like every destructive
  * verb) and the confirmation is the shared `DialogShell`.
+ *
+ * R7: the reception cards reuse this component as it is — one dialog, one
+ * action, one copy of "this cannot be undone". `disabled` shows the control
+ * but inert (the card says why, before the session starts); `onClosed` lets
+ * the reception desk open the receipt once the close has gone through.
  */
 export function EndSessionButton({
   sessionId,
   className,
+  disabled,
+  onClosed,
 }: {
   sessionId: string;
   className?: string;
+  disabled?: boolean;
+  /** Called once, after `endSessionAction` reports the session closed. */
+  onClosed?: () => void;
 }) {
   const t = useTranslations("Sessions.endSession");
   const tErrors = useTranslations("Sessions.errors");
@@ -34,7 +44,10 @@ export function EndSessionButton({
   const [state, formAction, pending] = useActionState(
     async (previous: SessionActionState, formData: FormData) => {
       const next = await endSessionAction(previous, formData);
-      if (next.status === "closed") setOpen(false);
+      if (next.status === "closed") {
+        setOpen(false);
+        onClosed?.();
+      }
       return next;
     },
     IDLE_SESSION_STATE,
@@ -42,7 +55,12 @@ export function EndSessionButton({
 
   return (
     <>
-      <ActionBarButton variant="destructive" className={className} onClick={() => setOpen(true)}>
+      <ActionBarButton
+        variant="destructive"
+        className={className}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
         <Lock className="size-4" aria-hidden />
         {t("button")}
       </ActionBarButton>

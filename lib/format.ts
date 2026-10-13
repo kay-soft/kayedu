@@ -79,6 +79,27 @@ export function formatDateTime(value: Date, locale: string, timeZone: string): s
 }
 
 /**
+ * A real instant as a 12-hour clock time alone ("4:05 PM") **in the centre's
+ * timezone** — "already checked in at 4:05 PM" on the reception desk (R7).
+ * The date-less sibling of `formatDateTime`.
+ */
+export function formatClockTime(value: Date, locale: string, timeZone: string): string {
+  const options: Intl.DateTimeFormatOptions = { timeStyle: "short", hour12: true, timeZone };
+  try {
+    return normalizeSpaces(
+      new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", options).format(value),
+    );
+  } catch {
+    return normalizeSpaces(
+      new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
+        ...options,
+        timeZone: "Africa/Cairo",
+      }).format(value),
+    );
+  }
+}
+
+/**
  * A teacher's published rating (M17, docs/00-master-product-spec.md §5
  * "Teacher ratings") — always the average alone, out of 5, never a count
  * alongside it.
