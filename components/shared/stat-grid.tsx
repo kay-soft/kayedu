@@ -13,16 +13,23 @@ import { cn } from "@/lib/utils";
  * this picks the arrangement that divides evenly at each breakpoint, and a
  * page that needs a different split says so by rendering two rows.
  *
- * Above five cards there is no arrangement that divides cleanly at every
- * breakpoint — that is the signal to split the row by meaning instead, which
- * is what the Analytics page now does.
+ * Every arrangement here fills its rows at 375, 768 and 1280: where the
+ * column count does not divide the card count, the last card spans the
+ * remainder rather than leaving a hole. Above six cards there is no
+ * arrangement that divides cleanly — split the row by meaning instead, which
+ * is what the Analytics page does.
  */
 const COLUMNS: Record<number, string> = {
   1: "grid-cols-1",
   2: "grid-cols-1 sm:grid-cols-2",
-  3: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+  // 2 columns from `sm` would strand the third card; it spans the full row
+  // there instead, then settles into three across from `lg`.
+  3: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 sm:[&>*:last-child]:col-span-2 lg:[&>*:last-child]:col-span-1",
   4: "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4",
-  5: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5",
+  // Five divides evenly nowhere, so each wide step is built from a six-column
+  // track: 2+2+1 at `sm` (the last spans the row), 3 over 2 at `lg`, five
+  // across at `xl`.
+  5: "grid-cols-1 sm:grid-cols-2 sm:[&>*:last-child]:col-span-2 lg:grid-cols-6 lg:[&>*]:col-span-2 lg:[&>*:nth-child(n+4)]:col-span-3 xl:grid-cols-5 xl:[&>*]:col-span-1 xl:[&>*:nth-child(n+4)]:col-span-1",
   6: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6",
 };
 

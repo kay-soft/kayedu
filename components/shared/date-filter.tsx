@@ -91,7 +91,13 @@ export function DateFilter({
   }, [kind, draft]);
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {/* The filter row's field label (docs/04 §5 "Filter row"): the trigger
+          below reads only the selection, so the label says what it filters. */}
+      <span id="date-filter-label" className="text-xs font-medium text-text-secondary">
+        {t("groupLabel")}
+      </span>
+      <div className="flex min-w-0 items-center gap-2">
       {/* What the page actually posts. Every visible control writes here, and
           only here, so there is exactly one `range` value in the query. */}
       <input type="hidden" name="range" value={kind} />
@@ -116,6 +122,7 @@ export function DateFilter({
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
+          aria-labelledby="date-filter-label date-filter-value"
           className={cn(
             "group flex h-11 min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3",
             "text-sm font-medium text-text-primary shadow-xs transition-ui outline-none",
@@ -125,8 +132,7 @@ export function DateFilter({
           )}
         >
           <CalendarDays className="size-4 shrink-0 text-text-muted" aria-hidden />
-          <span className="min-w-0 truncate">
-            <span className="text-text-muted">{t("groupLabel")}: </span>
+          <span id="date-filter-value" className="min-w-0 truncate">
             {describeDateFilter(value, locale, t)}
           </span>
           <ChevronDown
@@ -215,6 +221,7 @@ export function DateFilter({
         <RotateCcw className="size-4" aria-hidden />
         <span className="sr-only">{t("reset")}</span>
       </a>
+      </div>
     </div>
   );
 }

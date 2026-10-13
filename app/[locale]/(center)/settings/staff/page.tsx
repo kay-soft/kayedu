@@ -8,6 +8,7 @@ import {
   MemberRow,
   type MemberRowData,
 } from "@/app/[locale]/(center)/settings/staff/member-row";
+import { ListHeader } from "@/components/shared/list-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -120,10 +121,7 @@ export default async function StaffSettingsPage() {
             />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
+              <ListHeader>
                 <span className="min-w-0 flex-1">{t("columns.name")}</span>
                 <span className="min-w-0 flex-1">{t("columns.email")}</span>
                 <span className="min-w-0 flex-1">{t("columns.role")}</span>
@@ -131,7 +129,7 @@ export default async function StaffSettingsPage() {
                 <span className="w-32 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
-              </li>
+              </ListHeader>
 
               {/* Stacked cards below md, table rows from md up (docs/04 §6). */}
               {rows.map((member) => (

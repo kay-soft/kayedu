@@ -49,7 +49,7 @@ export default async function TeacherSettlementsPage() {
       <PageHeader title={t("teacherTitle")} description={t("teacherSubtitle")} />
 
       <Card>
-        <CardContent className="flex flex-col gap-3 pt-6">
+        <CardContent className="flex flex-col gap-3">
           {rows.length === 0 ? (
             <EmptyState
               icon={<HandCoins />}

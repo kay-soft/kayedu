@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { signUpAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
+import { PasswordField } from "@/components/shared/password-field";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
 import { Link } from "@/lib/i18n/navigation";
@@ -126,10 +127,9 @@ export function RegisterForm({
             : undefined
         }
       >
-        <Input
+        <PasswordField
           id="password"
           name="password"
-          type="password"
           autoComplete="new-password"
           required
           aria-invalid={state.fieldErrors?.password ? true : undefined}
@@ -145,10 +145,9 @@ export function RegisterForm({
             : undefined
         }
       >
-        <Input
+        <PasswordField
           id="confirmPassword"
           name="confirmPassword"
-          type="password"
           autoComplete="new-password"
           required
           aria-invalid={state.fieldErrors?.confirmPassword ? true : undefined}
@@ -157,7 +156,7 @@ export function RegisterForm({
 
       <SubmitButton className="w-full">{t("register.submit")}</SubmitButton>
 
-      <p className="text-center text-sm text-text-secondary">
+      <p className="border-t border-border pt-4 text-center text-sm text-text-secondary">
         {t("register.haveAccount")}{" "}
         <Link
           href={

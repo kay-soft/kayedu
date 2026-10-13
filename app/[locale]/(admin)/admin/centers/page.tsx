@@ -2,7 +2,9 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { CreateCenterForm } from "@/app/[locale]/(admin)/admin/centers/create-center-form";
 import { LIFECYCLE_BADGE_VARIANT } from "@/app/[locale]/(admin)/admin/centers/lifecycle-badge";
-import { FormMessage } from "@/components/shared/form-message";
+import { BrandAvatar } from "@/components/shared/brand-avatar";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +14,7 @@ import { prisma } from "@/lib/db/client";
 import { platformCenterList } from "@/lib/db/platform";
 import { formatNumber } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
+import { Building2 } from "lucide-react";
 import { ROUTES } from "@/lib/routes";
 
 /**
@@ -41,20 +44,18 @@ export default async function AdminCentersPage() {
 
       <SectionHeader title={t("listTitle")} />
       {centers.length === 0 ? (
-        <FormMessage tone="info">{t("empty")}</FormMessage>
+        <EmptyState icon={<Building2 />} tone="info" title={t("empty")} />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {centers.map((center) => (
             <Card key={center.id}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <span
-                    aria-hidden
-                    className="flex size-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white"
-                    style={{ backgroundColor: center.themeColor }}
-                  >
-                    {center.name.trim().charAt(0)}
-                  </span>
+                  <BrandAvatar
+                    name={center.name}
+                    themeColor={center.themeColor}
+                    size="sm"
+                  />
                   <Link
                     href={ROUTES.adminCenter(center.id)}
                     className="min-w-0 flex-1 truncate hover:underline"
@@ -78,12 +79,13 @@ export default async function AdminCentersPage() {
                   <span>{t("studentCount", { count: formatNumber(center.studentCount, locale) })}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2 pt-1">
-                  <Link
+                  <LinkButton
                     href={ROUTES.adminCenter(center.id)}
-                    className="text-sm font-medium text-brand hover:underline"
+                    variant="outline"
+                    size="sm"
                   >
                     {t("openDetail")}
-                  </Link>
+                  </LinkButton>
                 </div>
               </CardContent>
             </Card>

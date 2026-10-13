@@ -164,7 +164,6 @@ export default async function TeacherSessionsPage({
           label={t("stats.upcoming")}
           value={formatNumber(upcomingCount, locale)}
           icon={<CalendarClock className="size-4" />}
-          accent="info"
         />
       </StatGrid>
 

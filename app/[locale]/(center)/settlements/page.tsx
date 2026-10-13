@@ -1,4 +1,4 @@
-import { HandCoins } from "lucide-react";
+import { HandCoins, Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { PeriodSettlementForm } from "@/app/[locale]/(center)/settlements/period-settlement-form";
@@ -64,7 +64,7 @@ export default async function SettlementsPage() {
         </CardHeader>
         <CardContent>
           {teacherOptions.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("noTeachers")}</p>
+            <EmptyState compact icon={<Users />} title={t("noTeachers")} />
           ) : (
             <PeriodSettlementForm teachers={teacherOptions} />
           )}

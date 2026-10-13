@@ -31,13 +31,13 @@ export function ReservationActions({ id }: { id: string }) {
   const error = approveState.error ?? declineState.error;
 
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className="flex flex-col items-stretch gap-2 lg:items-end">
       {error ? <FormMessage className="text-xs">{tErrors(error)}</FormMessage> : null}
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2 lg:w-64">
         <form action={declineAction}>
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="id" value={id} />
-          <SubmitButton variant="outline">
+          <SubmitButton variant="outline" className="w-full">
             <X className="size-4" />
             {t("decline")}
           </SubmitButton>
@@ -45,7 +45,7 @@ export function ReservationActions({ id }: { id: string }) {
         <form action={approveAction}>
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="id" value={id} />
-          <SubmitButton>
+          <SubmitButton className="w-full">
             <Check className="size-4" />
             {t("approve")}
           </SubmitButton>

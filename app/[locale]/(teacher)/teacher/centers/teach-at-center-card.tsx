@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { requestToTeachAction } from "@/app/[locale]/(teacher)/teacher/centers/actions";
 import { TimeRangeFields } from "@/components/center/time-range-fields";
+import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -36,13 +37,12 @@ export function TeachAtCenterCard({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center gap-3">
-        <span
-          aria-hidden
-          className="flex size-11 shrink-0 items-center justify-center rounded-lg text-base font-bold text-white"
-          style={{ backgroundColor: center.themeColor }}
-        >
-          {center.name.trim().charAt(0)}
-        </span>
+        <BrandAvatar
+          name={center.name}
+          logoUrl={center.logoUrl}
+          themeColor={center.themeColor}
+          size="lg"
+        />
         <CardTitle className="truncate text-base">{center.name}</CardTitle>
       </CardHeader>
       <CardContent>

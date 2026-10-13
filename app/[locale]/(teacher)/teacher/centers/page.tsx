@@ -54,7 +54,7 @@ export default async function TeacherCentersPage() {
 
       {centers.length === 0 ? (
         <Card>
-          <CardContent className="pt-6">
+          <CardContent>
             <EmptyState icon={<Building2 />} title={t("empty")} description={t("emptyHint")} />
           </CardContent>
         </Card>

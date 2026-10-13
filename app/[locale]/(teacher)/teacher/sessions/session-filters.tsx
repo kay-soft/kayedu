@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 
 import { DatePicker } from "@/components/ui/date-picker";
+import { FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
 
 export type SelectOption = { value: string; label: string };
@@ -40,10 +41,7 @@ export function TeacherSessionFilters({
       {/* Keeps the active student search when a filter control re-submits. */}
       {q ? <input type="hidden" name="q" value={q} /> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-date" className="text-xs font-medium text-text-secondary">
-            {t("date")}
-          </label>
+        <FilterField label={t("date")} htmlFor="filter-date">
           <DatePicker
             id="filter-date"
             name="date"
@@ -52,12 +50,9 @@ export function TeacherSessionFilters({
             clearable
             submitOnChange
           />
-        </div>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-range" className="text-xs font-medium text-text-secondary">
-            {t("range")}
-          </label>
+        <FilterField label={t("range")} htmlFor="filter-range">
           <Select
             id="filter-range"
             name="range"
@@ -68,12 +63,9 @@ export function TeacherSessionFilters({
             <option value="week">{t("rangeWeek")}</option>
             <option value="month">{t("rangeMonth")}</option>
           </Select>
-        </div>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-status" className="text-xs font-medium text-text-secondary">
-            {t("status")}
-          </label>
+        <FilterField label={t("status")} htmlFor="filter-status">
           <Select
             id="filter-status"
             name="status"
@@ -86,12 +78,9 @@ export function TeacherSessionFilters({
             <option value="COMPLETED">{tStatus("COMPLETED")}</option>
             <option value="CANCELLED">{tStatus("CANCELLED")}</option>
           </Select>
-        </div>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-gradeId" className="text-xs font-medium text-text-secondary">
-            {t("grade")}
-          </label>
+        <FilterField label={t("grade")} htmlFor="filter-gradeId">
           <Select
             id="filter-gradeId"
             name="gradeId"
@@ -105,7 +94,7 @@ export function TeacherSessionFilters({
               </option>
             ))}
           </Select>
-        </div>
+        </FilterField>
       </div>
     </form>
   );

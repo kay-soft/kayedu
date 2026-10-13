@@ -8,6 +8,7 @@ import {
 } from "@/app/[locale]/(center)/classes/class-row";
 import { ClassFilters } from "@/app/[locale]/(center)/classes/class-filters";
 import { HolidayCalendar } from "@/app/[locale]/(center)/classes/holiday-calendar";
+import { ListHeader } from "@/components/shared/list-header";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -229,10 +230,7 @@ export default async function ClassesPage({
             )
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
+              <ListHeader>
                 <span className="min-w-0 flex-1">{t("columns.subject")}</span>
                 <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
                 <span className="min-w-0 flex-1">{t("columns.room")}</span>
@@ -242,7 +240,7 @@ export default async function ClassesPage({
                 <span className="w-44 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
-              </li>
+              </ListHeader>
 
               {rows.map((classGroup) => (
                 <ClassRow

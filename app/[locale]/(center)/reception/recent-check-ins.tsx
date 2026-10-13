@@ -2,6 +2,7 @@ import { UserRound } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/shared/empty-state";
 import { LinkButton } from "@/components/shared/link-button";
 import { formatClockTime, formatNumber } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -50,7 +51,7 @@ export async function RecentCheckIns({
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("recent.empty")}</p>
+        <EmptyState compact icon={<UserRound />} title={t("recent.empty")} />
       ) : (
         <ul className="flex flex-col gap-2">
           {rows.map((row) => (

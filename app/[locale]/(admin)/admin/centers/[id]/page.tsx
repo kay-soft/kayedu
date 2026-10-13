@@ -98,7 +98,7 @@ export default async function AdminCenterDetailPage({
         description={t("detail.lifecycleDescription")}
       />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent>
           <LifecycleTransitionForm
             centerId={center.id}
             validNext={validNextLifecycleStates(center.lifecycleState)}
@@ -111,7 +111,7 @@ export default async function AdminCenterDetailPage({
         description={t("detail.visibilityDescription")}
       />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent>
           <VisibilityWindowForm
             centerId={center.id}
             dataVisibilityDays={settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS}
@@ -124,7 +124,7 @@ export default async function AdminCenterDetailPage({
         description={t("detail.auditDescription")}
       />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent>
           {recentAudit.length === 0 ? (
             <EmptyState compact icon={<ScrollText />} title={t("detail.auditEmpty")} description={t("detail.auditEmptyHint")} />
           ) : (

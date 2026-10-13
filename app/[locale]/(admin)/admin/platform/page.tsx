@@ -57,7 +57,6 @@ export default async function AdminPlatformPage() {
             count: formatNumber(centers.byState.SUSPENDED + centers.byState.ARCHIVED, locale),
           })}
           icon={<Building2 className="size-4" />}
-          accent="brand"
         />
         <StatCard
           label={t("totalTeachers")}
@@ -78,7 +77,7 @@ export default async function AdminPlatformPage() {
 
       <SectionHeader title={t("adoption.title")} description={t("adoption.description")} />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent>
           <ul className="flex flex-col gap-3 md:gap-0">
             {trend.map((point) => {
               const [, monthNum] = point.monthKey.split("-");

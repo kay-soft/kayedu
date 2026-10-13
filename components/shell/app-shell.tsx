@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { usePathname } from "@/lib/i18n/navigation";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
-import { LocaleSwitcher } from "@/components/shared/locale-switcher";
+import { LocaleToggle } from "@/components/shared/locale-toggle";
 import {
   BranchSwitcher,
   type BranchOption,
@@ -60,6 +60,17 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** Consecutive items that share a `group` — each run gets one heading. */
+function groupNav(nav: ShellNavItem[]) {
+  const runs: { group: string | undefined; items: ShellNavItem[] }[] = [];
+  for (const item of nav) {
+    const last = runs[runs.length - 1];
+    if (last && last.group === item.group) last.items.push(item);
+    else runs.push({ group: item.group, items: [item] });
+  }
+  return runs;
+}
+
 function SidebarContent({
   nav,
   brand,
@@ -67,6 +78,7 @@ function SidebarContent({
   collapsed,
   onToggleCollapsed,
   onNavigate,
+  onClose,
 }: {
   nav: ShellNavItem[];
   brand: ShellBrand;
@@ -75,9 +87,12 @@ function SidebarContent({
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onNavigate?: () => void;
+  /** Drawer only: draws the close button on the brand row. */
+  onClose?: () => void;
 }) {
   const pathname = usePathname();
   const tNav = useTranslations("Nav");
+  const tGroups = useTranslations("NavGroups");
   const tRoles = useTranslations("Roles");
   const tShell = useTranslations("Shell");
 
@@ -108,6 +123,16 @@ function SidebarContent({
             </span>
           </span>
         )}
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={tShell("closeMenu")}
+            className="-me-2 flex size-11 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground transition-ui focus-ring-inverse hover:bg-sidebar-accent active:bg-sidebar-accent/70"
+          >
+            <X className="size-5" />
+          </button>
+        ) : null}
       </div>
 
       <nav
@@ -115,17 +140,37 @@ function SidebarContent({
         className="flex-1 overflow-y-auto p-3"
       >
         <ul className="flex flex-col gap-1">
-          {nav.map((item) => (
-            <li key={item.href}>
-              <NavItem
-                item={item}
-                active={isActive(pathname, item.href)}
-                label={tNav(item.labelKey)}
-                soonLabel={tShell("soon")}
-                collapsed={collapsed}
-                onNavigate={onNavigate}
-              />
-            </li>
+          {groupNav(nav).map((run, runIndex) => (
+            <Fragment key={run.group ?? `ungrouped-${runIndex}`}>
+              {/* A heading names a group of links; on the icon rail there is no
+                  room for words, so a hairline marks the same boundary. */}
+              {runIndex > 0 ? (
+                run.group && !collapsed ? (
+                  <li
+                    role="presentation"
+                    className="px-3 pt-4 pb-1 text-xs font-medium text-text-muted"
+                  >
+                    {tGroups(run.group)}
+                  </li>
+                ) : (
+                  <li
+                    role="separator"
+                    className="mx-3 my-2 border-t border-sidebar-border"
+                  />
+                )
+              ) : null}
+              {run.items.map((item) => (
+                <li key={item.href}>
+                  <NavItem
+                    item={item}
+                    active={isActive(pathname, item.href)}
+                    label={tNav(item.labelKey)}
+                    collapsed={collapsed}
+                    onNavigate={onNavigate}
+                  />
+                </li>
+              ))}
+            </Fragment>
           ))}
         </ul>
       </nav>
@@ -246,7 +291,7 @@ export function AppShell({
           expanded, since a full-screen sheet has no need for a rail. */}
       <div
         className={cn(
-          "fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-[1px] transition-opacity duration-[var(--motion-slow)] lg:hidden",
+          "fixed inset-0 z-40 bg-sidebar/50 backdrop-blur-[1px] transition-opacity duration-[var(--motion-slow)] lg:hidden",
           drawerOpen ? "opacity-100" : "pointer-events-none opacity-0",
         )}
         onClick={() => setDrawerOpen(false)}
@@ -262,21 +307,12 @@ export function AppShell({
           drawerOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full",
         )}
       >
-        <div className="flex justify-end p-2">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(false)}
-            aria-label={tShell("closeMenu")}
-            className="flex size-11 items-center justify-center rounded-lg text-sidebar-foreground transition-ui focus-ring-inverse hover:bg-sidebar-accent active:bg-sidebar-accent/70"
-          >
-            <X className="size-5" />
-          </button>
-        </div>
         <SidebarContent
           nav={nav}
           brand={brand}
           user={user}
           onNavigate={() => setDrawerOpen(false)}
+          onClose={() => setDrawerOpen(false)}
         />
       </aside>
 
@@ -326,7 +362,7 @@ export function AppShell({
             </span>
 
             <div className="ms-auto flex items-center gap-2">
-              <LocaleSwitcher />
+              <LocaleToggle />
               <UserMenu user={user} />
             </div>
           </div>

@@ -25,6 +25,7 @@ import {
 import { formatMoney, formatNumber, formatRating } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone } from "@/lib/scheduling";
+import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { LinkButton } from "@/components/shared/link-button";
 
 /**
@@ -90,7 +91,6 @@ export default async function TeacherDashboardPage() {
           label={t("stats.sessionsToday")}
           value={formatNumber(combined.sessionsToday, locale)}
           icon={<CalendarClock className="size-4" />}
-          accent="info"
         />
         <StatCard
           label={t("stats.sessionsThisWeek")}
@@ -101,13 +101,11 @@ export default async function TeacherDashboardPage() {
           label={t("stats.earningsThisMonth")}
           value={formatMoney(combined.teacherShare, locale)}
           icon={<Coins className="size-4" />}
-          accent="brand"
         />
         <StatCard
           label={t("stats.rating")}
           value={rating.average !== null ? formatRating(rating.average, locale) : t("stats.ratingNone")}
           icon={<Star className="size-4" />}
-          accent="warning"
         />
       </StatGrid>
 
@@ -127,13 +125,12 @@ export default async function TeacherDashboardPage() {
                 className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex min-w-0 items-center gap-3">
-                  <span
-                    aria-hidden
-                    className="flex size-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-brand-foreground"
-                    style={{ backgroundColor: centerCtx.center.themeColor }}
-                  >
-                    {centerCtx.center.name.trim().charAt(0)}
-                  </span>
+                  <BrandAvatar
+                    name={centerCtx.center.name}
+                    logoUrl={centerCtx.center.logoUrl}
+                    themeColor={centerCtx.center.themeColor}
+                    size="lg"
+                  />
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-2 truncate text-sm font-semibold text-text-primary">
                       {centerCtx.center.name}

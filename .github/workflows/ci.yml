@@ -32,6 +32,9 @@ jobs:
       - run: npx prisma validate
       - run: npm run typecheck
       - run: npm run lint
+      # R10a: static presentation gate (one locale toggle, no native select,
+      # no hardcoded colours, PageHeader coverage). Needs no database.
+      - run: npm run check:design
 
   gates:
     name: Migrations + acceptance gates

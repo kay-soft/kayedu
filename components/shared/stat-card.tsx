@@ -5,8 +5,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * KPI / stat card — docs/04 §5: white surface, 12px muted label above a large
- * figure, optional trend chip below, optional icon chip and colored top border
- * to differentiate cards in a row.
+ * figure, optional trend chip below, optional icon chip. Every card is the same
+ * neutral surface: there is deliberately no accent colour, because a green or
+ * amber top border on "Live now" or "Not started" is decoration borrowing the
+ * status palette (docs/04 §2 — semantic colours are for status only).
  *
  * Money figures are never colored here; only the trend chip carries color
  * (▲ success / ▼ danger), per the semantic color rules in docs/04 §2.
@@ -21,14 +23,6 @@ export type StatTrend = {
    */
   invertColor?: boolean;
 };
-
-const ACCENTS = {
-  brand: "before:bg-brand",
-  success: "before:bg-success",
-  warning: "before:bg-warning",
-  danger: "before:bg-danger",
-  info: "before:bg-info",
-} as const;
 
 const TREND_ICONS = {
   up: ArrowUpRight,
@@ -49,7 +43,6 @@ export function StatCard({
   hint,
   icon,
   trend,
-  accent,
   zero,
   zeroLabel,
   className,
@@ -59,7 +52,6 @@ export function StatCard({
   hint?: string;
   icon?: ReactNode;
   trend?: StatTrend;
-  accent?: keyof typeof ACCENTS;
   /**
    * True when the figure is zero *because nothing happened in this range*,
    * not because something failed. A wall of bold black "EGP 0" reads as a
@@ -76,12 +68,7 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border border-border bg-surface p-4 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover sm:p-6",
-        // The accent is a top border in both locales — a logical inset, so it
-        // does not flip with direction (docs/04 §7).
-        accent &&
-          "before:absolute before:inset-x-0 before:top-0 before:h-1 before:content-['']",
-        accent && ACCENTS[accent],
+        "rounded-xl border border-border bg-surface p-4 shadow-card sm:p-6",
         className,
       )}
     >

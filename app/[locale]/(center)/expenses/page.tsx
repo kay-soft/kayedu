@@ -9,8 +9,10 @@ import {
 } from "@/app/[locale]/(center)/expenses/actions";
 import { ExpenseForm } from "@/app/[locale]/(center)/expenses/expense-form";
 import { ExpenseRow, type ExpenseRowData } from "@/app/[locale]/(center)/expenses/expense-row";
+import { ListHeader } from "@/components/shared/list-header";
 import { Pagination } from "@/components/center/pagination";
 import { DateFilter } from "@/components/shared/date-filter";
+import { FilterBar } from "@/components/shared/filter-bar";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
@@ -135,7 +137,6 @@ export default async function ExpensesPage({
           label={t("stats.total")}
           value={formatMoney(totals.total, locale)}
           icon={<Wallet className="size-4" />}
-          accent="danger"
         />
         <StatCard label={t("stats.count")} value={formatNumber(totals.count, locale)} />
       </StatGrid>
@@ -154,7 +155,7 @@ export default async function ExpensesPage({
           <CardTitle>{t("listTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <form>
+          <FilterBar>
             <DateFilter
               value={{
                 range: filters.range,
@@ -165,7 +166,7 @@ export default async function ExpensesPage({
               todayIso={todayIso}
               resetHref={ROUTES.centerExpenses}
             />
-          </form>
+          </FilterBar>
 
           {tableRows.length === 0 ? (
             <EmptyState
@@ -175,16 +176,13 @@ export default async function ExpensesPage({
             />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
+              <ListHeader>
                 <span className="w-32 shrink-0">{t("columns.date")}</span>
                 <span className="min-w-0 flex-1">{t("columns.category")}</span>
                 <span className="min-w-0 flex-[2]">{t("columns.note")}</span>
                 <span className="w-28 shrink-0">{t("columns.amount")}</span>
                 <span className="w-32 shrink-0 text-end">{t("columns.actions")}</span>
-              </li>
+              </ListHeader>
 
               {tableRows.map((expense) => (
                 <ExpenseRow key={expense.id} expense={expense} />

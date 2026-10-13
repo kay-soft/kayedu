@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { getTranslations } from "next-intl/server";
 
-import { LocaleSwitcher } from "@/components/shared/locale-switcher";
+import { LocaleToggle } from "@/components/shared/locale-toggle";
 
 /**
  * The signed-out shell (docs/04-design-system.md §5 "Auth layout").
@@ -68,7 +68,7 @@ export default async function AuthLayout({
             </span>
             <span className="text-sm font-semibold">{t("productName")}</span>
           </span>
-          <LocaleSwitcher />
+          <LocaleToggle />
         </header>
 
         <main className="flex flex-1 items-start justify-center px-4 pb-10 sm:items-center sm:px-6">

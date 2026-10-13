@@ -106,7 +106,7 @@ export default async function CatalogPage() {
     .map((s) => ({ value: s.id, label: catalogLabel(locale, s) }));
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <SectionHeader title={t("title")} description={t("description")} />
 
       <CatalogSection

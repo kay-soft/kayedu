@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 
 import { DateFilter, type DateFilterValue } from "@/components/shared/date-filter";
+import { FilterBar, FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
 
 export type SelectOption = { value: string; label: string };
@@ -44,14 +45,11 @@ export function SessionFilters({
   const tStatus = useTranslations("Sessions.status");
 
   return (
-    <form className="flex flex-col gap-3">
+    <FilterBar className="sm:flex-col sm:items-stretch">
       <DateFilter value={dateFilter} todayIso={todayIso} resetHref={resetHref} />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-status" className="text-xs font-medium text-text-secondary">
-            {t("status")}
-          </label>
+        <FilterField label={t("status")} htmlFor="filter-status">
           <Select
             id="filter-status"
             name="status"
@@ -64,12 +62,9 @@ export function SessionFilters({
             <option value="COMPLETED">{tStatus("COMPLETED")}</option>
             <option value="CANCELLED">{tStatus("CANCELLED")}</option>
           </Select>
-        </div>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-teacherId" className="text-xs font-medium text-text-secondary">
-            {t("teacher")}
-          </label>
+        <FilterField label={t("teacher")} htmlFor="filter-teacherId">
           <Select
             id="filter-teacherId"
             name="teacherId"
@@ -83,12 +78,9 @@ export function SessionFilters({
               </option>
             ))}
           </Select>
-        </div>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-subjectId" className="text-xs font-medium text-text-secondary">
-            {t("subject")}
-          </label>
+        <FilterField label={t("subject")} htmlFor="filter-subjectId">
           <Select
             id="filter-subjectId"
             name="subjectId"
@@ -102,12 +94,9 @@ export function SessionFilters({
               </option>
             ))}
           </Select>
-        </div>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-classGroupId" className="text-xs font-medium text-text-secondary">
-            {t("class")}
-          </label>
+        <FilterField label={t("class")} htmlFor="filter-classGroupId">
           <Select
             id="filter-classGroupId"
             name="classGroupId"
@@ -121,8 +110,8 @@ export function SessionFilters({
               </option>
             ))}
           </Select>
-        </div>
+        </FilterField>
       </div>
-    </form>
+    </FilterBar>
   );
 }

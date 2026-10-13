@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 
+import { FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
 
 export type DiscoverFilterOption = { value: string; label: string };
@@ -36,10 +37,7 @@ export function DiscoverFilters({
 
   return (
     <form className="grid gap-3 sm:grid-cols-3">
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-subject" className="text-xs font-medium text-text-secondary">
-          {t("subject")}
-        </label>
+      <FilterField label={t("subject")} htmlFor="filter-subject">
         <Select
           id="filter-subject"
           name="subject"
@@ -54,12 +52,9 @@ export function DiscoverFilters({
             </option>
           ))}
         </Select>
-      </div>
+      </FilterField>
 
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-grade" className="text-xs font-medium text-text-secondary">
-          {t("grade")}
-        </label>
+      <FilterField label={t("grade")} htmlFor="filter-grade">
         <Select
           id="filter-grade"
           name="grade"
@@ -74,12 +69,9 @@ export function DiscoverFilters({
             </option>
           ))}
         </Select>
-      </div>
+      </FilterField>
 
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-day" className="text-xs font-medium text-text-secondary">
-          {t("day")}
-        </label>
+      <FilterField label={t("day")} htmlFor="filter-day">
         <Select
           id="filter-day"
           name="day"
@@ -94,7 +86,7 @@ export function DiscoverFilters({
             </option>
           ))}
         </Select>
-      </div>
+      </FilterField>
     </form>
   );
 }

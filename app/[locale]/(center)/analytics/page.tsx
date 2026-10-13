@@ -5,6 +5,7 @@ import { BranchRevenueTable } from "@/app/[locale]/(center)/analytics/branch-rev
 import { TeacherFilter } from "@/app/[locale]/(center)/analytics/teacher-filter";
 import { TeacherRevenueTable } from "@/app/[locale]/(center)/analytics/teacher-revenue-table";
 import { DateFilter } from "@/components/shared/date-filter";
+import { FilterBar } from "@/components/shared/filter-bar";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
@@ -170,14 +171,12 @@ export default async function AnalyticsPage({
         }
       />
 
-      {/* One row, one baseline (docs/04 §11.7). The date control is a single
-          control now rather than a segmented row plus two browser date
-          fields, so the teacher select sits directly beside it instead of
-          floating between two competing affordances. Below `sm` the two
-          stack, each full-width. */}
+      {/* One filter row (docs/04 §5 "Filter row"): the date control and the
+          teacher select are labelled fields on one baseline. The date control
+          is the page's only date affordance (§11.7). */}
       <Card>
-        <CardContent className="py-4">
-          <form className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <CardContent>
+          <FilterBar>
             <DateFilter
               value={{
                 range: filters.range,
@@ -189,7 +188,7 @@ export default async function AnalyticsPage({
               resetHref={ROUTES.centerAnalytics}
             />
             <TeacherFilter teacherId={filters.teacherId ?? ""} teachers={teacherOptions} />
-          </form>
+          </FilterBar>
         </CardContent>
       </Card>
 
@@ -203,7 +202,6 @@ export default async function AnalyticsPage({
           label={t("revenue.collected")}
           value={formatMoney(revenue.collected, locale)}
           icon={<Wallet className="size-4" />}
-          accent="brand"
           zero={noRevenue}
           zeroLabel={t("zeroHint")}
         />
@@ -231,7 +229,6 @@ export default async function AnalyticsPage({
             <StatCard
               label={t("revenue.expenses")}
               value={formatMoney(expenses.total, locale)}
-              accent="danger"
               zero={expenses.total === 0}
               zeroLabel={t("zeroHint")}
             />
@@ -239,7 +236,6 @@ export default async function AnalyticsPage({
               label={t("revenue.net")}
               value={formatMoney(net, locale)}
               icon={<TrendingUp className="size-4" />}
-              accent={net >= 0 ? "success" : "danger"}
               zero={noRevenue && expenses.total === 0}
               zeroLabel={t("zeroHint")}
             />
@@ -298,7 +294,7 @@ export default async function AnalyticsPage({
         <>
           <SectionHeader title={t("byBranch.title")} description={t("byBranch.description")} />
           <Card>
-            <CardContent className="pt-6">
+            <CardContent>
               <BranchRevenueTable rows={byBranch} showProfit={showProfit} locale={locale} />
             </CardContent>
           </Card>
@@ -309,7 +305,7 @@ export default async function AnalyticsPage({
         <>
           <SectionHeader title={t("byTeacher.title")} description={t("byTeacher.description")} />
           <Card>
-            <CardContent className="pt-6">
+            <CardContent>
               <TeacherRevenueTable rows={breakdownRows} showProfit={showProfit} locale={locale} />
             </CardContent>
           </Card>

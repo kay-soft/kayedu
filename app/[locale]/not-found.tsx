@@ -2,7 +2,7 @@ import { FileQuestion } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AnchorButton } from "@/components/shared/link-button";
-import { LocaleSwitcher } from "@/components/shared/locale-switcher";
+import { LocaleToggle } from "@/components/shared/locale-toggle";
 
 /**
  * The 404 (docs/04-design-system.md §5 "Empty state"). It renders outside
@@ -28,7 +28,7 @@ export default async function NotFound() {
           </span>
           <span className="text-sm font-semibold">{tShell("productName")}</span>
         </span>
-        <LocaleSwitcher />
+        <LocaleToggle />
       </header>
 
       <main className="flex flex-1 items-center justify-center px-4 pb-16">

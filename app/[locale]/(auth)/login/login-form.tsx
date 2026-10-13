@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { signInAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
+import { PasswordField } from "@/components/shared/password-field";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
 import { Link } from "@/lib/i18n/navigation";
@@ -49,10 +50,9 @@ export function LoginForm({ next }: { next?: string }) {
         label={t("fields.password")}
         error={state.fieldErrors?.password ? tErrors(state.fieldErrors.password) : undefined}
       >
-        <Input
+        <PasswordField
           id="password"
           name="password"
-          type="password"
           autoComplete="current-password"
           required
           aria-invalid={state.fieldErrors?.password ? true : undefined}
@@ -61,7 +61,7 @@ export function LoginForm({ next }: { next?: string }) {
 
       <SubmitButton className="w-full">{t("login.submit")}</SubmitButton>
 
-      <p className="text-center text-sm text-text-secondary">
+      <p className="border-t border-border pt-4 text-center text-sm text-text-secondary">
         {t("login.noAccount")}{" "}
         <Link
           href={

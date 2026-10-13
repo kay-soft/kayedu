@@ -31,24 +31,29 @@ export type ShellNavItem = {
   /** Key under the `Nav` namespace in messages/*.json. */
   labelKey: string;
   icon: ShellIconName;
-  /** Marks routes that land in a later milestone. */
-  disabled?: boolean;
+  /**
+   * Key under the `NavGroups` namespace. Consecutive items sharing a group sit
+   * under one small heading (docs/04 §5 "Sidebar"); an item with no group is
+   * drawn without one. A route a later milestone owns has no entry here at all
+   * — the nav never shows a link a centre cannot use.
+   */
+  group?: string;
 };
 
 type NavDef = ShellNavItem & { permission?: Permission };
 
 const CENTER_NAV: NavDef[] = [
   { href: ROUTES.centerDashboard, labelKey: "dashboard", icon: "dashboard" },
-  { href: ROUTES.centerReception, labelKey: "reception", icon: "reception", permission: "reception.use" },
-  { href: ROUTES.centerSessions, labelKey: "sessions", icon: "sessions", permission: "session.view" },
-  { href: ROUTES.centerClasses, labelKey: "classes", icon: "classes", permission: "class.manage" },
-  { href: ROUTES.centerStudents, labelKey: "students", icon: "students", permission: "student.manage" },
-  { href: ROUTES.centerTeachers, labelKey: "teachers", icon: "teachers", permission: "teacher.manage" },
-  { href: ROUTES.centerAnalytics, labelKey: "analytics", icon: "analytics", permission: "analytics.center.view" },
-  { href: ROUTES.centerExpenses, labelKey: "expenses", icon: "expenses", permission: "expense.manage" },
-  { href: ROUTES.centerApprovals, labelKey: "approvals", icon: "approvals", permission: "approvals.manage" },
-  { href: ROUTES.centerRefunds, labelKey: "refunds", icon: "refunds", permission: "payment.refund" },
-  { href: ROUTES.centerSettlements, labelKey: "settlements", icon: "settlements", permission: "settlement.manage" },
+  { href: ROUTES.centerReception, labelKey: "reception", icon: "reception", permission: "reception.use", group: "frontDesk" },
+  { href: ROUTES.centerSessions, labelKey: "sessions", icon: "sessions", permission: "session.view", group: "frontDesk" },
+  { href: ROUTES.centerApprovals, labelKey: "approvals", icon: "approvals", permission: "approvals.manage", group: "frontDesk" },
+  { href: ROUTES.centerClasses, labelKey: "classes", icon: "classes", permission: "class.manage", group: "academics" },
+  { href: ROUTES.centerStudents, labelKey: "students", icon: "students", permission: "student.manage", group: "academics" },
+  { href: ROUTES.centerTeachers, labelKey: "teachers", icon: "teachers", permission: "teacher.manage", group: "academics" },
+  { href: ROUTES.centerAnalytics, labelKey: "analytics", icon: "analytics", permission: "analytics.center.view", group: "money" },
+  { href: ROUTES.centerExpenses, labelKey: "expenses", icon: "expenses", permission: "expense.manage", group: "money" },
+  { href: ROUTES.centerRefunds, labelKey: "refunds", icon: "refunds", permission: "payment.refund", group: "money" },
+  { href: ROUTES.centerSettlements, labelKey: "settlements", icon: "settlements", permission: "settlement.manage", group: "money" },
   // Settings owns its own sub-navigation (users & roles lives under it).
   { href: ROUTES.centerSettings, labelKey: "settings", icon: "settings", permission: "center.settings.edit" },
 ];
@@ -66,8 +71,8 @@ const TEACHER_NAV: NavDef[] = [
   },
   // Spec §4.2 item 1's filterable earnings/sessions/students analytics screen
   // is still a gap beyond the Dashboard's combined/per-center summary (M7) —
-  // docs/03-build-order.md M7 note.
-  { href: "/teacher/analytics", labelKey: "analytics", icon: "analytics", disabled: true },
+  // docs/03-build-order.md M7 note. R10a removed its "Soon" nav placeholder:
+  // the nav lists only what a role can open. Add the item back with the screen.
   { href: ROUTES.teacherSettlements, labelKey: "settlements", icon: "settlements" },
 ];
 
@@ -102,7 +107,7 @@ function visible(
       href: item.href,
       labelKey: item.labelKey,
       icon: item.icon,
-      disabled: item.disabled,
+      group: item.group,
     }));
 }
 

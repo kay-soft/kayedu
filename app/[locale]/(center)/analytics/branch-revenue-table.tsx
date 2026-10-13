@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { ChartNoAxesColumn } from "lucide-react";
 
 import { formatMoney, formatNumber } from "@/lib/format";
+import { ListHeader } from "@/components/shared/list-header";
 import { EmptyState } from "@/components/shared/empty-state";
 
 export type BranchRevenueRowData = {
@@ -36,10 +37,7 @@ export async function BranchRevenueTable({
 
   return (
     <ul className="flex flex-col gap-3 md:gap-0">
-      <li
-        aria-hidden
-        className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-      >
+      <ListHeader>
         <span className="min-w-0 flex-1">{t("columns.branch")}</span>
         <span className="md:w-28 md:shrink-0">{t("columns.collected")}</span>
         {showProfit ? (
@@ -49,7 +47,7 @@ export async function BranchRevenueTable({
           </>
         ) : null}
         <span className="md:w-24 md:shrink-0">{t("columns.payments")}</span>
-      </li>
+      </ListHeader>
 
       {rows.map((row) => (
         <li

@@ -69,11 +69,11 @@ export function SessionRequestActions({ id }: { id: string }) {
           onConfirmedChange={(value) => setConfirmedFor(value ? approveState : null)}
         />
       </form>
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2 lg:w-64">
         <form action={declineAction}>
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="id" value={id} />
-          <SubmitButton variant="outline">
+          <SubmitButton variant="outline" className="w-full">
             <X className="size-4" />
             {t("decline")}
           </SubmitButton>

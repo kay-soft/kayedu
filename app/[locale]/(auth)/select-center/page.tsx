@@ -1,19 +1,14 @@
 import { getLocale, getTranslations } from "next-intl/server";
-import { Building2, ChevronLeft } from "lucide-react";
+import { Building2, Check, ChevronLeft } from "lucide-react";
 
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { AnchorButton } from "@/components/shared/link-button";
+import { AuthCard } from "@/components/shared/auth-card";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { getActiveCenterId } from "@/lib/auth/active-center";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
   getOwnerOrgGroups,
@@ -22,6 +17,7 @@ import {
 } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
+import { cn } from "@/lib/utils";
 
 export default async function SelectCenterPage({
   searchParams,
@@ -36,9 +32,10 @@ export default async function SelectCenterPage({
   const tRoles = await getTranslations("Roles");
 
   const { switch: switchMode } = await searchParams;
-  const [relations, orgGroups] = await Promise.all([
+  const [relations, orgGroups, activeId] = await Promise.all([
     getUserCenterRelations(user!.id),
     getOwnerOrgGroups(user!.id),
+    getActiveCenterId(),
   ]);
 
   // Exactly one center and no "Whole Management" option → skip the hub
@@ -51,15 +48,11 @@ export default async function SelectCenterPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <Card className="p-2 sm:p-4">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
-          <CardDescription>
-            {relations.length > 0 ? t("subtitle") : t("emptySubtitle")}
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="flex flex-col gap-3">
+      <AuthCard
+        title={t("title")}
+        description={relations.length > 0 ? t("subtitle") : t("emptySubtitle")}
+      >
+        <div className="flex flex-col gap-3">
           {relations.length === 0 ? (
             <EmptyState
               icon={<Building2 />}
@@ -86,81 +79,83 @@ export default async function SelectCenterPage({
             />
           ) : null}
 
-          {orgGroups.map((group) => (
-            <form key={group.organizationId} action={selectCenterAction}>
-              <input type="hidden" name="locale" value={locale} />
-              <input
-                type="hidden"
-                name="selectionId"
-                value={group.organizationId}
-              />
-              <button
-                type="submit"
-                className="flex w-full min-h-16 items-center gap-3 rounded-xl border border-brand bg-brand/5 p-3 text-start transition-ui focus-ring hover:bg-brand/10 hover:shadow-card-hover active:translate-y-px sm:p-4"
-              >
-                <span
-                  aria-hidden
-                  className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground"
+          {orgGroups.map((group) => {
+            const selected = activeId === group.organizationId;
+            return (
+              <form key={group.organizationId} action={selectCenterAction}>
+                <input type="hidden" name="locale" value={locale} />
+                <input
+                  type="hidden"
+                  name="selectionId"
+                  value={group.organizationId}
+                />
+                <button
+                  type="submit"
+                  aria-current={selected ? "true" : undefined}
+                  className={cn(CHOICE_CARD, selected ? CHOICE_SELECTED : CHOICE_IDLE)}
                 >
-                  <Building2 className="size-5" />
-                </span>
-
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">
-                    {t("wholeManagement", { organization: group.organizationName })}
+                  <span
+                    aria-hidden
+                    className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground"
+                  >
+                    <Building2 className="size-5" />
                   </span>
-                  <span className="block truncate text-xs text-text-muted">
-                    {t("wholeManagementHint", { count: group.branches.length })}
-                  </span>
-                </span>
 
-                <ChevronLeft
-                  aria-hidden
-                  className="size-4 shrink-0 text-text-muted ltr:-scale-x-100"
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">
+                      {t("wholeManagement", { organization: group.organizationName })}
+                    </span>
+                    <span className="block truncate text-xs text-text-muted">
+                      {t("wholeManagementHint", { count: group.branches.length })}
+                    </span>
+                  </span>
+
+                  <ChoiceMark selected={selected} />
+                </button>
+              </form>
+            );
+          })}
+
+          {relations.map((relation) => {
+            const selected = activeId === relation.center.id;
+            return (
+              <form key={relation.center.id} action={selectCenterAction}>
+                <input type="hidden" name="locale" value={locale} />
+                <input
+                  type="hidden"
+                  name="selectionId"
+                  value={relation.center.id}
                 />
-              </button>
-            </form>
-          ))}
+                <button
+                  type="submit"
+                  aria-current={selected ? "true" : undefined}
+                  className={cn(CHOICE_CARD, selected ? CHOICE_SELECTED : CHOICE_IDLE)}
+                >
+                  <BrandAvatar
+                    name={relation.center.name}
+                    logoUrl={relation.center.logoUrl}
+                    themeColor={relation.center.themeColor}
+                    size="lg"
+                  />
 
-          {relations.map((relation) => (
-            <form key={relation.center.id} action={selectCenterAction}>
-              <input type="hidden" name="locale" value={locale} />
-              <input
-                type="hidden"
-                name="selectionId"
-                value={relation.center.id}
-              />
-              <button
-                type="submit"
-                className="flex w-full min-h-16 items-center gap-3 rounded-xl border border-border bg-surface p-3 text-start transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover hover:shadow-card-hover active:translate-y-px sm:p-4"
-              >
-                <BrandAvatar
-                  name={relation.center.name}
-                  logoUrl={relation.center.logoUrl}
-                  themeColor={relation.center.themeColor}
-                  size="lg"
-                />
-
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">
-                    {relation.center.name}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">
+                      {relation.center.name}
+                    </span>
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {relation.roles.map((role) => (
+                        <Badge key={role} variant="brand">
+                          {tRoles(role)}
+                        </Badge>
+                      ))}
+                    </span>
                   </span>
-                  <span className="mt-1 flex flex-wrap gap-1">
-                    {relation.roles.map((role) => (
-                      <Badge key={role} variant="brand">
-                        {tRoles(role)}
-                      </Badge>
-                    ))}
-                  </span>
-                </span>
 
-                <ChevronLeft
-                  aria-hidden
-                  className="size-4 shrink-0 text-text-muted ltr:-scale-x-100"
-                />
-              </button>
-            </form>
-          ))}
+                  <ChoiceMark selected={selected} />
+                </button>
+              </form>
+            );
+          })}
 
           {user!.isPlatformAdmin ? (
             <AnchorButton
@@ -172,12 +167,37 @@ export default async function SelectCenterPage({
               {t("platformAdminLink")}
             </AnchorButton>
           ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </AuthCard>
 
       <div className="rounded-xl bg-sidebar p-2">
         <SignOutButton />
       </div>
     </div>
+  );
+}
+
+/** A branch / roll-up choice: one tappable card, 64px+ tall. */
+const CHOICE_CARD =
+  "flex min-h-16 w-full items-center gap-3 rounded-xl border p-3 text-start transition-ui focus-ring active:translate-y-px sm:p-4";
+const CHOICE_IDLE =
+  "border-border bg-surface hover:border-border-strong hover:bg-surface-hover hover:shadow-card-hover";
+// The branch you are already working in: brand outline + tint + a check, so
+// "current" never depends on colour alone.
+const CHOICE_SELECTED = "border-brand bg-brand/5 ring-2 ring-brand/20";
+
+function ChoiceMark({ selected }: { selected: boolean }) {
+  return selected ? (
+    <span
+      aria-hidden
+      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground"
+    >
+      <Check className="size-3.5" />
+    </span>
+  ) : (
+    <ChevronLeft
+      aria-hidden
+      className="size-4 shrink-0 text-text-muted ltr:-scale-x-100"
+    />
   );
 }

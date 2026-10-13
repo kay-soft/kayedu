@@ -6,6 +6,7 @@ import { ReservationActions } from "@/app/[locale]/(center)/approvals/reservatio
 import { SessionRequestActions } from "@/app/[locale]/(center)/approvals/session-request-actions";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FormMessage } from "@/components/shared/form-message";
+import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { RequestCard } from "@/components/shared/request-card";
 import { SectionHeader } from "@/components/shared/section-header";
@@ -15,6 +16,7 @@ import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
+import { ROUTES } from "@/lib/routes";
 
 type ChangeRequestPayload = {
   subjectId?: string | null;
@@ -146,6 +148,9 @@ export default async function ApprovalsPage() {
           tone="success"
           title={t("empty")}
           description={t("emptyHint")}
+          action={
+            <LinkButton href={ROUTES.centerTeachers}>{t("emptyAction")}</LinkButton>
+          }
         />
       ) : (
         <div className="flex flex-col gap-8">

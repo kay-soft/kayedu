@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 
+import { FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
 import type { SelectOption } from "@/components/center/class-fields";
 
@@ -32,10 +33,7 @@ export function ClassFilters({
 
   return (
     <form className="grid gap-3 sm:grid-cols-3">
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-teacherId" className="text-xs font-medium text-text-secondary">
-          {t("teacher")}
-        </label>
+      <FilterField label={t("teacher")} htmlFor="filter-teacherId">
         <Select
           id="filter-teacherId"
           name="teacherId"
@@ -49,12 +47,9 @@ export function ClassFilters({
             </option>
           ))}
         </Select>
-      </div>
+      </FilterField>
 
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-subjectId" className="text-xs font-medium text-text-secondary">
-          {t("subject")}
-        </label>
+      <FilterField label={t("subject")} htmlFor="filter-subjectId">
         <Select
           id="filter-subjectId"
           name="subjectId"
@@ -68,12 +63,9 @@ export function ClassFilters({
             </option>
           ))}
         </Select>
-      </div>
+      </FilterField>
 
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-gradeId" className="text-xs font-medium text-text-secondary">
-          {t("grade")}
-        </label>
+      <FilterField label={t("grade")} htmlFor="filter-gradeId">
         <Select
           id="filter-gradeId"
           name="gradeId"
@@ -87,7 +79,7 @@ export function ClassFilters({
             </option>
           ))}
         </Select>
-      </div>
+      </FilterField>
     </form>
   );
 }

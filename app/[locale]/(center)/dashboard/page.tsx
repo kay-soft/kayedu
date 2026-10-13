@@ -117,13 +117,11 @@ export default async function CenterDashboardPage() {
           label={t("today.live")}
           value={formatNumber(liveCount, locale)}
           icon={<Radio className="size-4" />}
-          accent="success"
         />
         <StatCard
           label={t("today.notStarted")}
           value={formatNumber(notStartedCount, locale)}
           icon={<CircleAlert className="size-4" />}
-          accent="warning"
         />
         <StatCard
           label={t("today.marked")}
@@ -139,7 +137,6 @@ export default async function CenterDashboardPage() {
           label={t("today.collected")}
           value={formatMoney(todayRevenue.collected, locale)}
           icon={<Wallet className="size-4" />}
-          accent="brand"
           zero={todayRevenue.paymentCount === 0}
           zeroLabel={t("zeroHint")}
         />
@@ -153,14 +150,20 @@ export default async function CenterDashboardPage() {
         ) : null}
       </StatGrid>
 
-      <SectionHeader title={t("today.sessionsListTitle")} action={
-        <Link href={ROUTES.centerSessions} className="text-sm font-medium text-brand hover:underline">
-          {t("today.viewAll")}
-        </Link>
-      } />
-      <Card>
-        <CardContent className="pt-6">
-          {withStatus.length === 0 ? (
+      <SectionHeader
+        title={t("today.sessionsListTitle")}
+        action={
+          <LinkButton href={ROUTES.centerSessions} variant="ghost" size="sm">
+            {t("today.viewAll")}
+          </LinkButton>
+        }
+      />
+      {/* The card gives up its own vertical padding: rows carry theirs, so the
+          first and last row sit an even 12px from the border instead of
+          stacking card padding on top of row padding. */}
+      <Card className="gap-0 py-0">
+        {withStatus.length === 0 ? (
+          <CardContent className="p-4">
             <EmptyState
               compact
               icon={<CalendarClock />}
@@ -172,38 +175,38 @@ export default async function CenterDashboardPage() {
                 </LinkButton>
               }
             />
-          ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              {withStatus.slice(0, 8).map(({ row, displayStatus }) => (
-                <li
-                  key={row.id}
-                  className="flex flex-col gap-2 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3 md:last:border-0"
+          </CardContent>
+        ) : (
+          <ul className="divide-y divide-border">
+            {withStatus.slice(0, 8).map(({ row, displayStatus }) => (
+              <li
+                key={row.id}
+                className="flex flex-col gap-1.5 px-4 py-3 md:flex-row md:items-center md:gap-4"
+              >
+                <span className="text-sm tabular-nums text-text-secondary md:w-20 md:shrink-0" dir="ltr">
+                  {formatTime(row.startTime, locale)}
+                </span>
+                <Link
+                  href={ROUTES.centerSession(row.id)}
+                  className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary hover:text-brand hover:underline focus-ring rounded-sm"
                 >
-                  <span className="text-sm tabular-nums text-text-secondary md:w-16 md:shrink-0" dir="ltr">
-                    {formatTime(row.startTime, locale)}
-                  </span>
-                  <Link
-                    href={ROUTES.centerSession(row.id)}
-                    className="min-w-0 flex-1 truncate text-sm font-medium text-brand hover:underline"
-                  >
-                    {sessionDisplayName(locale, row)}
-                  </Link>
-                  <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">
-                    {teacherNameByUserId.get(row.teacherId) ?? "—"}
-                  </span>
-                  <span className="shrink-0 text-sm tabular-nums text-text-secondary">
-                    {formatNumber(row._count.attendees, locale)}
-                    {/* A one-time session (R5) has no class and no enrolled count. */}
-                    {(row.classGroup?._count.enrollments ?? 0) > 0
-                      ? ` / ${formatNumber(row.classGroup?._count.enrollments ?? 0, locale)}`
-                      : ""}
-                  </span>
-                  <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
+                  {sessionDisplayName(locale, row)}
+                </Link>
+                <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">
+                  {teacherNameByUserId.get(row.teacherId) ?? "—"}
+                </span>
+                <span className="shrink-0 text-sm tabular-nums text-text-secondary">
+                  {formatNumber(row._count.attendees, locale)}
+                  {/* A one-time session (R5) has no class and no enrolled count. */}
+                  {(row.classGroup?._count.enrollments ?? 0) > 0
+                    ? ` / ${formatNumber(row.classGroup?._count.enrollments ?? 0, locale)}`
+                    : ""}
+                </span>
+                <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       <SectionHeader title={t("center.title")} />

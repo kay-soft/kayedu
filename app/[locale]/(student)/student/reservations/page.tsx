@@ -37,7 +37,7 @@ export default async function StudentReservationsPage() {
       <PageHeader title={t("title")} description={t("subtitle", { count: reservations.length })} />
 
       <Card>
-        <CardContent className="flex flex-col gap-3 pt-6">
+        <CardContent className="flex flex-col gap-3">
           {reservations.length === 0 ? (
             <EmptyState icon={<ClipboardList />} title={t("empty")} description={t("emptyHint")} />
           ) : (

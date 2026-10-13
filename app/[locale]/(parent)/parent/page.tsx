@@ -1,5 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
-import { CalendarClock, History } from "lucide-react";
+import { CalendarClock, History, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -120,11 +120,7 @@ export default async function ParentPage({
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title={t("title")} description={t("subtitle")} />
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-text-muted">
-            {t("noChildren")}
-          </CardContent>
-        </Card>
+        <EmptyState icon={<Users />} tone="info" title={t("noChildren")} />
       </div>
     );
   }

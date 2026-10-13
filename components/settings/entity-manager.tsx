@@ -8,6 +8,7 @@ import {
   EntityFields,
   type EntityField,
 } from "@/components/settings/entity-fields";
+import { ListHeader } from "@/components/shared/list-header";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Badge } from "@/components/ui/badge";
@@ -140,10 +141,7 @@ export function EntityManager({
             />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
+              <ListHeader>
                 {fields.map((field) => (
                   <span key={field.name} className="min-w-0 flex-1">
                     {field.label}
@@ -151,7 +149,7 @@ export function EntityManager({
                 ))}
                 <span className="md:w-20 md:shrink-0">{t("status")}</span>
                 <span className="w-40 shrink-0 text-end">{t("actions")}</span>
-              </li>
+              </ListHeader>
 
               {records.map((record) => (
                 <EntityRow

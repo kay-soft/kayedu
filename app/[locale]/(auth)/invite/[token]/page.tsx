@@ -2,16 +2,10 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { AcceptInvitationForm } from "@/app/[locale]/(auth)/invite/[token]/accept-invitation-form";
 import { SignOutButton } from "@/components/shell/sign-out-button";
+import { AuthCard } from "@/components/shared/auth-card";
 import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
@@ -54,11 +48,8 @@ export default async function InvitePage({
 
   if (!invitation || invalidReason) {
     return (
-      <Card className="p-2 shadow-card sm:p-4">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+      <AuthCard title={t("title")}>
+        <div className="flex flex-col gap-3">
           <FormMessage>{tErrors(invalidReason ?? "inviteNotFound")}</FormMessage>
           <Link
             href={ROUTES.login}
@@ -66,8 +57,8 @@ export default async function InvitePage({
           >
             {t("goToLogin")}
           </Link>
-        </CardContent>
-      </Card>
+        </div>
+      </AuthCard>
     );
   }
 
@@ -77,15 +68,11 @@ export default async function InvitePage({
   const nextPath = encodeURIComponent(ROUTES.invite(token));
 
   return (
-    <Card className="p-2 shadow-card sm:p-4">
-      <CardHeader>
-        <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
-        <CardDescription>
-          {t("subtitle", { center: invitation.center.name })}
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-4">
+    <AuthCard
+      title={t("title")}
+      description={t("subtitle", { center: invitation.center.name })}
+    >
+      <div className="flex flex-col gap-4">
         <dl className="flex flex-col gap-2 rounded-lg border border-border bg-surface-subtle p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <dt className="text-text-muted">{t("centerLabel")}</dt>
@@ -145,7 +132,7 @@ export default async function InvitePage({
             ).format(invitation.expiresAt),
           })}
         </p>
-      </CardContent>
-    </Card>
+      </div>
+    </AuthCard>
   );
 }

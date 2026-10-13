@@ -7,6 +7,7 @@ import {
   TeacherRow,
   type TeacherRowData,
 } from "@/app/[locale]/(center)/teachers/teacher-row";
+import { ListHeader } from "@/components/shared/list-header";
 import { Pagination } from "@/components/center/pagination";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
@@ -131,10 +132,7 @@ export default async function TeachersPage({
             )
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
+              <ListHeader>
                 <span className="min-w-0 flex-1">{t("columns.name")}</span>
                 <span className="min-w-0 flex-1">{t("columns.contact")}</span>
                 <span className="min-w-0 flex-1">{t("columns.blocked")}</span>
@@ -142,7 +140,7 @@ export default async function TeachersPage({
                 <span className="w-44 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
-              </li>
+              </ListHeader>
 
               {rows.map((teacher) => (
                 <TeacherRow

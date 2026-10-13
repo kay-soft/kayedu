@@ -7,6 +7,7 @@ import {
 } from "@/app/[locale]/(center)/sessions/new-session-dialog";
 import { SessionFilters } from "@/app/[locale]/(center)/sessions/session-filters";
 import { SessionRow, type SessionRowData } from "@/app/[locale]/(center)/sessions/session-row";
+import { ListHeader } from "@/components/shared/list-header";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -265,7 +266,6 @@ export default async function SessionsPage({
           label={t("stats.live")}
           value={formatNumber(liveCount, locale)}
           icon={<Radio className="size-4" />}
-          accent="success"
         />
         <StatCard
           label={t("stats.marked")}
@@ -276,7 +276,6 @@ export default async function SessionsPage({
           label={t("stats.collected")}
           value={formatMoney(paymentAgg._sum.amount ?? 0, locale)}
           icon={<Wallet className="size-4" />}
-          accent="brand"
           zero={(paymentAgg._sum.amount ?? 0) === 0}
           zeroLabel={t("zeroHint")}
         />
@@ -321,10 +320,7 @@ export default async function SessionsPage({
             />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
+              <ListHeader>
                 <span className="w-44 shrink-0">{t("columns.when")}</span>
                 <span className="min-w-0 flex-1">{t("columns.class")}</span>
                 <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
@@ -333,7 +329,7 @@ export default async function SessionsPage({
                 <span className="w-28 shrink-0">{t("columns.price")}</span>
                 <span className="w-28 shrink-0">{tCommon("status")}</span>
                 <span className="w-24 shrink-0 text-end">{tCommon("actions")}</span>
-              </li>
+              </ListHeader>
 
               {tableRows.map((row) => (
                 <SessionRow key={row.sessionId} session={row} locale={locale} />

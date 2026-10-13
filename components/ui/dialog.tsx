@@ -32,7 +32,7 @@ function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
         className={cn(
-          "fixed inset-0 z-50 bg-slate-900/50 transition-opacity duration-200",
+          "fixed inset-0 z-50 bg-sidebar/50 transition-opacity duration-200",
           "data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
         )}
       />
