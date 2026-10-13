@@ -14,13 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 
-const ROLE_OPTIONS: Role[] = [
-  "OWNER",
-  "MANAGER",
-  "RECEPTIONIST",
-  "ACCOUNTANT",
-  "TEACHER",
-];
+// Centre staff only (R9) — a teacher never appears on this screen.
+const ROLE_OPTIONS: Role[] = ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"];
 
 export type MemberRowData = {
   membershipId: string;

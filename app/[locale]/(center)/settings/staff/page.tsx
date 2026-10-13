@@ -39,9 +39,11 @@ export default async function StaffSettingsPage() {
 
   // Inactive memberships are listed too — deactivation is reversible, and a
   // hidden former member is how a center loses track of who has access.
+  // Centre staff only (R9): teachers — members or pending invitations — are
+  // managed on the Teachers page and filtered out here in the data layer.
   const [members, invitations] = await Promise.all([
-    db.memberships.listWithUser(),
-    db.invitations.list({ status: "PENDING" }),
+    db.memberships.listStaffWithUser(),
+    db.invitations.listStaff({ status: "PENDING" }),
   ]);
 
   const canManage = ctxCan(ctx, "staff.manage");

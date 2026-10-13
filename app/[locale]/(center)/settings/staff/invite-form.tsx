@@ -18,11 +18,11 @@ import { ROUTES } from "@/lib/routes";
 
 const initialState: InviteFormState = {};
 
+// Centre staff only (R9) — teachers are added from the Teachers page.
 const ROLE_OPTIONS = [
   "MANAGER",
   "RECEPTIONIST",
   "ACCOUNTANT",
-  "TEACHER",
   "OWNER",
 ] as const;
 

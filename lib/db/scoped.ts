@@ -27,6 +27,7 @@ import {
   scopedFindById,
   scopedWhere,
 } from "@/lib/db/tenant-scope";
+import { staffInvitationFilter, staffMembershipFilter } from "@/lib/db/staff-filter";
 import { visibilityWindowFloor } from "@/lib/db/visibility";
 import {
   PAYMENT_METHOD_ORDER,
@@ -87,9 +88,14 @@ export function scoped(ctx: TenantContext) {
           include: args?.include,
         }),
 
-      listWithUser: (where?: Prisma.MembershipWhereInput) =>
+      /**
+       * Users & Roles' list (R9): centre staff only — OWNER, MANAGER,
+       * RECEPTIONIST, ACCOUNTANT. Teachers are managed on the Teachers page
+       * (`teachers.list` below), never here.
+       */
+      listStaffWithUser: (where?: Prisma.MembershipWhereInput) =>
         prisma.membership.findMany({
-          where: scopedWhere(centerId, where),
+          where: scopedWhere(centerId, staffMembershipFilter(where)),
           orderBy: [{ role: "asc" }, { createdAt: "asc" }],
           include: { user: true },
         }),
@@ -116,6 +122,13 @@ export function scoped(ctx: TenantContext) {
       list: (where?: Prisma.InvitationWhereInput) =>
         prisma.invitation.findMany({
           where: scopedWhere(centerId, where),
+          orderBy: { createdAt: "desc" },
+        }),
+
+      /** Users & Roles' pending list (R9): staff roles only, see `staff-filter.ts`. */
+      listStaff: (where?: Prisma.InvitationWhereInput) =>
+        prisma.invitation.findMany({
+          where: scopedWhere(centerId, staffInvitationFilter(where)),
           orderBy: { createdAt: "desc" },
         }),
 

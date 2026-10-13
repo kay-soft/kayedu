@@ -3,7 +3,14 @@ import { z } from "zod";
 // Relative imports on purpose: this module and everything it pulls in stay
 // resolvable outside the Next.js runtime, so `npm run check:config` can
 // exercise the real schemas (same reasoning as lib/db/tenant-scope.ts).
-import { localeSchema } from "./auth.ts";
+import { localeSchema, staffRoleField } from "./auth.ts";
+import {
+  CARD_BOUNDS,
+  CARD_BRANCH_TEXT_MAX,
+  CARD_FONT_FAMILY_KEYS,
+  CARD_TEXT_ALIGNS,
+  DEFAULT_CARD_BACKGROUND,
+} from "../card-layout.ts";
 import { CATALOG_NAME_MAX } from "../catalog.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 import { extraRoomIdsField } from "./room-set.ts";
@@ -270,6 +277,76 @@ export const generalSettingsSchema = z
 
 export const MAX_CARD_LAYOUT_CHARS = 20_000;
 
+/**
+ * The stored shape of `CenterSettings.cardLayout` (R9) — strict on every
+ * level: unknown keys are refused, colours are `#RRGGBB` only, fonts and
+ * alignments come from closed lists, sizes are bounded, and an element may only
+ * carry the fields it has (`CARD_ELEMENT_FIELDS`). No CSS string is ever
+ * stored. Every field is optional because "absent" means today's default — an
+ * older layout stays valid, and the resolver (`lib/id-card.ts`) does the
+ * defaulting. A `null` element is "removed from the card" (M18).
+ */
+const hexColor = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/)
+  .transform((value) => value.toLowerCase());
+const position = z.number().min(CARD_BOUNDS.position.min).max(CARD_BOUNDS.position.max);
+const imageWidth = z.number().min(CARD_BOUNDS.imageWidth.min).max(CARD_BOUNDS.imageWidth.max);
+const textWidth = z.number().min(CARD_BOUNDS.textWidth.min).max(CARD_BOUNDS.textWidth.max);
+
+const imageElement = z
+  .strictObject({
+    x: position.optional(),
+    y: position.optional(),
+    width: imageWidth.optional(),
+  })
+  .nullable();
+
+const textElementShape = {
+  x: position.optional(),
+  y: position.optional(),
+  width: textWidth.optional(),
+  fontSize: z.number().min(CARD_BOUNDS.fontSize.min).max(CARD_BOUNDS.fontSize.max).optional(),
+  weight: z.number().int().min(CARD_BOUNDS.weight.min).max(CARD_BOUNDS.weight.max).optional(),
+  color: hexColor.optional(),
+  align: z.enum(CARD_TEXT_ALIGNS).optional(),
+  family: z.enum(CARD_FONT_FAMILY_KEYS).optional(),
+};
+
+const textElement = z.strictObject(textElementShape).nullable();
+
+const branchNameElement = z
+  .strictObject({
+    ...textElementShape,
+    // Blank is allowed and means "use the real name" (the resolver ignores it).
+    text: z
+      .string()
+      .trim()
+      .max(CARD_BRANCH_TEXT_MAX)
+      .regex(/^[^\p{Cc}]*$/u)
+      .optional(),
+  })
+  .nullable();
+
+export const cardLayoutDocumentSchema = z.strictObject({
+  version: z.literal(1).optional(),
+  background: z.union([z.literal(DEFAULT_CARD_BACKGROUND), hexColor]).optional(),
+  accent: hexColor.optional(),
+  footer: hexColor.optional(),
+  headerBand: z.boolean().optional(),
+  elements: z
+    .strictObject({
+      logo: imageElement.optional(),
+      centerName: branchNameElement.optional(),
+      photo: imageElement.optional(),
+      studentName: textElement.optional(),
+      grade: textElement.optional(),
+      studentCode: textElement.optional(),
+      qr: imageElement.optional(),
+    })
+    .optional(),
+});
+
 export const cardLayoutSchema = z
   .object({
     ...base,
@@ -301,7 +378,17 @@ export const cardLayoutSchema = z
       return z.NEVER;
     }
 
-    return { locale: value.locale, cardLayout: parsed as Record<string, unknown> };
+    const layout = cardLayoutDocumentSchema.safeParse(parsed);
+    if (!layout.success) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["cardLayout"],
+        message: "invalidCardLayout",
+      });
+      return z.NEVER;
+    }
+
+    return { locale: value.locale, cardLayout: layout.data as Record<string, unknown> };
   });
 
 // ── The permission matrix (M12) ────────────────────────────────────────────
@@ -328,9 +415,8 @@ export const membershipBranchGrantSchema = z.object({
 export const memberRoleSchema = z.object({
   ...base,
   membershipId: recordId,
-  role: z.enum(["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"], {
-    error: "notFound",
-  }),
+  // Centre staff only (R9) — a TEACHER role is refused here by direct call.
+  role: staffRoleField,
 });
 
 export const memberActiveSchema = z.object({

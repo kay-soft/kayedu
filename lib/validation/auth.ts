@@ -51,9 +51,28 @@ export const selectCenterSchema = z.object({
   locale: localeSchema,
 });
 
+/**
+ * The roles Users & Roles may hand out (R9): centre staff only. A TEACHER is a
+ * `Membership` too, but teachers are added and managed on the Teachers page —
+ * so this list, which both the invitation and the role-change schemas parse
+ * with, refuses it by direct call exactly as the dropdowns no longer offer it.
+ * Same four values as `CENTER_STAFF_ROLES` (lib/auth/permissions.ts).
+ */
+export const ASSIGNABLE_STAFF_ROLES = [
+  "OWNER",
+  "MANAGER",
+  "RECEPTIONIST",
+  "ACCOUNTANT",
+] as const;
+
+export const staffRoleField = z.enum(ASSIGNABLE_STAFF_ROLES, {
+  error: (issue) =>
+    issue.input === "TEACHER" ? "teacherViaTeachersPage" : "notFound",
+});
+
 export const createInvitationSchema = z.object({
   email,
-  role: z.enum(["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"]),
+  role: staffRoleField,
   locale: localeSchema,
 });
 

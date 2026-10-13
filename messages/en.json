@@ -197,7 +197,7 @@
   },
   "Staff": {
     "title": "Users & roles",
-    "subtitle": "Invite staff and teachers to this branch and manage who has access.",
+    "subtitle": "Invite staff to this branch and manage who has access. Teachers are managed on the Teachers page.",
     "inviteTitle": "Invite by email",
     "inviteSubtitle": "The invitee accepts with the link below and gets a membership at this branch.",
     "sendInvite": "Create invitation",
@@ -231,7 +231,8 @@
       "tooLong": "This value is too long.",
       "invalidEmail": "Enter a valid email address.",
       "invalidCenter": "Unknown branch.",
-      "invalidInvitation": "Unknown invitation."
+      "invalidInvitation": "Unknown invitation.",
+      "teacherViaTeachersPage": "Teachers are added and managed from the Teachers page."
     },
     "selfRow": "You",
     "ownerRow": "Owner-only",
@@ -1390,7 +1391,9 @@
       "selfLink": "A room cannot be combined with itself.",
       "invalidDate": "Enter a valid date.",
       "endBeforeStart": "The end date cannot be before the start date.",
-      "periodTooLong": "A period can span at most 400 days."
+      "periodTooLong": "A period can span at most 400 days.",
+      "invalidCardLayout": "This card layout isn't valid, so it wasn't saved. Reset to default and try again.",
+      "teacherViaTeachersPage": "Teachers are added and managed from the Teachers page."
     },
     "general": {
       "title": "General",
@@ -1515,7 +1518,7 @@
       "description": "Where the logo, photo, name, grade, student code and QR block sit on this branch's printed student card.",
       "editorTitle": "Card layout",
       "editorDescription": "Drag an element to move it, or add/remove one below. Previewing in {locale}.",
-      "dragHint": "Drag an element on the card to move it. The preview mirrors for {locale}.",
+      "dragHint": "Drag any part of an element to move it. Click it to style it; press Esc to deselect. The preview mirrors for {locale}.",
       "paletteLabel": "Add an element:",
       "width": "Width",
       "fontSize": "Font size",
@@ -1540,6 +1543,40 @@
         "studentName": "Sample Student",
         "grade": "Grade 10",
         "codeLabel": "Student code"
+      },
+      "contrastWarning": "{element}: this text color is hard to read on its background (contrast {ratio}:1; at least {required}:1 is recommended). You can still save.",
+      "style": {
+        "boxWidth": "Text box width",
+        "customText": "Custom branch text",
+        "customTextHint": "Leave blank to print the branch's real name. Up to {max} characters.",
+        "weight": "Weight",
+        "weightNormal": "Normal",
+        "weightBold": "Bold",
+        "align": "Alignment",
+        "align_start": "Start",
+        "align_center": "Center",
+        "align_end": "End",
+        "family": "Font",
+        "color": "Text color",
+        "resetColor": "Reset color"
+      },
+      "families": {
+        "cairo": "Cairo (card font)",
+        "system": "System sans",
+        "serif": "Serif"
+      },
+      "colors": {
+        "title": "Card colors",
+        "description": "The card background, an optional header band and the bottom line. Anything you leave alone follows the branch's theme color.",
+        "background": "Background",
+        "resetBackground": "Reset to default",
+        "headerBand": "Header band",
+        "headerBandHint": "A colored band behind the logo and branch name.",
+        "accent": "Header color",
+        "footer": "Bottom line color",
+        "resetToTheme": "Reset to theme color",
+        "theme": "Theme color",
+        "use": "Use {color}"
       }
     },
     "permissions": {

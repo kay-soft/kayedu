@@ -24,6 +24,9 @@ export default async function CardCustomizationPage() {
       <CardLayoutForm
         initialElements={layout.elements}
         background={layout.background}
+        accent={layout.accent}
+        footer={layout.footer}
+        headerBand={layout.headerBand}
         centerName={ctx.center.name}
         brandColor={ctx.center.themeColor}
       />

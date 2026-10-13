@@ -12,7 +12,22 @@
  * module has **no runtime imports** so `npm run check:people` can render a
  * card outside the Next.js runtime.
  */
-import { DEFAULT_CARD_LAYOUT } from "./card-layout.ts";
+import {
+  CARD_BRANCH_TEXT_MAX,
+  CARD_FONT_FAMILIES,
+  CARD_FONT_FAMILY_KEYS,
+  CARD_TEXT_ALIGNS,
+  DEFAULT_CARD_LAYOUT,
+  DEFAULT_CODE_LABEL_COLOR,
+  DEFAULT_TEXT_BOX_WIDTH,
+  DEFAULT_TEXT_COLOR,
+  FALLBACK_BRAND_COLOR,
+  HEADER_BAND_HEIGHT,
+  isTextElementKey,
+  normalizeHex,
+  type CardFontFamily,
+  type CardTextAlign,
+} from "./card-layout.ts";
 import { toAsciiDigits } from "./digits.ts";
 import { qrMatrix } from "./qr.ts";
 
@@ -31,13 +46,29 @@ export const CARD_HEIGHT = 202;
 export type CardElement = {
   x: number;
   y: number;
+  /** Images: the drawn width. Text: the box `align` aligns within (R9). */
   width?: number;
   fontSize?: number;
   weight?: number;
+  /** Text only (R9) — `#rrggbb`; absent = the built-in colour. */
+  color?: string;
+  /** Text only (R9) — logical, so `start` is the right edge on an Arabic card. */
+  align?: CardTextAlign;
+  /** Text only (R9) — a key of `CARD_FONT_FAMILIES`; absent = the card font. */
+  family?: CardFontFamily;
+  /** Branch name only (R9) — replaces the centre's real name when non-blank. */
+  text?: string;
 };
 
 export type CardLayout = {
+  /** `gradient-navy` or a solid colour. */
   background: string;
+  /** R9: colour of the header band (and nothing else); absent = the theme colour. */
+  accent?: string;
+  /** R9: colour of the bottom stripe; absent = the theme colour. */
+  footer?: string;
+  /** R9: draw the header band. Absent/false = no band, as before. */
+  headerBand?: boolean;
   elements: Record<string, CardElement>;
 };
 
@@ -92,15 +123,51 @@ export function resolveCardLayout(raw: unknown): CardLayout {
       ...(fallback.weight !== undefined || stored.weight !== undefined
         ? { weight: num(stored.weight, fallback.weight ?? 400) }
         : {}),
+      ...(isTextElementKey(key) ? resolveTextStyle(key, stored) : {}),
     };
   }
+
+  const accent = normalizeHex(source.accent);
+  const footer = normalizeHex(source.footer);
 
   return {
     background:
       typeof source.background === "string"
         ? source.background
         : DEFAULT_CARD_LAYOUT.background,
+    ...(accent ? { accent } : {}),
+    ...(footer ? { footer } : {}),
+    ...(source.headerBand === true ? { headerBand: true } : {}),
     elements,
+  };
+}
+
+/**
+ * The R9 text-style keys of one stored element. Each is kept only when it is a
+ * value the editor could have written — anything else is dropped, so a hand-
+ * edited or older row falls back to today's look instead of a broken card.
+ */
+function resolveTextStyle(
+  key: string,
+  stored: Record<string, unknown>,
+): Partial<CardElement> {
+  const color = normalizeHex(stored.color);
+  const align = (CARD_TEXT_ALIGNS as readonly unknown[]).includes(stored.align)
+    ? (stored.align as CardTextAlign)
+    : null;
+  const family = (CARD_FONT_FAMILY_KEYS as readonly unknown[]).includes(stored.family)
+    ? (stored.family as CardFontFamily)
+    : null;
+  const text =
+    key === "centerName" && typeof stored.text === "string"
+      ? stored.text.trim().slice(0, CARD_BRANCH_TEXT_MAX)
+      : "";
+
+  return {
+    ...(color ? { color } : {}),
+    ...(align ? { align } : {}),
+    ...(family ? { family } : {}),
+    ...(text ? { text } : {}),
   };
 }
 
@@ -255,6 +322,13 @@ export type IdCardData = {
   labels: { code: string };
   dir: "rtl" | "ltr";
   layout: CardLayout;
+  /**
+   * Editor only (R9): wraps each element's markup in `<g data-card-el="key">`
+   * so the layout editor can find where every element landed and draw its drag
+   * target there. The same renderer, the same markup inside — print and the
+   * stored file never set it.
+   */
+  annotate?: boolean;
 };
 
 function escapeXml(value: string): string {
@@ -293,23 +367,68 @@ function text(
   element: CardElement,
   dir: "rtl" | "ltr",
   value: string,
-  options: { fill: string; size?: number; weight?: number; opacity?: number },
+  options: {
+    fill: string;
+    size?: number;
+    weight?: number;
+    opacity?: number;
+    /** The element's default box width (percent) when the layout stores none. */
+    boxWidth?: number;
+  },
 ): string {
   if (!value) return "";
   const size = options.size ?? element.fontSize ?? 12;
-  const { x, y } = place(element, dir);
-  const anchor = dir === "rtl" ? "end" : "start";
+  const align = element.align ?? "start";
+
+  let x: number;
+  let y: number;
+  let anchor: "start" | "middle" | "end";
+  if (align === "start") {
+    // The pre-R9 path, untouched: a text is anchored at its logical start.
+    ({ x, y } = place(element, dir));
+    anchor = dir === "rtl" ? "end" : "start";
+  } else {
+    // Centre / end align inside the element's box. The box is clamped to the
+    // card, then mirrored like any other element, so `end` is the left edge of
+    // the box on an Arabic card.
+    const boxPercent = Math.min(
+      element.width ?? options.boxWidth ?? 40,
+      100 - Math.min(Math.max(element.x, 0), 100),
+    );
+    const box = px(boxPercent, CARD_WIDTH);
+    const placed = place(element, dir, box);
+    y = placed.y;
+    if (align === "center") {
+      x = round(placed.x + box / 2);
+      anchor = "middle";
+    } else if (dir === "rtl") {
+      x = placed.x;
+      anchor = "start";
+    } else {
+      x = round(placed.x + box);
+      anchor = "end";
+    }
+  }
+
   const opacity =
     options.opacity !== undefined ? ` opacity="${options.opacity}"` : "";
+  const family = element.family
+    ? ` font-family="${CARD_FONT_FAMILIES[element.family] ?? CARD_FONT_FAMILIES.cairo}"`
+    : "";
 
   // `dominant-baseline` is unreliable across print engines, so y is the text
   // baseline plus the cap height — the same result everywhere.
   return (
     `<text x="${x}" y="${round(y + size * 0.82)}" ` +
     `font-size="${size}" font-weight="${options.weight ?? element.weight ?? 400}" ` +
-    `fill="${options.fill}" text-anchor="${anchor}" direction="${dir}"${opacity}>` +
+    `fill="${options.fill}" text-anchor="${anchor}" direction="${dir}"${opacity}${family}>` +
     `${escapeXml(value)}</text>`
   );
+}
+
+/** A colour from a layout, or `fallback` — only `#rrggbb` ever reaches the SVG. */
+function paint(value: string | undefined, fallback: string): string {
+  return normalizeHex(value) ?? fallback;
 }
 
 function initials(name: string): string {
@@ -328,13 +447,18 @@ export function renderIdCardSvg(data: IdCardData): string {
   const el = layout.elements;
   const brand = /^#[0-9a-fA-F]{3,8}$/.test(data.brandColor)
     ? data.brandColor
-    : "#2563eb";
+    : FALLBACK_BRAND_COLOR;
 
   const solidBackground = /^#[0-9a-fA-F]{3,8}$/.test(layout.background)
     ? layout.background
     : null;
 
   const parts: string[] = [];
+
+  // Editor-only hook (`annotate`): each element's markup sits in a group the
+  // editor can measure. Off for print and for the stored file.
+  const group = (key: string, markup: string): string =>
+    data.annotate && markup ? `<g data-card-el="${key}">${markup}</g>` : markup;
 
   parts.push(
     `<defs>` +
@@ -349,10 +473,20 @@ export function renderIdCardSvg(data: IdCardData): string {
       `fill="${solidBackground ?? "url(#kayedu-card-bg)"}"/>`,
   );
 
+  // Optional header band (R9) — full width, so it needs no mirroring; its top
+  // corners follow the card's own 12-unit radius.
+  if (layout.headerBand) {
+    const height = round((CARD_HEIGHT * HEADER_BAND_HEIGHT) / 100);
+    parts.push(
+      `<path d="M0 ${height}V12a12 12 0 0 1 12-12H${CARD_WIDTH - 12}a12 12 0 0 1 12 12V${height}Z" ` +
+        `fill="${paint(layout.accent, brand)}"/>`,
+    );
+  }
+
   // Brand accent along the bottom edge — a horizontal band, so it needs no
   // mirroring in either direction.
   parts.push(
-    `<rect x="0" y="${CARD_HEIGHT - 6}" width="${CARD_WIDTH}" height="6" fill="${brand}"/>`,
+    `<rect x="0" y="${CARD_HEIGHT - 6}" width="${CARD_WIDTH}" height="6" fill="${paint(layout.footer, brand)}"/>`,
   );
 
   // ── Logo ────────────────────────────────────────────────────────────────
@@ -361,25 +495,42 @@ export function renderIdCardSvg(data: IdCardData): string {
     const { x, y } = place(el.logo, dir, size);
     if (data.logoDataUri) {
       parts.push(
-        `<image x="${x}" y="${y}" width="${size}" height="${size}" ` +
-          `preserveAspectRatio="xMidYMid slice" href="${escapeXml(data.logoDataUri)}"/>`,
+        group(
+          "logo",
+          `<image x="${x}" y="${y}" width="${size}" height="${size}" ` +
+            `preserveAspectRatio="xMidYMid slice" href="${escapeXml(data.logoDataUri)}"/>`,
+        ),
       );
     } else {
+      // The initial's tile is the theme colour — except on a header band, where
+      // that could be the band's own colour and vanish, so it goes translucent.
+      const tile = layout.headerBand
+        ? `fill="#ffffff" fill-opacity="0.22"`
+        : `fill="${brand}"`;
       parts.push(
-        `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="6" fill="${brand}"/>` +
-          `<text x="${round(x + size / 2)}" y="${round(y + size * 0.7)}" ` +
-          `font-size="${round(size * 0.55)}" font-weight="700" fill="#ffffff" ` +
-          `text-anchor="middle">${escapeXml(data.centerName.trim().charAt(0))}</text>`,
+        group(
+          "logo",
+          `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="6" ${tile}/>` +
+            `<text x="${round(x + size / 2)}" y="${round(y + size * 0.7)}" ` +
+            `font-size="${round(size * 0.55)}" font-weight="700" fill="#ffffff" ` +
+            `text-anchor="middle">${escapeXml(data.centerName.trim().charAt(0))}</text>`,
+        ),
       );
     }
   }
 
   if (el.centerName) {
+    // A custom branch text (R9) replaces the real name; blank falls back to it.
+    const shown = el.centerName.text?.trim() || data.centerName;
     parts.push(
-      text(el.centerName, dir, data.centerName, {
-        fill: "#f8fafc",
-        weight: el.centerName.weight ?? 700,
-      }),
+      group(
+        "centerName",
+        text(el.centerName, dir, shown, {
+          fill: paint(el.centerName.color, DEFAULT_TEXT_COLOR.centerName),
+          weight: el.centerName.weight ?? 700,
+          boxWidth: DEFAULT_TEXT_BOX_WIDTH.centerName,
+        }),
+      ),
     );
   }
 
@@ -390,48 +541,76 @@ export function renderIdCardSvg(data: IdCardData): string {
     const { x, y } = place(el.photo, dir, size);
     if (data.photoDataUri) {
       parts.push(
-        `<image x="${x}" y="${y}" width="${size}" height="${height}" ` +
-          `preserveAspectRatio="xMidYMid slice" href="${escapeXml(data.photoDataUri)}"/>`,
+        group(
+          "photo",
+          `<image x="${x}" y="${y}" width="${size}" height="${height}" ` +
+            `preserveAspectRatio="xMidYMid slice" href="${escapeXml(data.photoDataUri)}"/>`,
+        ),
       );
     } else {
       parts.push(
-        `<rect x="${x}" y="${y}" width="${size}" height="${height}" rx="6" ` +
-          `fill="#ffffff" fill-opacity="0.12"/>` +
-          `<text x="${round(x + size / 2)}" y="${round(y + height * 0.62)}" ` +
-          `font-size="${round(size * 0.42)}" font-weight="600" fill="#e2e8f0" ` +
-          `text-anchor="middle">${escapeXml(initials(data.studentName))}</text>`,
+        group(
+          "photo",
+          `<rect x="${x}" y="${y}" width="${size}" height="${height}" rx="6" ` +
+            `fill="#ffffff" fill-opacity="0.12"/>` +
+            `<text x="${round(x + size / 2)}" y="${round(y + height * 0.62)}" ` +
+            `font-size="${round(size * 0.42)}" font-weight="600" fill="#e2e8f0" ` +
+            `text-anchor="middle">${escapeXml(initials(data.studentName))}</text>`,
+        ),
       );
     }
   }
 
   if (el.studentName) {
     parts.push(
-      text(el.studentName, dir, data.studentName, {
-        fill: "#ffffff",
-        weight: el.studentName.weight ?? 600,
-      }),
+      group(
+        "studentName",
+        text(el.studentName, dir, data.studentName, {
+          fill: paint(el.studentName.color, DEFAULT_TEXT_COLOR.studentName),
+          weight: el.studentName.weight ?? 600,
+          boxWidth: DEFAULT_TEXT_BOX_WIDTH.studentName,
+        }),
+      ),
     );
   }
 
   if (el.grade && data.gradeName) {
-    parts.push(text(el.grade, dir, data.gradeName, { fill: "#cbd5e1" }));
+    parts.push(
+      group(
+        "grade",
+        text(el.grade, dir, data.gradeName, {
+          fill: paint(el.grade.color, DEFAULT_TEXT_COLOR.grade),
+          boxWidth: DEFAULT_TEXT_BOX_WIDTH.grade,
+        }),
+      ),
+    );
   }
 
   if (el.studentCode) {
     const size = el.studentCode.fontSize ?? 12;
+    const customColor = normalizeHex(el.studentCode.color);
     parts.push(
-      text(el.studentCode, dir, data.labels.code, {
-        fill: "#94a3b8",
-        size: round(size * 0.72),
-        weight: 500,
-      }),
-    );
-    parts.push(
-      text(
-        { ...el.studentCode, y: el.studentCode.y + 6 },
-        dir,
-        data.studentCode,
-        { fill: "#ffffff", weight: el.studentCode.weight ?? 600 },
+      group(
+        "studentCode",
+        text(el.studentCode, dir, data.labels.code, {
+          // The small caption keeps its muted look; a custom colour recolours
+          // it too, softened, so the pair still reads as label + value.
+          fill: customColor ?? DEFAULT_CODE_LABEL_COLOR,
+          size: round(size * 0.72),
+          weight: 500,
+          ...(customColor ? { opacity: 0.75 } : {}),
+          boxWidth: DEFAULT_TEXT_BOX_WIDTH.studentCode,
+        }) +
+          text(
+            { ...el.studentCode, y: el.studentCode.y + 6 },
+            dir,
+            data.studentCode,
+            {
+              fill: customColor ?? DEFAULT_TEXT_COLOR.studentCode,
+              weight: el.studentCode.weight ?? 600,
+              boxWidth: DEFAULT_TEXT_BOX_WIDTH.studentCode,
+            },
+          ),
       ),
     );
   }
@@ -444,10 +623,13 @@ export function renderIdCardSvg(data: IdCardData): string {
     const quiet = round(size * 0.08);
     const inner = round(size - quiet * 2);
     parts.push(
-      `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="4" fill="#ffffff"/>` +
-        `<g transform="translate(${round(x + quiet)} ${round(y + quiet)}) ` +
-        `scale(${round(inner / matrix.count)})">` +
-        `<path d="${matrix.path}" fill="#0f172a" shape-rendering="crispEdges"/></g>`,
+      group(
+        "qr",
+        `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="4" fill="#ffffff"/>` +
+          `<g transform="translate(${round(x + quiet)} ${round(y + quiet)}) ` +
+          `scale(${round(inner / matrix.count)})">` +
+          `<path d="${matrix.path}" fill="#0f172a" shape-rendering="crispEdges"/></g>`,
+      ),
     );
   }
 

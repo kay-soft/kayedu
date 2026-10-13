@@ -27,7 +27,7 @@
  * from the global academic catalog (M13), never centre-authored, and every
  * catalog entry carries both an Arabic and an English name.
  */
-import { PrismaClient, type CatalogGrade, type CatalogSubject } from "@prisma/client";
+import { Prisma, PrismaClient, type CatalogGrade, type CatalogSubject } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
@@ -46,6 +46,7 @@ import { linkRooms, writeSessionExtraRooms } from "../lib/db/room-sets.ts";
 import { createTerm } from "../lib/db/terms.ts";
 import { DEFAULT_TIMEZONE, addDays, dateKey, todayInTimezone } from "../lib/scheduling.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
+import { cardLayoutDocumentSchema } from "../lib/validation/settings.ts";
 
 const prisma = new PrismaClient();
 
@@ -227,6 +228,12 @@ type BranchConfig = {
   roomNames: string[];
   /** R3 — pairs of room indices that can be combined into one bigger room. */
   roomLinks?: [number, number][];
+  /**
+   * R9 — a styled ID-card layout, written only while the branch has none (a
+   * branch someone has already customised is never overwritten). Validated
+   * against the real `cardLayoutSchema` shape before it is stored.
+   */
+  cardLayout?: unknown;
   /** Indices into this branch's own teachers/rooms and the shared catalog's subjects. */
   classDefs: {
     subject: number;
@@ -804,9 +811,53 @@ const BRANCH_A: BranchConfig = {
   ],
 };
 
+/**
+ * R9 — Nasr City's ID card exercises every new styling key: a solid background,
+ * a header band with its own colour, a custom bottom-line colour, a custom
+ * branch text, and per-text colour / weight / alignment / font. Downtown keeps
+ * the default card on purpose, so both the old and the new look are on screen.
+ * Every text pairing here clears WCAG AA (the editor would warn otherwise).
+ */
+const NASR_CITY_CARD_LAYOUT = {
+  version: 1,
+  background: "#0f2a1d",
+  headerBand: true,
+  accent: "#166534",
+  footer: "#f59e0b",
+  elements: {
+    logo: { x: 6, y: 8, width: 13 },
+    centerName: {
+      x: 28,
+      y: 10,
+      width: 66,
+      fontSize: 15,
+      weight: 700,
+      color: "#fde68a",
+      align: "start",
+      family: "serif",
+      text: "Center 60 · Nasr City",
+    },
+    photo: { x: 6, y: 36, width: 24 },
+    studentName: {
+      x: 36,
+      y: 40,
+      width: 36,
+      fontSize: 16,
+      weight: 700,
+      color: "#ffffff",
+      align: "center",
+      family: "system",
+    },
+    grade: { x: 36, y: 56, width: 36, fontSize: 12, color: "#bbf7d0", align: "center" },
+    studentCode: { x: 36, y: 68, fontSize: 12, weight: 600 },
+    qr: { x: 74, y: 46, width: 20 },
+  },
+};
+
 const BRANCH_B: BranchConfig = {
   slug: "center-60-nasr-city",
   name: "Center 60 — Nasr City",
+  cardLayout: NASR_CITY_CARD_LAYOUT,
   // Physics renamed in English only (its Arabic name stays the catalog's).
   subjectRenames: [{ subject: 4, displayNameEn: "Physics (Advanced)" }],
   themeColor: "#2563EB",
@@ -872,6 +923,17 @@ async function main() {
         timezone: "Africa/Cairo",
       },
     });
+
+    // R9: a styled ID card on the branch that configures one — only while it
+    // has no layout of its own, and only if the layout passes the real schema.
+    if (config.cardLayout !== undefined && settings.cardLayout === null) {
+      const layout = cardLayoutDocumentSchema.parse(config.cardLayout);
+      await prisma.centerSettings.update({
+        where: { centerId: center.id },
+        data: { cardLayout: layout as Prisma.InputJsonValue },
+      });
+      console.log("  + styled ID card layout (R9)");
+    }
 
     // R1: Cash / InstaPay / Vodafone Cash, only if the branch has none yet.
     await ensureDefaultPaymentMethods(prisma, center.id);

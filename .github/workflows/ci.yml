@@ -85,3 +85,4 @@ jobs:
       - run: npm run check:class-creation
       - run: npm run check:reception
       - run: npm run check:timezone
+      - run: npm run check:card-layout

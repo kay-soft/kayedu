@@ -198,7 +198,17 @@
 
 **Why deferred.** The static payload is a recorded decision (`00-master-product-spec.md` §5.1 "Check-in & the QR payload") and R7 was explicitly told not to change the format; changing it invalidates every card already printed. R7 instead makes the failure *visible* (a payload-shaped scan with an unreadable prefix says "check the keyboard language" rather than "no student") and keeps the bare digits-only code working under any layout. Student codes also restart at 1001 in every centre, so a digits-only payload cannot identify the centre by itself — the desk's own centre scoping would have to carry that, and a card from another branch would then be indistinguishable from a student of this one.
 
-**Depends on.** A decision on transition (accept both payloads for a period, or reprint), a way to keep a card from another branch refusable without the centre id in the text (a per-centre numeric prefix, or a check digit over centre + code), and the ID-card editor milestone (R9) since the card layout and the QR block are edited there.
+**Depends on.** A decision on transition (accept both payloads for a period, or reprint), a way to keep a card from another branch refusable without the centre id in the text (a per-centre numeric prefix, or a check digit over centre + code), and the ID-card editor, where the card layout and the QR block are edited (R9 shipped the editor's styling and drag fixes with the payload deliberately untouched, so this dependency is still open).
+
+---
+
+## 20. The card font actually drawn: embed Cairo in the card SVG
+
+**What it is.** Make the "Cairo (card font)" choice in the ID-card editor render as Cairo everywhere — the editor preview, the print view and the stored `id-cards/` file — by embedding the font in the card SVG (a subset as a base64 `@font-face`), so the three-way font choice (card font / system sans / system serif) is three visibly different faces on every machine.
+
+**Why deferred.** The app loads Cairo through `next/font`, which serves it under a generated family name; the card SVG asks for `Cairo` by its plain name, which resolves only on a machine that has Cairo installed, and otherwise falls back to `'Segoe UI'` / `system-ui`. That is how the card has always rendered, and R9 deliberately added **no new web font** and kept every layout saved before it byte-identical. Embedding a font changes the size of every stored card file and the bytes of every card, which is a decision of its own — not something to slip into a styling pass. In practice today the "card font" and "system sans" options look alike in a browser; the serif option is visibly different.
+
+**Depends on.** A decision on how large a stored card may be (a subset of Cairo's Arabic + Latin ranges, with weights 400/500/600/700, is tens of KB per file), and on whether stored cards from before the change are regenerated or left as they are.
 
 ---
 

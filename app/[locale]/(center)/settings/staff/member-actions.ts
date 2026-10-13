@@ -28,6 +28,12 @@ import {
 
 const FORBIDDEN: ActionState = { error: "forbidden" };
 const NOT_FOUND: ActionState = { error: "notFound" };
+/**
+ * Teachers are managed on the Teachers page, never here (R9) — refused by
+ * direct call whether the TEACHER role is the one being assigned or the one
+ * being edited.
+ */
+const TEACHER_ELSEWHERE: ActionState = { error: "teacherViaTeachersPage" };
 
 function staffPath(locale: string): string {
   return `/${locale}${ROUTES.centerStaff}`;
@@ -83,13 +89,21 @@ export async function changeMemberRoleAction(
   if (!ctxCan(scope.ctx, "membership.role.assign")) return FORBIDDEN;
 
   const parsed = memberRoleSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  if (!parsed.success) {
+    const fieldErrors = fieldErrorsFrom(parsed.error);
+    // `role` is a closed list of staff roles (`staffRoleField`); naming the
+    // TEACHER case gets its own message instead of a generic "not found".
+    return fieldErrors.role === TEACHER_ELSEWHERE.error
+      ? { ...TEACHER_ELSEWHERE, fieldErrors }
+      : { fieldErrors };
+  }
 
   const { membershipId, role, locale } = parsed.data;
 
   // Scoped lookup: an id from another center never resolves.
   const membership = await scope.db.memberships.findById(membershipId);
   if (!membership) return NOT_FOUND;
+  if (membership.role === "TEACHER") return TEACHER_ELSEWHERE;
   if (membership.role === role) return { status: "saved" };
 
   // Nobody edits their own access — that is how a center locks itself out.
@@ -135,6 +149,7 @@ export async function setMemberActiveAction(
 
   const membership = await scope.db.memberships.findById(membershipId);
   if (!membership) return NOT_FOUND;
+  if (membership.role === "TEACHER") return TEACHER_ELSEWHERE;
   if (membership.active === active) return { status: "saved" };
   if (membership.userId === scope.ctx.user.id) return { error: "selfEdit" };
 
