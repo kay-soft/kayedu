@@ -3,8 +3,8 @@ import type { Center, CenterLifecycleState, Prisma, PrismaClient, Role } from "@
 // Relative imports on purpose — `npm run check:admin` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/payments.ts,
 // lib/db/approvals.ts, lib/db/analytics.ts).
-import { DEFAULT_ROLE_GRANTS } from "../auth/permissions.ts";
-import { defaultPaymentMethodRows } from "./payment-methods.ts";
+import { provisionCenterBaseline } from "./provision.ts";
+import { runInTransaction } from "./session-lifecycle.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -135,12 +135,15 @@ export type CreateCenterResult =
   | { ok: false; error: "slugTaken" };
 
 /**
- * Creates a Center + its CenterSettings row + the founding Owner invitation
- * in one nested write — the M9 equivalent of how `configureCenter` (M2's
- * gate) provisions a fresh center's config in one call, no per-center
- * branching. Settings defaults mirror `prisma/seed.ts`'s (percentage cut
- * 15%, 10-minute late threshold, Cairo timezone) — a new tenant should start
- * from the same sane defaults the seeded demo center does.
+ * Creates a Center + its organization + the founding Owner invitation, then
+ * hands the centre to `provisionCenterBaseline` (`lib/db/provision.ts`) for
+ * everything it needs to actually work — its CenterSettings row, the baseline
+ * permission matrix and the default payment methods — all in one transaction.
+ * The M9 equivalent of how `configureCenter` (M2's gate) provisions a fresh
+ * center's config in one call, no per-center branching. The baseline is owned
+ * by that one function, not re-listed here (P1: the demo seed had its own copy
+ * of "create a centre" that forgot the grants, and its Owner saw only the
+ * Dashboard).
  */
 export async function createCenterWithSettings(
   db: Db,
@@ -149,67 +152,46 @@ export async function createCenterWithSettings(
   const existing = await db.center.findUnique({ where: { slug: input.slug } });
   if (existing) return { ok: false, error: "slugTaken" };
 
-  const center = await db.center.create({
-    data: {
-      name: input.name,
-      nameEn: input.nameEn ?? null,
-      slug: input.slug,
-      logoUrl: input.logoUrl ?? null,
-      themeColor: input.themeColor,
-      // A freshly admin-provisioned center hasn't done anything yet — no
-      // staff signed in, no config touched — so it starts ONBOARDING rather
-      // than ACTIVE (docs/00 §5.1 "Centre lifecycle"). ONBOARDING already
-      // permits sign-in (`ACCESSIBLE_LIFECYCLE_STATES` above), so the invited
-      // Owner can still accept the invite below and set the center up; moving
-      // it to ACTIVE once setup is real is a deliberate lifecycle transition
-      // an admin makes from `/admin/centers/[id]`, not an automatic flip.
-      lifecycleState: "ONBOARDING",
-      // A platform-created center starts as its own single-branch
-      // organization (M11) — the same shape the M11 migration's backfill
-      // gave every pre-existing center. Turning it into a real multi-branch
-      // organization later is an Owner-side action, not something this
-      // provisioning step decides.
-      organization: {
-        create: {
-          name: input.name,
-          nameEn: input.nameEn ?? null,
+  const center = await runInTransaction(db, async (tx) => {
+    const created = await tx.center.create({
+      data: {
+        name: input.name,
+        nameEn: input.nameEn ?? null,
+        slug: input.slug,
+        logoUrl: input.logoUrl ?? null,
+        themeColor: input.themeColor,
+        // A freshly admin-provisioned center hasn't done anything yet — no
+        // staff signed in, no config touched — so it starts ONBOARDING rather
+        // than ACTIVE (docs/00 §5.1 "Centre lifecycle"). ONBOARDING already
+        // permits sign-in (`ACCESSIBLE_LIFECYCLE_STATES` above), so the invited
+        // Owner can still accept the invite below and set the center up; moving
+        // it to ACTIVE once setup is real is a deliberate lifecycle transition
+        // an admin makes from `/admin/centers/[id]`, not an automatic flip.
+        lifecycleState: "ONBOARDING",
+        // A platform-created center starts as its own single-branch
+        // organization (M11) — the same shape the M11 migration's backfill
+        // gave every pre-existing center. Turning it into a real multi-branch
+        // organization later is an Owner-side action, not something this
+        // provisioning step decides.
+        organization: {
+          create: {
+            name: input.name,
+            nameEn: input.nameEn ?? null,
+          },
+        },
+        invitations: {
+          create: {
+            email: input.invite.email,
+            role: "OWNER",
+            token: input.invite.token,
+            invitedBy: input.invite.invitedBy,
+            expiresAt: input.invite.expiresAt,
+          },
         },
       },
-      settings: {
-        create: {
-          defaultShareType: "PERCENTAGE",
-          defaultShareValue: 15,
-          defaultLateThreshold: 10,
-          timezone: "Africa/Cairo",
-        },
-      },
-      invitations: {
-        create: {
-          email: input.invite.email,
-          role: "OWNER",
-          token: input.invite.token,
-          invitedBy: input.invite.invitedBy,
-          expiresAt: input.invite.expiresAt,
-        },
-      },
-      // The M12 permission matrix (docs/02-architecture.md §6.1) is
-      // deny-by-default, so a fresh center needs its baseline grant rows
-      // seeded here — the same baseline every pre-existing center already
-      // carries from the M12 migration's backfill — or its founding Owner
-      // would be unable to do anything beyond the ceiling-forced ownership
-      // actions the moment they accept the invite above.
-      permissionGrants: {
-        create: Object.entries(DEFAULT_ROLE_GRANTS).flatMap(([role, actions]) =>
-          actions.map((action) => ({ role: role as Role, action, allowed: true })),
-        ),
-      },
-      // R1: a centre must always have at least one active payment method
-      // (lib/db/payment-methods.ts), so it is born with the defaults —
-      // Cash / InstaPay / Vodafone Cash — and edits them at /settings.
-      paymentMethods: {
-        create: defaultPaymentMethodRows(),
-      },
-    },
+    });
+    await provisionCenterBaseline(tx, created.id);
+    return created;
   });
 
   return { ok: true, center };

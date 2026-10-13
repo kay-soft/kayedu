@@ -30,11 +30,32 @@
  *     `lib/db/scoped.ts`'s `teachers.findById` runs never structurally
  *     includes another center's `Membership` rows for a teacher who has one.
  *
+ *  7. (P1) The provisioning baseline and the nav it unlocks — the regression
+ *     for "an Owner / Manager sees only Dashboard". `provisionCenterBaseline`
+ *     yields the full baseline (idempotently, without undoing a deliberate
+ *     change); `createCenterWithSettings` (Super Admin) and the demo seed both
+ *     go through it (static); a freshly provisioned centre gives its owner,
+ *     manager, receptionist, accountant and teacher exactly their expected nav
+ *     items, computed through the shell's own functions; and every nav item
+ *     shows on the permission its page asserts.
+ *
  * Needs a reachable database and cleans up after itself.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { PrismaClient, type Role } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { can, isBranchGrantableRole } from "../lib/auth/permissions.ts";
+import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
+import { createCenterWithSettings } from "../lib/db/platform.ts";
+import {
+  baselineGrantKeys,
+  centerBaselineGaps,
+  hasFullBaseline,
+  provisionCenterBaseline,
+} from "../lib/db/provision.ts";
+import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
+import { pageGateFor } from "./lib/nav-gates.ts";
 import {
   grantMembershipBranch,
   loadPermissionGrants,
@@ -48,6 +69,13 @@ const prisma = new PrismaClient();
 const SLUG_A = "permissions-check-a";
 const SLUG_B = "permissions-check-b";
 const ORG_NAME = "Permissions Check Org";
+// P1 (part 7): a centre made by Super Admin provisioning, one made the way the
+// seed makes them, and one left bare on purpose.
+const SLUG_P1_ADMIN = "permissions-check-p1-admin";
+const SLUG_P1_SEED = "permissions-check-p1-seed";
+const SLUG_P1_BARE = "permissions-check-p1-bare";
+const P1_ORG_PREFIX = "Permissions Check P1";
+const ROOT = join(import.meta.dirname, "..");
 
 let failures = 0;
 
@@ -61,8 +89,12 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 async function cleanup() {
-  await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
-  await prisma.organization.deleteMany({ where: { name: ORG_NAME } });
+  await prisma.center.deleteMany({
+    where: { slug: { in: [SLUG_A, SLUG_B, SLUG_P1_ADMIN, SLUG_P1_SEED, SLUG_P1_BARE] } },
+  });
+  await prisma.organization.deleteMany({
+    where: { OR: [{ name: ORG_NAME }, { name: { startsWith: P1_ORG_PREFIX } }] },
+  });
   await prisma.user.deleteMany({ where: { email: { startsWith: "permissions-check-" } } });
 }
 
@@ -268,6 +300,169 @@ async function main() {
     "Revoking a branch grant is additive-only in reverse — it removes exactly that branch",
     (afterRevoke.get(managerHome.id) ?? []).length === 0,
   );
+
+  await checkProvisioningBaseline();
+}
+
+// ── 7. P1: the provisioning baseline and the nav it unlocks ─────────────────
+
+/** What each role is meant to see in the sidebar of a centre that works. */
+const EXPECTED_NAV: Record<"OWNER" | "MANAGER" | "RECEPTIONIST" | "ACCOUNTANT", string[]> = {
+  OWNER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "settings"],
+  MANAGER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "settings"],
+  RECEPTIONIST: ["dashboard", "reception", "sessions", "students"],
+  ACCOUNTANT: ["dashboard", "analytics", "expenses"],
+};
+const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "students", "classes", "approvals", "settlements"];
+
+async function navFor(centerId: string, userId: string, role: Role): Promise<string[]> {
+  const relations = await resolveCenterRelations(prisma, userId);
+  const relation = relations.find((item) => item.center.id === centerId);
+  if (!relation) return ["(no relation)"];
+  const experience = role === "TEACHER" ? "teacher" : "center";
+  const resolved = roleForExperience(relation, experience) as Role;
+  const grants = await loadPermissionGrants(prisma, centerId, resolved);
+  return navForExperience(experience, resolved, grants).map((item) => item.labelKey);
+}
+
+async function staffMember(centerId: string, tag: string, role: Role) {
+  const user = await prisma.user.create({
+    data: { firstName: tag, lastName: role, email: `permissions-check-p1-${tag}-${role.toLowerCase()}@kayedu.test`, locale: "en" },
+  });
+  await prisma.membership.create({
+    data: scopedData(centerId, { userId: user.id, role, joinedAt: new Date(), firstName: tag, lastName: role }),
+  });
+  return user;
+}
+
+async function checkProvisioningBaseline() {
+  console.log("\n7. P1 — the provisioning baseline and the nav it unlocks");
+  const expectedRows = baselineGrantKeys().length;
+
+  // (a) Super Admin provisioning, end to end.
+  const created = await createCenterWithSettings(prisma, {
+    name: `${P1_ORG_PREFIX} Admin`,
+    slug: SLUG_P1_ADMIN,
+    themeColor: "#2563EB",
+    invite: {
+      email: "permissions-check-p1-invite@kayedu.test",
+      token: "permissions-check-p1-token",
+      invitedBy: "permissions-check",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    },
+  });
+  if (!created.ok) throw new Error(`createCenterWithSettings: ${created.error}`);
+  const adminGaps = await centerBaselineGaps(prisma, created.center.id);
+  check(
+    `createCenterWithSettings yields the full baseline (settings + ${expectedRows} grant rows + payment methods)`,
+    hasFullBaseline(adminGaps) &&
+      (await prisma.permissionGrant.count({ where: { centerId: created.center.id } })) === expectedRows,
+    JSON.stringify({ missing: adminGaps.missingGrants.length, settings: adminGaps.missingSettings, methods: adminGaps.activePaymentMethods }),
+  );
+
+  // (b) The function itself, the way the seed uses it — on a bare centre.
+  const org = await prisma.organization.create({ data: { name: `${P1_ORG_PREFIX} Seed` } });
+  const seeded = await prisma.center.create({ data: { slug: SLUG_P1_SEED, name: "Permissions Check P1 Seed", organizationId: org.id } });
+  const report = await prisma.$transaction((tx) => provisionCenterBaseline(tx, seeded.id));
+  check(
+    "provisionCenterBaseline on a bare centre creates settings, every baseline grant row and the default payment methods",
+    report.settingsCreated && report.grantsCreated === expectedRows && report.paymentMethodsCreated === 3,
+    JSON.stringify(report),
+  );
+  check("…and the centre then has no baseline gap", hasFullBaseline(await centerBaselineGaps(prisma, seeded.id)));
+
+  // Idempotent, and never undoes a deliberate change an Owner made.
+  await savePermissionGrants(prisma, seeded.id, [{ role: "RECEPTIONIST", action: "student.manage", allowed: false }]);
+  const again = await prisma.$transaction((tx) => provisionCenterBaseline(tx, seeded.id));
+  const stillOff = await loadPermissionGrants(prisma, seeded.id, "RECEPTIONIST");
+  check(
+    "Running it again creates nothing and does not flip a grant an Owner switched off",
+    !again.settingsCreated && again.grantsCreated === 0 && again.paymentMethodsCreated === 0 && stillOff["student.manage"] === false,
+    JSON.stringify(again),
+  );
+  await savePermissionGrants(prisma, seeded.id, [{ role: "RECEPTIONIST", action: "student.manage", allowed: true }]);
+  check(
+    "A switched-off baseline action is a configuration, not a gap",
+    hasFullBaseline(await centerBaselineGaps(prisma, seeded.id)),
+  );
+
+  // (c) Static: every centre-creating path goes through the one function.
+  const platformSource = readFileSync(join(ROOT, "lib", "db", "platform.ts"), "utf8");
+  const seedSource = readFileSync(join(ROOT, "prisma", "seed.ts"), "utf8");
+  check(
+    "createCenterWithSettings calls provisionCenterBaseline (static)",
+    /provisionCenterBaseline\(/.test(platformSource) && /from "\.\/provision\.ts"/.test(platformSource),
+  );
+  check("prisma/seed.ts calls provisionCenterBaseline (static)", /provisionCenterBaseline\(/.test(seedSource));
+  check(
+    "Neither re-implements the baseline — no DEFAULT_ROLE_GRANTS or permission-grant write of their own (static)",
+    !/DEFAULT_ROLE_GRANTS|permissionGrants:|permissionGrant\.create/.test(platformSource) &&
+      !/DEFAULT_ROLE_GRANTS|permissionGrants:|permissionGrant\.create/.test(seedSource),
+  );
+  check(
+    "createCenterWithSettings no longer builds the settings row or payment methods itself (static)",
+    !/settings:\s*\{|paymentMethods:\s*\{|defaultPaymentMethodRows/.test(platformSource),
+  );
+
+  // (d) The nav a freshly provisioned centre gives each role — through the
+  // shell's own functions (relation resolution → grant load → navForExperience).
+  const owner = await staffMember(created.center.id, "adm", "OWNER");
+  const manager = await staffMember(created.center.id, "adm", "MANAGER");
+  const receptionist = await staffMember(created.center.id, "adm", "RECEPTIONIST");
+  const accountant = await staffMember(created.center.id, "adm", "ACCOUNTANT");
+  const teacher = await staffMember(created.center.id, "adm", "TEACHER");
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((value, i) => value === b[i]);
+  for (const [label, user, role] of [
+    ["owner", owner, "OWNER"],
+    ["manager", manager, "MANAGER"],
+    ["receptionist", receptionist, "RECEPTIONIST"],
+    ["accountant", accountant, "ACCOUNTANT"],
+  ] as const) {
+    const nav = await navFor(created.center.id, user.id, role);
+    check(
+      `A freshly provisioned centre: its ${label} sees ${EXPECTED_NAV[role].length} nav items`,
+      same(nav, EXPECTED_NAV[role]),
+      `got [${nav.join(", ")}]`,
+    );
+  }
+  const teacherNav = await navFor(created.center.id, teacher.id, "TEACHER");
+  check("A freshly provisioned centre: its teacher sees the teacher nav", same(teacherNav, EXPECTED_TEACHER_NAV), `got [${teacherNav.join(", ")}]`);
+
+  // The seed's path gives the same answer as the admin path.
+  const seedOwner = await staffMember(seeded.id, "seed", "OWNER");
+  const seedRecep = await staffMember(seeded.id, "seed", "RECEPTIONIST");
+  check(
+    "The seed's path gives the same owner and receptionist nav as Super Admin provisioning",
+    same(await navFor(seeded.id, seedOwner.id, "OWNER"), EXPECTED_NAV.OWNER) &&
+      same(await navFor(seeded.id, seedRecep.id, "RECEPTIONIST"), EXPECTED_NAV.RECEPTIONIST),
+  );
+
+  // The regression itself: a centre with no baseline (deny-by-default) shows
+  // an Owner nothing but the ungated Dashboard — what P1 found in the dev DB.
+  const bareOrg = await prisma.organization.create({ data: { name: `${P1_ORG_PREFIX} Bare` } });
+  const bare = await prisma.center.create({ data: { slug: SLUG_P1_BARE, name: "Permissions Check P1 Bare", organizationId: bareOrg.id } });
+  const bareOwner = await staffMember(bare.id, "bare", "OWNER");
+  check(
+    "Regression: a centre created WITHOUT the baseline shows its Owner only the Dashboard",
+    same(await navFor(bare.id, bareOwner.id, "OWNER"), ["dashboard"]),
+  );
+  check("…and centerBaselineGaps reports every baseline row missing", (await centerBaselineGaps(prisma, bare.id)).missingGrants.length === expectedRows);
+
+  // (e) The page gate is the authority: each nav item's permission is exactly
+  // the one its page asserts.
+  for (const [experience, defs] of [["center", CENTER_NAV], ["teacher", TEACHER_NAV]] as const) {
+    const differing = defs.filter((def) => {
+      const page = pageGateFor(experience, def.href);
+      return page.found && page.permission !== (def.permission ?? null);
+    });
+    check(
+      `Every ${experience} nav item shows on exactly its page's permission`,
+      differing.length === 0,
+      differing.map((def) => `${def.href}: nav=${def.permission ?? "-"}`).join("; "),
+    );
+    const unresolved = defs.filter((def) => !pageGateFor(experience, def.href).found);
+    check(`Every ${experience} nav item has a page file to compare against`, unresolved.length === 0, unresolved.map((d) => d.href).join(", "));
+  }
 }
 
 main()

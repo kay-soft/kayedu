@@ -35,12 +35,16 @@ export default async function SettingsLayout({
       { href: ROUTES.centerSettingsCatalog, labelKey: "catalog" },
       { href: ROUTES.centerSettingsCard, labelKey: "card" },
     );
-    if (ctxCan(ctx, "permission.manage")) {
-      items.push({
-        href: ROUTES.centerSettingsPermissions,
-        labelKey: "permissions",
-      });
-    }
+  }
+
+  // P1: the permissions page asserts `permission.manage` and nothing else, so
+  // that is the one gate that shows its link — it used to nest under
+  // `center.settings.edit` too, a second condition the page never checks.
+  if (ctxCan(ctx, "permission.manage")) {
+    items.push({
+      href: ROUTES.centerSettingsPermissions,
+      labelKey: "permissions",
+    });
   }
 
   if (ctxCan(ctx, "staff.invite")) {

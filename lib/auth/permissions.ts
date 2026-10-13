@@ -206,9 +206,10 @@ export const MATRIX_ROLES: readonly Role[] = [
 
 /**
  * The baseline `PermissionGrant` rows a freshly provisioned center starts
- * with — seeded once at creation (`lib/db/platform.ts`'s
- * `createCenterWithSettings`), then freely reconfigurable through the matrix
- * from that point on. This is the same baseline the M12 migration backfilled
+ * with — written once at creation by `provisionCenterBaseline`
+ * (`lib/db/provision.ts`, the single provisioning function every centre-creating
+ * path calls: `createCenterWithSettings` and the demo seed), then freely
+ * reconfigurable through the matrix from that point on. This is the same baseline the M12 migration backfilled
  * onto every pre-existing center (`prisma/migrations/20260906224000_m12_permission_matrix`),
  * kept here as the one canonical list so a brand-new center's provisioning
  * path can never quietly drift from what that one-time migration established.

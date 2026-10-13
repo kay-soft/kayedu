@@ -7,7 +7,6 @@ import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-re
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
-import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -194,14 +193,6 @@ export default async function TeacherSessionDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("uploads.title")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <FormMessage tone="info">{t("uploads.comingSoon")}</FormMessage>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="flex flex-col gap-6">

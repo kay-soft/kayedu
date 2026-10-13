@@ -1,7 +1,10 @@
-import type { TenantRole } from "@/lib/auth/permissions";
-import { can } from "@/lib/auth/permissions";
-import type { PermissionGrants, Permission } from "@/lib/auth/permissions";
-import { ROUTES } from "@/lib/routes";
+// Relative imports on purpose (P1): `scripts/diagnose-nav.ts`, `seed:verify`
+// and `check:permissions` compute the nav a role would see through THIS file —
+// the same function the shell calls — outside the Next.js runtime, where the
+// `@/` alias does not resolve. (Same discipline as lib/db/*.)
+import type { TenantRole, PermissionGrants, Permission } from "../../lib/auth/permissions.ts";
+import { can } from "../../lib/auth/permissions.ts";
+import { ROUTES } from "../../lib/routes.ts";
 
 /**
  * Icon names are passed as strings so the nav stays serializable across the
@@ -40,9 +43,17 @@ export type ShellNavItem = {
   group?: string;
 };
 
-type NavDef = ShellNavItem & { permission?: Permission };
+/**
+ * A nav item and the permission that shows it. **The page's own gate is the
+ * authority** (P1, docs/02-architecture.md §6.2): an item's `permission` must
+ * be exactly the action its page asserts with `requirePermission`, no more and
+ * no less — an item broader than its page is a link that bounces the user
+ * home, one narrower hides a page they may open. `check:permissions` reads each
+ * page file and compares, so the two cannot drift apart silently.
+ */
+export type NavDef = ShellNavItem & { permission?: Permission };
 
-const CENTER_NAV: NavDef[] = [
+export const CENTER_NAV: NavDef[] = [
   { href: ROUTES.centerDashboard, labelKey: "dashboard", icon: "dashboard" },
   { href: ROUTES.centerReception, labelKey: "reception", icon: "reception", permission: "reception.use", group: "frontDesk" },
   { href: ROUTES.centerSessions, labelKey: "sessions", icon: "sessions", permission: "session.view", group: "frontDesk" },
@@ -58,11 +69,19 @@ const CENTER_NAV: NavDef[] = [
   { href: ROUTES.centerSettings, labelKey: "settings", icon: "settings", permission: "center.settings.edit" },
 ];
 
-const TEACHER_NAV: NavDef[] = [
+export const TEACHER_NAV: NavDef[] = [
   { href: ROUTES.teacherDashboard, labelKey: "dashboard", icon: "dashboard" },
   { href: ROUTES.teacherSessions, labelKey: "sessions", icon: "sessions" },
   { href: ROUTES.teacherStudents, labelKey: "students", icon: "students" },
-  { href: ROUTES.teacherClasses, labelKey: "classes", icon: "classes" },
+  // P1: the classes page asserts `changeRequest.create` (it is the request
+  // form's page); the item used to carry no permission, so a teacher without
+  // it saw a link that redirected them home.
+  {
+    href: ROUTES.teacherClasses,
+    labelKey: "classes",
+    icon: "classes",
+    permission: "changeRequest.create",
+  },
   {
     href: ROUTES.teacherApprovals,
     labelKey: "approvals",

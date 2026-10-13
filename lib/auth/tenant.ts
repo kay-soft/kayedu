@@ -4,7 +4,6 @@ import type {
   Center,
   CenterSettings,
   Membership,
-  Role,
   StudentProfile,
   User,
 } from "@prisma/client";
@@ -12,22 +11,25 @@ import { prisma } from "@/lib/db/client";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getActiveCenterId } from "@/lib/auth/active-center";
 import {
-  ROLE_PRECEDENCE,
   can,
   isCenterStaffRole,
-  isBranchGrantableRole,
   type Permission,
   type PermissionGrants,
   type TenantRole,
 } from "@/lib/auth/permissions";
-import { loadPermissionGrants, membershipBranchGrantsFor } from "@/lib/db/permissions";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
+import {
+  resolveCenterRelations,
+  roleForExperience,
+  type CenterRelation,
+  type Experience,
+} from "@/lib/auth/relations";
+import { loadPermissionGrants } from "@/lib/db/permissions";
 import { verifiedChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 
-export type Experience = "center" | "teacher" | "student";
+export type { CenterRelation, Experience };
 
 /**
  * Everything a request needs to be safely tenant-scoped
@@ -60,171 +62,20 @@ export type TenantContext = {
   rollupOrganizationId: string | null;
 };
 
-export type CenterRelation = {
-  center: Center;
-  memberships: Membership[];
-  studentProfile: StudentProfile | null;
-  roles: TenantRole[];
-};
-
-/** Drops the joined `center` relation so the row matches its Prisma model type. */
-function withoutCenter<T extends { center: unknown }>(row: T): Omit<T, "center"> {
-  const copy: Record<string, unknown> = { ...row };
-  delete copy.center;
-  return copy as Omit<T, "center">;
-}
-
-function rolePrecedence(role: TenantRole): number {
-  const index = ROLE_PRECEDENCE.indexOf(role as Role);
-  // STUDENT / PLATFORM_ADMIN aren't Memberships — they sort last.
-  return index === -1 ? ROLE_PRECEDENCE.length : index;
-}
-
-/** Highest-authority role first, so `roles[0]` is the role to land the user in. */
-function sortRoles(roles: TenantRole[]): TenantRole[] {
-  return [...new Set(roles)].sort((a, b) => rolePrecedence(a) - rolePrecedence(b));
-}
-
 /** The role a user acts with at a center when no experience is requested. */
 export function primaryRole(relation: CenterRelation): TenantRole {
   return relation.roles[0] ?? "STUDENT";
 }
 
-const OWNER_ROLE: Role = "OWNER";
-
 /**
- * Every center this user is connected to, as staff/teacher and/or as a
- * student — plus, for an OWNER, every *other* branch under the same
- * organization as a branch they already hold (M11, docs/01-data-model.md §4
- * "Branch (organization) visibility").
- *
- * This is the "widened by organizationId" resolution the milestone chose over
- * a nullable `Membership.centerId` (see docs/02-architecture.md §4): an
- * Owner's real `Membership` row is untouched — same `centerId`, same
- * `@@unique([userId, centerId, role])` — so every non-Owner role and every
- * existing Owner-at-their-own-branch behavior is provably unchanged. The only
- * new thing is that an Owner membership at branch A additionally resolves a
- * *synthetic* relation for every sibling branch B under A's organization,
- * carrying a per-branch view of the same membership row (same `id`, `centerId`
- * swapped to B). `buildContext()` still just reads `relation.center.id` as the
- * centerId to scope on, so a sibling relation scopes to B's real data exactly
- * like a real Membership at B would — `lib/db/scoped.ts` needs no changes at
- * all to support it.
+ * Every center this user is connected to — see `lib/auth/relations.ts`'s
+ * `resolveCenterRelations` for the resolution itself (the Owner/org widening,
+ * branch grants, student profiles). This is just the per-request `cache()`
+ * around it: React's cache is per-request only, so a role or grant change
+ * still takes effect on the very next request (security fix 17, below).
  */
 export const getUserCenterRelations = cache(
-  async (userId: string): Promise<CenterRelation[]> => {
-    const memberships = await prisma.membership.findMany({
-      where: {
-        userId,
-        active: true,
-        center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-      },
-      include: { center: true },
-    });
-
-    const ownerOrgIds = [
-      ...new Set(
-        memberships
-          .filter((membership) => membership.role === OWNER_ROLE)
-          .map((membership) => membership.center.organizationId),
-      ),
-    ];
-
-    const branchGrantableMembershipIds = memberships
-      .filter((membership) => isBranchGrantableRole(membership.role))
-      .map((membership) => membership.id);
-
-    const [studentProfiles, siblingBranches, branchGrantsByMembership] = await Promise.all([
-      prisma.studentProfile.findMany({
-        where: {
-          userId,
-          active: true,
-          center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-        },
-        include: { center: true },
-      }),
-      ownerOrgIds.length > 0
-        ? prisma.center.findMany({
-            where: {
-              organizationId: { in: ownerOrgIds },
-              lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] },
-            },
-          })
-        : Promise.resolve([]),
-      membershipBranchGrantsFor(prisma, branchGrantableMembershipIds),
-    ]);
-
-    const byCenter = new Map<string, CenterRelation>();
-
-    const ensure = (center: Center): CenterRelation => {
-      const existing = byCenter.get(center.id);
-      if (existing) return existing;
-      const created: CenterRelation = {
-        center,
-        memberships: [],
-        studentProfile: null,
-        roles: [],
-      };
-      byCenter.set(center.id, created);
-      return created;
-    };
-
-    for (const membership of memberships) {
-      const relation = ensure(membership.center);
-      relation.memberships.push(withoutCenter(membership));
-      relation.roles.push(membership.role);
-    }
-
-    // Widen: every Owner membership's organization reaches every branch under
-    // it, even branches with no real Membership row. A branch this user
-    // already holds a real membership at (its own branch, or one they also
-    // happen to be TEACHER/STUDENT at) is skipped — the real row above is
-    // never shadowed by a synthetic one.
-    const branchesByOrg = new Map<string, Center[]>();
-    for (const branch of siblingBranches) {
-      const list = branchesByOrg.get(branch.organizationId) ?? [];
-      list.push(branch);
-      branchesByOrg.set(branch.organizationId, list);
-    }
-    for (const membership of memberships) {
-      if (membership.role !== OWNER_ROLE) continue;
-      const siblings = branchesByOrg.get(membership.center.organizationId) ?? [];
-      for (const branch of siblings) {
-        if (branch.id === membership.centerId) continue;
-        const relation = ensure(branch);
-        if (relation.roles.includes(OWNER_ROLE)) continue;
-        relation.memberships.push({ ...withoutCenter(membership), centerId: branch.id });
-        relation.roles.push(OWNER_ROLE);
-      }
-    }
-
-    // Widen again: an Owner-granted MembershipBranchGrant lets a
-    // MANAGER/RECEPTIONIST/ACCOUNTANT membership additionally reach specific
-    // extra branches (M12) — additive only, and bounded to exactly the
-    // branches an Owner explicitly granted, unlike the Owner's own
-    // every-sibling-branch widening above.
-    for (const membership of memberships) {
-      if (!isBranchGrantableRole(membership.role)) continue;
-      const grantedBranches = branchGrantsByMembership.get(membership.id) ?? [];
-      for (const branch of grantedBranches) {
-        if (branch.id === membership.centerId) continue;
-        const relation = ensure(branch);
-        if (relation.roles.includes(membership.role)) continue;
-        relation.memberships.push({ ...withoutCenter(membership), centerId: branch.id });
-        relation.roles.push(membership.role);
-      }
-    }
-
-    for (const profile of studentProfiles) {
-      const relation = ensure(profile.center);
-      relation.studentProfile = withoutCenter(profile);
-      relation.roles.push("STUDENT");
-    }
-
-    return [...byCenter.values()]
-      .map((relation) => ({ ...relation, roles: sortRoles(relation.roles) }))
-      .sort((a, b) => a.center.name.localeCompare(b.center.name));
-  },
+  async (userId: string): Promise<CenterRelation[]> => resolveCenterRelations(prisma, userId),
 );
 
 export type OwnerOrgGroup = {
@@ -270,21 +121,6 @@ export const getOwnerOrgGroups = cache(
     }));
   },
 );
-
-function roleForExperience(
-  relation: CenterRelation,
-  experience?: Experience,
-): Role | "STUDENT" {
-  const staff = relation.roles.find((role) => isCenterStaffRole(role));
-  const teacher = relation.roles.find((role) => role === "TEACHER");
-  const student = relation.roles.find((role) => role === "STUDENT");
-
-  if (experience === "center" && staff) return staff;
-  if (experience === "teacher" && teacher) return teacher;
-  if (experience === "student" && student) return student;
-
-  return staff ?? teacher ?? student ?? "STUDENT";
-}
 
 async function redirectTo(href: string): Promise<never> {
   redirect({ href, locale: await getLocale() });

@@ -212,6 +212,16 @@
 
 ---
 
+## 21. A platform-admin "repair this centre's baseline" action
+
+**What it is.** A button on `/admin/centers/[id]` that runs `provisionCenterBaseline` (`lib/db/provision.ts`) for a centre that lacks part of it — missing settings, missing baseline `PermissionGrant` rows, no active payment method — and writes an audit row saying what it added, with a preview of exactly which rows are missing (`centerBaselineGaps`) before anything is written.
+
+**Why deferred.** P1 fixed the cause (every centre-creating path now goes through that one function) and deliberately did **not** backfill existing centres: re-adding a grant row an Owner removed or never wanted is a permission change made by side effect, and the only centres known to lack the baseline were the two dev Center 60 branches, which a wipe + reseed replaces. There is no production centre in that state. A repair that is a visible, audited, deliberate platform action is the right shape if one ever appears; building it before one does would be speculative.
+
+**Depends on.** A decision on whether a repair may only *add* missing rows (the function's behaviour today — it never flips an existing row) or may also reset a centre's matrix to the baseline, which is a different and more dangerous operation; and on who may run it (platform admin only, per `00-master-product-spec.md` §3).
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

@@ -573,7 +573,7 @@
       "acceptsNewStudents": "Accepting new students",
       "acceptsNewStudentsHint": "Turn off to hide this class from new enrollment while keeping it running.",
       "requiresConfirmation": "New enrollments need confirmation",
-      "requiresConfirmationHint": "Used by the student discovery/reservation flow (a later milestone) — staff-added enrollments are always immediate.",
+      "requiresConfirmationHint": "Students who reserve this class from Discover wait for your approval. Enrollments you add yourself are always immediate.",
       "seats": "Seats",
       "seatsValue": "{enrolled} of {seats}",
       "seatsUnlimited": "{enrolled} · no seat limit",
@@ -1575,6 +1575,7 @@
         "qr": "QR code"
       },
       "sample": {
+        "caption": "The preview uses a sample student — it is not a real record.",
         "studentName": "Sample Student",
         "grade": "Grade 10",
         "codeLabel": "Student code"
@@ -1764,10 +1765,6 @@
       "placeholder": "What was covered, homework assigned, anything worth noting",
       "save": "Save note",
       "saved": "Saved."
-    },
-    "uploads": {
-      "title": "Files",
-      "comingSoon": "Uploading files for a session is coming in a later milestone."
     },
     "context": {
       "title": "Session"

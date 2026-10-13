@@ -89,7 +89,9 @@ lib/
     session.ts                  # Supabase auth user + User mirror
     active-center.ts            # the active-center cookie
     tenant.ts                   # getTenantContext() (request-cached, §14) + getTeacherContexts() (M7, §4) + getStudentContexts()/requireStudentUser() (M8, §4), route-group gates
-    permissions.ts              # can(role, action) map
+    permissions.ts              # can(role, action) map + DEFAULT_ROLE_GRANTS, the one baseline list
+    relations.ts                # resolveCenterRelations() / roleForExperience() — the pure half of tenant.ts (which centres a user
+                                #   reaches, in which roles); no Next imports, so diagnose-nav / seed:verify run the REAL resolution (P1)
   supabase/
     server.ts  client.ts  proxy.ts  env.ts
   ui/
@@ -131,6 +133,7 @@ lib/
     reservations.ts              # the ONLY Reservation/Enrollment writes for the student portal — reserveOrEnroll/confirmReservation/rejectReservation/cancelReservation, no @/ imports (M8)
     approvals.ts                  # the ONLY ChangeRequest status-flip write — resolveChangeRequest, no @/ imports (Approvals)
     platform.ts                   # platform-admin cross-center reads/writes — deliberately not centerId-scoped, no @/ imports (M9)
+    provision.ts                  # provisionCenterBaseline(tx, centerId) — THE definition of "a centre that works"; centerBaselineGaps() (P1, §6.2)
     organizations.ts              # org-level analytics roll-up — one centerId-scoped lib/db/analytics.ts
                                   #   call per branch, summed in memory, no @/ imports (M11, §4)
     permissions.ts                # the ONLY PermissionGrant/role/branch-grant writes, OWNER-gated + audited (M12)
@@ -175,7 +178,13 @@ messages/
   ar.json  en.json
 prisma/
   schema.prisma  migrations/  seed.ts
+  seed-data/                    # the demo's blueprint + helpers: plan.ts (who/where/what), catalog.ts, names.ts, helpers.ts, domain.ts (SEED_EMAIL_DOMAIN), auth.ts (admin API + the preflight) (P1)
 scripts/
+  diagnose-nav.ts               # read-only: per account, resolved relations → grants → nav, and the five nav hypotheses (P1, npm run diagnose:nav)
+  wipe-dev-data.ts              # the fenced dev-database wipe the USER runs (P1, npm run db:wipe-dev; mechanics in scripts/lib/wipe.ts)
+  seed-preflight.ts             # BEFORE the wipe: password, project refs, service-role key, address clashes, one probe auth user created+deleted (P1, npm run seed:preflight)
+  seed-verify.ts                # read-only: baseline, nav per account, money reconciliation, no orphans, counts (P1, npm run seed:verify)
+  seed-docs.ts                  # regenerates the accounts table in docs/dev-accounts.md for the configured SEED_EMAIL_DOMAIN (P1, npm run seed:docs)
   isolation-check.ts            # the cross-center acceptance gate (M1)
   config-check.ts               # the center-configuration acceptance gate (M2)
   people-check.ts               # the teachers/students/blocks/storage gate (M3)
@@ -188,7 +197,8 @@ scripts/
   approvals-check.ts            # ChangeRequest/Reservation accept-decline correctness, permission denial, cross-center isolation gate (Approvals)
   admin-check.ts                 # center provisioning/lifecycle transitions, platform-KPI reconciliation, support-access audit gate (M9; the plan-edit assertion is removed at M19 with the column)
   branches-check.ts              # org roll-up = exact sum of per-branch scoped queries; branch-A-can't-read-branch-B (M11)
-  permissions-check.ts           # matrix resolution, deny-by-default, OWNER-only granting, grantable ceiling, session invalidation, teacher-detail leak (M12)
+  permissions-check.ts           # matrix resolution, deny-by-default, OWNER-only granting, grantable ceiling, session invalidation, teacher-detail leak (M12);
+                                 #   P1: the provisioning baseline, both creation paths through it, the nav a fresh centre gives each role, nav ⇄ page-gate alignment
   catalog-check.ts               # catalog is global, a centre edits only its own per-language names/price; platform-admin-only writes, delete/deactivate rules, bilingual resolution (M13, R8)
   settlements-check.ts           # settlement totals derive from frozen snapshots; refund arithmetic on revenue + both shares (M14)
   enrollment-check.ts            # block scopes, 7-day cooling-off, capacity cap vs. uncapped attendance, full-window reschedule (M15)
@@ -370,7 +380,7 @@ All gates import only modules free of `@/` aliases and of Next-runtime imports �
 
 **Role- and branch-granting are their own OWNER-only actions**, not folded into `staff.manage`/`staff.invite` (which a MANAGER still holds for non-role changes like activate/deactivate): `membership.role.assign` gates both `createInvitationAction` (inviting someone *is* assigning them a role) and `changeMemberRoleAction`, audited as `membership.role.change`; `membership.branch.grant` gates `grantMembershipBranchAction`/`revokeMembershipBranchAction` — a small "Branch access" card on `/settings/staff`, OWNER-only, letting an Owner widen a **MANAGER/RECEPTIONIST/ACCOUNTANT** membership's reach to one more real sibling branch under the same `Organization` (`lib/db/organizations.ts`'s `organizationBranches`) via `MembershipBranchGrant` — additive only, and resolved the same way the Owner's own every-sibling-branch widening is (`lib/auth/tenant.ts`'s `getUserCenterRelations()`), just bounded to exactly the branches explicitly granted rather than every sibling. OWNER already resolves org-wide and TEACHER's multi-center reach is a second real `Membership` row, so neither role is ever branch-grantable (`isBranchGrantableRole`).
 
-**A fresh center is seeded, never started empty.** Because the matrix is deny-by-default, `lib/db/platform.ts`'s `createCenterWithSettings` (Super Admin provisioning) seeds the exact same baseline (`lib/auth/permissions.ts`'s `DEFAULT_ROLE_GRANTS` — the one canonical list, also what the M12 migration backfilled onto every pre-existing center) for every newly created center in the same nested write that creates its founding-Owner `Invitation` — otherwise that Owner could do nothing beyond the four ceiling-forced ownership actions the moment they accepted.
+**A fresh center is provisioned, never started empty.** Because the matrix is deny-by-default, every path that creates a centre goes through **`provisionCenterBaseline(tx, centerId)`** (`lib/db/provision.ts`, P1) — see §6.2. The baseline it writes is `lib/auth/permissions.ts`'s `DEFAULT_ROLE_GRANTS`, the one canonical list, also what the M12 migration backfilled onto every pre-existing center; without it that centre's Owner could do nothing beyond the four ceiling-forced ownership actions.
 
 **Security fix 16 — the teacher-detail leak (delivered M12).** `/teachers/[id]` no longer calls anything cross-center at all: the `countOtherCenterRelations` call and its "other branches" `DetailRow` are removed outright, not merely hidden, and every remaining query on that page is already `centerId`-scoped (`db.teachers.findById`, `db.classGroups.list`, `db.studentBlocks.list`). `lib/db/identity.ts` still exports `countOtherCenterRelations` for the *student*-detail page's own, unrelated "other branches" field — a different concern this milestone does not touch.
 
@@ -387,6 +397,20 @@ All gates import only modules free of `@/` aliases and of Next-runtime imports �
 **Ending a session adds one action (R2).** `session.close` joins `PERMISSIONS` and `DEFAULT_ROLE_GRANTS` for **OWNER, MANAGER and RECEPTIONIST** — ending a session is the reception desk's daily job, not an elevated one. Unlike M14's money actions it **is backfilled**: the R2 migration (`prisma/migrations/20261012120000_r2_session_lifecycle`) inserts the three rows for every existing centre (`ON CONFLICT DO NOTHING`, so a centre's own explicit row survives), because without it no existing centre could end a session at all and the end-of-day auto-close would be the only way one ever closed. Not on `OWNER_ONLY_ACTIONS` or `FORBIDDEN_CEILING` — configurable like any other action. It gates `endSessionAction` (`app/[locale]/(center)/sessions/actions.ts`, re-checked server-side) and the "End session" button. Switching a paid student to Absent on a live session (which voids the payment) needs **both** `attendance.correct` and `payment.void` — checked in the action and re-checked under the row lock inside `changeAttendanceStatus` (`mayVoidPayment`), so a status change can never void money its actor could not void directly. `npm run check:session-lifecycle` asserts the defaults, a refusal without the grant, and the backfill.
 
 **Security fix 17 — session invalidation (delivered M12, no new mechanism needed).** `getTenantContext()`'s `cache()` wrapper (§14) is per-request only, and no cookie or JWT anywhere in this app carries a role, a permission, or a grant: `kayedu_center` holds only a center/organization selection, and Supabase's session cookie holds only the auth identity. `getUserCenterRelations()`/`buildContext()` already re-derive `role`/`grants` fresh from `Membership`/`PermissionGrant` on every request, so a role or grant change takes effect on the very next request with nothing to invalidate. `check:permissions` asserts this directly — writing a change and re-reading immediately, no fresh login, no cache warm-up.
+
+### 6.2 Provisioning a centre, and what the nav may show (P1)
+
+**One definition of "a centre that works".** A `Center` row on its own is a centre nobody can use: the matrix is deny-by-default, so with no `PermissionGrant` rows its Owner reaches the ungated Dashboard and nothing else (P1 found exactly that in the dev database — the demo seed had built its centres with a bare `center.upsert`). Everything a new centre needs lives in **`provisionCenterBaseline(tx, centerId)`** (`lib/db/provision.ts`):
+
+1. its `CenterSettings` row (15% default cut, 10-minute late threshold, `Africa/Cairo` — `BASELINE_SETTINGS`);
+2. the baseline `PermissionGrant` rows — `DEFAULT_ROLE_GRANTS`, for **every** role including OWNER (an Owner's non-ownership actions are stored rows like anyone's; only the four ownership actions are ceiling-forced);
+3. the default payment methods (Cash / InstaPay / Vodafone Cash — a centre must always have one active, R1).
+
+Every centre-creating path calls it and **only** it: `lib/db/platform.ts`'s `createCenterWithSettings` (Super Admin, M9 — now `Center` + `Organization` + founding-Owner `Invitation`, then the baseline, in one transaction) and `prisma/seed.ts`. A gate fixture that needs a working centre may call it too. It is **idempotent and non-destructive**: it only fills what is missing, so re-running it never flips a grant an Owner switched off in `/settings/permissions` (a stored `allowed: false` is a configuration, not a gap). `centerBaselineGaps(db, centerId)` is its read-only mirror — what a centre lacks of the baseline — used by `diagnose-nav`, `seed:verify` and the gates. **Existing centres are never silently backfilled**: P1 reports the ones lacking rows (the two dev Center 60 branches) and the dev-database wipe + reseed replaces them; a real centre in that state is repaired deliberately, not as a side effect.
+
+**Rule: nav visibility uses the permission the item's page requires — the page gate is the authority.** `components/shell/nav.ts` lists each item with the one `Permission` that shows it, and that must be exactly the action its page asserts with `requirePermission(ctx, "…")` — no broader (a link that bounces the user home), no narrower (a page they may open but cannot find). `check:permissions` reads each page file and compares; the settings sub-navigation follows the same rule. P1 found two items that differed: the teacher **Classes** item carried no permission while its page requires `changeRequest.create`, and the settings **Permissions** link was nested under `center.settings.edit` although its page asserts only `permission.manage`. Both now match. This is not a new check in `can()`: the ceilings and `can()` itself are untouched, and no role check was added to make anything appear (rule 6).
+
+**The relation resolution is importable.** `lib/auth/relations.ts` holds the pure half of `getTenantContext()` — `resolveCenterRelations(prisma, userId)` (the Owner/org widening, branch grants, student profiles, the lifecycle filter) and `roleForExperience()` — with relative imports and a client parameter. `lib/auth/tenant.ts`'s `getUserCenterRelations` is that function wrapped in React's per-request `cache()`; nothing about the resolution changed. It exists so `scripts/diagnose-nav.ts` and `seed:verify` run the **real** resolution, grant loading and `navForExperience` rather than a copy of them.
 
 ---
 

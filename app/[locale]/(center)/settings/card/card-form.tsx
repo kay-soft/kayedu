@@ -423,7 +423,8 @@ export function CardLayoutForm({
                 },
               )}
             </div>
-            <p className="mt-2 hidden text-center text-xs text-text-muted md:block">
+            <p className="mt-2 text-center text-xs text-text-muted">{t("sample.caption")}</p>
+            <p className="mt-1 hidden text-center text-xs text-text-muted md:block">
               {t("dragHint", { locale: t(`localeName.${locale}`) })}
             </p>
           </div>
