@@ -70,3 +70,5 @@ next-env.d.ts
 .claude/local/
 
 # NOTE: prisma/migrations is intentionally NOT ignored — migrations are source code.
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
