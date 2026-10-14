@@ -64,7 +64,8 @@ If the docs are silent on something that touches **money, permissions, or tenant
 
 7. **Audit the sensitive stuff.** Financial changes (including **refunds** and **settlement transitions**), permission and role changes, branch grants, and attendance corrections write an `AuditLog` row.
    - **Void ≠ refund.** A void is "this should never have been recorded" (not counted). A refund is "the money went back, in cash" (subtracted from revenue and from both shares, original row preserved, **no balance ever created**). Different mechanisms; never collapse them into one flag.
-   - **Settlements derive, never recompute.** A settlement total is the sum of frozen `teacherShareSnapshot` values — `DRAFT → APPROVED → PAID`, with **no partially-paid state**.
+   - **Settlements derive, never recompute.** A settlement total is the sum of frozen `teacherShareSnapshot` values — `DRAFT → APPROVED → PAID`, with **no partially-paid state**. A settlement **claims** each payment it counts, and a payment belongs to at most one live settlement (database-enforced, SEC-2b); a DRAFT may be CANCELLED, releasing its claims; a non-OWNER never approves or pays a settlement they created.
+   - **Audit rows commit with the change and carry ids and amounts only** — written on the money transaction (`writeAuditLog(input, tx)`), never a person's name, contact or free text (the reason lives on the record; `lib/db/audit-row.ts` refuses it). The log is append-only (a trigger).
 
 8. **Design system compliance.** Use the tokens in `docs/04-design-system.md`. Don't invent colors, radii, or spacing per screen. Semantic colors are fixed: present/paid = green, late/pending = amber, absent/void = red, upcoming = blue.
 

@@ -1,5 +1,6 @@
 "use server";
 
+import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
@@ -24,7 +25,7 @@ import {
   resolveContact,
   seedLocalName,
 } from "@/lib/db/identity";
-import { recordPayment, voidPayment } from "@/lib/db/payments";
+import { recordPayment, voidPayment, writePaymentRecordAudit } from "@/lib/db/payments";
 import { refundPayment } from "@/lib/db/refunds";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { closeSession, WRITE_TRANSACTION_OPTIONS } from "@/lib/db/session-lifecycle";
@@ -192,23 +193,30 @@ async function writeAttendance<T>(
   }
 }
 
-/** Every `settlement.adjust` row a void's live adjustment owes (docs/00 §5). */
+/**
+ * Every `settlement.adjust` row a void's or refund's live adjustment owes
+ * (docs/00 §5) — on the money transaction's own client (SEC-60).
+ */
 async function auditSettlementAdjustments(
+  tx: Prisma.TransactionClient,
   ctx: TenantContext,
   adjusted: AdjustedSettlement[],
-  reason: "payment.void" | "payment.refund",
+  trigger: "payment.void" | "payment.refund",
   paymentId: string,
 ): Promise<void> {
   for (const { settlement, previousTotal } of adjusted) {
-    await writeAuditLog({
-      centerId: ctx.center.id,
-      actorUserId: ctx.user.id,
-      action: "settlement.adjust",
-      entityType: "Settlement",
-      entityId: settlement.id,
-      before: { totalAmount: previousTotal },
-      after: { totalAmount: settlement.totalAmount, reason, paymentId },
-    });
+    await writeAuditLog(
+      {
+        centerId: ctx.center.id,
+        actorUserId: ctx.user.id,
+        action: "settlement.adjust",
+        entityType: "Settlement",
+        entityId: settlement.id,
+        before: { totalAmount: previousTotal },
+        after: { totalAmount: settlement.totalAmount, trigger, paymentId },
+      },
+      tx,
+    );
   }
 }
 
@@ -272,7 +280,9 @@ export async function checkInRosterAction(
  * explicit `confirmVoid` from the roster's confirmation dialog (which says
  * plainly that the payment will be voided); the void adds its own
  * `payment.void` audit row. All of it is written by `changeAttendanceStatus`
- * inside one transaction. The reason is optional.
+ * inside one transaction. **A change that voids a payment needs a reason**
+ * (SEC-2b, D-13) — zod, this action and the data layer each refuse one
+ * without; a change that voids nothing keeps it optional.
  */
 export async function setAttendanceAction(
   _state: SessionActionState,
@@ -299,6 +309,7 @@ export async function setAttendanceAction(
     });
     if (activePayment && !mayVoidPayment) return FORBIDDEN;
     if (activePayment && !confirmVoid) return { error: "voidConfirmationRequired" };
+    if (activePayment && !reason) return { fieldErrors: { reason: "reasonRequired" } };
   }
 
   const result = await changeAttendanceStatus(prisma, {
@@ -310,7 +321,9 @@ export async function setAttendanceAction(
     mayVoidPayment,
   });
   if (!result.ok) {
-    return result.error === "voidNotPermitted" ? FORBIDDEN : { error: result.error };
+    if (result.error === "voidNotPermitted") return FORBIDDEN;
+    if (result.error === "reasonRequired") return { fieldErrors: { reason: "reasonRequired" } };
+    return { error: result.error };
   }
   // The change row and its audit rows (`attendance.correct`, and
   // `payment.void`/`settlement.adjust` when a payment was voided) were
@@ -521,27 +534,14 @@ export async function recordPaymentAction(
   const { locale, sessionAttendeeId, paymentMethodId } = parsed.data;
 
   // The method is resolved inside the transaction, scoped to this centre and
-  // to active methods only — a forged or stale id is refused there.
-  const result = await prisma.$transaction(
-    (tx) => recordPayment(tx, ctx.center.id, sessionAttendeeId, paymentMethodId, ctx.user.id),
-    WRITE_TRANSACTION_OPTIONS,
-  );
+  // to active methods only — a forged or stale id is refused there. The audit
+  // row commits with the payment or not at all (SEC-60).
+  const result = await prisma.$transaction(async (tx) => {
+    const recorded = await recordPayment(tx, ctx.center.id, sessionAttendeeId, paymentMethodId, ctx.user.id);
+    if (recorded.ok) await writePaymentRecordAudit(tx, ctx.center.id, ctx.user.id, recorded.payment);
+    return recorded;
+  }, WRITE_TRANSACTION_OPTIONS);
   if (!result.ok) return { error: result.error };
-
-  await writeAuditLog({
-    centerId: ctx.center.id,
-    actorUserId: ctx.user.id,
-    action: "payment.record",
-    entityType: "Payment",
-    entityId: result.payment.id,
-    after: {
-      amount: result.payment.amount,
-      paymentMethodId: result.payment.paymentMethodId,
-      methodLabelSnapshot: result.payment.methodLabelSnapshot,
-      centerShareSnapshot: result.payment.centerShareSnapshot,
-      teacherShareSnapshot: result.payment.teacherShareSnapshot,
-    },
-  });
 
   revalidateSessionDetail(locale, result.payment.sessionId);
   revalidateSessionList(locale);
@@ -560,27 +560,29 @@ export async function voidPaymentAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, paymentId, reason } = parsed.data;
 
-  const result = await prisma.$transaction(
-    (tx) => voidPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id),
-    WRITE_TRANSACTION_OPTIONS,
-  );
+  // The reason lives on the payment row; the audit row carries ids and the
+  // amount only (D-20), and commits with the void (SEC-60).
+  const result = await prisma.$transaction(async (tx) => {
+    const voided = await voidPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id);
+    if (!voided.ok) return voided;
+    await writeAuditLog(
+      {
+        centerId: ctx.center.id,
+        actorUserId: ctx.user.id,
+        action: "payment.void",
+        entityType: "Payment",
+        entityId: voided.payment.id,
+        before: { amount: voided.payment.amount, voided: false },
+        after: { voided: true, sessionId: voided.payment.sessionId },
+      },
+      tx,
+    );
+    // A void inside a pre-SEC-2b DRAFT/APPROVED settlement's counted total
+    // live-adjusts it (lib/db/settlements.ts) — audited like a refund's.
+    await auditSettlementAdjustments(tx, ctx, voided.adjustedSettlements, "payment.void", voided.payment.id);
+    return voided;
+  }, WRITE_TRANSACTION_OPTIONS);
   if (!result.ok) return { error: result.error };
-
-  await writeAuditLog({
-    centerId: ctx.center.id,
-    actorUserId: ctx.user.id,
-    action: "payment.void",
-    entityType: "Payment",
-    entityId: result.payment.id,
-    before: {
-      amount: result.payment.amount,
-      methodLabelSnapshot: result.payment.methodLabelSnapshot,
-    },
-    after: { reason },
-  });
-  // A void inside a pre-R2 DRAFT/APPROVED settlement's counted total
-  // live-adjusts it (lib/db/settlements.ts) — audited like a refund's.
-  await auditSettlementAdjustments(ctx, result.adjustedSettlements, "payment.void", result.payment.id);
 
   revalidateSessionDetail(locale, result.payment.sessionId);
   revalidateSessionList(locale);
@@ -605,32 +607,35 @@ export async function refundPaymentAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, paymentId, reason } = parsed.data;
 
-  const result = await prisma.$transaction(
-    (tx) => refundPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id),
-    WRITE_TRANSACTION_OPTIONS,
-  );
+  const result = await prisma.$transaction(async (tx) => {
+    const refunded = await refundPayment(tx, ctx.center.id, paymentId, reason, ctx.user.id);
+    if (!refunded.ok) return refunded;
+    await writeAuditLog(
+      {
+        centerId: ctx.center.id,
+        actorUserId: ctx.user.id,
+        action: "payment.refund",
+        entityType: "Payment",
+        entityId: refunded.payment.id,
+        before: { refunded: false },
+        after: {
+          refunded: true,
+          refundId: refunded.refund.id,
+          sessionId: refunded.payment.sessionId,
+          amount: refunded.refund.amount,
+          centerShareReversed: refunded.refund.centerShareReversed,
+          teacherShareReversed: refunded.refund.teacherShareReversed,
+        },
+      },
+      tx,
+    );
+    // Any DRAFT/APPROVED settlement this payment was already claimed by just
+    // had its total live-adjusted (lib/db/refunds.ts) — audited as its own
+    // row, distinct from the refund itself (docs/00 §5 "Teacher settlements").
+    await auditSettlementAdjustments(tx, ctx, refunded.adjustedSettlements, "payment.refund", refunded.payment.id);
+    return refunded;
+  }, WRITE_TRANSACTION_OPTIONS);
   if (!result.ok) return { error: result.error };
-
-  await writeAuditLog({
-    centerId: ctx.center.id,
-    actorUserId: ctx.user.id,
-    action: "payment.refund",
-    entityType: "Payment",
-    entityId: result.payment.id,
-    before: { refunded: false },
-    after: {
-      refunded: true,
-      amount: result.refund.amount,
-      centerShareReversed: result.refund.centerShareReversed,
-      teacherShareReversed: result.refund.teacherShareReversed,
-      reason,
-    },
-  });
-
-  // Any DRAFT/APPROVED settlement this payment was already claimed by just
-  // had its total live-adjusted (lib/db/refunds.ts) — audited as its own
-  // row, distinct from the refund itself (docs/00 §5 "Teacher settlements").
-  await auditSettlementAdjustments(ctx, result.adjustedSettlements, "payment.refund", result.payment.id);
 
   revalidateSessionDetail(locale, result.payment.sessionId);
   revalidateSessionList(locale);
@@ -640,6 +645,11 @@ export async function refundPaymentAction(
 
 // ── Session lifecycle: cancel / reschedule (spec §7 acceptance criterion 11) ─
 
+/**
+ * Cancel (M10) — refused while the session holds an active payment
+ * (`hasPayments`, SEC-2b D-07): staff void or refund first, each with its
+ * reason. A cancelled session closes at the end of its day.
+ */
 export async function cancelSessionAction(
   _state: SessionActionState,
   formData: FormData,

@@ -92,7 +92,6 @@ export async function createCenterAction(
     entityType: "Center",
     entityId: result.center.id,
     after: {
-      name: result.center.name,
       slug: result.center.slug,
       lifecycleState: result.center.lifecycleState,
     },

@@ -12,7 +12,7 @@ import {
   DEFAULT_CARD_BACKGROUND,
 } from "../card-layout.ts";
 import { CATALOG_NAME_MAX } from "../catalog.ts";
-import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
+import { MAX_PRICE_PIASTRES, parseEgpToPiastres } from "../money.ts";
 import { extraRoomIdsField } from "./room-set.ts";
 import { dateOnlyField, withPeriodRule } from "./class-period.ts";
 
@@ -51,12 +51,12 @@ const wholeNumber = (max: number) =>
       "invalidNumber",
     );
 
-/** An EGP amount typed into a form, stored as piastres (CLAUDE.md rule 2). */
+/** A price typed in EGP, stored as piastres (CLAUDE.md rule 2), capped (D-17). */
 const moneyEgp = z
   .string()
   .trim()
   .default("0")
-  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value)))
+  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value, MAX_PRICE_PIASTRES)))
   .refine((value): value is number => value !== null, "invalidAmount");
 
 const base = { locale: localeSchema };
@@ -216,8 +216,9 @@ export const generalSettingsSchema = z
       }
       defaultShareValue = percent;
     } else {
-      const piastres = parseEgpToPiastres(value.shareValue);
-      if (piastres === null || piastres > MAX_PIASTRES) {
+      // A default only (no price to compare yet): capped like a price (D-17).
+      const piastres = parseEgpToPiastres(value.shareValue, MAX_PRICE_PIASTRES);
+      if (piastres === null) {
         ctx.addIssue({
           code: "custom",
           path: ["shareValue"],

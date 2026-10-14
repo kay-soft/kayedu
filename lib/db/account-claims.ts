@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 // Relative imports on purpose — `npm run check:security` exercises this module
 // directly, outside the Next.js runtime.
 import { fullName, localName } from "../identity.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -137,16 +138,14 @@ export async function approveAccountClaim(
       data: { status: "REJECTED", resolvedAt: now, resolvedBy: params.actorUserId, resolvedAtCenterId: params.centerId },
     });
 
-    await tx.auditLog.create({
-      data: {
-        centerId: params.centerId,
-        actorUserId: params.actorUserId,
-        action: "account.claim.approve",
-        entityType: "AccountClaim",
-        entityId: claim.id,
-        before: { status: "PENDING" },
-        after: { status: "APPROVED", targetUserId: claim.targetUserId },
-      },
+    await writeAuditRow(tx, {
+      centerId: params.centerId,
+      actorUserId: params.actorUserId,
+      action: "account.claim.approve",
+      entityType: "AccountClaim",
+      entityId: claim.id,
+      before: { status: "PENDING" },
+      after: { status: "APPROVED", targetUserId: claim.targetUserId },
     });
     return { ok: true, claimId: claim.id, targetUserId: claim.targetUserId } as const;
   });
@@ -184,16 +183,14 @@ export async function rejectAccountClaim(
       data: { email: null, emailVerifiedAt: null },
     });
 
-    await tx.auditLog.create({
-      data: {
-        centerId: params.centerId,
-        actorUserId: params.actorUserId,
-        action: "account.claim.reject",
-        entityType: "AccountClaim",
-        entityId: claim.id,
-        before: { status: "PENDING" },
-        after: { status: "REJECTED", targetUserId: claim.targetUserId },
-      },
+    await writeAuditRow(tx, {
+      centerId: params.centerId,
+      actorUserId: params.actorUserId,
+      action: "account.claim.reject",
+      entityType: "AccountClaim",
+      entityId: claim.id,
+      before: { status: "PENDING" },
+      after: { status: "REJECTED", targetUserId: claim.targetUserId },
     });
     return { ok: true, claimId: claim.id, targetUserId: claim.targetUserId } as const;
   });

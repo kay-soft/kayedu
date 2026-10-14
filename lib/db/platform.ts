@@ -5,6 +5,7 @@ import type { Center, CenterLifecycleState, Prisma, PrismaClient, Role } from "@
 // lib/db/approvals.ts, lib/db/analytics.ts).
 import { provisionCenterBaseline } from "./provision.ts";
 import { runInTransaction } from "./session-lifecycle.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -380,13 +381,11 @@ export async function recordSupportAccess(
   db: Db,
   input: { centerId: string; actorUserId: string },
 ): Promise<void> {
-  await db.auditLog.create({
-    data: {
-      centerId: input.centerId,
-      actorUserId: input.actorUserId,
-      action: "platform.support.access",
-      entityType: "Center",
-      entityId: input.centerId,
-    },
+  await writeAuditRow(db, {
+    centerId: input.centerId,
+    actorUserId: input.actorUserId,
+    action: "platform.support.access",
+    entityType: "Center",
+    entityId: input.centerId,
   });
 }

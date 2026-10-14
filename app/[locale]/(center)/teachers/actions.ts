@@ -323,7 +323,6 @@ export async function deleteTeacherAction(
     before: {
       role: "TEACHER",
       userId: teacher.userId,
-      name: fullName(localName(teacher, teacher.user)),
     },
     after: { personDeleted, blocksRemoved: blocks.length },
   });
@@ -382,7 +381,6 @@ export async function blockStudentAction(
       scope: "TEACHER",
       teacherUserId,
       studentProfileId: student.id,
-      reason,
     },
   });
 
@@ -419,7 +417,6 @@ export async function unblockStudentAction(
       scope: block.scope,
       refId: block.refId,
       blockedUserId: block.blockedUserId,
-      reason: block.reason,
     },
   });
 

@@ -1,6 +1,6 @@
 # 07 — Security & Anti-Fraud Audit (SEC-1)
 
-> **Status:** SEC-1 was report only. **SEC-2a** (identity & access, data exposure, platform) has since fixed **43** findings and left the rest open with a reason — see §1.1 for every finding's status. Money, concurrency and fraud findings are **SEC-2b**. Each fixed finding is asserted by name (`SEC-NN`) in `npm run check:security`; the Data API posture by `npm run check:rls`.
+> **Status:** SEC-1 was report only. **SEC-2a** (identity & access, data exposure, platform) fixed **43** findings; **SEC-2b** (money integrity, concurrency, anti-fraud) fixed **19** more — **62 FIXED, 13 OPEN**, each open one with its reason in §1.1. Each fixed finding is asserted by name (`SEC-NN`) in `npm run check:security`; the Data API posture by `npm run check:rls`.
 > **Audited:** branch `dev` at `977f9cf` (2026-10-13), plus the live shared dev Supabase project. The database was only read, except for throwaway repro fixtures, which were created and deleted.
 > **Method:** 13 parallel area audits, then a re-read by the lead of every Critical/High finding against the code. A finding only made this report once its `file:line` evidence was confirmed. Docs were treated as claims to check, not as facts. Where a doc turned out to be wrong, §9 lists it.
 > **Severity scale:**
@@ -49,9 +49,9 @@
 3. **Owner visibility.** Voids and unpaid check-ins leave no trace that any centre screen shows (SEC-07).
 4. **Environment drift.** The PostgREST lockdown exists only as hand-made state on the dev project (SEC-10).
 
-### 1.1 Fix status after SEC-2a
+### 1.1 Fix status after SEC-2b
 
-**43 FIXED, 32 OPEN.** "FIXED" means the change shipped and `npm run check:security` asserts it as `SEC-NN`. Every OPEN finding says why. The decisions SEC-2a used are in §6 (marked "decided").
+**62 FIXED, 13 OPEN** (SEC-2a fixed 43, SEC-2b 19). "FIXED" means the change shipped and `npm run check:security` asserts it as `SEC-NN`. Every OPEN finding says why. The decisions SEC-2a and SEC-2b used are in §6 (marked "decided"); none of the 13 open findings is a Critical or a High.
 
 | ID | Status | What changed / why open |
 |---|---|---|
@@ -59,34 +59,34 @@
 | SEC-02 | FIXED | A phone is never an identity key: sign-up stores none and says no "phone in use"; staff link only through a person's global email (`isLinkableMatch`); a contact another person holds is never copied onto a new `User`. (D-02 (a)) |
 | SEC-03 | FIXED (stop-gap) | `verifyParentLinkPlaceholder` refuses and its button is disabled (D-03 (d)); the real parent is no longer locked out of their number (no phone is stored at sign-up). Origination still writes inert PENDING rows. The real mechanism stays OD-6. |
 | SEC-04 | FIXED | `verifiedChildLinks` re-checks active profile, centre lifecycle and the matched phone on every read; a parent-phone change revokes stale links (`REVOKED`, audited `parentLink.revoke`). No manual "remove link" button — D-04 (a) chose automatic revocation. |
-| SEC-05 | OPEN | Money/concurrency — SEC-2b. |
-| SEC-06 | OPEN | Money/concurrency — SEC-2b (D-05 = OD-8 open). |
-| SEC-07 | OPEN | Fraud visibility — SEC-2b (D-06 open). |
-| SEC-08 | OPEN | Money/session lifecycle — SEC-2b (D-07 open). |
+| SEC-05 | FIXED | Partial unique index `Payment_one_active_per_attendee` (`WHERE voided = false`); `lockAttendeeRow` takes the lock, then reads the payment fact in a fresh statement; `recordPayment` inserts `ON CONFLICT … DO NOTHING` against the index, so a lost race is `alreadyPaid`, never a second row. Asserted with two clients in parallel. |
+| SEC-06 | FIXED | `SettlementClaim` (D-05 (c)): a settlement claims each payment it counts, in the same transaction; one live claim per payment is a partial unique index; creation is serialized per (centre, teacher) by an advisory lock; transitions are conditional on the status. Overlapping periods are allowed when they claim money no live settlement holds (OD-8 resolved). Asserted with parallel creates/approves/pays. |
+| SEC-07 | FIXED | `/audit` (`audit.view`): voids, absent switches, refunds, settlement transitions, price/cut changes, and present-but-unpaid check-ins (D-06 (a)); the receipt counts and lists voids, refunds and unpaid attendees. Linked from Dashboard and Analytics; a nav entry would edit a pinned `check:permissions` list (left for a decision). |
+| SEC-08 | FIXED | Cancel and reschedule are refused while the session holds an active payment (`hasPayments`); cancelled/rescheduled sessions close at the end of their day (status kept, no absences); void and refund refuse a terminal session (D-07 (c)). A refunded payment does not block (its money is back). |
 | SEC-09 | FIXED | `roleForExperience` denies instead of falling back; a denied context grants nothing (`canInContext`/`ctxCan`); every `(center)` action reaches `ctxCan` (static sweep); the centre unblock refuses a CLASS-scope block. |
 | SEC-10 | FIXED | Lockdown migration `20261017090100_sec2a_data_api_lockdown` (RLS on every public table, zero policies, no grants or default grants to anon/authenticated, private buckets); `npm run check:rls` in CI after `migrate deploy`. (D-19 (a)) |
 | SEC-11 | FIXED | Postgres-backed limiter inside `resolveContact` covers all five disclosing paths (per staff member and per centre); a person known only outside the organisation is described without a name. (D-08 (b)) |
-| SEC-12 | OPEN | Concurrency/money — SEC-2b. |
-| SEC-13 | OPEN | Concurrency — SEC-2b. |
+| SEC-12 | FIXED | Void and refund lock the payment row (`FOR UPDATE`, centre-scoped), re-read it and write conditionally; CHECK `Payment_not_voided_and_refunded`; a double refund is `alreadyRefunded`, never a thrown unique error. Asserted with parallel void ∥ refund. |
+| SEC-13 | FIXED | `claimClassSeat` (lib/db/reservations.ts) is the one seat-taking function: it locks the class row and counts in a fresh statement; instant enrol, confirmation and the staff Enrol action all use it, and a profile is never made for a student who got no seat. Asserted with 6 parallel enrolments. |
 | SEC-14 | FIXED | Reactivating a staff membership needs `membership.role.assign` (OWNER); managers may still deactivate; the UI hides reactivation from non-owners. (D-09 (a)) |
 | SEC-15 | FIXED | Teacher block/unblock check `student.block`; the form is gated; teacher earnings (dashboard, session receipt) are gated on `analytics.own.view`. The broader "every permission has a call site" sweep is narrowed to the teacher portal: `audit.view` (SEC-07, SEC-2b), `center.branding.edit` and `platform.manage` still have none. |
 | SEC-16 | FIXED | `reserveOrEnroll` refuses a suspended/archived centre and a deactivated profile; profile completion requires both; the parent read hides them. (D-10 (a)) |
 | SEC-17 | FIXED | Profile completion is strictly one-time (`alreadyCompleted`); staff edits stay. (D-11 (a)) |
-| SEC-18 | OPEN | Separation of duties on money — SEC-2b (D-12 open). |
-| SEC-19 | OPEN | Receipts/money — SEC-2b. |
-| SEC-20 | OPEN | Void path — SEC-2b (D-13 open). |
-| SEC-21 | OPEN | Fraud via timezone — SEC-2b (D-14 open). |
-| SEC-22 | OPEN | Money validation — SEC-2b (D-15 open). |
-| SEC-23 | OPEN | Settlements — SEC-2b (D-16 open). |
-| SEC-24 | OPEN | Money sums — SEC-2b (D-17 open). |
-| SEC-25 | OPEN | Abuse area, outside SEC-2a's scope (a later part). |
-| SEC-26 | OPEN | Abuse area, outside SEC-2a's scope; D-18 open. |
+| SEC-18 | FIXED | D-12: a non-OWNER cannot approve or pay a settlement they created (`ownSettlement`); an OWNER may, and the audit row says `selfApproved: true`. The seed now drafts as the manager and approves as the owner. |
+| SEC-19 | FIXED | The receipt's "collected" and both shares are net of refunds, with "Refunded (n)" and a named refunds section, on screen, in print and for the teacher. |
+| SEC-20 | FIXED | D-13: a status change that voids a payment needs a reason — zod, the Server Action and `changeAttendanceStatus` each refuse it without one (`reasonRequired`); a change that voids nothing keeps it optional. |
+| SEC-21 | FIXED | D-14 (b): `Session.timezone` is the centre's timezone frozen at creation (a trigger fills it and keeps it); the write guard, Present/Late, the end-of-day close, "today" at reception and the teacher edit deadline read it. A centre timezone edit moves nothing already created. |
+| SEC-22 | FIXED | D-15 (c): `centerCutError` (lib/money.ts, the one rule) refuses a FIXED cut above the price in every schema and in the data layer — class create and edit (so lowering a price below the cut is refused), one-time sessions and a session's override. The clamp stays as the backstop. |
+| SEC-23 | FIXED | D-16 (c): a period is strict dates, `to` not in the future (`futureRange`), at most 366 days (`rangeTooLong`); a DRAFT can be cancelled, releasing its claims. |
+| SEC-24 | FIXED | D-17 (b): every money aggregate is a raw `SUM(...)::bigint` (analytics, the receipt, the Sessions tile); a price is capped at 100,000 EGP (`MAX_PRICE_PIASTRES`, ~30× a realistic session price); a settlement total beyond `integer` is refused (`totalTooLarge`). |
+| SEC-25 | OPEN | Abuse area, outside the SEC-2a and SEC-2b scopes (a later part). |
+| SEC-26 | OPEN | Abuse area, outside the SEC-2a and SEC-2b scopes; D-18 open. |
 | SEC-27 | FIXED | Sign-in, sign-up and confirmation resend are throttled per email and per client IP in the shared store, before Supabase is called. CAPTCHA and leaked-password protection are recorded for M20 (`00` §2.1-A). |
 | SEC-28 | FIXED | Headers in `next.config.ts` on every route; CSP ships report-only — enforcing it is backlog entry 22. |
-| SEC-29 | OPEN | Retention/erasure is D-20 = OD-2 (legal review) — not decided. |
+| SEC-29 | OPEN (D-20 part fixed) | D-20: audit rows now carry ids, amounts, counts, statuses and dates only — `lib/db/audit-row.ts` refuses a name, contact or free-text key, every writer goes through it, and the reason lives on the record (platform catalog rows exempt, their names being platform reference data). Existing rows are kept, unchanged. **Retention and erasure stay OPEN** — that is OD-2 (legal review). |
 | SEC-30 | FIXED | `supabase/m10-rls-and-storage.sql` deleted; the lockdown migration covers every table; the grep gate is replaced by `check:rls`. |
 | SEC-31 | FIXED | Deny-all, zero policies on `public` (D-19 (a)); `check:rls` fails on any policy. |
-| SEC-32 | OPEN | Availability area, outside SEC-2a's scope. |
+| SEC-32 | OPEN | Availability area, outside the SEC-2a and SEC-2b scopes. |
 | SEC-33 | FIXED | Supabase auth cookies httpOnly, Secure in production, SameSite=Lax; `lib/supabase/client.ts` deleted. |
 | SEC-34 | FIXED | next and eslint-config-next 16.3.8. |
 | SEC-35 | FIXED | `shadcn` and `prisma` moved to devDependencies; `deepmerge-ts` pinned to 8.0.2 by an npm override (the advisory came in through `prisma`, a peer of `@prisma/client`); `npm audit --omit=dev` reports 0 and CI runs it at `--audit-level=high`. |
@@ -103,20 +103,20 @@
 | SEC-46 | FIXED | `createPeriodSettlementAction` refuses a teacher id that is not this centre's teacher before writing. |
 | SEC-47 | FIXED | The student page counts relations at other branches of the same organisation only. (D-23 (a)) |
 | SEC-48 | FIXED | The roll-up clamps each branch by its own visibility window and requires `analytics.center.view` at each branch; a branch without a range is never read unbounded. |
-| SEC-49 | OPEN | Validation area, outside SEC-2a's scope. |
-| SEC-50 | OPEN | Validation area, outside SEC-2a's scope. |
-| SEC-51 | OPEN | Fraud — SEC-2b (D-24 open). |
-| SEC-52 | OPEN | Validation area, outside SEC-2a's scope. |
+| SEC-49 | OPEN | Validation area, outside the SEC-2a and SEC-2b scopes. |
+| SEC-50 | FIXED | Every typed date is the strict `dateOnlyField`/`dateKeyField` (reschedule, holiday, settlement period, expense, teacher session request); a stored request with an impossible date is refused on approval (`invalidDate`), never thrown. |
+| SEC-51 | FIXED | Reschedule and NEW_SESSION approval refuse a past date (`pastDate`); D-24: an expense may be backdated within the visibility window only, never into the future; expenses are voided with a reason (who, when), never deleted; category changes are audited. |
+| SEC-52 | OPEN | Validation area, outside the SEC-2a and SEC-2b scopes. |
 | SEC-53 | FIXED | Logos are files in the private `logos` bucket (`Center.logoPath`), served by `/api/logos/[centerId]` as a signed URL; nothing fetches a remote URL any more. (D-25 (b)) |
 | SEC-54 | FIXED | Uploads are typed by magic bytes (PNG/JPEG/WebP; never SVG, never `File.type`). |
 | SEC-55 | FIXED | Storage is private and service-role-only by design (no `storage.objects` policy); buckets and caps are in the migration; `check:rls` asserts it. |
 | SEC-56 | FIXED | `docs/00` §2.1-B, `docs/01` §4, `docs/02` §5 and §10 rewritten to the real posture. |
 | SEC-57 | FIXED | Docs corrected (the Prisma role is not a superuser but has BYPASSRLS); `check:rls` prints it; a non-bypass app role is backlog entry 23. |
-| SEC-58 | OPEN | Pricing — SEC-2b (D-26 open). |
-| SEC-59 | OPEN | Ratings integrity (abuse), outside SEC-2a's scope. |
-| SEC-60 | OPEN | Audit/money — SEC-2b. |
-| SEC-61 | OPEN | LIKE escaping (validation), outside SEC-2a's scope. |
-| SEC-62 | OPEN | Visibility window on money writes — SEC-2b, with SEC-08. |
+| SEC-58 | FIXED | D-26 (b): a 0-priced one-time session needs an explicit "I understand this session is free" (`zeroPriceNeedsConfirmation`); the session header and its receipt are flagged; the `session.create` audit row says `zeroPrice`. |
+| SEC-59 | FIXED | A rating needs a PRESENT/LATE attendance inside the 7-day window, by direct call; a skip for a session the student did not attend writes nothing. |
+| SEC-60 | FIXED | A trigger makes `AuditLog` append-only (no UPDATE but the FKs' own SET NULL, no DELETE outside an opted-in maintenance transaction that only test cleanup uses); every money action writes its audit row on the money transaction, so an audit failure rolls the money back. |
+| SEC-61 | OPEN | LIKE escaping (validation), outside the SEC-2a and SEC-2b scopes. |
+| SEC-62 | OPEN (writes covered) | Money writes on an old session are refused by the closure rules (every session older than its day is closed, cancelled ones included since D-07), asserted under SEC-08. The read side — moving the window floor into the scoped session/attendee/payment helpers instead of each page — is a separate refactor not taken here. |
 | SEC-63 | FIXED | `lockAttendeeRow` takes `centerId` and filters on it in SQL. |
 | SEC-64 | FIXED | Photos capped at about 1 MB (under the Server Action body) and shrunk in the browser first. (D-27 (b)) |
 | SEC-65 | FIXED | Photo upload and removal are audited (`student.photo.update`/`.remove`). No rate limit was added — D-28 asked for the audit. (D-28) |
@@ -125,10 +125,10 @@
 | SEC-68 | FIXED | `poweredByHeader: false`. |
 | SEC-69 | FIXED | `vercel.json` pins `fra1`. |
 | SEC-70 | FIXED | Seed, wipe and preflight refuse the production deployment's environment and a committed `PRODUCTION_PROJECT_REFS` list — the production ref is added there at M20. |
-| SEC-71 | OPEN | SVG renderer hardening (injection area), outside SEC-2a's scope; not exploitable today. |
+| SEC-71 | OPEN | SVG renderer hardening (injection area), outside the SEC-2a and SEC-2b scopes; not exploitable today. |
 | SEC-72 | FIXED | The approval loaders select the requester's id and name only. |
 | SEC-73 | OPEN | No fix was specified and none is an escalation; aligning page and action gates on `/settings/staff` and the Add-teacher dialog is a UX decision for later. |
-| SEC-74 | OPEN | The auth half is fixed (`signInSchema` bounds the password and `next`); the money-parsing half (`parseEgpToPiastres`, the settings audit field) is SEC-2b. |
+| SEC-74 | FIXED | Auth half at SEC-2a; money half now: `parseEgpToPiastres` accepts plain decimal EGP only (no `1e3`, `0x10`, `0.001`), folds Arabic-Indic digits, and the client previews use it; the general-settings audit row includes `teacherEditDeadlineHours`. |
 | SEC-75 | OPEN | A `global-error.tsx` and production error reporting belong with M20's error-monitoring (Sentry) item. |
 
 ### Top 10 (fix order, highest risk first)
@@ -576,6 +576,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-04.ts`.
 
 #### SEC-05 — Two concurrent payments for the same student both succeed
+- **Status (SEC-2b): FIXED.** Partial unique index `Payment_one_active_per_attendee` (`WHERE voided = false`); `lockAttendeeRow` takes the lock, then reads the payment fact in a fresh statement; `recordPayment` inserts `ON CONFLICT … DO NOTHING` against the index, so a lost race is `alreadyPaid`, never a second row. Asserted with two clients in parallel.
 - **Severity:** High. Revenue and the teacher share get double-counted in normal use (two desks, a double tap, a retried submit), and an insider can trigger it deliberately. The docs claim this race is closed.
 - **Area:** Concurrency / money integrity.
 - **Evidence:**
@@ -596,6 +597,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-05.ts` imports the real `recordPayment`; 6/6 attendees got doubled. `SEC-05-mechanism.ts` shows the lock waits but the same-statement EXISTS is stale, while a fresh statement after the lock sees the payment.
 
 #### SEC-06 — One teacher share can be claimed by two settlements, and both can be paid
+- **Status (SEC-2b): FIXED.** `SettlementClaim` (D-05 (c)): a settlement claims each payment it counts, in the same transaction; one live claim per payment is a partial unique index; creation is serialized per (centre, teacher) by an advisory lock; transitions are conditional on the status. Overlapping periods are allowed when they claim money no live settlement holds (OD-8 resolved). Asserted with parallel creates/approves/pays.
 - **Severity:** High. A teacher gets paid twice for the same payments. There is no race needed in one variant (session plus period), it's trivially racy in the others, and both settlements look legitimate through to PAID, which is irreversible.
 - **Area:** Settlements / concurrency.
 - **Evidence:**
@@ -626,6 +628,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-06.ts` (session plus period, both orders, paid out twice) and `SEC-06-race.ts` (period ×2, session ×2, approve and pay ×2).
 
 #### SEC-07 — Voids and unpaid check-ins are invisible to the owner
+- **Status (SEC-2b): FIXED.** `/audit` (`audit.view`): voids, absent switches, refunds, settlement transitions, price/cut changes, and present-but-unpaid check-ins (D-06 (a)); the receipt counts and lists voids, refunds and unpaid attendees. Linked from Dashboard and Analytics; a nav entry would edit a pinned `check:permissions` list (left for a decision).
 - **Severity:** High. An insider can skim cash undetected. The only trace of a void is an AuditLog row that no centre screen reads, and a present-but-unpaid student is flagged nowhere.
 - **Area:** Fraud / audit / receipts / analytics.
 - **Evidence:**
@@ -651,6 +654,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-07.ts`.
 
 #### SEC-08 — Cancelling or rescheduling a paid session leaves its money editable forever and unsettleable
+- **Status (SEC-2b): FIXED.** Cancel and reschedule are refused while the session holds an active payment (`hasPayments`); cancelled/rescheduled sessions close at the end of their day (status kept, no absences); void and refund refuse a terminal session (D-07 (c)). A refunded payment does not block (its money is back).
 - **Severity:** High. An insider can retroactively change days whose cash was already counted (and SEC-07 makes the later void invisible). The teacher's share for those payments can never be paid.
 - **Area:** Session lifecycle / void / settlements.
 - **Evidence:**
@@ -763,6 +767,7 @@ Line numbers refer to `977f9cf`.
 ### 3.3 Medium
 
 #### SEC-12 — A refund racing a void leaves a payment both voided and refunded; a double void succeeds
+- **Status (SEC-2b): FIXED.** Void and refund lock the payment row (`FOR UPDATE`, centre-scoped), re-read it and write conditionally; CHECK `Payment_not_voided_and_refunded`; a double refund is `alreadyRefunded`, never a thrown unique error. Asserted with parallel void ∥ refund.
 - **Severity:** Medium. The ledger becomes inconsistent: the payment contributes −amount to revenue and both shares, which breaks "void ≠ refund". It needs two concurrent actors and leaves audit rows.
 - **Area:** Concurrency / money.
 - **Evidence:**
@@ -784,6 +789,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-12.ts`.
 
 #### SEC-13 — Concurrent enrolments overbook a class past its room-set capacity
+- **Status (SEC-2b): FIXED.** `claimClassSeat` (lib/db/reservations.ts) is the one seat-taking function: it locks the class row and counts in a fresh statement; instant enrol, confirmation and the staff Enrol action all use it, and a profile is never made for a student who got no seat. Asserted with 6 parallel enrolments.
 - **Severity:** Medium. This breaks a hard rule (spec §5.1 "Capacity"). Ordinary students can trigger it through instant-enrol. No money is involved, and the overbooking is visible afterwards.
 - **Area:** Concurrency / enrolment.
 - **Evidence:** all three paths count, then create, with no lock on `ClassGroup`:
@@ -865,6 +871,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** none.
 
 #### SEC-18 — No separation of duties on money
+- **Status (SEC-2b): FIXED.** D-12: a non-OWNER cannot approve or pay a settlement they created (`ownSettlement`); an OWNER may, and the audit row says `selfApproved: true`. The seed now drafts as the manager and approves as the owner.
 - **Severity:** Medium. One MANAGER can record, void, refund, edit the cut, and create, approve and pay settlements, including their own. It is all audited, but there is no maker-checker.
 - **Area:** AuthZ / money workflow.
 - **Evidence:**
@@ -883,6 +890,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** covered by `SEC-06.ts` (a single actor through to PAID).
 
 #### SEC-19 — The session receipt doesn't subtract refunds
+- **Status (SEC-2b): FIXED.** The receipt's "collected" and both shares are net of refunds, with "Refunded (n)" and a named refunds section, on screen, in print and for the teacher.
 - **Severity:** Medium. All three receipts (on screen, staff print, teacher print) overstate the money collected and the teacher share after a refund, and hide that the refund happened.
 - **Area:** Receipts.
 - **Evidence:** `lib/db/payments.ts:306` aggregates `voided: false` only. Analytics subtracts `Refund` rows (`analytics.ts:46-66`); the receipt (`(center)/sessions/[id]/receipt-data.ts`) does not.
@@ -893,6 +901,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** none.
 
 #### SEC-20 — Void-by-Absent needs no reason, and Absent→Present re-entry leaves the student present and unpaid
+- **Status (SEC-2b): FIXED.** D-13: a status change that voids a payment needs a reason — zod, the Server Action and `changeAttendanceStatus` each refuse it without one (`reasonRequired`); a change that voids nothing keeps it optional.
 - **Severity:** Medium. It is a void path with no reason; the only trace is the receipt's change log.
 - **Area:** Attendance correction / void.
 - **Evidence:**
@@ -907,6 +916,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** none.
 
 #### SEC-21 — A manager can reopen unclosed past sessions by changing the centre timezone
+- **Status (SEC-2b): FIXED.** D-14 (b): `Session.timezone` is the centre's timezone frozen at creation (a trigger fills it and keeps it); the write guard, Present/Late, the end-of-day close, "today" at reception and the teacher edit deadline read it. A centre timezone edit moves nothing already created.
 - **Severity:** Medium (likely). This bypasses closed-session immutability for sessions not yet lazily closed.
 - **Area:** Settings / session lifecycle.
 - **Evidence:**
@@ -922,6 +932,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** none (timing-dependent; logic traced).
 
 #### SEC-22 — A FIXED centre cut above the price silently zeroes the teacher's share
+- **Status (SEC-2b): FIXED.** D-15 (c): `centerCutError` (lib/money.ts, the one rule) refuses a FIXED cut above the price in every schema and in the data layer — class create and edit (so lowering a price below the cut is refused), one-time sessions and a session's override. The clamp stays as the backstop.
 - **Severity:** Medium. An insider can zero a teacher's share through configuration that looks valid. It is audited and visible.
 - **Area:** Input validation / money.
 - **Evidence:**
@@ -938,6 +949,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** none (a pure probe exists in the audit scratchpad).
 
 #### SEC-23 — A period settlement accepts any date range, so one bad range blocks a teacher's period settlements permanently
+- **Status (SEC-2b): FIXED.** D-16 (c): a period is strict dates, `to` not in the future (`futureRange`), at most 366 days (`rangeTooLong`); a DRAFT can be cancelled, releasing its claims.
 - **Severity:** Medium. It is an insider (or typo) denial of service on teacher payouts, with no in-app recovery.
 - **Area:** Input validation / settlements.
 - **Evidence:**
@@ -955,6 +967,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** none.
 
 #### SEC-24 — Money sums over int4 columns overflow above about 21.47M EGP
+- **Status (SEC-2b): FIXED.** D-17 (b): every money aggregate is a raw `SUM(...)::bigint` (analytics, the receipt, the Sessions tile); a price is capped at 100,000 EGP (`MAX_PRICE_PIASTRES`, ~30× a realistic session price); a settlement total beyond `integer` is refused (`totalTooLarge`).
 - **Severity:** Medium (likely). Analytics and settlements crash for a large centre over a long window. It is a denial of service, not corruption.
 - **Area:** Numeric bounds.
 - **Evidence:**
@@ -1035,6 +1048,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** none (no server may be run).
 
 #### SEC-29 — No retention or erasure path for minors' data; AuditLog keeps names and free-text block reasons forever
+- **Status (SEC-2b): OPEN (D-20 part fixed).** D-20: audit rows now carry ids, amounts, counts, statuses and dates only — `lib/db/audit-row.ts` refuses a name, contact or free-text key, every writer goes through it, and the reason lives on the record (platform catalog rows exempt, their names being platform reference data). Existing rows are kept, unchanged. **Retention and erasure stay OPEN** — that is OD-2 (legal review).
 - **Severity:** Medium. Every record belongs to a minor, OD-2 is open and gates production, and AuditLog is carved out of the visibility window.
 - **Area:** Privacy of minors.
 - **Evidence:**
@@ -1289,6 +1303,7 @@ Low findings use a compact form. Every field is still present.
 - Repro: none.
 
 **SEC-50 — Some dates pass validation but become Invalid Date, causing 500s and an un-approvable request.**
+- Status (SEC-2b): **FIXED.** Every typed date is the strict `dateOnlyField`/`dateKeyField` (reschedule, holiday, settlement period, expense, teacher session request); a stored request with an impossible date is refused on approval (`invalidDate`), never thrown.
 - Sev: Low.
 - Area: validation.
 - Evidence:
@@ -1302,6 +1317,7 @@ Low findings use a compact form. Every field is still present.
 - Repro: none.
 
 **SEC-51 — Backdating: reschedule and NEW_SESSION approval accept past dates; expenses accept any date and are hard-deleted.**
+- Status (SEC-2b): **FIXED.** Reschedule and NEW_SESSION approval refuse a past date (`pastDate`); D-24: an expense may be backdated within the visibility window only, never into the future; expenses are voided with a reason (who, when), never deleted; category changes are audited.
 - Sev: Low. Insider actions, audited.
 - Area: validation / fraud.
 - Evidence:
@@ -1388,6 +1404,7 @@ Low findings use a compact form. Every field is still present.
 - Repro: none.
 
 **SEC-58 — One-off sessions can be priced at 0.**
+- Status (SEC-2b): **FIXED.** D-26 (b): a 0-priced one-time session needs an explicit "I understand this session is free" (`zeroPriceNeedsConfirmation`); the session header and its receipt are flagged; the `session.create` audit row says `zeroPrice`.
 - Sev: Low. Audited and visible.
 - Area: pricing.
 - Evidence: `newOneOffSessionSchema` accepts a price ≥ 0 via `parseEgpToPiastres`, and `recordPayment` uses `priceSnapshot` (`lib/db/payments.ts:146`).
@@ -1400,6 +1417,7 @@ Low findings use a compact form. Every field is still present.
 - Repro: none.
 
 **SEC-59 — Students can rate sessions they missed, outside the 7-day window; `skipSessionRating` is unchecked.**
+- Status (SEC-2b): **FIXED.** A rating needs a PRESENT/LATE attendance inside the 7-day window, by direct call; a skip for a session the student did not attend writes nothing.
 - Sev: Low. Rating manipulation.
 - Area: ratings.
 - Evidence:
@@ -1412,6 +1430,7 @@ Low findings use a compact form. Every field is still present.
 - Repro: none.
 
 **SEC-60 — AuditLog is append-only by convention only; money audit rows are written after the commit.**
+- Status (SEC-2b): **FIXED.** A trigger makes `AuditLog` append-only (no UPDATE but the FKs' own SET NULL, no DELETE outside an opted-in maintenance transaction that only test cleanup uses); every money action writes its audit row on the money transaction, so an audit failure rolls the money back.
 - Sev: Low.
 - Area: audit.
 - Evidence:
@@ -1438,6 +1457,7 @@ Low findings use a compact form. Every field is still present.
 - Repro: none.
 
 **SEC-62 — The data-visibility window is enforced per page, not in the scoped helpers (CLAUDE.md rule 9).**
+- Status (SEC-2b): **OPEN (writes covered).** Money writes on an old session are refused by the closure rules (every session older than its day is closed, cancelled ones included since D-07), asserted under SEC-08. The read side — moving the window floor into the scoped session/attendee/payment helpers instead of each page — is a separate refactor not taken here.
 - Sev: Low.
 - Area: visibility window.
 - Evidence:
@@ -1496,6 +1516,7 @@ Info items have no behaviour change and no gate unless one is stated.
   - The block actions on `/teachers/[id]` use `student.block`, while class blocks use `class.manage`.
   - The Add-teacher dialog (`teacher.manage`) can give an existing staff member a TEACHER role.
 - **SEC-74:** small parsing gaps:
+  - **Status (SEC-2b): FIXED.** Auth half at SEC-2a; money half now: `parseEgpToPiastres` accepts plain decimal EGP only (no `1e3`, `0x10`, `0.001`), folds Arabic-Indic digits, and the client previews use it; the general-settings audit row includes `teacherEditDeadlineHours`.
   - `parseEgpToPiastres` accepts `1e3`, `0x10` and `0.001` (giving 0); it stays bounded and integer.
   - The client previews re-implement EGP→piastres with `Math.round(x*100)`; display only.
   - `signInSchema.password` and `next` have no max length.
@@ -1518,7 +1539,9 @@ How each script behaves:
 
 Last run: 2026-10-14, against the shared dev project. A count afterwards found 0 leftover `secrepro` centres, users or organisations.
 
-**SEC-2a:** `SEC-01`, `SEC-02`, `SEC-02-teacher`, `SEC-03`, `SEC-03-squat`, `SEC-04`, `SEC-09`, `SEC-10` and `SEC-11` were pointed at the fixed code, printed **NOT REPRODUCED**, were ported into `npm run check:security` as assertions `SEC-01/02/03/04/09/10/11`, and were then deleted. The money/concurrency scripts (`SEC-05`, `SEC-05-mechanism`, `SEC-06`, `SEC-06-race`, `SEC-07`, `SEC-08`, `SEC-12`, `SEC-13`, `_fixtures`) stay for SEC-2b; `SEC-05-mechanism` only gained the `centerId` argument SEC-63 added to `lockAttendeeRow`.
+**SEC-2a:** `SEC-01`, `SEC-02`, `SEC-02-teacher`, `SEC-03`, `SEC-03-squat`, `SEC-04`, `SEC-09`, `SEC-10` and `SEC-11` were pointed at the fixed code, printed **NOT REPRODUCED**, were ported into `npm run check:security` as assertions `SEC-01/02/03/04/09/10/11`, and were then deleted.
+
+**SEC-2b:** the remaining eight — `SEC-05`, `SEC-05-mechanism`, `SEC-06`, `SEC-06-race`, `SEC-07`, `SEC-08`, `SEC-12`, `SEC-13` (and `_fixtures`) — were run against the fixed code on 2026-10-14 and all printed **NOT REPRODUCED**: SEC-05 0/6 doubled (`alreadyPaid` on every race, one active row); SEC-05-mechanism's after-lock read saw the payment; SEC-06 one teacher share paid once in both orders; SEC-06-race one `ok` + `overlappingSettlement`/`sessionAlreadySettled` and one approve/pay out of two; SEC-07 the receipt renders the paid count and an audit-log reader exists; SEC-08 the paid cancel refused and the late void `sessionClosed`; SEC-12 one of void ∥ refund wins, never both flags; SEC-13 2 ACTIVE on a cap-2 class. The only edits before the run were call signatures (approve/pay take the actor; audit cleanup goes through the maintenance helper, the log being append-only now). They are ported into `check:security` as `SEC-05/06/07/08/12/13` — the concurrency ones with real parallel transactions on two clients — and the directory `scripts/security-repro/` is gone.
 
 | Script | Finding | Result | Key output |
 |---|---|---|---|
@@ -1595,7 +1618,7 @@ Until D-03 is decided, strongly consider **disabling the Verify button** (D-03 (
 
 ## 6. NEEDS-DECISION register
 
-These are product, money or permission choices. CLAUDE.md says to ask rather than assume on these. **Decided at SEC-2a** (and recorded in `00-master-product-spec.md` §5.1 "Security decisions (SEC-2a)"): D-01 (revised — no auto-link ever; invitation tokens only; staff-approved claims for staff-created people; `REQUIRE_EMAIL_CONFIRMATION` plus a production guard), D-02 (a), D-03 (d) as a stop-gap, D-04 (a), D-08 (b), D-09 (a), D-10 (a), D-11 (a), D-19 (a), D-21 (a), D-22 (a), D-23 (a), D-25 (b), D-27 (b), D-28 (yes). The rest remain open in OD-11. They are registered together as **OD-11** in `docs/00-master-product-spec.md` §2.2, which points here. Unless noted, the decider is the Founder/Dev plus the Business partner.
+These are product, money or permission choices. CLAUDE.md says to ask rather than assume on these. **Decided at SEC-2a** (and recorded in `00-master-product-spec.md` §5.1 "Security decisions (SEC-2a)"): D-01 (revised — no auto-link ever; invitation tokens only; staff-approved claims for staff-created people; `REQUIRE_EMAIL_CONFIRMATION` plus a production guard), D-02 (a), D-03 (d) as a stop-gap, D-04 (a), D-08 (b), D-09 (a), D-10 (a), D-11 (a), D-19 (a), D-21 (a), D-22 (a), D-23 (a), D-25 (b), D-27 (b), D-28 (yes). **Decided at SEC-2b** (recorded in §5.1 "Security decisions (SEC-2b)"): D-05 (c) — which closes OD-8 — D-06 (a), D-07 (c) (a refunded payment does not block a cancel), D-12 (creator, not beneficiary; OWNER may, flagged), D-13 (a), D-14 (b), D-15 (c), D-16 (c), D-17 (b), D-20 (audit content only — retention stays with OD-2; platform catalog rows exempt), D-24, D-26 (b). **Still open:** D-18 (abuse caps, CAPTCHA), D-20's retention half (= OD-2) and D-03's real mechanism (= OD-6), all in OD-11. They are registered together as **OD-11** in `docs/00-master-product-spec.md` §2.2, which points here. Unless noted, the decider is the Founder/Dev plus the Business partner.
 
 | D# | Finding(s) | Question | Options (★ = auditor's recommendation) |
 |---|---|---|---|
@@ -1729,6 +1752,7 @@ All of this was read-only, on 2026-10-13/14, against the shared dev project.
 | Constraints | `Payment` has no unique index on active payments (dropped in M5); `Refund_paymentId_key` UNIQUE; `SessionAttendee(sessionId, studentProfileId)` UNIQUE; no CHECK on Payment; no Settlement uniqueness or exclusion; no triggers |
 | Exposure counts | 109 `User` rows with an email and `authId` null (107 with a StudentProfile) are claimable via SEC-01; 110 profiles carry a `parentPhone` (the SEC-03 surface); 13 legacy auth users accept the historical password (SEC-36) |
 | `npm audit --omit=dev` | 21 vulnerable packages (2 critical, 17 high, 2 moderate); none reachable at runtime (SEC-34, SEC-35) |
+| **After SEC-2b** (2026-10-14, `migrate deploy` of `20261018090000_sec2b_money_integrity` on dev) | Data checked first: 0 duplicate active payments, 0 rows both voided and refunded, 0 payments counted by two settlements, 0 FIXED cuts above a price, 0 cancelled/rescheduled sessions holding active money. After: `Payment_one_active_per_attendee` and `SettlementClaim_one_live_per_payment` (partial unique), CHECK `Payment_not_voided_and_refunded`, triggers `Session_freeze_timezone` and `AuditLog_append_only`; 723 sessions backfilled with their centre's timezone; 253 claims backfilled, every settlement total equal to its claims; `migrate diff` against the schema empty; `SettlementClaim` has RLS from birth. |
 | **After SEC-2a** (`check:rls`, 2026-10-14) | 42 `public` tables, RLS on all, 0 policies; `anon`/`authenticated`: no USAGE, no table/sequence/function privilege, no default grant; buckets `avatars` (1 MB), `id-cards`, `logos` (512 KB, raster only), `session-uploads`, all private, 0 `storage.objects` policies; Prisma role `postgres` rolbypassrls=true. GoTrue unchanged (`mailer_autoconfirm=true` on dev, by design until OD-1). `npm audit --omit=dev`: 0. |
 
 ---
@@ -1739,9 +1763,9 @@ SEC-1 changes no behaviour, so these passages are **not** rewritten here. Each o
 
 | Doc claim | Reality | Finding | Status |
 |---|---|---|---|
-| `docs/03-build-order.md:186` (R2) says the "second active payment" race is closed | It is open; the lock query's EXISTS is stale | SEC-05 | open — SEC-2b |
+| `docs/03-build-order.md:186` (R2) says the "second active payment" race is closed | It is open; the lock query's EXISTS is stale | SEC-05 | **Corrected at SEC-2b** (the R2 entry says so; the race is closed by a fresh read and a partial unique index) |
 | `docs/00` §5 and CLAUDE.md rule 4: duplicate matching uses verified phone/email only | No phone is ever verified, and sign-up phones and student-edited local phones are matched | SEC-02 | **Corrected at SEC-2a** (matching now links on the global email only; a phone is never a key) |
-| CLAUDE.md rule 9: the visibility window is enforced in the scoped helpers | Enforced per page; only `refunds.list` applies it in `scoped.ts`; money writes skip it | SEC-62, SEC-08 | open — SEC-2b |
+| CLAUDE.md rule 9: the visibility window is enforced in the scoped helpers | Enforced per page; only `refunds.list` applies it in `scoped.ts`; money writes skip it | SEC-62, SEC-08 | **Partly** — money writes on old sessions are refused at SEC-2b (closure); the reads are still per page (SEC-62 open) |
 | `docs/02` §10 "Layer 2": `storage.objects` policies mirror membership, using three `kayedu_*` helpers | 0 storage policies and no helpers on the live project; the repo has no `avatars`/`id-cards` policies | SEC-55 | **Corrected at SEC-2a** (§10 now: no Layer 2 by design) |
 | `docs/00` §2.1-B (line 69): `public.rls_auto_enable()` is executable by anon/authenticated | The function does not exist | SEC-56 | **Corrected at SEC-2a** |
 | `docs/00` §2.1-B (line 71) and `docs/01:58,130`: avatars/id-cards policies exist; tables are "in the RLS backstop list" | No policies; the backstop script fails as written | SEC-30, SEC-56 | **Corrected at SEC-2a** |

@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient, ParentLinkStatus } from "@prisma/client";
 // lib/db/student-portal.ts and lib/db/reservations.ts).
 import { normalizePhone } from "../phone.ts";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 /**
  * ParentLink resolution (M16, docs/01-data-model.md "People layer, continued",
@@ -199,16 +200,14 @@ export async function revokeStaleParentLinks(
       data: { status: REVOKED, revokedAt: now, revokedReason: "parentPhoneChanged" },
     });
     if (updated.count === 0) continue;
-    await db.auditLog.create({
-      data: {
-        centerId: params.centerId,
-        actorUserId: params.actorUserId,
-        action: "parentLink.revoke",
-        entityType: "ParentLink",
-        entityId: link.id,
-        before: { status: link.status },
-        after: { status: REVOKED, reason: "parentPhoneChanged" },
-      },
+    await writeAuditRow(db, {
+      centerId: params.centerId,
+      actorUserId: params.actorUserId,
+      action: "parentLink.revoke",
+      entityType: "ParentLink",
+      entityId: link.id,
+      before: { status: link.status },
+      after: { status: REVOKED, trigger: "parentPhoneChanged" },
     });
   }
   return stale.length;

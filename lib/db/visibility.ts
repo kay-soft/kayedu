@@ -1,7 +1,7 @@
 // Relative import on purpose — `npm run check:visibility` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/organizations.ts).
-import { addDays, centreTimeZone, todayInTimezone } from "../scheduling.ts";
+import { addDays, centreTimeZone, dateKey, todayInTimezone } from "../scheduling.ts";
 
 /**
  * The data-visibility window (M19, docs/00-master-product-spec.md §5.1 "Data
@@ -80,4 +80,22 @@ export function clampRangeToVisibility<T extends { start: Date; end: Date }>(
 ): T {
   if (!floor || range.start.getTime() >= floor.getTime()) return range;
   return { ...range, start: floor };
+}
+
+/**
+ * When an expense may be dated (SEC-2b, D-24, SEC-51): backdated **within**
+ * the visibility window (a late-entered receipt is legitimate), never older
+ * than the window floor (a month the centre can no longer see), never in the
+ * future, all in the centre's calendar. A platform admin has no floor.
+ */
+export function expenseDateError(
+  ctx: VisibilityAwareContext,
+  date: Date,
+  now: Date = new Date(),
+): "futureDate" | "beforeWindow" | null {
+  const today = todayInTimezone(centreTimeZone(ctx.settings), now);
+  if (dateKey(date) > dateKey(today)) return "futureDate";
+  const floor = visibilityWindowFloor(ctx, now);
+  if (floor && date < floor) return "beforeWindow";
+  return null;
 }

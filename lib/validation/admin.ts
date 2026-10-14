@@ -4,7 +4,7 @@ import { z } from "zod";
 // schemas outside the Next.js runtime (same reasoning as
 // lib/validation/settings.ts).
 import { localeSchema } from "./auth.ts";
-import { parseEgpToPiastres } from "../money.ts";
+import { MAX_PRICE_PIASTRES, parseEgpToPiastres } from "../money.ts";
 
 /**
  * Platform-admin schemas (M9). Messages are i18n keys under
@@ -91,7 +91,7 @@ const catalogShareEgp = z
   .string()
   .trim()
   .default("")
-  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value)))
+  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value, MAX_PRICE_PIASTRES)))
   .refine((value): value is number => value !== null, "invalidAmount");
 
 const catalogEntryFields = {

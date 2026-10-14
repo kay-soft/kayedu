@@ -26,6 +26,7 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { PrismaClient, type Role } from "@prisma/client";
@@ -102,14 +103,12 @@ async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   // Platform audit rows for the entries this script made (the actor FK is
   // optional, so they would otherwise outlive the throwaway users).
-  await prisma.auditLog.deleteMany({
-    where: {
-      action: { startsWith: "platform.catalog." },
-      OR: [
-        { after: { path: ["nameEn"], string_starts_with: CATALOG_PREFIX } },
-        { before: { path: ["nameEn"], string_starts_with: CATALOG_PREFIX } },
-      ],
-    },
+  await deleteAuditRows(prisma, {
+    action: { startsWith: "platform.catalog." },
+    OR: [
+      { after: { path: ["nameEn"], string_starts_with: CATALOG_PREFIX } },
+      { before: { path: ["nameEn"], string_starts_with: CATALOG_PREFIX } },
+    ],
   });
   await prisma.user.deleteMany({ where: { email: { startsWith: "catalog-check-" } } });
   // Global rows — cleaned up explicitly, same reasoning as classes-check.ts.

@@ -95,7 +95,7 @@ export async function teacherBlockStudentAction(
     action: "student.block",
     entityType: "StudentBlock",
     entityId: block.id,
-    after: { scope: "TEACHER", teacherUserId: ctx.user.id, studentProfileId, reason },
+    after: { scope: "TEACHER", teacherUserId: ctx.user.id, studentProfileId },
   });
 
   revalidatePath(`/${locale}${ROUTES.teacherStudent(studentProfileId)}`);

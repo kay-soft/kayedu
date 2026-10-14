@@ -80,6 +80,9 @@ export async function SessionPrintSheet({
           timeZone={timeZone}
           closure={receipt.closure}
           changes={receipt.changes}
+          voids={receipt.voids}
+          refunds={receipt.refunds}
+          unpaid={receipt.unpaid}
         />
       </section>
 

@@ -14,6 +14,7 @@
  * whatever day or hour it runs. Needs a reachable database and cleans up
  * after itself.
  */
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -113,7 +114,7 @@ async function cleanup() {
   const ids = centers.map((c) => c.id);
   if (ids.length > 0) {
     // AuditLog.centerId has no cascade; the AUTO-close rows reference these centres.
-    await prisma.auditLog.deleteMany({ where: { centerId: { in: ids } } });
+    await deleteAuditRows(prisma, { centerId: { in: ids } });
     await prisma.center.deleteMany({ where: { id: { in: ids } } });
     await prisma.organization.deleteMany({ where: { id: { in: centers.map((c) => c.organizationId) } } });
   }
@@ -286,11 +287,11 @@ function checkStatic() {
       deriveSessionDisplayStatus({ ...base, rescheduledToId: "x", closedAt: null }, cairo(7, 16, 30), TZ) === "RESCHEDULED",
   );
   check(
-    "isSessionClosed: closedAt or day over; never a cancelled/rescheduled session",
+    "isSessionClosed: closedAt or day over, a cancelled/rescheduled session included (D-07)",
     isSessionClosed({ closedAt: cairo(7, 17, 0), date: D }, cairo(7, 17, 1), TZ) &&
       isSessionClosed({ closedAt: null, date: D }, cairo(8, 0, 1), TZ) &&
       !isSessionClosed({ closedAt: null, date: D }, cairo(7, 23, 0), TZ) &&
-      !isSessionClosed({ closedAt: null, date: D, status: "CANCELLED" }, cairo(8, 1, 0), TZ),
+      isSessionClosed({ closedAt: null, date: D }, cairo(8, 1, 0), TZ),
   );
 
   console.log("\nPermissions (no database needed)");
@@ -656,9 +657,19 @@ async function main() {
     { centerId: centerA.id, attendeeId: v2.id, status: "ABSENT", changedBy: staff.id, mayVoidPayment: true },
     { now: vNow },
   );
+  const v2AfterRefusal = await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: v2.id } });
   check(
-    "The reason is optional",
-    noReason.ok && noReason.change?.reason === null && noReason.voidedPayment?.id === vPay2.id,
+    "A change that voids a payment needs a reason (D-13): refused without one, nothing moves",
+    !noReason.ok &&
+      noReason.error === "reasonRequired" &&
+      v2AfterRefusal.attendanceStatus === "PRESENT" &&
+      !(await prisma.payment.findUniqueOrThrow({ where: { id: vPay2.id } })).voided,
+  );
+  // The same change with a reason goes through, so the totals below keep two voids.
+  await changeAttendanceStatus(
+    prisma,
+    { centerId: centerA.id, attendeeId: v2.id, status: "ABSENT", changedBy: staff.id, reason: "Left before class", mayVoidPayment: true },
+    { now: vNow },
   );
 
   const notPermitted = await changeAttendanceStatus(
@@ -694,7 +705,7 @@ async function main() {
   try {
     await changeAttendanceStatus(
       prisma,
-      { centerId: centerA.id, attendeeId: v8.id, status: "ABSENT", changedBy: staff.id, mayVoidPayment: true },
+      { centerId: centerA.id, attendeeId: v8.id, status: "ABSENT", changedBy: staff.id, reason: "Forced failure", mayVoidPayment: true },
       { now: vNow },
     );
   } catch {

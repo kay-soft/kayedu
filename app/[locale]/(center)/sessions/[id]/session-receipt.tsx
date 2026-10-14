@@ -1,9 +1,12 @@
 import { getTranslations } from "next-intl/server";
-import { Ban } from "lucide-react";
+import { Ban, CircleAlert, Gift, Undo2 } from "lucide-react";
 
 import type {
   ReceiptChange,
   ReceiptClosure,
+  ReceiptRefund,
+  ReceiptUnpaid,
+  ReceiptVoid,
 } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import type { SessionReceiptTotals } from "@/lib/db/payments";
@@ -18,9 +21,14 @@ import type { SessionReceiptTotals } from "@/lib/db/payments";
  * R2 adds the close (when and how the session closed) and, at the end, a
  * "Changes during session" section listing every live status change from
  * `SessionAttendanceChange` — absent entirely when nothing was changed.
- * Voided payments are already outside every total (`sessionReceiptTotals`).
- * The printed receipt renders the same data (`components/shared/
- * session-print-sheet.tsx`), loaded through the same `loadSessionReceiptView`.
+ *
+ * SEC-2b (D-06 (a), SEC-07, SEC-19, D-26): "collected" is net of refunds, and
+ * nothing that took money off the books is invisible — the receipt counts and
+ * lists every **refund**, every **voided** payment (who, how much, by whom,
+ * why) and every **present-but-unpaid** attendee, and flags a session priced
+ * at 0. Each section is absent when empty. The printed receipt renders the
+ * same data (`components/shared/session-print-sheet.tsx`), loaded through the
+ * same `loadSessionReceiptView`.
  */
 export async function SessionReceipt({
   totals,
@@ -29,6 +37,9 @@ export async function SessionReceipt({
   timeZone,
   closure = null,
   changes = [],
+  voids = [],
+  refunds = [],
+  unpaid = [],
   showOpenNote = false,
 }: {
   totals: SessionReceiptTotals;
@@ -37,6 +48,9 @@ export async function SessionReceipt({
   timeZone: string;
   closure?: ReceiptClosure;
   changes?: ReceiptChange[];
+  voids?: ReceiptVoid[];
+  refunds?: ReceiptRefund[];
+  unpaid?: ReceiptUnpaid[];
   /** Say plainly that an un-closed session's figures can still change. */
   showOpenNote?: boolean;
 }) {
@@ -45,6 +59,12 @@ export async function SessionReceipt({
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
+      {totals.zeroPriced ? (
+        <p className="mb-3 inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning">
+          <Gift className="size-3" aria-hidden />
+          {t("zeroPriced")}
+        </p>
+      ) : null}
       <dl className="flex flex-col gap-2 text-sm">
         <Row label={t("collected")} value={formatMoney(totals.collected, locale)} />
         {showProfit ? (
@@ -52,6 +72,27 @@ export async function SessionReceipt({
             <Row label={t("centerShare")} value={formatMoney(totals.centerShare, locale)} />
             <Row label={t("teacherShare")} value={formatMoney(totals.teacherShare, locale)} />
           </>
+        ) : null}
+        <Row label={t("paidCount")} value={formatNumber(totals.paidCount, locale)} />
+        {totals.refundedCount > 0 ? (
+          <Row
+            label={t("refundedLine", { count: totals.refundedCount })}
+            value={`−${formatMoney(totals.refundedAmount, locale)}`}
+          />
+        ) : null}
+        {totals.voidedCount > 0 ? (
+          <Row
+            label={t("voidedLine", { count: totals.voidedCount })}
+            value={formatMoney(totals.voidedAmount, locale)}
+            tone="danger"
+          />
+        ) : null}
+        {totals.unpaidCount > 0 ? (
+          <Row
+            label={t("unpaidLine", { count: totals.unpaidCount })}
+            value={formatNumber(totals.unpaidCount, locale)}
+            tone="warning"
+          />
         ) : null}
       </dl>
 
@@ -79,6 +120,77 @@ export async function SessionReceipt({
         <p className="mt-4 border-t border-border-subtle pt-4 text-xs text-text-muted">
           {t("notClosed")}
         </p>
+      ) : null}
+
+      {unpaid.length > 0 ? (
+        <section className="mt-4 border-t border-border-subtle pt-4">
+          <h3 className="flex items-center gap-1 text-sm font-semibold text-text-primary">
+            <CircleAlert className="size-4 text-warning" aria-hidden />
+            {t("unpaidTitle")}
+          </h3>
+          <ul className="mt-2 flex flex-col gap-1 text-sm">
+            {unpaid.map((line) => (
+              <li key={line.attendeeId} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <span className="min-w-0 text-text-primary">{line.studentName}</span>
+                <span className="text-xs text-text-secondary">{tAttendance(line.status)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {voids.length > 0 ? (
+        <section className="mt-4 border-t border-border-subtle pt-4">
+          <h3 className="flex items-center gap-1 text-sm font-semibold text-text-primary">
+            <Ban className="size-4 text-danger" aria-hidden />
+            {t("voidsTitle")}
+          </h3>
+          <ul className="mt-2 flex flex-col gap-2">
+            {voids.map((line) => (
+              <li key={line.paymentId} className="flex flex-col gap-1 rounded-lg bg-danger-bg px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <span className="min-w-0 font-medium text-text-primary">{line.studentName}</span>
+                  <span className="tabular-nums text-text-primary">{formatMoney(line.amount, locale)}</span>
+                </div>
+                <p className="text-xs text-text-secondary">
+                  {t("voidMeta", {
+                    time: line.voidedAt ? formatDateTime(line.voidedAt, locale, timeZone) : "—",
+                    name: line.voidedByName ?? t("unknownActor"),
+                  })}
+                </p>
+                {line.reason ? (
+                  <p className="text-xs text-text-secondary">{t("changeReason", { reason: line.reason })}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {refunds.length > 0 ? (
+        <section className="mt-4 border-t border-border-subtle pt-4">
+          <h3 className="flex items-center gap-1 text-sm font-semibold text-text-primary">
+            <Undo2 className="size-4 text-text-secondary" aria-hidden />
+            {t("refundsTitle")}
+          </h3>
+          <ul className="mt-2 flex flex-col gap-2">
+            {refunds.map((line) => (
+              <li key={line.paymentId} className="flex flex-col gap-1 rounded-lg bg-surface-subtle px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <span className="min-w-0 font-medium text-text-primary">{line.studentName}</span>
+                  <span className="tabular-nums text-text-primary">−{formatMoney(line.amount, locale)}</span>
+                </div>
+                <p className="text-xs text-text-secondary">
+                  {t("refundMeta", {
+                    time: formatDateTime(line.refundedAt, locale, timeZone),
+                    name: line.refundedByName ?? t("unknownActor"),
+                  })}
+                </p>
+                <p className="text-xs text-text-secondary">{t("changeReason", { reason: line.reason })}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {changes.length > 0 ? (
@@ -125,11 +237,25 @@ export async function SessionReceipt({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+const ROW_TONE = {
+  default: "text-text-primary",
+  danger: "text-danger",
+  warning: "text-warning",
+} as const;
+
+function Row({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: keyof typeof ROW_TONE;
+}) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="text-text-secondary">{label}</dt>
-      <dd className="text-end font-medium tabular-nums text-text-primary">{value}</dd>
+      <dd className={`text-end font-medium tabular-nums ${ROW_TONE[tone]}`}>{value}</dd>
     </div>
   );
 }

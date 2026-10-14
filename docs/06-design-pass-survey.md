@@ -86,13 +86,18 @@ Filters were a `grid sm:grid-cols-3` of hand-labelled selects; hand-copied list-
 "Live now" (green) and "Collected" (blue) KPI borders; hand-labelled filter grid; hand-copied list header. **R10a:** neutral KPIs, `FilterBar`/`FilterField`, `ListHeader`.
 
 ### `app/[locale]/(center)/expenses/page.tsx`
+**SEC-2b (D-24):** Delete is gone — "Void" opens an inline reason field (required) and a destructive confirm; a voided row stays in the list struck through with a red "Voided" badge and a "Voided by … · time · reason" line under it, and leaves both totals.
 Red "Total" KPI border (money going out is not an error); the date filter sat in a bare `<form>`; hand-copied list header. **R10a:** neutral KPI, `FilterBar`, `ListHeader`.
 
 ### `app/[locale]/(center)/settlements/page.tsx`
+**SEC-2b (D-12, D-16):** a DRAFT gets a ghost "Cancel draft" beside Approve; CANCELLED has a red badge; a settlement the viewer created (and the viewer is not an OWNER) shows no Approve/Mark-paid buttons, only a muted line saying another manager or the owner must do it.
 "No teachers" was a bare muted sentence in a card. **R10a:** compact `EmptyState`.
 
 ### `app/[locale]/(center)/refunds/page.tsx`
 Consistent (PageHeader, card, empty state, bordered rows). No change.
+
+### `app/[locale]/(center)/audit/page.tsx`
+**SEC-2b (new, D-06).** The centre audit trail, `audit.view` only, reached from the Dashboard and Analytics headers (not the nav — `check:permissions` pins each role's nav list; adding it there is a one-line change awaiting a decision). `PageHeader`, then a row of filter pills — Everything, Voids, Switched to absent, Refunds, Settlements, Price and cut changes, Present-not-paid — each a link with a 44 px touch height and `aria-current` on the active one, wrapping at 375 px. Every row is a stacked card at every width (nothing scrolls sideways): action, amount on the end side, "time · actor", the person it concerns, the reason, the before → after of any price/cut/status field, and an "Open the session" link. An OWNER's self-approved settlement carries an amber badge. Paged at 50.
 
 ### `app/[locale]/(center)/reception/page.tsx`
 Page chrome already on the shared parts. Its "Recent check-ins" panel showed a bare muted sentence when empty. **R10a:** compact `EmptyState` there (`recent-check-ins.tsx`). Filter chips already use the single brand selected state.
@@ -128,6 +133,8 @@ Hand-copied list header. **R10a:** `ListHeader`.
 ### `app/[locale]/(center)/sessions/[id]/page.tsx` — **R10b**
 *Wrong now (at `ea7f645`):* the session's verbs (Reschedule · Edit rooms · Cancel · Delete) are in an `ActionBar` **at the bottom of the side column's facts card** — below the date/time/room/seats/price rows, far from the title and, on a phone, below the entire roster. The header's own action slot holds only badges and the "All sessions" link, in a loose row. End session is a separate strip between header and body, with its hint left and the button right, in its own bordered box. The two columns are `3fr/2fr` from `xl` only; the receipt card moves above/below the facts card depending on `closed`, so the side column's order changes with state. The roster card is tall while the side stack has no matching rhythm (facts card is short, receipt card is long) — the columns end at unrelated heights. The closed banner is correct (R2) and stays.
 **R10b:** all five verbs (End session, Reschedule, Edit rooms, Cancel, Delete) are one `ActionBar inHeader` under the title, each behind the same condition as before (none once closed/cancelled/rescheduled, none without the permission — and no empty bar then); the End-session and Delete hints are muted text under the header; badges, time and rooms are the header's `meta`; the roster is `main`, the details and receipt are a sticky `side` (receipt first once closed, as R2 had it).
+
+**SEC-2b (D-06, D-13, D-26, SEC-19):** the receipt adds a "Payments" count, "Refunded (n) −amount", a red "Voided — not counted (n)" row and an amber "Present or late without a payment" row, then named sections — present-but-unpaid students, voided payments (amount, who, when, why, on a red tint), refunds — each absent when empty; the same receipt prints and shows on the teacher's session page and in the reception dialog. A session priced at 0 gets an amber "Free session" badge in the header and on the receipt. The roster's "Mark absent and void payment" dialog now requires its reason (field marked required, the server's refusal shown under it). The New session dialog, at a price of 0, shows an amber tick box "I understand this session is free" that the server requires.
 
 ### `app/[locale]/(center)/teachers/[id]/page.tsx` — **R10b**
 *Wrong now (at `ea7f645`):* the header is title + "Active" badge + back link in one loose row, with no initial or avatar. The main column is a single tall **edit form** card whose footer carries *Save* and, on the far side, *Delete* (a destructive button sharing a row with the primary action). The "trusted teacher" switch sits inside that same form between the fields and the buttons. The side column is two small cards (identity/rating, classes) — so under the form there is a large blank area at 1280px whenever the form is taller than them, and the block-list is a full-width card below both with its own search. The identity card is titled for a concept (`identityTitle`) the user does not recognise and carries a 'claimed account' row. There is no list of upcoming/recent sessions or of the teacher's students on the page today.

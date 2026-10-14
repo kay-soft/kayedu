@@ -231,25 +231,19 @@ export async function updateCatalogSelectionAction(
 
   // A rename (or a price change) is a centre-visible change to what staff,
   // teachers and students read — audited with before/after (CLAUDE.md rule 7).
-  const before = {
-    displayNameAr: existing.displayNameAr,
-    displayNameEn: existing.displayNameEn,
-    basePrice: existing.basePrice,
-  };
-  const after = {
-    displayNameAr: updated.displayNameAr,
-    displayNameEn: updated.displayNameEn,
-    basePrice: updated.basePrice,
-  };
-  if (JSON.stringify(before) !== JSON.stringify(after)) {
+  // D-20: the typed display names stay on the selection; the audit row says
+  // which one changed, and carries the price itself.
+  const renamedAr = existing.displayNameAr !== updated.displayNameAr;
+  const renamedEn = existing.displayNameEn !== updated.displayNameEn;
+  if (renamedAr || renamedEn || existing.basePrice !== updated.basePrice) {
     await writeAuditLog({
       centerId: scope.ctx.center.id,
       actorUserId: scope.ctx.user.id,
       action: "catalog.selection.update",
       entityType: "CenterCatalogSelection",
       entityId: selectionId,
-      before: { kind: existing.kind, ...before },
-      after: { kind: existing.kind, ...after },
+      before: { kind: existing.kind, basePrice: existing.basePrice },
+      after: { kind: existing.kind, basePrice: updated.basePrice, renamedAr, renamedEn },
     });
   }
   revalidateSettings(locale);
@@ -458,7 +452,7 @@ export async function createPaymentMethodAction(
     action: "paymentMethod.create",
     entityType: "CenterPaymentMethod",
     entityId: result.method.id,
-    after: { name: result.method.name, active: result.method.active },
+    after: { active: result.method.active },
   });
 
   revalidateSettings(locale);
@@ -490,8 +484,7 @@ export async function updatePaymentMethodAction(
       action: "paymentMethod.rename",
       entityType: "CenterPaymentMethod",
       entityId: id,
-      before: { name: result.before.name },
-      after: { name },
+      after: { renamed: true },
     });
   }
 
@@ -520,7 +513,7 @@ export async function togglePaymentMethodAction(
       action: active ? "paymentMethod.activate" : "paymentMethod.deactivate",
       entityType: "CenterPaymentMethod",
       entityId: id,
-      before: { name: result.before.name, active: result.before.active },
+      before: { active: result.before.active },
       after: { active },
     });
   }
@@ -552,11 +545,11 @@ export async function deletePaymentMethodAction(
       result.outcome === "deleted" ? "paymentMethod.delete" : "paymentMethod.deactivate",
     entityType: "CenterPaymentMethod",
     entityId: id,
-    before: { name: result.before.name, active: result.before.active },
+    before: { active: result.before.active },
     after:
       result.outcome === "deleted"
         ? null
-        : { active: false, reason: "deleteRequestedButReferencedByPayments" },
+        : { active: false, trigger: "deleteRequestedButReferencedByPayments" },
   });
 
   revalidateSettings(locale);
@@ -570,9 +563,9 @@ export async function deletePaymentMethodAction(
 // case-insensitive name rule and the period rule live in lib/db/terms.ts.
 // Every change is audited.
 
-function termJson(term: { name: string; startDate: Date; endDate: Date; active: boolean }) {
+/** A term's audit shape — its dates and state; never its typed name (D-20). */
+function termJson(term: { startDate: Date; endDate: Date; active: boolean }) {
   return {
-    name: term.name,
     startDate: dateKey(term.startDate),
     endDate: dateKey(term.endDate),
     active: term.active,
@@ -750,6 +743,7 @@ export async function saveGeneralSettingsAction(
           timezone: before.timezone,
           scheduleConflictPolicy: before.scheduleConflictPolicy,
           dataVisibilityDays: before.dataVisibilityDays,
+          teacherEditDeadlineHours: before.teacherEditDeadlineHours,
         }
       : null,
     after: {
@@ -760,6 +754,8 @@ export async function saveGeneralSettingsAction(
       timezone,
       scheduleConflictPolicy,
       dataVisibilityDays,
+      // SEC-74: the edit deadline is a setting too — it was missing here.
+      teacherEditDeadlineHours,
     },
   });
 

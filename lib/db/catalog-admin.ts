@@ -6,7 +6,8 @@ import {
   normalizeCatalogName,
   type CatalogEntryKind,
 } from "../catalog.ts";
-import { MAX_PIASTRES } from "../money.ts";
+import { MAX_PRICE_PIASTRES } from "../money.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 /**
  * The platform admin's write path to the global academic catalog (R8,
@@ -225,7 +226,7 @@ async function checkInput(
   let share: number | null = null;
   if (kind === "EDUCATION_SYSTEM") {
     share = input.defaultFixedCenterShare ?? 0;
-    if (!Number.isInteger(share) || share < 0 || share > MAX_PIASTRES) {
+    if (!Number.isInteger(share) || share < 0 || share > MAX_PRICE_PIASTRES) {
       return { ok: false, error: "invalidShare" };
     }
   }
@@ -264,16 +265,14 @@ async function audit(
   before: CatalogEntrySnapshot | null,
   after: CatalogEntrySnapshot | null,
 ) {
-  await tx.auditLog.create({
-    data: {
-      centerId: null,
-      actorUserId,
-      action: `platform.catalog.${action}`,
-      entityType: AUDIT_ENTITY[kind],
-      entityId,
-      before: before ?? undefined,
-      after: after ?? undefined,
-    },
+  await writeAuditRow(tx, {
+    centerId: null,
+    actorUserId,
+    action: `platform.catalog.${action}`,
+    entityType: AUDIT_ENTITY[kind],
+    entityId,
+    before: before ?? undefined,
+    after: after ?? undefined,
   });
 }
 

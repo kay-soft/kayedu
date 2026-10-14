@@ -13,6 +13,7 @@ import {
 import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import type { MatchCandidate } from "../validation/people.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 /**
  * **The one place a teacher is added to a centre** (CLAUDE.md rule 4; spec §5
@@ -153,15 +154,13 @@ export async function addTeacherMembership(
     const membership = await tx.membership.create({
       data: scopedData(centerId, { userId: person.id, role: TEACHER, joinedAt: new Date(), ...local }),
     });
-    await tx.auditLog.create({
-      data: {
-        centerId,
-        actorUserId: options.actorUserId,
-        action: "membership.create",
-        entityType: "Membership",
-        entityId: membership.id,
-        after: { role: "TEACHER", via: options.via, linked: false },
-      },
+    await writeAuditRow(tx, {
+      centerId,
+      actorUserId: options.actorUserId,
+      action: "membership.create",
+      entityType: "Membership",
+      entityId: membership.id,
+      after: { role: "TEACHER", via: options.via, linked: false },
     });
     return { ok: true, membershipId: membership.id, userId: person.id, outcome: "created" };
   }
@@ -186,16 +185,14 @@ export async function addTeacherMembership(
       where: scopedWhere(centerId, { id: existing.id }),
       data: { active: true, joinedAt: existing.joinedAt ?? new Date(), ...local },
     });
-    await tx.auditLog.create({
-      data: {
-        centerId,
-        actorUserId: options.actorUserId,
-        action: "membership.activate",
-        entityType: "Membership",
-        entityId: existing.id,
-        before: { active: existing.active },
-        after: { active: true, via: options.via, linked: true },
-      },
+    await writeAuditRow(tx, {
+      centerId,
+      actorUserId: options.actorUserId,
+      action: "membership.activate",
+      entityType: "Membership",
+      entityId: existing.id,
+      before: { active: existing.active },
+      after: { active: true, via: options.via, linked: true },
     });
     return { ok: true, membershipId: existing.id, userId: matched.id, outcome: "reactivated" };
   }
@@ -203,15 +200,13 @@ export async function addTeacherMembership(
   const membership = await tx.membership.create({
     data: scopedData(centerId, { userId: matched.id, role: TEACHER, joinedAt: new Date(), ...local }),
   });
-  await tx.auditLog.create({
-    data: {
-      centerId,
-      actorUserId: options.actorUserId,
-      action: "membership.create",
-      entityType: "Membership",
-      entityId: membership.id,
-      after: { role: "TEACHER", via: options.via, linked: true, matchedOn: match.matchedOn },
-    },
+  await writeAuditRow(tx, {
+    centerId,
+    actorUserId: options.actorUserId,
+    action: "membership.create",
+    entityType: "Membership",
+    entityId: membership.id,
+    after: { role: "TEACHER", via: options.via, linked: true, matchedOn: match.matchedOn },
   });
   return { ok: true, membershipId: membership.id, userId: matched.id, outcome: "linked" };
 }

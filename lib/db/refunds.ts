@@ -1,6 +1,7 @@
 import type { Payment, Prisma, PrismaClient, Refund } from "@prisma/client";
 // Relative imports on purpose — `npm run check:settlements` exercises this
 // module directly, outside the Next.js runtime.
+import { lockPaymentRow } from "./payments.ts";
 import {
   ensureSessionOpenOrAutoClose,
   type SessionWriteOptions,
@@ -39,7 +40,17 @@ export type RefundPaymentResult =
        */
       adjustedSettlements: AdjustedSettlement[];
     }
-  | { ok: false; error: "notFound" | "alreadyVoided" | "alreadyRefunded" | "sessionClosed" };
+  | {
+      ok: false;
+      error:
+        | "notFound"
+        | "alreadyVoided"
+        | "alreadyRefunded"
+        | "reasonRequired"
+        | "sessionClosed"
+        | "sessionCancelled"
+        | "sessionRescheduled";
+    };
 
 /**
  * Refunds one payment in full — Phase 1 supports whole-payment refunds only
@@ -73,8 +84,14 @@ export type RefundPaymentResult =
  * the one rule a void (R2) follows too.
  *
  * R2: refused on a closed session (`sessionClosed`) — a closed session is an
- * immutable record. A CANCELLED or rescheduled session is not "closed"; money
- * it already carries can still be given back.
+ * immutable record. SEC-2b (D-07): refused on a CANCELLED or rescheduled
+ * session too — neither can be cancelled/rescheduled while it holds active
+ * money, so there is nothing there to give back.
+ *
+ * SEC-12: the payment row is locked and re-read before anything is decided,
+ * and the flag flips conditionally — a refund racing a void (or a second
+ * refund) serializes here, and the loser gets `alreadyVoided`/
+ * `alreadyRefunded`, never a second write and never a thrown unique error.
  */
 export async function refundPayment(
   tx: Db,
@@ -84,44 +101,41 @@ export async function refundPayment(
   refundedBy: string,
   options: SessionWriteOptions = {},
 ): Promise<RefundPaymentResult> {
+  if (reason.trim().length === 0) return { ok: false, error: "reasonRequired" };
   const located = await tx.payment.findFirst({
     where: { centerId, id: paymentId },
     select: { sessionId: true },
   });
   if (!located) return { ok: false, error: "notFound" };
   const gate = await ensureSessionOpenOrAutoClose(tx, located.sessionId, centerId, options.now, {
-    allowTerminal: true,
     historicalBackfill: options.historicalBackfill,
   });
   if (gate.status === "missing") return { ok: false, error: "notFound" };
-  if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
+  if (gate.status === "refused") return { ok: false, error: gate.reason };
 
-  const payment = await tx.payment.findFirst({
-    where: { centerId, id: paymentId },
-    include: { session: { select: { date: true, closedAt: true } } },
-  });
+  const payment = await lockPaymentRow(tx, centerId, paymentId);
   if (!payment) return { ok: false, error: "notFound" };
   if (payment.voided) return { ok: false, error: "alreadyVoided" };
   if (payment.refunded) return { ok: false, error: "alreadyRefunded" };
 
-  const [refund, updatedPayment] = await Promise.all([
-    tx.refund.create({
-      data: {
-        centerId,
-        paymentId: payment.id,
-        teacherId: payment.teacherId,
-        amount: payment.amount,
-        centerShareReversed: payment.centerShareSnapshot,
-        teacherShareReversed: payment.teacherShareSnapshot,
-        reason,
-        refundedBy,
-      },
-    }),
-    tx.payment.update({
-      where: { id: payment.id },
-      data: { refunded: true },
-    }),
-  ]);
+  const flipped = await tx.payment.updateMany({
+    where: { id: payment.id, centerId, voided: false, refunded: false },
+    data: { refunded: true },
+  });
+  if (flipped.count !== 1) return { ok: false, error: "alreadyRefunded" };
+  const refund = await tx.refund.create({
+    data: {
+      centerId,
+      paymentId: payment.id,
+      teacherId: payment.teacherId,
+      amount: payment.amount,
+      centerShareReversed: payment.centerShareSnapshot,
+      teacherShareReversed: payment.teacherShareSnapshot,
+      reason: reason.trim(),
+      refundedBy,
+    },
+  });
+  const updatedPayment = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
 
   const adjustedSettlements = await adjustUnpaidSettlementsForReversal(
     tx,

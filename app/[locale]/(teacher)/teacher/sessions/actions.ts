@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ctxCan, actionContext } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
+import { sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { studentSearchWhere } from "@/lib/db/students";
 import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
@@ -83,8 +84,9 @@ export async function updateSessionDescriptionAction(
   const deadlineHours = ctx.settings?.teacherEditDeadlineHours ?? null;
   if (deadlineHours !== null) {
     // R7b: the deadline counts hours from the start of the session's day *at
-    // the centre* (local midnight), not from UTC midnight.
-    const dayStart = startOfSessionDay(session.date, centreTimeZone(ctx.settings));
+    // the centre* (local midnight), not from UTC midnight — in the session's
+    // own frozen timezone (SEC-2b, D-14).
+    const dayStart = startOfSessionDay(session.date, sessionTimeZone(session, centreTimeZone(ctx.settings)));
     const deadline = new Date(dayStart.getTime() + deadlineHours * 60 * 60 * 1000);
     if (new Date() > deadline) return EDIT_DEADLINE_PASSED;
   }

@@ -27,9 +27,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { expenseTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
+import { actorNames } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
 import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney, formatNumber } from "@/lib/format";
+import { fullName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import {
   centreTimeZone,
@@ -46,7 +48,9 @@ import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
  * filtered, paginated ledger — feeding directly into Analytics' "net" figure
  * (`lib/db/analytics.ts`'s `expenseTotals`, shared rather than recomputed
  * here). `expense.manage` is OWNER/MANAGER only, so a receptionist has no
- * path to this screen at all (spec §3's profit-denial pattern).
+ * path to this screen at all (spec §3's profit-denial pattern). A voided
+ * expense (D-24) stays in the list — struck through, with who voided it, when
+ * and why — and is left out of every total.
  */
 export default async function ExpensesPage({
   searchParams,
@@ -95,13 +99,28 @@ export default async function ExpensesPage({
     db.expenses.count(where),
   ]);
 
-  const tableRows: ExpenseRowData[] = rows.map((expense) => ({
-    id: expense.id,
-    date: dateKey(expense.date),
-    categoryName: expense.category?.name ?? null,
-    amount: expense.amount,
-    note: expense.note,
-  }));
+  const voiders = await actorNames(
+    prisma,
+    ctx.center.id,
+    [...new Set(rows.map((expense) => expense.voidedBy).filter((id): id is string => Boolean(id)))],
+  );
+  const tableRows: ExpenseRowData[] = rows.map((expense) => {
+    const voider = expense.voidedBy ? voiders.get(expense.voidedBy) : undefined;
+    return {
+      id: expense.id,
+      date: dateKey(expense.date),
+      categoryName: expense.category?.name ?? null,
+      amount: expense.amount,
+      note: expense.note,
+      voided: expense.voided
+        ? {
+            reason: expense.voidReason,
+            at: expense.voidedAt ? expense.voidedAt.toISOString() : null,
+            byName: voider ? fullName(voider) : null,
+          }
+        : null,
+    };
+  });
 
   const categoryOptions = categories
     .filter((category) => category.active)
@@ -185,7 +204,7 @@ export default async function ExpensesPage({
               </ListHeader>
 
               {tableRows.map((expense) => (
-                <ExpenseRow key={expense.id} expense={expense} />
+                <ExpenseRow key={expense.id} expense={expense} timeZone={timeZone} />
               ))}
             </ul>
           )}

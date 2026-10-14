@@ -82,7 +82,8 @@ export async function createInvitationAction(
     action: "invitation.create",
     entityType: "Invitation",
     entityId: invitation.id,
-    after: { email, role, expiresAt: expiresAt.toISOString() },
+    // D-20: the invited address stays on the invitation row.
+    after: { role, expiresAt: expiresAt.toISOString() },
   });
 
   revalidatePath(staffPath(locale));

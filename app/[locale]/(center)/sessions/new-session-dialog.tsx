@@ -36,7 +36,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/format";
 import { useRouter } from "@/lib/i18n/navigation";
-import { piastresToInputValue, splitShare } from "@/lib/money";
+import { Checkbox } from "@/components/ui/checkbox";
+import { MAX_PRICE_PIASTRES, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
 import { ROUTES } from "@/lib/routes";
 import type { RoomLinkPair } from "@/lib/rooms";
 import { isValidTimeRange } from "@/lib/scheduling";
@@ -155,6 +156,8 @@ function NewSessionDialogContent({
       : String(defaultCut.centerShareValue),
   );
   const [price, setPrice] = useState("");
+  // D-26 (b): a free one-time session is allowed, after an explicit tick.
+  const [confirmZeroPrice, setConfirmZeroPrice] = useState(false);
 
   // Open the new session once — a re-render while the dialog closes must not
   // navigate twice.
@@ -216,16 +219,14 @@ function NewSessionDialogContent({
     label: option.label,
   }));
 
-  const priceEgp = Number(price);
+  // Preview only — the same parser and split the server uses (lib/money.ts,
+  // SEC-74); the server re-derives everything on submit.
+  const pricePiastres = mode === "oneOff" ? parseEgpToPiastres(price, MAX_PRICE_PIASTRES) : null;
+  const cutValue =
+    shareType === "FIXED" ? parseEgpToPiastres(shareValue, MAX_PRICE_PIASTRES) : Number.isInteger(Number(shareValue)) && shareValue.trim() !== "" ? Number(shareValue) : null;
   const preview =
-    mode === "oneOff" && price.trim() !== "" && Number.isFinite(priceEgp) && priceEgp >= 0 &&
-    shareValue.trim() !== "" && Number.isFinite(Number(shareValue))
-      ? splitShare(
-          Math.round(priceEgp * 100),
-          shareType,
-          shareType === "FIXED" ? Math.round(Number(shareValue) * 100) : Math.round(Number(shareValue)),
-        )
-      : null;
+    pricePiastres !== null && cutValue !== null ? splitShare(pricePiastres, shareType, cutValue) : null;
+  const zeroPrice = pricePiastres === 0;
 
   return (
     <DialogShell
@@ -443,6 +444,23 @@ function NewSessionDialogContent({
                   />
                 </Field>
               </div>
+              {zeroPrice ? (
+                <label
+                  htmlFor="new-session-confirm-zero-price"
+                  className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-warning bg-warning-bg px-3 py-2 text-sm text-text-primary"
+                >
+                  <Checkbox
+                    id="new-session-confirm-zero-price"
+                    name="confirmZeroPrice"
+                    checked={confirmZeroPrice}
+                    onCheckedChange={(checked) => setConfirmZeroPrice(checked === true)}
+                  />
+                  <span className="flex flex-col">
+                    <span className="font-medium">{t("zeroPriceConfirm")}</span>
+                    <span className="text-xs text-text-secondary">{t("zeroPriceHint")}</span>
+                  </span>
+                </label>
+              ) : null}
               {preview ? (
                 <dl className="flex flex-col gap-1 text-sm sm:flex-row sm:gap-6">
                   <div className="flex justify-between gap-3 sm:block">

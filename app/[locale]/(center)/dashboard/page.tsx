@@ -103,7 +103,15 @@ export default async function CenterDashboardPage() {
       <PageHeader
         title={t("title", { center: ctx.center.name })}
         description={t("subtitle")}
-        action={<Badge variant="brand">{tRoles(ctx.role)}</Badge>}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="brand">{tRoles(ctx.role)}</Badge>
+            {/* SEC-2b (D-06): the audit trail, for whoever may read it. */}
+            {ctxCan(ctx, "audit.view") ? (
+              <LinkButton href={ROUTES.centerAudit}>{t("auditLink")}</LinkButton>
+            ) : null}
+          </div>
+        }
       />
 
       <SectionHeader title={t("today.title")} />

@@ -6,7 +6,6 @@ import { revalidatePath } from "next/cache";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
-import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import {
   createClassWithNewTeacher,
   createClassWithSessions,
@@ -16,10 +15,12 @@ import {
   removeSessionsOnHoliday,
   updateClassWithSessions,
   writeClassSlot,
+  type ClassMoneyError,
   type ConflictRefusal,
   type SessionSyncReport,
 } from "@/lib/db/class-sessions";
-import { loadClassRoomSet, type RoomSetError } from "@/lib/db/room-sets";
+import { claimClassSeat } from "@/lib/db/reservations";
+import type { RoomSetError } from "@/lib/db/room-sets";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { describeConflicts } from "@/lib/db/slot-conflicts";
 import { scopedData } from "@/lib/db/tenant-scope";
@@ -75,10 +76,17 @@ const NOT_FOUND: ClassActionState = { error: "notFound" };
 /** How many conflicts a form is shown — enough to act on, never a wall. */
 const MAX_SHOWN_CONFLICTS = 30;
 
-/** A room-set or period refusal, attached to the field that caused it. */
-function classFieldError(error: RoomSetError | ClassPeriodError | WeeklySlotsError): ClassActionState {
+/** A room-set, period or money refusal, attached to the field that caused it. */
+function classFieldError(
+  error: RoomSetError | ClassPeriodError | WeeklySlotsError | ClassMoneyError,
+): ClassActionState {
   if (error === "endBeforeStart" || error === "periodTooLong") {
     return { fieldErrors: { endDate: error } };
+  }
+  // D-15 / D-17 — the one money rule (lib/money.ts), by direct call too.
+  if (error === "invalidPrice") return { fieldErrors: { price: "invalidAmount" } };
+  if (error === "invalidPercent" || error === "invalidAmount" || error === "fixedAbovePrice") {
+    return { fieldErrors: { shareValue: error } };
   }
   if (
     error === "slotsRequired" ||
@@ -725,24 +733,13 @@ export async function enrollStudentAction(
   // Hard-capped by the class's room set — the summed capacity of its primary
   // and extra rooms (M15, revised R3, spec §5.1 "Capacity") — staff cannot
   // manually add past the cap. Enrolments already above a reduced cap stay.
-  const rooms = await loadClassRoomSet(prisma, scope.ctx.center.id, classGroupId);
-  const cap = enrollmentCap(rooms?.capacity);
-  const active = await scope.db.enrollments.countActive(classGroupId);
-  if (isAtCapacity(active, cap)) return { error: "classFull" };
-
-  // @@unique([studentProfileId, classGroupId]) means a previously removed
-  // enrollment still owns this pair's row — reactivate it instead of
-  // inserting a second one, which would violate the unique constraint.
-  const existing = await scope.db.enrollments.findAny(classGroupId, studentProfileId);
-  if (existing) {
-    await scope.db.enrollments.reactivate(existing.id);
-  } else {
-    await scope.db.enrollments.create({
-      classGroupId,
-      studentProfileId,
-      status: "ACTIVE",
-    });
-  }
+  // SEC-13: the seat is claimed under the class's row lock, in a transaction,
+  // through the one function every enrolment path shares (reactivating this
+  // pair's removed row, if any, rather than inserting a second one).
+  const seat = await prisma.$transaction((tx) =>
+    claimClassSeat(tx, scope.ctx.center.id, classGroupId, studentProfileId),
+  );
+  if (!seat.ok) return seat.error === "classFull" ? { error: "classFull" } : NOT_FOUND;
 
   revalidateClassDetail(locale, classGroupId);
   revalidateStudentDetail(locale, studentProfileId);
@@ -817,7 +814,8 @@ export async function blockEnrollmentAction(
     action: "student.block",
     entityType: "StudentBlock",
     entityId: block.id,
-    after: { scope: "CLASS", classGroupId, studentProfileId, reason },
+    // D-20: the block's reason stays on the StudentBlock row, not in the audit.
+    after: { scope: "CLASS", classGroupId, studentProfileId },
   });
 
   revalidateClassDetail(locale, classGroupId);
@@ -858,7 +856,7 @@ export async function unblockEnrollmentAction(
     action: "student.unblock",
     entityType: "StudentBlock",
     entityId: block.id,
-    before: { scope: "CLASS", classGroupId: block.refId, reason: block.reason },
+    before: { scope: "CLASS", classGroupId: block.refId, blockedUserId: block.blockedUserId },
   });
 
   revalidateClassDetail(parsed.data.locale, block.refId);

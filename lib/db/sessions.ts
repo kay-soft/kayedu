@@ -21,10 +21,13 @@ import {
   zonedClock,
   type ScheduleConflict,
 } from "../scheduling.ts";
+import { centerCutError } from "../money.ts";
 import { effectiveRoomIds } from "../rooms.ts";
 import {
+  centerTimeZone,
   ensureSessionOpenOrAutoClose,
   runInTransaction,
+  sessionTimeZone,
 } from "./session-lifecycle.ts";
 import { resolveRoomSet, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
 import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
@@ -96,16 +99,33 @@ const CANCELLED_ENUM: SessionStatus = "CANCELLED";
 
 export type CancelSessionResult =
   | { ok: true; session: Session }
-  | { ok: false; error: "notFound" | "alreadyCancelled" | "alreadyRescheduled" | "sessionClosed" };
+  | {
+      ok: false;
+      error: "notFound" | "alreadyCancelled" | "alreadyRescheduled" | "sessionClosed" | "hasPayments";
+    };
 
 /**
- * Cancels one session. Money is never touched here (CLAUDE.md rule 2) — a
- * cancelled session's existing attendance/payment rows stay exactly as
- * recorded; if a payment needs undoing, that is `voidPayment`'s job, a
- * separate, explicit, audited action. "Roster and schedule update
- * correctly" (spec §7 criterion 11) is true by construction: `SessionAttendee`
- * rows are never deleted, and `deriveSessionDisplayStatus` already treats
- * `CANCELLED` as terminal regardless of the clock.
+ * Payments that still stand on a session — neither voided nor refunded. Read
+ * under the session's exclusive lock, so a payment in flight (which holds the
+ * shared lock) has either committed and is counted, or waits behind it.
+ */
+async function activePaymentCount(tx: Prisma.TransactionClient, centerId: string, sessionId: string) {
+  return tx.payment.count({ where: { centerId, sessionId, voided: false, refunded: false } });
+}
+
+/**
+ * Cancels one session. Money is never touched here (CLAUDE.md rule 2) —
+ * a cancelled session's existing attendance rows stay exactly as recorded.
+ * "Roster and schedule update correctly" (spec §7 criterion 11) is true by
+ * construction: `SessionAttendee` rows are never deleted, and
+ * `deriveSessionDisplayStatus` already treats `CANCELLED` as terminal
+ * regardless of the clock.
+ *
+ * **Refused while the session holds an active payment (SEC-2b, D-07 (c),
+ * SEC-08)** — `hasPayments`: staff void or refund first, each audited with its
+ * reason, then cancel. A cancelled session then closes at the end of its day
+ * and refuses every money write, so a cancelled day's cash can never be edited
+ * months later. A refunded payment does not block (its money is already back).
  *
  * R2: a closed session cannot be cancelled (`sessionClosed`) — it ran, and
  * its record is final. A session whose day ended is auto-closed by this call
@@ -126,6 +146,7 @@ export async function cancelSession(
     if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
     if (gate.session.status === CANCELLED_ENUM) return { ok: false, error: "alreadyCancelled" };
     if (gate.session.rescheduledToId) return { ok: false, error: "alreadyRescheduled" };
+    if ((await activePaymentCount(tx, centerId, sessionId)) > 0) return { ok: false, error: "hasPayments" };
 
     const updated = await tx.session.update({
       where: { id: sessionId },
@@ -137,7 +158,7 @@ export async function cancelSession(
 
 export type UpdateSessionShareOverrideResult =
   | { ok: true; session: Session }
-  | { ok: false; error: "notFound" | "sessionClosed" | "cutRequired" };
+  | { ok: false; error: "notFound" | "sessionClosed" | "cutRequired" | "fixedAbovePrice" | "invalidCut" };
 
 /**
  * Sets or clears this one session's centre-cut override (M13, spec §5.1
@@ -154,6 +175,9 @@ export type UpdateSessionShareOverrideResult =
  * session's only cut, so clearing them is refused (`cutRequired`) — the
  * invariant above, enforced at the one writer that could break it. Changing
  * them to another valid cut is allowed, exactly as for a class session.
+ *
+ * SEC-2b (D-15): a FIXED cut above this session's own price is refused
+ * (`fixedAbovePrice`) — it would silently give the teacher 0 on every payment.
  */
 export async function updateSessionShareOverride(
   db: SessionDb,
@@ -171,6 +195,11 @@ export async function updateSessionShareOverride(
     if (gate.status === "refused") return { ok: false, error: "sessionClosed" };
     if (gate.session.classGroupId === null && override === null) {
       return { ok: false, error: "cutRequired" };
+    }
+    if (override) {
+      const cutError = centerCutError(gate.session.priceSnapshot, override.centerShareType, override.centerShareValue);
+      if (cutError === "fixedAbovePrice") return { ok: false, error: "fixedAbovePrice" };
+      if (cutError) return { ok: false, error: "invalidCut" };
     }
 
     const updated = await tx.session.update({
@@ -207,6 +236,8 @@ export type RescheduleSessionResult =
         | "alreadyRescheduled"
         | "sessionClosed"
         | "duplicateSlot"
+        | "pastDate"
+        | "hasPayments"
         | RoomSetError;
     };
 
@@ -243,6 +274,11 @@ export type RescheduleSessionResult =
  * R2: a closed session cannot be rescheduled (`sessionClosed`); the closure
  * guard runs inside the same transaction as the write, so a session that
  * closes between the conflict check and the write is still refused.
+ *
+ * SEC-2b: the target is **never in the past** (`pastDate`, SEC-51 — the same
+ * "today or later, in the centre's timezone" rule a manual session follows;
+ * a time earlier today is allowed), and a session holding an active payment
+ * cannot be moved (`hasPayments`, D-07 (c)) — staff void or refund first.
  */
 export async function rescheduleSession(
   db: PrismaClient,
@@ -269,6 +305,10 @@ export async function rescheduleSession(
   if (session.status === CANCELLED_ENUM) return { ok: false, error: "cancelled" };
   if (session.rescheduledToId) return { ok: false, error: "alreadyRescheduled" };
   if (session.closedAt) return { ok: false, error: "sessionClosed" };
+  const centreZone = await centerTimeZone(db, centerId);
+  if (dateKey(next.date) < zonedClock(options.now ?? new Date(), centreZone).dayKey) {
+    return { ok: false, error: "pastDate" };
+  }
 
   // The room set: the original's by default, or a newly chosen valid one.
   let roomId = session.roomId;
@@ -330,6 +370,7 @@ export async function rescheduleSession(
       });
       if (gate.status !== "open") return null;
       if (gate.session.status === CANCELLED_ENUM || gate.session.rescheduledToId) return null;
+      if ((await activePaymentCount(tx, centerId, sessionId)) > 0) return "hasPayments" as const;
 
       const created = await tx.session.create({
         data: {
@@ -371,6 +412,7 @@ export async function rescheduleSession(
       return created;
     });
     if (!outcome) return { ok: false, error: "sessionClosed" };
+    if (outcome === "hasPayments") return { ok: false, error: "hasPayments" };
     return { ok: true, session: outcome, conflicts };
   } catch (error) {
     if (
@@ -510,6 +552,8 @@ export function sessionListSelect(centerId: string) {
     priceSnapshot: true,
     teacherId: true,
     classGroupId: true,
+    // D-14 — the session's own frozen timezone (its display status uses it).
+    timezone: true,
     // R5 — a one-time session's own name; `isManual` badges an extra session.
     title: true,
     isManual: true,
@@ -632,8 +676,9 @@ export type SessionDisplayStatus =
  *   still open.
  *
  * `date` is a UTC-midnight calendar-day marker and `startTime` a bare
- * "HH:MM" wall-clock string in the centre's timezone, so `now` is read
- * through `zonedClock` (lib/scheduling.ts) — never compared in UTC.
+ * "HH:MM" wall-clock string in the session's timezone — its own frozen one
+ * when the row carries it (SEC-2b, D-14), else `timeZone` (the centre's) — so
+ * `now` is read through `zonedClock` (lib/scheduling.ts), never in UTC.
  */
 export function deriveSessionDisplayStatus(
   session: {
@@ -643,6 +688,7 @@ export function deriveSessionDisplayStatus(
     endTime: string;
     rescheduledToId?: string | null;
     closedAt?: Date | null;
+    timezone?: string | null;
   },
   now: Date,
   timeZone: string,
@@ -651,7 +697,7 @@ export function deriveSessionDisplayStatus(
   if (session.status === CANCELLED_STATUS) return "CANCELLED";
   if (session.closedAt || session.status === "COMPLETED") return "COMPLETED";
 
-  const clock = zonedClock(now, timeZone);
+  const clock = zonedClock(now, sessionTimeZone(session, timeZone));
   const dayKey = dateKey(session.date);
   if (dayKey > clock.dayKey) return "SCHEDULED";
   if (dayKey < clock.dayKey) return "COMPLETED";

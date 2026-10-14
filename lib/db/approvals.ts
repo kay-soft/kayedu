@@ -11,12 +11,15 @@ import type {
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/reservations.ts and lib/db/payments.ts).
 import {
+  dateKey,
   decideConflicts,
   findSessionConflicts,
+  zonedClock,
   type ScheduleConflict,
 } from "../scheduling.ts";
 import { effectiveRoomIds } from "../rooms.ts";
 import { writeSessionExtraRooms } from "./room-sets.ts";
+import { centerTimeZone } from "./session-lifecycle.ts";
 import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
@@ -96,7 +99,7 @@ export type ResolveSessionRequestResult =
     }
   | {
       ok: false;
-      error: "notFound" | "notPending" | "classNotFound" | "duplicateSlot";
+      error: "notFound" | "notPending" | "classNotFound" | "duplicateSlot" | "pastDate" | "invalidDate";
     };
 
 /**
@@ -108,7 +111,10 @@ export type ResolveSessionRequestResult =
  * path any more), and a **deactivated** class takes no new session — the
  * request resolves as `classNotFound`, exactly like a class that is gone.
  * R5: the session it creates is `isManual` — an extra session on the class,
- * which the engine never deletes or rewrites.
+ * which the engine never deletes or rewrites. SEC-2b (SEC-51, SEC-50): an
+ * approval never creates a session in the past (`pastDate` — today or later
+ * in the centre's timezone, the manual-session rule), and a payload date that
+ * is not a real calendar day is refused (`invalidDate`) instead of throwing.
  */
 export async function resolveSessionRequest(
   db: PrismaClient,
@@ -119,7 +125,7 @@ export async function resolveSessionRequest(
   conflictPolicy: ConflictPolicy,
   // Only labels a conflict for display (`ScheduleConflict.className`, M13).
   locale: string,
-  options: { confirmConflicts: boolean; actorUserId?: string | null },
+  options: { confirmConflicts: boolean; actorUserId?: string | null; now?: Date },
 ): Promise<ResolveSessionRequestResult> {
   return db.$transaction(async (tx) => {
     const existing = await tx.changeRequest.findFirst({
@@ -137,6 +143,14 @@ export async function resolveSessionRequest(
     }
 
     const payload = existing.payload as unknown as SessionRequestPayload;
+    const date = new Date(`${String(payload.date)}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.date)) || Number.isNaN(date.getTime()) || dateKey(date) !== payload.date) {
+      return { ok: false, error: "invalidDate" };
+    }
+    const centreZone = await centerTimeZone(tx, centerId);
+    if (dateKey(date) < zonedClock(options.now ?? new Date(), centreZone).dayKey) {
+      return { ok: false, error: "pastDate" };
+    }
     const classGroup = await tx.classGroup.findFirst({
       where: scopedWhere(centerId, { id: payload.classGroupId, active: true }),
       include: { extraRooms: { select: { roomId: true } } },
@@ -146,7 +160,6 @@ export async function resolveSessionRequest(
       ? classGroup.extraRooms.map((extra) => extra.roomId)
       : [];
 
-    const date = new Date(`${payload.date}T00:00:00.000Z`);
     const existingSessions = await loadSessionOccupancy(tx, centerId, locale, date, date);
     const conflicts = findSessionConflicts(
       {

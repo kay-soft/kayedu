@@ -21,13 +21,22 @@
  *      no relationship at all;
  *   5. every seed account is listed in docs/dev-accounts.md;
  *   6. the entity counts, printed.
+ *
+ * SEC-2b adds the money-integrity invariants to 3: one active payment per
+ * roster row, never voided-and-refunded, one live claim per payment, every
+ * live settlement's total = its live claims, a cancelled settlement claims
+ * nothing, every session carries a frozen timezone, no cancelled/rescheduled
+ * session holds active money, no FIXED cut above its class price, voided
+ * expenses out of the totals, and no audit row since SEC-2b carrying a name or
+ * free text.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient, type Role } from "@prisma/client";
 import { can } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
-import { revenueTotals } from "../lib/db/analytics.ts";
+import { expenseTotals, revenueTotals } from "../lib/db/analytics.ts";
+import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import { revenueTotalsRollup } from "../lib/db/organizations.ts";
 import { loadPermissionGrants } from "../lib/db/permissions.ts";
 import { verifiedChildLinks } from "../lib/db/parents.ts";
@@ -297,6 +306,74 @@ async function main() {
     ["PAID", "APPROVED", "DRAFT"].every((status) => settlementStates.some((row) => row.status === status)),
     settlementStates.map((row) => `${row._count._all} ${row.status}`).join(", "),
   );
+
+  // ── SEC-2b invariants: money integrity, concurrency, anti-fraud ────────
+  check(
+    "At most one non-voided payment per roster row (SEC-05)",
+    (await count(`SELECT COUNT(*)::int AS n FROM (SELECT "sessionAttendeeId" FROM "Payment" WHERE NOT "voided" GROUP BY 1 HAVING COUNT(*) > 1) x`)) === 0,
+  );
+  check(
+    "No payment is both voided and refunded (SEC-12)",
+    (await count(`SELECT COUNT(*)::int AS n FROM "Payment" WHERE "voided" AND "refunded"`)) === 0,
+  );
+  check(
+    "No payment holds two live settlement claims (D-05)",
+    (await count(`SELECT COUNT(*)::int AS n FROM (SELECT "paymentId" FROM "SettlementClaim" WHERE "releasedAt" IS NULL GROUP BY 1 HAVING COUNT(*) > 1) x`)) === 0,
+  );
+  check(
+    "Every live settlement's total = the sum of its live claims' frozen teacher shares (D-05)",
+    (await count(`SELECT COUNT(*)::int AS n FROM "Settlement" st WHERE st."status" <> 'CANCELLED'
+      AND st."totalAmount" <> COALESCE((SELECT SUM(c."teacherShare") FROM "SettlementClaim" c WHERE c."settlementId" = st."id" AND c."releasedAt" IS NULL), 0)`)) === 0,
+  );
+  check(
+    "Every live claim is a non-voided payment of the settlement's own teacher and centre",
+    (await count(`SELECT COUNT(*)::int AS n FROM "SettlementClaim" c
+      JOIN "Settlement" st ON st."id" = c."settlementId" JOIN "Payment" p ON p."id" = c."paymentId"
+      WHERE c."releasedAt" IS NULL AND (p."voided" OR p."teacherId" <> st."teacherId" OR p."centerId" <> st."centerId" OR c."centerId" <> st."centerId")`)) === 0,
+  );
+  check(
+    "A cancelled settlement holds no live claim, and the demo has one (D-16)",
+    (await count(`SELECT COUNT(*)::int AS n FROM "SettlementClaim" c JOIN "Settlement" st ON st."id" = c."settlementId" WHERE st."status" = 'CANCELLED' AND c."releasedAt" IS NULL`)) === 0 &&
+      settlementStates.some((row) => row.status === "CANCELLED"),
+  );
+  check(
+    "Every session carries its frozen timezone (D-14)",
+    (await count(`SELECT COUNT(*)::int AS n FROM "Session" WHERE "timezone" IS NULL`)) === 0,
+  );
+  check(
+    "No cancelled or rescheduled session holds an active payment (D-07)",
+    (await count(`SELECT COUNT(DISTINCT s."id")::int AS n FROM "Session" s JOIN "Payment" p ON p."sessionId" = s."id" AND NOT p."voided" AND NOT p."refunded"
+      WHERE s."status" = 'CANCELLED' OR s."rescheduledToId" IS NOT NULL`)) === 0,
+  );
+  check(
+    "No class carries a FIXED cut above its price (D-15)",
+    (await count(`SELECT COUNT(*)::int AS n FROM "ClassGroup" WHERE "centerShareType" = 'FIXED' AND "centerShareValue" > "price"`)) === 0,
+  );
+  for (const center of active) {
+    const rawExpense = (await prisma.$queryRaw<{ total: bigint | null; voided: bigint }[]>`
+      SELECT SUM("amount") FILTER (WHERE NOT "voided") AS total, COUNT(*) FILTER (WHERE "voided") AS voided
+      FROM "Expense" WHERE "centerId" = ${center.id}`)[0];
+    const expenses = await expenseTotals(prisma, center.id, { from: null, to: null });
+    check(
+      `${center.slug}: expense totals (${expenses.total}) skip the ${Number(rawExpense.voided)} voided expense(s) (D-24)`,
+      expenses.total === Number(rawExpense.total ?? 0),
+    );
+  }
+  const sec2b = await prisma.$queryRaw<{ finished_at: Date | null }[]>`
+    SELECT finished_at FROM "_prisma_migrations" WHERE migration_name = '20261018090000_sec2b_money_integrity'`;
+  const since = sec2b[0]?.finished_at ?? null;
+  if (since) {
+    const recent = await prisma.auditLog.findMany({
+      where: { createdAt: { gte: since }, NOT: { action: { startsWith: "platform.catalog." } } },
+      select: { action: true, before: true, after: true },
+    });
+    const dirty = recent.filter((row) => forbiddenAuditKey(row.before) ?? forbiddenAuditKey(row.after));
+    check(
+      `Audit rows written since SEC-2b carry no names or free text (D-20) — ${recent.length} checked`,
+      dirty.length === 0,
+      dirty.slice(0, 3).map((row) => row.action).join(", "),
+    );
+  }
 
   // ── 4. No orphan rows ────────────────────────────────────────────────
   console.log("\n4. No orphan rows (nothing crosses a tenant boundary)");

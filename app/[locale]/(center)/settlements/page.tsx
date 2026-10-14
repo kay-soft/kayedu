@@ -23,18 +23,23 @@ const STATUS_BADGE = {
   DRAFT: "neutral",
   APPROVED: "info",
   PAID: "success",
+  CANCELLED: "danger",
 } as const;
 
 /**
  * The centre-side settlement register (spec §4.1 item 11): create a
  * settlement (a session's own payout, from the session detail page, or a
- * period roll-up here), then approve/pay it. `/teacher/settlements` is this
- * screen's read-only teacher-side mirror.
+ * period roll-up here), then approve/pay it — or cancel a DRAFT, which
+ * releases the payments it claimed (D-16). A non-OWNER cannot approve or pay
+ * a settlement they created (D-12): the buttons say so, and the server
+ * refuses regardless. `/teacher/settlements` is this screen's read-only
+ * teacher-side mirror.
  */
 export default async function SettlementsPage() {
   const ctx = await getTenantContext("center");
   await requirePermission(ctx, "settlement.manage");
   const db = scoped(ctx);
+  const isOwner = ctx.roles.includes("OWNER");
 
   const t = await getTranslations("Settlements");
   const tStatus = await getTranslations("Settlements.status");
@@ -111,7 +116,11 @@ export default async function SettlementsPage() {
                     {formatMoney(settlement.totalAmount, locale)}
                   </p>
                 </div>
-                <SettlementTransitionActions id={settlement.id} status={settlement.status} />
+                <SettlementTransitionActions
+                  id={settlement.id}
+                  status={settlement.status}
+                  ownBlocked={settlement.createdBy === ctx.user.id && !isOwner}
+                />
               </div>
             ))
           )}

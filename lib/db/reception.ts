@@ -13,6 +13,7 @@ import {
   sessionListSelect,
   type SessionDisplayStatus,
 } from "./sessions.ts";
+import { sessionTimeZone } from "./session-lifecycle.ts";
 import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { studentSearchWhere } from "./students.ts";
 
@@ -208,6 +209,7 @@ export async function validateReceptionSession(
       teacherId: true,
       classGroupId: true,
       priceSnapshot: true,
+      timezone: true,
       classGroup: { select: { active: true } },
     },
   });
@@ -217,7 +219,10 @@ export async function validateReceptionSession(
   if (row.closedAt || deriveSessionDisplayStatus(row, now, timeZone) === "COMPLETED") {
     return { ok: false, reason: "closed" };
   }
-  if (dateKey(row.date) !== zonedClock(now, timeZone).dayKey) return { ok: false, reason: "notToday" };
+  // "Today" for this session is its own frozen timezone's day (D-14).
+  if (dateKey(row.date) !== zonedClock(now, sessionTimeZone(row, timeZone)).dayKey) {
+    return { ok: false, reason: "notToday" };
+  }
   if (row.classGroup && !row.classGroup.active) return { ok: false, reason: "inactive" };
   return {
     ok: true,

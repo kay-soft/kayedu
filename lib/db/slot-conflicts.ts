@@ -11,6 +11,7 @@ import {
   type SlotConflictInfo,
 } from "../scheduling.ts";
 import { scopedWhere } from "./tenant-scope.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 /**
  * The conflict universe and its presentation (R3, docs/02 §11). Every
@@ -194,28 +195,25 @@ export async function writeConfirmedConflictAudit(
   },
 ): Promise<void> {
   if (input.conflicts.length === 0) return;
-  await db.auditLog.create({
-    data: {
-      centerId: input.centerId,
-      actorUserId: input.actorUserId,
-      action: "schedule.conflict.confirm",
-      entityType: input.entityType,
-      entityId: input.entityId,
-      after: {
-        context: input.context,
-        conflicts: input.conflicts.map((conflict) => ({
-          type: conflict.type,
-          classGroupId: conflict.classGroupId,
-          className: conflict.className,
-          roomId: conflict.roomId ?? null,
-          teacherId: conflict.teacherId ?? null,
-          sessionId: conflict.sessionId ?? null,
-          date: conflict.date ?? null,
-          dayOfWeek: conflict.dayOfWeek ?? null,
-          startTime: conflict.startTime ?? null,
-          endTime: conflict.endTime ?? null,
-        })),
-      },
+  await writeAuditRow(db, {
+    centerId: input.centerId,
+    actorUserId: input.actorUserId,
+    action: "schedule.conflict.confirm",
+    entityType: input.entityType,
+    entityId: input.entityId,
+    after: {
+      context: input.context,
+      conflicts: input.conflicts.map((conflict) => ({
+        type: conflict.type,
+        classGroupId: conflict.classGroupId,
+        roomId: conflict.roomId ?? null,
+        teacherId: conflict.teacherId ?? null,
+        sessionId: conflict.sessionId ?? null,
+        date: conflict.date ?? null,
+        dayOfWeek: conflict.dayOfWeek ?? null,
+        startTime: conflict.startTime ?? null,
+        endTime: conflict.endTime ?? null,
+      })),
     },
   });
 }

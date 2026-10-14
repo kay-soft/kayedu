@@ -62,7 +62,9 @@ export type RosterRowData = {
  *
  * Switching a paid student to Absent voids their payment (R2). The row says
  * so in plain words before anyone clicks, and the click opens a
- * confirmation dialog (optional reason) instead of submitting straight away.
+ * confirmation dialog instead of submitting straight away. Its reason is
+ * **required** (SEC-2b, D-13): the void is refused without one, here and on
+ * the server.
  *
  * `canRecord`/`canCorrect`/`canRecordPayment`/`canVoid`/`canRefund` only
  * hide controls; the server actions re-check every permission (docs/02 §6).
@@ -142,7 +144,6 @@ function AttendeeRow({
   const t = useTranslations("Sessions.roster");
   const tErrors = useTranslations("Sessions.errors");
   const tAttendance = useTranslations("Sessions.attendance");
-  const tShared = useTranslations("Shared");
   const locale = useLocale();
 
   const [absentConfirmOpen, setAbsentConfirmOpen] = useState(false);
@@ -262,14 +263,18 @@ function AttendeeRow({
                   <DialogBody className="flex flex-col gap-2">
                     <Label htmlFor={`absent-reason-${row.studentProfileId}`}>
                       {t("voidDialog.reasonLabel")}
-                      <span className="font-normal text-text-muted">{tShared("optional")}</span>
                     </Label>
                     <Input
                       id={`absent-reason-${row.studentProfileId}`}
                       name="reason"
+                      required
                       maxLength={200}
                       placeholder={t("voidDialog.reasonPlaceholder")}
+                      aria-invalid={attendanceState.fieldErrors?.reason ? true : undefined}
                     />
+                    {attendanceState.fieldErrors?.reason ? (
+                      <FormMessage>{tErrors(attendanceState.fieldErrors.reason)}</FormMessage>
+                    ) : null}
                     {attendanceState.error ? (
                       <FormMessage>{tErrors(attendanceState.error)}</FormMessage>
                     ) : null}

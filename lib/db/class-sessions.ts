@@ -11,7 +11,7 @@ import type {
 // exercise this module directly, outside the Next.js runtime — the same
 // reason lib/db/sessions.ts and lib/db/room-sets.ts are written this way
 // (docs/02 §5). The Prisma client is injected, never imported.
-import { MAX_PIASTRES } from "../money.ts";
+import { MAX_PRICE_PIASTRES, centerCutError, type CenterCutError } from "../money.ts";
 import { effectiveRoomIds } from "../rooms.ts";
 import {
   DEFAULT_TIMEZONE,
@@ -37,10 +37,11 @@ import {
   type DatedConflict,
   type OneOffShapeError,
 } from "./sessions.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 export type { ConflictRefusal, DatedConflict };
 import type { PersonInput } from "./identity.ts";
-import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
+import { sessionTimeZone, WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
 import {
   addTeacherMembership,
   isUniqueViolation,
@@ -201,6 +202,8 @@ const SESSION_STATE_SELECT = {
   rescheduledToId: true,
   rescheduledFrom: { select: { id: true } },
   extraRooms: { select: { roomId: true } },
+  // D-14 — "has it started" is the session's own frozen timezone.
+  timezone: true,
   _count: { select: { attendees: true, payments: true, settlements: true, ratings: true } },
 } satisfies Prisma.SessionSelect;
 
@@ -688,16 +691,14 @@ async function audit(
     after?: Prisma.InputJsonValue;
   },
 ): Promise<void> {
-  await tx.auditLog.create({
-    data: {
-      centerId: input.centerId,
-      actorUserId: input.actorUserId ?? null,
-      action: input.action,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      before: input.before,
-      after: input.after,
-    },
+  await writeAuditRow(tx, {
+    centerId: input.centerId,
+    actorUserId: input.actorUserId ?? null,
+    action: input.action,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    before: input.before,
+    after: input.after,
   });
 }
 
@@ -728,7 +729,26 @@ export type CreateClassResult =
   | { ok: true; classGroupId: string; report: SessionSyncReport }
   | ConflictRefusal
   | ClassPeriodRefusal
-  | { ok: false; error: RoomSetError | WeeklySlotsError };
+  | { ok: false; error: RoomSetError | WeeklySlotsError | ClassMoneyError };
+
+/** A class's price/cut refused by the one money rule (lib/money.ts, D-15). */
+export type ClassMoneyError = "invalidPrice" | CenterCutError;
+
+/**
+ * The class's money configuration, by direct call (SEC-2b, D-15 (c), D-17):
+ * a whole-piastre price within `MAX_PRICE_PIASTRES`, and a cut valid for that
+ * price — a FIXED cut above it is refused. The same rule runs on create and
+ * on every edit, so **lowering a price below the class's FIXED cut is
+ * refused** too, never silently clamped at payment time.
+ */
+export function classMoneyError(input: {
+  price: number;
+  centerShareType: ShareType;
+  centerShareValue: number;
+}): ClassMoneyError | null {
+  if (!Number.isInteger(input.price) || input.price < 0 || input.price > MAX_PRICE_PIASTRES) return "invalidPrice";
+  return centerCutError(input.price, input.centerShareType, input.centerShareValue);
+}
 
 /**
  * The create write itself, on the caller's transaction client (R6): the class
@@ -802,6 +822,8 @@ export async function createClassWithSessions(
 ): Promise<CreateClassResult> {
   const periodError = classPeriodError(input.startDate, input.endDate);
   if (periodError) return { ok: false, error: periodError };
+  const moneyError = classMoneyError(input);
+  if (moneyError) return { ok: false, error: moneyError };
   const slotsProblem = weeklySlotsError(input.slots, { required: false });
   if (slotsProblem) return { ok: false, error: slotsProblem.error };
   const rooms = await resolveRoomSet(db, centerId, input.roomId, input.extraRoomIds);
@@ -846,7 +868,7 @@ export type NewTeacherClassResult =
   /** The teacher step refused (`matchFound` carries the match to confirm). */
   | { ok: false; part: "teacher"; error: TeacherRefusal | "matchFound"; match?: MatchCandidate }
   /** The class step refused — everything, the teacher included, was rolled back. */
-  | { ok: false; part: "class"; error: ClassPeriodError | RoomSetError | WeeklySlotsError }
+  | { ok: false; part: "class"; error: ClassPeriodError | RoomSetError | WeeklySlotsError | ClassMoneyError }
   | { ok: false; part: "class"; error: ConflictRefusal["error"]; conflicts: DatedConflict[] };
 
 class TeacherStepRefusedError extends Error {
@@ -889,6 +911,8 @@ export async function createClassWithNewTeacher(
   // gets as far as creating anyone.
   const periodError = classPeriodError(input.class.startDate, input.class.endDate);
   if (periodError) return { ok: false, part: "class", error: periodError };
+  const moneyError = classMoneyError(input.class);
+  if (moneyError) return { ok: false, part: "class", error: moneyError };
   const slotsProblem = weeklySlotsError(input.slots, { required: true });
   if (slotsProblem) return { ok: false, part: "class", error: slotsProblem.error };
   const rooms = await resolveRoomSet(db, centerId, input.class.roomId, input.class.extraRoomIds);
@@ -981,7 +1005,7 @@ export type UpdateClassResult =
   | { ok: true; report: SessionSyncReport | null }
   | ConflictRefusal
   | ClassPeriodRefusal
-  | { ok: false; error: "notFound" | RoomSetError };
+  | { ok: false; error: "notFound" | RoomSetError | ClassMoneyError };
 
 /**
  * Edits a class. When its period, teacher or room set changes (and the class
@@ -1000,6 +1024,9 @@ export async function updateClassWithSessions(
   if (!current) return { ok: false, error: "notFound" };
   const periodError = classPeriodError(input.startDate, input.endDate);
   if (periodError) return { ok: false, error: periodError };
+  // D-15: a price lowered below the class's FIXED cut is refused here too.
+  const moneyError = classMoneyError(input);
+  if (moneyError) return { ok: false, error: moneyError };
   // A room deactivated after this class chose it may stay; it just cannot
   // be newly picked.
   const rooms = await resolveRoomSet(db, centerId, input.roomId, input.extraRoomIds, {
@@ -1559,6 +1586,7 @@ export type ManualSessionError =
   | "invalidTitle"
   | "invalidPrice"
   | "invalidCut"
+  | "fixedAbovePrice"
   | "duplicateSlot"
   | OneOffShapeError
   | RoomSetError;
@@ -1807,15 +1835,16 @@ export async function createOneOffSession(
     async (tx) => {
       const title = input.title.trim();
       if (title.length === 0 || title.length > MAX_TITLE_LENGTH) return { ok: false, error: "invalidTitle" };
-      if (!Number.isInteger(input.price) || input.price < 0 || input.price > MAX_PIASTRES) {
+      // D-17: a price within the per-price cap; D-26: 0 is allowed (the form
+      // warns and the receipt flags it). D-15: a FIXED cut above the price is
+      // refused.
+      if (!Number.isInteger(input.price) || input.price < 0 || input.price > MAX_PRICE_PIASTRES) {
         return { ok: false, error: "invalidPrice" };
       }
       const value = input.centerShareValue;
-      const cutValid =
-        Number.isInteger(value) &&
-        value >= 0 &&
-        (input.centerShareType === "PERCENTAGE" ? value <= 100 : value <= MAX_PIASTRES);
-      if (!cutValid) return { ok: false, error: "invalidCut" };
+      const cutError = centerCutError(input.price, input.centerShareType, value);
+      if (cutError === "fixedAbovePrice") return { ok: false, error: "fixedAbovePrice" };
+      if (cutError) return { ok: false, error: "invalidCut" };
       if (input.subjectId) {
         const subject = await centerSubjectById(tx, centerId, input.subjectId);
         if (!subject || !subject.active || !subject.catalogActive) return { ok: false, error: "subjectNotFound" };
@@ -1828,7 +1857,7 @@ export async function createOneOffSession(
         ok: true,
         mode: "oneOff",
         audit: {
-          title,
+          zeroPrice: input.price === 0,
           subjectId: input.subjectId,
           gradeId: input.gradeId,
           centerShareType: input.centerShareType,
@@ -1908,6 +1937,7 @@ export function manualSessionDeleteBlockers(
     centerShareValue: number | null;
     rescheduledToId: string | null;
     rescheduledFrom: { id: string } | null;
+    timezone?: string | null;
     _count: { attendees: number; payments: number; settlements: number; ratings: number };
   },
   now: Date,
@@ -1915,7 +1945,7 @@ export function manualSessionDeleteBlockers(
 ): ManualSessionDeleteBlocker[] {
   const blockers: ManualSessionDeleteBlocker[] = [];
   if (session.classGroupId !== null && !session.isManual) blockers.push("notManual");
-  if (hasStarted(session, centreClock(now, timeZone))) blockers.push("started");
+  if (hasStarted(session, centreClock(now, sessionTimeZone(session, timeZone)))) blockers.push("started");
   if (session.status !== SCHEDULED) blockers.push("notScheduled");
   if (session.closedAt) blockers.push("closed");
   if (session._count.attendees > 0) blockers.push("attendees");
@@ -1990,7 +2020,6 @@ export async function deleteManualSession(
       before: {
         mode: row.classGroupId === null ? "oneOff" : "extra",
         classGroupId: row.classGroupId,
-        title: row.title,
         teacherId: row.teacherId,
         roomId: row.roomId,
         date: dateKey(row.date),

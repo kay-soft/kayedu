@@ -119,10 +119,14 @@ enum CatalogEntryKind {
 
 // A teacher payout's lifecycle (M14, spec §5 "Teacher settlements"). No
 // partially-paid state — a settlement is fully paid or it is not.
+// SEC-2b (D-16): a DRAFT may be CANCELLED, which releases every payment it
+// claimed (SettlementClaim.releasedAt) so a corrected settlement can claim
+// them again. APPROVED and PAID are never cancelled.
 enum SettlementStatus {
   DRAFT
   APPROVED
   PAID
+  CANCELLED
 }
 
 // A parent↔child link's lifecycle (M16, spec §5.1 "Parent role & portal").
@@ -311,6 +315,7 @@ model Center {
   branchGrants       MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
   refunds            Refund[]
   settlements        Settlement[]
+  settlementClaims   SettlementClaim[]
   parentLinks        ParentLink[]
 
   @@index([organizationId])
@@ -890,6 +895,15 @@ model Session {
   closedAt         DateTime?
   closedBy         String?
   closeMode        SessionCloseMode?
+  // SEC-2b (D-14) — the centre's `CenterSettings.timezone`, frozen when the
+  // session is created. Its lifecycle (auto-close, Present/Late, "is it today")
+  // reads this, never the centre's current setting, so editing the centre's
+  // timezone moves nothing already created. Filled by a database trigger on
+  // insert when the writer leaves it null, and never changed afterwards (the
+  // same trigger keeps the old value on update) — see the migration
+  // `20261018090000_sec2b_money_integrity`. Nullable in the schema only so
+  // writers need not pass it; every row has one.
+  timezone         String?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -953,7 +967,8 @@ model SessionAttendee {
  * itself (`lib/db/attendance.ts`'s `changeAttendanceStatus`). Append-only:
  * nothing updates or deletes a row here. `voidedPaymentId` is set when the
  * change was PRESENT/LATE → ABSENT on a paid student and the payment was
- * voided in that same transaction. `reason` is optional.
+ * voided in that same transaction. `reason` is required when the change
+ * voided a payment (SEC-2b, D-13), optional otherwise.
  */
 model SessionAttendanceChange {
   id               String           @id @default(uuid())
@@ -988,13 +1003,15 @@ model Payment {
   // just a reference snapshot, like `recordedBy` — so it carries none of the
   // "never recompute" weight CLAUDE.md rule 2 puts on the share snapshots.
   teacherId            String
-  // Deliberately NOT @unique (revised at M5): a void never deletes its row
+  // Not a plain @unique (revised at M5): a void never deletes its row
   // (CLAUDE.md rule 2), and a correction writes a *new* Payment for the same
-  // roster row rather than reusing or replacing the voided one — so one
-  // SessionAttendee can carry more than one Payment over its history, with
-  // the application layer (lib/db/payments.ts `recordPayment`) enforcing "at
-  // most one non-voided Payment per attendee at a time" instead of the
-  // database. See docs/01-data-model.md §3.
+  // roster row — so one SessionAttendee can carry several Payments over its
+  // history. "At most one non-voided Payment per attendee" is a **partial
+  // unique index** since SEC-2b (`Payment_one_active_per_attendee`, WHERE
+  // voided = false — raw SQL in the migration, Prisma cannot express it), and
+  // `recordPayment` inserts with ON CONFLICT against it (SEC-05). A CHECK
+  // (`Payment_not_voided_and_refunded`) keeps void and refund exclusive.
+  // See docs/01-data-model.md §3.
   sessionAttendeeId    String
   sessionAttendee      SessionAttendee           @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
   studentProfileId     String
@@ -1026,6 +1043,10 @@ model Payment {
   // R2 — the live attendance change (PRESENT/LATE → ABSENT) that voided this
   // payment, when that is how it was voided.
   attendanceChanges    SessionAttendanceChange[]
+  // SEC-2b (D-05) — the settlements that claimed this payment's teacher share.
+  // At most one claim is live (not released) at a time — a partial unique
+  // index in the migration.
+  settlementClaims     SettlementClaim[]
   recordedBy           String
   recordedAt           DateTime                  @default(now())
   createdAt            DateTime                  @default(now())
@@ -1124,17 +1145,52 @@ model Settlement {
   // void/refund was ever part of this total.
   closedSessionsOnly Boolean          @default(true)
 
-  createdBy  String
-  createdAt  DateTime  @default(now())
-  approvedBy String?
-  approvedAt DateTime?
-  paidBy     String?
-  paidAt     DateTime?
-  updatedAt  DateTime  @updatedAt
+  createdBy   String
+  createdAt   DateTime  @default(now())
+  approvedBy  String?
+  approvedAt  DateTime?
+  paidBy      String?
+  paidAt      DateTime?
+  // SEC-2b (D-16) — DRAFT → CANCELLED, releasing every claim.
+  cancelledBy String?
+  cancelledAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  // SEC-2b (D-05) — the payments whose teacher share this settlement counted.
+  claims SettlementClaim[]
 
   @@index([centerId])
   @@index([centerId, teacherId])
   @@index([sessionId])
+}
+
+/**
+ * One payment's teacher share, claimed by one settlement (SEC-2b, D-05 (c) —
+ * closes OD-8 and SEC-06). A settlement's total is the sum of its claims'
+ * `teacherShare` (each a copy of the payment's frozen `teacherShareSnapshot`
+ * at claim time — CLAUDE.md rule 7, derive, never recompute). **A payment
+ * belongs to at most one live settlement**: a partial unique index on
+ * (`paymentId`) WHERE `releasedAt` IS NULL, raw SQL in the migration, and the
+ * claims are written in the same transaction that creates the settlement
+ * (`lib/db/settlements.ts`). Cancelling a DRAFT settlement stamps
+ * `releasedAt` on its claims — the rows stay as history, and the payments are
+ * claimable again. A claim is never deleted.
+ */
+model SettlementClaim {
+  id           String     @id @default(uuid())
+  centerId     String
+  center       Center     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  settlementId String
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  paymentId    String
+  payment      Payment    @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  teacherShare Int // piastres — the payment's frozen teacherShareSnapshot at claim time
+  releasedAt   DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@index([centerId])
+  @@index([settlementId])
+  @@index([paymentId])
 }
 
 /**
@@ -1226,6 +1282,12 @@ model Expense {
   note       String?
   recordedBy String
   createdAt  DateTime         @default(now())
+  // SEC-2b (D-24) — an expense is voided, never deleted: the row stays, with
+  // who, when and why, and every total skips it (lib/db/analytics.ts).
+  voided     Boolean          @default(false)
+  voidReason String?
+  voidedAt   DateTime?
+  voidedBy   String?
 
   @@index([centerId])
   @@index([centerId, date])
@@ -1394,6 +1456,12 @@ model SessionRatingSkip {
 // AUDIT
 // ─────────────────────────────────────────────────────────────
 
+// Append-only (SEC-2b, SEC-60): a trigger refuses any UPDATE except the
+// foreign keys' own ON DELETE SET NULL, and any DELETE outside an explicit
+// maintenance transaction (`SET LOCAL kayedu.audit_maintenance = 'on'`, used
+// only by test cleanup — scripts/lib/audit-maintenance.ts). Rows carry ids,
+// amounts, counts, statuses and dates only — never a person's name or contact
+// and never free text (D-20); lib/db/audit-row.ts refuses such a payload.
 model AuditLog {
   id          String   @id @default(uuid())
   centerId    String?

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { revenueTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionListWhere } from "@/lib/db/sessions";
@@ -110,19 +111,14 @@ export default async function SessionsPage({
     classGroupId: filters.classGroupId,
   });
 
-  const [rows, teachers, subjects, classes, paymentAgg] = await Promise.all([
+  const [rows, teachers, subjects, classes, revenue] = await Promise.all([
     db.sessions.search({ where }),
     db.teachers.list({ active: true }),
     db.subjects.list(),
     db.classGroups.list(),
-    prisma.payment.aggregate({
-      where: {
-        centerId: ctx.center.id,
-        voided: false,
-        session: { date: { gte: from, lte: to } },
-      },
-      _sum: { amount: true },
-    }),
+    // A 64-bit sum, net of refunds — the same figure the receipt and
+    // Analytics show (SEC-2b: SEC-19, SEC-24).
+    revenueTotals(prisma, ctx.center.id, { from, to }),
   ]);
 
   const withStatus = rows.map((row) => ({
@@ -274,9 +270,9 @@ export default async function SessionsPage({
         />
         <StatCard
           label={t("stats.collected")}
-          value={formatMoney(paymentAgg._sum.amount ?? 0, locale)}
+          value={formatMoney(revenue.collected, locale)}
           icon={<Wallet className="size-4" />}
-          zero={(paymentAgg._sum.amount ?? 0) === 0}
+          zero={revenue.collected === 0}
           zeroLabel={t("zeroHint")}
         />
       </StatGrid>

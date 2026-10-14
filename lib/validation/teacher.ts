@@ -5,6 +5,7 @@ import { z } from "zod";
 // Next.js runtime.
 import { localeSchema } from "./auth.ts";
 import { isValidTime } from "../scheduling.ts";
+import { dateKeyField } from "./class-period.ts";
 
 /**
  * Teacher portal schemas (M7). Every Server Action under
@@ -175,11 +176,9 @@ export const teachAtCenterRequestSchema = z
 
 // ── Sessions: request a new one-off session (ChangeRequest, spec §4.2 item 2) ─
 
-const sessionDate = z
-  .string()
-  .trim()
-  .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate")
-  .transform((value) => value.slice(0, 10));
+// SEC-50: a strict "YYYY-MM-DD" calendar day, stored as that key — a
+// malformed one used to be sliced into the payload and break every approve.
+const sessionDate = dateKeyField;
 
 export const sessionRequestSchema = z
   .object({

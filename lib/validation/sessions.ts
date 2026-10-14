@@ -9,12 +9,13 @@ import { localeSchema } from "./auth.ts";
 import { normalizeEmail } from "../identity.ts";
 import { optionalPhone } from "./phone-schema.ts";
 import { dateFilterSchema } from "./date-filter.ts";
-import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
+import { MAX_PRICE_PIASTRES, centerCutError, parseEgpToPiastres } from "../money.ts";
 import {
   confirmConflictsField,
   extraRoomIdsField,
   type SlotConflictState,
 } from "./room-set.ts";
+import { dateOnlyField } from "./class-period.ts";
 
 /**
  * Session, attendance, payment and Reception Desk schemas (M5). Every Server
@@ -105,26 +106,35 @@ export const checkInRosterSchema = z.object({
 
 /**
  * A correction of an already-marked row, while the session is live (R2).
- * `reason` is optional; `confirmVoid` must be "true" when the change voids
- * the student's payment (PRESENT/LATE → ABSENT on a paid student) — the
- * roster's confirmation dialog sets it, so a void never happens unannounced.
+ * `confirmVoid` must be "true" when the change voids the student's payment
+ * (PRESENT/LATE → ABSENT on a paid student) — the roster's confirmation
+ * dialog sets it, so a void never happens unannounced — and then **a reason is
+ * required** (SEC-2b, D-13; the server re-checks it against the payment
+ * actually found, and the data layer once more under the row lock). For a
+ * change that voids nothing the reason stays optional.
  */
-export const setAttendanceSchema = z.object({
-  ...base,
-  sessionId: recordId,
-  studentProfileId: recordId,
-  status: attendanceStatus,
-  reason: z
-    .string()
-    .trim()
-    .max(200, "tooLong")
-    .optional()
-    .transform((value) => (value && value.length > 0 ? value : null)),
-  confirmVoid: z
-    .string()
-    .optional()
-    .transform((value) => value === "true"),
-});
+export const setAttendanceSchema = z
+  .object({
+    ...base,
+    sessionId: recordId,
+    studentProfileId: recordId,
+    status: attendanceStatus,
+    reason: z
+      .string()
+      .trim()
+      .max(200, "tooLong")
+      .optional()
+      .transform((value) => (value && value.length > 0 ? value : null)),
+    confirmVoid: z
+      .string()
+      .optional()
+      .transform((value) => value === "true"),
+  })
+  .superRefine((value, ctx) => {
+    if (value.confirmVoid && !value.reason) {
+      ctx.addIssue({ code: "custom", path: ["reason"], message: "reasonRequired" });
+    }
+  });
 
 // ── Add student to a session's roster ───────────────────────────────────────
 
@@ -193,11 +203,10 @@ export const endSessionSchema = z.object({
   sessionId: recordId,
 });
 
-const sessionDate = z
-  .string()
-  .trim()
-  .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate")
-  .transform((value) => new Date(`${value.slice(0, 10)}T00:00:00.000Z`));
+// SEC-50: a strict "YYYY-MM-DD" that is a real calendar day — the shared
+// `dateOnlyField` — never `Date.parse` + a slice, which turned "March 5 2026"
+// into "March 5 20" and let malformed dates through to throw later.
+const sessionDate = dateOnlyField;
 
 const sessionTime = z
   .string()
@@ -273,9 +282,12 @@ export const newClassSessionSchema = z
 
 /**
  * "One-time session" — no class: its own title (≤ 80), optional catalog
- * subject/grade, price (EGP → piastres through lib/money.ts's parser) and
- * centre cut, resolved exactly like the class form's (a whole percent 0–100,
- * or a FIXED EGP amount the centre takes).
+ * subject/grade, price (EGP → piastres through lib/money.ts's parser, at most
+ * `MAX_PRICE_PIASTRES` — D-17) and centre cut, resolved exactly like the class
+ * form's (a whole percent 0–100, or a FIXED EGP amount the centre takes — never
+ * above the price, D-15). A price of **0** is allowed (D-26 (b)) but only with
+ * `confirmZeroPrice` — the form's "I understand this session is free" box —
+ * and the session and its receipt are flagged as free.
  */
 export const newOneOffSessionSchema = z
   .object({
@@ -287,30 +299,24 @@ export const newOneOffSessionSchema = z
     price: z.string().trim().min(1, "priceRequired"),
     centerShareType: z.enum(["FIXED", "PERCENTAGE"], { error: "invalidShareType" }),
     shareValue: z.string().trim().min(1, "required"),
+    confirmZeroPrice: z
+      .string()
+      .optional()
+      .transform((value) => value === "on" || value === "true"),
   })
   .refine(timeOrder, { path: ["endTime"], message: "invalidTimeRange" })
   .transform((value, ctx) => {
-    const price = parseEgpToPiastres(value.price);
+    const price = parseEgpToPiastres(value.price, MAX_PRICE_PIASTRES);
     if (price === null) {
       ctx.addIssue({ code: "custom", path: ["price"], message: "invalidAmount" });
       return z.NEVER;
     }
-    let centerShareValue: number;
-    if (value.centerShareType === "PERCENTAGE") {
-      const percent = Number(value.shareValue);
-      if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
-        ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidPercent" });
-        return z.NEVER;
-      }
-      centerShareValue = percent;
-    } else {
-      const piastres = parseEgpToPiastres(value.shareValue);
-      if (piastres === null || piastres > MAX_PIASTRES) {
-        ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidAmount" });
-        return z.NEVER;
-      }
-      centerShareValue = piastres;
+    if (price === 0 && !value.confirmZeroPrice) {
+      ctx.addIssue({ code: "custom", path: ["price"], message: "zeroPriceNeedsConfirmation" });
+      return z.NEVER;
     }
+    const centerShareValue = shareValueFor(value.centerShareType, value.shareValue, price, ctx);
+    if (centerShareValue === null) return z.NEVER;
     return {
       locale: value.locale,
       mode: value.mode,
@@ -371,8 +377,10 @@ export const sessionShareOverrideSchema = z
         override: { centerShareType: value.centerShareType, centerShareValue: percent },
       };
     }
-    const piastres = parseEgpToPiastres(value.shareValue);
-    if (piastres === null || piastres > MAX_PIASTRES) {
+    // The session's own price is the data layer's to compare (D-15,
+    // `updateSessionShareOverride` refuses `fixedAbovePrice`); here only the cap.
+    const piastres = parseEgpToPiastres(value.shareValue, MAX_PRICE_PIASTRES);
+    if (piastres === null) {
       ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidAmount" });
       return z.NEVER;
     }
@@ -382,6 +390,25 @@ export const sessionShareOverrideSchema = z
       override: { centerShareType: value.centerShareType, centerShareValue: piastres },
     };
   });
+
+/**
+ * The centre-cut field of a one-time session, against its price — the one cut
+ * rule (`lib/money.ts`'s `centerCutError`, D-15). Null after adding the issue.
+ */
+function shareValueFor(
+  shareType: "FIXED" | "PERCENTAGE",
+  raw: string,
+  price: number,
+  ctx: z.RefinementCtx,
+): number | null {
+  const value = shareType === "PERCENTAGE" ? Number(raw) : parseEgpToPiastres(raw, MAX_PRICE_PIASTRES);
+  const error = value === null ? "invalidAmount" : centerCutError(price, shareType, value);
+  if (error || value === null) {
+    ctx.addIssue({ code: "custom", path: ["shareValue"], message: error ?? "invalidAmount" });
+    return null;
+  }
+  return value;
+}
 
 // ── Reception Desk (attendance + payment in one submit) ────────────────────
 

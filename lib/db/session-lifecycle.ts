@@ -16,10 +16,12 @@ import {
   dateKey,
   endOfSessionDay,
   isSessionDayOver,
+  centreTimeZone as safeZone,
   parseTimeToMinutes,
   todayInTimezone,
   zonedClock,
 } from "../scheduling.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 /**
  * Session lifecycle (R2, docs/00-master-product-spec.md §5.1 "Session
@@ -37,8 +39,16 @@ import {
  *   AUTO`/`status: COMPLETED` and materializes enrolled no-shows as ABSENT
  *   (`materializeAbsences`) in the same transaction. A write that triggered
  *   it is then refused — the close commits, the write does not happen.
- * - CANCELLED and rescheduled sessions are terminal states of their own and
- *   never close (M15's guard keeps refusing new attendance/payment on them).
+ * - CANCELLED and rescheduled sessions are terminal states of their own: they
+ *   refuse every new write, void and refund included (M15's guard, extended by
+ *   SEC-2b D-07 — a cancel or reschedule is refused while the session holds an
+ *   active payment, so nothing is left there to undo), and since SEC-2b they
+ *   **also close at the end of their day** like any other session (`closedAt`
+ *   stamped, `status` kept, no absences — the class did not meet), so their
+ *   record locks with the day.
+ * - "The end of the day" is the session's **own frozen timezone**
+ *   (`Session.timezone`, set at creation — SEC-2b D-14), so editing the
+ *   centre's timezone never reopens, or closes early, a session already made.
  *
  * Every write path calls `ensureSessionOpenOrAutoClose` first:
  * `changeAttendanceStatus`/`updateAttendanceStatus` (lib/db/attendance.ts),
@@ -114,7 +124,11 @@ export async function runInTransaction<T>(
   return fn(db);
 }
 
-/** The centre's configured timezone (`CenterSettings.timezone`). */
+/**
+ * The centre's configured timezone (`CenterSettings.timezone`) — the centre's
+ * "today" for lists and for new sessions. A session's own lifecycle reads the
+ * timezone frozen on it instead (`sessionTimeZone`, D-14).
+ */
 export async function centerTimeZone(db: Db, centerId: string): Promise<string> {
   const settings = await db.centerSettings.findUnique({
     where: { centerId },
@@ -124,23 +138,32 @@ export async function centerTimeZone(db: Db, centerId: string): Promise<string> 
 }
 
 /**
- * Closed = `closedAt` set, or the session's day has ended in `timeZone`
- * (it will be stamped AUTO on its next touch). CANCELLED and rescheduled
- * sessions are never "closed" — they are terminal in their own way.
+ * The timezone a session's lifecycle runs in: its own frozen one (D-14), else
+ * — only for a row selected without it — the centre's.
+ */
+export function sessionTimeZone(
+  session: { timezone?: string | null },
+  centreZone: string | null | undefined,
+): string {
+  return safeZone({ timezone: session.timezone ?? centreZone });
+}
+
+/**
+ * Closed = `closedAt` set, or the session's day has ended in its own frozen
+ * timezone (it will be stamped AUTO on its next touch). Since SEC-2b (D-07)
+ * that holds for CANCELLED and rescheduled sessions too.
  */
 export function isSessionClosed(
   session: {
     closedAt: Date | null;
     date: Date;
-    status?: SessionStatus;
-    rescheduledToId?: string | null;
+    timezone?: string | null;
   },
   now: Date,
-  timeZone: string,
+  centreZone: string,
 ): boolean {
   if (session.closedAt) return true;
-  if (session.status === "CANCELLED" || session.rescheduledToId) return false;
-  return isSessionDayOver(session.date, now, timeZone);
+  return isSessionDayOver(session.date, now, sessionTimeZone(session, centreZone));
 }
 
 /**
@@ -171,6 +194,7 @@ export type GateSession = {
   classLateThresholdMinutes: number | null;
   classCenterShareType: ShareType | null;
   classCenterShareValue: number | null;
+  /** The session's own frozen timezone (D-14); the centre's only for a legacy null. */
   timezone: string | null;
   defaultLateThreshold: number | null;
 };
@@ -181,7 +205,7 @@ const GATE_COLUMNS = Prisma.sql`s."id", s."centerId", s."classGroupId", s."teach
   cg."lateThresholdMinutes" AS "classLateThresholdMinutes",
   cg."centerShareType" AS "classCenterShareType",
   cg."centerShareValue" AS "classCenterShareValue",
-  cs."timezone", cs."defaultLateThreshold"`;
+  COALESCE(s."timezone", cs."timezone") AS "timezone", cs."defaultLateThreshold"`;
 
 // LEFT JOIN since R5: a one-time session has no class, and an inner join
 // would make it look "missing" to every write path. Its late threshold then
@@ -225,7 +249,7 @@ export type SessionGate =
   | { status: "refused"; reason: SessionClosedReason; autoClosed: boolean };
 
 export function gateTimeZone(session: GateSession): string {
-  return session.timezone ?? DEFAULT_TIMEZONE;
+  return safeZone({ timezone: session.timezone });
 }
 
 /**
@@ -278,6 +302,15 @@ async function lockAndLoadSession(
  * to Absent; no second active payment) while different students in the same
  * session still proceed concurrently.
  *
+ * **Two statements, on purpose (SEC-05).** Under READ COMMITTED a statement's
+ * snapshot is taken when it *starts*: a waiter blocked on this row lock used
+ * to evaluate "is there an active payment?" against the state from before the
+ * first desk committed (that desk only INSERTs a payment and never updates
+ * this row, so Postgres had nothing to re-check). The lock is taken first, and
+ * the payment fact is read by a **fresh statement** once it is held — it sees
+ * every commit made while waiting. The partial unique index
+ * `Payment_one_active_per_attendee` is the database's backstop behind it.
+ *
  * Scoped by `centerId` in the SQL itself (SEC-63, tenant rule 1): an attendee
  * of another centre locks nothing and returns null, even if a caller ever
  * forgot to pre-scope the id.
@@ -291,27 +324,34 @@ export async function lockAttendeeRow(
   studentProfileId: string | null;
   hasActivePayment: boolean;
 } | null> {
-  // The current status and "is there an active (non-voided) payment" are
-  // returned by the lock query itself — the facts a concurrent write on
-  // this student could change, read only once the lock is held.
-  const rows = await tx.$queryRaw<
-    { attendanceStatus: AttendanceStatus; studentProfileId: string | null; hasActivePayment: boolean }[]
-  >`SELECT a."attendanceStatus", a."studentProfileId",
-      EXISTS (SELECT 1 FROM "Payment" p WHERE p."sessionAttendeeId" = a."id" AND p."voided" = false) AS "hasActivePayment"
+  const locked = await tx.$queryRaw<
+    { attendanceStatus: AttendanceStatus; studentProfileId: string | null }[]
+  >`SELECT a."attendanceStatus", a."studentProfileId"
     FROM "SessionAttendee" a
     WHERE a."id" = ${attendeeId} AND a."centerId" = ${centerId}
     FOR UPDATE OF a`;
-  return rows[0] ?? null;
+  const row = locked[0];
+  if (!row) return null;
+  // A NEW statement, after the lock is held (see above).
+  const active = await tx.$queryRaw<{ hasActivePayment: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM "Payment" p
+      WHERE p."sessionAttendeeId" = ${attendeeId} AND p."centerId" = ${centerId} AND p."voided" = false
+    ) AS "hasActivePayment"`;
+  return { ...row, hasActivePayment: Boolean(active[0]?.hasActivePayment) };
 }
 
 /**
  * The closure guard every write path calls first (R2). Must run inside the
  * write's own transaction.
  *
- * - `allowTerminal` — void/refund pass this: a CANCELLED or rescheduled
- *   session still lets staff undo money it already carries (cancelling never
- *   touches money; undoing it is `voidPayment`'s separate job, docs/02 §11).
- *   Everything else refuses new activity on a terminal session, as at M15.
+ * - `allowTerminal` — for a caller that handles a CANCELLED or rescheduled
+ *   session itself: cancel, reschedule, the cut override and room edits
+ *   (which report `alreadyCancelled`/`alreadyRescheduled`), settlement
+ *   creation and the read path's lazy close. **Void and refund no longer pass
+ *   it (SEC-2b, D-07):** a cancel or reschedule is refused while the session
+ *   holds active money, so a terminal session has nothing to undo and refuses
+ *   them like every other write.
  * - `exclusive` — the caller is about to update the session row itself
  *   (cancel/reschedule/cut override), so it takes the exclusive lock up front
  *   rather than upgrading a shared one (two upgraders deadlock).
@@ -343,12 +383,10 @@ export async function ensureSessionOpenOrAutoClose(
   if (!peek || peek.id !== sessionId || peek.centerId !== centerId) return { status: "missing" };
 
   const timeZone = gateTimeZone(peek);
-  const isTerminal = (row: GateSession) =>
-    row.status === "CANCELLED" || Boolean(row.rescheduledToId);
+  // SEC-2b (D-07): a terminal session closes at the end of its day too.
   const dueForAutoClose =
     !options.historicalBackfill &&
     !peek.closedAt &&
-    !isTerminal(peek) &&
     isSessionDayOver(peek.date, now, timeZone);
 
   const session = await lockAndLoadSession(
@@ -372,7 +410,6 @@ export async function ensureSessionOpenOrAutoClose(
   if (options.historicalBackfill) return { status: "open", session, timeZone };
 
   if (session.closedAt) return { status: "refused", reason: "sessionClosed", autoClosed: false };
-  if (isTerminal(session)) return { status: "open", session, timeZone };
 
   if (dueForAutoClose) {
     const { closed } = await closeLockedSession(tx, session, {
@@ -383,6 +420,8 @@ export async function ensureSessionOpenOrAutoClose(
     return { status: "refused", reason: "sessionClosed", autoClosed: closed };
   }
 
+  // A terminal session still inside its day reaches here only for an
+  // `allowTerminal` caller, which reports the terminal state itself.
   return { status: "open", session, timeZone };
 }
 
@@ -437,6 +476,9 @@ export async function materializeAbsences(
  * Stamps the close and materializes absences, on a session row the caller
  * already holds the lock for. `updateMany … where closedAt: null` makes the
  * stamp itself idempotent; returns whether this call was the one that closed it.
+ *
+ * A CANCELLED or rescheduled session (SEC-2b, D-07) keeps its status and gets
+ * no absences — the class never met in that slot; `closedAt` only locks it.
  */
 async function closeLockedSession(
   tx: Db,
@@ -444,38 +486,39 @@ async function closeLockedSession(
   params: { mode: SessionCloseMode; closedBy: string | null; closedAt: Date },
 ): Promise<{ closed: boolean; absentCreated: number }> {
   const completed: SessionStatus = "COMPLETED";
+  const terminal = session.status === "CANCELLED" || Boolean(session.rescheduledToId);
   const stamped = await tx.session.updateMany({
     where: { id: session.id, centerId: session.centerId, closedAt: null },
     data: {
       closedAt: params.closedAt,
       closedBy: params.closedBy,
       closeMode: params.mode,
-      status: completed,
+      ...(terminal ? {} : { status: completed }),
     },
   });
   if (stamped.count === 0) return { closed: false, absentCreated: 0 };
 
-  const absentCreated = await materializeAbsences(
-    tx,
-    session,
-    params.closedAt,
-    gateTimeZone(session),
-  );
+  const absentCreated = terminal
+    ? 0
+    : await materializeAbsences(tx, session, params.closedAt, gateTimeZone(session));
 
   // A MANUAL close is audited by the Server Action that performed it
   // (`endSessionAction`, the docs/02 §7 shape). An AUTO close has no action
   // and no human actor, so its `session.close` row is written here, in the
   // same transaction, with `actorUserId: null`.
   if (params.mode === "AUTO") {
-    await tx.auditLog.create({
-      data: {
-        centerId: session.centerId,
-        actorUserId: null,
-        action: "session.close",
-        entityType: "Session",
-        entityId: session.id,
-        before: { status: session.status, closedAt: null },
-        after: { status: completed, closeMode: "AUTO", closedAt: params.closedAt, absentCreated },
+    await writeAuditRow(tx, {
+      centerId: session.centerId,
+      actorUserId: null,
+      action: "session.close",
+      entityType: "Session",
+      entityId: session.id,
+      before: { status: session.status, closedAt: null },
+      after: {
+        status: terminal ? session.status : completed,
+        closeMode: "AUTO",
+        closedAt: params.closedAt,
+        absentCreated,
       },
     });
   }
@@ -559,47 +602,68 @@ export async function closeSessionIfDayOver(
 const ENDED_SWEEP_LIMIT = 200;
 
 /**
- * The lazy close for list/dashboard reads: every un-closed, non-terminal
- * session of this centre whose day has ended (optionally narrowed to a date
- * range and/or one teacher) is closed AUTO, each in its own short
- * transaction. One indexed query when there is nothing to close — which,
- * after the first touch of the day, is the normal case. Bounded per call.
+ * The zone whose calendar day is furthest ahead (UTC+14). No session's day can
+ * be over unless its date is before *this* zone's today, so it bounds the
+ * candidate query without knowing each session's frozen timezone up front.
+ */
+const FURTHEST_AHEAD_TIMEZONE = "Pacific/Kiritimati";
+
+export type EndedSessionScope = { from?: Date; to?: Date; teacherId?: string; classGroupId?: string };
+
+/**
+ * Every un-closed session of this centre whose day has ended **in its own
+ * frozen timezone** (D-14) — CANCELLED and rescheduled ones included (D-07) —
+ * oldest first, optionally narrowed to an inclusive date range, a teacher or a
+ * class. One indexed query; whether a day is over is decided by
+ * `isSessionDayOver` (lib/scheduling.ts), the one owner of "today".
+ */
+export async function sessionsDueForAutoClose(
+  db: Db,
+  centerId: string,
+  now: Date,
+  scope: EndedSessionScope = {},
+  take: number = ENDED_SWEEP_LIMIT,
+): Promise<string[]> {
+  const dateFilter: Prisma.DateTimeFilter = { lt: todayInTimezone(FURTHEST_AHEAD_TIMEZONE, now) };
+  if (scope.from) dateFilter.gte = scope.from;
+  if (scope.to) dateFilter.lte = scope.to;
+  const candidates = await db.session.findMany({
+    where: {
+      centerId,
+      closedAt: null,
+      date: dateFilter,
+      ...(scope.teacherId ? { teacherId: scope.teacherId } : {}),
+      ...(scope.classGroupId ? { classGroupId: scope.classGroupId } : {}),
+    },
+    select: { id: true, date: true, timezone: true },
+    orderBy: { date: "asc" },
+    take,
+  });
+  if (candidates.length === 0) return [];
+  const centreZone = candidates.some((row) => !row.timezone)
+    ? await centerTimeZone(db, centerId)
+    : DEFAULT_TIMEZONE;
+  return candidates
+    .filter((row) => isSessionDayOver(row.date, now, sessionTimeZone(row, centreZone)))
+    .map((row) => row.id);
+}
+
+/**
+ * The lazy close for list/dashboard reads: every un-closed session of this
+ * centre whose day has ended (optionally narrowed to a date range and/or one
+ * teacher) is closed AUTO, each in its own short transaction. One indexed
+ * query when there is nothing to close — which, after the first touch of the
+ * day, is the normal case. Bounded per call.
  */
 export async function closeEndedSessions(
   db: PrismaClient,
   centerId: string,
   now: Date = new Date(),
-  scope: { from?: Date; to?: Date; teacherId?: string; classGroupId?: string } = {},
+  scope: EndedSessionScope = {},
 ): Promise<number> {
-  const timeZone = await centerTimeZone(db, centerId);
-  const todayStart = todayInTimezone(timeZone, now);
-  const dateFilter: Prisma.DateTimeFilter = { lt: todayStart };
-  if (scope.from) dateFilter.gte = scope.from;
-  if (scope.to && scope.to < todayStart) {
-    // Inclusive `to` on a UTC-midnight day marker: anything before the next day.
-    const dayAfter = new Date(scope.to);
-    dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
-    dateFilter.lt = dayAfter < todayStart ? dayAfter : todayStart;
-  }
-  const cancelled: SessionStatus = "CANCELLED";
-  const candidates = await db.session.findMany({
-    where: {
-      centerId,
-      closedAt: null,
-      rescheduledToId: null,
-      status: { not: cancelled },
-      date: dateFilter,
-      ...(scope.teacherId ? { teacherId: scope.teacherId } : {}),
-      ...(scope.classGroupId ? { classGroupId: scope.classGroupId } : {}),
-    },
-    select: { id: true },
-    orderBy: { date: "asc" },
-    take: ENDED_SWEEP_LIMIT,
-  });
-
   let closed = 0;
-  for (const candidate of candidates) {
-    if (await closeSessionIfDayOver(db, centerId, candidate.id, now)) closed++;
+  for (const id of await sessionsDueForAutoClose(db, centerId, now, scope)) {
+    if (await closeSessionIfDayOver(db, centerId, id, now)) closed++;
   }
   return closed;
 }

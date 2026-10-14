@@ -753,7 +753,8 @@
       "periodEnded": "This class's period has already ended. Extend its end date before reactivating it.",
       "slotsRequired": "Add at least one weekly time slot.",
       "slotOverlap": "This row overlaps another row on the same day.",
-      "tooManySlots": "That is too many weekly rows."
+      "tooManySlots": "That is too many weekly rows.",
+      "fixedAbovePrice": "A fixed centre cut can't be more than the price — lower the cut or raise the price."
     },
     "emptyHint": "A class pairs a teacher, a subject, a period and a weekly schedule. Add the first one and its sessions are created for the whole period.",
     "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
@@ -878,7 +879,7 @@
       "voidDialog": {
         "title": "Mark {name} absent?",
         "body": "{name} has paid {amount}. Marking them absent voids that payment: it stops counting in this receipt and in analytics. This is a void, not a cash refund.",
-        "reasonLabel": "Reason",
+        "reasonLabel": "Reason (required)",
         "reasonPlaceholder": "e.g. Checked in by mistake",
         "confirm": "Mark absent and void payment",
         "cancel": "Keep as is"
@@ -951,7 +952,17 @@
       "changeReason": "Reason: {reason}",
       "paymentVoided": "Payment voided",
       "unknownActor": "Staff member",
-      "print": "Print receipt"
+      "print": "Print receipt",
+      "zeroPriced": "Free session — priced at 0",
+      "paidCount": "Payments",
+      "refundedLine": "Refunded ({count, plural, one {# payment} other {# payments}})",
+      "voidedLine": "Voided — not counted ({count, plural, one {# payment} other {# payments}})",
+      "unpaidLine": "Present or late without a payment",
+      "unpaidTitle": "Present or late, not paid",
+      "voidsTitle": "Voided payments",
+      "voidMeta": "Voided {time} by {name}",
+      "refundsTitle": "Refunds",
+      "refundMeta": "Refunded {time} by {name}"
     },
     "settlement": {
       "status": "Settlement: {status}",
@@ -1015,7 +1026,11 @@
       "missingCut": "This session has no centre cut set, so the payment can't be recorded. Set the session's cut first.",
       "sessionInUse": "This session can no longer be deleted — it has started or has records on it. Cancel it instead.",
       "sessionNotToday": "Only today's sessions can be checked in from the reception desk.",
-      "rateLimited": "Too many contact lookups — wait a minute and try again."
+      "rateLimited": "Too many contact lookups — wait a minute and try again.",
+      "reasonRequired": "Give a reason — switching a paid student to Absent voids their payment.",
+      "hasPayments": "This session still has payments. Void or refund them first, each with its reason, then cancel or reschedule.",
+      "fixedAbovePrice": "A fixed centre cut can't be more than the price — the teacher would get nothing.",
+      "zeroPriceNeedsConfirmation": "This session is free (0 EGP). Tick the box to confirm that is intended."
     },
     "emptyHint": "Sessions come from each class's weekly schedule and period. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
@@ -1067,7 +1082,9 @@
         "when": "Date & time",
         "rooms": "Room(s)",
         "money": "Price & branch cut"
-      }
+      },
+      "zeroPriceConfirm": "I understand this session is free",
+      "zeroPriceHint": "Nobody can be charged for it. The session and its receipt are marked as free."
     },
     "deleteSession": {
       "button": "Delete session",
@@ -1076,7 +1093,8 @@
       "dialogBody": "The session is removed completely. Nothing has been recorded on it yet, so no attendance or money is lost.",
       "confirm": "Delete session",
       "cancel": "Keep it"
-    }
+    },
+    "zeroPriced": "Free session"
   },
   "Reception": {
     "title": "Reception Desk",
@@ -1224,7 +1242,8 @@
     },
     "emptyState": "No revenue in this range",
     "emptyStateHint": "Nothing was collected between these dates. Try a wider range.",
-    "zeroHint": "No activity in this range"
+    "zeroHint": "No activity in this range",
+    "auditLink": "Audit trail"
   },
   "Expenses": {
     "title": "Expenses",
@@ -1233,8 +1252,6 @@
     "listTitle": "Expenses",
     "empty": "No expenses recorded in this period.",
     "add": "Add expense",
-    "delete": "Delete",
-    "deleteYes": "Delete",
     "cancel": "Cancel",
     "stats": {
       "total": "Total in period",
@@ -1275,10 +1292,20 @@
       "invalidAmount": "Enter a valid amount in EGP.",
       "invalidDate": "Enter a valid date.",
       "required": "This field is required.",
-      "tooLong": "This value is too long."
+      "tooLong": "This value is too long.",
+      "alreadyVoided": "This expense was already voided.",
+      "futureDate": "An expense can't be dated in the future.",
+      "beforeWindow": "That date is older than this branch can see. Ask the owner to widen the visibility window first."
     },
     "emptyHint": "Record what the branch spends and it is subtracted from the centre's share in Analytics.",
-    "clearFilters": "Clear filters"
+    "clearFilters": "Clear filters",
+    "void": "Void",
+    "voidYes": "Void expense",
+    "voidReason": "Reason",
+    "voidedBadge": "Voided",
+    "voidedMeta": "Voided by {name} · {time}",
+    "voidReasonLine": "Reason: {reason}",
+    "unknownActor": "someone"
   },
   "Approvals": {
     "title": "Approvals",
@@ -1335,7 +1362,9 @@
       "duplicateSlot": "This class already has a session at that exact date and time.",
       "conflictsNeedConfirmation": "This double-books a room or the teacher. Tick “I understand, create anyway” and approve again.",
       "alreadyResolved": "That claim has already been decided.",
-      "alreadyLinked": "That record or that account is already connected to a login."
+      "alreadyLinked": "That record or that account is already connected to a login.",
+      "pastDate": "That date has passed — a session can't be added in the past. Decline the request instead.",
+      "invalidDate": "The requested date isn't a valid date."
     },
     "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
     "kinds": {
@@ -1398,7 +1427,8 @@
     "status": {
       "DRAFT": "Draft",
       "APPROVED": "Approved",
-      "PAID": "Paid"
+      "PAID": "Paid",
+      "CANCELLED": "Cancelled"
     },
     "teacherTitle": "My settlements",
     "teacherSubtitle": "What you've been paid, and what's outstanding — across every branch you teach at.",
@@ -1410,14 +1440,21 @@
       "sessionAlreadySettled": "This session's teacher share has already been settled.",
       "invalidRange": "The end date must be on or after the start date.",
       "invalidDate": "Enter a valid date.",
-      "overlappingSettlement": "This teacher already has a settlement covering part of that date range.",
+      "overlappingSettlement": "Every payment in that range is already in another settlement for this teacher.",
       "notDraft": "This settlement has already been approved or paid.",
       "notApproved": "This settlement must be approved before it can be marked paid.",
-      "sessionNotClosed": "This session is still open. End it first — a live session's payments can still change."
+      "sessionNotClosed": "This session is still open. End it first — a live session's payments can still change.",
+      "ownSettlement": "You created this settlement — the owner or another manager has to approve and pay it.",
+      "futureRange": "The end date can't be in the future — settle days that have already happened.",
+      "rangeTooLong": "A settlement can cover at most 366 days.",
+      "totalTooLarge": "That total is too large to record in one settlement — split the period.",
+      "required": "This field is required."
     },
     "emptyHint": "A settlement rolls up what a teacher has earned across a period. Create the first one below.",
     "teacherEmptyHint": "When the branch settles your earnings, each settlement appears here with its status.",
-    "periodClosedOnlyHint": "Only sessions that are already closed count. A session still running today is left out — settle it once it has ended."
+    "periodClosedOnlyHint": "Only sessions that are already closed count. A session still running today is left out — a later settlement over the same days picks it up once it has ended (each payment is settled once).",
+    "cancelDraft": "Cancel draft",
+    "ownSettlementHint": "You created this settlement, so the owner or another manager approves and pays it."
   },
   "Settings": {
     "title": "Branch configuration",
@@ -1734,7 +1771,8 @@
       "students": "Students"
     },
     "emptyHint": "Nothing is scheduled for today. Sessions come from each class's weekly schedule and period.",
-    "zeroHint": "No activity yet today"
+    "zeroHint": "No activity yet today",
+    "auditLink": "Audit trail"
   },
   "TeacherDashboard": {
     "title": "Teacher dashboard",
@@ -2327,6 +2365,91 @@
       "empty": "No classes match.",
       "clear": "Clear class",
       "open": "Show all classes"
+    }
+  },
+  "Audit": {
+    "title": "Audit trail",
+    "subtitle": "Every void, switch to absent, refund, settlement step and price change at this branch — and who checked in without paying.",
+    "filtersLabel": "Show",
+    "filters": {
+      "all": "Everything",
+      "voids": "Voids",
+      "absent": "Switched to absent",
+      "refunds": "Refunds",
+      "settlements": "Settlements",
+      "pricing": "Price and cut changes",
+      "unpaid": "Present, not paid"
+    },
+    "trailDescription": "Newest first. The trail is kept in full — it is not limited by the visibility window.",
+    "unpaidDescription": "Students marked present or late who hold no payment, within this branch's visibility window.",
+    "empty": "Nothing here",
+    "emptyHint": "Nothing of this kind has happened at this branch.",
+    "selfApproved": "Approved by its creator (owner)",
+    "meta": "{time} · {name}",
+    "system": "Automatic",
+    "reason": "Reason: {reason}",
+    "diff": "{field}: {before} → {after}",
+    "openSession": "Open the session",
+    "unpaidMeta": "Session on {date} · checked in by {name} at {time}",
+    "status": {
+      "PRESENT": "Present",
+      "LATE": "Late"
+    },
+    "actions": {
+      "payment": {
+        "void": "Payment voided",
+        "refund": "Payment refunded",
+        "record": "Payment recorded"
+      },
+      "attendance": {
+        "correct": "Attendance changed"
+      },
+      "expense": {
+        "void": "Expense voided",
+        "create": "Expense added"
+      },
+      "settlement": {
+        "create": "Settlement drafted",
+        "approve": "Settlement approved",
+        "pay": "Settlement paid",
+        "cancel": "Settlement draft cancelled",
+        "adjust": "Settlement total adjusted"
+      },
+      "classGroup": {
+        "create": "Class created",
+        "update": "Class edited"
+      },
+      "session": {
+        "create": "Session added by hand",
+        "shareOverride": {
+          "update": "Session cut changed"
+        },
+        "cancel": "Session cancelled",
+        "close": "Session closed"
+      },
+      "center": {
+        "settings": {
+          "update": "Branch settings changed"
+        }
+      },
+      "catalog": {
+        "selection": {
+          "update": "Catalog price or name changed"
+        }
+      }
+    },
+    "fields": {
+      "price": "Price",
+      "centerShareType": "Cut type",
+      "centerShareValue": "Cut",
+      "defaultShareType": "Default cut type",
+      "defaultShareValue": "Default cut",
+      "basePrice": "Base price",
+      "priceSnapshot": "Session price",
+      "status": "Status",
+      "attendanceStatus": "Attendance",
+      "totalAmount": "Total",
+      "timezone": "Timezone"
     }
   }
 }

@@ -1,13 +1,15 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Ban } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { deleteExpenseAction } from "@/app/[locale]/(center)/expenses/actions";
+import { voidExpenseAction } from "@/app/[locale]/(center)/expenses/actions";
 import { FormMessage } from "@/components/shared/form-message";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatMoney } from "@/lib/format";
+import { Input } from "@/components/ui/input";
+import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 
 export type ExpenseRowData = {
@@ -16,72 +18,98 @@ export type ExpenseRowData = {
   categoryName: string | null;
   amount: number;
   note: string | null;
+  /** D-24 — a voided expense stays listed, out of every total. */
+  voided: { reason: string | null; at: string | null; byName: string | null } | null;
 };
 
-/** One expense entry. Stacked card below `md`, table row from `md` up (docs/04 §6). */
-export function ExpenseRow({ expense }: { expense: ExpenseRowData }) {
+/**
+ * One expense entry. Stacked card below `md`, table row from `md` up (docs/04
+ * §6). An expense is never deleted (D-24): "Void" asks for a reason, and a
+ * voided row stays here, struck through, with who voided it and why.
+ */
+export function ExpenseRow({ expense, timeZone }: { expense: ExpenseRowData; timeZone: string }) {
   const t = useTranslations("Expenses");
   const tErrors = useTranslations("Expenses.errors");
   const locale = useLocale();
   const [confirming, setConfirming] = useState(false);
-  const [state, formAction] = useActionState(deleteExpenseAction, IDLE_ACTION_STATE);
+  const [state, formAction] = useActionState(voidExpenseAction, IDLE_ACTION_STATE);
+  const voided = expense.voided;
+  const struck = voided ? "line-through text-text-muted" : "";
 
   return (
-    <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
+    <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:flex-wrap md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
       <div className="flex md:w-32 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.date")}</span>
-        <span className="truncate text-sm text-text-secondary">
+        <span className={`truncate text-sm text-text-secondary ${struck}`}>
           {formatDate(new Date(expense.date), locale)}
         </span>
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.category")}</span>
-        <span className="truncate text-sm text-text-primary">
+        <span className={`truncate text-sm text-text-primary ${struck}`}>
           {expense.categoryName ?? t("fields.categoryNone")}
         </span>
       </div>
 
       <div className="flex min-w-0 flex-[2] flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.note")}</span>
-        <span className="truncate text-sm text-text-secondary">{expense.note ?? "—"}</span>
+        <span className={`truncate text-sm text-text-secondary ${struck}`}>{expense.note ?? "—"}</span>
       </div>
 
       <div className="flex md:w-28 md:shrink-0 flex-col">
         <span className="text-xs text-text-muted md:hidden">{t("columns.amount")}</span>
-        <span className="truncate text-sm font-medium tabular-nums text-text-primary">
+        <span className={`truncate text-sm font-medium tabular-nums text-text-primary ${struck}`}>
           {formatMoney(expense.amount, locale)}
         </span>
       </div>
 
       <div className="shrink-0 md:w-32 md:text-end">
-        {confirming ? (
-          <form action={formAction} className="flex items-center justify-end gap-2">
-            <input type="hidden" name="locale" value={locale} />
-            <input type="hidden" name="id" value={expense.id} />
-            <Button type="submit" variant="destructive" className="h-11 px-3">
-              {t("deleteYes")}
-            </Button>
-            <Button type="button" variant="outline" className="h-11 px-3" onClick={() => setConfirming(false)}>
-              {t("cancel")}
-            </Button>
-          </form>
-        ) : (
+        {voided ? (
+          <Badge variant="danger">{t("voidedBadge")}</Badge>
+        ) : confirming ? null : (
           <Button
             type="button"
             variant="ghost"
             className="h-11 w-full px-4 md:w-auto"
             onClick={() => setConfirming(true)}
           >
-            <Trash2 className="size-4" />
-            {t("delete")}
+            <Ban className="size-4" />
+            {t("void")}
           </Button>
         )}
       </div>
 
-      {state.error ? (
+      {voided ? (
+        <p className="text-xs text-text-secondary md:basis-full">
+          {t("voidedMeta", {
+            name: voided.byName ?? t("unknownActor"),
+            time: voided.at ? formatDateTime(new Date(voided.at), locale, timeZone) : "—",
+          })}
+          {voided.reason ? ` · ${t("voidReasonLine", { reason: voided.reason })}` : null}
+        </p>
+      ) : confirming ? (
+        <form action={formAction} className="flex flex-col gap-2 md:basis-full md:flex-row md:items-end">
+          <input type="hidden" name="locale" value={locale} />
+          <input type="hidden" name="id" value={expense.id} />
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+            <span className="text-text-secondary">{t("voidReason")}</span>
+            <Input name="reason" required maxLength={200} className="h-11" />
+          </label>
+          <div className="flex gap-2">
+            <Button type="submit" variant="destructive" className="h-11 px-3">
+              {t("voidYes")}
+            </Button>
+            <Button type="button" variant="outline" className="h-11 px-3" onClick={() => setConfirming(false)}>
+              {t("cancel")}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
+      {state.error || state.fieldErrors?.reason ? (
         <div className="md:w-full md:basis-full">
-          <FormMessage>{tErrors(state.error)}</FormMessage>
+          <FormMessage>{tErrors(state.error ?? state.fieldErrors?.reason ?? "required")}</FormMessage>
         </div>
       ) : null}
     </li>

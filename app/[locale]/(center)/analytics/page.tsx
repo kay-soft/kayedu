@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatGrid } from "@/components/shared/stat-grid";
+import { LinkButton } from "@/components/shared/link-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -194,10 +195,18 @@ export default async function AnalyticsPage({
         title={t("title")}
         description={t("subtitle")}
         action={
-          orgGroup ? (
-            <Badge variant="brand">
-              {t("rollup.badge", { organization: orgGroup.organizationName })}
-            </Badge>
+          orgGroup || ctxCan(ctx, "audit.view") ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {orgGroup ? (
+                <Badge variant="brand">
+                  {t("rollup.badge", { organization: orgGroup.organizationName })}
+                </Badge>
+              ) : null}
+              {/* SEC-2b (D-06): voids, refunds and unpaid check-ins live here. */}
+              {ctxCan(ctx, "audit.view") ? (
+                <LinkButton href={ROUTES.centerAudit}>{t("auditLink")}</LinkButton>
+              ) : null}
+            </div>
           ) : undefined
         }
       />

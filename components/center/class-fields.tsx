@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/format";
 import { MAX_LATE_THRESHOLD_MINUTES } from "@/lib/validation/classes";
-import { piastresToInputValue, splitShare } from "@/lib/money";
+import { MAX_PRICE_PIASTRES, centerCutError, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
 import type { RoomLinkPair } from "@/lib/rooms";
 
 export type SelectOption = { value: string; label: string };
@@ -154,21 +154,19 @@ export function ClassFields({
   const error = (name: string) =>
     fieldErrors?.[name] ? tErrors(fieldErrors[name]) : undefined;
 
-  const priceEgp = Number(priceInput);
-  const sharePreviewable =
-    Number.isFinite(priceEgp) &&
-    priceEgp >= 0 &&
-    shareValue.trim() !== "" &&
-    Number.isFinite(Number(shareValue));
-  const preview = sharePreviewable
-    ? splitShare(
-        Math.round(priceEgp * 100),
-        shareType,
-        shareType === "FIXED"
-          ? Math.round(Number(shareValue) * 100)
-          : Math.round(Number(shareValue)),
-      )
-    : null;
+  // Preview only, through the server's own parser and split (lib/money.ts,
+  // SEC-74). A FIXED cut above the price is shown as refused (D-15).
+  const pricePiastres = parseEgpToPiastres(priceInput === "" ? "0" : priceInput, MAX_PRICE_PIASTRES);
+  const cutValue =
+    shareType === "FIXED"
+      ? parseEgpToPiastres(shareValue, MAX_PRICE_PIASTRES)
+      : shareValue.trim() !== "" && Number.isInteger(Number(shareValue)) ? Number(shareValue) : null;
+  const cutProblem =
+    pricePiastres !== null && cutValue !== null ? centerCutError(pricePiastres, shareType, cutValue) : null;
+  const preview =
+    pricePiastres !== null && cutValue !== null && !cutProblem
+      ? splitShare(pricePiastres, shareType, cutValue)
+      : null;
 
   return (
     <div className="grid items-start gap-4 lg:grid-cols-2">
@@ -319,7 +317,7 @@ export function ClassFields({
           <Field
             id={`${idPrefix}-shareValue`}
             label={shareType === "FIXED" ? t("shareValueEgp") : t("shareValuePct")}
-            error={error("shareValue")}
+            error={error("shareValue") ?? (cutProblem === "fixedAbovePrice" ? tErrors("fixedAbovePrice") : undefined)}
           >
             <Input
               id={`${idPrefix}-shareValue`}

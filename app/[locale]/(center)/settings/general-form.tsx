@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/format";
-import { piastresToInputValue, splitShare } from "@/lib/money";
+import { MAX_PRICE_PIASTRES, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 import {
   MAX_EDIT_DEADLINE_HOURS,
@@ -74,15 +74,12 @@ export function GeneralSettingsForm({
 
   // The same split lib/money.ts freezes onto a payment, previewed live so an
   // owner sees what the setting actually does before saving it.
-  const typed = Number(shareValue);
-  const previewable = shareValue.trim() !== "" && Number.isFinite(typed) && typed >= 0;
-  const preview = previewable
-    ? splitShare(
-        PREVIEW_AMOUNT,
-        shareType,
-        shareType === "FIXED" ? Math.round(typed * 100) : Math.round(typed),
-      )
-    : null;
+  // Through the server's own parser (lib/money.ts, SEC-74) — preview only.
+  const typed =
+    shareType === "FIXED"
+      ? parseEgpToPiastres(shareValue, MAX_PRICE_PIASTRES)
+      : shareValue.trim() !== "" && Number.isInteger(Number(shareValue)) ? Number(shareValue) : null;
+  const preview = typed !== null ? splitShare(PREVIEW_AMOUNT, shareType, typed) : null;
 
   return (
     <form action={formAction} className="flex flex-col gap-6" noValidate>

@@ -14,6 +14,7 @@ import {
   isSessionDayOver,
   resolveLateThreshold,
 } from "../scheduling.ts";
+import { writeAuditRow } from "./audit-row.ts";
 import { voidPaymentRow } from "./payments.ts";
 import {
   closeSessionIfDayOver,
@@ -203,7 +204,7 @@ export type ChangeAttendanceResult =
       /** DRAFT/APPROVED settlements whose total that void live-adjusted (pre-R2 settlements only). */
       adjustedSettlements: AdjustedSettlement[];
     }
-  | { ok: false; error: SessionClosedReason | "notFound" | "voidNotPermitted" };
+  | { ok: false; error: SessionClosedReason | "notFound" | "voidNotPermitted" | "reasonRequired" };
 
 /**
  * A changed mark on an already-marked row — the audited "correction"
@@ -213,11 +214,14 @@ export type ChangeAttendanceResult =
  * "Changes during session" section). Switching a student who holds an
  * active (non-voided, non-refunded) payment to ABSENT **voids that payment
  * in this same transaction** (void, not refund — the payment should never
- * have stood, CLAUDE.md rule 7); `reason` is optional and lands on both the
- * void and the change row. If the void fails, nothing is written: the status
- * stays as it was. Moving ABSENT → PRESENT/LATE creates no payment — staff
- * record one through the normal flow. No money is created or recomputed by a
- * status change; lib/money.ts is not involved.
+ * have stood, CLAUDE.md rule 7). **That change needs a reason** (SEC-2b,
+ * D-13 — reversing R2's "optional"): without one it is refused
+ * (`reasonRequired`) before anything is written; the reason lands on both
+ * the void and the change row. A status change that voids nothing keeps the
+ * reason optional. If the void fails, nothing is written: the status stays
+ * as it was. Moving ABSENT → PRESENT/LATE creates no payment — staff record
+ * one through the normal flow. No money is created or recomputed by a status
+ * change; lib/money.ts is not involved.
  *
  * `mayVoidPayment` is the caller's `payment.void` permission, re-checked here
  * under the row lock: a status change can never void money its actor could
@@ -274,6 +278,7 @@ export async function changeAttendanceStatus(
       });
       if (active) {
         if (!params.mayVoidPayment) return { ok: false, error: "voidNotPermitted" };
+        if (!reason) return { ok: false, error: "reasonRequired" };
         const voided = await voidPaymentRow(tx, params.centerId, active.id, reason, params.changedBy);
         // Anything but a clean void aborts the whole change (the throw rolls
         // the transaction back): the status never moves without its void.
@@ -304,53 +309,50 @@ export async function changeAttendanceStatus(
     // The audit trail, in the same transaction as the change it records
     // (CLAUDE.md rule 7): `attendance.correct` always; `payment.void` and one
     // `settlement.adjust` per live-adjusted settlement when a payment was
-    // voided. `SessionAttendanceChange` is the receipt's data source;
-    // `AuditLog` stays the audit trail.
-    await tx.auditLog.create({
-      data: {
-        centerId: params.centerId,
-        actorUserId: params.changedBy,
-        action: "attendance.correct",
-        entityType: "SessionAttendee",
-        entityId: attendee.id,
-        before: { attendanceStatus: fromStatus },
-        after: {
-          attendanceStatus: params.status,
-          reason,
-          changeId: change.id,
-          voidedPaymentId: change.voidedPaymentId,
-        },
+    // voided. Ids and amounts only (D-20) — the reason lives on the change
+    // row and the payment. `SessionAttendanceChange` is the receipt's data
+    // source; `AuditLog` stays the audit trail.
+    await writeAuditRow(tx, {
+      centerId: params.centerId,
+      actorUserId: params.changedBy,
+      action: "attendance.correct",
+      entityType: "SessionAttendee",
+      entityId: attendee.id,
+      before: { attendanceStatus: fromStatus },
+      after: {
+        attendanceStatus: params.status,
+        sessionId: attendee.sessionId,
+        changeId: change.id,
+        voidedPaymentId: change.voidedPaymentId,
       },
     });
     if (voidedPayment) {
-      await tx.auditLog.create({
-        data: {
-          centerId: params.centerId,
-          actorUserId: params.changedBy,
-          action: "payment.void",
-          entityType: "Payment",
-          entityId: voidedPayment.id,
-          before: {
-            amount: voidedPayment.amount,
-            methodLabelSnapshot: voidedPayment.methodLabelSnapshot,
-          },
-          after: { reason, trigger: "attendance.absent", changeId: change.id },
+      await writeAuditRow(tx, {
+        centerId: params.centerId,
+        actorUserId: params.changedBy,
+        action: "payment.void",
+        entityType: "Payment",
+        entityId: voidedPayment.id,
+        before: { amount: voidedPayment.amount, voided: false },
+        after: {
+          voided: true,
+          trigger: "attendance.absent",
+          sessionId: voidedPayment.sessionId,
+          changeId: change.id,
         },
       });
       for (const { settlement, previousTotal } of adjustedSettlements) {
-        await tx.auditLog.create({
-          data: {
-            centerId: params.centerId,
-            actorUserId: params.changedBy,
-            action: "settlement.adjust",
-            entityType: "Settlement",
-            entityId: settlement.id,
-            before: { totalAmount: previousTotal },
-            after: {
-              totalAmount: settlement.totalAmount,
-              reason: "payment.void",
-              paymentId: voidedPayment.id,
-            },
+        await writeAuditRow(tx, {
+          centerId: params.centerId,
+          actorUserId: params.changedBy,
+          action: "settlement.adjust",
+          entityType: "Settlement",
+          entityId: settlement.id,
+          before: { totalAmount: previousTotal },
+          after: {
+            totalAmount: settlement.totalAmount,
+            trigger: "payment.void",
+            paymentId: voidedPayment.id,
           },
         });
       }
@@ -386,7 +388,7 @@ export async function updateAttendanceStatus(
     options,
   );
   if (result.ok) return result.attendee;
-  if (result.error === "notFound" || result.error === "voidNotPermitted") {
+  if (result.error === "notFound" || result.error === "voidNotPermitted" || result.error === "reasonRequired") {
     throw new Error(`updateAttendanceStatus: ${result.error}`);
   }
   throw new SessionClosedError(result.error);

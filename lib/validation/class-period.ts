@@ -24,6 +24,20 @@ export const dateOnlyField = z
   .transform((value) => dayMarker(value));
 
 /**
+ * The same strict "YYYY-MM-DD", kept as the key string — for a payload that
+ * stores the day as text (a teacher's NEW_SESSION request). SEC-50.
+ */
+export const dateKeyField = z
+  .string({ error: "required" })
+  .trim()
+  .min(1, "required")
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "invalidDate")
+  .refine((value) => {
+    const parsed = dayMarker(value);
+    return !Number.isNaN(parsed.getTime()) && dateKey(parsed) === value;
+  }, "invalidDate");
+
+/**
  * Adds `lib/scheduling.ts`'s `classPeriodError` to an object schema that has
  * `startDate`/`endDate` — the one period rule (end on or after start, at most
  * `MAX_CLASS_PERIOD_DAYS`), reported on `endDate`.

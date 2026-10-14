@@ -38,6 +38,9 @@ export const ROUTES = {
   centerApprovals: "/approvals",
   centerRefunds: "/refunds",
   centerSettlements: "/settlements",
+  // SEC-2b (D-06): the centre audit trail — voids, absent switches, refunds,
+  // settlement transitions, price/cut changes, unpaid check-ins.
+  centerAudit: "/audit",
   // Center configuration (M2). The settings shell lives at /settings and every
   // configuration screen is a child of it.
   centerSettings: "/settings",

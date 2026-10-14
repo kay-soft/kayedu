@@ -14,9 +14,12 @@
  * nothing destructive. The one network call is the read-only anon-key probe
  * of SEC-10, skipped when the Supabase env is absent.
  *
- * Findings still open (SEC-2a leaves them, with reasons, in docs/07) and the
- * money/concurrency/fraud findings (SEC-2b) have no assertion here yet.
+ * SEC-2b adds the money, concurrency and anti-fraud findings (`sec2bMoney`
+ * below) — the concurrency ones with real parallel transactions on two
+ * separate clients. Findings still open keep no assertion; docs/07 §1.1 says
+ * why for each.
  */
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -54,7 +57,6 @@ import {
 import { loadPermissionGrants } from "../lib/db/permissions.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
 import { reserveOrEnroll } from "../lib/db/reservations.ts";
-import { lockAttendeeRow } from "../lib/db/session-lifecycle.ts";
 import { addTeacherMembership } from "../lib/db/teacher-membership.ts";
 import { scopedData } from "../lib/db/tenant-scope.ts";
 import { checkRateLimit, checkRateLimits, pruneRateLimitBuckets } from "../lib/rate-limit.ts";
@@ -64,6 +66,33 @@ import { createCenterSchema } from "../lib/validation/admin.ts";
 import { seedPasswordProblems } from "../prisma/seed-data/auth.ts";
 import { productionTargetReason } from "../prisma/seed-data/production-refs.ts";
 import { auditRls, rlsProblems } from "./lib/rls-audit.ts";
+import { loadAuditFeed, loadUnpaidCheckIns } from "../lib/db/audit-feed.ts";
+import { AuditPayloadError, FORBIDDEN_AUDIT_KEYS, forbiddenAuditKey, writeAuditRow } from "../lib/db/audit-row.ts";
+import { revenueTotals } from "../lib/db/analytics.ts";
+import { resolveSessionRequest } from "../lib/db/approvals.ts";
+import { changeAttendanceStatus, createAttendance, SessionClosedError } from "../lib/db/attendance.ts";
+import { classMoneyError } from "../lib/db/class-sessions.ts";
+import { listActivePaymentMethods } from "../lib/db/payment-methods.ts";
+import { recordPayment, sessionReceiptLines, sessionReceiptTotals, voidPayment } from "../lib/db/payments.ts";
+import { skipSessionRating, submitSessionRating } from "../lib/db/ratings.ts";
+import { refundPayment } from "../lib/db/refunds.ts";
+import { closeSessionIfDayOver, lockAttendeeRow, WRITE_TRANSACTION_OPTIONS } from "../lib/db/session-lifecycle.ts";
+import { cancelSession, rescheduleSession, updateSessionShareOverride } from "../lib/db/sessions.ts";
+import {
+  approveSettlement,
+  cancelSettlement,
+  createPeriodSettlement,
+  createSessionSettlement,
+  paySettlement,
+} from "../lib/db/settlements.ts";
+import { expenseDateError } from "../lib/db/visibility.ts";
+import { MAX_PRICE_PIASTRES, parseEgpToPiastres, splitShare } from "../lib/money.ts";
+import { addDays, dateKey, dayMarker, todayInTimezone, zonedDateTimeToUtc } from "../lib/scheduling.ts";
+import { expenseCreateSchema } from "../lib/validation/analytics.ts";
+import { classGroupSchema, classGroupUpdateSchema, holidaySchema } from "../lib/validation/classes.ts";
+import { newOneOffSessionSchema, rescheduleSessionSchema, setAttendanceSchema } from "../lib/validation/sessions.ts";
+import { createPeriodSettlementSchema } from "../lib/validation/settlements.ts";
+import { sessionRequestSchema } from "../lib/validation/teacher.ts";
 
 const prisma = new PrismaClient();
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
@@ -148,7 +177,7 @@ async function cleanup() {
   });
   const centerIds = centers.map((center) => center.id);
   if (centerIds.length > 0) {
-    await prisma.auditLog.deleteMany({ where: { centerId: { in: centerIds } } });
+    await deleteAuditRows(prisma, { centerId: { in: centerIds } });
     await prisma.center.deleteMany({ where: { id: { in: centerIds } } });
   }
   const orgIds = [...new Set(centers.map((center) => center.organizationId))];
@@ -161,7 +190,7 @@ async function cleanup() {
   });
   const userIds = users.map((user) => user.id);
   if (userIds.length > 0) {
-    await prisma.auditLog.deleteMany({ where: { actorUserId: { in: userIds } } });
+    await deleteAuditRows(prisma, { actorUserId: { in: userIds } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   }
   if (rateLimitKeys.size > 0) {
@@ -1014,6 +1043,643 @@ async function main() {
 
   // Not a finding of its own: the production guard must never fire off-production.
   await enforceProductionAuthSettings({ REQUIRE_EMAIL_CONFIRMATION: "false" });
+
+  await sec2bMoney();
+}
+
+// ── SEC-2b: money integrity, concurrency, anti-fraud ──────────────────────
+//
+// Ported from the SEC-05/05-mechanism/06/06-race/07/08/12/13 repros (deleted
+// once these printed NOT REPRODUCED) and from the stated gates of the
+// Medium/Low findings. The concurrency assertions run REAL parallel
+// transactions on two separate PrismaClients (two desks / two instances).
+
+async function sec2bMoney() {
+  console.log("\ncheck:security — SEC-2b (money integrity, concurrency, anti-fraud)\n");
+  const deskA = new PrismaClient();
+  const deskB = new PrismaClient();
+  try {
+    await sec2bAssertions(deskA, deskB);
+  } finally {
+    await Promise.all([deskA.$disconnect(), deskB.$disconnect()]);
+  }
+}
+
+async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
+  const TZ = "Africa/Cairo";
+  const now = new Date();
+  const today = todayInTimezone(TZ, now);
+  const daysAgo = (n: number) => addDays(today, -n);
+  const center = await makeCenter("m1");
+  const centerId = center.id;
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+
+  async function member(tag: string, role: "OWNER" | "MANAGER" | "TEACHER" | "RECEPTIONIST") {
+    const user = await makeUser(tag);
+    await prisma.membership.create({
+      data: { centerId, userId: user.id, role, firstName: "Sec", lastName: tag, joinedAt: new Date() },
+    });
+    return user;
+  }
+  const owner = await member("m-owner", "OWNER");
+  const managerA = await member("m-managerA", "MANAGER");
+  const managerB = await member("m-managerB", "MANAGER");
+  const teacher = await member("m-teacher", "TEACHER");
+
+  /** A one-time session (own 20 % cut) on `date`, open all day. */
+  async function session(date: Date, price = 10_000, teacherId = teacher.id) {
+    return prisma.session.create({
+      data: {
+        centerId,
+        teacherId,
+        isManual: true,
+        title: "SEC-2b",
+        date,
+        startTime: "00:00",
+        endTime: "23:59",
+        priceSnapshot: price,
+        centerShareType: "PERCENTAGE",
+        centerShareValue: 20,
+      },
+    });
+  }
+  let studentSeq = 0;
+  async function student() {
+    studentSeq += 1;
+    return makeStudent(centerId, await makeUser(`m-student-${studentSeq}`));
+  }
+  /** A PRESENT roster row: the real check-in today, the scripts-only backfill in the past. */
+  async function attendee(sessionId: string, past = false) {
+    const profile = await student();
+    return createAttendance(
+      prisma,
+      { centerId, sessionId, studentProfileId: profile.id, enrollmentId: null, isDropIn: true, recordedBy: managerA.id },
+      past ? { historicalBackfill: true, status: "PRESENT" } : {},
+    );
+  }
+  async function pay(attendeeId: string, past = false) {
+    const result = await prisma.$transaction((tx) =>
+      recordPayment(tx, centerId, attendeeId, method.id, managerA.id, past ? { historicalBackfill: true } : {}),
+    );
+    if (!result.ok) throw new Error(`fixture payment refused: ${result.error}`);
+    return result.payment;
+  }
+  /** A past session with `n` paid students (closed lazily by whatever touches it next). */
+  async function paidPastSession(n: number, ago: number, teacherId = teacher.id) {
+    const s = await session(daysAgo(ago), 10_000, teacherId);
+    const payments = [];
+    for (let i = 0; i < n; i++) payments.push(await pay((await attendee(s.id, true)).id, true));
+    return { session: s, payments, share: payments.reduce((sum, p) => sum + p.teacherShareSnapshot, 0) };
+  }
+  const owner1 = { userId: owner.id, isOwner: true };
+
+  // ── Concurrency & integrity ───────────────────────────────────────────
+
+  await assertSec("SEC-05", "two desks paying for one student at once record ONE payment (lock, fresh read, partial unique index)", async () => {
+    const s = await session(today);
+    let bad = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = await attendee(s.id);
+      const run = (client: PrismaClient) =>
+        client.$transaction((tx) => recordPayment(tx, centerId, a.id, method.id, managerA.id), WRITE_TRANSACTION_OPTIONS);
+      const results = await Promise.all([run(deskA), run(deskB)]);
+      const active = await prisma.payment.count({ where: { sessionAttendeeId: a.id, voided: false } });
+      const oneOk = results.filter((r) => r.ok).length === 1;
+      const oneAlreadyPaid = results.some((r) => !r.ok && r.error === "alreadyPaid");
+      if (active !== 1 || !oneOk || !oneAlreadyPaid) bad++;
+    }
+    const a = await attendee(s.id);
+    const first = await pay(a.id);
+    let databaseRefused = false;
+    try {
+      await prisma.payment.create({
+        data: {
+          centerId: first.centerId, sessionId: first.sessionId, teacherId: first.teacherId,
+          sessionAttendeeId: first.sessionAttendeeId, studentProfileId: first.studentProfileId,
+          amount: first.amount, paymentMethodId: first.paymentMethodId, methodLabelSnapshot: first.methodLabelSnapshot,
+          priceSnapshot: first.priceSnapshot, centerShareSnapshot: first.centerShareSnapshot,
+          teacherShareSnapshot: first.teacherShareSnapshot, recordedBy: first.recordedBy,
+        },
+      });
+    } catch {
+      databaseRefused = true;
+    }
+    const index = await prisma.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes WHERE indexname = 'Payment_one_active_per_attendee'`;
+    return [
+      [`4 rounds × 2 concurrent payments: one ok + one alreadyPaid + one active row each (${bad} bad)`, bad === 0],
+      ["a second active payment written around the app is refused by the database", databaseRefused],
+      ["the partial unique index is WHERE voided = false", /UNIQUE/.test(index[0]?.indexdef ?? "") && /voided = false/.test(index[0]?.indexdef ?? "")],
+      ["lockAttendeeRow re-reads the payment fact in a fresh statement after the lock", /FOR UPDATE OF a`;[\s\S]*SELECT EXISTS/.test(read("lib/db/session-lifecycle.ts"))],
+    ];
+  });
+
+  await assertSec("SEC-12", "a void racing a refund (or itself) changes the payment once; never both flags", async () => {
+    const s = await session(today);
+    let bad = 0;
+    for (let i = 0; i < 3; i++) {
+      const p = await pay((await attendee(s.id)).id);
+      const [refund, voided] = await Promise.all([
+        deskA.$transaction((tx) => refundPayment(tx, centerId, p.id, "race", managerA.id), WRITE_TRANSACTION_OPTIONS),
+        deskB.$transaction((tx) => voidPayment(tx, centerId, p.id, "race", managerB.id), WRITE_TRANSACTION_OPTIONS),
+      ]);
+      const row = await prisma.payment.findUniqueOrThrow({ where: { id: p.id }, include: { refund: true } });
+      const contribution = row.voided ? 0 : row.amount - (row.refund?.amount ?? 0);
+      if ([refund.ok, voided.ok].filter(Boolean).length !== 1 || (row.voided && row.refunded) || contribution !== 0) bad++;
+    }
+    const v = await pay((await attendee(s.id)).id);
+    const voids = await Promise.all([deskA, deskB].map((c) =>
+      c.$transaction((tx) => voidPayment(tx, centerId, v.id, "twice", managerA.id), WRITE_TRANSACTION_OPTIONS)));
+    const r = await pay((await attendee(s.id)).id);
+    let refundThrew = false;
+    let refunds: Awaited<ReturnType<typeof refundPayment>>[] = [];
+    try {
+      refunds = await Promise.all([deskA, deskB].map((c) =>
+        c.$transaction((tx) => refundPayment(tx, centerId, r.id, "twice", managerA.id), WRITE_TRANSACTION_OPTIONS)));
+    } catch {
+      refundThrew = true;
+    }
+    let checkRefused = false;
+    try {
+      await prisma.payment.update({ where: { id: r.id }, data: { voided: true, refunded: true } });
+    } catch {
+      checkRefused = true;
+    }
+    return [
+      [`refund ∥ void ×3: exactly one wins, never both flags, contribution 0 (${bad} bad)`, bad === 0],
+      ["void ×2 at once: one ok, one alreadyVoided", voids.filter((x) => x.ok).length === 1 && voids.some((x) => !x.ok && x.error === "alreadyVoided")],
+      ["refund ×2 at once: one ok, one alreadyRefunded, nothing thrown", !refundThrew && refunds.filter((x) => x.ok).length === 1 && refunds.some((x) => !x.ok && x.error === "alreadyRefunded")],
+      ["the database refuses a payment both voided and refunded (CHECK)", checkRefused],
+    ];
+  });
+
+  await assertSec("SEC-13", "concurrent enrolments never pass the room set's capacity (one locked seat claim)", async () => {
+    const room = await prisma.room.create({ data: { centerId, name: `${PREFIX}room-13`, capacity: 2 } });
+    const cls = await prisma.classGroup.create({
+      data: {
+        centerId, teacherId: teacher.id, roomId: room.id, price: 10_000, centerShareType: "PERCENTAGE", centerShareValue: 20,
+        startDate: today, endDate: addDays(today, 30), acceptsNewStudents: true, requiresConfirmation: false,
+      },
+    });
+    const users = await Promise.all([1, 2, 3, 4, 5, 6].map((i) => makeUser(`m-enrol-${i}`)));
+    const results = await Promise.all(users.map((user, i) =>
+      (i % 2 === 0 ? deskA : deskB).$transaction(
+        (tx) => reserveOrEnroll(tx, { centerId, classGroupId: cls.id, studentUserId: user.id }),
+        WRITE_TRANSACTION_OPTIONS,
+      )));
+    const active = await prisma.enrollment.count({ where: { classGroupId: cls.id, status: "ACTIVE" } });
+    const profiles = await prisma.studentProfile.count({ where: { centerId, userId: { in: users.map((u) => u.id) } } });
+    return [
+      [`6 at once into a cap-2 class: ${results.filter((r) => r.ok).length} enrolled, ${active} ACTIVE`, active === 2 && results.filter((r) => r.ok).length === 2],
+      ["the other 4 are classFull", results.filter((r) => !r.ok && r.error === "classFull").length === 4],
+      ["no profile was made for a student who got no seat", profiles === 2],
+      ["the staff Enrol action and the approval path take the same locked claim", /claimClassSeat\(/.test(exportedBody("app/[locale]/(center)/classes/actions.ts", "enrollStudentAction")) && /claimClassSeat\(/.test(exportedBody("lib/db/reservations.ts", "confirmReservation"))],
+    ];
+  });
+
+  // ── Settlements ───────────────────────────────────────────────────────
+
+  await assertSec("SEC-06", "a payment belongs to at most one live settlement — shapes, overlaps and races included (D-05)", async () => {
+    const t6 = await member("m-teacher6", "TEACHER");
+    const a = await paidPastSession(3, 2, t6.id);
+    const period = (client: PrismaClient, from: Date, to: Date, options: { now?: Date } = {}) =>
+      client.$transaction((tx) => createPeriodSettlement(tx, centerId, t6.id, from, to, managerA.id, options), { ...WRITE_TRANSACTION_OPTIONS, timeout: 30_000 });
+    const races = await Promise.all([period(deskA, daysAgo(2), daysAgo(2)), period(deskB, daysAgo(2), daysAgo(2))]);
+    const live = () => prisma.settlement.findMany({ where: { centerId, teacherId: t6.id, status: { not: "CANCELLED" } } });
+    const afterRace = (await live()).reduce((n, s) => n + s.totalAmount, 0);
+
+    const b = await paidPastSession(2, 3, t6.id);
+    const sessionRuns = await Promise.all([deskA, deskB].map((c) =>
+      c.$transaction((tx) => createSessionSettlement(tx, centerId, b.session.id, managerA.id), WRITE_TRANSACTION_OPTIONS)));
+
+    const c = await paidPastSession(1, 4, t6.id);
+    await prisma.$transaction((tx) => createSessionSettlement(tx, centerId, c.session.id, managerA.id));
+    const overC = await period(prisma, daysAgo(4), daysAgo(4));
+    const ledger = a.share + b.share + c.share;
+    const claimed = (await live()).reduce((n, s) => n + s.totalAmount, 0);
+
+    // OD-8: a period settled while a session was still live leaves it out; a
+    // later overlapping period picks it up once it has closed.
+    const d = await paidPastSession(1, 5, t6.id);
+    const whileLive = await period(prisma, daysAgo(5), daysAgo(5), { now: zonedDateTimeToUtc(dateKey(daysAgo(5)), 12 * 60, TZ) });
+    const afterClose = await period(prisma, daysAgo(5), daysAgo(5));
+
+    const target = (await live()).find((s) => s.status === "DRAFT")!;
+    const approvals = await Promise.all([deskA, deskB].map((cl) =>
+      cl.$transaction((tx) => approveSettlement(tx, centerId, target.id, owner1), WRITE_TRANSACTION_OPTIONS)));
+    const pays = await Promise.all([deskA, deskB].map((cl) =>
+      cl.$transaction((tx) => paySettlement(tx, centerId, target.id, owner1), WRITE_TRANSACTION_OPTIONS)));
+
+    let secondClaimRefused = false;
+    try {
+      const claim = await prisma.settlementClaim.findFirstOrThrow({ where: { centerId, releasedAt: null } });
+      await prisma.settlementClaim.create({ data: { centerId, settlementId: claim.settlementId, paymentId: claim.paymentId, teacherShare: claim.teacherShare } });
+    } catch {
+      secondClaimRefused = true;
+    }
+    return [
+      [`period ×2 at once: one ok, one overlappingSettlement; claimed ${afterRace} of ${a.share}`, races.filter((r) => r.ok).length === 1 && races.some((r) => !r.ok && r.error === "overlappingSettlement") && afterRace === a.share],
+      ["session ×2 at once: one ok, one sessionAlreadySettled", sessionRuns.filter((r) => r.ok).length === 1 && sessionRuns.some((r) => !r.ok && r.error === "sessionAlreadySettled")],
+      [`session settlement then a period over it: the period claims nothing more (all live totals ${claimed} ≤ ledger ${ledger})`, overC.ok && overC.settlement.totalAmount === 0 && claimed <= ledger],
+      ["OD-8: the payment a live-session period left out is claimed by a later overlapping period", whileLive.ok && whileLive.settlement.totalAmount === 0 && afterClose.ok && afterClose.settlement.totalAmount === d.share],
+      ["approve ×2 and pay ×2 at once: each changes the settlement once", approvals.filter((r) => r.ok).length === 1 && pays.filter((r) => r.ok).length === 1],
+      ["the database refuses a second live claim on one payment", secondClaimRefused],
+    ];
+  });
+
+  await assertSec("SEC-23", "a period settlement is bounded, and a DRAFT can be cancelled to release its payments (D-16)", async () => {
+    const t23 = await member("m-teacher23", "TEACHER");
+    const p = await paidPastSession(2, 6, t23.id);
+    const make = (from: Date, to: Date) =>
+      prisma.$transaction((tx) => createPeriodSettlement(tx, centerId, t23.id, from, to, managerA.id), { ...WRITE_TRANSACTION_OPTIONS, timeout: 30_000 });
+    const future = await make(daysAgo(10), dayMarker("9999-12-31"));
+    const tooLong = await make(addDays(daysAgo(1), -400), daysAgo(1));
+    const zod9999 = createPeriodSettlementSchema.safeParse({ locale: "en", teacherId: t23.id, from: "2026-10-01", to: "9999-12-31" });
+    const draft = await make(daysAgo(6), daysAgo(6));
+    const cancelled = draft.ok ? await prisma.$transaction((tx) => cancelSettlement(tx, centerId, draft.settlement.id, { userId: managerA.id })) : null;
+    const again = await make(daysAgo(6), daysAgo(6));
+    const approved = again.ok ? await prisma.$transaction((tx) => approveSettlement(tx, centerId, again.settlement.id, owner1)) : null;
+    const cancelApproved = again.ok ? await prisma.$transaction((tx) => cancelSettlement(tx, centerId, again.settlement.id, { userId: managerA.id })) : null;
+    return [
+      ["`to` in the future (9999-12-31) is refused by direct call (futureRange)", !future.ok && future.error === "futureRange"],
+      ["more than 366 days is refused (rangeTooLong)", !tooLong.ok && tooLong.error === "rangeTooLong"],
+      ["the form schema refuses the 9999 range too", !zod9999.success],
+      ["cancelling a DRAFT releases its claims", cancelled !== null && cancelled.ok && cancelled.releasedClaims === p.payments.length],
+      ["…so a corrected settlement claims the same payments", again.ok && again.settlement.totalAmount === p.share],
+      ["an APPROVED settlement is never cancelled (notDraft)", approved !== null && approved.ok && cancelApproved !== null && !cancelApproved.ok && cancelApproved.error === "notDraft"],
+    ];
+  });
+
+  await assertSec("SEC-18", "a non-owner cannot approve or pay a settlement they created; an owner may, flagged (D-12)", async () => {
+    const t18 = await member("m-teacher18", "TEACHER");
+    await paidPastSession(1, 7, t18.id);
+    const created = await prisma.$transaction((tx) => createPeriodSettlement(tx, centerId, t18.id, daysAgo(7), daysAgo(7), managerA.id));
+    if (!created.ok) return [["fixture settlement", false]];
+    const id = created.settlement.id;
+    const selfApprove = await prisma.$transaction((tx) => approveSettlement(tx, centerId, id, { userId: managerA.id, isOwner: false }));
+    const other = await prisma.$transaction((tx) => approveSettlement(tx, centerId, id, { userId: managerB.id, isOwner: false }));
+    const selfPay = await prisma.$transaction((tx) => paySettlement(tx, centerId, id, { userId: managerA.id, isOwner: false }));
+    const otherPay = await prisma.$transaction((tx) => paySettlement(tx, centerId, id, { userId: managerB.id, isOwner: false }));
+    await paidPastSession(1, 8, t18.id);
+    const ownerMade = await prisma.$transaction((tx) => createPeriodSettlement(tx, centerId, t18.id, daysAgo(8), daysAgo(8), owner.id));
+    const ownerSelf = ownerMade.ok ? await prisma.$transaction((tx) => approveSettlement(tx, centerId, ownerMade.settlement.id, owner1)) : null;
+    const actions = read("app/[locale]/(center)/settlements/actions.ts");
+    return [
+      ["the creator (MANAGER) is refused approval (ownSettlement)", !selfApprove.ok && selfApprove.error === "ownSettlement"],
+      ["another manager approves (not flagged)", other.ok && !other.selfApproved],
+      ["the creator is refused payment too; another manager pays", !selfPay.ok && selfPay.error === "ownSettlement" && otherPay.ok],
+      ["an OWNER may approve their own settlement, and it is flagged selfApproved", ownerSelf !== null && ownerSelf.ok && ownerSelf.selfApproved],
+      ["the actions pass the actor's OWNER-ness and audit selfApproved", /isOwner: ctx\.roles\.includes\("OWNER"\)/.test(actions) && (actions.match(/selfApproved: (approved|paid)\.selfApproved/g) ?? []).length === 2],
+    ];
+  });
+
+  // ── Fraud visibility ──────────────────────────────────────────────────
+
+  await assertSec("SEC-07", "voids and unpaid check-ins are visible: an audit screen and the receipt (D-06)", async () => {
+    const s = await session(today);
+    const paid = await pay((await attendee(s.id)).id);
+    await attendee(s.id); // present, never paid
+    await prisma.$transaction(async (tx) => {
+      const voided = await voidPayment(tx, centerId, paid.id, "Wrong student", managerA.id);
+      if (!voided.ok) throw new Error(voided.error);
+      await writeAuditRow(tx, {
+        centerId, actorUserId: managerA.id, action: "payment.void", entityType: "Payment", entityId: paid.id,
+        before: { amount: paid.amount, voided: false }, after: { voided: true, sessionId: s.id },
+      });
+    });
+    const totals = await sessionReceiptTotals(prisma, centerId, s.id);
+    const lines = await sessionReceiptLines(prisma, centerId, s.id);
+    const feed = await loadAuditFeed(prisma, centerId, "voids", { take: 50, skip: 0 });
+    const unpaid = await loadUnpaidCheckIns(prisma, centerId, daysAgo(30), { take: 50, skip: 0 });
+    const page = read("app/[locale]/(center)/audit/page.tsx");
+    const receipt = read("app/[locale]/(center)/sessions/[id]/session-receipt.tsx");
+    const entry = feed.entries.find((e) => e.entityId === paid.id);
+    return [
+      ["the receipt counts the void and the unpaid check-ins", totals.voidedCount === 1 && totals.voidedAmount === paid.amount && totals.unpaidCount === 2],
+      ["the receipt lists the void with its actor and reason", lines.voids.length === 1 && lines.voids[0].reason === "Wrong student" && lines.voids[0].voidedByName !== null],
+      ["the receipt lists the present-but-unpaid students", lines.unpaid.length === 2],
+      ["SessionReceipt renders the voided and unpaid sections", /voidsTitle/.test(receipt) && /unpaidTitle/.test(receipt) && /voidedLine/.test(receipt)],
+      ["the audit feed shows the void with its amount, student and reason", entry !== undefined && entry.amount === paid.amount && entry.reason === "Wrong student" && entry.subjectName !== null],
+      ["the unpaid list is filterable and centre-scoped", unpaid.rows.some((row) => row.sessionId === s.id)],
+      ["/audit is gated on audit.view and reads the feed", /requirePermission\(ctx, "audit\.view"\)/.test(page) && /loadAuditFeed\(/.test(page) && /loadUnpaidCheckIns\(/.test(page)],
+      ["the unpaid list is clamped to the visibility window; the trail is not", /loadUnpaidCheckIns\(prisma, ctx\.center\.id, visibilityWindowFloor\(ctx\)/.test(page) && !/loadAuditFeed\([^)]*visibility/.test(page)],
+    ];
+  });
+
+  await assertSec("SEC-19", "the session receipt subtracts refunds and shows them", async () => {
+    const s = await session(today);
+    const kept = await pay((await attendee(s.id)).id);
+    const back = await pay((await attendee(s.id)).id);
+    const refunded = await prisma.$transaction((tx) => refundPayment(tx, centerId, back.id, "cash back", managerA.id));
+    const totals = await sessionReceiptTotals(prisma, centerId, s.id);
+    const lines = await sessionReceiptLines(prisma, centerId, s.id);
+    return [
+      ["collected = paid − refunded, and both shares net of the reversal", refunded.ok && totals.collected === kept.amount && totals.teacherShare === kept.teacherShareSnapshot && totals.centerShare === kept.centerShareSnapshot],
+      ["the refund is counted and listed with its reason", totals.refundedCount === 1 && totals.refundedAmount === back.amount && lines.refunds.length === 1 && lines.refunds[0].reason === "cash back"],
+      ["SessionReceipt renders the refunds line and section", /refundedLine/.test(read("app/[locale]/(center)/sessions/[id]/session-receipt.tsx")) && /refundsTitle/.test(read("app/[locale]/(center)/sessions/[id]/session-receipt.tsx"))],
+    ];
+  });
+
+  await assertSec("SEC-08", "a paid session cannot be cancelled or rescheduled; a cancelled one closes at day end and refuses money (D-07)", async () => {
+    const s = await session(today);
+    const p = await pay((await attendee(s.id)).id);
+    const cancel = await cancelSession(prisma, centerId, s.id);
+    const tomorrow = await session(addDays(today, 1));
+    const tp = await pay((await attendee(tomorrow.id, true)).id, true);
+    const move = await rescheduleSession(prisma, centerId, tomorrow.id, { date: addDays(today, 2), startTime: "10:00", endTime: "11:00" }, "WARN", "en", { confirmConflicts: true });
+    // Refunded money is back with the student, so it no longer blocks.
+    await prisma.$transaction((tx) => refundPayment(tx, centerId, p.id, "teacher left early", managerA.id));
+    const cancelAfterRefund = await cancelSession(prisma, centerId, s.id);
+    const closedNextDay = await closeSessionIfDayOver(prisma, centerId, s.id, addDays(now, 1));
+    const row = await prisma.session.findUniqueOrThrow({ where: { id: s.id } });
+    const absences = await prisma.sessionAttendee.count({ where: { sessionId: s.id, attendanceStatus: "ABSENT" } });
+    // A legacy cancelled session still holding a payment: no void/refund path stays open.
+    const legacy = await session(today);
+    const lp = await pay((await attendee(legacy.id)).id);
+    await prisma.session.update({ where: { id: legacy.id }, data: { status: "CANCELLED" } });
+    const voidLegacy = await prisma.$transaction((tx) => voidPayment(tx, centerId, lp.id, "late", managerA.id));
+    const refundLegacy = await prisma.$transaction((tx) => refundPayment(tx, centerId, lp.id, "late", managerA.id));
+    // The old repro: a past payment voided months later with the real clock.
+    const old = await paidPastSession(1, 20);
+    const voidOld = await prisma.$transaction((tx) => voidPayment(tx, centerId, old.payments[0].id, "months later", managerA.id));
+    return [
+      ["cancelling a session with an active payment is refused (hasPayments)", !cancel.ok && cancel.error === "hasPayments"],
+      ["rescheduling one is refused too", !move.ok && move.error === "hasPayments" && Boolean(tp)],
+      ["once the payment is refunded the cancel goes through", cancelAfterRefund.ok],
+      ["the cancelled session closes at the end of its day — status kept, no absences", closedNextDay && row.closedAt !== null && row.status === "CANCELLED" && absences === 0],
+      ["a cancelled session refuses void and refund", !voidLegacy.ok && voidLegacy.error === "sessionCancelled" && !refundLegacy.ok && refundLegacy.error === "sessionCancelled"],
+      ["a payment on an ended day cannot be voided later (sessionClosed)", !voidOld.ok && voidOld.error === "sessionClosed"],
+    ];
+  });
+
+  await assertSec("SEC-20", "switching a paid student to Absent needs a reason (D-13)", async () => {
+    const s = await session(today);
+    const a = await attendee(s.id);
+    const p = await pay(a.id);
+    const without = await changeAttendanceStatus(prisma, { centerId, attendeeId: a.id, status: "ABSENT", changedBy: managerA.id, mayVoidPayment: true });
+    const still = await prisma.payment.findUniqueOrThrow({ where: { id: p.id } });
+    const withReason = await changeAttendanceStatus(prisma, { centerId, attendeeId: a.id, status: "ABSENT", changedBy: managerA.id, reason: "Left early", mayVoidPayment: true });
+    const b = await attendee(s.id);
+    const unpaidChange = await changeAttendanceStatus(prisma, { centerId, attendeeId: b.id, status: "LATE", changedBy: managerA.id, mayVoidPayment: false });
+    const zodNoReason = setAttendanceSchema.safeParse({ locale: "en", sessionId: s.id, studentProfileId: "x", status: "ABSENT", confirmVoid: "true" });
+    const zodReason = setAttendanceSchema.safeParse({ locale: "en", sessionId: s.id, studentProfileId: "x", status: "ABSENT", confirmVoid: "true", reason: "Left early" });
+    const action = exportedBody("app/[locale]/(center)/sessions/actions.ts", "setAttendanceAction");
+    return [
+      ["without a reason it is refused (reasonRequired) and the payment stands", !without.ok && without.error === "reasonRequired" && !still.voided],
+      ["with a reason it voids, and the reason is on the payment and the change row", withReason.ok && withReason.voidedPayment?.voidReason === "Left early" && withReason.change?.reason === "Left early"],
+      ["a change that voids nothing keeps the reason optional", unpaidChange.ok],
+      ["the zod schema refuses a confirmed void without a reason", !zodNoReason.success && zodReason.success],
+      ["the Server Action refuses it too", /reasonRequired/.test(action)],
+    ];
+  });
+
+  await assertSec("SEC-21", "a timezone edit never reopens or moves a session already created (D-14)", async () => {
+    await prisma.centerSettings.update({ where: { centerId }, data: { timezone: TZ } });
+    const day = dayMarker("2026-10-13");
+    const s = await session(day);
+    const frozen = await prisma.session.findUniqueOrThrow({ where: { id: s.id } });
+    await prisma.session.update({ where: { id: s.id }, data: { timezone: "Etc/GMT+12" } });
+    const afterEdit = await prisma.session.findUniqueOrThrow({ where: { id: s.id } });
+    // 01:00 Cairo on 14 Oct is still 13 Oct at UTC−12: the old live read let
+    // a manager reopen the 13th by switching the centre to that zone.
+    await prisma.centerSettings.update({ where: { centerId }, data: { timezone: "Etc/GMT+12" } });
+    const at = zonedDateTimeToUtc("2026-10-14", 60, TZ);
+    let refused: string | null = null;
+    try {
+      await createAttendance(prisma, { centerId, sessionId: s.id, studentProfileId: (await student()).id, enrollmentId: null, isDropIn: true, recordedBy: managerA.id }, { now: at });
+    } catch (error) {
+      refused = error instanceof SessionClosedError ? error.reason : String(error);
+    }
+    const created = await session(today);
+    const createdRow = await prisma.session.findUniqueOrThrow({ where: { id: created.id } });
+    await prisma.centerSettings.update({ where: { centerId }, data: { timezone: TZ } });
+    return [
+      ["a new session freezes the centre's timezone", frozen.timezone === TZ],
+      ["a session's timezone never changes afterwards (trigger)", afterEdit.timezone === TZ],
+      ["switching the centre to a zone where that day is 'today' does not reopen it", refused === "sessionClosed"],
+      ["a session created after the edit takes the new zone", createdRow.timezone === "Etc/GMT+12"],
+      ["the write guard reads the session's own timezone first", /COALESCE\(s\."timezone", cs\."timezone"\)/.test(read("lib/db/session-lifecycle.ts"))],
+    ];
+  });
+
+  await assertSec("SEC-22", "a FIXED centre cut above the price is refused, at configuration and when a price is lowered (D-15)", async () => {
+    const base = { locale: "en", teacherId: "t", roomId: "r", startDate: "2026-10-09", endDate: "2027-04-01", lateThresholdMinutes: "10" };
+    const issue = (result: { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } }) =>
+      result.success ? null : result.error!.issues.map((i) => `${i.path.join(".")}:${i.message}`).join(",");
+    const classAbove = issue(classGroupSchema.safeParse({ ...base, price: "100", centerShareType: "FIXED", shareValue: "500" }));
+    const lowered = issue(classGroupUpdateSchema.safeParse({ ...base, id: "c", price: "10", centerShareType: "FIXED", shareValue: "15" }));
+    const oneOff = issue(newOneOffSessionSchema.safeParse({
+      locale: "en", mode: "oneOff", title: "x", teacherId: "t", roomId: "r", date: dateKey(addDays(today, 3)), startTime: "10:00", endTime: "11:00",
+      price: "100", centerShareType: "FIXED", shareValue: "500",
+    }));
+    const s = await session(today, 10_000);
+    const override = await updateSessionShareOverride(prisma, centerId, s.id, { centerShareType: "FIXED", centerShareValue: 20_000 });
+    return [
+      ["a class at 100 EGP with FIXED 500 EGP is refused (fixedAbovePrice)", classAbove === "shareValue:fixedAbovePrice"],
+      ["lowering a class's price below its FIXED cut is refused", lowered === "shareValue:fixedAbovePrice"],
+      ["the same for a one-time session", oneOff === "shareValue:fixedAbovePrice"],
+      ["a session's cut override above its price is refused by direct call", !override.ok && override.error === "fixedAbovePrice"],
+      ["the data layer refuses it on class create and edit", classMoneyError({ price: 10_000, centerShareType: "FIXED", centerShareValue: 50_000 }) === "fixedAbovePrice" && /classMoneyError\(input\)/.test(exportedBody("lib/db/class-sessions.ts", "updateClassWithSessions")) && /classMoneyError\(input\)/.test(exportedBody("lib/db/class-sessions.ts", "createClassWithSessions"))],
+      ["splitShare still clamps (the backstop for older rows)", splitShare(10_000, "FIXED", 50_000).teacherShare === 0],
+    ];
+  });
+
+  await assertSec("SEC-24", "money sums are 64-bit and a price is capped (D-17)", async () => {
+    const s = await session(daysAgo(9), 10_000);
+    for (let i = 0; i < 3; i++) {
+      const a = await attendee(s.id, true);
+      const profileId = a.studentProfileId!;
+      await prisma.payment.create({
+        data: {
+          centerId, sessionId: s.id, teacherId: teacher.id, sessionAttendeeId: a.id, studentProfileId: profileId,
+          amount: 1_000_000_000, paymentMethodId: method.id, methodLabelSnapshot: method.name, priceSnapshot: 1_000_000_000,
+          centerShareSnapshot: 0, teacherShareSnapshot: 1_000_000_000, recordedBy: managerA.id,
+        },
+      });
+    }
+    let threw = false;
+    let revenue = 0;
+    let receipt = 0;
+    let settle: Awaited<ReturnType<typeof createSessionSettlement>> | null = null;
+    try {
+      revenue = (await revenueTotals(prisma, centerId, { from: daysAgo(9), to: daysAgo(9) })).collected;
+      receipt = (await sessionReceiptTotals(prisma, centerId, s.id)).collected;
+      settle = await prisma.$transaction((tx) => createSessionSettlement(tx, centerId, s.id, managerA.id));
+    } catch {
+      threw = true;
+    }
+    return [
+      ["three 10M EGP payments sum to 30M EGP in analytics and on the receipt, without throwing", !threw && revenue === 3_000_000_000 && receipt === 3_000_000_000],
+      ["a settlement beyond the integer ceiling is refused, not thrown (totalTooLarge)", settle !== null && !settle.ok && settle.error === "totalTooLarge"],
+      [`a price is capped at ${MAX_PRICE_PIASTRES / 100} EGP`, parseEgpToPiastres("100001", MAX_PRICE_PIASTRES) === null && parseEgpToPiastres("100000", MAX_PRICE_PIASTRES) === MAX_PRICE_PIASTRES],
+      ["no Prisma _sum over a money column remains in the app", !walk("app").concat(walk("lib")).some((f) => /_sum: \{[^}]*(amount|Share|totalAmount)/.test(read(f)))],
+    ];
+  });
+
+  await assertSec("SEC-29", "audit rows carry ids and amounts only — no names, contacts or free text (D-20; retention stays OPEN)", async () => {
+    let refused = false;
+    try {
+      await prisma.$transaction((tx) => writeAuditRow(tx, { centerId, actorUserId: managerA.id, action: "payment.void", entityType: "Payment", entityId: "x", after: { reason: "free text" } }));
+    } catch (error) {
+      refused = error instanceof AuditPayloadError;
+    }
+    const written = await prisma.auditLog.count({ where: { centerId, entityId: "x" } });
+    const writers = walk("app").concat(walk("lib")).filter((f) => f !== "lib/db/audit-row.ts" && /\.auditLog\.create(Many)?\(/.test(read(f)));
+    const literalHits: string[] = [];
+    for (const file of walk("app").concat(walk("lib"), walk("prisma"))) {
+      const source = read(file);
+      const re = /(writeAuditLog|writeAuditRow|auditRowData|\baudit)\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(source))) {
+        let depth = 0;
+        let i = m.index + m[0].length - 1;
+        for (; i < source.length; i++) {
+          if (source[i] === "(") depth++;
+          else if (source[i] === ")" && --depth === 0) break;
+        }
+        const body = source.slice(m.index, i + 1);
+        if (/action: "platform\.catalog\./.test(body)) continue;
+        for (const key of FORBIDDEN_AUDIT_KEYS) {
+          if (new RegExp(`[\\s{,]${key}\\s*[:,}]`).test(body)) literalHits.push(`${file}:${key}`);
+        }
+      }
+    }
+    return [
+      ["a payload with a free-text key is refused before anything is written", refused && written === 0],
+      ["forbiddenAuditKey finds a name at any depth", forbiddenAuditKey({ a: [{ b: { firstName: "x" } }] }) === "firstName" && forbiddenAuditKey({ amount: 1, voided: true }) === null],
+      [`every audit write goes through lib/db/audit-row.ts (${writers.join(", ") || "none other"})`, writers.length === 0],
+      [`no audit payload in the source names a forbidden key (${literalHits.slice(0, 4).join(", ") || "none"})`, literalHits.length === 0],
+    ];
+  });
+
+  await assertSec("SEC-50", "dates are strict calendar days everywhere they are typed", async () => {
+    const bad = ["March 5 2026", "2026-02-30", "2026-01-01T10:00"];
+    const refusedBy = (parse: (date: string) => boolean) => bad.every((date) => !parse(date));
+    const s = await session(addDays(today, 5));
+    const badRequest = await prisma.changeRequest.create({
+      data: { centerId, type: "NEW_SESSION", requestedBy: teacher.id, status: "PENDING", payload: { classGroupId: "missing", date: "2026-02-30", startTime: "10:00", endTime: "11:00", note: null } },
+    });
+    const resolved = await resolveSessionRequest(prisma, centerId, badRequest.id, "APPROVED", managerA.id, "WARN", "en", { confirmConflicts: true });
+    return [
+      ["reschedule", refusedBy((date) => rescheduleSessionSchema.safeParse({ locale: "en", sessionId: s.id, date, startTime: "10:00", endTime: "11:00" }).success)],
+      ["holiday", refusedBy((date) => holidaySchema.safeParse({ locale: "en", date }).success)],
+      ["period settlement", refusedBy((date) => createPeriodSettlementSchema.safeParse({ locale: "en", teacherId: "t", from: date, to: date }).success)],
+      ["expense", refusedBy((date) => expenseCreateSchema.safeParse({ locale: "en", amount: "10", date }).success)],
+      ["a teacher's session request", refusedBy((date) => sessionRequestSchema.safeParse({ locale: "en", classGroupId: "c", date, startTime: "10:00", endTime: "11:00" }).success)],
+      ["a stored request with an impossible date is refused on approval, never thrown", !resolved.ok && resolved.error === "invalidDate"],
+    ];
+  });
+
+  await assertSec("SEC-51", "no backdating: reschedule and approval refuse the past; expenses are voided within the window (D-24)", async () => {
+    const s = await session(addDays(today, 3));
+    const back = await rescheduleSession(prisma, centerId, s.id, { date: daysAgo(1), startTime: "10:00", endTime: "11:00" }, "WARN", "en", { confirmConflicts: true });
+    const cls = await prisma.classGroup.create({
+      data: { centerId, teacherId: teacher.id, price: 10_000, centerShareType: "PERCENTAGE", centerShareValue: 20, startDate: daysAgo(30), endDate: addDays(today, 30) },
+    });
+    const request = await prisma.changeRequest.create({
+      data: { centerId, type: "NEW_SESSION", requestedBy: teacher.id, status: "PENDING", payload: { classGroupId: cls.id, date: dateKey(daysAgo(1)), startTime: "10:00", endTime: "11:00", note: null } },
+    });
+    const approve = await resolveSessionRequest(prisma, centerId, request.id, "APPROVED", managerA.id, "WARN", "en", { confirmConflicts: true });
+    const vctx = { isPlatformAdmin: false, settings: { dataVisibilityDays: 30, timezone: TZ } };
+    const expenses = read("app/[locale]/(center)/expenses/actions.ts");
+    return [
+      ["rescheduling into the past is refused (pastDate)", !back.ok && back.error === "pastDate"],
+      ["approving a NEW_SESSION request for yesterday is refused (pastDate)", !approve.ok && approve.error === "pastDate"],
+      ["an expense may be backdated within the window, never before it or into the future", expenseDateError(vctx, daysAgo(10), now) === null && expenseDateError(vctx, daysAgo(45), now) === "beforeWindow" && expenseDateError(vctx, addDays(today, 1), now) === "futureDate"],
+      ["an expense is voided with a reason, never deleted", /voidExpenseAction/.test(expenses) && !/expense\.delete|expenses\.remove|deleteExpenseAction/.test(expenses) && !/remove:/.test(read("lib/db/scoped.ts").split("expenses: {")[1]?.split("settings: {")[0] ?? "remove:")],
+      ["category create/rename/toggle/delete are audited", ["expenseCategory.create", "expenseCategory.rename", "expenseCategory.activate", "expenseCategory.delete"].every((action) => expenses.includes(action))],
+      ["voided expenses leave every total", /e\."voided" = false/.test(read("lib/db/analytics.ts"))],
+    ];
+  });
+
+  await assertSec("SEC-58", "a free one-time session needs an explicit confirmation and is flagged (D-26)", async () => {
+    const input = {
+      locale: "en", mode: "oneOff", title: "Free", teacherId: "t", roomId: "r", date: dateKey(addDays(today, 3)), startTime: "10:00", endTime: "11:00",
+      price: "0", centerShareType: "PERCENTAGE", shareValue: "0",
+    };
+    const unconfirmed = newOneOffSessionSchema.safeParse(input);
+    const confirmed = newOneOffSessionSchema.safeParse({ ...input, confirmZeroPrice: "on" });
+    const s = await session(today, 0);
+    const totals = await sessionReceiptTotals(prisma, centerId, s.id);
+    return [
+      ["price 0 without the tick is refused (zeroPriceNeedsConfirmation)", !unconfirmed.success && unconfirmed.error.issues.some((i) => i.message === "zeroPriceNeedsConfirmation")],
+      ["with the tick it is allowed", confirmed.success && confirmed.data.price === 0],
+      ["its receipt is flagged as free", totals.zeroPriced],
+      ["the session page badges it", /priceSnapshot === 0 \? <Badge/.test(read("app/[locale]/(center)/sessions/[id]/page.tsx"))],
+    ];
+  });
+
+  await assertSec("SEC-59", "a rating needs real attendance inside the 7-day window", async () => {
+    const studentUser = await makeUser("m-rater");
+    const profile = await makeStudent(centerId, studentUser);
+    const row = (sessionId: string, status: "PRESENT" | "ABSENT") =>
+      prisma.sessionAttendee.create({ data: { centerId, sessionId, studentProfileId: profile.id, attendanceStatus: status, recordedBy: managerA.id } });
+    const absent = await session(daysAgo(2));
+    await row(absent.id, "ABSENT");
+    const old = await session(daysAgo(9));
+    await row(old.id, "PRESENT");
+    const recent = await session(daysAgo(1));
+    await row(recent.id, "PRESENT");
+    const never = await session(daysAgo(1));
+    const rateAbsent = await submitSessionRating(prisma, { studentUserId: studentUser.id, sessionId: absent.id, score: 1 });
+    const rateOld = await submitSessionRating(prisma, { studentUserId: studentUser.id, sessionId: old.id, score: 1 });
+    const rateRecent = await submitSessionRating(prisma, { studentUserId: studentUser.id, sessionId: recent.id, score: 4 });
+    await skipSessionRating(prisma, { studentUserId: studentUser.id, sessionId: never.id });
+    const skips = await prisma.sessionRatingSkip.count({ where: { studentUserId: studentUser.id, sessionId: never.id } });
+    return [
+      ["rating an ABSENT session is refused (notAttended)", !rateAbsent.ok && rateAbsent.error === "notAttended"],
+      ["rating a 9-day-old session is refused (notAttended)", !rateOld.ok && rateOld.error === "notAttended"],
+      ["rating an attended session from yesterday works", rateRecent.ok],
+      ["skipping a session the student never attended writes nothing", skips === 0],
+    ];
+  });
+
+  await assertSec("SEC-60", "the audit log is append-only and money audit rows commit with the money", async () => {
+    const row = await writeAuditRow(prisma, { centerId, actorUserId: managerA.id, action: "seccheck.append", entityType: "Center", entityId: centerId });
+    let updateRefused = false;
+    try {
+      await prisma.auditLog.update({ where: { id: row.id }, data: { action: "tampered" } });
+    } catch {
+      updateRefused = true;
+    }
+    let deleteRefused = false;
+    try {
+      await prisma.auditLog.delete({ where: { id: row.id } });
+    } catch {
+      deleteRefused = true;
+    }
+    const s = await session(today);
+    const a = await attendee(s.id);
+    let rolledBack = false;
+    try {
+      await prisma.$transaction(async (tx) => {
+        const paid = await recordPayment(tx, centerId, a.id, method.id, managerA.id);
+        if (!paid.ok) throw new Error(paid.error);
+        await writeAuditRow(tx, { centerId, actorUserId: managerA.id, action: "payment.record", entityType: "Payment", entityId: paid.payment.id, after: { note: "forced audit failure" } });
+      });
+    } catch {
+      rolledBack = (await prisma.payment.count({ where: { sessionAttendeeId: a.id } })) === 0;
+    }
+    const sessions = read("app/[locale]/(center)/sessions/actions.ts");
+    const reception = read("app/[locale]/(center)/reception/actions.ts");
+    const settlements = read("app/[locale]/(center)/settlements/actions.ts");
+    const inTx = (body: string) => /writeAuditLog\(\s*\{[\s\S]*?\},\s*tx,\s*\)|writePaymentRecordAudit\(tx,/.test(body);
+    return [
+      ["UPDATE of an audit row is refused", updateRefused],
+      ["DELETE of an audit row is refused outside a maintenance transaction", deleteRefused],
+      ["an audit failure rolls the payment back with it", rolledBack],
+      ["record/void/refund write their audit row on the money transaction", ["recordPaymentAction", "voidPaymentAction", "refundPaymentAction"].every((name) => inTx(exportedBody("app/[locale]/(center)/sessions/actions.ts", name))) && /writePaymentRecordAudit\(tx,/.test(sessions)],
+      ["the reception check-in payment too", /writePaymentRecordAudit\(tx,/.test(reception)],
+      ["every settlement transition too", ["createSessionSettlementAction", "createPeriodSettlementAction", "approveSettlementAction", "paySettlementAction", "cancelSettlementAction"].every((name) => inTx(exportedBody("app/[locale]/(center)/settlements/actions.ts", name))) && settlements.length > 0],
+    ];
+  });
+
+  await assertSec("SEC-74", "EGP amounts parse strictly; the settings audit row is complete", () => [
+    ["`1e3`, `0x10`, `0.001`, `-5` and `12,5` are refused", ["1e3", "0x10", "0.001", "-5", "12,5"].every((value) => parseEgpToPiastres(value) === null)],
+    ["`120`, `12.5` and Arabic-Indic `١٢٠` parse exactly", parseEgpToPiastres("120") === 12_000 && parseEgpToPiastres("12.5") === 1_250 && parseEgpToPiastres(String.fromCodePoint(0x0661, 0x0662, 0x0660)) === 12_000],
+    ["the client previews use the same parser", ["components/center/class-fields.tsx", "app/[locale]/(center)/sessions/new-session-dialog.tsx", "app/[locale]/(center)/settings/general-form.tsx"].every((file) => /parseEgpToPiastres\(/.test(read(file)) && !/Math\.round\([^)]*\* 100\)/.test(read(file)))],
+    ["the general-settings audit row includes teacherEditDeadlineHours", /teacherEditDeadlineHours: before\.teacherEditDeadlineHours/.test(read("app/[locale]/(center)/settings/actions.ts"))],
+  ]);
 }
 
 main()

@@ -376,8 +376,8 @@ async function main() {
   );
   check("Setup: settlementToPayOut is created", settlementToPayOut.ok);
   if (!settlementToPayOut.ok) throw new Error("settlementToPayOut was not ok");
-  await prisma.$transaction((tx) => approveSettlement(tx, centerA.id, settlementToPayOut.settlement.id, actorId));
-  const paidOut = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, settlementToPayOut.settlement.id, actorId));
+  await prisma.$transaction((tx) => approveSettlement(tx, centerA.id, settlementToPayOut.settlement.id, { userId: actorId, isOwner: true }));
+  const paidOut = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, settlementToPayOut.settlement.id, { userId: actorId, isOwner: true }));
   check("Setup: settlementToPayOut is now PAID", paidOut.ok && paidOut.settlement.status === "PAID");
 
   const refundAfterPayout = await prisma.$transaction((tx) =>
@@ -469,14 +469,14 @@ async function main() {
   if (!sessionSettlement.ok) throw new Error("sessionSettlement was not ok");
   const draftId = sessionSettlement.settlement.id;
 
-  const payBeforeApprove = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, draftId, actorId));
+  const payBeforeApprove = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, draftId, { userId: actorId, isOwner: true }));
   check(
     "A DRAFT settlement cannot be marked PAID directly — APPROVED must come first",
     !payBeforeApprove.ok && payBeforeApprove.error === "notApproved",
     JSON.stringify(payBeforeApprove),
   );
 
-  const approved = await prisma.$transaction((tx) => approveSettlement(tx, centerA.id, draftId, actorId));
+  const approved = await prisma.$transaction((tx) => approveSettlement(tx, centerA.id, draftId, { userId: actorId, isOwner: true }));
   check(
     "approveSettlement moves DRAFT to APPROVED and stamps approvedBy/approvedAt",
     approved.ok &&
@@ -486,21 +486,21 @@ async function main() {
     JSON.stringify(approved),
   );
 
-  const reApprove = await prisma.$transaction((tx) => approveSettlement(tx, centerA.id, draftId, actorId));
+  const reApprove = await prisma.$transaction((tx) => approveSettlement(tx, centerA.id, draftId, { userId: actorId, isOwner: true }));
   check(
     "Re-approving an already-approved settlement is refused as notDraft",
     !reApprove.ok && reApprove.error === "notDraft",
     JSON.stringify(reApprove),
   );
 
-  const paid = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, draftId, actorId));
+  const paid = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, draftId, { userId: actorId, isOwner: true }));
   check(
     "paySettlement moves APPROVED to PAID and stamps paidBy/paidAt — no partially-paid state",
     paid.ok && paid.settlement.status === "PAID" && paid.settlement.paidBy === actorId && paid.settlement.paidAt !== null,
     JSON.stringify(paid),
   );
 
-  const rePay = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, draftId, actorId));
+  const rePay = await prisma.$transaction((tx) => paySettlement(tx, centerA.id, draftId, { userId: actorId, isOwner: true }));
   check(
     "Re-paying an already-paid settlement is refused as notApproved",
     !rePay.ok && rePay.error === "notApproved",
@@ -508,7 +508,7 @@ async function main() {
   );
 
   const crossCenterApprove = await prisma.$transaction((tx) =>
-    approveSettlement(tx, centerB.id, draftId, actorId),
+    approveSettlement(tx, centerB.id, draftId, { userId: actorId, isOwner: true }),
   );
   check(
     "Center B cannot approve Center A's settlement by id — resolves to notFound",

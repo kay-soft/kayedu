@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { AttendanceStatus, Prisma, PrismaClient } from "@prisma/client";
 // Relative imports on purpose — `npm run check:ratings` exercises this module
 // directly, outside the Next.js runtime (same reasoning as
 // lib/db/student-portal.ts and lib/db/parents.ts).
@@ -27,6 +27,23 @@ type Db = PrismaClient | Prisma.TransactionClient;
 const RATING_WINDOW_DAYS = 7;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** A rating needs real attendance (SEC-59) — an ABSENT row is not it. */
+const ATTENDED: AttendanceStatus[] = ["PRESENT", "LATE"];
+
+/**
+ * Inside the pop-up's window: `[today − 6, today]` in the session's centre's
+ * calendar. `< today + 1` (not `<= today`) so a session dated today is in
+ * regardless of any time-of-day on the stored date. (Not exported: the
+ * module's exported surface is fixed by `check:ratings`.)
+ */
+function isWithinRatingWindow(sessionDate: Date, timeZone: string, now: Date): boolean {
+  const today = todayInTimezone(timeZone, now);
+  return (
+    sessionDate.getTime() >= addDays(today, -(RATING_WINDOW_DAYS - 1)).getTime() &&
+    sessionDate.getTime() < addDays(today, 1).getTime()
+  );
+}
 
 /** Rounded to one decimal — "however's sensible" per the M17 brief. */
 function roundRating(value: number): number {
@@ -71,6 +88,9 @@ export async function attendedSessionsToRate(
   const candidateRows = await db.sessionAttendee.findMany({
     where: {
       studentProfile: { userId: studentUserId },
+      // SEC-59: only a session the student actually attended — never an
+      // ABSENT row (the close writes one for every enrolled no-show).
+      attendanceStatus: { in: ATTENDED },
       session: { date: { gte: coarseFrom, lte: coarseTo } },
     },
     distinct: ["sessionId"],
@@ -95,13 +115,9 @@ export async function attendedSessionsToRate(
   // Each row is held to its own centre's window: [today − 6, today], where
   // "today" is that centre's calendar day. `< today + 1` (not `<= today`) so a
   // session dated today is in regardless of any time-of-day on the stored date.
-  const attendeeRows = candidateRows.filter((row) => {
-    const today = todayInTimezone(centreTimeZone(row.session.center.settings), now);
-    return (
-      row.session.date.getTime() >= addDays(today, -(RATING_WINDOW_DAYS - 1)).getTime() &&
-      row.session.date.getTime() < addDays(today, 1).getTime()
-    );
-  });
+  const attendeeRows = candidateRows.filter((row) =>
+    isWithinRatingWindow(row.session.date, centreTimeZone(row.session.center.settings), now),
+  );
   if (attendeeRows.length === 0) return [];
 
   const sessionIds = attendeeRows.map((row) => row.sessionId);
@@ -140,20 +156,36 @@ export type SubmitSessionRatingResult =
  * Records one rating. Re-checks attendance itself rather than trusting the
  * pop-up's own list — the same "never trust the client, re-derive from the
  * database" discipline every other student-facing write in this app follows
- * (`lib/db/reservations.ts`'s `reserveOrEnroll`).
+ * (`lib/db/reservations.ts`'s `reserveOrEnroll`). SEC-59: the student must
+ * have been PRESENT or LATE (an ABSENT row is not attendance), and the session
+ * must be inside the same 7-day window the pop-up offers — anything else is
+ * `notAttended`, by direct call too.
  */
 export async function submitSessionRating(
   db: Db,
-  params: { studentUserId: string; sessionId: string; score: number },
+  params: { studentUserId: string; sessionId: string; score: number; now?: Date },
 ): Promise<SubmitSessionRatingResult> {
   const attendee = await db.sessionAttendee.findFirst({
     where: {
       sessionId: params.sessionId,
       studentProfile: { userId: params.studentUserId },
+      attendanceStatus: { in: ATTENDED },
     },
-    select: { session: { select: { teacherId: true } } },
+    select: {
+      session: {
+        select: {
+          teacherId: true,
+          date: true,
+          center: { select: { settings: { select: { timezone: true } } } },
+        },
+      },
+    },
   });
   if (!attendee) return { ok: false, error: "notAttended" };
+  const timeZone = centreTimeZone(attendee.session.center.settings);
+  if (!isWithinRatingWindow(attendee.session.date, timeZone, params.now ?? new Date())) {
+    return { ok: false, error: "notAttended" };
+  }
 
   const existing = await db.sessionRating.findUnique({
     where: {
@@ -178,13 +210,24 @@ export async function submitSessionRating(
 }
 
 /**
- * Records a skip. Idempotent (`skipDuplicates`) and always succeeds — a skip
- * is not an assertion about anything, just "don't ask again for this one."
+ * Records a skip. Idempotent (`skipDuplicates`) and never fails — a skip is
+ * not an assertion about anything, just "don't ask again for this one." SEC-59:
+ * only for a session this student attended; anything else writes nothing
+ * (and no longer surfaces a foreign-key error that told a caller whether a
+ * session id exists).
  */
 export async function skipSessionRating(
   db: Db,
   params: { studentUserId: string; sessionId: string },
 ): Promise<void> {
+  const attended = await db.sessionAttendee.count({
+    where: {
+      sessionId: params.sessionId,
+      studentProfile: { userId: params.studentUserId },
+      attendanceStatus: { in: ATTENDED },
+    },
+  });
+  if (attended === 0) return;
   await db.sessionRatingSkip.createMany({
     data: [{ studentUserId: params.studentUserId, sessionId: params.sessionId }],
     skipDuplicates: true,

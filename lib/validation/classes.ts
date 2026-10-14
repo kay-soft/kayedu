@@ -4,7 +4,7 @@ import { z } from "zod";
 // resolvable outside the Next.js runtime, so `npm run check:classes` can
 // exercise the real schemas (same reasoning as ./settings.ts and ./people.ts).
 import { localeSchema } from "./auth.ts";
-import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
+import { MAX_PRICE_PIASTRES, centerCutError, parseEgpToPiastres } from "../money.ts";
 import { isValidTime, weeklySlotsError, type WeeklySlotRow } from "../scheduling.ts";
 import {
   confirmConflictsField,
@@ -55,11 +55,12 @@ const wholeNumber = (max: number) =>
       "invalidNumber",
     );
 
+/** A price in EGP → piastres, at most `MAX_PRICE_PIASTRES` (D-17). */
 const moneyEgp = z
   .string()
   .trim()
   .default("0")
-  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value)))
+  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value, MAX_PRICE_PIASTRES)))
   .refine((value): value is number => value !== null, "invalidAmount");
 
 export const MAX_LATE_THRESHOLD_MINUTES = 240;
@@ -100,24 +101,26 @@ const classGroupFields = {
   confirmConflicts: confirmConflictsField,
 };
 
+/**
+ * The cut against the class's own price — the one rule (`lib/money.ts`'s
+ * `centerCutError`, SEC-2b D-15): a whole percent 0–100, or a FIXED amount
+ * no greater than the price. The same rule runs on every edit, so lowering a
+ * price below the class's FIXED cut is refused (`fixedAbovePrice`).
+ */
 function resolveShareValue(
-  value: { centerShareType: "FIXED" | "PERCENTAGE"; shareValue: string },
+  value: { centerShareType: "FIXED" | "PERCENTAGE"; shareValue: string; price: number },
   ctx: z.RefinementCtx,
 ): number | typeof z.NEVER {
-  if (value.centerShareType === "PERCENTAGE") {
-    const percent = Number(value.shareValue);
-    if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
-      ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidPercent" });
-      return z.NEVER;
-    }
-    return percent;
-  }
-  const piastres = parseEgpToPiastres(value.shareValue);
-  if (piastres === null || piastres > MAX_PIASTRES) {
-    ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidAmount" });
+  const parsed =
+    value.centerShareType === "PERCENTAGE"
+      ? Number(value.shareValue)
+      : parseEgpToPiastres(value.shareValue, MAX_PRICE_PIASTRES);
+  const error = parsed === null ? "invalidAmount" : centerCutError(value.price, value.centerShareType, parsed);
+  if (error || parsed === null) {
+    ctx.addIssue({ code: "custom", path: ["shareValue"], message: error ?? "invalidAmount" });
     return z.NEVER;
   }
-  return piastres;
+  return parsed;
 }
 
 export const classGroupSchema = z
@@ -302,11 +305,8 @@ export const classBlockCreateSchema = z.object({
 
 // ── Holiday calendar ────────────────────────────────────────────────────────
 
-const holidayDate = z
-  .string()
-  .trim()
-  .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate")
-  .transform((value) => new Date(`${value.slice(0, 10)}T00:00:00.000Z`));
+// SEC-50: a strict "YYYY-MM-DD" calendar day (the shared `dateOnlyField`).
+const holidayDate = dateOnlyField;
 
 export const holidaySchema = z.object({
   ...base,

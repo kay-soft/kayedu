@@ -16,6 +16,7 @@
  * session's class unguarded. Needs a reachable database; cleans up after
  * itself (fixture centres, users and catalog rows only — never a reset).
  */
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -92,7 +93,7 @@ async function cleanup() {
   const ids = centers.map((c) => c.id);
   if (ids.length > 0) {
     // AuditLog.centerId has no cascade.
-    await prisma.auditLog.deleteMany({ where: { centerId: { in: ids } } });
+    await deleteAuditRows(prisma, { centerId: { in: ids } });
     await prisma.center.deleteMany({ where: { id: { in: ids } } });
     await prisma.organization.deleteMany({ where: { id: { in: centers.map((c) => c.organizationId) } } });
   }

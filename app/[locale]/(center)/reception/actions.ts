@@ -9,9 +9,8 @@ import {
   isStudentBlockedFromSession,
   SessionClosedError,
 } from "@/lib/db/attendance";
-import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
-import { recordPayment } from "@/lib/db/payments";
+import { recordPayment, writePaymentRecordAudit } from "@/lib/db/payments";
 import {
   resolveStudentInput,
   studentSessionState,
@@ -320,27 +319,14 @@ export async function checkInAction(
   if (paymentMethodId && payable) {
     if (!ctxCan(ctx, "payment.record")) return FORBIDDEN;
 
-    const result = await prisma.$transaction(
-      (tx) => recordPayment(tx, centerId, attendee.id, paymentMethodId, ctx.user.id),
-      WRITE_TRANSACTION_OPTIONS,
-    );
+    // The audit row commits with the payment or not at all (SEC-60).
+    const result = await prisma.$transaction(async (tx) => {
+      const recorded = await recordPayment(tx, centerId, attendee.id, paymentMethodId, ctx.user.id);
+      if (recorded.ok) await writePaymentRecordAudit(tx, centerId, ctx.user.id, recorded.payment);
+      return recorded;
+    }, WRITE_TRANSACTION_OPTIONS);
 
-    if (result.ok) {
-      await writeAuditLog({
-        centerId,
-        actorUserId: ctx.user.id,
-        action: "payment.record",
-        entityType: "Payment",
-        entityId: result.payment.id,
-        after: {
-          amount: result.payment.amount,
-          paymentMethodId: result.payment.paymentMethodId,
-          methodLabelSnapshot: result.payment.methodLabelSnapshot,
-          centerShareSnapshot: result.payment.centerShareSnapshot,
-          teacherShareSnapshot: result.payment.teacherShareSnapshot,
-        },
-      });
-    } else if (result.error !== "alreadyPaid") {
+    if (!result.ok && result.error !== "alreadyPaid") {
       // "alreadyPaid" is fine to swallow — the check-in itself still
       // succeeded, they simply already have an active payment on file.
       revalidateReception(locale);

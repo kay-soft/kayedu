@@ -59,9 +59,10 @@ import {
 import { createPaymentMethod, listActivePaymentMethods } from "../lib/db/payment-methods.ts";
 import { createTeacherMembership } from "../lib/db/teacher-membership.ts";
 import { createPerson } from "../lib/db/identity.ts";
-import { originateParentLinks, verifyParentLinkPlaceholder } from "../lib/db/parents.ts";
+import { originateParentLinks } from "../lib/db/parents.ts";
 import { transitionCenterLifecycle } from "../lib/db/platform.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import { auditRowData, writeAuditRow } from "../lib/db/audit-row.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
 import { confirmReservation, reserveOrEnroll, rejectReservation } from "../lib/db/reservations.ts";
 import { submitSessionRating } from "../lib/db/ratings.ts";
@@ -74,6 +75,7 @@ import {
 import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
 import {
   approveSettlement,
+  cancelSettlement,
   createPeriodSettlement,
   paySettlement,
 } from "../lib/db/settlements.ts";
@@ -284,6 +286,7 @@ async function ensurePerson(
   return linkAuth(user, def, options.isPlatformAdmin === true);
 }
 
+/** Through the app's own audit writer, so a seeded row obeys D-20 too. */
 async function audit(
   centerId: string | null,
   actorUserId: string | null,
@@ -292,9 +295,7 @@ async function audit(
   entityId: string,
   after?: Prisma.InputJsonValue,
 ) {
-  await prisma.auditLog.create({
-    data: { centerId, actorUserId, action, entityType, entityId, after },
-  });
+  await writeAuditRow(prisma, { centerId, actorUserId, action, entityType, entityId, after });
 }
 
 // ── One centre ───────────────────────────────────────────────────────────────
@@ -891,7 +892,7 @@ async function seedHistory(ctx: Centre, today: Date, historyStart: Date, holiday
           now: new Date(startAt.getTime() - 3 * 3_600_000),
         });
         if (!result.ok) throw new Error(`Cancel ${sessionId}: ${result.error}`);
-        await audit(centerId, ctx.actorId, "session.cancel", "Session", sessionId, { reason: "seed" });
+        await audit(centerId, ctx.actorId, "session.cancel", "Session", sessionId, { status: "CANCELLED", via: "seed" });
         cancelled += 1;
         continue;
       }
@@ -932,20 +933,22 @@ async function seedHistory(ctx: Centre, today: Date, historyStart: Date, holiday
         );
         if (!paid.ok) throw new Error(`Payment for ${attendeeId}: ${paid.error}`);
         paymentsMade += 1;
-        paymentAudit.push({
-          centerId,
-          actorUserId: receptionist,
-          action: "payment.record",
-          entityType: "Payment",
-          entityId: paid.payment.id,
-          after: {
-            amount: paid.payment.amount,
-            paymentMethodId: paid.payment.paymentMethodId,
-            methodLabelSnapshot: paid.payment.methodLabelSnapshot,
-            centerShareSnapshot: paid.payment.centerShareSnapshot,
-            teacherShareSnapshot: paid.payment.teacherShareSnapshot,
-          },
-        });
+        paymentAudit.push(
+          auditRowData({
+            centerId,
+            actorUserId: receptionist,
+            action: "payment.record",
+            entityType: "Payment",
+            entityId: paid.payment.id,
+            after: {
+              amount: paid.payment.amount,
+              sessionId: paid.payment.sessionId,
+              paymentMethodId: paid.payment.paymentMethodId,
+              centerShareSnapshot: paid.payment.centerShareSnapshot,
+              teacherShareSnapshot: paid.payment.teacherShareSnapshot,
+            },
+          }),
+        );
 
         // A few were marked in by mistake and switched to Absent while the
         // session was live: the payment voids with the change, a change-log row.
@@ -1086,7 +1089,8 @@ async function seedToday(ctx: Centre, today: Date) {
           paid += 1;
           await audit(centerId, receptionist, "payment.record", "Payment", result.payment.id, {
             amount: result.payment.amount,
-            methodLabelSnapshot: result.payment.methodLabelSnapshot,
+            sessionId: result.payment.sessionId,
+            paymentMethodId: result.payment.paymentMethodId,
           });
         }
       }
@@ -1207,12 +1211,32 @@ async function seedSettlements(ctx: Centre, today: Date, historyStart: Date) {
     nasrcity: [["mahmoud", "PAID"], ["salma", "APPROVED"], ["omar", "DRAFT"]],
   };
   const actor = ctx.actorId;
+  // D-12: the manager drafts; someone else (the owner) approves and pays.
+  const approver = { userId: ctx.ownerId ?? actor, isOwner: ctx.ownerId !== null };
   const to = addDays(today, -8);
   for (const [teacherKey, wanted] of plan[ctx.branch.key] ?? []) {
     const teacherId = ctx.teacherIds[teacherKey];
-    // RESUMABLE: one settlement per teacher; an existing one is advanced only
-    // as far as this run wants it, never re-created.
-    let settlement = await prisma.settlement.findFirst({ where: { centerId, teacherId } });
+    // D-16: the DRAFT teacher first got a mistyped one-week draft, cancelled
+    // (its claims released) before the real one was made.
+    if (wanted === "DRAFT" && (await prisma.settlement.count({ where: { centerId, teacherId, status: "CANCELLED" } })) === 0) {
+      const mistake = await prisma.$transaction(
+        (tx) => createPeriodSettlement(tx, centerId, teacherId, historyStart, addDays(historyStart, 6), actor),
+        WRITE_TRANSACTION_OPTIONS,
+      );
+      if (mistake.ok) {
+        await audit(centerId, actor, "settlement.create", "Settlement", mistake.settlement.id, {
+          teacherId, totalAmount: mistake.settlement.totalAmount, claimedPayments: mistake.claimedPayments,
+        });
+        const cancelled = await cancelSettlement(prisma, centerId, mistake.settlement.id, { userId: actor });
+        if (!cancelled.ok) throw new Error(`Cancel draft ${teacherKey}: ${cancelled.error}`);
+        await audit(centerId, actor, "settlement.cancel", "Settlement", mistake.settlement.id, {
+          status: "CANCELLED", releasedClaims: cancelled.releasedClaims,
+        });
+      }
+    }
+    // RESUMABLE: one live settlement per teacher; an existing one is advanced
+    // only as far as this run wants it, never re-created.
+    let settlement = await prisma.settlement.findFirst({ where: { centerId, teacherId, status: { not: "CANCELLED" } } });
     if (!settlement) {
       const created = await prisma.$transaction(
         (tx) => createPeriodSettlement(tx, centerId, teacherId, historyStart, to, actor),
@@ -1225,18 +1249,22 @@ async function seedSettlements(ctx: Centre, today: Date, historyStart: Date) {
       });
     }
     if (wanted !== "DRAFT" && settlement.status === "DRAFT") {
-      const approved = await approveSettlement(prisma, centerId, settlement.id, actor);
+      const approved = await approveSettlement(prisma, centerId, settlement.id, approver);
       if (!approved.ok) throw new Error(`Approve ${teacherKey}: ${approved.error}`);
       settlement = approved.settlement;
-      await audit(centerId, actor, "settlement.approve", "Settlement", settlement.id, { status: "APPROVED" });
+      await audit(centerId, approver.userId, "settlement.approve", "Settlement", settlement.id, {
+        status: "APPROVED", selfApproved: approved.selfApproved,
+      });
     }
     if (wanted === "PAID" && settlement.status === "APPROVED") {
-      const paid = await paySettlement(prisma, centerId, settlement.id, actor);
+      const paid = await paySettlement(prisma, centerId, settlement.id, approver);
       if (!paid.ok) throw new Error(`Pay ${teacherKey}: ${paid.error}`);
-      await audit(centerId, actor, "settlement.pay", "Settlement", settlement.id, { status: "PAID" });
+      await audit(centerId, approver.userId, "settlement.pay", "Settlement", settlement.id, {
+        status: "PAID", selfApproved: paid.selfApproved,
+      });
     }
   }
-  line("  settlements: one PAID, one APPROVED, one DRAFT");
+  line("  settlements: one PAID, one APPROVED, one DRAFT (after a cancelled draft) — approved by the owner");
 }
 
 async function seedExpenses(ctx: Centre, today: Date) {
@@ -1273,10 +1301,31 @@ async function seedExpenses(ctx: Centre, today: Date) {
       data: { centerId, categoryId: categories[category], amount, date, note, recordedBy: ctx.actorId },
     });
     await audit(centerId, ctx.actorId, "expense.create", "Expense", expense.id, {
-      categoryId: categories[category], amount, date: dateKey(date), note,
+      categoryId: categories[category], amount, date: dateKey(date),
     });
   }
-  line(`  expenses: ${entries.length} across ${names.join(", ")}`);
+  // One entry recorded twice by mistake and voided (D-24): it stays in the
+  // list, struck through, and is left out of every total.
+  const duplicateNote = "Markers, paper and printer toner (entered twice)";
+  const duplicateDate = addDays(today, -6);
+  if ((await prisma.expense.count({ where: { centerId, note: duplicateNote } })) === 0) {
+    const duplicate = await prisma.expense.create({
+      data: {
+        centerId,
+        categoryId: categories.Supplies,
+        amount: Math.round(650 * scale) * 100,
+        date: duplicateDate,
+        note: duplicateNote,
+        recordedBy: ctx.actorId,
+        voided: true,
+        voidReason: "Recorded twice — the same receipt is already entered",
+        voidedAt: new Date(),
+        voidedBy: ctx.actorId,
+      },
+    });
+    await audit(centerId, ctx.actorId, "expense.void", "Expense", duplicate.id, { voided: true });
+  }
+  line(`  expenses: ${entries.length} across ${names.join(", ")}, plus one voided duplicate`);
 }
 
 async function seedRatings(ctx: Centre, today: Date) {
@@ -1426,13 +1475,16 @@ async function seedParents(centres: Centre[]) {
         ? key === "dt-yara" || key === "nc-ziad"
         : link.studentProfile.center.slug === "al-nokhba-academy";
     if (!shouldVerify || link.status !== "PENDING") continue;
+    // No app path verifies a link since SEC-2a (D-03 (d) — OD-6 is open), so
+    // the demo world marks its two verified links directly, as fixture data,
+    // exactly like the links the dev data held before SEC-2a. Conditional on
+    // PENDING, and audited like any verification.
     const verifier = await centreStaffId(link.centerId);
-    const verified = await verifyParentLinkPlaceholder(prisma, {
-      parentLinkId: link.id,
-      centerId: link.centerId,
-      verifiedByUserId: verifier,
+    const verified = await prisma.parentLink.updateMany({
+      where: { id: link.id, centerId: link.centerId, status: "PENDING" },
+      data: { status: "VERIFIED", verifiedAt: new Date(), verifiedBy: verifier },
     });
-    if (!verified.ok) throw new Error(`Verify parent link: ${verified.error}`);
+    if (verified.count !== 1) throw new Error(`Verify parent link ${link.id}: not PENDING`);
     await audit(link.centerId, verifier, "parentLink.verify", "ParentLink", link.id, { via: "seed" });
   }
   const summary = await prisma.parentLink.groupBy({ by: ["status"], _count: { _all: true } });

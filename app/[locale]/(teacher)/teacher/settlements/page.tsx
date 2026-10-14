@@ -14,6 +14,7 @@ const STATUS_BADGE = {
   DRAFT: "neutral",
   APPROVED: "info",
   PAID: "success",
+  CANCELLED: "danger",
 } as const;
 
 /**

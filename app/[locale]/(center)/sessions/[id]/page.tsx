@@ -23,7 +23,7 @@ import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { manualSessionDeleteState } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
+import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { isWithinVisibilityWindow, visibilityWindowFloor } from "@/lib/db/visibility";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
@@ -98,7 +98,8 @@ export default async function SessionDetailPage({
   const tSettlementStatus = await getTranslations("Settlements.status");
   const locale = await getLocale();
 
-  const timeZone = centreTimeZone(ctx.settings);
+  // D-14 — the session's own frozen timezone (its lifecycle and its times).
+  const timeZone = sessionTimeZone(session, centreTimeZone(ctx.settings));
   const canReschedule = ctxCan(ctx, "session.manage");
   const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks, deleteBlockers] = await Promise.all([
     // A one-time session (R5) has no class, so no enrolled roster: everyone is a drop-in.
@@ -241,6 +242,9 @@ export default async function SessionDetailPage({
         timeZone={timeZone}
         closure={receipt.closure}
         changes={receipt.changes}
+        voids={receipt.voids}
+        refunds={receipt.refunds}
+        unpaid={receipt.unpaid}
         showOpenNote={!closed && !rosterReadOnly}
       />
       {closed ? (
@@ -280,6 +284,7 @@ export default async function SessionDetailPage({
           <>
             <SessionKindBadge kind={kind} />
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
+            {session.priceSnapshot === 0 ? <Badge variant="warning">{t("zeroPriced")}</Badge> : null}
             <span className="inline-flex items-center gap-1.5 tabular-nums">
               <Clock className="size-4 text-text-muted" aria-hidden />
               {formatTimeRange(session.startTime, session.endTime, locale)}

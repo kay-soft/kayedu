@@ -20,7 +20,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
+import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
@@ -77,7 +77,8 @@ export default async function TeacherSessionDetailPage({
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  const timeZone = ctx.settings?.timezone ?? DEFAULT_TIMEZONE;
+  // D-14 — the session's own frozen timezone.
+  const timeZone = sessionTimeZone(session, ctx.settings?.timezone ?? DEFAULT_TIMEZONE);
   const receipt = await loadSessionReceiptView(ctx.center.id, session);
 
   const roster = await Promise.all(
@@ -252,6 +253,9 @@ export default async function TeacherSessionDetailPage({
                 timeZone={timeZone}
                 closure={receipt.closure}
                 changes={receipt.changes}
+                voids={receipt.voids}
+                refunds={receipt.refunds}
+                unpaid={receipt.unpaid}
               />
             </CardContent>
           </Card>

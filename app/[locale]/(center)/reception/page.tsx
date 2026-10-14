@@ -399,6 +399,9 @@ export default async function ReceptionPage({
             timeZone={timeZone}
             closure={receiptView.closure}
             changes={receiptView.changes}
+            voids={receiptView.voids}
+            refunds={receiptView.refunds}
+            unpaid={receiptView.unpaid}
           />
         </ReceiptDialog>
       ) : null}

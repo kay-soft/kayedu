@@ -104,7 +104,7 @@ async function revokeInvitationsBy(
       action: "invitation.revoke",
       entityType: "User",
       entityId: inviterUserId,
-      after: { reason: "inviterLostOwner", count: revoked },
+      after: { trigger: "inviterLostOwner", count: revoked },
     });
   }
   return revoked;

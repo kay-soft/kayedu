@@ -67,6 +67,64 @@ export async function ensureStudentProfile(
   });
 }
 
+/** `SELECT … FOR UPDATE` on one class row, centre-scoped; false when not this centre's. */
+export async function lockClassRow(
+  tx: Prisma.TransactionClient,
+  centerId: string,
+  classGroupId: string,
+): Promise<boolean> {
+  const locked = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "ClassGroup" WHERE "id" = ${classGroupId} AND "centerId" = ${centerId} FOR UPDATE`;
+  return locked.length > 0;
+}
+
+export type ClaimSeatResult =
+  | { ok: true; enrollment: Enrollment }
+  | { ok: false; error: "notFound" | "classFull" };
+
+/**
+ * The ONE place a class seat is taken (SEC-2b, SEC-13) — instant enrol
+ * (`reserveOrEnroll`), a confirmed reservation (`confirmReservation`) and the
+ * staff "Enrol" action all call it, inside their own transaction. The class
+ * row is locked (`FOR UPDATE`, centre-scoped) **before** the active
+ * enrolments are counted, and the count is a fresh statement after the lock —
+ * so concurrent enrolments into one class serialize and the cap (the room
+ * set's summed capacity, `lib/capacity.ts`) holds. A student who already has
+ * this pair's enrolment row (removed earlier) gets it reactivated; otherwise
+ * a new row is written. Blocking/duplicate checks stay with each caller.
+ */
+export async function claimClassSeat(
+  tx: Prisma.TransactionClient,
+  centerId: string,
+  classGroupId: string,
+  studentProfileId: string,
+): Promise<ClaimSeatResult> {
+  if (!(await lockClassRow(tx, centerId, classGroupId))) return { ok: false, error: "notFound" };
+  const classGroup = await tx.classGroup.findFirst({
+    where: scopedWhere(centerId, { id: classGroupId }),
+    include: { room: ROOM_SET_SELECT.room, extraRooms: ROOM_SET_SELECT.extraRooms },
+  });
+  if (!classGroup) return { ok: false, error: "notFound" };
+
+  const cap = enrollmentCap(classRoomSetFrom(classGroup).capacity);
+  const active = await tx.enrollment.count({
+    where: scopedWhere(centerId, { classGroupId, status: ACTIVE_ENROLLMENT }),
+  });
+  if (isAtCapacity(active, cap)) return { ok: false, error: "classFull" };
+
+  // @@unique([studentProfileId, classGroupId]): a removed enrolment still
+  // owns this pair's row — reactivate it rather than insert a second one.
+  const existing = await tx.enrollment.findFirst({
+    where: scopedWhere(centerId, { classGroupId, studentProfileId }),
+  });
+  const enrollment = existing
+    ? await tx.enrollment.update({ where: { id: existing.id }, data: { status: ACTIVE_ENROLLMENT } })
+    : await tx.enrollment.create({
+        data: scopedData(centerId, { classGroupId, studentProfileId, status: ACTIVE_ENROLLMENT }),
+      });
+  return { ok: true, enrollment };
+}
+
 async function isBlockedFromClass(
   tx: Db,
   centerId: string,
@@ -193,22 +251,20 @@ export async function reserveOrEnroll(
 
   if (!classGroup.requiresConfirmation) {
     // R3: the summed capacity of the class's room set — never a class field.
+    // SEC-13: counted under the class's row lock, taken before the profile is
+    // made, so a profile is only ever created for a seat that is available.
+    await lockClassRow(tx, centerId, classGroupId);
     const cap = enrollmentCap(classRoomSetFrom(classGroup).capacity);
-    const active = await tx.enrollment.count({
+    const peek = await tx.enrollment.count({
       where: scopedWhere(centerId, { classGroupId, status: ACTIVE_ENROLLMENT }),
     });
-    if (isAtCapacity(active, cap)) return { ok: false, error: "classFull" };
+    if (isAtCapacity(peek, cap)) return { ok: false, error: "classFull" };
 
     const user = await tx.user.findUniqueOrThrow({ where: { id: studentUserId } });
     const profile = existingProfile ?? (await ensureStudentProfile(tx, centerId, user));
-    const enrollment = await tx.enrollment.create({
-      data: scopedData(centerId, {
-        classGroupId,
-        studentProfileId: profile.id,
-        status: "ACTIVE",
-      }),
-    });
-    return { ok: true, kind: "enrolled", enrollmentId: enrollment.id };
+    const seat = await claimClassSeat(tx, centerId, classGroupId, profile.id);
+    if (!seat.ok) return { ok: false, error: seat.error };
+    return { ok: true, kind: "enrolled", enrollmentId: seat.enrollment.id };
   }
 
   // A REJECTED/CANCELLED row from an earlier request is reused, never
@@ -270,7 +326,9 @@ export async function confirmReservation(
   // Hard-capped by the class's room set (M15, revised R3 — spec §5.1
   // "Capacity") — staff cannot approve past the cap, request or no request.
   // Enrolments already above a reduced cap are never removed; only new ones
-  // are refused.
+  // are refused. SEC-13: counted under the class's row lock, before the
+  // profile is made; the seat itself is `claimClassSeat`'s.
+  await lockClassRow(tx, centerId, classGroup.id);
   const cap = enrollmentCap(classRoomSetFrom(classGroup).capacity);
   const active = await tx.enrollment.count({
     where: scopedWhere(centerId, { classGroupId: classGroup.id, status: ACTIVE_ENROLLMENT }),
@@ -280,18 +338,9 @@ export async function confirmReservation(
   const user = await tx.user.findUniqueOrThrow({ where: { id: reservation.studentId } });
   const profile = await ensureStudentProfile(tx, centerId, user);
 
-  const existingEnrollment = await tx.enrollment.findFirst({
-    where: scopedWhere(centerId, { classGroupId: classGroup.id, studentProfileId: profile.id }),
-  });
-  const enrollment = existingEnrollment
-    ? await tx.enrollment.update({ where: { id: existingEnrollment.id }, data: { status: "ACTIVE" } })
-    : await tx.enrollment.create({
-        data: scopedData(centerId, {
-          classGroupId: classGroup.id,
-          studentProfileId: profile.id,
-          status: "ACTIVE",
-        }),
-      });
+  const seat = await claimClassSeat(tx, centerId, classGroup.id, profile.id);
+  if (!seat.ok) return { ok: false, error: seat.error };
+  const enrollment = seat.enrollment;
 
   const updated = await tx.reservation.update({
     where: { id: reservation.id },

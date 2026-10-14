@@ -456,7 +456,6 @@ export async function deleteStudentAction(
     before: {
       userId: student.userId,
       studentCode: student.studentCode,
-      name: fullName(localName(student, student.user)),
     },
     after: { personDeleted, blocksRemoved: blocks.length },
   });
@@ -506,8 +505,8 @@ export async function promoteGradeAction(
     action: "student.promote",
     entityType: "Grade",
     entityId: from.id,
-    before: { gradeId: from.id, gradeName: from.name },
-    after: { gradeId: to.id, gradeName: to.name, students: result.count },
+    before: { gradeId: from.id },
+    after: { gradeId: to.id, students: result.count },
   });
 
   revalidateStudentList(locale);

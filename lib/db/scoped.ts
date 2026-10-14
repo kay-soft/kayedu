@@ -923,10 +923,10 @@ export function scoped(ctx: TenantContext) {
 
     /**
      * Expenses (M6, spec §4.1 item 6). Create-and-audit, never edited in
-     * place — a mistaken entry is deleted (also audited) and re-added, the
+     * place and — since SEC-2b (D-24) — **never deleted**: a mistaken entry is
+     * voided with a reason (`voidExpenseAction`, audited) and re-added, the
      * same "financial changes are audited" spirit as Payment/void
-     * (CLAUDE.md rule 7), without the append-only ledger machinery Payment
-     * needs (an Expense carries no downstream snapshot that must survive it).
+     * (CLAUDE.md rule 7). There is deliberately no `remove` here.
      */
     expenses: {
       count: (where?: Prisma.ExpenseWhereInput) =>
@@ -950,9 +950,6 @@ export function scoped(ctx: TenantContext) {
 
       create: (data: Omit<Prisma.ExpenseUncheckedCreateInput, "centerId">) =>
         prisma.expense.create({ data: scopedData(centerId, data) }),
-
-      remove: (id: string) =>
-        prisma.expense.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     settings: {
