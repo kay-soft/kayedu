@@ -17,11 +17,11 @@
  * export remains and that every slot-writing data-layer function requires
  * `confirmConflicts`. Needs a reachable database; cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { PrismaClient } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import {
   addDays,
@@ -68,7 +68,7 @@ import { confirmReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
 import { revenueTotals } from "../lib/db/analytics.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "class-periods-check-a";
 const SLUG_B = "class-periods-check-b";

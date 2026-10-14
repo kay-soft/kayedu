@@ -16,7 +16,7 @@
  * call) — against two throwaway centers. Needs a reachable database and
  * cleans up after itself.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import {
   createAttendance,
@@ -26,7 +26,7 @@ import {
 import { recordPayment, voidPayment } from "../lib/db/payments.ts";
 import { splitShare } from "../lib/money.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "payments-check-a";
 const SLUG_B = "payments-check-b";

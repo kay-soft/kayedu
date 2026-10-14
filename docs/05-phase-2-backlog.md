@@ -222,13 +222,9 @@
 
 ---
 
-## 22. Enforce the Content-Security-Policy
+## 22. ~~Enforce the Content-Security-Policy~~ — moved to M20 (SEC-2c)
 
-**What it is.** Turn the policy SEC-2a ships as `Content-Security-Policy-Report-Only` (`next.config.ts`) into an enforced `Content-Security-Policy`: a per-request nonce for Next's inline bootstrap scripts (set in `proxy.ts` and read by the root layout), `script-src 'self' 'nonce-…' 'strict-dynamic'` without `'unsafe-inline'`, and a report endpoint so violations are seen before they break a page.
-
-**Why deferred.** An enforced policy that is wrong breaks the app for everyone, silently, on whatever page the mistake touches — and this session may not run the app to check (CLAUDE.md working rule 1). Next's App Router needs the nonce threaded through the proxy and every layout before `'unsafe-inline'` can go, and next-intl's middleware sits in the same proxy. The non-CSP headers (framing, nosniff, referrer, permissions, HSTS) carry no such risk and are enforced now (SEC-28).
-
-**Depends on.** A browser pass over every route group in both locales with the report-only policy, to collect the real violations; a reporting endpoint (or Sentry's CSP intake, M20); then the nonce plumbing.
+**Moved, not dropped.** Enforcing the policy SEC-2a ships as `Content-Security-Policy-Report-Only` is now an **M20** build item (`03-build-order.md` M20, `00-master-product-spec.md` §2.1-C): it needs a browser pass over every route group in both locales and a reporting endpoint (Sentry's CSP intake), both of which M20 brings. The number is kept so older references still resolve; an item lives in one list only.
 
 ---
 

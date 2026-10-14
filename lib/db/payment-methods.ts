@@ -3,6 +3,7 @@ import type {
   Prisma,
   PrismaClient,
 } from "@prisma/client";
+import { nameClashes } from "../like.ts";
 
 /**
  * A centre's configurable payment methods (R1, docs/01-data-model.md §3 and
@@ -100,14 +101,12 @@ async function nameTaken(
   name: string,
   exceptId?: string,
 ): Promise<boolean> {
-  const clash = await db.centerPaymentMethod.count({
-    where: {
-      centerId,
-      name: { equals: name, mode: "insensitive" },
-      ...(exceptId ? { NOT: { id: exceptId } } : {}),
-    },
+  // SEC-61: compared by the one name key, never with an (I)LIKE.
+  const others = await db.centerPaymentMethod.findMany({
+    where: { centerId, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
+    select: { name: true },
   });
-  return clash > 0;
+  return nameClashes(name, others);
 }
 
 export async function createPaymentMethod(

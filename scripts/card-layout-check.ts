@@ -32,11 +32,12 @@
  * Section 6's data checks need a reachable database (a throwaway organization,
  * cleaned up after) — like every other gate. Nothing here can reset a database.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PrismaClient, type Role } from "@prisma/client";
+import { type Role } from "@prisma/client";
 
 import {
   CARD_BRANCH_TEXT_MAX,
@@ -81,7 +82,7 @@ import {
 } from "../lib/validation/settings.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "card-layout-check-a";
 const SLUG_B = "card-layout-check-b";

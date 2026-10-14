@@ -62,8 +62,8 @@ function check(name: string, passed: boolean, detail = "") {
 
 /** What each role is MEANT to see in the centre nav (labelKeys, in order). Written out by hand. */
 const EXPECTED_CENTER_NAV: Record<StaffRole, string[]> = {
-  OWNER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "settings"],
-  MANAGER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "settings"],
+  OWNER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "audit", "settings"],
+  MANAGER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "audit", "settings"],
   RECEPTIONIST: ["dashboard", "reception", "sessions", "students"],
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };

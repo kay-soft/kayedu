@@ -17,6 +17,7 @@
  * (no native time input, one teacher-creation path). Needs a reachable
  * database; cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -46,7 +47,7 @@ import { phoneMatchesQuery, phoneSearchDigits } from "../lib/phone.ts";
 import { fromTimeParts, minutesBetween, parseTimeInput, suggestEndTime, timeParts } from "../lib/time-input.ts";
 import { toAsciiDigits } from "../lib/digits.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "class-creation-check-a";
 const SLUG_B = "class-creation-check-b";

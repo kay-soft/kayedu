@@ -35,7 +35,7 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import {
   requireScopedById,
   scopedData,
@@ -56,7 +56,7 @@ import {
   teacherCountsRollup,
 } from "../lib/db/organizations.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 /** R1 fixture shape: a centre's first active payment method, created on demand. */
 const fixtureMethodIds = new Map<string, string>();

@@ -16,13 +16,24 @@
  * `lib/auth/permissions.ts` that RECEPTIONIST cannot reach `approvals.manage`.
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type ChangeRequestStatus, type ReservationStatus } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type ChangeRequestStatus, type ReservationStatus } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { resolveChangeRequest, resolveSessionRequest } from "../lib/db/approvals.ts";
 import { confirmReservation, rejectReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { can } from "../lib/auth/permissions.ts";
+import { addDays, dateKey, todayInTimezone } from "../lib/scheduling.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
+
+/** Fixture dates relative to today in Cairo (SEC-2c) — never a calendar date that will pass. */
+const FIXTURE_TODAY = todayInTimezone("Africa/Cairo");
+const FIXTURE_CLASS_END = addDays(FIXTURE_TODAY, 400);
+function mondayOnOrAfter(day: Date): Date {
+  let next = day;
+  while (next.getUTCDay() !== 1) next = addDays(next, 1);
+  return next;
+}
 
 const SLUG_A = "approvals-check-a";
 const SLUG_B = "approvals-check-b";
@@ -147,9 +158,11 @@ async function main() {
     data: { nameAr: "Approvals-Check Physics", nameEn: "Approvals-Check Physics" },
   });
   const classForSession = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
-  const sessionRequestDate = "2026-11-16"; // a Monday, arbitrary and far enough out not to collide
+  // SEC-2c: relative to today — approving a request for a past date is refused
+  // (SEC-51), so a fixed date would start failing the day it passed.
+  const sessionRequestDate = dateKey(mondayOnOrAfter(addDays(FIXTURE_TODAY, 35))); // a Monday 5–6 weeks out
 
   async function makeSessionRequest(classGroupId: string, startTime = "09:00", endTime = "10:00") {
     return prisma.changeRequest.create({
@@ -235,7 +248,7 @@ async function main() {
 
   // A second class, sharing teacherA and overlapping the already-approved slot.
   const classConflicting = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
   const sessionRequestConflictWarn = await makeSessionRequest(classConflicting.id, "09:30", "10:30");
   const sessionConflictWarn = await resolveSessionRequest(
@@ -255,7 +268,7 @@ async function main() {
   );
 
   const classConflictingDeny = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
   const sessionRequestConflictDeny = await makeSessionRequest(classConflictingDeny.id, "09:15", "09:45");
   const sessionConflictDeny = await resolveSessionRequest(
@@ -295,7 +308,7 @@ async function main() {
     data: { nameAr: "Approvals-Check Math", nameEn: "Approvals-Check Math" },
   });
   const classConfirm = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
   });
   const studentToApprove = await makeStudentUser("studentApprove");
   const studentToDecline = await makeStudentUser("studentDecline");

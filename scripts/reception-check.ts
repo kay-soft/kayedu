@@ -15,6 +15,7 @@
  * reachable database; cleans up after itself (fixture centres and users only
  * — never a reset).
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -58,7 +59,7 @@ import {
 import { splitShare } from "../lib/money.ts";
 import { dayMarker, todayInTimezone, zonedDateTimeToUtc } from "../lib/scheduling.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "reception-check-a";
 const SLUG_B = "reception-check-b";

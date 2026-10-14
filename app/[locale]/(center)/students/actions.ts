@@ -51,6 +51,7 @@ import {
   type PhoneLookupResult,
 } from "@/lib/validation/people";
 import { verifyParentLinkSchema } from "@/lib/validation/parents";
+import { parseActionArgs, phoneLookupArgs, searchArgs } from "@/lib/validation/action-args";
 
 /**
  * Students (M3, revised). Every action follows docs/02 §7: getTenantContext()
@@ -130,7 +131,9 @@ export async function searchStudentsTypeAheadAction(
 ): Promise<TypeAheadResult[]> {
   const scope = await studentScope();
   if (!scope) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(searchArgs, [query]);
+  if (!args) return [];
+  const [trimmed] = args;
   if (trimmed.length < 2) return [];
 
   const rows = await scope.db.students.search({
@@ -161,8 +164,10 @@ export async function lookupPersonByPhoneAction(
 ): Promise<PhoneLookupResult> {
   const scope = await studentScope();
   if (!scope) return { status: "notFound" };
+  const args = parseActionArgs(phoneLookupArgs, [phone]);
+  if (!args) return { status: "notFound" };
 
-  const normalized = normalizePhone(phone);
+  const normalized = normalizePhone(args[0]);
   if (!normalized) return { status: "notFound" };
 
   const resolution = await resolveContact(

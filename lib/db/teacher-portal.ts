@@ -7,6 +7,7 @@ import { monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
 import { type DateRange, revenueTotals } from "./analytics.ts";
 import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
+import { likeSearchToken } from "../like.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string` (matches lib/db/sessions.ts). */
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
@@ -147,10 +148,13 @@ export function teacherSessionListWhere(filters: {
     AND: and,
   };
 
-  const query = filters.studentQuery?.trim();
-  if (query) {
+  // SEC-61: LIKE pattern characters removed — Prisma cannot escape them. A
+  // query that was only such characters matches nobody, never everyone.
+  const typed = filters.studentQuery?.trim() ?? "";
+  const query = likeSearchToken(typed);
+  if (typed) {
     const contains = { contains: query, mode: "insensitive" as const };
-    const studentMatch: Prisma.StudentProfileWhereInput = {
+    const studentMatch: Prisma.StudentProfileWhereInput = query === "" ? { id: { in: [] } } : {
       OR: [
         { studentCode: contains },
         { firstName: contains },
@@ -192,6 +196,16 @@ export async function teacherStudentProfileIds(
   return rows
     .map((row) => row.studentProfileId)
     .filter((id): id is string => id !== null);
+}
+
+/**
+ * The same "taught by this teacher here" set as `teacherStudentProfileIds`,
+ * as a relational `where` on `StudentProfile` (SEC-2c, SEC-52): a type-ahead
+ * filters in the database instead of loading the teacher's all-history roster
+ * on every keystroke.
+ */
+export function taughtByTeacherWhere(centerId: string, teacherId: string): Prisma.StudentProfileWhereInput {
+  return { attendees: { some: scopedWhere(centerId, { session: { teacherId } }) } };
 }
 
 /**

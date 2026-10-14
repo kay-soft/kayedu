@@ -27,8 +27,8 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import {
-  PrismaClient,
   type BlockScope,
   type EnrollmentStatus,
   type Role,
@@ -56,7 +56,7 @@ import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
 import { inClassTransaction, materializeClassSessions } from "../lib/db/class-sessions.ts";
 import { catalogLabel } from "../lib/catalog.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 // R2 fixture clock: these lifecycle checks act on freshly generated sessions
 // (dated from UTC today onward). Pinning "now" to UTC midnight keeps every

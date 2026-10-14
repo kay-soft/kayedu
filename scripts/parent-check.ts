@@ -44,9 +44,9 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { PrismaClient } from "@prisma/client";
 import {
   isPrivilegedPhone,
   originateParentLinks,
@@ -58,7 +58,7 @@ import { scopedData } from "../lib/db/tenant-scope.ts";
 import { studentPastAttendance } from "../lib/db/student-portal.ts";
 import { PERMISSIONS, permissionsFor, type PermissionGrants } from "../lib/auth/permissions.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
 const SLUG_A = "parent-check-a";

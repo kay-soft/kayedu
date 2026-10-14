@@ -53,6 +53,7 @@ import {
   termSchema,
   termUpdateSchema,
 } from "@/lib/validation/settings";
+import { nameClashes } from "@/lib/like";
 
 /**
  * Center configuration (M2). Every action follows docs/02 §7:
@@ -322,10 +323,8 @@ export async function createRoomAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
   const { name, capacity, locale } = parsed.data;
-  const clash = await scope.db.rooms.count({
-    name: { equals: name, mode: "insensitive" },
-  });
-  if (clash > 0) return { fieldErrors: { name: "duplicateName" } };
+  // SEC-61: compared by the one name key, never with an (I)LIKE.
+  if (nameClashes(name, await scope.db.rooms.list())) return { fieldErrors: { name: "duplicateName" } };
 
   await scope.db.rooms.create({ name, capacity });
   revalidateSettings(locale);
@@ -345,11 +344,9 @@ export async function updateRoomAction(
   const { id, name, capacity, locale } = parsed.data;
   if (!(await scope.db.rooms.findById(id))) return NOT_FOUND;
 
-  const clash = await scope.db.rooms.count({
-    name: { equals: name, mode: "insensitive" },
-    NOT: { id },
-  });
-  if (clash > 0) return { fieldErrors: { name: "duplicateName" } };
+  if (nameClashes(name, await scope.db.rooms.list({ NOT: { id } }))) {
+    return { fieldErrors: { name: "duplicateName" } };
+  }
 
   await scope.db.rooms.update(id, { name, capacity });
   revalidateSettings(locale);

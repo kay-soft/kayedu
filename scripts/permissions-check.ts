@@ -41,9 +41,10 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PrismaClient, type Role } from "@prisma/client";
+import { type Role } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { can, isBranchGrantableRole } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
@@ -64,7 +65,7 @@ import {
   savePermissionGrants,
 } from "../lib/db/permissions.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "permissions-check-a";
 const SLUG_B = "permissions-check-b";
@@ -308,8 +309,8 @@ async function main() {
 
 /** What each role is meant to see in the sidebar of a centre that works. */
 const EXPECTED_NAV: Record<"OWNER" | "MANAGER" | "RECEPTIONIST" | "ACCOUNTANT", string[]> = {
-  OWNER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "settings"],
-  MANAGER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "settings"],
+  OWNER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "audit", "settings"],
+  MANAGER: ["dashboard", "reception", "sessions", "approvals", "classes", "students", "teachers", "analytics", "expenses", "refunds", "settlements", "audit", "settings"],
   RECEPTIONIST: ["dashboard", "reception", "sessions", "students"],
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };

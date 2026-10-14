@@ -18,11 +18,12 @@
  * static section asserts). Needs a reachable database; cleans up after
  * itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
 import {
   combinationError,
@@ -61,7 +62,7 @@ import {
   type SessionCandidate,
 } from "../lib/scheduling.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "rooms-check-a";
 const SLUG_B = "rooms-check-b";

@@ -7,7 +7,7 @@ import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
-import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { taughtByTeacherWhere, teacherStudentProfileIds } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
@@ -17,6 +17,7 @@ import {
   teacherUnblockStudentSchema,
   type TeacherActionState,
 } from "@/lib/validation/teacher";
+import { parseActionArgs, searchArgs } from "@/lib/validation/action-args";
 
 /**
  * Teacher block-list (spec §4.2 items 2/3, reusing the `StudentBlock` scope
@@ -38,14 +39,14 @@ export async function searchTaughtStudentsTypeAheadAction(
 ): Promise<TypeAheadResult[]> {
   const ctx = await actionContext("teacher");
   if (!ctx) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(searchArgs, [query]);
+  if (!args) return [];
+  const [trimmed] = args;
   if (trimmed.length < 2) return [];
 
-  const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id);
-  if (studentIds.length === 0) return [];
-
+  // SEC-52: a relational filter, not this teacher's whole roster loaded per keystroke.
   const rows = await scoped(ctx).students.search({
-    where: { id: { in: studentIds }, ...studentSearchWhere(trimmed) },
+    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id), ...studentSearchWhere(trimmed) },
     take: 8,
   });
 

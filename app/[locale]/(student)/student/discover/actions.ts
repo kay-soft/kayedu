@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
+import { clientIp } from "@/lib/auth/request-ip";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { reserveOrEnroll } from "@/lib/db/reservations";
 import { formatDate } from "@/lib/format";
+import { checkRateLimits } from "@/lib/rate-limit";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -36,6 +38,14 @@ export async function reserveClassAction(
     return { error: Object.values(fieldErrorsFrom(parsed.error))[0] ?? "notFound" };
   }
   const { locale, centerId, classGroupId } = parsed.data;
+
+  // D-18 (SEC-26): per account and per client IP, in the shared store; the
+  // per-account caps on what is held live in `reserveOrEnroll` itself.
+  const allowed = await checkRateLimits([
+    { name: "selfServicePerUser", key: user.id },
+    { name: "selfServicePerIp", key: await clientIp() },
+  ]);
+  if (!allowed) return { error: "rateLimited" };
 
   const result = await prisma.$transaction((tx) =>
     reserveOrEnroll(tx, { centerId, classGroupId, studentUserId: user.id }),

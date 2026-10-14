@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
+import { getUserCenterRelations } from "@/lib/auth/tenant";
+import { clientIp } from "@/lib/auth/request-ip";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
+import { checkRateLimits } from "@/lib/rate-limit";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -39,6 +42,19 @@ export async function requestToTeachAction(
 
   const { locale, centerId, ...payload } = parsed.data;
 
+  // SEC-25: the directory is for a teacher with zero centres — the page's
+  // redirect is not the boundary, so the action refuses one who already
+  // teaches somewhere (their own Classes screen is where they ask for more).
+  const relations = await getUserCenterRelations(user.id);
+  if (relations.some((relation) => relation.roles.includes("TEACHER"))) {
+    return { error: "alreadyTeaching" };
+  }
+  const allowed = await checkRateLimits([
+    { name: "teachRequestPerUser", key: user.id },
+    { name: "teachRequestPerIp", key: await clientIp() },
+  ]);
+  if (!allowed) return { error: "rateLimited" };
+
   const center = await prisma.center.findFirst({
     where: { id: centerId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
   });
@@ -61,14 +77,26 @@ export async function requestToTeachAction(
     if (!grade) return { fieldErrors: { gradeId: "notFound" } };
   }
 
-  await prisma.changeRequest.create({
-    data: {
-      centerId,
-      type: "NEW_CLASS",
-      requestedBy: user.id,
-      payload,
-    },
+  // SEC-25: one PENDING request per (requester, centre); serialized per pair,
+  // so two parallel posts cannot both pass the check.
+  const created = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`teach-request:${centerId}:${user.id}`}, 0))`;
+    const pending = await tx.changeRequest.findFirst({
+      where: { centerId, requestedBy: user.id, type: "NEW_CLASS", status: "PENDING" },
+      select: { id: true },
+    });
+    if (pending) return false;
+    await tx.changeRequest.create({
+      data: {
+        centerId,
+        type: "NEW_CLASS",
+        requestedBy: user.id,
+        payload,
+      },
+    });
+    return true;
   });
+  if (!created) return { error: "alreadyRequested" };
 
   revalidatePath(`/${locale}${ROUTES.teacherCenters}`);
   return { status: "created" };

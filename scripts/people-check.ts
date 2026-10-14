@@ -18,16 +18,24 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { PrismaClient, type BlockScope, type Role } from "@prisma/client";
+import { type BlockScope, type Role } from "@prisma/client";
 import {
   MissingCenterScopeError,
   scopedData,
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
-import { fullName, localName, normalizeContact } from "../lib/identity.ts";
+import { fullName, localName } from "../lib/identity.ts";
+import {
+  createPerson,
+  describeMatch,
+  resolveContact,
+  seedLocalName,
+  type LookupContext,
+} from "../lib/db/identity.ts";
 import { normalizePhone } from "../lib/phone.ts";
 import { checkRateLimit } from "../lib/rate-limit.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
@@ -55,7 +63,7 @@ import {
   teacherCreateSchema,
 } from "../lib/validation/people.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 // Typed so a spread into a Prisma `where` keeps the enum, not `string`.
 const TEACHER_ROLE: Role = "TEACHER";
@@ -237,7 +245,15 @@ function parse<T>(
   return result.data;
 }
 
+/** Centres this run created — their `resolveContact` rate-limit buckets go with them. */
+const createdCenterIds = new Set<string>();
+
 async function cleanup() {
+  if (createdCenterIds.size > 0) {
+    await prisma.rateLimitBucket.deleteMany({
+      where: { key: { in: [...createdCenterIds].map((id) => `identityLookupPerCenter:${id}`) } },
+    });
+  }
   await prisma.center.deleteMany({
     where: { slug: { in: [SLUG_A, SLUG_B, SLUG_C] } },
   });
@@ -254,71 +270,56 @@ async function cleanup() {
   await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "People-Check" } } });
 }
 
-/**
- * Finds a match the way `resolveContact()` does at the DB layer: across the
- * global `User` and every center's local `StudentProfile`/`Membership`
- * record (`lib/db/identity.ts`). Reimplemented here at the query level (not
- * imported) so the gate exercises the actual tables/columns rather than
- * trusting the app module imported it correctly. Returns the matched
- * person's **real** name too — that's what a linked record's local name is
- * seeded from, never the (possibly mistyped) form input.
- */
-async function findMatch(
-  input: { email: string | null; phone: string | null },
-): Promise<{ userId: string; firstName: string; lastName: string } | "conflict" | null> {
-  const { email, phone } = normalizeContact(input);
-  if (!email && !phone) return null;
-
-  const userOr = [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])];
-  const [users, students, memberships] = await Promise.all([
-    prisma.user.findMany({ where: { OR: userOr } }),
-    prisma.studentProfile.findMany({ where: { OR: userOr }, include: { user: true } }),
-    prisma.membership.findMany({ where: { OR: userOr }, include: { user: true } }),
-  ]);
-
-  const byId = new Map<string, { firstName: string; lastName: string }>();
-  for (const u of users) byId.set(u.id, u);
-  for (const s of students) byId.set(s.userId, s.user);
-  for (const m of memberships) byId.set(m.userId, m.user);
-
-  if (byId.size === 0) return null;
-  if (byId.size > 1) return "conflict";
-  const [userId, name] = [...byId.entries()][0];
-  return { userId, ...name };
-}
+/** The lookup context the centre's Add-student action passes (no actor: this gate is not a staff member). */
+const lookupAt = (centerId: string): LookupContext => ({ centerId, actorUserId: null, adding: "student" });
 
 /**
- * Registers a student the way `createStudentAction` does: resolve the match
- * across global + local contacts, then claim a code and create the profile in
- * one transaction, seeding the local name from the matched person's real name
- * (or the form input for a brand-new person). Takes a centerId and nothing
- * else — same "zero code changes for a second center" claim the M2 gate makes.
+ * Registers a student the way `createStudentAction` does — through the REAL
+ * identity module (SEC-2c: this gate used to carry its own copy of the
+ * matching query, which could never disagree with itself): `resolveContact`
+ * across global + local contacts, `describeMatch` before linking, the local
+ * name seeded by `seedLocalName`, then `createPerson` (for a brand-new person),
+ * the code claim and the profile in one transaction. Takes a centerId and
+ * nothing else — same "zero code changes for a second center" claim the M2
+ * gate makes.
  */
 async function registerStudent(
   centerId: string,
   form: Record<string, string>,
 ): Promise<{ userId: string; profileId: string; studentCode: string; linked: boolean }> {
   const input = parse(studentCreateSchema, form, "studentCreate");
-  const matched = await findMatch({ email: input.email, phone: input.phone });
-  if (matched === "conflict") throw new Error("unexpected contact conflict in fixture");
+  const contact = { email: input.email, phone: input.phone };
+  const resolution = await resolveContact(lookupAt(centerId), contact);
+  if (resolution.kind === "conflict" || resolution.kind === "rateLimited") {
+    throw new Error(`unexpected ${resolution.kind} in fixture`);
+  }
 
-  const name = matched
-    ? { firstName: matched.firstName, lastName: matched.lastName }
-    : { firstName: input.firstName, lastName: input.lastName };
+  let described: Awaited<ReturnType<typeof describeMatch>> | null = null;
+  let linkTo: string | null = null;
+  if (resolution.kind === "matched") {
+    described = await describeMatch(centerId, resolution.match, contact);
+    if (described.existingHere === "student" || !described.linkable) {
+      throw new Error("unexpected alreadyStudent in fixture");
+    }
+    linkTo = resolution.match.user.id;
+  }
+  const name = seedLocalName(resolution, { firstName: input.firstName, lastName: input.lastName }, described);
 
   const created = await prisma.$transaction(async (tx) => {
     const userId =
-      matched?.userId ??
+      linkTo ??
       (
-        await tx.user.create({
-          data: {
+        await createPerson(
+          {
             firstName: input.firstName,
             lastName: input.lastName,
             email: input.email,
             phone: input.phone,
+            altPhone: input.altPhone,
             locale: input.locale,
           },
-        })
+          tx,
+        )
       ).id;
 
     const code = await claimStudentCode(tx, centerId);
@@ -343,7 +344,7 @@ async function registerStudent(
     userId: created.userId,
     profileId: created.profile.id,
     studentCode: created.profile.studentCode,
-    linked: matched !== null,
+    linked: linkTo !== null,
   };
 }
 
@@ -363,6 +364,7 @@ async function main() {
       organization: { create: { name: "People A" } },
     },
   });
+  createdCenterIds.add(centerA.id);
   const centerB = await prisma.center.create({
     data: {
       slug: SLUG_B,
@@ -371,6 +373,7 @@ async function main() {
       organization: { create: { name: "People B" } },
     },
   });
+  createdCenterIds.add(centerB.id);
 
   // Global catalog rows (M13) — no centerId; StudentProfile.gradeId
   // references them directly. Three distinct rows, matching the pre-M13
@@ -425,7 +428,10 @@ async function main() {
   );
   check(
     "Nothing matchable means no match at all (a blank form matches nobody)",
-    (await findMatch({ email: null, phone: null })) === null,
+    await (async () => {
+      const blank = await resolveContact(lookupAt(centerA.id), { email: null, phone: null });
+      return blank.kind === "none" && blank.others.length === 0;
+    })(),
   );
 
   // ── 1b. Contact details are center-local, not global ───────────────────
@@ -469,10 +475,15 @@ async function main() {
       organization: { create: { name: "People C" } },
     },
   });
-  const matchedFromLocalOnly = await findMatch({ email: LOCAL_ONLY_EMAIL, phone: null });
+  createdCenterIds.add(centerC.id);
+  const matchedFromLocalOnly = await resolveContact(lookupAt(centerC.id), { email: LOCAL_ONLY_EMAIL, phone: null });
   check(
     "A contact that exists only on another center's local record still matches",
-    matchedFromLocalOnly !== "conflict" && matchedFromLocalOnly?.userId === inA.userId,
+    matchedFromLocalOnly.kind === "matched" && matchedFromLocalOnly.match.user.id === inA.userId,
+    JSON.stringify({
+      kind: matchedFromLocalOnly.kind,
+      others: "others" in matchedFromLocalOnly ? matchedFromLocalOnly.others.map((other) => other.user.id === inA.userId) : null,
+    }),
   );
   await prisma.center.delete({ where: { id: centerC.id } });
 

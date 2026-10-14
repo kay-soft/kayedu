@@ -17,6 +17,22 @@ import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 import { cooldownUntil, enrollmentCap, isAtCapacity, isInCooldown } from "../capacity.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
 
+/**
+ * D-18 (SEC-2c, SEC-26): what one account may hold through the student
+ * portal's self-service, across every centre. A real student holds a handful
+ * of each; the caps exist so a few free accounts cannot squat every
+ * instant-enrol seat or flood every centre's queue. Counted for the caller's
+ * own identity only (identity-scoping, as `lib/db/student-portal.ts` reads a
+ * student's own rows) and serialized per account, so parallel requests cannot
+ * race past them. Staff enrolments are not limited by these.
+ */
+export const SELF_SERVICE_CAPS = {
+  /** PENDING reservations at once — the 31st is refused until one resolves. */
+  openReservations: 30,
+  /** ACTIVE enrolments held when instant-enrolling — the 31st is refused. */
+  activeEnrollments: 30,
+} as const;
+
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER_SCOPE: BlockScope = "TEACHER";
 const CLASS_SCOPE: BlockScope = "CLASS";
@@ -161,9 +177,16 @@ export type ReserveOrEnrollResult =
         | "studentBlocked"
         | "alreadyEnrolled"
         | "alreadyRequested"
-        | "classFull";
+        | "classFull"
+        | "reservationLimit"
+        | "enrollmentLimit";
     }
   | { ok: false; error: "coolingOff"; cooldownUntil: Date };
+
+/** One account's self-service writes run one at a time (D-18), so a cap is exact. */
+async function lockSelfService(tx: Prisma.TransactionClient, studentUserId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`self-service:${studentUserId}`}, 0))`;
+}
 
 /**
  * The student-facing write for Discover (spec §5, docs/04 §10): branches on
@@ -247,6 +270,19 @@ export async function reserveOrEnroll(
     isInCooldown(existingReservation.rejectedAt, new Date())
   ) {
     return { ok: false, error: "coolingOff", cooldownUntil: cooldownUntil(existingReservation.rejectedAt) };
+  }
+
+  // D-18 (SEC-26): the per-account caps, after every per-class refusal so a
+  // student at the cap still hears "already enrolled"/"already requested".
+  await lockSelfService(tx, studentUserId);
+  if (classGroup.requiresConfirmation) {
+    const open = await tx.reservation.count({ where: { studentId: studentUserId, status: "PENDING" } });
+    if (open >= SELF_SERVICE_CAPS.openReservations) return { ok: false, error: "reservationLimit" };
+  } else {
+    const active = await tx.enrollment.count({
+      where: { status: ACTIVE_ENROLLMENT, studentProfile: { userId: studentUserId } },
+    });
+    if (active >= SELF_SERVICE_CAPS.activeEnrollments) return { ok: false, error: "enrollmentLimit" };
   }
 
   if (!classGroup.requiresConfirmation) {

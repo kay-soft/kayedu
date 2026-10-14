@@ -12,7 +12,7 @@ import { shellScope, shellUser } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireStudentUser, studentBrand } from "@/lib/auth/tenant";
 import { CATALOG_OVERRIDE_SELECT, catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
-import { listCatalogGrades } from "@/lib/db/catalog";
+import { centerGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { attendedSessionsToRate } from "@/lib/db/ratings";
@@ -123,12 +123,16 @@ export default async function StudentLayout({
 
   if (incomplete?.studentProfile) {
     const profile = incomplete.studentProfile;
-    const grades = await listCatalogGrades(prisma);
+    // SEC-49: the grades this branch offers (its own catalog selection, under
+    // its own display name) — the action accepts nothing else.
+    const grades = await centerGrades(prisma, incomplete.center.id);
     const tCommon = await getTranslations("Settings.common");
-    const gradeOptions = grades.map((grade) => ({
-      value: grade.id,
-      label: catalogLabel(locale, grade),
-    }));
+    const gradeOptions = grades
+      .filter((grade) => (grade.active && grade.catalogActive) || grade.id === profile.gradeId)
+      .map((grade) => ({
+        value: grade.id,
+        label: catalogLabel(locale, grade, grade),
+      }));
 
     return (
       <AppShell

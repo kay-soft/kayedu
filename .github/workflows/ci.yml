@@ -62,6 +62,10 @@ jobs:
       # freshly migrated CI project — read-only catalog checks.
       - run: npm run check:rls
 
+      # SEC-2c: the run must leave no more User rows than it found — each gate
+      # deletes its own (scripts/lib/gate-db.ts); this proves it run-wide.
+      - run: npm run gates:users -- record
+
       # Every gate below is the "Delivered" claim for its milestone
       # (docs/02-architecture.md §5) — a failure here means a milestone's own
       # acceptance criteria regressed, not just "a test broke".
@@ -96,3 +100,4 @@ jobs:
       - run: npm run check:timezone
       - run: npm run check:card-layout
       - run: npm run check:security
+      - run: npm run gates:users -- verify

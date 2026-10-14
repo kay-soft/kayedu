@@ -3,11 +3,10 @@
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, actionContext } from "@/lib/auth/tenant";
-import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { studentSearchWhere } from "@/lib/db/students";
-import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { taughtByTeacherWhere } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, startOfSessionDay } from "@/lib/scheduling";
@@ -18,6 +17,7 @@ import {
   type TeacherActionState,
 } from "@/lib/validation/teacher";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
+import { paramsSearchArgs, parseActionArgs } from "@/lib/validation/action-args";
 
 /**
  * Session-description edit only (spec §4.2 item 2). Attendance and payments
@@ -40,18 +40,18 @@ export async function searchOwnSessionStudentsTypeAheadAction(
 ): Promise<TypeAheadResult[]> {
   const ctx = await actionContext("teacher");
   if (!ctx) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(paramsSearchArgs, [currentParams, query]);
+  if (!args) return [];
+  const [params, trimmed] = args;
   if (trimmed.length < 2) return [];
 
-  const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id);
-  if (studentIds.length === 0) return [];
-
+  // SEC-52: a relational filter, not this teacher's whole roster loaded per keystroke.
   const rows = await scoped(ctx).students.search({
-    where: { id: { in: studentIds }, ...studentSearchWhere(trimmed) },
+    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id), ...studentSearchWhere(trimmed) },
     take: 8,
   });
 
-  const kept = new URLSearchParams(currentParams);
+  const kept = new URLSearchParams(params);
   return rows.map((row) => {
     const params = new URLSearchParams(kept);
     params.set("q", row.studentCode);

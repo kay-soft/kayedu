@@ -33,6 +33,12 @@ import {
   type SessionActionState,
 } from "@/lib/validation/sessions";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
+import {
+  parseActionArgs,
+  receptionInputArgs,
+  receptionStudentArgs,
+  searchArgs,
+} from "@/lib/validation/action-args";
 
 /**
  * Reception Desk (spec §4.1 item 8): search a student, pick today's session
@@ -92,7 +98,9 @@ export async function searchStudentsForReceptionAction(
 ): Promise<TypeAheadResult[]> {
   const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "reception.use")) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(searchArgs, [query]);
+  if (!args) return [];
+  const [trimmed] = args;
   if (trimmed.length < 2) return [];
 
   const rows = await scoped(ctx).students.search({
@@ -130,10 +138,6 @@ export type ReceptionResolution =
   | { kind: "forbidden" };
 
 const MAX_INPUT_LENGTH = 200;
-
-function asLocale(locale: string): string {
-  return locale === "ar" ? "ar" : "en";
-}
 
 async function describeStudent(
   ctx: TenantContext,
@@ -195,18 +199,21 @@ export async function resolveReceptionInputAction(
   raw: string,
   locale: string,
 ): Promise<ReceptionResolution> {
-  const scope = await sessionModeScope(sessionId);
+  const args = parseActionArgs(receptionInputArgs, [sessionId, raw, locale]);
+  if (!args) return { kind: "notFound" };
+  const [validSessionId, input, validLocale] = args;
+  const scope = await sessionModeScope(validSessionId);
   if (!scope.ok) return scope.resolution;
   const { ctx, session } = scope;
 
   const resolved = await resolveStudentInput(prisma, {
     centerId: ctx.center.id,
-    raw: String(raw).slice(0, MAX_INPUT_LENGTH),
+    raw: input.slice(0, MAX_INPUT_LENGTH),
   });
 
   switch (resolved.kind) {
     case "student":
-      return describeStudent(ctx, session, resolved.student, asLocale(locale));
+      return describeStudent(ctx, session, resolved.student, validLocale);
     case "inactive":
       return { kind: "inactive", name: resolved.student.name };
     case "candidates":
@@ -225,12 +232,15 @@ export async function resolveReceptionStudentAction(
   studentProfileId: string,
   locale: string,
 ): Promise<ReceptionResolution> {
-  const scope = await sessionModeScope(sessionId);
+  const args = parseActionArgs(receptionStudentArgs, [sessionId, studentProfileId, locale]);
+  if (!args) return { kind: "notFound" };
+  const [validSessionId, validStudentId, validLocale] = args;
+  const scope = await sessionModeScope(validSessionId);
   if (!scope.ok) return scope.resolution;
   const { ctx, session } = scope;
 
   const row = await prisma.studentProfile.findFirst({
-    where: { id: String(studentProfileId), centerId: ctx.center.id },
+    where: { id: validStudentId, centerId: ctx.center.id },
     include: { user: true },
   });
   if (!row) return { kind: "notFound" };
@@ -243,7 +253,7 @@ export async function resolveReceptionStudentAction(
     active: row.active,
   };
   if (!student.active) return { kind: "inactive", name: student.name };
-  return describeStudent(ctx, session, student, asLocale(locale));
+  return describeStudent(ctx, session, student, validLocale);
 }
 
 // ── The check-in itself (unchanged path: attendance + payment) ──────────────

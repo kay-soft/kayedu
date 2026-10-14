@@ -8,7 +8,7 @@
  * same ones lib/db/scoped.ts is built on), creates two throwaway centers,
  * asserts the cross-center reads are denied, and cleans up after itself.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import {
   MissingCenterScopeError,
   TenantScopeError,
@@ -17,7 +17,7 @@ import {
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "isolation-check-a";
 const SLUG_B = "isolation-check-b";

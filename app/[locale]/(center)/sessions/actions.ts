@@ -63,6 +63,7 @@ import {
   voidPaymentSchema,
   type SessionActionState,
 } from "@/lib/validation/sessions";
+import { boundSearchArgs, parseActionArgs } from "@/lib/validation/action-args";
 
 /**
  * Session roster, attendance and payment actions (M5 — the daily loop).
@@ -112,10 +113,12 @@ export async function searchAddAttendeeCandidatesAction(
 ): Promise<TypeAheadResult[]> {
   const { ctx, db } = await sessionScope();
   if (!ctxCan(ctx, "attendance.record")) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(boundSearchArgs, [sessionId, query]);
+  if (!args) return [];
+  const [validSessionId, trimmed] = args;
   if (trimmed.length < 2) return [];
 
-  const session = await db.sessions.findDetailById(sessionId);
+  const session = await db.sessions.findDetailById(validSessionId);
   if (!session) return [];
 
   // A one-time session (R5) has no class, so nobody is enrolled in it.

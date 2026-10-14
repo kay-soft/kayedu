@@ -11,6 +11,7 @@ import {
   HandCoins,
   LayoutDashboard,
   Library,
+  ScrollText,
   Settings,
   ShieldCheck,
   Undo2,
@@ -39,6 +40,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string }>> = {
   catalog: Library,
   refunds: Undo2,
   settlements: HandCoins,
+  audit: ScrollText,
 };
 
 export function ShellIcon({

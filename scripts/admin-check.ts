@@ -32,7 +32,8 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type CenterLifecycleState } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type CenterLifecycleState } from "@prisma/client";
 import {
   ACCESSIBLE_LIFECYCLE_STATES,
   createCenterWithSettings,
@@ -49,7 +50,7 @@ import {
   validNextLifecycleStates,
 } from "../lib/db/platform.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "admin-check-a";
 const SLUG_B = "admin-check-b";

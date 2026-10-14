@@ -27,7 +27,8 @@ export type ShellIconName =
   | "platform"
   | "catalog"
   | "refunds"
-  | "settlements";
+  | "settlements"
+  | "audit";
 
 export type ShellNavItem = {
   href: string;
@@ -65,6 +66,8 @@ export const CENTER_NAV: NavDef[] = [
   { href: ROUTES.centerExpenses, labelKey: "expenses", icon: "expenses", permission: "expense.manage", group: "money" },
   { href: ROUTES.centerRefunds, labelKey: "refunds", icon: "refunds", permission: "payment.refund", group: "money" },
   { href: ROUTES.centerSettlements, labelKey: "settlements", icon: "settlements", permission: "settlement.manage", group: "money" },
+  // SEC-2c: the audit trail (SEC-07) — the page asserts `audit.view`.
+  { href: ROUTES.centerAudit, labelKey: "audit", icon: "audit", permission: "audit.view", group: "money" },
   // Settings owns its own sub-navigation (users & roles lives under it).
   { href: ROUTES.centerSettings, labelKey: "settings", icon: "settings", permission: "center.settings.edit" },
 ];

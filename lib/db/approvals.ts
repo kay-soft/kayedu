@@ -24,6 +24,15 @@ import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-confli
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
+ * One page of each Approvals queue (SEC-25): a queue somebody floods must not
+ * grow the screen without bound. The page says how many more wait; resolving
+ * requests brings them up. Floods are also bounded at the source — one
+ * pending teach-here request per (requester, centre), and per-account and
+ * per-IP limits on requests and reservations (D-18).
+ */
+export const APPROVALS_PAGE_SIZE = 50;
+
+/**
  * The Approvals screen's write path for `ChangeRequest` (M6/M7 gap, closed at
  * this milestone — docs/00-master-product-spec.md §4.1 item 9). A plain
  * status flip, unlike `Reservation`'s `confirmReservation` — accepting a

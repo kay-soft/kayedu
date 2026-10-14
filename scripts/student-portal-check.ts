@@ -12,7 +12,8 @@
  * primitives (`lib/db/tenant-scope.ts`) — against two throwaway centers.
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type BlockScope } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type BlockScope } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import {
   cancelReservation,
@@ -26,7 +27,7 @@ import {
   studentReservationStatusByClass,
 } from "../lib/db/student-portal.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "student-portal-check-a";
 const SLUG_B = "student-portal-check-b";

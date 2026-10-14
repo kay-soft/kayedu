@@ -36,8 +36,8 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { readFileSync } from "node:fs";
-import { PrismaClient } from "@prisma/client";
 import {
   attendedSessionsToRate,
   skipSessionRating,
@@ -46,7 +46,7 @@ import {
   teacherRatingAverages,
 } from "../lib/db/ratings.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
 const SLUG_A = "ratings-check-a";

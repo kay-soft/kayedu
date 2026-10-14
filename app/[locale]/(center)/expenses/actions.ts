@@ -18,6 +18,7 @@ import {
   expenseCreateSchema,
   expenseVoidSchema,
 } from "@/lib/validation/analytics";
+import { nameClashes } from "@/lib/like";
 
 /**
  * Expenses (M6, spec §4.1 item 6): category CRUD + append-and-audit expense
@@ -50,11 +51,9 @@ function revalidateExpenses(locale: string): void {
 }
 
 async function nameTaken(db: ScopedDb, name: string, exceptId?: string): Promise<boolean> {
-  const where = {
-    name: { equals: name, mode: "insensitive" as const },
-    ...(exceptId ? { NOT: { id: exceptId } } : {}),
-  };
-  return (await db.expenseCategories.count(where)) > 0;
+  // SEC-61: compared by the one name key, never with an (I)LIKE.
+  const others = await db.expenseCategories.list(exceptId ? { NOT: { id: exceptId } } : undefined);
+  return nameClashes(name, others);
 }
 
 // ── Expense categories ──────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { normalizePhone } from "../phone.ts";
 import type { ScopedDb } from "@/lib/db/scoped";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
+import { likeSearchToken } from "../like.ts";
 
 /**
  * Student & teacher policies that are neither scoping primitives nor UI: how
@@ -107,8 +108,12 @@ export type TeacherListRow = Prisma.MembershipGetPayload<{
 export function studentSearchWhere(
   query: string,
 ): Prisma.StudentProfileWhereInput | undefined {
-  const tokens = query.trim().split(/\s+/).filter(Boolean).slice(0, 5);
-  if (tokens.length === 0) return undefined;
+  // SEC-61: LIKE pattern characters removed — Prisma cannot escape them. A
+  // query that was only such characters matches nobody, never everyone.
+  const typed = query.trim().split(/\s+/).filter(Boolean);
+  const tokens = typed.map(likeSearchToken).filter(Boolean).slice(0, 5);
+  if (typed.length === 0) return undefined;
+  if (tokens.length === 0) return { id: { in: [] } };
 
   return {
     AND: tokens.map((token) => {
@@ -139,8 +144,12 @@ export function studentSearchWhere(
 export function teacherSearchWhere(
   query: string,
 ): Prisma.MembershipWhereInput | undefined {
-  const tokens = query.trim().split(/\s+/).filter(Boolean).slice(0, 5);
-  if (tokens.length === 0) return undefined;
+  // SEC-61: LIKE pattern characters removed — Prisma cannot escape them. A
+  // query that was only such characters matches nobody, never everyone.
+  const typed = query.trim().split(/\s+/).filter(Boolean);
+  const tokens = typed.map(likeSearchToken).filter(Boolean).slice(0, 5);
+  if (typed.length === 0) return undefined;
+  if (tokens.length === 0) return { id: { in: [] } };
 
   return {
     AND: tokens.map((token) => {

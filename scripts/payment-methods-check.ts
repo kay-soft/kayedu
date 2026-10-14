@@ -14,7 +14,8 @@
  * directly with a forged method id is exactly the "direct action call" case.
  * Needs a reachable database and cleans up after itself.
  */
-import { AttendanceStatus, PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { AttendanceStatus } from "@prisma/client";
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
@@ -34,7 +35,7 @@ import {
   setAttendanceSchema,
 } from "../lib/validation/sessions.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "payment-methods-check-a";
 const SLUG_B = "payment-methods-check-b";

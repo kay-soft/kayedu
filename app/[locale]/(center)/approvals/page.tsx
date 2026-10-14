@@ -14,6 +14,7 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { pendingClaimsForCenter } from "@/lib/db/account-claims";
+import { APPROVALS_PAGE_SIZE } from "@/lib/db/approvals";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
@@ -71,16 +72,35 @@ export default async function ApprovalsPage() {
   const locale = await getLocale();
   const dayNames = tDays.raw("dayNames") as string[];
 
-  const [changeRequests, sessionRequests, reservations, subjects, grades, classGroups, accountClaims] =
-    await Promise.all([
-      db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }),
-      db.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }),
-      db.reservations.listPending(),
-      db.subjects.list(),
-      db.grades.list(),
-      db.classGroups.list(),
-      pendingClaimsForCenter(prisma, ctx.center.id),
-    ]);
+  const page = { take: APPROVALS_PAGE_SIZE };
+  const [
+    changeRequests,
+    sessionRequests,
+    reservations,
+    subjects,
+    grades,
+    classGroups,
+    accountClaims,
+    changeRequestTotal,
+    sessionRequestTotal,
+    reservationTotal,
+  ] = await Promise.all([
+    db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }, page),
+    db.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }, page),
+    db.reservations.listPending(page),
+    db.subjects.list(),
+    db.grades.list(),
+    db.classGroups.list(),
+    pendingClaimsForCenter(prisma, ctx.center.id),
+    db.changeRequests.count({ status: "PENDING", type: "NEW_CLASS" }),
+    db.changeRequests.count({ status: "PENDING", type: "NEW_SESSION" }),
+    db.reservations.countPending(),
+  ]);
+  // SEC-25: each queue shows one page; the rest wait behind it, counted.
+  const moreNote = (shown: number, total: number) =>
+    total > shown ? (
+      <p className="text-sm text-text-secondary">{t("pageCapped", { shown, total })}</p>
+    ) : null;
 
   const teacherIds = [
     ...new Set(
@@ -129,7 +149,7 @@ export default async function ApprovalsPage() {
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
   const totalPending =
-    changeRequests.length + sessionRequests.length + reservations.length + accountClaims.length;
+    changeRequestTotal + sessionRequestTotal + reservationTotal + accountClaims.length;
 
   // A NEW_CLASS request from someone with no local `Membership` is a teacher
   // asking to work at this branch at all (M15's centre directory), not an
@@ -253,6 +273,7 @@ export default async function ApprovalsPage() {
                 );
               })
             )}
+            {moreNote(changeRequests.length, changeRequestTotal)}
           </section>
 
           <section className="flex flex-col gap-3">
@@ -316,6 +337,7 @@ export default async function ApprovalsPage() {
                 );
               })
             )}
+            {moreNote(sessionRequests.length, sessionRequestTotal)}
           </section>
 
           <section className="flex flex-col gap-3">
@@ -365,6 +387,7 @@ export default async function ApprovalsPage() {
                 );
               })
             )}
+            {moreNote(reservations.length, reservationTotal)}
           </section>
         </div>
       )}

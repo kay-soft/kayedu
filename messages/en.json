@@ -104,6 +104,7 @@
     "approvals": "Approvals",
     "refunds": "Refunds",
     "settlements": "Settlements",
+    "audit": "Audit trail",
     "staff": "Users & roles",
     "schedule": "My schedule",
     "discover": "Discover",
@@ -1308,6 +1309,7 @@
     "unknownActor": "someone"
   },
   "Approvals": {
+    "pageCapped": "Showing {shown} of {total}. Resolve some to see the rest.",
     "title": "Approvals",
     "subtitle": "{count, plural, =0 {Nothing pending} one {# pending request} other {# pending requests}}.",
     "empty": "Nothing is waiting for your review right now.",
@@ -2006,6 +2008,9 @@
     },
     "requestButton": "Request to teach here",
     "errors": {
+      "alreadyRequested": "You already have a pending request at this branch. Wait for its decision.",
+      "alreadyTeaching": "You already teach at a branch. Ask for new classes from your Classes screen.",
+      "rateLimited": "Too many requests. Try again later.",
       "forbidden": "You need to sign in to do this.",
       "notFound": "That centre is no longer available.",
       "required": "This field is required.",
@@ -2058,6 +2063,9 @@
       "rating": "★ {value}"
     },
     "errors": {
+      "reservationLimit": "You have too many open requests. Cancel one, or wait for a branch to decide.",
+      "enrollmentLimit": "You are enrolled in the most classes allowed online. Ask the branch to enrol you in more.",
+      "rateLimited": "Too many attempts. Try again in a little while.",
       "forbidden": "You need to sign in to reserve a class.",
       "notFound": "That class is no longer available.",
       "notAcceptingStudents": "This class is not accepting new students right now.",

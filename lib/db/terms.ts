@@ -5,6 +5,7 @@ import type { CenterTerm, Prisma, PrismaClient } from "@prisma/client";
 // lib/db/payment-methods.ts). The client is injected, never imported.
 import { classPeriodError, type ClassPeriodError } from "../scheduling.ts";
 import { scopedWhere } from "./tenant-scope.ts";
+import { nameClashes } from "../like.ts";
 
 /**
  * A centre's term presets (R4, docs/00-master-product-spec.md §5.1 "Class
@@ -51,14 +52,12 @@ async function lockCenter(tx: Prisma.TransactionClient, centerId: string): Promi
 }
 
 async function nameTaken(db: Db, centerId: string, name: string, exceptId?: string): Promise<boolean> {
-  const clash = await db.centerTerm.findFirst({
-    where: scopedWhere(centerId, {
-      name: { equals: name, mode: "insensitive" as const },
-      ...(exceptId ? { id: { not: exceptId } } : {}),
-    }),
-    select: { id: true },
+  // SEC-61: compared by the one name key, never with an (I)LIKE.
+  const others = await db.centerTerm.findMany({
+    where: scopedWhere(centerId, exceptId ? { id: { not: exceptId } } : {}),
+    select: { name: true },
   });
-  return clash !== null;
+  return nameClashes(name, others);
 }
 
 export async function createTerm(

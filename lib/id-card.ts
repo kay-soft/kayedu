@@ -24,6 +24,7 @@ import {
   FALLBACK_BRAND_COLOR,
   HEADER_BAND_HEIGHT,
   isTextElementKey,
+  DEFAULT_CARD_BACKGROUND,
   normalizeHex,
   type CardFontFamily,
   type CardTextAlign,
@@ -129,12 +130,15 @@ export function resolveCardLayout(raw: unknown): CardLayout {
 
   const accent = normalizeHex(source.accent);
   const footer = normalizeHex(source.footer);
+  // SEC-71: normalised like `accent` — the built-in surface or a hex colour,
+  // never a stored string passed through to the renderer as-is.
+  const background =
+    source.background === DEFAULT_CARD_BACKGROUND
+      ? DEFAULT_CARD_BACKGROUND
+      : (normalizeHex(source.background) ?? DEFAULT_CARD_LAYOUT.background);
 
   return {
-    background:
-      typeof source.background === "string"
-        ? source.background
-        : DEFAULT_CARD_LAYOUT.background,
+    background,
     ...(accent ? { accent } : {}),
     ...(footer ? { footer } : {}),
     ...(source.headerBand === true ? { headerBand: true } : {}),

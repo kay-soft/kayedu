@@ -27,6 +27,7 @@ import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { subjectAccentColor } from "@/lib/subject-accent";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { ROUTES } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
@@ -59,6 +60,9 @@ const STATUS_BADGE: Record<CardStatus, "success" | "warning" | "neutral" | "info
   open: "info",
   requiresApproval: "warning",
 };
+
+/** Centres whose classes load in parallel on one Discover page load (SEC-32). */
+const DISCOVER_CENTER_CONCURRENCY = 5;
 
 export default async function StudentDiscoverPage({
   searchParams,
@@ -96,8 +100,12 @@ export default async function StudentDiscoverPage({
   // Global catalog ids (M13) mean the same thing at every centre, so the
   // subject/grade filter is a real scoped `where` per centre now — never the
   // pre-M13 in-memory name match (docs/02-architecture.md §14).
-  const perCenter = await Promise.all(
-    centers.map(async (center) => {
+  // SEC-32: at most DISCOVER_CENTER_CONCURRENCY centres in flight at once — a
+  // page load never holds one pool connection per centre on the platform.
+  const perCenter = await mapWithConcurrency(
+    centers,
+    DISCOVER_CENTER_CONCURRENCY,
+    async (center) => {
       const classes = await discoverClassesForCenter(prisma, center.id, {
         subjectId: subjectFilter || undefined,
         gradeId: gradeFilter || undefined,
@@ -105,7 +113,7 @@ export default async function StudentDiscoverPage({
       const teacherIds = [...new Set(classes.map((row) => row.teacherId))];
       const teacherNames = await teacherDisplayNames(prisma, center.id, teacherIds);
       return { center, classes, teacherNames };
-    }),
+    },
   );
 
   // Ratings are platform-wide by teacherId, never per-centre (M17, spec §5

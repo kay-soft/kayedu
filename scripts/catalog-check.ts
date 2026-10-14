@@ -26,10 +26,11 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { PrismaClient, type Role } from "@prisma/client";
+import { type Role } from "@prisma/client";
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
 import {
   CATALOG_NAME_MAX,
@@ -69,7 +70,7 @@ import {
 } from "../lib/db/payment-methods.ts";
 import { splitShare } from "../lib/money.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 /** R1 fixture shape: a centre's first active payment method, created on demand. */
 const fixtureMethodIds = new Map<string, string>();

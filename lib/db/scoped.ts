@@ -988,11 +988,16 @@ export function scoped(ctx: TenantContext) {
      * teacher's own "my requests" list uses today.
      */
     changeRequests: {
-      list: (where?: Prisma.ChangeRequestWhereInput) =>
+      /** `take` bounds a queue a flood could grow (SEC-25): the Approvals screen reads one page. */
+      list: (where?: Prisma.ChangeRequestWhereInput, options?: { take?: number }) =>
         prisma.changeRequest.findMany({
           where: scopedWhere(centerId, where),
           orderBy: { createdAt: "desc" },
+          ...(options?.take ? { take: options.take } : {}),
         }),
+
+      count: (where?: Prisma.ChangeRequestWhereInput) =>
+        prisma.changeRequest.count({ where: scopedWhere(centerId, where) }),
 
       findById: (id: string) => scopedFindById(prisma.changeRequest, centerId, id),
 
@@ -1019,13 +1024,14 @@ export function scoped(ctx: TenantContext) {
      * `voidPayment`, not through this object).
      */
     reservations: {
-      /** The Approvals queue's own section: this center's PENDING requests. */
-      listPending: () =>
+      /** The Approvals queue's own section: this center's PENDING requests — one page (SEC-25). */
+      listPending: (options?: { take?: number }) =>
         prisma.reservation.findMany({
           // R4: a deactivated class's requests wait, unseen, until it is
           // reactivated — `confirmReservation` refuses them meanwhile.
           where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
           orderBy: { requestedAt: "asc" },
+          ...(options?.take ? { take: options.take } : {}),
           include: {
             // SEC-72: the requester's name only — never a whole `User` row
             // (authId, isPlatformAdmin, contacts) in a server component.
@@ -1063,6 +1069,11 @@ export function scoped(ctx: TenantContext) {
               },
             },
           },
+        }),
+
+      countPending: () =>
+        prisma.reservation.count({
+          where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
         }),
 
       findById: (id: string) => scopedFindById(prisma.reservation, centerId, id),

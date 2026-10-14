@@ -18,10 +18,10 @@
  * Supabase the Prisma role does, so RLS is a backstop for the Data API only —
  * never for the app's own connection.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import { auditRls, rlsProblems } from "./lib/rls-audit.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 async function main(): Promise<number> {
   const result = await auditRls(prisma);

@@ -33,6 +33,12 @@ import {
   type PeopleActionState,
   type PhoneLookupResult,
 } from "@/lib/validation/people";
+import {
+  boundSearchArgs,
+  parseActionArgs,
+  phoneLookupArgs,
+  searchArgs,
+} from "@/lib/validation/action-args";
 
 /**
  * Teachers (M3, revised). Every action follows docs/02 §7: getTenantContext()
@@ -75,7 +81,9 @@ export async function searchTeachersTypeAheadAction(
 ): Promise<TypeAheadResult[]> {
   const scope = await teacherScope();
   if (!scope) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(searchArgs, [query]);
+  if (!args) return [];
+  const [trimmed] = args;
   if (trimmed.length < 2) return [];
 
   const rows = await scope.db.teachers.search({
@@ -106,11 +114,13 @@ export async function searchBlockCandidatesAction(
 ): Promise<TypeAheadResult[]> {
   const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "student.block")) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(boundSearchArgs, [teacherMembershipId, query]);
+  if (!args) return [];
+  const [membershipId, trimmed] = args;
   if (trimmed.length < 2) return [];
 
   const db = scoped(ctx);
-  const teacher = await db.teachers.findById(teacherMembershipId);
+  const teacher = await db.teachers.findById(membershipId);
   if (!teacher) return [];
 
   const blocks = await db.studentBlocks.list({ scope: "TEACHER", refId: teacher.userId });
@@ -142,8 +152,10 @@ export async function lookupPersonByPhoneAction(
 ): Promise<PhoneLookupResult> {
   const scope = await teacherScope();
   if (!scope) return { status: "notFound" };
+  const args = parseActionArgs(phoneLookupArgs, [phone]);
+  if (!args) return { status: "notFound" };
 
-  const normalized = normalizePhone(phone);
+  const normalized = normalizePhone(args[0]);
   if (!normalized) return { status: "notFound" };
 
   const resolution = await resolveContact(

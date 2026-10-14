@@ -61,7 +61,8 @@ export async function pruneRateLimitBuckets(): Promise<number> {
  * The limits, named once so a call site never invents its own numbers.
  * `identityLookup*` covers every path that can reveal who owns a contact
  * (D-08): the phone lookup and every add-person submit, per staff member and
- * per centre. Sign-in/registration are keyed per email and per client IP.
+ * per centre. Sign-in/registration are keyed per email and per client IP; the
+ * self-service writes (D-18) per account and per client IP.
  */
 export const RATE_LIMITS = {
   identityLookupPerUser: { limit: 20, windowMs: 60_000 },
@@ -72,6 +73,14 @@ export const RATE_LIMITS = {
   signUpPerIp: { limit: 10, windowMs: 60 * 60_000 },
   resendPerEmail: { limit: 3, windowMs: 10 * 60_000 },
   resendPerIp: { limit: 10, windowMs: 10 * 60_000 },
+  // D-18 (SEC-2c): the student portal's reserve/enrol and the teacher
+  // directory's "request to teach here" — per account and per client IP. The
+  // IP limits are generous on purpose: a whole centre's Wi-Fi, or a mobile
+  // carrier's shared address, is one IP.
+  selfServicePerUser: { limit: 30, windowMs: 60 * 60_000 },
+  selfServicePerIp: { limit: 300, windowMs: 60 * 60_000 },
+  teachRequestPerUser: { limit: 10, windowMs: 24 * 60 * 60_000 },
+  teachRequestPerIp: { limit: 30, windowMs: 24 * 60 * 60_000 },
 } as const;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

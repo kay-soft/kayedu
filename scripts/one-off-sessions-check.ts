@@ -16,11 +16,11 @@
  * session's class unguarded. Needs a reachable database; cleans up after
  * itself (fixture centres, users and catalog rows only — never a reset).
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { PrismaClient } from "@prisma/client";
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
 import { dateKey, dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
 import {
@@ -56,7 +56,7 @@ import { reserveOrEnroll } from "../lib/db/reservations.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
 import { sessionDisplayName, sessionKind, sessionLabelParts } from "../lib/session-label.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "one-off-sessions-check-a";
 const SLUG_B = "one-off-sessions-check-b";

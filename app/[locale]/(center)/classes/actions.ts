@@ -53,6 +53,7 @@ import {
   holidaySchema,
   type ClassActionState,
 } from "@/lib/validation/classes";
+import { boundSearchArgs, parseActionArgs } from "@/lib/validation/action-args";
 
 /**
  * Classes, schedules, enrollment and the holiday calendar (M4). Every action
@@ -163,10 +164,12 @@ export async function searchEnrollCandidatesAction(
 ): Promise<TypeAheadResult[]> {
   const scope = await classScope();
   if (!scope) return [];
-  const trimmed = query.trim();
+  const args = parseActionArgs(boundSearchArgs, [classGroupId, query]);
+  if (!args) return [];
+  const [classId, trimmed] = args;
   if (trimmed.length < 2) return [];
 
-  const enrollments = await scope.db.enrollments.listForClass(classGroupId);
+  const enrollments = await scope.db.enrollments.listForClass(classId);
   const excludedStudentIds = new Set(
     enrollments
       .filter((enrollment) => enrollment.status !== "REMOVED")

@@ -15,7 +15,7 @@
  * prove this milestone left the ledger's *history* untouched — this script
  * does not re-assert their scenarios, only the new refund/settlement surface.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
@@ -33,7 +33,7 @@ import {
 import { revenueByTeacher, revenueTotals } from "../lib/db/analytics.ts";
 import { can } from "../lib/auth/permissions.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 /** R1 fixture shape: a centre's first active payment method, created on demand. */
 const fixtureMethodIds = new Map<string, string>();

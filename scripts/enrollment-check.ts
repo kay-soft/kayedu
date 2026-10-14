@@ -19,7 +19,8 @@
  * `lib/db/approvals.ts` (`resolveChangeRequest`) — against a throwaway
  * center. Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type BlockScope } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type BlockScope } from "@prisma/client";
 import { scopedData } from "../lib/db/tenant-scope.ts";
 import {
   confirmReservation,
@@ -40,7 +41,7 @@ import {
 import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
 import { resolveChangeRequest } from "../lib/db/approvals.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 // R2 fixture clock: the cancel/reschedule fixtures below are hard-dated
 // December 2026 sessions. Pinning "now" before them keeps them open (not

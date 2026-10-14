@@ -19,6 +19,7 @@
  * separate clients. Findings still open keep no assertion; docs/07 §1.1 says
  * why for each.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -56,10 +57,10 @@ import {
 } from "../lib/db/parents.ts";
 import { loadPermissionGrants } from "../lib/db/permissions.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
-import { reserveOrEnroll } from "../lib/db/reservations.ts";
+import { reserveOrEnroll, SELF_SERVICE_CAPS } from "../lib/db/reservations.ts";
 import { addTeacherMembership } from "../lib/db/teacher-membership.ts";
 import { scopedData } from "../lib/db/tenant-scope.ts";
-import { checkRateLimit, checkRateLimits, pruneRateLimitBuckets } from "../lib/rate-limit.ts";
+import { checkRateLimit, checkRateLimits, pruneRateLimitBuckets, RATE_LIMITS } from "../lib/rate-limit.ts";
 import { safeNextPath } from "../lib/routes.ts";
 import { MAX_PHOTO_BYTES, centerLogoSrc, sniffImageType } from "../lib/storage-paths.ts";
 import { createCenterSchema } from "../lib/validation/admin.ts";
@@ -72,7 +73,7 @@ import { revenueTotals } from "../lib/db/analytics.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
 import { changeAttendanceStatus, createAttendance, SessionClosedError } from "../lib/db/attendance.ts";
 import { classMoneyError } from "../lib/db/class-sessions.ts";
-import { listActivePaymentMethods } from "../lib/db/payment-methods.ts";
+import { createPaymentMethod, listActivePaymentMethods } from "../lib/db/payment-methods.ts";
 import { recordPayment, sessionReceiptLines, sessionReceiptTotals, voidPayment } from "../lib/db/payments.ts";
 import { skipSessionRating, submitSessionRating } from "../lib/db/ratings.ts";
 import { refundPayment } from "../lib/db/refunds.ts";
@@ -93,8 +94,15 @@ import { classGroupSchema, classGroupUpdateSchema, holidaySchema } from "../lib/
 import { newOneOffSessionSchema, rescheduleSessionSchema, setAttendanceSchema } from "../lib/validation/sessions.ts";
 import { createPeriodSettlementSchema } from "../lib/validation/settlements.ts";
 import { sessionRequestSchema } from "../lib/validation/teacher.ts";
+import { centerGradeById } from "../lib/db/catalog.ts";
+import { DEFAULT_CARD_BACKGROUND } from "../lib/card-layout.ts";
+import { mapWithConcurrency } from "../lib/concurrency.ts";
+import { resolveCardLayout } from "../lib/id-card.ts";
+import { likeSearchToken } from "../lib/like.ts";
+import { studentSearchWhere } from "../lib/db/students.ts";
+import { boundSearchArgs, parseActionArgs, SEARCH_QUERY_MAX, searchArgs } from "../lib/validation/action-args.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
 const PREFIX = "seccheck-";
 const EMAIL = (tag: string) => `${PREFIX}${tag}@kayedu.test`;
@@ -1045,6 +1053,7 @@ async function main() {
   await enforceProductionAuthSettings({ REQUIRE_EMAIL_CONFIRMATION: "false" });
 
   await sec2bMoney();
+  await sec2cAssertions();
 }
 
 // ── SEC-2b: money integrity, concurrency, anti-fraud ──────────────────────
@@ -1056,8 +1065,8 @@ async function main() {
 
 async function sec2bMoney() {
   console.log("\ncheck:security — SEC-2b (money integrity, concurrency, anti-fraud)\n");
-  const deskA = new PrismaClient();
-  const deskB = new PrismaClient();
+  const deskA = await gatePrisma({ sweepUsers: false });
+  const deskB = await gatePrisma({ sweepUsers: false });
   try {
     await sec2bAssertions(deskA, deskB);
   } finally {
@@ -1680,6 +1689,202 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
     ["the client previews use the same parser", ["components/center/class-fields.tsx", "app/[locale]/(center)/sessions/new-session-dialog.tsx", "app/[locale]/(center)/settings/general-form.tsx"].every((file) => /parseEgpToPiastres\(/.test(read(file)) && !/Math\.round\([^)]*\* 100\)/.test(read(file)))],
     ["the general-settings audit row includes teacherEditDeadlineHours", /teacherEditDeadlineHours: before\.teacherEditDeadlineHours/.test(read("app/[locale]/(center)/settings/actions.ts"))],
   ]);
+}
+
+
+// ── SEC-2c: validation, injection, availability, D-18 limits ──────────────
+
+async function sec2cAssertions() {
+  console.log("\ncheck:security — SEC-2c (validation, injection, availability, abuse limits)\n");
+  const TZ = "Africa/Cairo";
+  const today = todayInTimezone(TZ);
+  const center = await makeCenter("c1");
+  const teacher = await makeUser("c-teacher");
+  createdUserIds.add(teacher.id);
+  await prisma.membership.create({ data: { centerId: center.id, userId: teacher.id, role: "TEACHER", joinedAt: new Date() } });
+
+  await assertSec("SEC-25", "the teach-here request and the Approvals queues are bounded", () => {
+    const action = exportedBody("app/[locale]/(teacher)/teacher/centers/actions.ts", "requestToTeachAction");
+    const page = read("app/[locale]/(center)/approvals/page.tsx");
+    const scopedSource = read("lib/db/scoped.ts");
+    return [
+      ["a requester who already teaches somewhere is refused on the server (alreadyTeaching)", /roles\.includes\("TEACHER"\)/.test(action) && /alreadyTeaching/.test(action)],
+      ["per-account and per-IP limits in the shared store", /teachRequestPerUser/.test(action) && /teachRequestPerIp/.test(action) && "teachRequestPerUser" in RATE_LIMITS && "teachRequestPerIp" in RATE_LIMITS],
+      ["one PENDING request per (requester, centre), serialized per pair (alreadyRequested)", /pg_advisory_xact_lock/.test(action) && /status: "PENDING"/.test(action) && /alreadyRequested/.test(action)],
+      ["each Approvals queue loads one page and counts the rest", /take: APPROVALS_PAGE_SIZE/.test(page) && (page.match(/, page\)|listPending\(page\)/g) ?? []).length === 3 && /changeRequests\.count\(/.test(page) && /reservations\.countPending\(\)/.test(page) && /options\?\.take \? \{ take: options\.take \}/.test(scopedSource)],
+    ];
+  });
+
+  // SEC-26 fixtures: 32 classes (31 need confirmation, 1 is instant).
+  const subject = await prisma.catalogSubject.create({ data: { nameAr: `${PREFIX}subject`, nameEn: `${PREFIX}subject` } });
+  try {
+    const classIds = Array.from({ length: 32 }, () => randomUUID());
+    await prisma.classGroup.createMany({
+      data: classIds.map((id, index) => ({
+        id,
+        centerId: center.id,
+        teacherId: teacher.id,
+        subjectId: subject.id,
+        startDate: addDays(today, -30),
+        endDate: addDays(today, 300),
+        price: 10_000,
+        requiresConfirmation: index < 31,
+      })),
+    });
+    const student = await makeUser("c-student");
+    createdUserIds.add(student.id);
+    const reserve = (db: PrismaClient, classGroupId: string) =>
+      db.$transaction((tx) => reserveOrEnroll(tx, { centerId: center.id, classGroupId, studentUserId: student.id }), WRITE_TRANSACTION_OPTIONS);
+
+    await assertSec("SEC-26", "per-account caps on open reservations and self-enrolments (D-18), race-safe", async () => {
+      // 28 open requests; a 29th alone; then two at once — exactly one fits under 30.
+      await prisma.reservation.createMany({
+        data: classIds.slice(0, 28).map((classGroupId) => ({ centerId: center.id, classGroupId, studentId: student.id, status: "PENDING" as const })),
+      });
+      const deskA = await gatePrisma({ sweepUsers: false });
+      const deskB = await gatePrisma({ sweepUsers: false });
+      let raced: Awaited<ReturnType<typeof reserveOrEnroll>>[];
+      try {
+        raced = [await reserve(prisma, classIds[28])];
+        raced.push(...(await Promise.all([reserve(deskA, classIds[29]), reserve(deskB, classIds[30])])));
+      } finally {
+        await Promise.all([deskA.$disconnect(), deskB.$disconnect()]);
+      }
+      const open = await prisma.reservation.count({ where: { studentId: student.id, status: "PENDING" } });
+      const okCount = raced.filter((result) => result.ok).length;
+      const refused = raced.filter((result) => !result.ok && result.error === "reservationLimit").length;
+
+      // 30 active enrolments, then an instant-enrol class: refused.
+      const profile = await makeStudent(center.id, student);
+      await prisma.enrollment.createMany({
+        data: classIds.slice(0, 30).map((classGroupId) => ({ centerId: center.id, classGroupId, studentProfileId: profile.id, status: "ACTIVE" as const })),
+      });
+      const instant = await reserve(prisma, classIds[31]);
+      const seats = await prisma.enrollment.count({ where: { classGroupId: classIds[31] } });
+      const action = exportedBody("app/[locale]/(student)/student/discover/actions.ts", "reserveClassAction");
+      return [
+        [`the 29th alone, then two in parallel at 29 open: two ok, one reservationLimit (got ok=${okCount} refused=${refused})`, okCount === 2 && refused === 1],
+        [`never more than ${SELF_SERVICE_CAPS.openReservations} open (got ${open})`, open === SELF_SERVICE_CAPS.openReservations],
+        ["the 31st active self-enrolment is refused (enrollmentLimit), no seat taken", !instant.ok && instant.error === "enrollmentLimit" && seats === 0],
+        ["the action is limited per account and per IP", /selfServicePerUser/.test(action) && /selfServicePerIp/.test(action)],
+      ];
+    });
+  } finally {
+    await prisma.classGroup.deleteMany({ where: { centerId: center.id } }).catch(() => undefined);
+    await prisma.catalogSubject.deleteMany({ where: { id: subject.id } }).catch(() => undefined);
+  }
+
+  await assertSec("SEC-32", "Discover loads at most five centres at once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const order = await mapWithConcurrency(Array.from({ length: 50 }, (_, index) => index), 5, async (index) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolveTick) => setTimeout(resolveTick, 2));
+      inFlight -= 1;
+      return index;
+    });
+    const page = read("app/[locale]/(student)/student/discover/page.tsx");
+    return [
+      [`50 centres, limit 5: peak ${peak} in flight`, peak <= 5 && peak > 1],
+      ["results stay in input order", order.every((value, index) => value === index)],
+      ["the Discover page fans out through it, never Promise.all over every centre", /mapWithConcurrency\(\s*centers,\s*DISCOVER_CENTER_CONCURRENCY/.test(page) && !/Promise\.all\(\s*centers\.map/.test(page)],
+    ];
+  });
+
+  await assertSec("SEC-49", "profile completion takes only a grade the centre offers", async () => {
+    const unselected = await prisma.catalogGrade.create({ data: { nameAr: `${PREFIX}grade`, nameEn: `${PREFIX}grade` } });
+    try {
+      const action = exportedBody("app/[locale]/(student)/student/profile/actions.ts", "completeStudentProfileAction");
+      const layout = read("app/[locale]/(student)/layout.tsx");
+      return [
+        ["an unselected catalog grade does not resolve at this centre", (await centerGradeById(prisma, center.id, unselected.id)) === null],
+        ["the action resolves through centerGradeById, never a raw catalog row", /centerGradeById\(prisma, centerId, gradeId\)/.test(action) && !/catalogGrade\.find/.test(action)],
+        ["the form offers this centre's grades only", /centerGrades\(prisma, incomplete\.center\.id\)/.test(layout) && !/listCatalogGrades/.test(layout)],
+      ];
+    } finally {
+      await prisma.catalogGrade.delete({ where: { id: unselected.id } });
+    }
+  });
+
+  await assertSec("SEC-52", "raw-argument actions parse their arguments before any query", () => {
+    const rawActions: [string, string][] = [
+      ["app/[locale]/(center)/classes/actions.ts", "searchEnrollCandidatesAction"],
+      ["app/[locale]/(center)/reception/actions.ts", "searchStudentsForReceptionAction"],
+      ["app/[locale]/(center)/reception/actions.ts", "resolveReceptionInputAction"],
+      ["app/[locale]/(center)/reception/actions.ts", "resolveReceptionStudentAction"],
+      ["app/[locale]/(center)/sessions/actions.ts", "searchAddAttendeeCandidatesAction"],
+      ["app/[locale]/(center)/students/actions.ts", "searchStudentsTypeAheadAction"],
+      ["app/[locale]/(center)/students/actions.ts", "lookupPersonByPhoneAction"],
+      ["app/[locale]/(center)/teachers/actions.ts", "searchTeachersTypeAheadAction"],
+      ["app/[locale]/(center)/teachers/actions.ts", "searchBlockCandidatesAction"],
+      ["app/[locale]/(center)/teachers/actions.ts", "lookupPersonByPhoneAction"],
+      ["app/[locale]/(teacher)/teacher/sessions/actions.ts", "searchOwnSessionStudentsTypeAheadAction"],
+      ["app/[locale]/(teacher)/teacher/students/actions.ts", "searchTaughtStudentsTypeAheadAction"],
+    ];
+    const unparsed = rawActions.filter(([file, name]) => {
+      const body = exportedBody(file, name);
+      const parseAt = body.indexOf("parseActionArgs(");
+      const firstQuery = body.search(/\.search\(|findFirst\(|findDetailById\(|findById\(|listForClass\(|resolveContact\(|sessionModeScope\(/);
+      return parseAt < 0 || (firstQuery >= 0 && firstQuery < parseAt);
+    });
+    const typeAheadBodies = ["app/[locale]/(teacher)/teacher/sessions/actions.ts", "app/[locale]/(teacher)/teacher/students/actions.ts"].map(
+      (file) => exportedFunctions(file).find((fn) => /TypeAheadAction$/.test(fn.name))?.body ?? "",
+    );
+    return [
+      ["an object as the query is refused", parseActionArgs(searchArgs, [{ not: "" }]) === null],
+      ["an object as a bound id is refused", parseActionArgs(boundSearchArgs, [{ not: "" }, "ab"]) === null],
+      [`a ${SEARCH_QUERY_MAX + 1}-character query is refused, never truncated into the database`, parseActionArgs(searchArgs, ["x".repeat(SEARCH_QUERY_MAX + 1)]) === null && parseActionArgs(searchArgs, ["x".repeat(10_000)]) === null],
+      ["an ordinary query parses (trimmed)", JSON.stringify(parseActionArgs(searchArgs, ["  mona  "])) === JSON.stringify(["mona"])],
+      [`all ${rawActions.length} raw-argument actions parse first${unparsed.length ? ` (not: ${unparsed.map(([, name]) => name).join(", ")})` : ""}`, unparsed.length === 0],
+      ["the teacher type-aheads filter relationally, with no roster preload per keystroke", typeAheadBodies.every((body) => /taughtByTeacherWhere\(/.test(body) && !/teacherStudentProfileIds\(/.test(body))],
+    ];
+  });
+
+  await assertSec("SEC-61", "LIKE pattern characters never act as wildcards in search or duplicate checks", async () => {
+    await makeStudent(center.id, teacher, { email: null });
+    const searchHits = async (query: string) =>
+      prisma.studentProfile.count({ where: { centerId: center.id, ...studentSearchWhere(query) } });
+    const everyone = await prisma.studentProfile.count({ where: { centerId: center.id } });
+    const cash1 = await createPaymentMethod(prisma, center.id, "Cash1");
+    const cashUnderscore = await createPaymentMethod(prisma, center.id, "Cash_");
+    const cashAgain = await createPaymentMethod(prisma, center.id, "  CASH_ ");
+    const sources = ["lib/db/students.ts", "lib/db/teacher-portal.ts", "lib/db/payment-methods.ts", "lib/db/terms.ts", "app/[locale]/(center)/expenses/actions.ts", "app/[locale]/(center)/settings/actions.ts"];
+    const insensitiveEquals = sources.filter((file) => /equals: \w+, mode: "insensitive"/.test(read(file)));
+    return [
+      [`a search for "%" or "_" matches nobody (it used to match all ${everyone})`, everyone > 0 && (await searchHits("%")) === 0 && (await searchHits("_")) === 0 && (await searchHits("% _")) === 0 && studentSearchWhere("") === undefined],
+      ["the search tokens drop the pattern characters", likeSearchToken("50%_off\\") === "50off"],
+      ["`Cash_` can be created when only `Cash1` exists", cash1.ok && cashUnderscore.ok],
+      ["a real duplicate is still refused — case and spaces ignored", !cashAgain.ok && cashAgain.error === "duplicateName"],
+      [`no duplicate check uses an insensitive equals (an ILIKE)${insensitiveEquals.length ? ` (still: ${insensitiveEquals.join(", ")})` : ""}`, insensitiveEquals.length === 0],
+    ];
+  });
+
+  await assertSec("SEC-71", "the card background is normalised like the accent", () => [
+    ["a stored non-colour string falls back to the default", resolveCardLayout({ background: "url(javascript:alert(1))" }).background === DEFAULT_CARD_BACKGROUND],
+    ["a hex colour is kept (normalised)", resolveCardLayout({ background: "#ABCDEF" }).background === "#abcdef"],
+    ["the built-in surface is kept", resolveCardLayout({ background: DEFAULT_CARD_BACKGROUND }).background === DEFAULT_CARD_BACKGROUND],
+  ]);
+
+  await assertSec("SEC-75", "production Prisma errors carry no call-site arguments (logging half)", () => [
+    ["errorFormat is minimal in production", /NODE_ENV === "production" \? \{ errorFormat: "minimal"/.test(read("lib/db/client.ts"))],
+  ]);
+
+  await assertSec("SEC-2c gates", "every DB gate runs on the gate client; fixtures do not rot", () => {
+    const gateFiles = walk("scripts").filter((file) => /^scripts\/[a-z-]+-check\.ts$/.test(file));
+    const bare = gateFiles.filter((file) => /^const prisma = new PrismaClient\(/m.test(read(file)));
+    const people = read("scripts/people-check.ts");
+    const approvals = read("scripts/approvals-check.ts");
+    const ci = read(".github/workflows/ci.yml");
+    const gateDb = read("scripts/lib/gate-db.ts");
+    return [
+      [`no gate builds a bare client${bare.length ? ` (${bare.join(", ")})` : ""}`, gateFiles.length > 20 && bare.length === 0],
+      ["check:people matches through the real resolveContact and describeMatch (no private copy)", /from "\.\.\/lib\/db\/identity\.ts"/.test(people) && /resolveContact\(/.test(people) && /describeMatch\(/.test(people) && !/async function findMatch\(/.test(people)],
+      ["check:approvals computes its request date from today", /todayInTimezone\(/.test(approvals) && !/sessionRequestDate = "\d{4}-/.test(approvals)],
+      ["CI records and verifies the User row count around the gates", /gates:users -- record/.test(ci) && /gates:users -- verify/.test(ci)],
+      ["the gate client sets lock_timeout and statement_timeout on every transaction", gateDb.includes("set_config('lock_timeout'") && gateDb.includes("set_config('statement_timeout'")],
+    ];
+  });
 }
 
 main()

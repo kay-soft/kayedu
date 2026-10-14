@@ -15,7 +15,8 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
-import { Prisma, PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { Prisma } from "@prisma/client";
 import {
   scopedData,
   scopedFindById,
@@ -28,7 +29,7 @@ import {
   roomSchema,
 } from "../lib/validation/settings.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "config-check-a";
 const SLUG_B = "config-check-b";

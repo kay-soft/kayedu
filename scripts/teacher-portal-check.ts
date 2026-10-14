@@ -13,7 +13,8 @@
  * primitives (`lib/db/tenant-scope.ts`) — against two throwaway centers that
  * share one teacher. Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type BlockScope } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type BlockScope } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
@@ -31,7 +32,7 @@ import {
 import { can } from "../lib/auth/permissions.ts";
 import { startOfUtcDay, weekRangeUtc } from "../lib/scheduling.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 /** R1 fixture shape: a centre's first active payment method, created on demand. */
 const fixtureMethodIds = new Map<string, string>();

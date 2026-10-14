@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getCurrentUser } from "@/lib/auth/session";
+import { centerGradeById } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { revokeStaleParentLinks } from "@/lib/db/parents";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
@@ -70,13 +71,15 @@ export async function completeStudentProfileAction(
   if (profile.profileCompletedAt) return { error: "alreadyCompleted" };
 
   if (gradeId) {
-    // The picker offers the global catalog directly (docs/01 §2 "Academic
-    // catalog layer") — a grade is not centre-scoped, so no CenterCatalog-
-    // Selection lookup applies here, unlike a receptionist's own picker.
-    const grade = await prisma.catalogGrade.findUnique({ where: { id: gradeId } });
+    // SEC-49: a grade this centre offers — resolved through its own catalog
+    // selection, exactly like the receptionist's picker, never any catalog row.
+    const grade = await centerGradeById(prisma, centerId, gradeId);
     if (!grade) return { fieldErrors: { gradeId: "notFound" } };
-    // A deactivated grade cannot be newly chosen (R8) — only kept, if it is already theirs.
-    if (!grade.active && grade.id !== profile.gradeId) return { fieldErrors: { gradeId: "notFound" } };
+    // A deactivated grade or selection cannot be newly chosen (R8) — only
+    // kept, if it is already theirs.
+    if (!(grade.active && grade.catalogActive) && grade.id !== profile.gradeId) {
+      return { fieldErrors: { gradeId: "notFound" } };
+    }
   }
 
   await prisma.studentProfile.update({
