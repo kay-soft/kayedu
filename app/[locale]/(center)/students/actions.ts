@@ -14,7 +14,7 @@ import {
   seedLocalName,
 } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
-import { verifyParentLinkPlaceholder } from "@/lib/db/parents";
+import { revokeStaleParentLinks, verifyParentLinkPlaceholder } from "@/lib/db/parents";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import {
   claimStudentCode,
@@ -32,7 +32,6 @@ import {
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import { normalizePhone } from "@/lib/phone";
-import { checkRateLimit } from "@/lib/rate-limit";
 import { ROUTES } from "@/lib/routes";
 import {
   AVATARS_BUCKET,
@@ -151,8 +150,11 @@ export async function searchStudentsTypeAheadAction(
 // Explicitly NOT a raw "phone → full record" endpoint: it is the exact same
 // duplicate-match workflow (`resolveContact`/`describeMatch`) the add-student
 // form already runs on submit, just reachable from a phone alone, before the
-// rest of the form is filled in — minimum fields, rate-limited, and a match
-// still requires the form's own explicit "link" submit to attach anything.
+// rest of the form is filled in — minimum fields, rate-limited inside
+// `resolveContact` (the shared store, SEC-11), and a match still requires the
+// form's own explicit "link" submit to attach anything. Since SEC-2a (D-02) a
+// phone is never a link key, so a phone alone only ever finds someone who is
+// already a student here.
 
 export async function lookupPersonByPhoneAction(
   phone: string,
@@ -163,11 +165,11 @@ export async function lookupPersonByPhoneAction(
   const normalized = normalizePhone(phone);
   if (!normalized) return { status: "notFound" };
 
-  if (!checkRateLimit(`people.phoneLookup:${scope.ctx.user.id}`, 20, 60_000)) {
-    return { status: "rateLimited" };
-  }
-
-  const resolution = await resolveContact({ phone: normalized });
+  const resolution = await resolveContact(
+    { centerId: scope.ctx.center.id, actorUserId: scope.ctx.user.id, adding: "student" },
+    { phone: normalized },
+  );
+  if (resolution.kind === "rateLimited") return { status: "rateLimited" };
   if (resolution.kind !== "matched") return { status: "notFound" };
 
   const match = await describeMatch(scope.ctx.center.id, resolution.match, {
@@ -208,22 +210,28 @@ export async function createStudentAction(
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
 
   const contact = { email, phone };
-  const resolution = await resolveContact(contact);
+  const resolution = await resolveContact(
+    { centerId, actorUserId: scope.ctx.user.id, adding: "student" },
+    contact,
+  );
+  if (resolution.kind === "rateLimited") return { error: "rateLimited" };
 
   // Two different people carry these details — merging identities is a manual,
   // audited admin action (docs/02 §3), not something this form decides.
   if (resolution.kind === "conflict") return { error: "contactConflict" };
 
   let userId: string | null = null;
+  let described: Awaited<ReturnType<typeof describeMatch>> | null = null;
 
   if (resolution.kind === "matched") {
     const match = await describeMatch(centerId, resolution.match, contact);
+    described = match;
 
     // Show the person before linking anything (spec §5).
     if (linkUserId !== resolution.match.user.id) {
       return { status: "matchFound", match };
     }
-    if (match.existingHere === "student") {
+    if (match.existingHere === "student" || !match.linkable) {
       return { error: "alreadyStudent", match };
     }
     userId = resolution.match.user.id;
@@ -232,9 +240,10 @@ export async function createStudentAction(
   }
 
   // The name to seed onto this center's record: the existing person's real
-  // name when linking to a match, or the form's own input for a brand-new
-  // person (docs/01 §6) — editable here immediately either way, no lock.
-  const name = seedLocalName(resolution, { firstName, lastName });
+  // name when linking to a match (unless it is masked, D-08), or the form's
+  // own input for a brand-new person (docs/01 §6) — editable here immediately
+  // either way, no lock.
+  const name = seedLocalName(resolution, { firstName, lastName }, described);
 
   // The code claim, the (possible) new person, and the profile all happen in
   // one transaction: a rollback for any reason undoes the claim too, so a
@@ -349,6 +358,19 @@ export async function updateStudentAction(
     parentPhone,
     parentAltPhone,
   });
+
+  // D-04 (a), SEC-04: a parent phone that is no longer on the record takes
+  // every link it produced with it — revoked and audited, never left to read.
+  if (
+    normalizePhone(parentPhone) !== normalizePhone(student.parentPhone) ||
+    normalizePhone(parentAltPhone) !== normalizePhone(student.parentAltPhone)
+  ) {
+    await revokeStaleParentLinks(prisma, {
+      centerId: scope.ctx.center.id,
+      studentProfileId: student.id,
+      actorUserId: scope.ctx.user.id,
+    });
+  }
 
   revalidateStudentDetail(locale, student.id);
   revalidateStudentPrintables(locale, student.id);
@@ -565,6 +587,19 @@ export async function uploadStudentPhotoAction(
     );
   }
 
+  // D-28: the photo is reception's anti-impersonation check (§5.1), so every
+  // change to it is audited — who, when, and whether one was replaced. No
+  // storage path goes into the log.
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "student.photo.update",
+    entityType: "StudentProfile",
+    entityId: student.id,
+    before: { hadPhoto: Boolean(previous) },
+    after: { hasPhoto: true },
+  });
+
   revalidateStudentPrintables(parsed.data.locale, student.id);
   return { status: "saved" };
 }
@@ -589,6 +624,16 @@ export async function removeStudentPhotoAction(
     student.photoUrl,
   ).catch(() => undefined);
   await scope.db.students.update(student.id, { photoUrl: null });
+
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "student.photo.remove",
+    entityType: "StudentProfile",
+    entityId: student.id,
+    before: { hadPhoto: true },
+    after: { hasPhoto: false },
+  });
 
   revalidateStudentPrintables(parsed.data.locale, student.id);
   return { status: "deleted" };

@@ -17,6 +17,7 @@ import {
 } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
+import { centerLogoSrc } from "@/lib/storage-paths";
 import { cn } from "@/lib/utils";
 
 export default async function SelectCenterPage({
@@ -133,7 +134,7 @@ export default async function SelectCenterPage({
                 >
                   <BrandAvatar
                     name={relation.center.name}
-                    logoUrl={relation.center.logoUrl}
+                    logoUrl={centerLogoSrc(relation.center)}
                     themeColor={relation.center.themeColor}
                     size="lg"
                   />

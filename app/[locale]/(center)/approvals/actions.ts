@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import { approveAccountClaim, rejectAccountClaim } from "@/lib/db/account-claims";
 import { resolveChangeRequest, resolveSessionRequest } from "@/lib/db/approvals";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
@@ -242,6 +243,55 @@ export async function declineSessionRequestAction(
     before: { status: "PENDING" },
     after: { status: "DECLINED" },
   });
+
+  revalidateApprovals(locale);
+  return { status: "declined" };
+}
+
+// ── Account claims (SEC-2a, D-01) ───────────────────────────────────────────
+// A sign-up whose email matches a person this centre created waits here: staff
+// approve it with the person in front of them. Both decisions are audited by
+// the data layer, inside their own transaction (`lib/db/account-claims.ts`).
+
+export async function approveAccountClaimAction(
+  _state: ApprovalsActionState,
+  formData: FormData,
+): Promise<ApprovalsActionState> {
+  const ctx = await approvalsScope();
+  if (!ctx) return FORBIDDEN;
+
+  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+  const { locale, id } = parsed.data;
+
+  const result = await approveAccountClaim(prisma, {
+    claimId: id,
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+  });
+  if (!result.ok) return { error: result.error };
+
+  revalidateApprovals(locale);
+  return { status: "approved" };
+}
+
+export async function declineAccountClaimAction(
+  _state: ApprovalsActionState,
+  formData: FormData,
+): Promise<ApprovalsActionState> {
+  const ctx = await approvalsScope();
+  if (!ctx) return FORBIDDEN;
+
+  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+  const { locale, id } = parsed.data;
+
+  const result = await rejectAccountClaim(prisma, {
+    claimId: id,
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+  });
+  if (!result.ok) return { error: result.error };
 
   revalidateApprovals(locale);
   return { status: "declined" };

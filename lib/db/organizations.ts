@@ -22,6 +22,21 @@ import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
+/**
+ * One range for every branch, or each branch's own (SEC-48): the
+ * "Whole Management" roll-up clamps each branch to **its own** data-visibility
+ * window, so a branch with a stricter window never contributes older rows.
+ */
+export type BranchRange = DateRange | Map<string, DateRange>;
+
+function rangeFor(range: BranchRange, centerId: string): DateRange {
+  if (!(range instanceof Map)) return range;
+  const own = range.get(centerId);
+  // Never fall back to an unbounded range for a branch the caller left out.
+  if (!own) throw new Error(`No date range for branch ${centerId} in this roll-up.`);
+  return own;
+}
+
 const EMPTY_REVENUE: RevenueTotals = {
   collected: 0,
   centerShare: 0,
@@ -50,11 +65,11 @@ function sumRevenue(rows: RevenueTotals[]): RevenueTotals {
 export async function revenueTotalsRollup(
   db: Db,
   branchIds: string[],
-  range: DateRange,
+  range: BranchRange,
   teacherId?: string | null,
 ): Promise<RevenueTotals> {
   const rows = await Promise.all(
-    branchIds.map((centerId) => revenueTotals(db, centerId, range, teacherId)),
+    branchIds.map((centerId) => revenueTotals(db, centerId, rangeFor(range, centerId), teacherId)),
   );
   return sumRevenue(rows);
 }
@@ -63,13 +78,13 @@ export async function revenueTotalsRollup(
 export async function revenueByBranch(
   db: Db,
   branches: { id: string; name: string }[],
-  range: DateRange,
+  range: BranchRange,
 ): Promise<(RevenueTotals & { branchId: string; branchName: string })[]> {
   const rows = await Promise.all(
     branches.map(async (branch) => ({
       branchId: branch.id,
       branchName: branch.name,
-      ...(await revenueTotals(db, branch.id, range)),
+      ...(await revenueTotals(db, branch.id, rangeFor(range, branch.id))),
     })),
   );
   return rows.sort((a, b) => b.collected - a.collected);
@@ -78,10 +93,10 @@ export async function revenueByBranch(
 export async function expenseTotalsRollup(
   db: Db,
   branchIds: string[],
-  range: DateRange,
+  range: BranchRange,
 ): Promise<ExpenseTotals> {
   const rows = await Promise.all(
-    branchIds.map((centerId) => expenseTotals(db, centerId, range)),
+    branchIds.map((centerId) => expenseTotals(db, centerId, rangeFor(range, centerId))),
   );
   return rows.reduce(
     (sum, row) => ({ total: sum.total + row.total, count: sum.count + row.count }),
@@ -92,10 +107,10 @@ export async function expenseTotalsRollup(
 export async function studentCountsRollup(
   db: Db,
   branchIds: string[],
-  range: DateRange,
+  range: BranchRange,
 ): Promise<StudentCounts> {
   const rows = await Promise.all(
-    branchIds.map((centerId) => studentCounts(db, centerId, range)),
+    branchIds.map((centerId) => studentCounts(db, centerId, rangeFor(range, centerId))),
   );
   return rows.reduce(
     (sum, row) => ({ total: sum.total + row.total, new: sum.new + row.new }),
@@ -106,10 +121,10 @@ export async function studentCountsRollup(
 export async function teacherCountsRollup(
   db: Db,
   branchIds: string[],
-  range: DateRange,
+  range: BranchRange,
 ): Promise<TeacherCounts> {
   const rows = await Promise.all(
-    branchIds.map((centerId) => teacherCounts(db, centerId, range)),
+    branchIds.map((centerId) => teacherCounts(db, centerId, rangeFor(range, centerId))),
   );
   return rows.reduce(
     (sum, row) => ({

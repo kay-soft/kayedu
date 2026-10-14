@@ -28,6 +28,7 @@ import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { subjectAccentColor } from "@/lib/subject-accent";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
+import { centerLogoSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
 
@@ -79,7 +80,7 @@ export default async function StudentDiscoverPage({
     await Promise.all([
       prisma.center.findMany({
         where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-        select: { id: true, name: true, logoUrl: true, themeColor: true },
+        select: { id: true, name: true, logoPath: true, themeColor: true },
         orderBy: { name: "asc" },
       }),
       studentBlockedRefsByCenter(prisma, session.user.id),
@@ -138,7 +139,7 @@ export default async function StudentDiscoverPage({
       cards.push({
         centerId: center.id,
         centerName: center.name,
-        centerLogoUrl: center.logoUrl,
+        centerLogoUrl: centerLogoSrc(center),
         classGroupId: row.id,
         subjectName: catalogLabelWithSelection(locale, row.subject),
         gradeName: catalogLabelWithSelection(locale, row.grade),

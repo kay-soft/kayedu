@@ -2,12 +2,16 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   AVATARS_BUCKET,
   ID_CARDS_BUCKET,
+  LOGOS_BUCKET,
+  MAX_LOGO_BYTES,
   MAX_PHOTO_BYTES,
   assertPathInCenter,
+  centerLogoPath,
   photoExtensionFor,
+  sniffImageType,
   studentIdCardPath,
   studentPhotoPath,
-  type PeopleBucket,
+  type StorageBucket,
 } from "@/lib/storage-paths";
 
 /**
@@ -25,16 +29,34 @@ const SIGNED_URL_TTL_SECONDS = 60 * 10;
 
 export type StoredPhoto = { path: string };
 
+type UploadRefusal = "photoType" | "photoTooLarge" | "storage";
+
+/**
+ * Reads an uploaded image and decides its type from its **bytes** (SEC-54):
+ * PNG/JPEG/WebP only, whatever `File.type` claims, under `maxBytes`. The
+ * stored object's content type is the sniffed one.
+ */
+export async function readRasterImage(
+  file: File,
+  maxBytes: number,
+): Promise<{ ok: true; bytes: Uint8Array; type: string; extension: string } | { ok: false; error: UploadRefusal }> {
+  if (file.size > maxBytes) return { ok: false, error: "photoTooLarge" };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength > maxBytes) return { ok: false, error: "photoTooLarge" };
+  const type = sniffImageType(bytes);
+  const extension = type ? photoExtensionFor(type) : null;
+  if (!type || !extension) return { ok: false, error: "photoType" };
+  return { ok: true, bytes, type, extension };
+}
+
 export async function uploadStudentPhoto(
   centerId: string,
   studentProfileId: string,
   file: File,
-): Promise<
-  { ok: true; path: string } | { ok: false; error: "photoType" | "photoTooLarge" | "storage" }
-> {
-  const extension = photoExtensionFor(file.type);
-  if (!extension) return { ok: false, error: "photoType" };
-  if (file.size > MAX_PHOTO_BYTES) return { ok: false, error: "photoTooLarge" };
+): Promise<{ ok: true; path: string } | { ok: false; error: UploadRefusal }> {
+  const image = await readRasterImage(file, MAX_PHOTO_BYTES);
+  if (!image.ok) return image;
+  const { bytes, type, extension } = image;
 
   // The version suffix busts any cached copy of a replaced photo; the filename
   // stem stays the profile id, which is what the read policy matches on.
@@ -48,8 +70,27 @@ export async function uploadStudentPhoto(
   const supabase = createSupabaseAdminClient();
   const { error } = await supabase.storage
     .from(AVATARS_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: true });
+    .upload(path, bytes, { contentType: type, upsert: true });
 
+  return error ? { ok: false, error: "storage" } : { ok: true, path };
+}
+
+/**
+ * A centre's logo (D-25 (b)) — into the private `logos` bucket under the
+ * centre's own folder, raster only by its bytes, size-capped. Served only
+ * through `/api/logos/[centerId]` as a short-lived signed URL.
+ */
+export async function uploadCenterLogo(
+  centerId: string,
+  file: File,
+): Promise<{ ok: true; path: string } | { ok: false; error: UploadRefusal }> {
+  const image = await readRasterImage(file, MAX_LOGO_BYTES);
+  if (!image.ok) return image;
+  const path = centerLogoPath(centerId, image.extension, Date.now().toString(36));
+  const supabase = createSupabaseAdminClient();
+  const { error } = await supabase.storage
+    .from(LOGOS_BUCKET)
+    .upload(path, image.bytes, { contentType: image.type, upsert: true });
   return error ? { ok: false, error: "storage" } : { ok: true, path };
 }
 
@@ -74,7 +115,7 @@ export async function uploadIdCard(
 
 export async function signedUrlFor(
   centerId: string,
-  bucket: PeopleBucket,
+  bucket: StorageBucket,
   path: string,
 ): Promise<string | null> {
   assertPathInCenter(centerId, path);
@@ -92,7 +133,7 @@ export async function signedUrlFor(
  */
 export async function objectAsDataUri(
   centerId: string,
-  bucket: PeopleBucket,
+  bucket: StorageBucket,
   path: string,
 ): Promise<string | null> {
   assertPathInCenter(centerId, path);
@@ -100,29 +141,17 @@ export async function objectAsDataUri(
   const { data, error } = await supabase.storage.from(bucket).download(path);
   if (error || !data) return null;
 
-  const buffer = Buffer.from(await data.arrayBuffer());
-  const mime = data.type || "application/octet-stream";
-  return `data:${mime};base64,${buffer.toString("base64")}`;
-}
-
-/** Fetches a remote image (the center logo) as a data URI for the card. */
-export async function remoteImageAsDataUri(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const type = response.headers.get("content-type") ?? "";
-    if (!type.startsWith("image/")) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > MAX_PHOTO_BYTES) return null;
-    return `data:${type};base64,${buffer.toString("base64")}`;
-  } catch {
-    return null;
-  }
+  // Only a raster image is ever inlined into a card, whatever was stored:
+  // the type comes from the bytes (SEC-54), not the object's metadata.
+  const bytes = new Uint8Array(await data.arrayBuffer());
+  const mime = sniffImageType(bytes);
+  if (!mime) return null;
+  return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
 export async function removeStoredObject(
   centerId: string,
-  bucket: PeopleBucket,
+  bucket: StorageBucket,
   path: string,
 ): Promise<void> {
   assertPathInCenter(centerId, path);

@@ -145,10 +145,30 @@ export function can(
   // shape as STUDENT, so a future stray grant row could never reopen one.
   if (role === "STUDENT" || role === "PARENT") return false;
 
-  if (OWNER_ONLY_ACTIONS.includes(permission)) return role === "OWNER";
+  // SEC-45: OWNER is "full control" (spec §3) — every non-platform action,
+  // whatever rows exist. OWNER is not a matrix role (`MATRIX_ROLES`) and no
+  // screen can repair a missing OWNER grant row, so a permission shipped
+  // without a backfill must never lock every owner out of it.
+  if (role === "OWNER") return true;
+
+  if (OWNER_ONLY_ACTIONS.includes(permission)) return false;
   if (FORBIDDEN_CEILING[role]?.includes(permission)) return false;
 
   return grants?.[permission] === true;
+}
+
+/**
+ * `can()` bound to a resolved request context (SEC-09). A context whose
+ * requested experience the user holds no role for grants nothing at all —
+ * `lib/auth/tenant.ts`'s `ctxCan` is exactly this, and every centre Server
+ * Action passes through it.
+ */
+export function canInContext(
+  ctx: { experienceDenied: boolean; role: TenantRole; grants: PermissionGrants },
+  permission: Permission,
+): boolean {
+  if (ctx.experienceDenied) return false;
+  return can(ctx.role, permission, ctx.grants);
 }
 
 export class PermissionError extends Error {

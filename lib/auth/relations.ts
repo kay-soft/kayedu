@@ -181,18 +181,27 @@ export async function resolveCenterRelations(
     .sort((a, b) => a.center.name.localeCompare(b.center.name));
 }
 
-/** The role a user acts with at a center for a given experience (or their highest). */
+/**
+ * The role a user acts with at a center for a given experience — or, with no
+ * experience asked for, their highest role there.
+ *
+ * SEC-09: when an experience **is** asked for and the user holds no role of
+ * that kind here, the answer is `null` — a denial, never a fall-back to
+ * whatever role they do hold. (Before SEC-2a a TEACHER-only member resolved
+ * to TEACHER inside every centre Server Action and passed any gate the
+ * matrix granted TEACHER.)
+ */
 export function roleForExperience(
   relation: CenterRelation,
   experience?: Experience,
-): Role | "STUDENT" {
+): Role | "STUDENT" | null {
   const staff = relation.roles.find((role) => isCenterStaffRole(role));
   const teacher = relation.roles.find((role) => role === "TEACHER");
   const student = relation.roles.find((role) => role === "STUDENT");
 
-  if (experience === "center" && staff) return staff;
-  if (experience === "teacher" && teacher) return teacher;
-  if (experience === "student" && student) return student;
+  if (experience === "center") return staff ?? null;
+  if (experience === "teacher") return teacher ?? null;
+  if (experience === "student") return student ?? null;
 
   return staff ?? teacher ?? student ?? "STUDENT";
 }

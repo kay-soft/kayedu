@@ -248,6 +248,7 @@ const PAGEHEADER_EXEMPT: Record<string, string> = {
   "app/[locale]/(auth)/register/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/invite/[token]/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/select-center/page.tsx": "signed-out screen — AuthCard carries the heading",
+  "app/[locale]/(auth)/account-pending/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(print)/sessions/[id]/print/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/card/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/paper/page.tsx": "print sheet — no app chrome",

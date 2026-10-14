@@ -8,6 +8,7 @@ import { isBranchGrantableRole } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { organizationBranches } from "@/lib/db/organizations";
+import { scopedWhere } from "@/lib/db/tenant-scope";
 import { grantMembershipBranch, revokeMembershipBranch } from "@/lib/db/permissions";
 import { scoped, type ScopedDb } from "@/lib/db/scoped";
 import { ROUTES } from "@/lib/routes";
@@ -76,6 +77,39 @@ async function ownerGuard(
   return null;
 }
 
+/**
+ * An OWNER who stops being one takes their unaccepted invitations with them
+ * (SEC-42): a departing owner must not leave a week-long OWNER invitation
+ * behind. Revoked branch by branch across the organisation an Owner reaches
+ * — one `centerId`-scoped write per branch, never a cross-centre `where`.
+ */
+async function revokeInvitationsBy(
+  ctx: TenantContext,
+  inviterUserId: string,
+): Promise<number> {
+  const branches = await organizationBranches(prisma, ctx.center.organizationId);
+  const branchIds = new Set([ctx.center.id, ...branches.map((branch) => branch.id)]);
+  let revoked = 0;
+  for (const branchId of branchIds) {
+    const { count } = await prisma.invitation.updateMany({
+      where: scopedWhere(branchId, { invitedBy: inviterUserId, status: "PENDING" as const }),
+      data: { status: "REVOKED" },
+    });
+    revoked += count;
+  }
+  if (revoked > 0) {
+    await writeAuditLog({
+      centerId: ctx.center.id,
+      actorUserId: ctx.user.id,
+      action: "invitation.revoke",
+      entityType: "User",
+      entityId: inviterUserId,
+      after: { reason: "inviterLostOwner", count: revoked },
+    });
+  }
+  return revoked;
+}
+
 export async function changeMemberRoleAction(
   _state: ActionState,
   formData: FormData,
@@ -120,6 +154,7 @@ export async function changeMemberRoleAction(
   if (existing.length > 0) return { error: "alreadyMember" };
 
   await scope.db.memberships.update(membership.id, { role });
+  if (membership.role === "OWNER") await revokeInvitationsBy(scope.ctx, membership.userId);
 
   await writeAuditLog({
     centerId: scope.ctx.center.id,
@@ -153,6 +188,11 @@ export async function setMemberActiveAction(
   if (membership.active === active) return { status: "saved" };
   if (membership.userId === scope.ctx.user.id) return { error: "selfEdit" };
 
+  // D-09 (a), SEC-14: bringing a membership back re-grants its whole role, so
+  // reactivating is OWNER-only (`membership.role.assign`). A MANAGER may still
+  // deactivate — taking access away is not a grant.
+  if (active && !ctxCan(scope.ctx, "membership.role.assign")) return FORBIDDEN;
+
   const guard = await ownerGuard(scope, membership, membership.role, active);
   if (guard) return guard;
 
@@ -161,6 +201,9 @@ export async function setMemberActiveAction(
     // Re-activating someone who never accepted still counts as joining now.
     ...(active && !membership.joinedAt ? { joinedAt: new Date() } : {}),
   });
+  if (!active && membership.role === "OWNER") {
+    await revokeInvitationsBy(scope.ctx, membership.userId);
+  }
 
   await writeAuditLog({
     centerId: scope.ctx.center.id,

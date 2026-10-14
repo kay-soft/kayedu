@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, actionContext } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { confirmReservation, rejectReservation } from "@/lib/db/reservations";
 import { writeAuditLog } from "@/lib/db/audit";
@@ -40,7 +40,8 @@ export async function approveOwnReservationAction(
   _state: ApprovalsActionState,
   formData: FormData,
 ): Promise<ApprovalsActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return { error: "forbidden" };
   if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -72,7 +73,8 @@ export async function declineOwnReservationAction(
   _state: ApprovalsActionState,
   formData: FormData,
 ): Promise<ApprovalsActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return { error: "forbidden" };
   if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));

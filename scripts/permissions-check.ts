@@ -437,14 +437,18 @@ async function checkProvisioningBaseline() {
       same(await navFor(seeded.id, seedRecep.id, "RECEPTIONIST"), EXPECTED_NAV.RECEPTIONIST),
   );
 
-  // The regression itself: a centre with no baseline (deny-by-default) shows
-  // an Owner nothing but the ungated Dashboard — what P1 found in the dev DB.
+  // The regression P1 found — a centre with no baseline left its Owner nothing
+  // but the ungated Dashboard — is closed for OWNER at the root since SEC-2a
+  // (SEC-45): OWNER holds every non-platform action whatever rows exist, so a
+  // missing baseline can no longer lock an Owner out. (Was: "…shows its Owner
+  // only the Dashboard".) The other roles stay deny-by-default — the gaps
+  // check below still reports every missing row.
   const bareOrg = await prisma.organization.create({ data: { name: `${P1_ORG_PREFIX} Bare` } });
   const bare = await prisma.center.create({ data: { slug: SLUG_P1_BARE, name: "Permissions Check P1 Bare", organizationId: bareOrg.id } });
   const bareOwner = await staffMember(bare.id, "bare", "OWNER");
   check(
-    "Regression: a centre created WITHOUT the baseline shows its Owner only the Dashboard",
-    same(await navFor(bare.id, bareOwner.id, "OWNER"), ["dashboard"]),
+    "SEC-45: a centre created WITHOUT the baseline still gives its Owner the full Owner nav",
+    same(await navFor(bare.id, bareOwner.id, "OWNER"), EXPECTED_NAV.OWNER),
   );
   check("…and centerBaselineGaps reports every baseline row missing", (await centerBaselineGaps(prisma, bare.id)).missingGrants.length === expectedRows);
 

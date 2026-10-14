@@ -18,9 +18,16 @@ const personName = z.string().trim().min(1, "required").max(60, "tooLong");
 
 export const signInSchema = z.object({
   email,
-  password: z.string().min(1, "required"),
+  // Bounded like every other input (SEC-74): bcrypt reads 72 bytes anyway.
+  password: z.string().min(1, "required").max(72, "tooLong"),
   locale: localeSchema,
-  next: z.string().optional(),
+  next: z.string().max(512).optional(),
+});
+
+/** "Send the confirmation email again" (SEC-2a). */
+export const resendConfirmationSchema = z.object({
+  email,
+  locale: localeSchema,
 });
 
 export const signUpSchema = z
@@ -30,9 +37,9 @@ export const signUpSchema = z
     email,
     phone: optionalPhone,
     password,
-    confirmPassword: z.string(),
+    confirmPassword: z.string().max(72, "tooLong"),
     locale: localeSchema,
-    next: z.string().optional(),
+    next: z.string().max(512).optional(),
   })
   .refine((value) => value.password === value.confirmPassword, {
     path: ["confirmPassword"],

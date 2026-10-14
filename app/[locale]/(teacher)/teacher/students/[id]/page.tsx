@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
@@ -128,15 +128,18 @@ export default async function TeacherStudentDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("block.title")}</CardTitle>
-              <CardDescription>{t("block.description")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <StudentBlockForm studentProfileId={student.id} block={activeBlock} />
-            </CardContent>
-          </Card>
+          {/* SEC-15: shown only while the matrix grants TEACHER student.block. */}
+          {ctxCan(ctx, "student.block") ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("block.title")}</CardTitle>
+                <CardDescription>{t("block.description")}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <StudentBlockForm studentProfileId={student.id} block={activeBlock} />
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       </div>
     </div>

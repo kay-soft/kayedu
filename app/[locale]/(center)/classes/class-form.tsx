@@ -219,7 +219,7 @@ export function NewClassDialogContent({
         <p className="text-xs text-text-muted">{tNew("modeNewHint")}</p>
         {alreadyTeacher ? (
           <div className="flex flex-col gap-2 rounded-lg border border-info/30 bg-info-bg/60 p-3 text-sm" role="status">
-            <p className="text-text-primary">{tNew("alreadyTeacher", { name: alreadyTeacher.name })}</p>
+            <p className="text-text-primary">{tNew("alreadyTeacher", { name: alreadyTeacher.name ?? "" })}</p>
             <Button
               type="button"
               className="h-11 w-full sm:w-auto"
@@ -228,7 +228,7 @@ export function NewClassDialogContent({
                 setMode("select");
               }}
             >
-              {tNew("selectThem", { name: alreadyTeacher.name })}
+              {tNew("selectThem", { name: alreadyTeacher.name ?? "" })}
             </Button>
           </div>
         ) : null}

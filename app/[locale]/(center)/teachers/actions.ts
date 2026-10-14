@@ -21,7 +21,6 @@ import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import { normalizePhone } from "@/lib/phone";
-import { checkRateLimit } from "@/lib/rate-limit";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -147,11 +146,11 @@ export async function lookupPersonByPhoneAction(
   const normalized = normalizePhone(phone);
   if (!normalized) return { status: "notFound" };
 
-  if (!checkRateLimit(`people.phoneLookup:${scope.ctx.user.id}`, 20, 60_000)) {
-    return { status: "rateLimited" };
-  }
-
-  const resolution = await resolveContact({ phone: normalized });
+  const resolution = await resolveContact(
+    { centerId: scope.ctx.center.id, actorUserId: scope.ctx.user.id, adding: "teacher" },
+    { phone: normalized },
+  );
+  if (resolution.kind === "rateLimited") return { status: "rateLimited" };
   if (resolution.kind !== "matched") return { status: "notFound" };
 
   const match = await describeMatch(scope.ctx.center.id, resolution.match, {
@@ -403,7 +402,10 @@ export async function unblockStudentAction(
   if (!parsed.success) return NOT_FOUND;
 
   const block = await db.studentBlocks.findById(parsed.data.blockId);
-  if (!block) return NOT_FOUND;
+  // SEC-09: this screen manages teachers' block-lists only. A CLASS-scope
+  // block (placed from a class roster under `class.manage`) is removed there,
+  // never through `student.block`.
+  if (!block || block.scope !== "TEACHER") return NOT_FOUND;
 
   await db.studentBlocks.remove(block.id);
 

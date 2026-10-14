@@ -130,9 +130,22 @@ enum SettlementStatus {
 // VERIFIED is the only status any parent-portal read trusts. There is no
 // REJECTED state: OD-6 (00-master-product-spec.md §2.2) hasn't decided who
 // verifies or how, so this enum only carries what M16 actually needs.
+// REVOKED (SEC-2a, D-04): a VERIFIED link whose matched phone is no longer on
+// the student's record is revoked automatically (audited `parentLink.revoke`)
+// and never read again — revocation is final; a new match starts PENDING.
 enum ParentLinkStatus {
   PENDING
   VERIFIED
+  REVOKED
+}
+
+// A self-registered account's claim on a staff-created person (SEC-2a, D-01).
+// A sign-up whose email equals an unlinked, staff-created `User` never links
+// on its own: it opens a PENDING claim that centre staff approve in person.
+enum AccountClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -146,6 +159,13 @@ model User {
   firstName       String
   lastName        String
   email           String?  @unique
+  // SEC-2a (D-01): Supabase's `email_confirmed_at` for this login, mirrored on
+  // every sync. Null for a staff-created person who has never signed in. When
+  // REQUIRE_EMAIL_CONFIRMATION=true, an email-based link needs it set.
+  emailVerifiedAt DateTime?
+  // A staff-typed (never self-typed) contact, seeded once at creation. Phone
+  // is never an identity key (SEC-2a, D-02): nothing links on it, and sign-up
+  // never writes it.
   phone           String?  @unique
   altPhone        String?
   avatarUrl       String?
@@ -175,6 +195,52 @@ model User {
   // authenticates against — see the note on SessionRating below.
   sessionRatings     SessionRating[]     @relation("SessionRatingStudent")
   sessionRatingSkips SessionRatingSkip[] @relation("SessionRatingSkipStudent")
+  // SEC-2a (D-01) — sign-ups claiming this staff-created person.
+  accountClaims      AccountClaim[]      @relation("AccountClaimTarget")
+}
+
+/**
+ * A pending "this staff-created person is me" claim (SEC-2a, D-01,
+ * docs/01-data-model.md "People layer"). Written by `syncUserFromAuth`
+ * (`lib/auth/identity-link.ts`) when a new login's email equals a `User` a
+ * centre created (`authId` null); that login has **no app `User` at all**
+ * until a staff member at a centre where the person is known approves the
+ * claim in person (`lib/db/account-claims.ts`). Approving sets the target's
+ * `authId`; rejecting detaches the email from the unlinked target so the
+ * claimant continues as a brand-new person. Global, like `User` — no
+ * `centerId`; the staff list is scoped through the target's relations.
+ */
+model AccountClaim {
+  id                 String             @id @default(uuid())
+  /// The Supabase auth user id making the claim.
+  authId             String
+  /// The (normalized) email that login signed up with.
+  email              String
+  targetUserId       String
+  targetUser         User               @relation("AccountClaimTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  status             AccountClaimStatus @default(PENDING)
+  resolvedAt         DateTime?
+  resolvedBy         String?
+  resolvedAtCenterId String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([authId, targetUserId])
+  @@index([targetUserId, status])
+  @@index([authId])
+}
+
+/**
+ * One fixed-window counter for `lib/rate-limit.ts` (SEC-2a): a shared store so
+ * the limit holds across serverless instances and cold starts. One row per
+ * key, upserted atomically; rows from old windows are pruned opportunistically.
+ */
+model RateLimitBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@index([windowStart])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -203,7 +269,9 @@ model Center {
   slug           String               @unique // subdomain / branding key
   name           String
   nameEn         String?
-  logoUrl        String?
+  // SEC-2a (D-25): a key in the private `logos` bucket, never a URL — served
+  // through `/api/logos/[centerId]`, which mints a short-lived signed URL.
+  logoPath       String?
   themeColor     String               @default("#2563EB")
   // M19: replaces the old `active` boolean — see the enum's own doc comment.
   lifecycleState CenterLifecycleState @default(ACTIVE)
@@ -1235,11 +1303,14 @@ model ParentLink {
   centerId         String
   center           Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
   status           ParentLinkStatus @default(PENDING)
-  // The normalized phone that produced this link — an audit trail for staff
-  // reviewing the placeholder seam above, not itself re-checked on read.
+  // The normalized phone that produced this link. Re-checked on every read
+  // (SEC-2a, D-04): a link whose phone is no longer the student's parent
+  // phone or alt phone reads as nothing, and is revoked when staff change it.
   matchedPhone     String
   verifiedAt       DateTime?
   verifiedBy       String?
+  revokedAt        DateTime?
+  revokedReason    String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 

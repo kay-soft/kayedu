@@ -5,7 +5,9 @@
  *   npm run seed:preflight
  *
  * Writes nothing to the application database. Checks:
- *   - SEED_PASSWORD is at least 12 characters;
+ *   - SEED_PASSWORD and SEED_ADMIN_PASSWORD are at least 12 characters and
+ *     differ (D-21);
+ *   - the target is not a production project or environment (SEC-70);
  *   - DEV_PROJECT_REF matches the project ref in DATABASE_URL (and DIRECT_URL,
  *     and the Supabase API URL);
  *   - the service-role key works;

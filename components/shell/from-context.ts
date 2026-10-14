@@ -1,4 +1,5 @@
 import type { User } from "@prisma/client";
+import { centerLogoSrc } from "@/lib/storage-paths";
 
 import type {
   ShellBrand,
@@ -24,7 +25,7 @@ function fullName(user: User): string {
 export function brandFromContext(ctx: TenantContext): ShellBrand {
   return {
     name: ctx.center.name,
-    logoUrl: ctx.center.logoUrl,
+    logoUrl: centerLogoSrc(ctx.center),
     themeColor: ctx.center.themeColor,
   };
 }
@@ -53,7 +54,7 @@ export function shellScope(
     branches: relations.map((relation) => ({
       id: relation.center.id,
       name: relation.center.name,
-      logoUrl: relation.center.logoUrl,
+      logoUrl: centerLogoSrc(relation.center),
       themeColor: relation.center.themeColor,
     })),
     rollups: orgGroups.map((group) => ({

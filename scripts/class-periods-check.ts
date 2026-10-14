@@ -223,9 +223,15 @@ function staticChecks() {
       !/term/i.test(classGroupModel.replace(/\/\/.*$/gm, "")),
   );
   check("CenterTerm is exposed through lib/db/scoped.ts", /terms:\s*\{/.test(readFileSync("lib/db/scoped.ts", "utf8")));
+  // SEC-30 (SEC-2a): the hand-listed M10 script is gone — it named tables
+  // that no longer existed and missed fourteen that did. The lockdown
+  // migration enables RLS on every public table, CenterTerm included, and
+  // `npm run check:rls` proves it live.
   check(
-    "CenterTerm is in the RLS backstop list (supabase/m10-rls-and-storage.sql)",
-    /'CenterTerm'/.test(readFileSync("supabase/m10-rls-and-storage.sql", "utf8")),
+    "CenterTerm is covered by the Data API lockdown (RLS on every public table; check:rls asserts it live)",
+    /FOR r IN[\s\S]*n\.nspname = 'public' AND c\.relkind IN \('r', 'p'\)[\s\S]*ENABLE ROW LEVEL SECURITY/.test(
+      readFileSync("prisma/migrations/20261017090100_sec2a_data_api_lockdown/migration.sql", "utf8"),
+    ),
   );
   const settingsActions = readFileSync("app/[locale]/(center)/settings/actions.ts", "utf8");
   check(

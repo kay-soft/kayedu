@@ -120,7 +120,7 @@ export function StudentForm({
               key={`person-${linkedMatch?.userId ?? "new"}`}
               idPrefix="student-create"
               values={
-                linkedMatch
+                linkedMatch?.name
                   ? { firstName: linkedMatch.name.split(" ")[0], lastName: linkedMatch.name.split(" ").slice(1).join(" ") }
                   : undefined
               }

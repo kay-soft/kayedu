@@ -11,6 +11,7 @@ import { prisma } from "@/lib/db/client";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
+import { centerLogoSrc } from "@/lib/storage-paths";
 import { EmptyState } from "@/components/shared/empty-state";
 
 /**
@@ -34,7 +35,7 @@ export default async function TeacherCentersPage() {
   const [centers, subjects, grades] = await Promise.all([
     prisma.center.findMany({
       where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-      select: { id: true, name: true, logoUrl: true, themeColor: true },
+      select: { id: true, name: true, logoPath: true, themeColor: true },
       orderBy: { name: "asc" },
     }),
     listCatalogSubjects(prisma),
@@ -63,7 +64,12 @@ export default async function TeacherCentersPage() {
           {centers.map((center) => (
             <TeachAtCenterCard
               key={center.id}
-              center={center}
+              center={{
+                id: center.id,
+                name: center.name,
+                themeColor: center.themeColor,
+                logoUrl: centerLogoSrc(center),
+              }}
               subjects={subjectOptions}
               grades={gradeOptions}
             />

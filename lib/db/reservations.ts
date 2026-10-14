@@ -13,6 +13,7 @@ import type {
 // lib/db/teacher-portal.ts and lib/db/payments.ts).
 import { claimStudentCode } from "./students.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 import { cooldownUntil, enrollmentCap, isAtCapacity, isInCooldown } from "../capacity.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
 
@@ -134,8 +135,14 @@ export async function reserveOrEnroll(
 ): Promise<ReserveOrEnrollResult> {
   const { centerId, classGroupId, studentUserId } = params;
 
+  // SEC-16: a SUSPENDED/ARCHIVED centre takes no reservation or enrolment by
+  // direct call either — Discover's own filter is not the boundary.
   const classGroup = await tx.classGroup.findFirst({
-    where: scopedWhere(centerId, { id: classGroupId, active: true }),
+    where: scopedWhere(centerId, {
+      id: classGroupId,
+      active: true,
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    }),
     include: { room: ROOM_SET_SELECT.room, extraRooms: ROOM_SET_SELECT.extraRooms },
   });
   if (!classGroup) return { ok: false, error: "notFound" };
@@ -148,6 +155,10 @@ export async function reserveOrEnroll(
   const existingProfile = await tx.studentProfile.findFirst({
     where: { userId: studentUserId, centerId },
   });
+  // SEC-16: a student this centre deactivated cannot re-enrol themselves.
+  if (existingProfile && !existingProfile.active) {
+    return { ok: false, error: "studentBlocked" };
+  }
   if (existingProfile) {
     const existingEnrollment = await tx.enrollment.findFirst({
       where: scopedWhere(centerId, {

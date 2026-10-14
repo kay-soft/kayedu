@@ -24,6 +24,7 @@
 import { createInterface } from "node:readline/promises";
 import { PrismaClient } from "@prisma/client";
 import { foreignKeysIntoPublic, listWipeableTables, truncateAll } from "./lib/wipe.ts";
+import { productionTargetReason } from "../prisma/seed-data/production-refs.ts";
 
 const prisma = new PrismaClient();
 
@@ -53,6 +54,11 @@ function projectRefOf(raw: string | undefined): string | null {
 
 async function main() {
   const devRef = process.env.DEV_PROJECT_REF?.trim();
+
+  // SEC-70: the committed production denylist and the production
+  // deployment's own environment refuse before anything else is read.
+  const production = productionTargetReason();
+  if (production) fail(`Refusing to wipe: ${production}.`);
 
   if (process.env.ALLOW_DEV_WIPE !== "yes") {
     fail("ALLOW_DEV_WIPE is not set to 'yes'. Set it for this one command, then remove it again.");

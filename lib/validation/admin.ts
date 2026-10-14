@@ -50,7 +50,9 @@ export const createCenterSchema = z.object({
   name: centerName,
   nameEn: optionalText(120),
   slug,
-  logoUrl: optionalText(500),
+  // No logo URL (SEC-53, D-25 (b)): the logo is an uploaded file, checked by
+  // its bytes and stored in the private `logos` bucket — never a URL the
+  // server would fetch.
   themeColor,
   ownerEmail,
 });

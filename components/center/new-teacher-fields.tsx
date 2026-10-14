@@ -70,7 +70,7 @@ export function NewTeacherFields({
         key={`person-${linkedMatch?.userId ?? "new"}`}
         idPrefix={idPrefix}
         values={
-          linkedMatch
+          linkedMatch?.name
             ? {
                 firstName: linkedMatch.name.split(" ")[0],
                 lastName: linkedMatch.name.split(" ").slice(1).join(" "),

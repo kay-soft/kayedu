@@ -68,7 +68,7 @@ async function main() {
       if (heldRoles.length === 0) continue;
       const experience = experienceFor(heldRoles[0] as Role);
       const role = roleForExperience(relation, experience);
-      if (role === "STUDENT") continue;
+      if (role === null || role === "STUDENT") continue;
       const grants = await loadPermissionGrants(prisma, relation.center.id, role);
       const allowed = Object.entries(grants).filter(([, v]) => v).length;
       const nav = navForExperience(experience, role, grants);

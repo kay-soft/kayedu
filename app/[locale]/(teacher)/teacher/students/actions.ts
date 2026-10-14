@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getTenantContext } from "@/lib/auth/tenant";
+import { actionContext, ctxCan } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
@@ -36,7 +36,8 @@ const NOT_FOUND: TeacherActionState = { error: "notFound" };
 export async function searchTaughtStudentsTypeAheadAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return [];
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
@@ -60,7 +61,9 @@ export async function teacherBlockStudentAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  // SEC-15: the matrix's TEACHER `student.block` cell means what it says.
+  if (!ctx || !ctxCan(ctx, "student.block")) return { error: "forbidden" };
   const db = scoped(ctx);
 
   const parsed = teacherBlockStudentSchema.safeParse(Object.fromEntries(formData));
@@ -103,7 +106,8 @@ export async function teacherUnblockStudentAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx || !ctxCan(ctx, "student.block")) return { error: "forbidden" };
   const db = scoped(ctx);
 
   const parsed = teacherUnblockStudentSchema.safeParse(Object.fromEntries(formData));

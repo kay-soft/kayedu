@@ -1,6 +1,6 @@
 # 07 — Security & Anti-Fraud Audit (SEC-1)
 
-> **Status:** report only. SEC-1 changed **no** application code, schema or migrations. Every finding below is open until a fix milestone closes it.
+> **Status:** SEC-1 was report only. **SEC-2a** (identity & access, data exposure, platform) has since fixed **43** findings and left the rest open with a reason — see §1.1 for every finding's status. Money, concurrency and fraud findings are **SEC-2b**. Each fixed finding is asserted by name (`SEC-NN`) in `npm run check:security`; the Data API posture by `npm run check:rls`.
 > **Audited:** branch `dev` at `977f9cf` (2026-10-13), plus the live shared dev Supabase project. The database was only read, except for throwaway repro fixtures, which were created and deleted.
 > **Method:** 13 parallel area audits, then a re-read by the lead of every Critical/High finding against the code. A finding only made this report once its `file:line` evidence was confirmed. Docs were treated as claims to check, not as facts. Where a doc turned out to be wrong, §9 lists it.
 > **Severity scale:**
@@ -48,6 +48,88 @@
 2. **Money invariants enforced only in app code**, under READ COMMITTED with no database backstop. A race doubles payments (SEC-05) and settlements (SEC-06). Cancelled sessions leave money editable forever (SEC-08).
 3. **Owner visibility.** Voids and unpaid check-ins leave no trace that any centre screen shows (SEC-07).
 4. **Environment drift.** The PostgREST lockdown exists only as hand-made state on the dev project (SEC-10).
+
+### 1.1 Fix status after SEC-2a
+
+**43 FIXED, 32 OPEN.** "FIXED" means the change shipped and `npm run check:security` asserts it as `SEC-NN`. Every OPEN finding says why. The decisions SEC-2a used are in §6 (marked "decided").
+
+| ID | Status | What changed / why open |
+|---|---|---|
+| SEC-01 | FIXED | A sign-up never links to a staff-created person: a matching email opens a PENDING `AccountClaim` that staff approve in person on `/approvals`; the login has no app user meanwhile (`lib/auth/identity-link.ts`, `lib/db/account-claims.ts`). `REQUIRE_EMAIL_CONFIRMATION=true` adds a confirmed-email requirement to every email link; production refuses to start without it or while Supabase auto-confirms. Invitations link by token only (email-bound, single use, expiring, role from the row). Auth-confirm route and a "check your email" state added. Asserted with auto-confirm simulated ON. (D-01) |
+| SEC-02 | FIXED | A phone is never an identity key: sign-up stores none and says no "phone in use"; staff link only through a person's global email (`isLinkableMatch`); a contact another person holds is never copied onto a new `User`. (D-02 (a)) |
+| SEC-03 | FIXED (stop-gap) | `verifyParentLinkPlaceholder` refuses and its button is disabled (D-03 (d)); the real parent is no longer locked out of their number (no phone is stored at sign-up). Origination still writes inert PENDING rows. The real mechanism stays OD-6. |
+| SEC-04 | FIXED | `verifiedChildLinks` re-checks active profile, centre lifecycle and the matched phone on every read; a parent-phone change revokes stale links (`REVOKED`, audited `parentLink.revoke`). No manual "remove link" button — D-04 (a) chose automatic revocation. |
+| SEC-05 | OPEN | Money/concurrency — SEC-2b. |
+| SEC-06 | OPEN | Money/concurrency — SEC-2b (D-05 = OD-8 open). |
+| SEC-07 | OPEN | Fraud visibility — SEC-2b (D-06 open). |
+| SEC-08 | OPEN | Money/session lifecycle — SEC-2b (D-07 open). |
+| SEC-09 | FIXED | `roleForExperience` denies instead of falling back; a denied context grants nothing (`canInContext`/`ctxCan`); every `(center)` action reaches `ctxCan` (static sweep); the centre unblock refuses a CLASS-scope block. |
+| SEC-10 | FIXED | Lockdown migration `20261017090100_sec2a_data_api_lockdown` (RLS on every public table, zero policies, no grants or default grants to anon/authenticated, private buckets); `npm run check:rls` in CI after `migrate deploy`. (D-19 (a)) |
+| SEC-11 | FIXED | Postgres-backed limiter inside `resolveContact` covers all five disclosing paths (per staff member and per centre); a person known only outside the organisation is described without a name. (D-08 (b)) |
+| SEC-12 | OPEN | Concurrency/money — SEC-2b. |
+| SEC-13 | OPEN | Concurrency — SEC-2b. |
+| SEC-14 | FIXED | Reactivating a staff membership needs `membership.role.assign` (OWNER); managers may still deactivate; the UI hides reactivation from non-owners. (D-09 (a)) |
+| SEC-15 | FIXED | Teacher block/unblock check `student.block`; the form is gated; teacher earnings (dashboard, session receipt) are gated on `analytics.own.view`. The broader "every permission has a call site" sweep is narrowed to the teacher portal: `audit.view` (SEC-07, SEC-2b), `center.branding.edit` and `platform.manage` still have none. |
+| SEC-16 | FIXED | `reserveOrEnroll` refuses a suspended/archived centre and a deactivated profile; profile completion requires both; the parent read hides them. (D-10 (a)) |
+| SEC-17 | FIXED | Profile completion is strictly one-time (`alreadyCompleted`); staff edits stay. (D-11 (a)) |
+| SEC-18 | OPEN | Separation of duties on money — SEC-2b (D-12 open). |
+| SEC-19 | OPEN | Receipts/money — SEC-2b. |
+| SEC-20 | OPEN | Void path — SEC-2b (D-13 open). |
+| SEC-21 | OPEN | Fraud via timezone — SEC-2b (D-14 open). |
+| SEC-22 | OPEN | Money validation — SEC-2b (D-15 open). |
+| SEC-23 | OPEN | Settlements — SEC-2b (D-16 open). |
+| SEC-24 | OPEN | Money sums — SEC-2b (D-17 open). |
+| SEC-25 | OPEN | Abuse area, outside SEC-2a's scope (a later part). |
+| SEC-26 | OPEN | Abuse area, outside SEC-2a's scope; D-18 open. |
+| SEC-27 | FIXED | Sign-in, sign-up and confirmation resend are throttled per email and per client IP in the shared store, before Supabase is called. CAPTCHA and leaked-password protection are recorded for M20 (`00` §2.1-A). |
+| SEC-28 | FIXED | Headers in `next.config.ts` on every route; CSP ships report-only — enforcing it is backlog entry 22. |
+| SEC-29 | OPEN | Retention/erasure is D-20 = OD-2 (legal review) — not decided. |
+| SEC-30 | FIXED | `supabase/m10-rls-and-storage.sql` deleted; the lockdown migration covers every table; the grep gate is replaced by `check:rls`. |
+| SEC-31 | FIXED | Deny-all, zero policies on `public` (D-19 (a)); `check:rls` fails on any policy. |
+| SEC-32 | OPEN | Availability area, outside SEC-2a's scope. |
+| SEC-33 | FIXED | Supabase auth cookies httpOnly, Secure in production, SameSite=Lax; `lib/supabase/client.ts` deleted. |
+| SEC-34 | FIXED | next and eslint-config-next 16.3.8. |
+| SEC-35 | FIXED | `shadcn` and `prisma` moved to devDependencies; `deepmerge-ts` pinned to 8.0.2 by an npm override (the advisory came in through `prisma`, a peer of `@prisma/client`); `npm audit --omit=dev` reports 0 and CI runs it at `--audit-level=high`. |
+| SEC-36 | OPEN | Needs the 13 legacy auth users deleted on the shared dev project — destructive, so it is the person's action (Supabase dashboard), recorded in `00` §2.1-A and M20. |
+| SEC-37 | FIXED | A static import-closure gate (`check:security` SEC-37) proves no `"use client"` module reaches the service-role client, Prisma, the storage layer or the auth session. The `server-only` package was not installed (that install is the person's decision); the gate stands in for it. |
+| SEC-38 | FIXED | `SEED_ADMIN_PASSWORD` (≥ 12, ≠ `SEED_PASSWORD`) for the platform admin; seed, preflight and `.env.example` updated. (D-21 (a)) |
+| SEC-39 | FIXED | `npm run db:migrate` refuses and points at `prisma migrate deploy`; no script runs `migrate dev`/`reset`/`db push`. |
+| SEC-40 | FIXED | No `phoneInUse`/`emailInUse`: a sign-up without a session always shows the same "check your email" state. (D-02) |
+| SEC-41 | FIXED | Sign-up metadata is zod-parsed and capped; a metadata phone is ignored; `signUpAction` no longer overwrites the `User` row. |
+| SEC-42 | FIXED | Acceptance claims the invitation conditionally inside its transaction; revoke is OWNER-only (D-22 (a)); an owner who stops being one has their pending invitations revoked, branch by branch. |
+| SEC-43 | FIXED | `safeNextPath` refuses backslashes, control characters, over-long values and anything resolving to another origin. |
+| SEC-44 | FIXED | Every `(teacher)` action resolves through `actionContext("teacher")` (an active TEACHER role at the active centre, else FORBIDDEN). |
+| SEC-45 | FIXED | `can()` gives OWNER every non-platform action regardless of stored rows. |
+| SEC-46 | FIXED | `createPeriodSettlementAction` refuses a teacher id that is not this centre's teacher before writing. |
+| SEC-47 | FIXED | The student page counts relations at other branches of the same organisation only. (D-23 (a)) |
+| SEC-48 | FIXED | The roll-up clamps each branch by its own visibility window and requires `analytics.center.view` at each branch; a branch without a range is never read unbounded. |
+| SEC-49 | OPEN | Validation area, outside SEC-2a's scope. |
+| SEC-50 | OPEN | Validation area, outside SEC-2a's scope. |
+| SEC-51 | OPEN | Fraud — SEC-2b (D-24 open). |
+| SEC-52 | OPEN | Validation area, outside SEC-2a's scope. |
+| SEC-53 | FIXED | Logos are files in the private `logos` bucket (`Center.logoPath`), served by `/api/logos/[centerId]` as a signed URL; nothing fetches a remote URL any more. (D-25 (b)) |
+| SEC-54 | FIXED | Uploads are typed by magic bytes (PNG/JPEG/WebP; never SVG, never `File.type`). |
+| SEC-55 | FIXED | Storage is private and service-role-only by design (no `storage.objects` policy); buckets and caps are in the migration; `check:rls` asserts it. |
+| SEC-56 | FIXED | `docs/00` §2.1-B, `docs/01` §4, `docs/02` §5 and §10 rewritten to the real posture. |
+| SEC-57 | FIXED | Docs corrected (the Prisma role is not a superuser but has BYPASSRLS); `check:rls` prints it; a non-bypass app role is backlog entry 23. |
+| SEC-58 | OPEN | Pricing — SEC-2b (D-26 open). |
+| SEC-59 | OPEN | Ratings integrity (abuse), outside SEC-2a's scope. |
+| SEC-60 | OPEN | Audit/money — SEC-2b. |
+| SEC-61 | OPEN | LIKE escaping (validation), outside SEC-2a's scope. |
+| SEC-62 | OPEN | Visibility window on money writes — SEC-2b, with SEC-08. |
+| SEC-63 | FIXED | `lockAttendeeRow` takes `centerId` and filters on it in SQL. |
+| SEC-64 | FIXED | Photos capped at about 1 MB (under the Server Action body) and shrunk in the browser first. (D-27 (b)) |
+| SEC-65 | FIXED | Photo upload and removal are audited (`student.photo.update`/`.remove`). No rate limit was added — D-28 asked for the audit. (D-28) |
+| SEC-66 | OPEN | The auth-confirm route exists (`/[locale]/auth/confirm`); the password-reset flow needs real email delivery (OD-1) and is in M20. |
+| SEC-67 | FIXED | The in-process `Map` is replaced by the `RateLimitBucket` table, with pruning. |
+| SEC-68 | FIXED | `poweredByHeader: false`. |
+| SEC-69 | FIXED | `vercel.json` pins `fra1`. |
+| SEC-70 | FIXED | Seed, wipe and preflight refuse the production deployment's environment and a committed `PRODUCTION_PROJECT_REFS` list — the production ref is added there at M20. |
+| SEC-71 | OPEN | SVG renderer hardening (injection area), outside SEC-2a's scope; not exploitable today. |
+| SEC-72 | FIXED | The approval loaders select the requester's id and name only. |
+| SEC-73 | OPEN | No fix was specified and none is an escalation; aligning page and action gates on `/settings/staff` and the Add-teacher dialog is a UX decision for later. |
+| SEC-74 | OPEN | The auth half is fixed (`signInSchema` bounds the password and `next`); the money-parsing half (`parseEgpToPiastres`, the settings audit field) is SEC-2b. |
+| SEC-75 | OPEN | A `global-error.tsx` and production error reporting belong with M20's error-monitoring (Sentry) item. |
 
 ### Top 10 (fix order, highest risk first)
 | # | ID | Sev | One line |
@@ -394,6 +476,7 @@ Line numbers refer to `977f9cf`.
 ### 3.1 Critical
 
 #### SEC-01 — Signing up with a staff-created person's email takes over their record
+- **Status (SEC-2a): FIXED.** A sign-up never links to a staff-created person: a matching email opens a PENDING `AccountClaim` that staff approve in person on `/approvals`; the login has no app user meanwhile (`lib/auth/identity-link.ts`, `lib/db/account-claims.ts`). `REQUIRE_EMAIL_CONFIRMATION=true` adds a confirmed-email requirement to every email link; production refuses to start without it or while Supabase auto-confirms. Invitations link by token only (email-bound, single use, expiring, role from the row). Auth-confirm route and a "check your email" state added. Asserted with auto-confirm simulated ON. (D-01)
 - **Severity:** Critical. An unauthenticated outsider takes over a minor's record, or a teacher's membership, at every centre that person belongs to. It works against the live dev configuration today.
 - **Area:** AuthN / identity linking.
 - **Evidence:**
@@ -420,6 +503,7 @@ Line numbers refer to `977f9cf`.
 ### 3.2 High
 
 #### SEC-02 — An unverified phone acts as an identity key, so staff link a child or teacher record to a stranger
+- **Status (SEC-2a): FIXED.** A phone is never an identity key: sign-up stores none and says no "phone in use"; staff link only through a person's global email (`isLinkableMatch`); a contact another person holds is never copied onto a new `User`. (D-02 (a))
 - **Severity:** High. A child's record or a TEACHER membership is exposed to an outsider. Spec §5 requires matching "keyed on verified phone/email", but no phone in the system is ever verified.
 - **Area:** Identity / duplicate matching (cross-tenant).
 - **Evidence:**
@@ -445,6 +529,7 @@ Line numbers refer to `977f9cf`.
   - `SEC-02-teacher.ts`: the teacher path, using the real `addTeacherMembership`. A new centre's TEACHER membership ends up on the attacker's login.
 
 #### SEC-03 — Parent links come from an unverified sign-up phone, and "Verify" can't tell impostor from parent
+- **Status (SEC-2a): FIXED (stop-gap).** `verifyParentLinkPlaceholder` refuses and its button is disabled (D-03 (d)); the real parent is no longer locked out of their number (no phone is stored at sign-up). Origination still writes inert PENDING rows. The real mechanism stays OD-6.
 - **Severity:** High. A minor's schedule (location and time), attendance and payments go to a stranger after one staff click on evidence the stranger controls. OD-6 records that the mechanism is open; this finding shows why the shipped stand-in is unsafe.
 - **Area:** Parent origination / privacy of minors.
 - **Evidence:**
@@ -468,6 +553,7 @@ Line numbers refer to `977f9cf`.
   - `SEC-03-squat.ts`: cross-centre fan-out, and the real parent locked out.
 
 #### SEC-04 — A VERIFIED parent link is never revoked
+- **Status (SEC-2a): FIXED.** `verifiedChildLinks` re-checks active profile, centre lifecycle and the matched phone on every read; a parent-phone change revokes stale links (`REVOKED`, audited `parentLink.revoke`). No manual "remove link" button — D-04 (a) chose automatic revocation.
 - **Severity:** High. An adult the centre has removed from the record (after a custody change, a corrected number or a reassigned SIM) keeps seeing a minor's upcoming locations and attendance.
 - **Area:** Privacy of minors / parent portal.
 - **Evidence:**
@@ -589,6 +675,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-08.ts`. A payment from 2026-03-10 was voided on 2026-10-13.
 
 #### SEC-09 — A TEACHER-only member can call staff-only centre actions
+- **Status (SEC-2a): FIXED.** `roleForExperience` denies instead of falling back; a denied context grants nothing (`canInContext`/`ctxCan`); every `(center)` action reaches `ctxCan` (static sweep); the centre unblock refuses a CLASS-scope block.
 - **Severity:** High. This is a role bypass. Today it gives a teacher full-roster search (minors' names and codes) and lets them rewrite other teachers' block lists and staff-placed class blocks, at every centre (TEACHER holds `student.block` at 5/5 dev centres).
 - **Area:** AuthZ / role resolution.
 - **Evidence:**
@@ -616,6 +703,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-09.ts`. It uses the real `resolveCenterRelations`, `roleForExperience`, `loadPermissionGrants` and `can`, and replicates the action query shapes.
 
 #### SEC-10 — The PostgREST lockdown exists only as hand-made state on the dev project
+- **Status (SEC-2a): FIXED.** Lockdown migration `20261017090100_sec2a_data_api_lockdown` (RLS on every public table, zero policies, no grants or default grants to anon/authenticated, private buckets); `npm run check:rls` in CI after `migrate deploy`. (D-19 (a))
 - **Severity:** High (latent Critical). On any fresh Supabase project (the M20 production project, or the CI project `ci.yml` points at), every table would very likely be readable and writable with the public anon key. That includes minors' PII and the money and membership tables.
 - **Area:** Supabase RLS / grants.
 - **Evidence:**
@@ -649,6 +737,7 @@ Line numbers refer to `977f9cf`.
 - **Repro:** `SEC-10.ts`. It prints **NOT REPRODUCED against dev**, because the hand-made lockdown holds there. It is the probe to rerun against every newly provisioned project. The finding is about the repo gap, which the grep above confirms.
 
 #### SEC-11 — A cross-centre "phone/email → name" lookup whose rate limit is bypassable and unaudited
+- **Status (SEC-2a): FIXED.** Postgres-backed limiter inside `resolveContact` covers all five disclosing paths (per staff member and per centre); a person known only outside the organisation is described without a name. (D-08 (b))
 - **Severity:** High (borderline Medium). Any staff member with `student.manage` at any centre can turn phone numbers or emails into the global names of minors registered at **other** tenants, at volume. Spec §5.1 accepts the disclosure only with a rate limit, and that control doesn't hold.
 - **Area:** Abuse / enumeration / privacy of minors.
 - **Evidence:**
@@ -1429,6 +1518,8 @@ How each script behaves:
 
 Last run: 2026-10-14, against the shared dev project. A count afterwards found 0 leftover `secrepro` centres, users or organisations.
 
+**SEC-2a:** `SEC-01`, `SEC-02`, `SEC-02-teacher`, `SEC-03`, `SEC-03-squat`, `SEC-04`, `SEC-09`, `SEC-10` and `SEC-11` were pointed at the fixed code, printed **NOT REPRODUCED**, were ported into `npm run check:security` as assertions `SEC-01/02/03/04/09/10/11`, and were then deleted. The money/concurrency scripts (`SEC-05`, `SEC-05-mechanism`, `SEC-06`, `SEC-06-race`, `SEC-07`, `SEC-08`, `SEC-12`, `SEC-13`, `_fixtures`) stay for SEC-2b; `SEC-05-mechanism` only gained the `centerId` argument SEC-63 added to `lockAttendeeRow`.
+
 | Script | Finding | Result | Key output |
 |---|---|---|---|
 | `SEC-01.ts` | SEC-01 | REPRODUCED | live `mailer_autoconfirm=true`; victim `authId` null before; the attacker now resolves the victim's StudentProfile |
@@ -1504,7 +1595,7 @@ Until D-03 is decided, strongly consider **disabling the Verify button** (D-03 (
 
 ## 6. NEEDS-DECISION register
 
-These are product, money or permission choices. CLAUDE.md says to ask rather than assume on these. They are registered together as **OD-11** in `docs/00-master-product-spec.md` §2.2, which points here. Unless noted, the decider is the Founder/Dev plus the Business partner.
+These are product, money or permission choices. CLAUDE.md says to ask rather than assume on these. **Decided at SEC-2a** (and recorded in `00-master-product-spec.md` §5.1 "Security decisions (SEC-2a)"): D-01 (revised — no auto-link ever; invitation tokens only; staff-approved claims for staff-created people; `REQUIRE_EMAIL_CONFIRMATION` plus a production guard), D-02 (a), D-03 (d) as a stop-gap, D-04 (a), D-08 (b), D-09 (a), D-10 (a), D-11 (a), D-19 (a), D-21 (a), D-22 (a), D-23 (a), D-25 (b), D-27 (b), D-28 (yes). The rest remain open in OD-11. They are registered together as **OD-11** in `docs/00-master-product-spec.md` §2.2, which points here. Unless noted, the decider is the Founder/Dev plus the Business partner.
 
 | D# | Finding(s) | Question | Options (★ = auditor's recommendation) |
 |---|---|---|---|
@@ -1638,6 +1729,7 @@ All of this was read-only, on 2026-10-13/14, against the shared dev project.
 | Constraints | `Payment` has no unique index on active payments (dropped in M5); `Refund_paymentId_key` UNIQUE; `SessionAttendee(sessionId, studentProfileId)` UNIQUE; no CHECK on Payment; no Settlement uniqueness or exclusion; no triggers |
 | Exposure counts | 109 `User` rows with an email and `authId` null (107 with a StudentProfile) are claimable via SEC-01; 110 profiles carry a `parentPhone` (the SEC-03 surface); 13 legacy auth users accept the historical password (SEC-36) |
 | `npm audit --omit=dev` | 21 vulnerable packages (2 critical, 17 high, 2 moderate); none reachable at runtime (SEC-34, SEC-35) |
+| **After SEC-2a** (`check:rls`, 2026-10-14) | 42 `public` tables, RLS on all, 0 policies; `anon`/`authenticated`: no USAGE, no table/sequence/function privilege, no default grant; buckets `avatars` (1 MB), `id-cards`, `logos` (512 KB, raster only), `session-uploads`, all private, 0 `storage.objects` policies; Prisma role `postgres` rolbypassrls=true. GoTrue unchanged (`mailer_autoconfirm=true` on dev, by design until OD-1). `npm audit --omit=dev`: 0. |
 
 ---
 
@@ -1645,16 +1737,16 @@ All of this was read-only, on 2026-10-13/14, against the shared dev project.
 
 SEC-1 changes no behaviour, so these passages are **not** rewritten here. Each one is to be corrected in the same session as the fix that touches it (working rule 3). They are recorded so that nobody relies on them in the meantime.
 
-| Doc claim | Reality | Finding |
-|---|---|---|
-| `docs/03-build-order.md:186` (R2) says the "second active payment" race is closed | It is open; the lock query's EXISTS is stale | SEC-05 |
-| `docs/00` §5 and CLAUDE.md rule 4: duplicate matching uses verified phone/email only | No phone is ever verified, and sign-up phones and student-edited local phones are matched | SEC-02 |
-| CLAUDE.md rule 9: the visibility window is enforced in the scoped helpers | Enforced per page; only `refunds.list` applies it in `scoped.ts`; money writes skip it | SEC-62, SEC-08 |
-| `docs/02` §10 "Layer 2": `storage.objects` policies mirror membership, using three `kayedu_*` helpers | 0 storage policies and no helpers on the live project; the repo has no `avatars`/`id-cards` policies | SEC-55 |
-| `docs/00` §2.1-B (line 69): `public.rls_auto_enable()` is executable by anon/authenticated | The function does not exist | SEC-56 |
-| `docs/00` §2.1-B (line 71) and `docs/01:58,130`: avatars/id-cards policies exist; tables are "in the RLS backstop list" | No policies; the backstop script fails as written | SEC-30, SEC-56 |
-| `docs/00:68`, `docs/02:326-328`: RLS is a safety net for direct SQL; the Prisma role is "non-superuser" | The Prisma role has BYPASSRLS, so RLS only ever covers PostgREST | SEC-57 |
-| `supabase/m10-rls-and-storage.sql:21`: Prisma connects with the service-role key | It connects as `postgres` | SEC-30 |
-| `docs/03` M20: "run `supabase/m10-rls-and-storage.sql`" is the RLS step | The script aborts on non-existent tables and omits 14 tables, and no migration carries the lockdown | SEC-10, SEC-30 |
-| `docs/02` §10: photo limit 5 MB | Effectively 1 MB (the Server Action body limit) | SEC-64 |
-| `docs/00` §5.1 (M18): the phone lookup is rate-limited | Only 2 of the 5 paths that disclose a match are limited, and the limiter is per instance | SEC-11 |
+| Doc claim | Reality | Finding | Status |
+|---|---|---|---|
+| `docs/03-build-order.md:186` (R2) says the "second active payment" race is closed | It is open; the lock query's EXISTS is stale | SEC-05 | open — SEC-2b |
+| `docs/00` §5 and CLAUDE.md rule 4: duplicate matching uses verified phone/email only | No phone is ever verified, and sign-up phones and student-edited local phones are matched | SEC-02 | **Corrected at SEC-2a** (matching now links on the global email only; a phone is never a key) |
+| CLAUDE.md rule 9: the visibility window is enforced in the scoped helpers | Enforced per page; only `refunds.list` applies it in `scoped.ts`; money writes skip it | SEC-62, SEC-08 | open — SEC-2b |
+| `docs/02` §10 "Layer 2": `storage.objects` policies mirror membership, using three `kayedu_*` helpers | 0 storage policies and no helpers on the live project; the repo has no `avatars`/`id-cards` policies | SEC-55 | **Corrected at SEC-2a** (§10 now: no Layer 2 by design) |
+| `docs/00` §2.1-B (line 69): `public.rls_auto_enable()` is executable by anon/authenticated | The function does not exist | SEC-56 | **Corrected at SEC-2a** |
+| `docs/00` §2.1-B (line 71) and `docs/01:58,130`: avatars/id-cards policies exist; tables are "in the RLS backstop list" | No policies; the backstop script fails as written | SEC-30, SEC-56 | **Corrected at SEC-2a** |
+| `docs/00:68`, `docs/02:326-328`: RLS is a safety net for direct SQL; the Prisma role is "non-superuser" | The Prisma role has BYPASSRLS, so RLS only ever covers PostgREST | SEC-57 | **Corrected at SEC-2a** (BYPASSRLS stated) |
+| `supabase/m10-rls-and-storage.sql:21`: Prisma connects with the service-role key | It connects as `postgres` | SEC-30 | **Resolved at SEC-2a** (file deleted) |
+| `docs/03` M20: "run `supabase/m10-rls-and-storage.sql`" is the RLS step | The script aborts on non-existent tables and omits 14 tables, and no migration carries the lockdown | SEC-10, SEC-30 | **Corrected at SEC-2a** (M20 now runs `check:rls` after the migration) |
+| `docs/02` §10: photo limit 5 MB | Effectively 1 MB (the Server Action body limit) | SEC-64 | **Corrected at SEC-2a** (about 1 MB, shrunk in the browser) |
+| `docs/00` §5.1 (M18): the phone lookup is rate-limited | Only 2 of the 5 paths that disclose a match are limited, and the limiter is per instance | SEC-11 | **Corrected at SEC-2a** (all five paths, shared store) |

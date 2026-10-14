@@ -10,6 +10,10 @@ import type { TenantRole } from "@/lib/auth/permissions";
 export const ROUTES = {
   login: "/login",
   register: "/register",
+  /** A login with no app user yet: a pending claim or an unconfirmed email (SEC-2a). */
+  accountPending: "/account-pending",
+  /** Where Supabase's confirmation link lands (SEC-66). */
+  authConfirm: "/auth/confirm",
   selectCenter: "/select-center",
   invite: (token: string) => `/invite/${token}`,
   centerDashboard: "/dashboard",
@@ -83,9 +87,24 @@ export function homePathForRole(role: TenantRole): string {
   }
 }
 
-/** Guards against open redirects on `?next=`. */
+/**
+ * Guards against open redirects on `?next=` (SEC-43): a same-origin,
+ * root-relative path only. Refuses a protocol-relative `//host`, any
+ * backslash (browsers treat `/\host` as `//host`), control characters and
+ * anything that resolves to another origin, and caps the length.
+ */
 export function safeNextPath(value: string | null | undefined): string | null {
-  if (!value) return null;
+  if (!value || value.length > 512) return null;
   if (!value.startsWith("/") || value.startsWith("//")) return null;
+  if (value.includes("\\") || [...value].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127)) {
+    return null;
+  }
+  try {
+    const base = "https://kayedu.invalid";
+    const resolved = new URL(value, base);
+    if (resolved.origin !== base) return null;
+  } catch {
+    return null;
+  }
   return value;
 }

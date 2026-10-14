@@ -43,6 +43,8 @@ const TEACHER: Role = "TEACHER";
 export type TeacherRefusal =
   /** The email and the phone belong to two different people. */
   | "contactConflict"
+  /** The contact-lookup budget is spent (SEC-11 / D-08). */
+  | "rateLimited"
   /** `linkUserId` was posted but nobody matches any more. */
   | "matchGone"
   /** They already teach at this centre — select them instead. */
@@ -79,6 +81,23 @@ export type TeacherMembershipOptions = {
   refusePrivileged: boolean;
 };
 
+/**
+ * The inline flow's refusal for a contact that belongs to a platform
+ * administrator or to someone holding a non-teacher role at this centre.
+ */
+async function privilegedRefusal(
+  tx: Tx,
+  centerId: string,
+  user: { id: string; isPlatformAdmin: boolean },
+): Promise<"privilegedPerson" | "staffMember" | null> {
+  if (user.isPlatformAdmin) return "privilegedPerson";
+  const otherRole = await tx.membership.findFirst({
+    where: scopedWhere(centerId, { userId: user.id, role: { not: TEACHER } }),
+    select: { id: true },
+  });
+  return otherRole ? "staffMember" : null;
+}
+
 export function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
 }
@@ -94,14 +113,38 @@ export async function addTeacherMembership(
 ): Promise<TeacherMembershipResult> {
   const { email, phone, altPhone } = input;
   const contact = { email, phone };
-  const resolution = await resolveContact(contact, tx);
+  const resolution = await resolveContact(
+    { centerId, actorUserId: options.actorUserId, adding: "teacher" },
+    contact,
+    tx,
+  );
 
+  if (resolution.kind === "rateLimited") return fail("rateLimited");
   if (resolution.kind === "conflict") return fail("contactConflict");
 
+  // Inline flow (class dialog): never a hidden way to give someone a second
+  // role. Checked against **every** contact hit — a phone included — because
+  // refusing reveals nothing it could link (SEC-2a keeps phones out of links,
+  // not out of refusals).
+  if (options.refusePrivileged) {
+    const hits = resolution.kind === "matched" ? [resolution.match, ...resolution.others] : resolution.others;
+    for (const hit of hits) {
+      const refusal = await privilegedRefusal(tx, centerId, hit.user);
+      if (refusal) return fail(refusal, await describeMatch(centerId, hit, contact, tx));
+    }
+  }
+
+  const matchedDescription =
+    resolution.kind === "matched" ? await describeMatch(centerId, resolution.match, contact, tx) : null;
+
   // The name to seed onto this centre's record: the existing person's real
-  // name when linking to a match, or the form's own input for a brand-new
-  // person (docs/01 §6) — editable here immediately either way, no lock.
-  const name = seedLocalName(resolution, { firstName: input.firstName, lastName: input.lastName });
+  // name when linking to a match (unless masked, D-08), or the form's own
+  // input for a brand-new person (docs/01 §6) — editable here either way.
+  const name = seedLocalName(
+    resolution,
+    { firstName: input.firstName, lastName: input.lastName },
+    matchedDescription,
+  );
   const local = { firstName: name.firstName, lastName: name.lastName, email, phone, altPhone };
 
   if (resolution.kind === "none") {
@@ -126,22 +169,11 @@ export async function addTeacherMembership(
   // Someone matched. Show them before doing anything — "this person already
   // exists", never a silent merge (spec §5).
   const matched = resolution.match.user;
-  const match = await describeMatch(centerId, resolution.match, contact, tx);
-
-  // Refused up front, before the match is even offered: nobody should be
-  // invited to "use" a person the flow will not let them use.
-  if (options.refusePrivileged) {
-    if (matched.isPlatformAdmin) return fail("privilegedPerson", match);
-    const otherRole = await tx.membership.findFirst({
-      where: scopedWhere(centerId, { userId: matched.id, role: { not: TEACHER } }),
-      select: { id: true },
-    });
-    if (otherRole) return fail("staffMember", match);
-  }
+  const match = matchedDescription!;
 
   if (options.linkUserId !== matched.id) return fail("matchFound", match);
 
-  if (match.existingHere === "teacher") return fail("alreadyTeacher", match);
+  if (match.existingHere === "teacher" || !match.linkable) return fail("alreadyTeacher", match);
 
   // Re-activating a former teacher is the same membership coming back, not a
   // second one — Membership is unique on (userId, centerId, role). Either way,

@@ -70,6 +70,9 @@ function check(name: string, passed: boolean, detail = "") {
   }
 }
 
+/** People created with no email and a phone they could not keep (SEC-2a) — cleaned up by id. */
+const extraUserIds: string[] = [];
+
 async function cleanup() {
   const centers = await prisma.center.findMany({
     where: { slug: { in: [SLUG_A, SLUG_B] } },
@@ -85,7 +88,9 @@ async function cleanup() {
     });
   }
   await prisma.user.deleteMany({
-    where: { OR: [{ email: { startsWith: EMAIL_PREFIX } }, { phone: { startsWith: PHONE_PREFIX } }] },
+    where: {
+      OR: [{ email: { startsWith: EMAIL_PREFIX } }, { phone: { startsWith: PHONE_PREFIX } }, { id: { in: extraUserIds } }],
+    },
   });
 }
 
@@ -640,27 +645,36 @@ async function main() {
     check("The teacher audit row records where it came from (class.create)", JSON.stringify(teacherAudit?.after).includes("class.create"));
   }
 
-  // ── 4. A duplicate phone links, never creates ─────────────────────────────
-  console.log("\n4. A phone that already belongs to someone shows the match and links — it never creates a second person");
+  // ── 4. A phone is not an identity key (SEC-2a, SEC-02 / D-02) ───────────────
+  // Was: "A duplicate phone links, never creates" — the match came back and
+  // "Use this person" linked Centre A to whoever held the phone. That was
+  // SEC-02: no phone is verified, so a phone alone may never attach a record.
+  console.log("\n4. A phone held by someone elsewhere is never a link — the new teacher is a new person");
   const otherCentrePerson = await makeMember(B, "teacher-elsewhere", "TEACHER", `${PHONE_PREFIX}0002`);
   const beforeMatch = await snapshot(A);
-  const firstTry = await createClassWithNewTeacher(prisma, A, newTeacherInput("dup", `${PHONE_PREFIX}0002`, roomA3.id), withTeacherOptions(actor.id));
-  check(
-    "Without 'Use this person', the match comes back and nothing is written",
-    !firstTry.ok && firstTry.part === "teacher" && firstTry.error === "matchFound" && firstTry.match?.userId === otherCentrePerson.id && (await snapshot(A)) === beforeMatch,
-    JSON.stringify(firstTry),
-  );
-  const linked = await createClassWithNewTeacher(
+  const forcedLink = await createClassWithNewTeacher(
     prisma,
     A,
     newTeacherInput("dup", `${PHONE_PREFIX}0002`, roomA3.id, TWO_SLOTS, otherCentrePerson.id),
     withTeacherOptions(actor.id),
   );
-  check("With the explicit link, it links this centre to the existing person", linked.ok && linked.teacherUserId === otherCentrePerson.id && linked.teacherOutcome === "linked", JSON.stringify(linked));
-  const afterLink = JSON.parse(await snapshot(A)) as Record<string, number>;
-  const beforeLink = JSON.parse(beforeMatch) as Record<string, number>;
-  check("No second User was created (users unchanged), one new Membership and one class", afterLink.users === beforeLink.users && afterLink.memberships === beforeLink.memberships + 1 && afterLink.classes === beforeLink.classes + 1);
-  check("The existing person is now a teacher at Centre A as well, and still at Centre B", (await prisma.membership.count({ where: { userId: otherCentrePerson.id, role: "TEACHER" } })) === 2);
+  check(
+    "Posting 'Use this person' for the phone's holder is refused (matchGone) and nothing is written",
+    !forcedLink.ok && forcedLink.part === "teacher" && forcedLink.error === "matchGone" && (await snapshot(A)) === beforeMatch,
+    JSON.stringify(forcedLink),
+  );
+  const createdNew = await createClassWithNewTeacher(prisma, A, newTeacherInput("dup", `${PHONE_PREFIX}0002`, roomA3.id), withTeacherOptions(actor.id));
+  check(
+    "Without a link it creates a NEW person — never the phone's holder",
+    createdNew.ok && createdNew.teacherOutcome === "created" && createdNew.teacherUserId !== otherCentrePerson.id,
+    JSON.stringify(createdNew),
+  );
+  if (createdNew.ok) {
+    extraUserIds.push(createdNew.teacherUserId);
+    const newPerson = await prisma.user.findUnique({ where: { id: createdNew.teacherUserId } });
+    check("The new person does not take the held phone onto their global User", newPerson?.phone === null);
+  }
+  check("The phone's holder is still a teacher at Centre B only", (await prisma.membership.count({ where: { userId: otherCentrePerson.id, role: "TEACHER" } })) === 1);
 
   // ── 5. Already a teacher here → selectable instead ─────────────────────────
   console.log("\n5. Someone who already teaches here is not recreated");

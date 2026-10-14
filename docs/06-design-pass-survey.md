@@ -54,6 +54,9 @@ Same as login; two password fields with no visibility toggle. **R10a:** `AuthCar
 ### `app/[locale]/(auth)/invite/[token]/page.tsx`
 Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on `AuthCard`.
 
+### `app/[locale]/(auth)/account-pending/page.tsx`
+**SEC-2a (new).** Where a login with no app user yet lands — a pending account claim, an unconfirmed email, or an email held by another account. Built on `AuthCard` like its siblings: the heading and description name the reason, an amber notice says what to do next, and a full-width-on-phone outline Sign out button. Nothing on it names the matched record.
+
 ### `app/[locale]/(auth)/select-center/page.tsx`
 Branch cards had hover but **no selected state** — the branch you are already in looked like the others — and the "Whole Management" card was always brand-tinted, even when not selected. **R10a:** `AuthCard`; the active branch/roll-up gets a brand outline, tint and a check (not colour alone); idle cards share one hover state.
 

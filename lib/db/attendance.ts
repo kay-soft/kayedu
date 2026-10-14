@@ -253,7 +253,7 @@ export async function changeAttendanceStatus(
     // Row-lock this attendee (session share-lock first, then the attendee —
     // the order every attendee/payment write uses), then re-read: a
     // concurrent correction or payment on the same student serializes here.
-    await lockAttendeeRow(tx, current.id);
+    await lockAttendeeRow(tx, current.id, params.centerId);
     const attendee = await tx.sessionAttendee.findUniqueOrThrow({ where: { id: current.id } });
     const fromStatus = attendee.attendanceStatus;
     if (fromStatus === params.status) {

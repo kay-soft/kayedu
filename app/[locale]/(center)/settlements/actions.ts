@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
+import { scoped } from "@/lib/db/scoped";
 import { WRITE_TRANSACTION_OPTIONS } from "@/lib/db/session-lifecycle";
 import {
   approveSettlement,
@@ -89,6 +90,10 @@ export async function createPeriodSettlementAction(
   const parsed = createPeriodSettlementSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, teacherId, from, to } = parsed.data;
+
+  // SEC-46: the teacher must be a teacher **of this centre** — a foreign or
+  // made-up id is refused before anything is written, never a junk row.
+  if (!(await scoped(ctx).teachers.findByUserId(teacherId))) return { error: "notFound" };
 
   // R2: creating a period settlement first closes every ended session in
   // range (lib/db/settlements.ts), so it gets a longer transaction budget

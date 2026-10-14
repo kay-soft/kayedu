@@ -238,7 +238,12 @@ export function parsePageSizeParam(value: string | undefined): number {
  */
 export type MatchCandidate = {
   userId: string;
-  name: string;
+  /**
+   * Null when the person is known only outside this centre's organisation
+   * (SEC-11 / D-08 (b)) — the panel then says "an account with this contact
+   * exists" without naming anyone.
+   */
+  name: string | null;
   /**
    * The contact value(s) as typed into *this* form — echoed back so staff can
    * sanity-check the match, not pulled from another center's local record
@@ -252,6 +257,12 @@ export type MatchCandidate = {
   existingHere: "student" | "teacher" | "staff" | null;
   /** The StudentProfile id when `existingHere === "student"` — links to them. */
   existingProfileId?: string;
+  /**
+   * May staff attach a new record to this person (SEC-2a, D-01/D-02 —
+   * `lib/db/identity.ts`'s `isLinkableMatch`)? False for a match that is only
+   * reported because they already hold this relationship here.
+   */
+  linkable: boolean;
 };
 
 /**

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, actionContext } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
@@ -37,7 +37,8 @@ export async function searchOwnSessionStudentsTypeAheadAction(
   currentParams: string,
   query: string,
 ): Promise<TypeAheadResult[]> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return [];
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
@@ -66,7 +67,8 @@ export async function updateSessionDescriptionAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return { error: "forbidden" };
   const db = scoped(ctx);
 
   const parsed = teacherSessionDescriptionSchema.safeParse(Object.fromEntries(formData));
@@ -112,7 +114,8 @@ export async function createSessionRequestAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return { error: "forbidden" };
   if (!ctxCan(ctx, "changeRequest.create")) return FORBIDDEN;
   if (!(ctx.membership?.isTrustedTeacher ?? false)) return NOT_TRUSTED;
   const db = scoped(ctx);

@@ -14,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { teacherRatingAverage } from "@/lib/db/ratings";
 import {
@@ -24,6 +24,7 @@ import {
 } from "@/lib/db/teacher-portal";
 import { formatMoney, formatNumber, formatRating } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
+import { centerLogoSrc } from "@/lib/storage-paths";
 import { centreTimeZone } from "@/lib/scheduling";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { LinkButton } from "@/components/shared/link-button";
@@ -67,6 +68,16 @@ export default async function TeacherDashboardPage() {
   const combined = combineTeacherSummaries(summaries);
   const summaryByCenter = new Map(summaries.map((summary) => [summary.centerId, summary]));
 
+  // SEC-15: a teacher's own earnings show per centre under that centre's
+  // `analytics.own.view` (TEACHER baseline) — a centre that revokes the cell
+  // drops out of the combined figure and its own line hides the amount.
+  const earningsVisibleAt = new Set(
+    contexts.filter((centerCtx) => ctxCan(centerCtx, "analytics.own.view")).map((centerCtx) => centerCtx.center.id),
+  );
+  const visibleEarnings = summaries
+    .filter((summary) => earningsVisibleAt.has(summary.centerId))
+    .reduce((sum, summary) => sum + summary.earnings.teacherShare, 0);
+
   // M17, spec §5 "Teacher ratings": the same average-out-of-5-only shape
   // every other reader of this aggregate gets — a teacher reading their own
   // rating is never shown a count either, and there is no separate,
@@ -81,7 +92,7 @@ export default async function TeacherDashboardPage() {
         action={<Badge variant="brand">{tRoles(ctx.role)}</Badge>}
       />
 
-      <StatGrid count={5}>
+      <StatGrid count={earningsVisibleAt.size > 0 ? 5 : 4}>
         <StatCard
           label={t("stats.centers")}
           value={formatNumber(combined.centerCount, locale)}
@@ -97,11 +108,13 @@ export default async function TeacherDashboardPage() {
           value={formatNumber(combined.sessionsThisWeek, locale)}
           icon={<CalendarDays className="size-4" />}
         />
-        <StatCard
-          label={t("stats.earningsThisMonth")}
-          value={formatMoney(combined.teacherShare, locale)}
-          icon={<Coins className="size-4" />}
-        />
+        {earningsVisibleAt.size > 0 ? (
+          <StatCard
+            label={t("stats.earningsThisMonth")}
+            value={formatMoney(visibleEarnings, locale)}
+            icon={<Coins className="size-4" />}
+          />
+        ) : null}
         <StatCard
           label={t("stats.rating")}
           value={rating.average !== null ? formatRating(rating.average, locale) : t("stats.ratingNone")}
@@ -127,7 +140,7 @@ export default async function TeacherDashboardPage() {
                 <div className="flex min-w-0 items-center gap-3">
                   <BrandAvatar
                     name={centerCtx.center.name}
-                    logoUrl={centerCtx.center.logoUrl}
+                    logoUrl={centerLogoSrc(centerCtx.center)}
                     themeColor={centerCtx.center.themeColor}
                     size="lg"
                   />
@@ -142,7 +155,9 @@ export default async function TeacherDashboardPage() {
                       {t("centers.summary", {
                         today: summary?.sessionsToday ?? 0,
                         week: summary?.sessionsThisWeek ?? 0,
-                        earnings: formatMoney(summary?.earnings.teacherShare ?? 0, locale),
+                        earnings: earningsVisibleAt.has(centerCtx.center.id)
+                          ? formatMoney(summary?.earnings.teacherShare ?? 0, locale)
+                          : "—",
                       })}
                     </p>
                   </div>

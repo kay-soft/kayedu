@@ -93,7 +93,9 @@ export async function revokeInvitationAction(
   formData: FormData,
 ): Promise<void> {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "staff.invite")) return;
+  // D-22 (a): revoking an invitation is OWNER-only, exactly like creating one
+  // (SEC-42) — `membership.role.assign` is ceiling-forced to OWNER.
+  if (!ctxCan(ctx, "membership.role.assign")) return;
 
   const parsed = invitationIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return;

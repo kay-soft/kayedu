@@ -141,10 +141,17 @@ export function CreateCenterForm() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="create-center-logo">{t("create.fields.logoUrl")}</Label>
-              <Input id="create-center-logo" name="logoUrl" dir="ltr" />
-              {state.fieldErrors?.logoUrl ? (
-                <FieldError>{tErrors(state.fieldErrors.logoUrl)}</FieldError>
+              <Label htmlFor="create-center-logo">{t("create.fields.logo")}</Label>
+              <Input
+                id="create-center-logo"
+                name="logo"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="h-11"
+              />
+              <p className="text-xs text-text-muted">{t("create.fields.logoHint")}</p>
+              {state.fieldErrors?.logo ? (
+                <FieldError>{tErrors(state.fieldErrors.logo)}</FieldError>
               ) : null}
             </div>
 

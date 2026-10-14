@@ -1,6 +1,7 @@
 import { ClipboardCheck } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { AccountClaimActions } from "@/app/[locale]/(center)/approvals/account-claim-actions";
 import { ChangeRequestActions } from "@/app/[locale]/(center)/approvals/change-request-actions";
 import { ReservationActions } from "@/app/[locale]/(center)/approvals/reservation-actions";
 import { SessionRequestActions } from "@/app/[locale]/(center)/approvals/session-request-actions";
@@ -12,6 +13,7 @@ import { RequestCard } from "@/components/shared/request-card";
 import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
+import { pendingClaimsForCenter } from "@/lib/db/account-claims";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
@@ -69,7 +71,7 @@ export default async function ApprovalsPage() {
   const locale = await getLocale();
   const dayNames = tDays.raw("dayNames") as string[];
 
-  const [changeRequests, sessionRequests, reservations, subjects, grades, classGroups] =
+  const [changeRequests, sessionRequests, reservations, subjects, grades, classGroups, accountClaims] =
     await Promise.all([
       db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }),
       db.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }),
@@ -77,6 +79,7 @@ export default async function ApprovalsPage() {
       db.subjects.list(),
       db.grades.list(),
       db.classGroups.list(),
+      pendingClaimsForCenter(prisma, ctx.center.id),
     ]);
 
   const teacherIds = [
@@ -125,7 +128,8 @@ export default async function ApprovalsPage() {
   }
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
-  const totalPending = changeRequests.length + sessionRequests.length + reservations.length;
+  const totalPending =
+    changeRequests.length + sessionRequests.length + reservations.length + accountClaims.length;
 
   // A NEW_CLASS request from someone with no local `Membership` is a teacher
   // asking to work at this branch at all (M15's centre directory), not an
@@ -154,6 +158,32 @@ export default async function ApprovalsPage() {
         />
       ) : (
         <div className="flex flex-col gap-8">
+          {accountClaims.length > 0 ? (
+            <section className="flex flex-col gap-3">
+              <SectionHeader
+                title={t("accountClaims.title")}
+                description={t("accountClaims.description")}
+              />
+              {accountClaims.map((claim) => (
+                <RequestCard
+                  key={claim.id}
+                  kind="onboarding"
+                  kindLabel={t("kinds.accountClaim")}
+                  requesterName={claim.name}
+                  headline={t(`accountClaims.headline.${claim.relation}`)}
+                  requestedOn={t("changeRequests.requestedOn", {
+                    date: formatDate(claim.createdAt, locale),
+                  })}
+                  details={[
+                    { label: t("accountClaims.emailLabel"), value: claim.email, ltr: true },
+                  ]}
+                  note={t("accountClaims.inPerson")}
+                  actions={<AccountClaimActions id={claim.id} />}
+                />
+              ))}
+            </section>
+          ) : null}
+
           <section className="flex flex-col gap-3">
             <SectionHeader
               title={t("changeRequests.title")}

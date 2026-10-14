@@ -277,10 +277,15 @@ async function lockAndLoadSession(
  * same student serialize (no payment slips in for a student being switched
  * to Absent; no second active payment) while different students in the same
  * session still proceed concurrently.
+ *
+ * Scoped by `centerId` in the SQL itself (SEC-63, tenant rule 1): an attendee
+ * of another centre locks nothing and returns null, even if a caller ever
+ * forgot to pre-scope the id.
  */
 export async function lockAttendeeRow(
   tx: Db,
   attendeeId: string,
+  centerId: string,
 ): Promise<{
   attendanceStatus: AttendanceStatus;
   studentProfileId: string | null;
@@ -293,7 +298,9 @@ export async function lockAttendeeRow(
     { attendanceStatus: AttendanceStatus; studentProfileId: string | null; hasActivePayment: boolean }[]
   >`SELECT a."attendanceStatus", a."studentProfileId",
       EXISTS (SELECT 1 FROM "Payment" p WHERE p."sessionAttendeeId" = a."id" AND p."voided" = false) AS "hasActivePayment"
-    FROM "SessionAttendee" a WHERE a."id" = ${attendeeId} FOR UPDATE OF a`;
+    FROM "SessionAttendee" a
+    WHERE a."id" = ${attendeeId} AND a."centerId" = ${centerId}
+    FOR UPDATE OF a`;
   return rows[0] ?? null;
 }
 

@@ -12,6 +12,8 @@ import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
+import { shrinkImageForUpload } from "@/components/center/resize-image";
+import { MAX_PHOTO_BYTES } from "@/lib/storage-paths";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
 
 /**
@@ -46,7 +48,18 @@ export function PhotoForm({
     <div className="flex flex-col gap-3">
       {error ? <FormMessage>{tErrors(error)}</FormMessage> : null}
 
-      <form action={formAction} className="flex flex-col gap-3">
+      <form
+        action={async (formData) => {
+          // D-27 (b): shrink a large phone photo before it is sent, so it
+          // fits the ~1 MB cap instead of failing on upload.
+          const photo = formData.get("photo");
+          if (photo instanceof File && photo.size > 0) {
+            formData.set("photo", await shrinkImageForUpload(photo, MAX_PHOTO_BYTES));
+          }
+          formAction(formData);
+        }}
+        className="flex flex-col gap-3"
+      >
         <input type="hidden" name="locale" value={locale} />
         <input
           type="hidden"

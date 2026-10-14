@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient, ParentLinkStatus } from "@prisma/client";
 // directly, outside the Next.js runtime (same reasoning as
 // lib/db/student-portal.ts and lib/db/reservations.ts).
 import { normalizePhone } from "../phone.ts";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 
 /**
  * ParentLink resolution (M16, docs/01-data-model.md "People layer, continued",
@@ -29,6 +30,19 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 const PENDING: ParentLinkStatus = "PENDING";
 const VERIFIED: ParentLinkStatus = "VERIFIED";
+const REVOKED: ParentLinkStatus = "REVOKED";
+
+/** The phones on the student's record a link may still stand on. */
+function currentParentPhones(profile: {
+  parentPhone: string | null;
+  parentAltPhone: string | null;
+}): Set<string> {
+  return new Set(
+    [normalizePhone(profile.parentPhone), normalizePhone(profile.parentAltPhone)].filter(
+      (phone): phone is string => Boolean(phone),
+    ),
+  );
+}
 
 /**
  * Is this (already-normalized) phone number privileged — does it belong to a
@@ -117,16 +131,87 @@ export async function originateParentLinks(
  * really do have a pending match for) yields zero rows here, which is what
  * makes "inert until verified" true by construction rather than by a check
  * some future caller could forget.
+ *
+ * SEC-2a re-checks every link on every read, so nothing stale is ever served
+ * (SEC-04, SEC-16; decisions D-04 (a), D-10 (a)):
+ * - the child's profile must still be **active**;
+ * - the child's centre must still be in an accessible lifecycle state (a
+ *   SUSPENDED or ARCHIVED centre disappears from the parent portal);
+ * - the phone the link was made on must still be the student's parent phone
+ *   or parent alt phone. A changed number reads as nothing here even before
+ *   `revokeStaleParentLinks` has marked the link REVOKED.
  */
-export function verifiedChildLinks(db: Db, parentUserId: string) {
-  return db.parentLink.findMany({
-    where: { parentUserId, status: VERIFIED },
+export async function verifiedChildLinks(db: Db, parentUserId: string) {
+  const links = await db.parentLink.findMany({
+    where: {
+      parentUserId,
+      status: VERIFIED,
+      studentProfile: { active: true },
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    },
     orderBy: { createdAt: "asc" },
     include: {
       studentProfile: { include: { user: true } },
       center: true,
     },
   });
+  return links.filter((link) =>
+    currentParentPhones(link.studentProfile).has(normalizePhone(link.matchedPhone) ?? ""),
+  );
+}
+
+/**
+ * D-04 (a): when a student's parent phones change, every link (pending or
+ * verified) whose matched phone is no longer on the record is **revoked** —
+ * final, audited (`parentLink.revoke`), in the caller's transaction when it
+ * passes one. Called by every write path that can change a parent phone:
+ * staff editing the student and the student's one-time profile completion.
+ */
+export async function revokeStaleParentLinks(
+  db: Db,
+  params: {
+    centerId: string;
+    studentProfileId: string;
+    actorUserId: string | null;
+  },
+): Promise<number> {
+  const profile = await db.studentProfile.findFirst({
+    where: { id: params.studentProfileId, centerId: params.centerId },
+    select: { parentPhone: true, parentAltPhone: true },
+  });
+  if (!profile) return 0;
+
+  const phones = currentParentPhones(profile);
+  const links = await db.parentLink.findMany({
+    where: {
+      centerId: params.centerId,
+      studentProfileId: params.studentProfileId,
+      status: { in: [PENDING, VERIFIED] },
+    },
+    select: { id: true, status: true, matchedPhone: true },
+  });
+  const stale = links.filter((link) => !phones.has(normalizePhone(link.matchedPhone) ?? ""));
+
+  const now = new Date();
+  for (const link of stale) {
+    const updated = await db.parentLink.updateMany({
+      where: { id: link.id, centerId: params.centerId, status: link.status },
+      data: { status: REVOKED, revokedAt: now, revokedReason: "parentPhoneChanged" },
+    });
+    if (updated.count === 0) continue;
+    await db.auditLog.create({
+      data: {
+        centerId: params.centerId,
+        actorUserId: params.actorUserId,
+        action: "parentLink.revoke",
+        entityType: "ParentLink",
+        entityId: link.id,
+        before: { status: link.status },
+        after: { status: REVOKED, reason: "parentPhoneChanged" },
+      },
+    });
+  }
+  return stale.length;
 }
 
 /** Every link (any status) against one student — the staff-side detail view. */
@@ -140,7 +225,7 @@ export function parentLinksForStudent(db: Db, centerId: string, studentProfileId
 
 export type VerifyParentLinkResult =
   | { ok: true; linkId: string; studentProfileId: string }
-  | { ok: false; error: "notFound" | "alreadyVerified" };
+  | { ok: false; error: "notFound" | "alreadyVerified" | "verificationUnavailable" };
 
 /**
  * ─────────────────────────────── OD-6 PLACEHOLDER ───────────────────────────
@@ -166,9 +251,10 @@ export async function verifyParentLinkPlaceholder(
   if (!link) return { ok: false, error: "notFound" };
   if (link.status === VERIFIED) return { ok: false, error: "alreadyVerified" };
 
-  await db.parentLink.update({
-    where: { id: link.id },
-    data: { status: VERIFIED, verifiedAt: new Date(), verifiedBy: params.verifiedByUserId },
-  });
-  return { ok: true, linkId: link.id, studentProfileId: link.studentProfileId };
+  // SEC-03 / D-03 (d): disabled until OD-6 is decided. A staff click on
+  // evidence the registrant controls (their own name, the phone they typed)
+  // cannot tell a parent from an impostor, so no staff action may turn a
+  // phone match into access. Links verified before SEC-2a keep working
+  // (`verifiedChildLinks` still re-checks them on every read).
+  return { ok: false, error: "verificationUnavailable" };
 }

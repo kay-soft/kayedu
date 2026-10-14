@@ -72,7 +72,11 @@ export function MatchPanel({
       <dl className="rounded-lg bg-surface/80 p-3 text-sm">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <dt className="text-xs font-medium text-text-muted">{t("person")}</dt>
-          <dd className="font-medium text-text-primary">{match.name}</dd>
+          <dd className="font-medium text-text-primary">
+            {/* D-08 (b): someone known only outside this organisation is
+                never named here. */}
+            {match.name ?? t("maskedName")}
+          </dd>
         </div>
         {match.email ? (
           <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">

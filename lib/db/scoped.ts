@@ -1030,7 +1030,9 @@ export function scoped(ctx: TenantContext) {
           where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
           orderBy: { requestedAt: "asc" },
           include: {
-            student: true,
+            // SEC-72: the requester's name only — never a whole `User` row
+            // (authId, isPlatformAdmin, contacts) in a server component.
+            student: { select: { id: true, firstName: true, lastName: true } },
             classGroup: {
               include: {
                 subject: { include: { selections: { where: { centerId } } } },
@@ -1054,7 +1056,9 @@ export function scoped(ctx: TenantContext) {
           }),
           orderBy: { requestedAt: "asc" },
           include: {
-            student: true,
+            // SEC-72: the requester's name only — never a whole `User` row
+            // (authId, isPlatformAdmin, contacts) in a server component.
+            student: { select: { id: true, firstName: true, lastName: true } },
             classGroup: {
               include: {
                 subject: { include: { selections: { where: { centerId } } } },

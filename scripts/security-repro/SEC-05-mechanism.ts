@@ -25,14 +25,14 @@ async function main() {
   const att = await createAttendance(prisma, { centerId: center.id, sessionId: session.id, studentProfileId: s.profile.id, enrollmentId: null, isDropIn: true, recordedBy: teacher.id });
   let t2Out: unknown;
   const t1 = a.$transaction(async (tx) => {
-    await lockAttendeeRow(tx, att.id);
+    await lockAttendeeRow(tx, att.id, center.id);
     await sleep(1500);
     await tx.payment.create({ data: { centerId: center.id, sessionId: session.id, sessionAttendeeId: att.id, studentProfileId: s.profile.id, teacherId: teacher.id, amount: 1, paymentMethodId: method.id, methodLabelSnapshot: "Cash", priceSnapshot: 1, centerShareSnapshot: 0, teacherShareSnapshot: 1, recordedBy: teacher.id } });
   }, { timeout: 20000 });
   await sleep(400);
   const t2 = b.$transaction(async (tx) => {
     const started = Date.now();
-    const locked = await lockAttendeeRow(tx, att.id);
+    const locked = await lockAttendeeRow(tx, att.id, center.id);
     const waited = Date.now() - started;
     const fresh = await tx.payment.count({ where: { sessionAttendeeId: att.id, voided: false } });
     t2Out = { waitedMs: waited, hasActivePaymentFromLockQuery: locked?.hasActivePayment, freshCountAfterLock: fresh };

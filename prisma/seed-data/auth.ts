@@ -5,7 +5,10 @@
  *
  * Hard rules:
  *  - the password is `SEED_PASSWORD` — required, and refused if under 12
- *    characters; there is no default and nothing here prints it;
+ *    characters; there is no default and nothing here prints it. The platform
+ *    admin alone uses `SEED_ADMIN_PASSWORD` (SEC-2a, D-21 (a)): also ≥ 12
+ *    characters and refused when it equals `SEED_PASSWORD`, so a tester given a
+ *    demo login never holds the admin's;
  *  - **a seed account is recognised by a marker the seed itself writes**
  *    (`app_metadata.kayedu_seed = true`, settable only through the admin API).
  *    An account with a seed address that carries no marker was not made by the
@@ -19,13 +22,34 @@
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SEED_EMAIL_DOMAIN } from "./domain.ts";
+import { productionTargetReason } from "./production-refs.ts";
 
 export { SEED_EMAIL_DOMAIN };
 
 /** The marker that says "the seed made this auth user". */
 export const SEED_MARKER = { kayedu_seed: true } as const;
 
-export type AuthAccount = { email: string; firstName: string; lastName: string; locale: "ar" | "en" };
+export type AuthAccount = {
+  email: string;
+  firstName: string;
+  lastName: string;
+  locale: "ar" | "en";
+  /** The platform admin — signs in with SEED_ADMIN_PASSWORD (D-21). */
+  admin?: boolean;
+};
+
+/** Both seed passwords, checked once (D-21): ≥ 12 characters each, and different. */
+export function seedPasswordProblems(env: Record<string, string | undefined> = process.env): string[] {
+  const password = env.SEED_PASSWORD ?? "";
+  const adminPassword = env.SEED_ADMIN_PASSWORD ?? "";
+  const problems: string[] = [];
+  if (password.length < 12) problems.push("SEED_PASSWORD is missing or shorter than 12 characters");
+  if (adminPassword.length < 12) problems.push("SEED_ADMIN_PASSWORD is missing or shorter than 12 characters");
+  if (adminPassword.length > 0 && adminPassword === password) {
+    problems.push("SEED_ADMIN_PASSWORD must differ from SEED_PASSWORD");
+  }
+  return problems;
+}
 
 /** `postgres.<ref>` (pooler user), `db.<ref>.supabase.co`, or `<ref>.supabase.co`. */
 export function projectRefOf(raw: string | undefined): string | null {
@@ -97,29 +121,43 @@ async function listAll(admin: SupabaseClient): Promise<AuthUserRow[]> {
 export class SeedAuth implements AuthPort {
   private readonly admin: SupabaseClient;
   private readonly password: string;
+  private readonly adminPassword: string;
   private readonly existing = new Map<string, string>(); // email → auth id (seed-made only)
   private readonly others = new Set<string>();
   private readonly seedEmails: Set<string>;
 
-  private constructor(admin: SupabaseClient, password: string, seedEmails: Set<string>) {
+  private constructor(
+    admin: SupabaseClient,
+    password: string,
+    adminPassword: string,
+    seedEmails: Set<string>,
+  ) {
     this.admin = admin;
     this.password = password;
+    this.adminPassword = adminPassword;
     this.seedEmails = seedEmails;
   }
 
-  /** Reads SEED_PASSWORD and the Supabase env, refusing early and clearly. */
+  /** Reads SEED_PASSWORD / SEED_ADMIN_PASSWORD and the Supabase env, refusing early and clearly. */
   static async connect(seedEmails: readonly string[]): Promise<SeedAuth> {
-    const password = process.env.SEED_PASSWORD ?? "";
-    if (password.length < 12) {
-      throw new Error("SEED_PASSWORD is missing or shorter than 12 characters. Set it in .env (it is the password of every seed account).");
+    const problems = seedPasswordProblems();
+    if (problems.length > 0) {
+      throw new Error(`${problems.join("; ")}. Set them in .env (SEED_PASSWORD for every seed account, SEED_ADMIN_PASSWORD for the platform admin).`);
     }
+    const password = process.env.SEED_PASSWORD ?? "";
+    const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "";
     for (const email of seedEmails) {
       if (!email.endsWith(`@${SEED_EMAIL_DOMAIN}`)) {
         throw new Error(`Seed account ${email} is not an @${SEED_EMAIL_DOMAIN} address.`);
       }
     }
     const admin = adminClient();
-    const auth = new SeedAuth(admin, password, new Set(seedEmails.map((email) => email.toLowerCase())));
+    const auth = new SeedAuth(
+      admin,
+      password,
+      adminPassword,
+      new Set(seedEmails.map((email) => email.toLowerCase())),
+    );
 
     const collisions: string[] = [];
     for (const user of await listAll(admin)) {
@@ -144,11 +182,12 @@ export class SeedAuth implements AuthPort {
       throw new Error(`${email} is not in the seed's fixed account list; refusing to touch it.`);
     }
     const metadata = { first_name: account.firstName, last_name: account.lastName, locale: account.locale };
+    const password = account.admin ? this.adminPassword : this.password;
 
     const known = this.existing.get(email);
     if (known) {
       const { error } = await this.admin.auth.admin.updateUserById(known, {
-        password: this.password,
+        password,
         email_confirm: true,
         user_metadata: metadata,
       });
@@ -158,7 +197,7 @@ export class SeedAuth implements AuthPort {
 
     const { data, error } = await this.admin.auth.admin.createUser({
       email,
-      password: this.password,
+      password,
       email_confirm: true,
       user_metadata: metadata,
       app_metadata: SEED_MARKER,
@@ -200,11 +239,24 @@ export async function runAuthPreflight(seedEmails: readonly string[]): Promise<P
   const result = (others: string[] = []): PreflightResult => ({ ok: steps.every((step) => step.ok), steps, others });
 
   const password = process.env.SEED_PASSWORD ?? "";
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "";
   add("SEED_PASSWORD is at least 12 characters", password.length >= 12, password.length >= 12 ? `${password.length} characters` : `${password.length} characters (need 12+)`);
+  add(
+    "SEED_ADMIN_PASSWORD is at least 12 characters (D-21)",
+    adminPassword.length >= 12,
+    adminPassword.length >= 12 ? `${adminPassword.length} characters` : `${adminPassword.length} characters (need 12+)`,
+  );
+  add(
+    "SEED_ADMIN_PASSWORD differs from SEED_PASSWORD (D-21)",
+    adminPassword.length === 0 || adminPassword !== password,
+    adminPassword !== password ? "different" : "the same — the platform admin must not share the demo password",
+  );
   add("Seed email domain", true, `@${SEED_EMAIL_DOMAIN}${process.env.SEED_EMAIL_DOMAIN ? " (SEED_EMAIL_DOMAIN)" : " (default)"}`);
 
   const devRef = process.env.DEV_PROJECT_REF?.trim() ?? "";
   const dbRef = projectRefOf(process.env.DATABASE_URL);
+  const production = productionTargetReason();
+  add("Not a production project or environment (SEC-70)", production === null, production ?? "not production");
   add(
     "DEV_PROJECT_REF matches DATABASE_URL's project ref",
     devRef !== "" && dbRef === devRef,

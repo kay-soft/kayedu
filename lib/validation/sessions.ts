@@ -404,12 +404,14 @@ export const receptionCheckInSchema = z.object({
  */
 export type SessionMatchCandidate = {
   userId: string;
-  name: string;
+  /** Null when known only outside this organisation (SEC-11 / D-08 (b)). */
+  name: string | null;
   email: string | null;
   phone: string | null;
   matchedOn: ("email" | "phone")[];
   existingHere: "student" | "teacher" | "staff" | null;
   existingProfileId?: string;
+  linkable: boolean;
 };
 
 export type SessionActionState = SlotConflictState & {

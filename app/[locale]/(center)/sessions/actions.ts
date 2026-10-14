@@ -399,21 +399,32 @@ export async function addNewAttendeeAction(
   if (!session) return NOT_FOUND;
 
   const contact = { email, phone };
-  const resolution = await resolveContact(contact);
+  const resolution = await resolveContact(
+    { centerId, actorUserId: ctx.user.id, adding: "student" },
+    contact,
+  );
+  if (resolution.kind === "rateLimited") return { error: "rateLimited" };
   if (resolution.kind === "conflict") return { error: "contactConflict" };
 
   let userId: string | null = null;
+  let described: Awaited<ReturnType<typeof describeMatch>> | null = null;
   if (resolution.kind === "matched") {
     const match = await describeMatch(centerId, resolution.match, contact);
+    described = match;
     if (linkUserId !== resolution.match.user.id) {
       return { status: "matchFound", match };
+    }
+    // Already a student here: reuse that profile (below). Anyone else must be
+    // linkable (SEC-2a, D-01/D-02) — a phone alone never attaches a record.
+    if (!match.linkable && match.existingHere !== "student") {
+      return { error: "matchGone" };
     }
     userId = resolution.match.user.id;
   } else if (linkUserId) {
     return { error: "matchGone" };
   }
 
-  const name = seedLocalName(resolution, { firstName, lastName });
+  const name = seedLocalName(resolution, { firstName, lastName }, described);
 
   let studentProfileId: string;
   try {

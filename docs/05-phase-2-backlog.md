@@ -222,6 +222,26 @@
 
 ---
 
+## 22. Enforce the Content-Security-Policy
+
+**What it is.** Turn the policy SEC-2a ships as `Content-Security-Policy-Report-Only` (`next.config.ts`) into an enforced `Content-Security-Policy`: a per-request nonce for Next's inline bootstrap scripts (set in `proxy.ts` and read by the root layout), `script-src 'self' 'nonce-…' 'strict-dynamic'` without `'unsafe-inline'`, and a report endpoint so violations are seen before they break a page.
+
+**Why deferred.** An enforced policy that is wrong breaks the app for everyone, silently, on whatever page the mistake touches — and this session may not run the app to check (CLAUDE.md working rule 1). Next's App Router needs the nonce threaded through the proxy and every layout before `'unsafe-inline'` can go, and next-intl's middleware sits in the same proxy. The non-CSP headers (framing, nosniff, referrer, permissions, HSTS) carry no such risk and are enforced now (SEC-28).
+
+**Depends on.** A browser pass over every route group in both locales with the report-only policy, to collect the real violations; a reporting endpoint (or Sentry's CSP intake, M20); then the nonce plumbing.
+
+---
+
+## 23. A dedicated Postgres role for the app that does not bypass RLS
+
+**What it is.** Connect Prisma as a `kayedu_app` role with exactly the table privileges the app needs and **no** BYPASSRLS, so the row-level-security backstop also covers the app's own connection — today it only covers the Supabase Data API (SEC-57).
+
+**Why deferred.** On Supabase the `postgres` role Prisma uses has BYPASSRLS, and the app's tenant isolation is enforced in code (`lib/db/scoped.ts`, CLAUDE.md rule 1). A non-bypass role only helps once there are **policies** that express tenant isolation per request (a `centerId` set per transaction, read by the policies) — a per-query design the audit lists as D-19 (c) and the project chose not to build (D-19 (a): deny-all, no policies). Without those policies a non-bypass app role would simply see nothing.
+
+**Depends on.** A decision to move from deny-all to per-tenant policies (setting the tenant per transaction from `getTenantContext()`), a migration path for the role and its grants that `prisma migrate deploy` can run, and connection-pooler support for per-transaction settings.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

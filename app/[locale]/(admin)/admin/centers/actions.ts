@@ -10,6 +10,8 @@ import {
   createCenterWithSettings,
   transitionCenterLifecycle,
 } from "@/lib/db/platform";
+import { readRasterImage, uploadCenterLogo } from "@/lib/db/storage";
+import { MAX_LOGO_BYTES } from "@/lib/storage-paths";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -51,6 +53,15 @@ export async function createCenterAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, ownerEmail, ...input } = parsed.data;
 
+  // The logo (D-25 (b)) is checked by its bytes before anything is created,
+  // then stored in the private `logos` bucket under the new centre's folder.
+  const logoField = formData.get("logo");
+  const logo = logoField instanceof File && logoField.size > 0 ? logoField : null;
+  if (logo) {
+    const checked = await readRasterImage(logo, MAX_LOGO_BYTES);
+    if (!checked.ok) return { fieldErrors: { logo: checked.error } };
+  }
+
   const invite = {
     email: ownerEmail,
     token: randomBytes(32).toString("base64url"),
@@ -60,6 +71,19 @@ export async function createCenterAction(
 
   const result = await createCenterWithSettings(prisma, { ...input, invite });
   if (!result.ok) return { error: result.error };
+
+  let logoError: string | undefined;
+  if (logo) {
+    const uploaded = await uploadCenterLogo(result.center.id, logo);
+    if (uploaded.ok) {
+      await prisma.center.update({
+        where: { id: result.center.id },
+        data: { logoPath: uploaded.path },
+      });
+    } else {
+      logoError = uploaded.error;
+    }
+  }
 
   await writeAuditLog({
     centerId: result.center.id,
@@ -75,7 +99,11 @@ export async function createCenterAction(
   });
 
   revalidatePath(centersPath(locale));
-  return { status: "created", invitationToken: invite.token };
+  return {
+    status: "created",
+    invitationToken: invite.token,
+    ...(logoError ? { fieldErrors: { logo: logoError } } : {}),
+  };
 }
 
 /**

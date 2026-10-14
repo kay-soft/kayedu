@@ -87,7 +87,7 @@ export async function listReservationsForStudent(db: Db, studentUserId: string) 
     where: { studentId: studentUserId },
     orderBy: { requestedAt: "desc" },
     include: {
-      center: { select: { id: true, name: true, logoUrl: true, themeColor: true } },
+      center: { select: { id: true, name: true, logoPath: true, themeColor: true } },
       classGroup: {
         select: {
           id: true,

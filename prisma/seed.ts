@@ -90,6 +90,7 @@ import {
 import { cardLayoutDocumentSchema } from "../lib/validation/settings.ts";
 
 import { SeedAuth, offlineAuth, projectRefOf, runAuthPreflight, type AuthPort } from "./seed-data/auth.ts";
+import { productionTargetReason } from "./seed-data/production-refs.ts";
 import { SEED_EMAIL_DOMAIN, mail } from "./seed-data/domain.ts";
 import { ensureCatalog, type Catalog, type SystemKey } from "./seed-data/catalog.ts";
 import { PhoneBook, dayOf, hashString, hhmm, makeRng, pool, toMinutes } from "./seed-data/helpers.ts";
@@ -135,6 +136,10 @@ function guardEnvironment(): "dev" | "local" {
   // writes thousands of rows. It must only ever run against the dev project
   // - or a database on this machine, where it touches no Supabase Auth at all.
   if (isLocalDatabase()) return "local";
+  // SEC-70: a committed production denylist and the production deployment's
+  // own environment refuse first — no .env value can talk past them.
+  const production = productionTargetReason();
+  if (production) throw new Error(`Refusing to seed: ${production}.`);
   const devRef = process.env.DEV_PROJECT_REF?.trim();
   const ref = projectRefOf(process.env.DATABASE_URL);
   if (!devRef || !ref || ref !== devRef) {
@@ -229,7 +234,7 @@ function holidaysBetween(from: Date, to: Date): HolidayDef[] {
 
 let auth: AuthPort;
 
-async function linkAuth(user: User, def: PersonDef): Promise<User> {
+async function linkAuth(user: User, def: PersonDef, isPlatformAdmin = false): Promise<User> {
   // Only the seed's fixed account list ever touches Supabase Auth - a person
   // with a seed-domain address who is not on it is a plain app-side User.
   if (!def.email || !auth.has(def.email)) return user;
@@ -238,10 +243,17 @@ async function linkAuth(user: User, def: PersonDef): Promise<User> {
     firstName: def.first,
     lastName: def.last,
     locale: def.locale ?? "en",
+    // D-21 (a): the platform admin signs in with SEED_ADMIN_PASSWORD.
+    admin: isPlatformAdmin,
   });
-  return user.authId === authId
+  // Seed accounts are created confirmed (`email_confirm: true`), so the app
+  // row carries the stamp too (SEC-2a: REQUIRE_EMAIL_CONFIRMATION reads it).
+  return user.authId === authId && user.emailVerifiedAt
     ? user
-    : prisma.user.update({ where: { id: user.id }, data: { authId } });
+    : prisma.user.update({
+        where: { id: user.id },
+        data: { authId, emailVerifiedAt: user.emailVerifiedAt ?? new Date() },
+      });
 }
 
 /** A global `User` for this person — found by email/phone, else created (one User per person). */
@@ -269,7 +281,7 @@ async function ensurePerson(
   if (options.isPlatformAdmin && !user.isPlatformAdmin) {
     user = await prisma.user.update({ where: { id: user.id }, data: { isPlatformAdmin: true } });
   }
-  return linkAuth(user, def);
+  return linkAuth(user, def, options.isPlatformAdmin === true);
 }
 
 async function audit(
@@ -1514,7 +1526,8 @@ async function main() {
   // ── Summary ────────────────────────────────────────────────────────────
   line("\n──────────────────────────────────────────────────────────────");
   line("Seed complete. Sign in at /en/login (or /ar/login) with any account in");
-  line("docs/dev-accounts.md — the password of every one is SEED_PASSWORD.");
+  line("docs/dev-accounts.md — the password of every one is SEED_PASSWORD, except the");
+  line("platform admin, whose password is SEED_ADMIN_PASSWORD.");
   line(
     mode === "local"
       ? "\nAccounts created or reset: none (local database — Supabase Auth skipped)"

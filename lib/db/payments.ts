@@ -127,7 +127,7 @@ export async function recordPayment(
   // concurrent write could change: the attendance status and whether an
   // active payment already exists. A correction to Absent or a second
   // payment for the same student serializes here.
-  const roster = await lockAttendeeRow(tx, attendeeId);
+  const roster = await lockAttendeeRow(tx, attendeeId, centerId);
   if (!roster || !roster.studentProfileId) return { ok: false, error: "notFound" };
   if (roster.attendanceStatus !== "PRESENT" && roster.attendanceStatus !== "LATE") {
     return { ok: false, error: "attendanceNotPayable" };

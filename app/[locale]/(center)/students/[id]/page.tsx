@@ -384,7 +384,15 @@ export default async function StudentDetailPage({
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={link.status === "VERIFIED" ? "success" : "warning"}>
+                        <Badge
+                          variant={
+                            link.status === "VERIFIED"
+                              ? "success"
+                              : link.status === "REVOKED"
+                                ? "danger"
+                                : "warning"
+                          }
+                        >
                           {t(`parentLinks.status.${link.status}`)}
                         </Badge>
                         {link.status === "PENDING" && ctxCan(ctx, "parent.link.manage") ? (

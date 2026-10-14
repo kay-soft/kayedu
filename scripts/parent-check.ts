@@ -26,8 +26,9 @@
  *  2. Inert until verified — origination only ever writes PENDING rows;
  *     `verifiedChildLinks` (the *only* read a parent-portal page may build
  *     on) returns zero rows for a PENDING link, including the parent's own.
- *  3. The OD-6 placeholder seam — `verifyParentLinkPlaceholder` flips
- *     PENDING → VERIFIED once, refuses a second call (`alreadyVerified`),
+ *  3. The OD-6 placeholder seam — since SEC-2a (D-03 (d)) it refuses to
+ *     verify anything (`verificationUnavailable`), still says
+ *     `alreadyVerified` for a link that is already VERIFIED,
  *     and is centre-scoped: a link cannot be "verified" through another
  *     centre's id.
  *  4. Never a superset of the child — the reads a verified parent link
@@ -246,16 +247,26 @@ async function main() {
     JSON.stringify(wrongCenterVerify),
   );
 
+  // SEC-03 / D-03 (d), SEC-2a: the staff stand-in no longer verifies
+  // anything — it refuses, and the link stays PENDING. (Was: "flips PENDING
+  // to VERIFIED".) A VERIFIED link now exists only the way the seed makes
+  // them, so the fixture sets it directly for the read-side checks below.
   const verify = await verifyParentLinkPlaceholder(prisma, {
     parentLinkId: createdLink.id,
     centerId: centerA.id,
     verifiedByUserId: ownerUser.id,
   });
   check(
-    "verifyParentLinkPlaceholder flips PENDING to VERIFIED",
-    verify.ok && verify.linkId === createdLink.id,
+    "verifyParentLinkPlaceholder refuses (verificationUnavailable) and the link stays PENDING",
+    !verify.ok &&
+      verify.error === "verificationUnavailable" &&
+      (await prisma.parentLink.findUniqueOrThrow({ where: { id: createdLink.id } })).status === "PENDING",
     JSON.stringify(verify),
   );
+  await prisma.parentLink.update({
+    where: { id: createdLink.id },
+    data: { status: "VERIFIED", verifiedAt: new Date(), verifiedBy: ownerUser.id },
+  });
 
   const doubleVerify = await verifyParentLinkPlaceholder(prisma, {
     parentLinkId: createdLink.id,

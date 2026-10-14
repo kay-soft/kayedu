@@ -91,7 +91,9 @@ export function PhoneLookupField({
           <div className="flex items-start gap-2">
             <UserCheck className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
             <div className="min-w-0 text-sm">
-              <p className="font-medium text-text-primary">{match.name}</p>
+              <p className="font-medium text-text-primary">
+                {match.name ?? tMatch("maskedName")}
+              </p>
               {match.matchedOn.length > 0 ? (
                 <p className="text-xs text-text-muted">
                   {tMatch("matchedBy", {

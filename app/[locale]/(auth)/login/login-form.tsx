@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { signInAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
 import { Field } from "@/components/shared/field";
+import { CheckEmailNotice } from "@/components/shared/check-email-notice";
 import { FormMessage } from "@/components/shared/form-message";
 import { PasswordField } from "@/components/shared/password-field";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -19,6 +20,10 @@ export function LoginForm({ next }: { next?: string }) {
   const tErrors = useTranslations("Auth.errors");
   const locale = useLocale();
   const [state, formAction] = useActionState(signInAction, initialState);
+
+  if (state.status === "emailConfirmationRequired" && state.email) {
+    return <CheckEmailNotice email={state.email} />;
+  }
 
   return (
     <form action={formAction} className="flex flex-col gap-4" noValidate>

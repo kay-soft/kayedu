@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
+import { revokeStaleParentLinks } from "@/lib/db/parents";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { scopedWhere } from "@/lib/db/tenant-scope";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
@@ -50,10 +52,22 @@ export async function completeStudentProfileAction(
     parentAltPhone,
   } = parsed.data;
 
+  // SEC-16: only an active profile at a centre that still admits sign-ins —
+  // a deactivated student or a suspended/archived centre is not editable here.
   const profile = await prisma.studentProfile.findFirst({
-    where: scopedWhere(centerId, { id: studentProfileId, userId: user.id }),
+    where: scopedWhere(centerId, {
+      id: studentProfileId,
+      userId: user.id,
+      active: true,
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    }),
   });
   if (!profile) return NOT_FOUND;
+  // SEC-17 / D-11 (a): strictly one-time. Once the profile is complete (by
+  // the student, or by staff at creation) only staff edit it — the layout's
+  // gate is not the only thing standing between a student and the parent
+  // phone that parent-link origination keys on.
+  if (profile.profileCompletedAt) return { error: "alreadyCompleted" };
 
   if (gradeId) {
     // The picker offers the global catalog directly (docs/01 §2 "Academic
@@ -80,6 +94,13 @@ export async function completeStudentProfileAction(
       parentAltPhone,
       profileCompletedAt: new Date(),
     },
+  });
+  // D-04 (a): any link standing on a parent phone no longer on the record
+  // is revoked (normally none — this is the profile's first completion).
+  await revokeStaleParentLinks(prisma, {
+    centerId,
+    studentProfileId: profile.id,
+    actorUserId: user.id,
   });
 
   revalidatePath(`/${locale}${ROUTES.studentProfile}`);

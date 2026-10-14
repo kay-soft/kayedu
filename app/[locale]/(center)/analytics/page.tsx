@@ -16,8 +16,12 @@ import {
   ctxCan,
   getOwnerOrgGroups,
   getTenantContext,
+  getUserCenterRelations,
   requirePermission,
 } from "@/lib/auth/tenant";
+import { can } from "@/lib/auth/permissions";
+import { roleForExperience } from "@/lib/auth/relations";
+import { loadPermissionGrants } from "@/lib/db/permissions";
 import {
   expenseTotals,
   revenueByTeacher,
@@ -106,28 +110,55 @@ export default async function AnalyticsPage({
   const orgGroup = orgGroups.find(
     (group) => group.organizationId === ctx.rollupOrganizationId,
   );
-  const rollupBranchIds = orgGroup?.branches.map((branch) => branch.id) ?? null;
+
+  // SEC-48: every branch in the roll-up is read under **its own** rules —
+  // the viewer must hold `analytics.center.view` at that branch, and its rows
+  // are clamped to that branch's own data-visibility window (its own
+  // settings, read one branch at a time — never a cross-centre query).
+  const rollupBranches = orgGroup
+    ? (
+        await Promise.all(
+          orgGroup.branches.map(async (branch) => {
+            const relation = (await getUserCenterRelations(ctx.user.id)).find(
+              (item) => item.center.id === branch.id,
+            );
+            const role = relation ? roleForExperience(relation, "center") : null;
+            if (!role || role === "STUDENT") return null;
+            const grants = await loadPermissionGrants(prisma, branch.id, role);
+            if (!can(role, "analytics.center.view", grants)) return null;
+            const settings = await prisma.centerSettings.findUnique({ where: { centerId: branch.id } });
+            const { start, end } = clampRangeToVisibility(
+              resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
+              visibilityWindowFloor({ isPlatformAdmin: ctx.isPlatformAdmin, settings }, now),
+            );
+            return { branch, range: { from: start, to: end } };
+          }),
+        )
+      ).filter((row): row is NonNullable<typeof row> => row !== null)
+    : null;
+  const rollupBranchIds = rollupBranches?.map((row) => row.branch.id) ?? null;
+  const rollupRanges = new Map(rollupBranches?.map((row) => [row.branch.id, row.range]) ?? []);
 
   const [revenue, expenses, students, teachers, byTeacher, teacherMemberships, byBranch] =
     await Promise.all([
       rollupBranchIds
-        ? revenueTotalsRollup(prisma, rollupBranchIds, range, filters.teacherId)
+        ? revenueTotalsRollup(prisma, rollupBranchIds, rollupRanges, filters.teacherId)
         : revenueTotals(prisma, centerId, range, filters.teacherId),
       rollupBranchIds
-        ? expenseTotalsRollup(prisma, rollupBranchIds, range)
+        ? expenseTotalsRollup(prisma, rollupBranchIds, rollupRanges)
         : expenseTotals(prisma, centerId, range),
       rollupBranchIds
-        ? studentCountsRollup(prisma, rollupBranchIds, range)
+        ? studentCountsRollup(prisma, rollupBranchIds, rollupRanges)
         : studentCounts(prisma, centerId, range),
       rollupBranchIds
-        ? teacherCountsRollup(prisma, rollupBranchIds, range)
+        ? teacherCountsRollup(prisma, rollupBranchIds, rollupRanges)
         : teacherCounts(prisma, centerId, range),
       filters.teacherId || rollupBranchIds
         ? Promise.resolve([])
         : revenueByTeacher(prisma, centerId, range),
       scoped(ctx).teachers.list({ active: true }),
       rollupBranchIds
-        ? revenueByBranch(prisma, orgGroup!.branches, range)
+        ? revenueByBranch(prisma, rollupBranches!.map((row) => row.branch), rollupRanges)
         : Promise.resolve([]),
     ]);
 

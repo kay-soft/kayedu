@@ -15,7 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
@@ -241,12 +241,13 @@ export default async function TeacherSessionDetailPage({
             </CardHeader>
             <CardContent>
               {/* This is the teacher's own session — their earning and the
-                  center's cut on it are always shown here (spec §4.2 item 2),
-                  unlike the center staff receipt which gates on
-                  center.profit.view (a different, broader permission). */}
+                  center's cut on it are shown here (spec §4.2 item 2) under
+                  the teacher's own `analytics.own.view` (TEACHER baseline),
+                  never the centre staff's broader center.profit.view. SEC-15:
+                  a centre that revokes the cell hides the money. */}
               <SessionReceipt
                 totals={receipt.totals}
-                showProfit
+                showProfit={ctxCan(ctx, "analytics.own.view")}
                 locale={locale}
                 timeZone={timeZone}
                 closure={receipt.closure}

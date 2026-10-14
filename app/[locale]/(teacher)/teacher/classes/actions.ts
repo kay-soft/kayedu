@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, actionContext } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
@@ -25,7 +25,8 @@ export async function createClassRequestAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return { error: "forbidden" };
   if (!ctxCan(ctx, "changeRequest.create")) return FORBIDDEN;
   if (!(ctx.membership?.isTrustedTeacher ?? false)) return NOT_TRUSTED;
   const db = scoped(ctx);

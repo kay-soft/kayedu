@@ -118,7 +118,6 @@ export type CreateCenterInput = {
   name: string;
   nameEn?: string | null;
   slug: string;
-  logoUrl?: string | null;
   themeColor: string;
   /**
    * The center's first Owner, invited the same way `/settings/staff` invites
@@ -158,7 +157,6 @@ export async function createCenterWithSettings(
         name: input.name,
         nameEn: input.nameEn ?? null,
         slug: input.slug,
-        logoUrl: input.logoUrl ?? null,
         themeColor: input.themeColor,
         // A freshly admin-provisioned center hasn't done anything yet — no
         // staff signed in, no config touched — so it starts ONBOARDING rather

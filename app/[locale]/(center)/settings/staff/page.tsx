@@ -62,7 +62,11 @@ export default async function StaffSettingsPage() {
     isSelf: member.userId === ctx.user.id,
     canChangeRole: canAssignRole,
     // Only an owner may suspend another owner (docs/02 §3).
-    canToggleActive: canManage && (member.role !== "OWNER" || canManageOwners),
+    canToggleActive:
+      canManage &&
+      (member.role !== "OWNER" || canManageOwners) &&
+      // D-09 (a): reactivating is OWNER-only; a manager may only deactivate.
+      (member.active || canAssignRole),
   }));
 
   // Cross-branch grants (M12) — OWNER only, and only meaningful when this
@@ -176,21 +180,24 @@ export default async function StaffSettingsPage() {
                     </p>
                   </div>
 
-                  <form action={revokeInvitationAction} className="shrink-0">
-                    <input type="hidden" name="locale" value={locale} />
-                    <input
-                      type="hidden"
-                      name="invitationId"
-                      value={invitation.id}
-                    />
-                    <Button
-                      type="submit"
-                      variant="destructive"
-                      className="h-11 w-full px-4 sm:w-auto"
-                    >
-                      {t("revoke")}
-                    </Button>
-                  </form>
+                  {/* D-22 (a): revoking is OWNER-only, like creating. */}
+                  {canAssignRole ? (
+                    <form action={revokeInvitationAction} className="shrink-0">
+                      <input type="hidden" name="locale" value={locale} />
+                      <input
+                        type="hidden"
+                        name="invitationId"
+                        value={invitation.id}
+                      />
+                      <Button
+                        type="submit"
+                        variant="destructive"
+                        className="h-11 w-full px-4 sm:w-auto"
+                      >
+                        {t("revoke")}
+                      </Button>
+                    </form>
+                  ) : null}
                 </li>
               ))}
             </ul>

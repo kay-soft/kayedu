@@ -187,7 +187,7 @@
       "invalidCredentials": "Wrong email or password.",
       "emailInUse": "An account already uses this email. Sign in instead.",
       "phoneInUse": "This phone number belongs to another account.",
-      "signUpFailed": "We could not create the account. Try again.",
+      "signUpFailed": "We could not create the account. Check the details and try again.",
       "invalidToken": "This invitation link is not valid.",
       "inviteNotFound": "This invitation no longer exists.",
       "inviteExpired": "This invitation has expired. Ask for a new one.",
@@ -195,11 +195,38 @@
       "inviteEmailMismatch": "This invitation was sent to a different email address.",
       "centerInactive": "This branch is not active.",
       "invalidCenter": "Unknown branch.",
-      "invalidInvitation": "Unknown invitation."
+      "invalidInvitation": "Unknown invitation.",
+      "rateLimited": "Too many attempts — wait a few minutes and try again.",
+      "emailNotConfirmed": "Confirm your email address first, then accept the invitation."
     },
     "shell": {
       "headline": "Run the whole centre from one screen.",
       "subhead": "Attendance, payments, teacher shares and every branch's numbers — in Arabic or English, on any device."
+    },
+    "checkEmail": {
+      "title": "Check your email",
+      "body": "If this address can be used, a confirmation link is on its way. Open it to finish, then sign in.",
+      "resend": "Send the email again",
+      "resent": "If the address can be used, a new confirmation email is on its way.",
+      "backToLogin": "Back to sign in"
+    },
+    "accountPending": {
+      "signOut": "Sign out",
+      "claimPending": {
+        "title": "Your account is waiting for a branch",
+        "body": "A branch already has a record with this email address.",
+        "next": "Visit the branch in person. Once a staff member confirms it is you, sign in again and your account will be connected."
+      },
+      "unconfirmed": {
+        "title": "Confirm your email first",
+        "body": "This account cannot be used until its email address is confirmed.",
+        "next": "Open the confirmation link we emailed you, then sign in again."
+      },
+      "blocked": {
+        "title": "This account cannot be used",
+        "body": "This email address is already in use by another account.",
+        "next": "Sign in with your existing account, or contact your branch for help."
+      }
     }
   },
   "Staff": {
@@ -284,7 +311,8 @@
         "staff": "They are already a staff member at this branch."
       },
       "openProfile": "Open their profile",
-      "cancel": "Use different details"
+      "cancel": "Use different details",
+      "maskedName": "A person with this contact already has a KayEdu account"
     },
     "phoneLookup": {
       "label": "Have their phone number? Look them up first.",
@@ -313,11 +341,14 @@
       "noStudentsToPromote": "No active students are in that grade.",
       "photoMissing": "Choose a photo first.",
       "photoType": "Photos must be PNG, JPEG or WebP.",
-      "photoTooLarge": "That photo is larger than 5 MB.",
+      "photoTooLarge": "That photo is larger than 1 MB.",
       "storage": "File storage is unavailable right now. Try again in a moment.",
       "alreadyVerified": "This parent link is already verified.",
       "staffMember": "They are already a staff member at this branch.",
-      "privilegedPerson": "That phone belongs to a platform administrator, so it cannot be used for a teacher."
+      "privilegedPerson": "That phone belongs to a platform administrator, so it cannot be used for a teacher.",
+      "rateLimited": "Too many contact lookups — wait a minute and try again.",
+      "alreadyCompleted": "Your profile is already complete. Ask the branch to change these details.",
+      "verificationUnavailable": "Parent verification is turned off until a safe verification method is decided."
     }
   },
   "Teachers": {
@@ -451,7 +482,7 @@
       "title": "Photo",
       "description": "Used on the ID card. Stored for this branch only.",
       "label": "Student photo",
-      "hint": "PNG, JPEG or WebP, up to 5 MB.",
+      "hint": "PNG, JPEG or WebP. Large photos are shrunk to about 1 MB before upload.",
       "upload": "Upload photo",
       "remove": "Remove photo"
     },
@@ -485,15 +516,17 @@
     },
     "parentLinks": {
       "title": "Parent accounts",
-      "description": "Accounts that matched this student's parent phone. A match alone grants no access — verify it before a parent can see this student's data.",
+      "description": "Accounts that matched this student’s parent phone. A match alone grants no access. A link is revoked automatically when the parent phone changes.",
       "empty": "No parent account has matched this student's parent phone yet.",
       "status": {
         "PENDING": "Pending",
-        "VERIFIED": "Verified"
+        "VERIFIED": "Verified",
+        "REVOKED": "Revoked"
       },
       "verify": "Verify",
       "verified": "Verified.",
-      "emptyHint": "A parent who links to this student appears here once a staff member verifies them."
+      "emptyHint": "A parent who links to this student appears here once a staff member verifies them.",
+      "verifyUnavailable": "Verification is turned off until a safe method is decided."
     },
     "print": {
       "print": "Print",
@@ -981,7 +1014,8 @@
       "cutRequired": "A one-time session needs its own centre cut.",
       "missingCut": "This session has no centre cut set, so the payment can't be recorded. Set the session's cut first.",
       "sessionInUse": "This session can no longer be deleted — it has started or has records on it. Cancel it instead.",
-      "sessionNotToday": "Only today's sessions can be checked in from the reception desk."
+      "sessionNotToday": "Only today's sessions can be checked in from the reception desk.",
+      "rateLimited": "Too many contact lookups — wait a minute and try again."
     },
     "emptyHint": "Sessions come from each class's weekly schedule and period. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
@@ -1299,18 +1333,34 @@
       "classNotFound": "The class this request was for no longer exists or has been deactivated.",
       "conflict": "That time double-books a room or the teacher, and this branch does not allow double-booking.",
       "duplicateSlot": "This class already has a session at that exact date and time.",
-      "conflictsNeedConfirmation": "This double-books a room or the teacher. Tick “I understand, create anyway” and approve again."
+      "conflictsNeedConfirmation": "This double-books a room or the teacher. Tick “I understand, create anyway” and approve again.",
+      "alreadyResolved": "That claim has already been decided.",
+      "alreadyLinked": "That record or that account is already connected to a login."
     },
     "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
     "kinds": {
       "class": "New class",
       "session": "New session",
       "reservation": "Joining a class",
-      "onboarding": "New teacher"
+      "onboarding": "New teacher",
+      "accountClaim": "Account claim"
     },
     "onboarding": {
       "headline": "Wants to teach at this branch",
       "hint": "This teacher has no record at this branch yet. Approving is a decision about the class, not about hiring — create their teacher record at Teachers."
+    },
+    "accountClaims": {
+      "title": "Account claims",
+      "description": "Someone signed up with the email of a person this branch already has. Approve only when that person is in front of you.",
+      "headline": {
+        "student": "Wants to use their student record",
+        "teacher": "Wants to use their teacher record",
+        "staff": "Wants to use their staff record"
+      },
+      "emailLabel": "Signed up with",
+      "inPerson": "Check their identity in person before approving. Declining keeps the record as it is and gives them a new, separate account.",
+      "approved": "Connected",
+      "declined": "Declined"
     }
   },
   "Refunds": {
@@ -2064,9 +2114,10 @@
         "slug": "Slug",
         "slugHint": "Lowercase letters, digits and hyphens only. Used as this branch's identifier.",
         "themeColor": "Theme color",
-        "logoUrl": "Logo URL",
         "ownerEmail": "Founding owner's email",
-        "ownerEmailHint": "They accept the invite link below to become this branch's first Owner."
+        "ownerEmailHint": "They accept the invite link below to become this branch's first Owner.",
+        "logo": "Logo",
+        "logoHint": "PNG, JPEG or WebP, up to 512 KB. Stored privately for this branch."
       },
       "submit": "Create branch",
       "created": "Branch created. Share the owner invite link below.",
@@ -2107,7 +2158,10 @@
       "invalidEmail": "Enter a valid email address.",
       "invalidLifecycleState": "That is not a valid lifecycle state.",
       "invalidTransition": "That transition isn't allowed from the branch's current state.",
-      "invalidNumber": "Enter a whole number of days, between 1 and 3650."
+      "invalidNumber": "Enter a whole number of days, between 1 and 3650.",
+      "photoType": "The logo must be a PNG, JPEG or WebP image.",
+      "photoTooLarge": "The logo is larger than 512 KB.",
+      "storage": "The branch was created, but the logo could not be stored. Try again later."
     }
   },
   "AdminCatalog": {

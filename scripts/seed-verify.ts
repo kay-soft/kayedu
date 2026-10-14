@@ -205,6 +205,17 @@ async function main() {
 
   const admin = byEmail.get(mail("admin"));
   check("The platform admin is flagged", admin?.isPlatformAdmin === true);
+
+  // SEC-2a: seed accounts are created confirmed, so the app rows carry the
+  // stamp REQUIRE_EMAIL_CONFIRMATION reads; and the demo world has no
+  // half-finished account claim in it.
+  const unstamped = [...byEmail.values()].filter((user) => user.authId && !user.emailVerifiedAt);
+  check(
+    "Every seed account linked to Supabase Auth carries emailVerifiedAt (SEC-2a)",
+    unstamped.length === 0,
+    `${unstamped.length} without it — re-run the seed`,
+  );
+  check("No account claim is pending in the demo world", (await prisma.accountClaim.count({ where: { status: "PENDING" } })) === 0);
   check("Admin nav is the 3 platform items", same(navForExperience("admin", "PLATFORM_ADMIN").map((i) => i.labelKey), EXPECTED_ADMIN_NAV));
 
   // The nav ⇄ page-gate rule (docs/02 §6.2) holds for the real definitions.

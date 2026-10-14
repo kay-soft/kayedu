@@ -11,7 +11,7 @@ import { prisma } from "@/lib/db/client";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getActiveCenterId } from "@/lib/auth/active-center";
 import {
-  can,
+  canInContext,
   isCenterStaffRole,
   type Permission,
   type PermissionGrants,
@@ -28,6 +28,7 @@ import { verifiedChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
+import { centerLogoSrc } from "@/lib/storage-paths";
 
 export type { CenterRelation, Experience };
 
@@ -52,6 +53,14 @@ export type TenantContext = {
   /** Center-configurable permission grants on top of the role baseline. */
   grants: PermissionGrants;
   isPlatformAdmin: boolean;
+  /**
+   * SEC-09: the request asked for an experience (centre / teacher / student)
+   * this user holds no role for at this centre. Such a context grants
+   * nothing: `ctxCan` denies every permission, and every Server Action's
+   * experience guard (`actionContext`) refuses it. `role` is then the user's
+   * highest role here, kept only so a page can redirect them home.
+   */
+  experienceDenied: boolean;
   /**
    * Set when the active-selection cookie named an Organization rather than a
    * branch — an Owner's "Whole Management" choice (M11). `center` above is
@@ -144,14 +153,19 @@ async function buildContext(
     where: { centerId: relation.center.id },
   });
 
-  const role = roleForExperience(relation, experience);
+  const requested = roleForExperience(relation, experience);
+  const experienceDenied = requested === null;
+  const role = requested ?? roleForExperience(relation) ?? "STUDENT";
   const membership = relation.memberships.find((item) => item.role === role) ?? null;
 
   // STUDENT is a resolved role, not a Membership — it never has PermissionGrant
   // rows (docs/01-data-model.md "Permissions layer" is centerId × Role × action,
-  // and Role has no STUDENT value), so there is nothing to load.
+  // and Role has no STUDENT value), so there is nothing to load. A denied
+  // experience loads nothing either: it grants nothing (SEC-09).
   const grants =
-    role === "STUDENT" ? {} : await loadPermissionGrants(prisma, relation.center.id, role);
+    role === "STUDENT" || experienceDenied
+      ? {}
+      : await loadPermissionGrants(prisma, relation.center.id, role);
 
   return {
     user,
@@ -163,6 +177,7 @@ async function buildContext(
     roles: relation.roles,
     grants,
     isPlatformAdmin: user.isPlatformAdmin,
+    experienceDenied,
     rollupOrganizationId: null,
   };
 }
@@ -380,7 +395,7 @@ export function studentBrand(session: StudentSession) {
   if (!session.studentRelation) return DEFAULT_STUDENT_BRAND;
   return {
     name: session.studentRelation.center.name,
-    logoUrl: session.studentRelation.center.logoUrl,
+    logoUrl: centerLogoSrc(session.studentRelation.center),
     themeColor: session.studentRelation.center.themeColor,
   };
 }
@@ -409,7 +424,7 @@ export const getVerifiedParentChildren = cache(
       linkId: link.id,
       centerId: link.center.id,
       centerName: link.center.name,
-      centerLogoUrl: link.center.logoUrl,
+      centerLogoUrl: centerLogoSrc(link.center),
       centerThemeColor: link.center.themeColor,
       studentProfileId: link.studentProfileId,
       childName: fullName(localName(link.studentProfile, link.studentProfile.user)),
@@ -454,15 +469,34 @@ export async function requireExperience(
   experience: Experience,
 ): Promise<TenantContext> {
   const ctx = await getTenantContext(experience);
-  if (!hasExperience(ctx, experience)) {
+  if (ctx.experienceDenied || !hasExperience(ctx, experience)) {
     return redirectTo(homePathForRole(ctx.role));
   }
   return ctx;
 }
 
-/** Authoritative permission check bound to the resolved context. */
+/**
+ * The Server Action guard (SEC-09, SEC-44). A layout's `requireExperience`
+ * protects pages, never actions — so every `(teacher)` action that has no
+ * permission check of its own, and anything else that needs it, resolves its
+ * context through here: `null` (the caller answers FORBIDDEN, never a
+ * redirect) unless the user holds an **active** role of this experience at
+ * the active centre. `ctxCan` refuses a denied context on its own too, which
+ * is what covers every `(center)` action.
+ */
+export async function actionContext(experience: Experience): Promise<TenantContext | null> {
+  const ctx = await getTenantContext(experience);
+  if (ctx.experienceDenied || !hasExperience(ctx, experience)) return null;
+  return ctx;
+}
+
+/**
+ * Authoritative permission check bound to the resolved context. A context
+ * whose requested experience was denied grants nothing (SEC-09) — this is the
+ * one choke point every `(center)` Server Action already passes through.
+ */
 export function ctxCan(ctx: TenantContext, permission: Permission): boolean {
-  return can(ctx.role, permission, ctx.grants);
+  return canInContext(ctx, permission);
 }
 
 export async function requirePermission(
@@ -479,7 +513,7 @@ export async function requirePlatformAdmin(): Promise<User> {
   if (!user) return redirectTo(ROUTES.login);
   if (!user.isPlatformAdmin) {
     const relations = await getUserCenterRelations(user.id);
-    const role = relations[0] ? roleForExperience(relations[0]) : "STUDENT";
+    const role = relations[0] ? (roleForExperience(relations[0]) ?? "STUDENT") : "STUDENT";
     return redirectTo(homePathForRole(role));
   }
   return user;

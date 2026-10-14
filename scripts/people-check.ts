@@ -174,7 +174,7 @@ function checkSingleNormalizer(): void {
  * behavioral one against the real rate limiter — no database needed for any
  * of them.
  */
-function checkPhoneLookupShape(): void {
+async function checkPhoneLookupShape(): Promise<void> {
   const root = join(process.cwd());
   const files = [
     join(root, "app", "[locale]", "(center)", "students", "actions.ts"),
@@ -185,9 +185,11 @@ function checkPhoneLookupShape(): void {
     const contents = readFileSync(file, "utf8");
     const start = contents.indexOf("lookupPersonByPhoneAction");
     const body = contents.slice(start, start + 800);
+    // SEC-11 (SEC-2a): the limit moved inside `resolveContact` itself, so it
+    // covers every path that can reveal a match, not just this one.
     check(
-      `${relative(root, file)}'s lookupPersonByPhoneAction rate-limits before resolving a match`,
-      start !== -1 && /checkRateLimit\(/.test(body),
+      `${relative(root, file)}'s lookupPersonByPhoneAction resolves through the rate-limited resolveContact`,
+      start !== -1 && /resolveContact\(/.test(body) && /rateLimited/.test(body),
     );
     check(
       `${relative(root, file)}'s lookupPersonByPhoneAction reuses describeMatch (never a raw record fetch)`,
@@ -214,11 +216,11 @@ function checkPhoneLookupShape(): void {
   const key = `people-check-${Date.now()}`;
   let allowed = 0;
   for (let i = 0; i < 25; i += 1) {
-    if (checkRateLimit(key, 20, 60_000)) allowed += 1;
+    if (await checkRateLimit(key, 20, 60_000)) allowed += 1;
   }
   check(
     "The rate limiter allows exactly the configured limit, then refuses",
-    allowed === 20 && !checkRateLimit(key, 20, 60_000),
+    allowed === 20 && !(await checkRateLimit(key, 20, 60_000)),
   );
 }
 
@@ -349,7 +351,7 @@ async function main() {
   // Database-free static gates first (M18) — no fixtures to clean up either
   // way, so they run before anything else touches the database.
   checkSingleNormalizer();
-  checkPhoneLookupShape();
+  await checkPhoneLookupShape();
 
   await cleanup();
 
