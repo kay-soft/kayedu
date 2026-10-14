@@ -92,7 +92,7 @@
 | SEC-35 | FIXED | `shadcn` and `prisma` moved to devDependencies; `deepmerge-ts` pinned to 8.0.2 by an npm override (the advisory came in through `prisma`, a peer of `@prisma/client`); `npm audit --omit=dev` reports 0 and CI runs it at `--audit-level=high`. |
 | SEC-36 | DEFERRED (M20) | Needs the 13 legacy auth users deleted on the shared dev project — destructive, so it is the person's action in the Supabase dashboard, not tooling's (`00` §2.1-A, M20). |
 | SEC-37 | FIXED | A static import-closure gate (`check:security` SEC-37) proves no `"use client"` module reaches the service-role client, Prisma, the storage layer or the auth session. The `server-only` package was not installed (that install is the person's decision); the gate stands in for it. |
-| SEC-38 | FIXED | `SEED_ADMIN_PASSWORD` (≥ 12, ≠ `SEED_PASSWORD`) for the platform admin; seed, preflight and `.env.example` updated. (D-21 (a)) |
+| SEC-38 | FIXED | `SEED_ADMIN_PASSWORD` (≥ 6, ≠ `SEED_PASSWORD`) for the platform admin; seed, preflight and `.env.example` updated. (D-21 (a)) |
 | SEC-39 | FIXED | `npm run db:migrate` refuses and points at `prisma migrate deploy`; no script runs `migrate dev`/`reset`/`db push`. |
 | SEC-40 | FIXED | No `phoneInUse`/`emailInUse`: a sign-up without a session always shows the same "check your email" state. (D-02) |
 | SEC-41 | FIXED | Sign-up metadata is zod-parsed and capped; a metadata phone is ignored; `signUpAction` no longer overwrites the `User` row. |

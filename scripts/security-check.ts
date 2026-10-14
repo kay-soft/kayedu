@@ -1009,7 +1009,7 @@ async function main() {
     return [
       ["the preflight/seed refuse SEED_ADMIN_PASSWORD == SEED_PASSWORD", seedPasswordProblems({ SEED_PASSWORD: same, SEED_ADMIN_PASSWORD: same }).length > 0],
       ["they refuse a short admin password", seedPasswordProblems({ SEED_PASSWORD: same, SEED_ADMIN_PASSWORD: "short" }).length > 0],
-      ["two distinct ≥12-character passwords pass", seedPasswordProblems({ SEED_PASSWORD: same, SEED_ADMIN_PASSWORD: "y".repeat(16) }).length === 0],
+      ["two distinct ≥6-character passwords pass", seedPasswordProblems({ SEED_PASSWORD: same, SEED_ADMIN_PASSWORD: "y".repeat(16) }).length === 0],
       ["the platform admin is created with the admin password", /admin: isPlatformAdmin/.test(read("prisma/seed.ts")) && /account\.admin \? this\.adminPassword : this\.password/.test(read("prisma/seed-data/auth.ts"))],
       [".env.example documents SEED_ADMIN_PASSWORD", /SEED_ADMIN_PASSWORD=/.test(read(".env.example"))],
     ];

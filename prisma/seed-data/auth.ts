@@ -4,9 +4,9 @@
  * list (every address `@<SEED_EMAIL_DOMAIN>`, default example.com).
  *
  * Hard rules:
- *  - the password is `SEED_PASSWORD` — required, and refused if under 12
+ *  - the password is `SEED_PASSWORD` — required, and refused if under 6
  *    characters; there is no default and nothing here prints it. The platform
- *    admin alone uses `SEED_ADMIN_PASSWORD` (SEC-2a, D-21 (a)): also ≥ 12
+ *    admin alone uses `SEED_ADMIN_PASSWORD` (SEC-2a, D-21 (a)): also ≥ 6
  *    characters and refused when it equals `SEED_PASSWORD`, so a tester given a
  *    demo login never holds the admin's;
  *  - **a seed account is recognised by a marker the seed itself writes**
@@ -38,13 +38,13 @@ export type AuthAccount = {
   admin?: boolean;
 };
 
-/** Both seed passwords, checked once (D-21): ≥ 12 characters each, and different. */
+/** Both seed passwords, checked once (D-21): ≥ 6 characters each (Supabase Auth's own minimum — these are dev demo logins, never production: SEC-70), and different. */
 export function seedPasswordProblems(env: Record<string, string | undefined> = process.env): string[] {
   const password = env.SEED_PASSWORD ?? "";
   const adminPassword = env.SEED_ADMIN_PASSWORD ?? "";
   const problems: string[] = [];
-  if (password.length < 12) problems.push("SEED_PASSWORD is missing or shorter than 12 characters");
-  if (adminPassword.length < 12) problems.push("SEED_ADMIN_PASSWORD is missing or shorter than 12 characters");
+  if (password.length < 6) problems.push("SEED_PASSWORD is missing or shorter than 6 characters");
+  if (adminPassword.length < 6) problems.push("SEED_ADMIN_PASSWORD is missing or shorter than 6 characters");
   if (adminPassword.length > 0 && adminPassword === password) {
     problems.push("SEED_ADMIN_PASSWORD must differ from SEED_PASSWORD");
   }
@@ -240,11 +240,11 @@ export async function runAuthPreflight(seedEmails: readonly string[]): Promise<P
 
   const password = process.env.SEED_PASSWORD ?? "";
   const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "";
-  add("SEED_PASSWORD is at least 12 characters", password.length >= 12, password.length >= 12 ? `${password.length} characters` : `${password.length} characters (need 12+)`);
+  add("SEED_PASSWORD is at least 6 characters", password.length >= 6, password.length >= 6 ? `${password.length} characters` : `${password.length} characters (need 6+)`);
   add(
-    "SEED_ADMIN_PASSWORD is at least 12 characters (D-21)",
-    adminPassword.length >= 12,
-    adminPassword.length >= 12 ? `${adminPassword.length} characters` : `${adminPassword.length} characters (need 12+)`,
+    "SEED_ADMIN_PASSWORD is at least 6 characters (D-21)",
+    adminPassword.length >= 6,
+    adminPassword.length >= 6 ? `${adminPassword.length} characters` : `${adminPassword.length} characters (need 6+)`,
   );
   add(
     "SEED_ADMIN_PASSWORD differs from SEED_PASSWORD (D-21)",

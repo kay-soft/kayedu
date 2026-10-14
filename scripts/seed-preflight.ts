@@ -5,7 +5,7 @@
  *   npm run seed:preflight
  *
  * Writes nothing to the application database. Checks:
- *   - SEED_PASSWORD and SEED_ADMIN_PASSWORD are at least 12 characters and
+ *   - SEED_PASSWORD and SEED_ADMIN_PASSWORD are at least 6 characters and
  *     differ (D-21);
  *   - the target is not a production project or environment (SEC-70);
  *   - DEV_PROJECT_REF matches the project ref in DATABASE_URL (and DIRECT_URL,

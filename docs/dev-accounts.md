@@ -1,6 +1,6 @@
 # KayEdu — Dev accounts (demo seed)
 
-> Every account the demo seed (`npm run db:seed`, `prisma/seed.ts`) owns in Supabase Auth. **All fictional, all on one reserved domain: `@example.com` by default, or whatever `SEED_EMAIL_DOMAIN` says in your `.env`** (the table below is regenerated for the configured domain by `npm run seed:docs`). The password of every one is the value of **`SEED_PASSWORD`** in your `.env` (≥ 12 characters, never committed, never printed by any script) — **except the platform admin**, whose password is **`SEED_ADMIN_PASSWORD`** (≥ 12 characters and different from `SEED_PASSWORD`; SEC-2a, D-21). Sign in at `/en/login` or `/ar/login`.
+> Every account the demo seed (`npm run db:seed`, `prisma/seed.ts`) owns in Supabase Auth. **All fictional, all on one reserved domain: `@example.com` by default, or whatever `SEED_EMAIL_DOMAIN` says in your `.env`** (the table below is regenerated for the configured domain by `npm run seed:docs`). The password of every one is the value of **`SEED_PASSWORD`** in your `.env` (≥ 6 characters, never committed, never printed by any script) — **except the platform admin**, whose password is **`SEED_ADMIN_PASSWORD`** (≥ 6 characters and different from `SEED_PASSWORD`; SEC-2a, D-21). Sign in at `/en/login` or `/ar/login`.
 >
 > The blueprint these come from is `prisma/seed-data/plan.ts` — `npm run seed:verify` checks this file lists every account in it, at the configured domain.
 
