@@ -32,6 +32,7 @@ import { fullName, localName } from "../lib/identity.ts";
 import {
   createPerson,
   describeMatch,
+  isLinkableMatch,
   resolveContact,
   seedLocalName,
   type LookupContext,
@@ -478,8 +479,9 @@ async function main() {
   createdCenterIds.add(centerC.id);
   const matchedFromLocalOnly = await resolveContact(lookupAt(centerC.id), { email: LOCAL_ONLY_EMAIL, phone: null });
   check(
-    "A contact that exists only on another center's local record still matches",
-    matchedFromLocalOnly.kind === "matched" && matchedFromLocalOnly.match.user.id === inA.userId,
+    "A contact that exists only on another center's local record is found, never linkable (SEC-2a)",
+    matchedFromLocalOnly.kind === "none" &&
+      matchedFromLocalOnly.others.some((other) => other.user.id === inA.userId && !isLinkableMatch(other)),
     JSON.stringify({
       kind: matchedFromLocalOnly.kind,
       others: "others" in matchedFromLocalOnly ? matchedFromLocalOnly.others.map((other) => other.user.id === inA.userId) : null,
