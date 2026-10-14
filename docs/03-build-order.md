@@ -333,6 +333,23 @@
 **The commands for the user, in order:** `npm run seed:preflight` → set `ALLOW_DEV_WIPE=yes` → `npm run db:wipe-dev` (type the project ref) → `npm run db:seed` → `npm run seed:verify` → remove `ALLOW_DEV_WIPE`. Claude did **not** wipe, reset or seed the dev database; the seed and every gate were dry-run against a throwaway local Postgres.
 **Decisions taken (for review).** (1) *A class that is already five weeks into its run starts on its first history day, not its term's start* — Term 1 begins 26 September, only 17 days before the seed's "today", so five weeks of history needs a typed start (the class form allows one); the end date is still the term's. (2) *Downtown's 30-day window hides the oldest ~5 days of the 35-day history from centre-side roles* (Nasr City's 60 shows all) — deliberate, it is the window feature on display. (3) *The "live session" is an extra (manual) session whose start is computed from the clock at run time* (today's regular sessions have fixed times, so one could not be guaranteed live); skipped before 00:20 Cairo. One is created per active branch, three in all. (4) *Receipts are backdated by clock stamp only* — `SessionAttendee.recordedAt` and `Payment.recordedAt` are set to the session's own check-in time after the fact (never an amount or a snapshot) so a three-week-old receipt does not read as checked in today. (5) *Existing dev centres lacking the baseline are reported, not repaired* — the wipe + reseed is the repair. (6) The seeded platform admin is `admin@<domain>`; a developer's own Supabase account that was `isPlatformAdmin` in the wiped `User` table comes back as an ordinary user on its next sign-in (its Auth login and password are untouched, but `syncUserFromAuth` creates a fresh blank `User`: no centre, no role) and must be re-flagged by hand if wanted. (7) *A seed address that already exists in Auth without the seed's marker stops the run* rather than being adopted — the alternative (resetting that person's password) is exactly what was ruled out.
 
+## SEC-1 — Security & anti-fraud audit: report and reproductions, no fixes (delivered)
+**Goal:** find every way the system can be breached, leak data across tenants or to the wrong person, or be used to cheat a centre, with evidence. **No application code, schema or migration changed.**
+**Delivered:**
+- `docs/07-security-audit.md`, containing:
+  - the attack-surface inventory: 125 Server Actions, no route handlers, id-reading pages, raw SQL, cookies and headers, Supabase clients, uploads and HTML sinks;
+  - 75 findings: 1 Critical, 10 High, 20 Medium, 32 Low, 12 Info;
+  - a prioritized fix plan;
+  - the NEEDS-DECISION register, D-01 to D-28, registered as **OD-11**;
+  - a verified-safe list;
+  - the live platform state;
+  - a list of docs passages the audit contradicts. Those passages are corrected with their fixes, not here.
+- `scripts/security-repro/SEC-NN.ts`, one or more scripts per Critical/High plus SEC-12/13. They use throwaway fixtures, clean up after themselves and are not wired into CI.
+
+Every Critical and High was re-confirmed by the lead with `file:line` evidence.
+**Done when:** every audit area has findings or verified-safe evidence; every Critical and High is confirmed; the repro scripts run (all print REPRODUCED except SEC-10, which is expected to be NOT REPRODUCED on the hand-locked dev project).
+**Next:** the fix milestone or milestones follow `07-security-audit.md` §5. Phase 0 (operations) and Phase 1 (no decision needed) can start immediately. **Do not provision a production or CI Supabase project before the SEC-10 lockdown migration exists.** M20's "RLS applied" step depends on it.
+
 ## M20 — Pre-deployment
 **Goal:** close `00-master-product-spec.md` §2.1 and actually be deployable.
 **Build:** **domain** purchase and DNS/Vercel wiring (blocked on **OD-1**); **SMTP / transactional email** sender with SPF/DKIM — invites, password reset, confirmations; **SMS/WhatsApp provider accounts** — the *channel* only, credentials and sender IDs; the notification **features** stay Phase 2 (`05-phase-2-backlog.md`); **Sentry** error monitoring; **RLS applied** — review and run `supabase/m10-rls-and-storage.sql` by hand against the live project, and confirm the Prisma role is non-superuser; **backups + a tested restore** (tested, not configured); **data export** (scope blocked on **OD-4**). Data *import* is explicitly **not** here — it moves to `05-phase-2-backlog.md` entry 10. *(R4: the Vercel cron entry for `app/api/cron/generate-sessions` and its `CRON_SECRET`, listed here until R4, no longer exist — the generator was removed and a class creates its whole period's sessions itself, so nothing needs scheduling.)*
