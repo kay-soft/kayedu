@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { Ban, ShieldOff, UserMinus, UserPlus, UserX, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -10,12 +9,15 @@ import {
   removeEnrollmentAction,
   unblockEnrollmentAction,
 } from "@/app/[locale]/(center)/classes/actions";
+import { ConfirmAction } from "@/components/shared/confirm-action";
+import { Ltr } from "@/components/shared/ltr";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type RosterRow = {
   enrollmentId: string;
@@ -61,22 +63,27 @@ export function ClassRoster({
   const tErrors = useTranslations("Classes.errors");
   const locale = useLocale();
 
-  const [enrollState, enrollAction] = useActionState(
+  const [enrollState, enrollAction] = useGuardedActionState(
     enrollStudentAction,
     IDLE_CLASS_STATE,
   );
-  const [removeState, removeAction] = useActionState(
+  const [removeState, removeAction] = useGuardedActionState(
     removeEnrollmentAction,
     IDLE_CLASS_STATE,
   );
-  const [blockState, blockAction] = useActionState(
+  const [blockState, blockAction] = useGuardedActionState(
     blockEnrollmentAction,
     IDLE_CLASS_STATE,
   );
-  const [unblockState, unblockAction] = useActionState(
+  const [unblockState, unblockAction] = useGuardedActionState(
     unblockEnrollmentAction,
     IDLE_CLASS_STATE,
   );
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(enrollState, { success: tToast("enrolled") });
+  useActionFeedback(removeState, { success: tToast("enrollmentRemoved") });
+  useActionFeedback(blockState, { success: tToast("studentBlocked") });
+  useActionFeedback(unblockState, { success: tToast("studentUnblocked") });
 
   const error =
     enrollState.error ?? removeState.error ?? blockState.error ?? unblockState.error;
@@ -105,34 +112,34 @@ export function ClassRoster({
                   >
                     {row.name}
                   </Link>
-                  <p className="text-xs text-text-muted" dir="ltr">
-                    {row.studentCode}
+                  <p className="text-xs text-text-secondary">
+                    <Ltr>{row.studentCode}</Ltr>
                   </p>
                 </div>
 
-                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                  <form action={removeAction}>
-                    <input type="hidden" name="locale" value={locale} />
-                    <input type="hidden" name="enrollmentId" value={row.enrollmentId} />
-                    <SubmitButton variant="outline" className="w-full sm:w-auto">
-                      <UserMinus className="size-4" />
-                      {t("remove")}
-                    </SubmitButton>
-                  </form>
-
-                  <form action={blockAction}>
-                    <input type="hidden" name="locale" value={locale} />
-                    <input type="hidden" name="classGroupId" value={classGroupId} />
-                    <input
-                      type="hidden"
-                      name="studentProfileId"
-                      value={row.studentProfileId}
-                    />
-                    <SubmitButton variant="destructive" className="w-full sm:w-auto">
-                      <Ban className="size-4" />
-                      {t("block")}
-                    </SubmitButton>
-                  </form>
+                {/* Remove ends an enrolment and Block is a sanction: both ask
+                    first, and say what follows (docs/04 §14.6). */}
+                <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
+                  <ConfirmAction
+                    label={t("remove")}
+                    icon={<UserMinus className="size-4" aria-hidden />}
+                    variant="outline"
+                    triggerClassName="w-full sm:w-auto"
+                    title={t("removeConfirm.title", { name: row.name })}
+                    description={t("removeConfirm.body")}
+                    action={removeAction}
+                    fields={{ locale, enrollmentId: row.enrollmentId }}
+                  />
+                  <ConfirmAction
+                    label={t("block")}
+                    icon={<Ban className="size-4" aria-hidden />}
+                    variant="destructive"
+                    triggerClassName="w-full sm:w-auto"
+                    title={t("blockConfirm.title", { name: row.name })}
+                    description={t("blockConfirm.body")}
+                    action={blockAction}
+                    fields={{ locale, classGroupId, studentProfileId: row.studentProfileId }}
+                  />
                 </div>
               </li>
             ))}

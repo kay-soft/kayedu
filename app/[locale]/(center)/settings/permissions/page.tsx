@@ -60,8 +60,6 @@ export default async function PermissionsPage() {
         editableByRole={editableByRolePlain}
         checked={checked}
       />
-
-      <p className="text-xs text-text-muted">{t("lockedNote")}</p>
     </div>
   );
 }

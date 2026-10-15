@@ -22,11 +22,19 @@ export function PersonFields({
   values,
   fieldErrors,
   autoFocus,
+  ownProfile,
 }: {
   idPrefix: string;
   values?: PersonValues;
   fieldErrors?: Record<string, string>;
   autoFocus?: boolean;
+  /**
+   * The person filling this in is the person it describes (a student's own
+   * profile): offer the browser's autofill. Staff entering someone else get
+   * `autoComplete="off"` — the browser had offered the receptionist's own
+   * name for every student they registered (DES, docs/04 §14.7).
+   */
+  ownProfile?: boolean;
 }) {
   const t = useTranslations("People.fields");
   const tErrors = useTranslations("People.errors");
@@ -44,6 +52,7 @@ export function PersonFields({
         <Input
           id={`${idPrefix}-firstName`}
           name="firstName"
+          autoComplete={ownProfile ? "given-name" : "off"}
           defaultValue={values?.firstName ?? ""}
           maxLength={60}
           required
@@ -61,6 +70,7 @@ export function PersonFields({
         <Input
           id={`${idPrefix}-lastName`}
           name="lastName"
+          autoComplete={ownProfile ? "family-name" : "off"}
           defaultValue={values?.lastName ?? ""}
           maxLength={60}
           required

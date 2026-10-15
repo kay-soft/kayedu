@@ -139,9 +139,9 @@ function Select({
         aria-describedby={ariaDescribedBy}
         className={cn(
           // Matches Input exactly (docs/04 §4/§6): 44px target, 8px radius.
-          "flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-border bg-background px-3",
+          "flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-border-control bg-surface px-3",
           "text-start text-sm text-foreground shadow-xs transition-ui outline-none select-none",
-          "hover:border-border-strong hover:bg-surface-hover",
+          "hover:border-border-control-hover hover:bg-surface-hover",
           "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
           "data-[popup-open]:border-brand data-[popup-open]:ring-3 data-[popup-open]:ring-brand/25",
           "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
@@ -152,14 +152,16 @@ function Select({
         <span
           className={cn(
             "min-w-0 truncate",
-            selected ? undefined : "text-text-muted",
+            // An empty choice ("Not set", "Choose a term") reads as a
+            // placeholder, not as a chosen value (DES).
+            selected && selected.value !== "" ? undefined : "text-text-placeholder",
           )}
         >
           {selected ? selected.label : (placeholder ?? "")}
         </span>
         <SelectPrimitive.Icon className="flex shrink-0 text-text-muted">
           {/* Points down, not forward — it must not mirror in RTL (docs/04 §7). */}
-          <ChevronDown className="size-4" />
+          <ChevronDown className="size-4" aria-hidden />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
 

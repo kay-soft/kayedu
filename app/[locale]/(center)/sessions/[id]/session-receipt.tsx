@@ -60,7 +60,7 @@ export async function SessionReceipt({
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       {totals.zeroPriced ? (
-        <p className="mb-3 inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning">
+        <p className="mb-3 inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-fg">
           <Gift className="size-3" aria-hidden />
           {t("zeroPriced")}
         </p>
@@ -77,7 +77,7 @@ export async function SessionReceipt({
         {totals.refundedCount > 0 ? (
           <Row
             label={t("refundedLine", { count: totals.refundedCount })}
-            value={`−${formatMoney(totals.refundedAmount, locale)}`}
+            value={formatMoney(-totals.refundedAmount, locale)}
           />
         ) : null}
         {totals.voidedCount > 0 ? (
@@ -125,7 +125,7 @@ export async function SessionReceipt({
       {unpaid.length > 0 ? (
         <section className="mt-4 border-t border-border-subtle pt-4">
           <h3 className="flex items-center gap-1 text-sm font-semibold text-text-primary">
-            <CircleAlert className="size-4 text-warning" aria-hidden />
+            <CircleAlert className="size-4 text-warning-fg" aria-hidden />
             {t("unpaidTitle")}
           </h3>
           <ul className="mt-2 flex flex-col gap-1 text-sm">
@@ -142,7 +142,7 @@ export async function SessionReceipt({
       {voids.length > 0 ? (
         <section className="mt-4 border-t border-border-subtle pt-4">
           <h3 className="flex items-center gap-1 text-sm font-semibold text-text-primary">
-            <Ban className="size-4 text-danger" aria-hidden />
+            <Ban className="size-4 text-danger-fg" aria-hidden />
             {t("voidsTitle")}
           </h3>
           <ul className="mt-2 flex flex-col gap-2">
@@ -178,7 +178,7 @@ export async function SessionReceipt({
               <li key={line.paymentId} className="flex flex-col gap-1 rounded-lg bg-surface-subtle px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <span className="min-w-0 font-medium text-text-primary">{line.studentName}</span>
-                  <span className="tabular-nums text-text-primary">−{formatMoney(line.amount, locale)}</span>
+                  <span className="whitespace-nowrap tabular-nums text-text-primary">{formatMoney(-line.amount, locale)}</span>
                 </div>
                 <p className="text-xs text-text-secondary">
                   {t("refundMeta", {
@@ -223,7 +223,7 @@ export async function SessionReceipt({
                   </p>
                 ) : null}
                 {change.paymentVoided ? (
-                  <span className="inline-flex w-fit items-center gap-1 rounded-full bg-danger-bg px-2 py-0.5 text-xs font-medium text-danger">
+                  <span className="inline-flex w-fit items-center gap-1 rounded-full bg-danger-bg px-2 py-0.5 text-xs font-medium text-danger-fg">
                     <Ban className="size-3" aria-hidden />
                     {t("paymentVoided")}
                   </span>
@@ -239,8 +239,8 @@ export async function SessionReceipt({
 
 const ROW_TONE = {
   default: "text-text-primary",
-  danger: "text-danger",
-  warning: "text-warning",
+  danger: "text-danger-fg",
+  warning: "text-warning-fg",
 } as const;
 
 function Row({
@@ -261,9 +261,9 @@ function Row({
 }
 
 const TONE_TEXT = {
-  success: "text-success",
-  warning: "text-warning",
-  danger: "text-danger",
+  success: "text-success-fg",
+  warning: "text-warning-fg",
+  danger: "text-danger-fg",
 } as const;
 
 function Count({
@@ -278,11 +278,14 @@ function Count({
   locale: string;
 }) {
   return (
-    <div className="flex flex-col items-center gap-1 rounded-lg bg-surface-subtle py-2">
-      <span className={`text-xl font-bold tabular-nums ${TONE_TEXT[tone]}`}>
+    // A zero takes no status colour — an Arabic zero is a dot, and a red or
+    // amber dot read as a status, not a count (DES, docs/04 §14.7). Printed,
+    // the tile keeps an edge (background tints are dropped by most printers).
+    <div className="flex flex-col items-center gap-1 rounded-lg bg-surface-subtle py-2 print:border print:border-border">
+      <span className={`text-xl font-bold tabular-nums ${value === 0 ? "text-text-secondary" : TONE_TEXT[tone]}`}>
         {formatNumber(value, locale)}
       </span>
-      <span className="text-xs text-text-muted">{label}</span>
+      <span className="text-xs text-text-secondary">{label}</span>
     </div>
   );
 }

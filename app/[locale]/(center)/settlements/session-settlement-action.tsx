@@ -1,12 +1,12 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createSessionSettlementAction } from "@/app/[locale]/(center)/settlements/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_SETTLEMENT_STATE } from "@/lib/validation/settlements";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The "pay cash right after this session" shape from the session detail page
@@ -18,7 +18,7 @@ export function SessionSettlementAction({ sessionId }: { sessionId: string }) {
   const t = useTranslations("Settlements");
   const tErrors = useTranslations("Settlements.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     createSessionSettlementAction,
     IDLE_SETTLEMENT_STATE,
   );

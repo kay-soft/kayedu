@@ -149,7 +149,11 @@ export function TimePicker({
           type="text"
           inputMode="text"
           autoComplete="off"
-          dir="ltr"
+          spellCheck={false}
+          // No `dir="ltr"` (DES): the value is a locale-formatted time that
+          // carries its own direction (docs/04 §3). An LTR input inside an RTL
+          // page put its end padding on the right while the clock button sat
+          // at the logical end (the left) — the button covered the time.
           disabled={disabled}
           value={text}
           placeholder={placeholder ?? t("placeholder")}
@@ -165,8 +169,8 @@ export function TimePicker({
             }
           }}
           className={cn(
-            "flex h-11 w-full min-w-0 rounded-lg border border-border bg-background ps-3 pe-11 text-start text-sm text-foreground shadow-xs outline-none transition-colors",
-            "placeholder:text-text-muted hover:border-border-strong",
+            "flex h-11 w-full min-w-0 rounded-lg border border-border-control bg-surface ps-3 pe-11 text-start text-sm text-foreground shadow-xs outline-none transition-ui",
+            "placeholder:text-text-placeholder hover:border-border-control-hover",
             "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
             "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
             "aria-invalid:border-danger aria-invalid:ring-3 aria-invalid:ring-danger/20",
@@ -251,7 +255,7 @@ export function TimePicker({
         </Popover>
       </div>
       {parseError ? (
-        <p id={errorId} role="alert" className="text-xs text-danger">
+        <p id={errorId} role="alert" className="text-xs text-danger-fg">
           {parseError === "outOfRange" ? t("outOfRange") : t("invalid")}
         </p>
       ) : null}

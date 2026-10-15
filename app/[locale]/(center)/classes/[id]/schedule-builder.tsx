@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { CalendarClock, Plus, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -22,6 +22,7 @@ import { Select } from "@/components/ui/select";
 import { isValidTimeRange } from "@/lib/scheduling";
 import { IDLE_CLASS_STATE, type ClassActionState } from "@/lib/validation/classes";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type ScheduleSlotRow = {
   id: string;
@@ -131,8 +132,8 @@ function ScheduleRow({
   const tErrors = useTranslations("Classes.errors");
   const locale = useLocale();
 
-  const [state, updateAction] = useActionState(updateScheduleAction, IDLE_CLASS_STATE);
-  const [removeState, removeAction] = useActionState(
+  const [state, updateAction] = useGuardedActionState(updateScheduleAction, IDLE_CLASS_STATE);
+  const [removeState, removeAction] = useGuardedActionState(
     removeScheduleAction,
     IDLE_CLASS_STATE,
   );
@@ -209,7 +210,7 @@ function ScheduleRow({
           <Button
             type="submit"
             variant="ghost"
-            className="size-11 p-0 text-text-muted hover:text-danger"
+            className="size-11 p-0 text-text-muted hover:text-danger-fg"
             aria-label={t("remove")}
           >
             <X className="size-4" />
@@ -253,7 +254,7 @@ function AddSlotForm({ classGroupId }: { classGroupId: string }) {
   const tDays = useTranslations("Classes");
   const tErrors = useTranslations("Classes.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(createScheduleAction, IDLE_CLASS_STATE);
+  const [state, formAction] = useGuardedActionState(createScheduleAction, IDLE_CLASS_STATE);
   const [open, setOpen] = useState(false);
   const { draft, setDraft, conflicts } = useSlotDraft(
     classGroupId,

@@ -137,7 +137,7 @@ export default async function TeachersPage({
                 <span className="min-w-0 flex-1">{t("columns.contact")}</span>
                 <span className="min-w-0 flex-1">{t("columns.blocked")}</span>
                 <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-44 shrink-0 text-end">
+                <span className="w-36 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
               </ListHeader>

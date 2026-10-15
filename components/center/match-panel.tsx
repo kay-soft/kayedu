@@ -51,7 +51,7 @@ export function MatchPanel({
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-info/30 bg-info-bg/60 p-4">
       <div className="flex items-start gap-3">
-        <UserCheck className="mt-0.5 size-5 shrink-0 text-info" aria-hidden />
+        <UserCheck className="mt-0.5 size-5 shrink-0 text-info-fg" aria-hidden />
         <div className="min-w-0">
           <p className="text-sm font-semibold text-text-primary">
             {t("title")}

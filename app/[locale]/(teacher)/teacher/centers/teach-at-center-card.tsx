@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { requestToTeachAction } from "@/app/[locale]/(teacher)/teacher/centers/actions";
@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
 import { Button } from "@/components/ui/button";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 type SelectOption = { value: string; label: string };
 type CenterCard = { id: string; name: string; logoUrl: string | null; themeColor: string };
@@ -83,7 +84,7 @@ function RequestForm({
   const t = useTranslations("TeacherCenters.request");
   const tErrors = useTranslations("TeacherCenters.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(requestToTeachAction, IDLE_TEACHER_STATE);
+  const [state, formAction] = useGuardedActionState(requestToTeachAction, IDLE_TEACHER_STATE);
 
   if (state.status === "created") {
     return <FormMessage tone="success">{t("submitted")}</FormMessage>;

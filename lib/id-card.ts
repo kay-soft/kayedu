@@ -388,10 +388,15 @@ function text(
   let x: number;
   let y: number;
   let anchor: "start" | "middle" | "end";
+  // DES: the anchor is logical. The `direction` attribute on the <text> already
+  // makes `start` the right edge of an Arabic run (SVG text-anchor follows the
+  // inline direction), so flipping it here as well had anchored every Arabic
+  // text at its *left* end — the branch name ran off the card and the photo
+  // overprinted the grade. LTR output is byte-for-byte unchanged.
   if (align === "start") {
-    // The pre-R9 path, untouched: a text is anchored at its logical start.
+    // A text is anchored at its logical start (the mirrored `x` on an Arabic card).
     ({ x, y } = place(element, dir));
-    anchor = dir === "rtl" ? "end" : "start";
+    anchor = "start";
   } else {
     // Centre / end align inside the element's box. The box is clamped to the
     // card, then mirrored like any other element, so `end` is the left edge of
@@ -407,8 +412,9 @@ function text(
       x = round(placed.x + box / 2);
       anchor = "middle";
     } else if (dir === "rtl") {
+      // The logical end of an Arabic run is its left edge: the box's left edge.
       x = placed.x;
-      anchor = "start";
+      anchor = "end";
     } else {
       x = round(placed.x + box);
       anchor = "end";

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
-import { TeacherSessionPrintToolbar } from "@/app/[locale]/(print)/teacher/sessions/[id]/print/toolbar";
+import { PrintToolbar } from "@/components/shared/print-toolbar";
 import { SessionPrintSheet } from "@/components/shared/session-print-sheet";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
@@ -56,8 +56,7 @@ export default async function SessionPrintPage({
       name: fullName(localName(attendee.studentProfile!, attendee.studentProfile!.user)),
       studentCode: attendee.studentProfile!.studentCode,
       status: attendee.attendanceStatus,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    }));
 
   const className = sessionDisplayName(locale, session);
 
@@ -65,7 +64,7 @@ export default async function SessionPrintPage({
     <>
       <style>{`@page { size: A4; margin: 14mm; }`}</style>
 
-      <TeacherSessionPrintToolbar
+      <PrintToolbar
         title={className}
         hint={tSheet("hint")}
         printLabel={tSheet("print")}

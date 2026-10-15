@@ -60,8 +60,10 @@ export default async function RefundsPage() {
                     <p className="text-sm font-semibold text-text-primary">
                       {fullName(localName(studentProfile, studentProfile.user))}
                     </p>
-                    <p className="text-sm font-medium tabular-nums text-danger">
-                      -{formatMoney(refund.amount, locale)}
+                    {/* Money is never coloured (§11.9), and red is the void
+                        colour; the locale's own minus, never a glued hyphen. */}
+                    <p className="text-sm font-medium whitespace-nowrap tabular-nums text-text-primary">
+                      {formatMoney(-refund.amount, locale)}
                     </p>
                   </div>
                   <p className="text-xs text-text-secondary">
@@ -69,8 +71,8 @@ export default async function RefundsPage() {
                     {" · "}
                     {formatDate(refund.payment.session.date, locale)}
                   </p>
-                  <p className="text-xs text-text-muted">{refund.reason}</p>
-                  <p className="text-xs text-text-muted">
+                  <p className="text-sm break-words text-text-secondary" dir="auto">{refund.reason}</p>
+                  <p className="text-xs text-text-secondary">
                     {t("refundedOn", { date: formatDate(refund.refundedAt, locale) })}
                   </p>
                 </div>

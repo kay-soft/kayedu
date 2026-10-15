@@ -368,7 +368,7 @@ export function RemoveButton({
     <Button
       type="button"
       variant="ghost"
-      className="h-11 px-3 text-danger hover:bg-danger-bg"
+      className="h-11 px-3 text-danger-fg hover:bg-danger-bg"
       onClick={onClick}
     >
       <X className="size-4" />

@@ -1,5 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
+
+import { formatNumber } from "@/lib/format";
 
 import { Link } from "@/lib/i18n/navigation";
 
@@ -22,6 +24,10 @@ export async function Pagination({
   buildHref: (page: number) => string;
 }) {
   const t = await getTranslations("Shared.pagination");
+  // Formatted here: a plain ICU placeholder prints a raw number in Latin
+  // digits in Arabic (docs/04 §3).
+  const locale = await getLocale();
+  const n = (value: number) => formatNumber(value, locale);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   if (totalPages <= 1) return null;
 
@@ -34,7 +40,7 @@ export async function Pagination({
       className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between"
     >
       <p className="text-sm text-text-muted">
-        {t("range", { from, to, total })}
+        {t("range", { from: n(from), to: n(to), total: n(total) })}
       </p>
 
       <div className="flex items-center justify-center gap-2">
@@ -50,7 +56,7 @@ export async function Pagination({
         ) : (
           <span
             aria-disabled
-            className="flex h-11 min-w-11 cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-border bg-surface-subtle px-3 text-sm text-text-muted/60"
+            className="flex h-11 min-w-11 cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-border bg-surface-subtle px-3 text-sm text-text-muted"
           >
             <ChevronLeft className="size-4 rtl:-scale-x-100" aria-hidden />
             {t("previous")}
@@ -58,7 +64,7 @@ export async function Pagination({
         )}
 
         <span className="px-2 text-sm tabular-nums text-text-secondary">
-          {t("pageOf", { page, totalPages })}
+          {t("pageOf", { page: n(page), totalPages: n(totalPages) })}
         </span>
 
         {page < totalPages ? (
@@ -72,7 +78,7 @@ export async function Pagination({
         ) : (
           <span
             aria-disabled
-            className="flex h-11 min-w-11 cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-border bg-surface-subtle px-3 text-sm text-text-muted/60"
+            className="flex h-11 min-w-11 cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-border bg-surface-subtle px-3 text-sm text-text-muted"
           >
             {t("next")}
             <ChevronRight className="size-4 rtl:-scale-x-100" aria-hidden />

@@ -23,7 +23,8 @@ const STATUS_BADGE = {
   DRAFT: "neutral",
   APPROVED: "info",
   PAID: "success",
-  CANCELLED: "danger",
+  // A cancelled draft released its claims — nothing is wrong (docs/04 §11.9).
+  CANCELLED: "neutral",
 } as const;
 
 /**

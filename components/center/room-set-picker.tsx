@@ -150,7 +150,7 @@ export function RoomSetPicker({
           </ul>
         )}
         <p className="text-xs text-text-muted">{t("combineHint")}</p>
-        {extraError ? <p className="text-xs text-danger">{extraError}</p> : null}
+        {extraError ? <p className="text-xs text-danger-fg">{extraError}</p> : null}
       </fieldset>
 
       {chosen.length > 0 ? (

@@ -133,10 +133,14 @@ function checkLocaleToggle() {
   const renderers = [
     "components/shell/app-shell.tsx",
     "app/[locale]/(auth)/layout.tsx",
-    "app/[locale]/not-found.tsx",
+    "components/shared/public-header.tsx",
   ];
   for (const file of renderers) {
     check(`${file} renders <LocaleToggle />`, /<LocaleToggle\b/.test(read(file)));
+  }
+  // DES: every screen outside a shell carries the public header (mark + toggle).
+  for (const file of ["app/[locale]/not-found.tsx", "app/[locale]/error.tsx", "app/[locale]/page.tsx"]) {
+    check(`${file} renders <PublicHeader />`, /<PublicHeader\b/.test(read(file)));
   }
 
   // Every experience layout is a shell, and a shell is `AppShell`.
@@ -192,6 +196,8 @@ const HEX_ALLOWLIST: Record<string, string> = {
   "app/[locale]/(teacher)/layout.tsx": "the zero-centre teacher shell's default brand — the --brand token's value, passed as data",
   "app/[locale]/(center)/settings/card/card-style-controls.tsx":
     "ID-card colour swatches and fallbacks — a centre's own card colours are user content, not UI chrome",
+  "app/[locale]/layout.tsx":
+    "the viewport themeColor for the mobile browser's chrome — the --bg-canvas token's value, which Next needs as a literal (DES)",
 };
 
 const COLOUR_UTILITIES = "bg|text|border|ring|outline|divide|fill|stroke|from|to|via|shadow|accent|caret|decoration|placeholder";
@@ -212,6 +218,17 @@ function checkTokens() {
   }
 
   check("No hex colour outside the justified allowlist", hexOffenders.length === 0, hexOffenders.join(", "));
+
+  // DES (docs/04 §2): text drawn in a status colour uses the darker `-fg`
+  // shade — the base shades failed AA on their own tints (amber 1.93:1).
+  const baseStatusText = FILES.filter(
+    (file) => file.endsWith(".tsx") && /text-(success|warning|danger|info|destructive)(?!-)/.test(stripComments(read(file))),
+  );
+  check(
+    "Status-coloured text uses the -fg shade (text-success-fg …), never the base token",
+    baseStatusText.length === 0,
+    baseStatusText.join(", "),
+  );
   check("No arbitrary colour class (bg-[#…], text-[rgb(…)])", arbitrary.length === 0, arbitrary.join(", "));
   check("No palette-scale colour class (bg-green-500, text-slate-900, …)", palette.length === 0, palette.join(", "));
 
@@ -242,7 +259,9 @@ function checkNoDecorativeAccents() {
 
 /** Pages that are not "a page with a title": signed-out, print, or redirect-only. */
 const PAGEHEADER_EXEMPT: Record<string, string> = {
-  "app/[locale]/page.tsx": "entry redirect — renders nothing",
+  "app/[locale]/page.tsx":
+    "entry point — redirects a signed-in visitor home; signed out it is the public landing, whose h1 is the product name (DES)",
+  "app/[locale]/[...rest]/page.tsx": "unknown-path catch-all — calls notFound(), renders nothing (DES)",
   "app/[locale]/(student)/student/profile/page.tsx": "redirect-only (the layout renders the profile form)",
   "app/[locale]/(auth)/login/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/register/page.tsx": "signed-out screen — AuthCard carries the heading",
@@ -504,6 +523,110 @@ function checkRtlCentring() {
   );
 }
 
+// ── 11. Every mutation answers (DES Phase 3, docs/04 §14.2) ─────────────────
+
+/** Route groups under app/[locale]: each keeps a way out of its own failures. */
+function checkRouteGroupBoundaries() {
+  const base = join(ROOT, "app", "[locale]");
+  const groups = readdirSync(base).filter(
+    (entry) => /^\(.+\)$/.test(entry) && statSync(join(base, entry)).isDirectory(),
+  );
+  const missing = groups.flatMap((group) =>
+    ["error.tsx", "not-found.tsx"]
+      .filter((file) => !existsSync(join(base, group, file)))
+      .map((file) => `${group}/${file}`),
+  );
+  check(
+    `Every route group has error.tsx and not-found.tsx (${groups.length} groups)`,
+    groups.length > 0 && missing.length === 0,
+    missing.join(", "),
+  );
+}
+
+/**
+ * Form state comes from `useGuardedActionState` (a network failure becomes a
+ * Retry toast), and every state it returns is reported: a toast through
+ * `useActionFeedback`, or the state's own error/status/field errors rendered.
+ */
+function checkActionsReport() {
+  const plain: string[] = [];
+  const unreported: string[] = [];
+  for (const file of FILES) {
+    if (!file.endsWith(".tsx")) continue;
+    const source = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    if (/\buseActionState\(/.test(source)) plain.push(file);
+    for (const match of source.matchAll(/const\s*\[\s*(\w+)\s*,[^\]]*\]\s*=\s*useGuardedActionState\(/g)) {
+      const name = match[1];
+      const isReported = (n: string) =>
+        new RegExp(`\\b${n}\\.(error|status|fieldErrors)\\b`).test(source) ||
+        new RegExp(`useActionFeedback\\(\\s*${n}\\b`).test(source);
+      // Two modes of one form merged into one state (`const state = a ? x : y`).
+      const aliases = [...source.matchAll(new RegExp(`const\\s+(\\w+)\\s*(?::[^=]+)?=[^;]*\\b${name}\\b`, "g"))].map(
+        (alias) => alias[1],
+      );
+      if (!isReported(name) && !aliases.some(isReported)) unreported.push(`${file} (${name})`);
+    }
+  }
+  check(
+    "Form state comes from useGuardedActionState, never a bare useActionState (network failures are retryable)",
+    plain.length === 0,
+    plain.join(", "),
+  );
+  check(
+    "Every action state is reported — a toast, or its error/status rendered (no silent mutation)",
+    unreported.length === 0,
+    unreported.join(", "),
+  );
+}
+
+/** The auth actions that end in `redirect()` — they never return to a form. */
+const VOID_ACTION_ALLOWLIST: Record<string, string> = {
+  signOutAction: "ends in redirect() to the sign-in page",
+  selectCenterAction: "ends in redirect() into the chosen branch",
+};
+
+function checkActionsReturnResults() {
+  const offenders: string[] = [];
+  for (const file of FILES) {
+    if (!file.endsWith(".ts")) continue;
+    const raw = readFileSync(join(ROOT, file), "utf8");
+    if (!/^\s*["']use server["']/.test(raw)) continue;
+    const source = stripComments(raw);
+    for (const match of source.matchAll(/export\s+async\s+function\s+(\w+)\s*\([^()]*\)\s*:\s*Promise<void>/g)) {
+      if (!(match[1] in VOID_ACTION_ALLOWLIST)) offenders.push(`${file} (${match[1]})`);
+    }
+  }
+  check(
+    "No Server Action returns void — a refusal must not look like a success",
+    offenders.length === 0,
+    offenders.join(", "),
+  );
+}
+
+/** A `catch` that swallows silently, each with the reason it may. */
+const SILENT_CATCH_ALLOWLIST: Record<string, string> = {
+  "components/center/slot-conflict-notice.tsx":
+    "an advisory preview — the server's own conflict check still answers on submit",
+  "app/[locale]/(center)/settings/card/card-form.tsx":
+    "getBBox() throws while the card is display:none; there is nothing to measure, not a failure",
+};
+
+function checkNoSilentCatches() {
+  const offenders = FILES.filter((file) => {
+    if (file in SILENT_CATCH_ALLOWLIST) return false;
+    const source = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    return (
+      /\bcatch\s*(\([^)]*\))?\s*\{\s*\}/.test(source) ||
+      /\.catch\(\s*(\(\s*\w*\s*\)|\w+)\s*=>\s*(\{\s*\}|undefined|null)\s*\)/.test(source)
+    );
+  });
+  check(
+    "No empty or comment-only catch outside the allowlist (errors are never silent)",
+    offenders.length === 0,
+    offenders.join(", "),
+  );
+}
+
 checkLocaleToggle();
 checkNav();
 checkNativeSelect();
@@ -516,6 +639,11 @@ checkInitials();
 checkDetailPages();
 checkAddDialogs();
 checkRtlCentring();
+console.log("\nFeedback (DES)");
+checkRouteGroupBoundaries();
+checkActionsReport();
+checkActionsReturnResults();
+checkNoSilentCatches();
 
 if (failures > 0) {
   console.error(`\n${failures} design check(s) failed.`);

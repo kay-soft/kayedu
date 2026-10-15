@@ -1,20 +1,19 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { Copy, Check } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
   createInvitationAction,
   type InviteFormState,
 } from "@/app/[locale]/(center)/settings/staff/actions";
+import { CopyLinkField } from "@/components/shared/copy-link-field";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { ROUTES } from "@/lib/routes";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 const initialState: InviteFormState = {};
 
@@ -33,33 +32,18 @@ function InviteLink({ token }: { token: string }) {
   // Only ever rendered after the action resolves, i.e. on the client.
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const href = `${origin}${path}`;
-  const [copied, setCopied] = useState(false);
-
   return (
     <div className="flex flex-col gap-2">
       <FormMessage tone="success">{t("inviteCreated")}</FormMessage>
-      <Label htmlFor="invite-link">{t("inviteLinkLabel")}</Label>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input id="invite-link" readOnly value={href} dir="ltr" />
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 shrink-0 px-4"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(href);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            } catch {
-              setCopied(false);
-            }
-          }}
-        >
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? t("copied") : t("copy")}
-        </Button>
-      </div>
-      <p className="text-xs text-text-muted">{t("inviteLinkHint")}</p>
+      <CopyLinkField
+        id="invite-link"
+        href={href}
+        label={t("inviteLinkLabel")}
+        hint={t("inviteLinkHint")}
+        copyLabel={t("copy")}
+        copiedLabel={t("copied")}
+        failedLabel={t("copyFailed")}
+      />
     </div>
   );
 }
@@ -69,7 +53,7 @@ export function InviteForm() {
   const tErrors = useTranslations("Staff.errors");
   const tRoles = useTranslations("Roles");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     createInvitationAction,
     initialState,
   );
@@ -88,6 +72,8 @@ export function InviteForm() {
               id="invite-email"
               name="email"
               type="email"
+          spellCheck={false}
+          autoCapitalize="none"
               inputMode="email"
               dir="ltr"
               required
@@ -116,7 +102,7 @@ export function InviteForm() {
           </div>
         </div>
 
-        <SubmitButton className="w-full sm:w-auto">
+        <SubmitButton className="w-full sm:w-auto sm:self-start">
           {t("sendInvite")}
         </SubmitButton>
       </form>

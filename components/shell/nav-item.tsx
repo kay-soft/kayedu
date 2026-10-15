@@ -38,11 +38,13 @@ export function NavItem({
       aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
       className={cn(
-        "relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-ui",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
+        // The one focus ring, in its on-dark form (docs/04 §4). The active item
+        // is the solid brand pill alone — the white start-edge tab drawn on it
+        // read as a rendering glitch (DES, §14.3).
+        "relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-ui focus-ring-inverse",
         collapsed && "justify-center px-0",
         active
-          ? "bg-brand font-medium text-brand-foreground before:absolute before:inset-y-1 before:start-0 before:w-1 before:rounded-e-full before:bg-brand-foreground/70 before:content-['']"
+          ? "bg-brand font-medium text-brand-foreground"
           : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
       )}
     >

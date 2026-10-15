@@ -1,8 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Library, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+
+import { formatMoney, formatNumber } from "@/lib/format";
 
 import {
   createCatalogEntryAction,
@@ -35,6 +37,7 @@ import type { CatalogAdminRow, CatalogUsage } from "@/lib/db/catalog-admin";
 import { piastresToInputValue } from "@/lib/money";
 import { foldPickerText } from "@/lib/picker-search";
 import { cn } from "@/lib/utils";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 type Kind = CatalogAdminRow["kind"];
 
@@ -66,6 +69,7 @@ export function CatalogManager({
   subjects: CatalogAdminRow[];
 }) {
   const t = useTranslations("AdminCatalog");
+  const tabLocale = useLocale();
   const [kind, setKind] = useState<Kind>("EDUCATION_SYSTEM");
   const [query, setQuery] = useState("");
 
@@ -76,16 +80,18 @@ export function CatalogManager({
   };
   const rows = rowsByKind[kind];
 
-  const visible = useMemo(() => {
-    const words = foldPickerText(query).split(" ").filter(Boolean);
-    if (words.length === 0) return rows;
-    return rows.filter((row) => {
-      const haystack = foldPickerText(
-        [row.nameEn, row.nameAr, row.parentNameEn, row.parentNameAr].filter(Boolean).join(" "),
-      );
-      return words.every((word) => haystack.includes(word));
-    });
-  }, [rows, query]);
+  // A short, client-side list: filtered on each render (the React compiler
+  // memoises what is worth it).
+  const words = foldPickerText(query).split(" ").filter(Boolean);
+  const visible =
+    words.length === 0
+      ? rows
+      : rows.filter((row) => {
+          const haystack = foldPickerText(
+            [row.nameEn, row.nameAr, row.parentNameEn, row.parentNameAr].filter(Boolean).join(" "),
+          );
+          return words.every((word) => haystack.includes(word));
+        });
 
   const key = KIND_KEY[kind];
 
@@ -114,7 +120,9 @@ export function CatalogManager({
               )}
             >
               <span className="truncate">{t(`tabs.${KIND_KEY[tabKind]}`)}</span>
-              <span className="text-xs font-normal text-text-muted">{rowsByKind[tabKind].length}</span>
+              <span className="text-xs font-normal tabular-nums text-text-secondary">
+                {formatNumber(rowsByKind[tabKind].length, tabLocale)}
+              </span>
             </button>
           );
         })}
@@ -203,11 +211,11 @@ function CatalogRow({
   const tErrors = useTranslations("AdminCatalog.errors");
   const locale = useLocale();
   const [confirming, setConfirming] = useState<Confirming>(null);
-  const [toggleState, toggleAction, togglePending] = useActionState(
+  const [toggleState, toggleAction, togglePending] = useGuardedActionState(
     toggleCatalogEntryAction,
     IDLE_CATALOG_ADMIN_ACTION_STATE,
   );
-  const [deleteState, deleteAction, deletePending] = useActionState(
+  const [deleteState, deleteAction, deletePending] = useGuardedActionState(
     deleteCatalogEntryAction,
     IDLE_CATALOG_ADMIN_ACTION_STATE,
   );
@@ -223,7 +231,7 @@ function CatalogRow({
   const meta = [
     parentLabel,
     row.defaultFixedCenterShare !== null
-      ? t("defaultShareValue", { amount: piastresToInputValue(row.defaultFixedCenterShare) })
+      ? t("defaultShareValue", { amount: formatMoney(row.defaultFixedCenterShare, locale) })
       : null,
     t("usage.summary", { centres: row.usage.centres, classes: row.usage.classes }),
   ].filter(Boolean);
@@ -241,18 +249,21 @@ function CatalogRow({
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="grid min-w-0 flex-1 gap-1 sm:grid-cols-2 sm:gap-4">
           <div className="min-w-0">
-            <p className="text-xs text-text-muted">{t("fields.nameEn")}</p>
-            <p dir="ltr" lang="en" className="truncate text-sm font-medium text-text-primary text-start">
-              {row.nameEn}
+            {/* The paragraph keeps the page's direction so the value starts
+                under its label; the name is an isolated run in its own
+                language (docs/04 §7). */}
+            <p className="text-xs text-text-secondary">{t("fields.nameEn")}</p>
+            <p className="truncate text-sm font-medium text-text-primary">
+              <bdi dir="ltr" lang="en">{row.nameEn}</bdi>
             </p>
           </div>
           <div className="min-w-0">
-            <p className="text-xs text-text-muted">{t("fields.nameAr")}</p>
-            <p dir="rtl" lang="ar" className="truncate text-sm font-medium text-text-primary text-start">
-              {row.nameAr}
+            <p className="text-xs text-text-secondary">{t("fields.nameAr")}</p>
+            <p className="truncate text-sm font-medium text-text-primary">
+              <bdi dir="rtl" lang="ar">{row.nameAr}</bdi>
             </p>
           </div>
-          <p className="text-xs text-text-muted sm:col-span-2">{meta.join(" · ")}</p>
+          <p className="text-xs text-text-secondary sm:col-span-2">{meta.join(" · ")}</p>
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -288,13 +299,15 @@ function CatalogRow({
               </Button>
             </form>
           )}
+          {/* Quiet at rest — the red fill is for its confirmation panel, not
+              for every row of reference data (docs/04 §14.6). */}
           <Button
             type="button"
-            variant="destructive"
-            className="h-11 px-3 md:h-9"
+            variant="ghost"
+            className="h-11 px-3 text-danger-fg hover:bg-danger-bg md:h-9"
             onClick={() => setConfirming(confirming === "delete" ? null : "delete")}
           >
-            <Trash2 className="size-4" />
+            <Trash2 className="size-4" aria-hidden />
             {t("delete")}
           </Button>
         </div>
@@ -323,7 +336,7 @@ function CatalogRow({
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="kind" value={row.kind} />
           <input type="hidden" name="id" value={row.id} />
-          <p className="text-sm text-danger">{t("deleteConfirm")}</p>
+          <p className="text-sm text-danger-fg">{t("deleteConfirm")}</p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button type="submit" variant="destructive" className="h-11 sm:h-9" disabled={deletePending}>
               {t("deleteYes")}
@@ -380,7 +393,7 @@ function EntryDialog({
   const locale = useLocale();
   const key = KIND_KEY[kind];
 
-  const [state, formAction, pending] = useActionState<CatalogAdminActionState, FormData>(
+  const [state, formAction, pending] = useGuardedActionState<CatalogAdminActionState>(
     mode === "create" ? createCatalogEntryAction : updateCatalogEntryAction,
     IDLE_CATALOG_ADMIN_ACTION_STATE,
   );

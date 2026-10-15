@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { IDLE_RATING_STATE } from "@/lib/validation/ratings";
 import { cn } from "@/lib/utils";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type PendingRatingSessionView = {
   sessionId: string;
@@ -83,11 +84,11 @@ function RatingRow({
   onResolved: () => void;
 }) {
   const t = useTranslations("RatingPopup");
-  const [submitState, submitAction, submitPending] = useActionState(
+  const [submitState, submitAction, submitPending] = useGuardedActionState(
     submitSessionRatingAction,
     IDLE_RATING_STATE,
   );
-  const [skipState, skipAction, skipPending] = useActionState(
+  const [skipState, skipAction, skipPending] = useGuardedActionState(
     skipSessionRatingAction,
     IDLE_RATING_STATE,
   );
@@ -139,7 +140,7 @@ function RatingRow({
               "flex size-11 shrink-0 items-center justify-center rounded-lg",
               "transition-ui-fast focus-ring hover:bg-surface-hover active:bg-surface-active",
               "disabled:pointer-events-none disabled:opacity-50",
-              score <= hovered ? "text-warning" : "text-text-muted",
+              score <= hovered ? "text-warning-fg" : "text-text-muted",
             )}
           >
             <Star
@@ -151,16 +152,18 @@ function RatingRow({
         ))}
       </form>
 
-      {error ? <p className="text-xs text-danger">{t(`errors.${error}`)}</p> : null}
+      {error ? <p className="text-xs text-danger-fg">{t(`errors.${error}`)}</p> : null}
 
       <form action={skipAction}>
         <input type="hidden" name="sessionId" value={session.sessionId} />
         <button
           type="submit"
           disabled={pending}
+          // A real button of its own weight (docs/04 §11.5) — it had been
+          // plain text that read as a caption.
           className={cn(
-            "-mx-2 flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-text-secondary",
-            "transition-ui-fast focus-ring hover:bg-surface-hover hover:text-text-primary active:bg-surface-active",
+            "flex min-h-11 items-center rounded-lg border border-border-control bg-surface px-4 text-sm font-medium text-text-secondary",
+            "transition-ui-fast focus-ring hover:border-border-control-hover hover:bg-surface-hover hover:text-text-primary active:bg-surface-active",
             "disabled:pointer-events-none disabled:opacity-50",
           )}
         >

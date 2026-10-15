@@ -26,7 +26,7 @@ import { studentCardSvg } from "@/lib/db/id-cards";
 import { parentLinksForStudent } from "@/lib/db/parents";
 import { scoped } from "@/lib/db/scoped";
 import { idCardGeneratedAt, signedUrlFor } from "@/lib/db/storage";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -354,7 +354,7 @@ export default async function StudentDetailPage({
               <DetailRow label={t("fields.parentName")} value={parentName} />
               <DetailRow label={t("fields.parentPhone")} value={student.parentPhone} ltr />
               <DetailRow label={t("fields.parentAltPhone")} value={student.parentAltPhone} ltr />
-              <DetailRow label={t("fields.otherCenters")} value={String(otherRelations)} />
+              <DetailRow label={t("fields.otherCenters")} value={formatNumber(otherRelations, locale)} />
             </DetailCard>
 
             <DetailCard title={t("parentLinks.title")} description={t("parentLinks.description")}>

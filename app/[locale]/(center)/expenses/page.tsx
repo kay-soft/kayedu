@@ -199,7 +199,7 @@ export default async function ExpensesPage({
                 <span className="w-32 shrink-0">{t("columns.date")}</span>
                 <span className="min-w-0 flex-1">{t("columns.category")}</span>
                 <span className="min-w-0 flex-[2]">{t("columns.note")}</span>
-                <span className="w-28 shrink-0">{t("columns.amount")}</span>
+                <span className="w-32 shrink-0 text-end">{t("columns.amount")}</span>
                 <span className="w-32 shrink-0 text-end">{t("columns.actions")}</span>
               </ListHeader>
 

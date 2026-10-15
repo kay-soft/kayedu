@@ -11,8 +11,11 @@ export function SubmitButton({
   className,
   variant,
   disabled,
+  pendingLabel,
 }: {
   children: React.ReactNode;
+  /** Shown instead of the label while the form submits ("Signing in…"). */
+  pendingLabel?: React.ReactNode;
   className?: string;
   variant?: React.ComponentProps<typeof Button>["variant"];
   /** Held disabled by the form itself — e.g. an unconfirmed double-booking (R3). */
@@ -25,10 +28,11 @@ export function SubmitButton({
       type="submit"
       variant={variant}
       disabled={pending || disabled}
+      aria-busy={pending || undefined}
       className={cn("h-11 px-4", className)}
     >
-      {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-      {children}
+      {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+      {pending && pendingLabel ? pendingLabel : children}
     </Button>
   );
 }

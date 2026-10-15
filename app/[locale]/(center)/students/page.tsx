@@ -104,7 +104,9 @@ export default async function StudentsPage({
     <div className="flex flex-col gap-6">
       <PageHeader
         title={t("title")}
-        description={t("subtitle", { count: total })}
+        // With a search, the count is the matches — say so, rather than claim
+        // the branch has that many students (docs/04 §14.6).
+        description={query ? t("subtitleFiltered", { count: total, query }) : t("subtitle", { count: total })}
         action={<AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} />}
       />
 
@@ -169,7 +171,7 @@ export default async function StudentsPage({
                 <span className="min-w-0 flex-1">{t("columns.grade")}</span>
                 <span className="min-w-0 flex-1">{t("columns.contact")}</span>
                 <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-44 shrink-0 text-end">
+                <span className="w-36 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
               </ListHeader>

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  startTransition,
-  useActionState,
-  useEffect,
-  useState,
-  type FormEvent,
-} from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { Camera, GraduationCap, UserRound, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -24,8 +18,11 @@ import {
   type GradeOption,
 } from "@/components/center/student-fields";
 import { DialogSections, DialogShell, FormSection } from "@/components/shared/dialog-shell";
+import { ErrorSummary } from "@/components/shared/error-summary";
 import { FormMessage } from "@/components/shared/form-message";
-import { IDLE_PEOPLE_STATE, type MatchCandidate } from "@/lib/validation/people";
+import { IDLE_PEOPLE_STATE, type MatchCandidate, studentCreateSchema } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
+import { useClientValidation } from "@/lib/ui/client-validation";
 
 /**
  * Register a student (spec §4.1 item 4) — the body of the "Add student"
@@ -61,10 +58,13 @@ export function StudentForm({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [state, formAction, pending] = useActionState(
+  const [state, formAction, pending] = useGuardedActionState(
     createStudentAction,
     IDLE_PEOPLE_STATE,
   );
+  // The action's own schema, run before the round trip (docs/04 §14.2).
+  const { clientErrors, check } = useClientValidation(studentCreateSchema);
+  const fieldErrors = clientErrors ?? state.fieldErrors;
   const [dismissedMatch, setDismissedMatch] = useState<string | null>(null);
   const [linkedMatch, setLinkedMatch] = useState<MatchCandidate | null>(null);
 
@@ -84,6 +84,7 @@ export function StudentForm({
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    if (!check(event.currentTarget, formData)) return;
     startTransition(() => formAction(formData));
   }
 
@@ -106,6 +107,7 @@ export function StudentForm({
 
       <div className="flex flex-col gap-4">
         {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+        <ErrorSummary fieldErrors={fieldErrors} />
 
         <DialogSections>
           <FormSection
@@ -124,13 +126,13 @@ export function StudentForm({
                   ? { firstName: linkedMatch.name.split(" ")[0], lastName: linkedMatch.name.split(" ").slice(1).join(" ") }
                   : undefined
               }
-              fieldErrors={state.fieldErrors}
+              fieldErrors={fieldErrors}
             />
             <ContactFields
               key={`contact-${linkedMatch?.userId ?? "new"}`}
               idPrefix="student-create"
               values={linkedMatch ? { phone: linkedMatch.phone ?? "", email: linkedMatch.email ?? "" } : undefined}
-              fieldErrors={state.fieldErrors}
+              fieldErrors={fieldErrors}
               belowPhone={
                 match ? (
                   <MatchPanel
@@ -154,7 +156,7 @@ export function StudentForm({
               <GradeField
                 idPrefix="student-create"
                 grades={grades}
-                fieldErrors={state.fieldErrors}
+                fieldErrors={fieldErrors}
                 noneLabel={noneLabel}
               />
             </FormSection>
@@ -164,7 +166,7 @@ export function StudentForm({
               description={tSections("parentHint")}
               icon={<Users />}
             >
-              <ParentFields idPrefix="student-create" fieldErrors={state.fieldErrors} />
+              <ParentFields idPrefix="student-create" fieldErrors={fieldErrors} />
             </FormSection>
 
             <FormSection

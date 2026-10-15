@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { signUpAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
@@ -12,6 +11,7 @@ import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 const initialState: AuthFormState = {};
 
@@ -25,7 +25,7 @@ export function RegisterForm({
   const t = useTranslations("Auth");
   const tErrors = useTranslations("Auth.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(signUpAction, initialState);
+  const [state, formAction] = useGuardedActionState(signUpAction, initialState);
 
   if (state.status === "emailConfirmationRequired" && state.email) {
     return <CheckEmailNotice email={state.email} />;
@@ -87,6 +87,8 @@ export function RegisterForm({
           id="email"
           name="email"
           type="email"
+          spellCheck={false}
+          autoCapitalize="none"
           inputMode="email"
           autoComplete="email"
           dir="ltr"

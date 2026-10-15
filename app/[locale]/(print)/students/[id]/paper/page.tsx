@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { IdCardPreview } from "@/components/center/id-card-preview";
-import { PrintToolbar } from "@/components/center/print-toolbar";
+import { PrintToolbar } from "@/components/shared/print-toolbar";
 import { DetailRow } from "@/components/shared/field";
+import { Ltr } from "@/components/shared/ltr";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { studentCardSvg } from "@/lib/db/id-cards";
@@ -47,21 +48,24 @@ export default async function StudentPaperPrintPage({
 
       <PrintToolbar
         backHref={ROUTES.centerStudent(student.id)}
+        backLabel={t("print.back")}
         title={fullName(localName(student, student.user))}
+        hint={t("print.hint")}
+        printLabel={t("print.print")}
       />
 
       <div className="mx-auto w-full max-w-3xl p-4 sm:p-8 print:max-w-none print:p-0">
         <header className="flex flex-col gap-2 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <p className="text-xs text-text-muted">{ctx.center.name}</p>
+            <p className="text-xs text-text-secondary">{ctx.center.name}</p>
             <h2 className="text-xl font-bold text-text-primary">
               {fullName(localName(student, student.user))}
             </h2>
-            <p className="mt-1 text-sm text-text-secondary" dir="ltr">
-              {student.studentCode}
+            <p className="mt-1 text-sm text-text-secondary">
+              <Ltr>{student.studentCode}</Ltr>
             </p>
           </div>
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-text-secondary">
             {t("print.printedOn", {
               date: formatDate(todayInTimezone(centreTimeZone(ctx.settings)), locale),
             })}
@@ -75,20 +79,24 @@ export default async function StudentPaperPrintPage({
             </h3>
             <div className="mt-2">
               <DetailRow
+                stacked
                 label={t("fields.grade")}
                 value={student.grade ? catalogLabelWithSelection(locale, student.grade) : tCommon("none")}
               />
               <DetailRow
+                stacked
                 label={t("fields.phone")}
                 value={student.phone}
                 ltr
               />
               <DetailRow
+                stacked
                 label={t("fields.email")}
                 value={student.email}
                 ltr
               />
               <DetailRow
+                stacked
                 label={tCommon("status")}
                 value={student.active ? tCommon("active") : tCommon("inactive")}
               />
@@ -101,17 +109,20 @@ export default async function StudentPaperPrintPage({
             </h3>
             <div className="mt-2">
               <DetailRow
+                stacked
                 label={t("fields.parentName")}
                 value={[student.parentFirstName, student.parentLastName]
                   .filter(Boolean)
                   .join(" ")}
               />
               <DetailRow
+                stacked
                 label={t("fields.parentPhone")}
                 value={student.parentPhone}
                 ltr
               />
               <DetailRow
+                stacked
                 label={t("fields.parentAltPhone")}
                 value={student.parentAltPhone}
                 ltr
@@ -125,7 +136,7 @@ export default async function StudentPaperPrintPage({
             {t("enrollments.title")}
           </h3>
           {enrollments.length === 0 ? (
-            <p className="mt-2 text-sm text-text-muted">
+            <p className="mt-2 text-sm text-text-secondary">
               {t("enrollments.emptyPrint")}
             </p>
           ) : (
@@ -152,7 +163,8 @@ export default async function StudentPaperPrintPage({
             {t("card.title")}
           </h3>
           <div className="mt-2">
-            <IdCardPreview svg={svg} />
+            {/* True card size on paper, as on the card print. */}
+            <IdCardPreview svg={svg} className="print:w-[85.6mm] print:max-w-none" />
           </div>
         </section>
       </div>

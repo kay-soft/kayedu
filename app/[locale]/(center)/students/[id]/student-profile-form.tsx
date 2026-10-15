@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { updateStudentAction } from "@/app/[locale]/(center)/students/actions";
@@ -17,6 +16,7 @@ import { FormGroup } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * Edit one student.
@@ -52,7 +52,7 @@ export function StudentProfileForm({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     updateStudentAction,
     IDLE_PEOPLE_STATE,
   );

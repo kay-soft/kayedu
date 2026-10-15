@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -30,6 +30,7 @@ import { FormMessage } from "@/components/shared/form-message";
 import { Button } from "@/components/ui/button";
 import type { RoomLinkPair } from "@/lib/rooms";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /** The delete blockers, in the order the refusal lists them (R4). */
 const BLOCKER_KEYS = [
@@ -116,9 +117,9 @@ function EditClassDialogContent({
   const tBlockers = useTranslations("Classes.deleteBlockers");
   const locale = useLocale();
 
-  const [state, formAction, pending] = useActionState(updateClassAction, IDLE_CLASS_STATE);
-  const [deleteState, deleteFormAction] = useActionState(deleteClassAction, IDLE_CLASS_STATE);
-  const [deactivateState, deactivateFormAction] = useActionState(
+  const [state, formAction, pending] = useGuardedActionState(updateClassAction, IDLE_CLASS_STATE);
+  const [deleteState, deleteFormAction] = useGuardedActionState(deleteClassAction, IDLE_CLASS_STATE);
+  const [deactivateState, deactivateFormAction] = useGuardedActionState(
     setClassActiveAction,
     IDLE_CLASS_STATE,
   );
@@ -212,7 +213,7 @@ function EditClassDialogContent({
         ) : null}
         {deleteState.error === "classInUse" && deleteState.blockers ? (
           <div
-            className="flex flex-col gap-3 rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger"
+            className="flex flex-col gap-3 rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger-fg"
             role="alert"
           >
             <p className="font-medium">{tBlockers("title")}</p>

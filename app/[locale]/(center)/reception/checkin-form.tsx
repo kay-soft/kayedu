@@ -1,7 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
-import { UserRound } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { checkInAction } from "@/app/[locale]/(center)/reception/actions";
@@ -10,6 +9,7 @@ import {
   PaymentMethodSelector,
   type PaymentMethodOption,
 } from "@/components/center/payment-method-selector";
+import { StudentConfirmHeader } from "@/components/center/student-confirm-header";
 import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -17,6 +17,7 @@ import { formatTime } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /** One open session a student can be checked in to — the shape the picker needs. */
 export type OpenSessionOption = {
@@ -47,6 +48,7 @@ export type OpenSessionOption = {
 export function CheckInForm({
   studentProfileId,
   studentName,
+  studentCode,
   studentPhotoUrl,
   sessions,
   preselectSessionId,
@@ -54,6 +56,7 @@ export function CheckInForm({
 }: {
   studentProfileId: string;
   studentName: string;
+  studentCode: string;
   /** A short-lived signed URL, or null with no photo on file / Storage unset. */
   studentPhotoUrl: string | null;
   sessions: OpenSessionOption[];
@@ -68,7 +71,7 @@ export function CheckInForm({
   const locale = useLocale();
 
   const [sessionId, setSessionId] = useState(preselectSessionId ?? "");
-  const [state, formAction] = useActionState(checkInAction, IDLE_SESSION_STATE);
+  const [state, formAction] = useGuardedActionState(checkInAction, IDLE_SESSION_STATE);
   const saved = state.status === "saved";
 
   // A completed action hands the keyboard back to the search input, text
@@ -104,24 +107,13 @@ export function CheckInForm({
       <input type="hidden" name="studentProfileId" value={studentProfileId} />
       <input type="hidden" name="sessionId" value={sessionId} />
 
-      <div className="flex items-center gap-3">
-        {studentPhotoUrl ? (
-          // A short-lived signed Storage URL, not a static/remote asset next/image can optimize.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={studentPhotoUrl}
-            alt=""
-            className="size-14 shrink-0 rounded-full border border-border object-cover"
-          />
-        ) : (
-          <span className="flex size-14 shrink-0 items-center justify-center rounded-full border border-border bg-surface-subtle text-text-muted">
-            <UserRound className="size-6" aria-hidden />
-          </span>
-        )}
-        <p className="text-sm text-text-secondary">
-          {t("checkingIn", { name: studentName })}
-        </p>
-      </div>
+      {/* The same identity block as session mode (docs/04 §14.5). */}
+      <StudentConfirmHeader
+        name={studentName}
+        code={studentCode}
+        codeLabel={t("sessionMode.code")}
+        photoUrl={studentPhotoUrl}
+      />
 
       {sessions.length === 0 ? (
         <FormMessage tone="info">{t("noLiveSessions")}</FormMessage>
@@ -138,14 +130,15 @@ export function CheckInForm({
                   onClick={() => setSessionId(session.sessionId)}
                   aria-pressed={sessionId === session.sessionId}
                   className={cn(
-                    "flex min-h-11 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-start text-sm transition-ui focus-ring",
+                    // 48px: desk controls are larger than the 44px floor (§6).
+                    "flex min-h-12 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-start text-sm transition-ui focus-ring",
                     sessionId === session.sessionId
                       ? "border-brand bg-brand/10 text-brand"
                       : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
                   )}
                 >
                   <span className="min-w-0 truncate font-medium">{text}</span>
-                  <span className="shrink-0 tabular-nums" dir="ltr">
+                  <span className="shrink-0 tabular-nums">
                     {formatTime(session.startTime, locale)}
                   </span>
                 </button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Lock } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -9,6 +9,7 @@ import { ActionBarButton } from "@/components/shared/action-bar";
 import { DialogShell } from "@/components/shared/dialog-shell";
 import { FormMessage } from "@/components/shared/form-message";
 import { IDLE_SESSION_STATE, type SessionActionState } from "@/lib/validation/sessions";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * "End session" (R2) — a button that opens a confirmation dialog saying, in
@@ -41,7 +42,7 @@ export function EndSessionButton({
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
   const [open, setOpen] = useState(false);
-  const [state, formAction, pending] = useActionState(
+  const [state, formAction, pending] = useGuardedActionState(
     async (previous: SessionActionState, formData: FormData) => {
       const next = await endSessionAction(previous, formData);
       if (next.status === "closed") {

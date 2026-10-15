@@ -17,7 +17,7 @@ import { pendingClaimsForCenter } from "@/lib/db/account-claims";
 import { APPROVALS_PAGE_SIZE } from "@/lib/db/approvals";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { usersByIds } from "@/lib/db/identity";
@@ -260,7 +260,7 @@ export default async function ApprovalsPage() {
                         },
                         {
                           label: t("changeRequests.fields.lateThreshold"),
-                          value: String(payload.lateThresholdMinutes),
+                          value: formatNumber(payload.lateThresholdMinutes, locale),
                         },
                       ]}
                       note={payload.note ?? null}

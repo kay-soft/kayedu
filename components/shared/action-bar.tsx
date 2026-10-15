@@ -20,8 +20,8 @@ export function ActionBar({
   children: ReactNode;
   className?: string;
   /**
-   * The bar that sits in a `PageHeader` (R10b): full width on a phone, and
-   * packed to the end edge from `sm`, beside the title.
+   * The bar that sits in a `PageHeader` (R10b): full width below `lg`, and
+   * packed to the end edge from `lg`, beside the title (DES, docs/04 §14.1).
    */
   inHeader?: boolean;
 }) {
@@ -30,7 +30,8 @@ export function ActionBar({
       role="group"
       className={cn(
         "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center",
-        inHeader && "w-full sm:w-auto sm:justify-end",
+        // In a detail header it sits beside the title only from lg (DES).
+        inHeader && "w-full lg:w-auto lg:justify-end",
         className,
       )}
     >

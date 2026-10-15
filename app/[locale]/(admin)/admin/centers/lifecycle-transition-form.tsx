@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import type { CenterLifecycleState } from "@prisma/client";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -11,6 +11,7 @@ import { SubmitButton } from "@/components/shared/submit-button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The lifecycle-state transition control (M19, replacing the old boolean
@@ -36,7 +37,7 @@ export function LifecycleTransitionForm({
   const locale = useLocale();
   const [to, setTo] = useState<string>(validNext[0] ?? "");
   const [archiveConfirmed, setArchiveConfirmed] = useState(false);
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     transitionCenterLifecycleAction,
     IDLE_ADMIN_ACTION_STATE,
   );

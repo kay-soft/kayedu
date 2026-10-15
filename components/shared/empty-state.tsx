@@ -19,9 +19,9 @@ import { cn } from "@/lib/utils";
  */
 const TONES = {
   muted: "bg-surface-subtle text-text-muted",
-  info: "bg-info-bg text-info",
-  warning: "bg-warning-bg text-warning",
-  success: "bg-success-bg text-success",
+  info: "bg-info-bg text-info-fg",
+  warning: "bg-warning-bg text-warning-fg",
+  success: "bg-success-bg text-success-fg",
 } as const;
 
 export function EmptyState({
@@ -46,8 +46,10 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border text-center",
-        compact ? "px-4 py-6" : "px-6 py-10 sm:py-14",
+        // DES (docs/04 §14.1): no dashed box — the card around it is the
+        // frame; a compact panel sits on a quiet inset instead.
+        "flex flex-col items-center justify-center gap-3 rounded-xl text-center",
+        compact ? "bg-surface-subtle px-4 py-6" : "px-6 py-10 sm:py-14",
         className,
       )}
     >
@@ -66,11 +68,11 @@ export function EmptyState({
       <div className="flex max-w-sm flex-col gap-1">
         <p className="text-sm font-semibold text-text-primary">{title}</p>
         {description ? (
-          <p className="text-sm text-text-secondary">{description}</p>
+          <p className="text-sm text-pretty text-text-secondary">{description}</p>
         ) : null}
       </div>
 
-      {action ? <div className="mt-1">{action}</div> : null}
+      {action ? <div className="mt-1 w-full sm:w-auto">{action}</div> : null}
     </div>
   );
 }

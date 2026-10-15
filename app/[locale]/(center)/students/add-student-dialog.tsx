@@ -18,17 +18,20 @@ import type { GradeOption } from "@/components/center/student-fields";
 export function AddStudentDialog({
   grades,
   noneLabel,
+  variant = "default",
 }: {
   grades: GradeOption[];
   noneLabel: string;
+  /** Outline where another control is the screen's primary (the reception desk, docs/04 §14.5). */
+  variant?: "default" | "outline";
 }) {
   const t = useTranslations("Students");
 
   return (
     <DialogLauncher
       button={(openDialog) => (
-        <Button className="h-11 px-4" onClick={openDialog}>
-          <Plus className="size-4" />
+        <Button variant={variant} className="h-11 px-4" onClick={openDialog}>
+          <Plus className="size-4" aria-hidden />
           {t("add")}
         </Button>
       )}

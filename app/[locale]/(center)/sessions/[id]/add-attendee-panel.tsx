@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -15,6 +15,7 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
 import { Button } from "@/components/ui/button";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type AttendeeCandidate = {
   studentProfileId: string;
@@ -85,7 +86,7 @@ function ExistingCandidateRow({
   const t = useTranslations("Sessions.addAttendee");
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     addExistingAttendeeAction,
     IDLE_SESSION_STATE,
   );
@@ -122,7 +123,7 @@ function NewAttendeeForm({
   const t = useTranslations("Sessions.addAttendee");
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(addNewAttendeeAction, IDLE_SESSION_STATE);
+  const [state, formAction] = useGuardedActionState(addNewAttendeeAction, IDLE_SESSION_STATE);
   const [dismissedMatch, setDismissedMatch] = useState<string | null>(null);
 
   useEffect(() => {

@@ -22,7 +22,7 @@ import {
 import type { ComponentType } from "react";
 import type { ShellIconName } from "@/components/shell/nav";
 
-const ICONS: Record<ShellIconName, ComponentType<{ className?: string }>> = {
+const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hidden"?: boolean }>> = {
   dashboard: LayoutDashboard,
   reception: ConciergeBell,
   sessions: CalendarDays,
@@ -51,5 +51,6 @@ export function ShellIcon({
   className?: string;
 }) {
   const Icon = ICONS[name] ?? UserRound;
-  return <Icon className={className} />;
+  // Always beside its label — decorative to assistive technology.
+  return <Icon className={className} aria-hidden />;
 }

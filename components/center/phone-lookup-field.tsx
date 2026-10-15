@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Search, UserCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import type { MatchCandidate, PhoneLookupResult } from "@/lib/validation/people";
 
 /**
@@ -25,6 +26,7 @@ export function PhoneLookupField({
   onMatch: (match: MatchCandidate) => void;
 }) {
   const t = useTranslations("People.phoneLookup");
+  const inputId = useId();
   const tMatch = useTranslations("People.match");
   const [phone, setPhone] = useState("");
   const [pending, setPending] = useState(false);
@@ -46,9 +48,12 @@ export function PhoneLookupField({
 
   return (
     <div className="flex flex-col gap-2 rounded-lg bg-surface-subtle p-3">
-      <span className="text-xs font-medium text-text-secondary">{t("label")}</span>
+      {/* A real label for the field (it had been a loose span), DES. */}
+      <Label htmlFor={inputId}>{t("label")}</Label>
       <div className="flex gap-2">
         <Input
+          id={inputId}
+          autoComplete="off"
           type="tel"
           inputMode="tel"
           dir="ltr"
@@ -64,7 +69,7 @@ export function PhoneLookupField({
             event.preventDefault();
             void runLookup();
           }}
-          placeholder="01xxxxxxxxx"
+          placeholder={t("placeholder")}
           className="h-11"
         />
         <Button
@@ -74,22 +79,25 @@ export function PhoneLookupField({
           disabled={pending || phone.trim().length === 0}
           onClick={runLookup}
         >
-          <Search className="size-4" />
+          <Search className="size-4" aria-hidden />
           {t("submit")}
         </Button>
       </div>
 
-      {result?.status === "rateLimited" ? (
-        <p className="text-xs text-danger">{t("rateLimited")}</p>
-      ) : null}
-      {result?.status === "notFound" ? (
-        <p className="text-xs text-text-muted">{t("notFound")}</p>
-      ) : null}
+      {/* The lookup's answer is announced (it had been silent to a screen reader). */}
+      <div aria-live="polite">
+        {result?.status === "rateLimited" ? (
+          <p className="text-xs text-danger-fg">{t("rateLimited")}</p>
+        ) : null}
+        {result?.status === "notFound" ? (
+          <p className="text-xs text-text-secondary">{t("notFound")}</p>
+        ) : null}
+      </div>
 
       {match && !used ? (
         <div className="flex flex-col gap-2 rounded-lg border border-info/30 bg-info-bg/60 p-3">
           <div className="flex items-start gap-2">
-            <UserCheck className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
+            <UserCheck className="mt-0.5 size-4 shrink-0 text-info-fg" aria-hidden />
             <div className="min-w-0 text-sm">
               <p className="font-medium text-text-primary">
                 {match.name ?? tMatch("maskedName")}

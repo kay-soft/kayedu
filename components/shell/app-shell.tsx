@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { usePathname } from "@/lib/i18n/navigation";
@@ -76,19 +76,20 @@ function SidebarContent({
   brand,
   user,
   collapsed,
-  onToggleCollapsed,
   onNavigate,
   onClose,
+  closeRef,
 }: {
   nav: ShellNavItem[];
   brand: ShellBrand;
   user: ShellUser;
   /** Omitted entirely on the mobile drawer — a full-screen sheet has no rail. */
   collapsed?: boolean;
-  onToggleCollapsed?: () => void;
   onNavigate?: () => void;
   /** Drawer only: draws the close button on the brand row. */
   onClose?: () => void;
+  /** Drawer only: the close button, focused when the drawer opens. */
+  closeRef?: Ref<HTMLButtonElement>;
 }) {
   const pathname = usePathname();
   const tNav = useTranslations("Nav");
@@ -118,26 +119,27 @@ function SidebarContent({
             <span className="block truncate text-sm font-semibold text-white">
               {brand.name}
             </span>
-            <span className="block truncate text-xs text-text-muted">
+            <span className="block truncate text-xs text-text-on-dark-muted">
               {tShell("productName")}
             </span>
           </span>
         )}
         {onClose ? (
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
             aria-label={tShell("closeMenu")}
             className="-me-2 flex size-11 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground transition-ui focus-ring-inverse hover:bg-sidebar-accent active:bg-sidebar-accent/70"
           >
-            <X className="size-5" />
+            <X className="size-5" aria-hidden />
           </button>
         ) : null}
       </div>
 
       <nav
         aria-label={tShell("primaryNav")}
-        className="flex-1 overflow-y-auto p-3"
+        className="flex-1 overflow-y-auto overscroll-contain p-3"
       >
         <ul className="flex flex-col gap-1">
           {groupNav(nav).map((run, runIndex) => (
@@ -148,7 +150,7 @@ function SidebarContent({
                 run.group && !collapsed ? (
                   <li
                     role="presentation"
-                    className="px-3 pt-4 pb-1 text-xs font-medium text-text-muted"
+                    className="px-3 pt-4 pb-1 text-xs font-medium text-text-on-dark-muted"
                   >
                     {tGroups(run.group)}
                   </li>
@@ -194,39 +196,14 @@ function SidebarContent({
               <span className="block truncate text-sm font-medium text-white">
                 {user.name}
               </span>
-              <span className="block truncate text-xs text-text-muted">
+              <span className="block truncate text-xs text-text-on-dark-muted">
                 {tRoles(user.roleKey)}
               </span>
             </span>
           )}
         </div>
 
-        {/* Sign out and the collapse toggle share one row (icon-only, right
-            next to sign out — no label, so the rail never needs its own
-            scrollbar). They stack instead when the rail is already narrow. */}
-        <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
-          <div className="min-w-0 flex-1">
-            <SignOutButton collapsed={collapsed} />
-          </div>
-          {onToggleCollapsed ? (
-            <button
-              type="button"
-              onClick={onToggleCollapsed}
-              title={collapsed ? tShell("expandSidebar") : tShell("collapseSidebar")}
-              aria-pressed={collapsed}
-              className="flex size-11 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground transition-ui focus-ring-inverse hover:bg-sidebar-accent active:bg-sidebar-accent/70"
-            >
-              {/* The panel flips edge with the toggle direction, so it mirrors
-                  correctly in RTL (docs/04 §7) — collapsing always "closes
-                  toward the start" regardless of locale. */}
-              {collapsed ? (
-                <PanelLeftOpen className="size-4 rtl:-scale-x-100" />
-              ) : (
-                <PanelLeftClose className="size-4 rtl:-scale-x-100" />
-              )}
-            </button>
-          ) : null}
-        </div>
+        <SignOutButton collapsed={collapsed} />
       </div>
     </>
   );
@@ -243,16 +220,35 @@ export function AppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const tShell = useTranslations("Shell");
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
 
   useEffect(() => {
-    if (!drawerOpen) return;
+    if (!drawerOpen) {
+      // Closing hands focus back to the button that opened the drawer — only
+      // after it was actually open, never on the first render (docs/04 §14.3).
+      if (wasOpen.current) menuRef.current?.focus();
+      wasOpen.current = false;
+      return;
+    }
+    wasOpen.current = true;
+    closeRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setDrawerOpen(false);
     };
+    // The page behind is inert while the drawer is open, so the drawer must
+    // close if the window grows into the desktop layout (docs/04 §14.3).
+    const desktop = window.matchMedia("(min-width: 64rem)");
+    const onDesktop = (event: MediaQueryListEvent) => {
+      if (event.matches) setDrawerOpen(false);
+    };
     document.addEventListener("keydown", onKeyDown);
+    desktop.addEventListener("change", onDesktop);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKeyDown);
+      desktop.removeEventListener("change", onDesktop);
       document.body.style.overflow = "";
     };
   }, [drawerOpen]);
@@ -270,6 +266,14 @@ export function AppShell({
 
   return (
     <div style={brandStyle} className="min-h-dvh bg-canvas text-text-primary">
+      {/* The first focusable thing on every page (docs/04 §14.3). */}
+      <a
+        href="#main"
+        inert={drawerOpen}
+        className="sr-only z-[60] rounded-lg bg-surface px-4 py-3 text-sm font-medium text-text-primary shadow-popover focus-ring focus:not-sr-only focus:fixed focus:start-3 focus:top-3"
+      >
+        {tShell("skipToContent")}
+      </a>
       {/* Desktop sidebar — 240px, or a 72px icon rail when collapsed
           (docs/04 §5). */}
       <aside
@@ -283,7 +287,6 @@ export function AppShell({
           brand={brand}
           user={user}
           collapsed={collapsed}
-          onToggleCollapsed={toggleCollapsed}
         />
       </aside>
 
@@ -300,7 +303,12 @@ export function AppShell({
       <aside
         id="app-drawer"
         aria-label={tShell("primaryNav")}
-        aria-hidden={!drawerOpen}
+        // `inert` while closed: off-screen links must not stay in the tab
+        // order of every phone page (it had only been aria-hidden).
+        inert={!drawerOpen}
+        // A modal while open: everything behind it is inert (docs/04 §14.3).
+        role={drawerOpen ? "dialog" : undefined}
+        aria-modal={drawerOpen || undefined}
         className={cn(
           "fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col bg-sidebar lg:hidden",
           "transition-transform duration-[var(--motion-slow)] ease-[var(--ease-out)]",
@@ -313,10 +321,13 @@ export function AppShell({
           user={user}
           onNavigate={() => setDrawerOpen(false)}
           onClose={() => setDrawerOpen(false)}
+          closeRef={closeRef}
         />
       </aside>
 
       <div
+        // Tab must not walk out of an open drawer into the page under it.
+        inert={drawerOpen}
         className={cn(
           "flex min-h-dvh flex-col transition-[padding] duration-[var(--motion-slow)] ease-[var(--ease-out)]",
           collapsed ? "lg:ps-18" : "lg:ps-60",
@@ -325,8 +336,12 @@ export function AppShell({
         {/* The app bar (docs/04 §5): branch context on the start edge, account
             and language on the end edge, one baseline, real controls. */}
         <header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
-          <div className="content-shell flex h-16 items-center gap-2 px-3 sm:px-6">
+          {/* Padding outside the content column, like main's, so the controls
+              end exactly at the content's edge at every width. */}
+          <div className="px-3 sm:px-6">
+          <div className="content-shell flex h-16 items-center gap-2">
             <button
+              ref={menuRef}
               type="button"
               onClick={() => setDrawerOpen(true)}
               aria-label={tShell("openMenu")}
@@ -334,7 +349,26 @@ export function AppShell({
               aria-expanded={drawerOpen}
               className="flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-ui focus-ring hover:bg-surface-hover active:bg-surface-active lg:hidden"
             >
-              <Menu className="size-5" />
+              <Menu className="size-5" aria-hidden />
+            </button>
+            {/* From lg the same start-edge spot collapses the rail (docs/04
+                §14.3). It used to sit beside Sign out, where one slip signed a
+                receptionist out; on the brand row it cut the branch name. */}
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label={collapsed ? tShell("expandSidebar") : tShell("collapseSidebar")}
+              title={collapsed ? tShell("expandSidebar") : tShell("collapseSidebar")}
+              aria-pressed={collapsed}
+              className="hidden size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-ui focus-ring hover:bg-surface-hover active:bg-surface-active lg:flex"
+            >
+              {/* The panel flips edge with the reading direction (docs/04 §7):
+                  collapsing always closes toward the start. */}
+              {collapsed ? (
+                <PanelLeftOpen className="size-5 rtl:-scale-x-100" aria-hidden />
+              ) : (
+                <PanelLeftClose className="size-5 rtl:-scale-x-100" aria-hidden />
+              )}
             </button>
 
             {scope ? (
@@ -366,9 +400,10 @@ export function AppShell({
               <UserMenu user={user} />
             </div>
           </div>
+          </div>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6">
+        <main id="main" tabIndex={-1} className="flex-1 p-4 outline-none sm:p-6">
           <div className="content-shell">{children}</div>
         </main>
       </div>

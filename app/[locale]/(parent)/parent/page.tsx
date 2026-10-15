@@ -13,6 +13,7 @@ import { centerTimeZone } from "@/lib/db/session-lifecycle";
 import { dateKey, todayInTimezone } from "@/lib/scheduling";
 import { ChildSelector } from "./child-selector";
 import { ParentDateFilter } from "./parent-date-filter";
+import { CappedList } from "@/components/shared/capped-list";
 import { EmptyState } from "@/components/shared/empty-state";
 import { sessionLabelParts } from "@/lib/session-label";
 
@@ -184,7 +185,10 @@ export default async function ParentPage({
           {upcomingFiltered.length === 0 ? (
             <EmptyState compact icon={<CalendarClock />} title={t("upcomingEmpty")} description={t("upcomingEmptyHint")} />
           ) : (
-            upcomingFiltered.map((row) => (
+            <CappedList
+              items={upcomingFiltered}
+              moreLabel={(hidden) => t("showMoreUpcoming", { count: hidden })}
+              render={(row) => (
               <div
                 key={row.sessionId}
                 className="flex flex-col gap-2 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -193,7 +197,7 @@ export default async function ParentPage({
                   <p className="truncate text-sm font-semibold text-text-primary">
                     {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
                   </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
                     <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
@@ -202,7 +206,8 @@ export default async function ParentPage({
                 </div>
                 <Badge variant="info">{t("upcomingBadge")}</Badge>
               </div>
-            ))
+              )}
+            />
           )}
         </CardContent>
       </Card>
@@ -224,7 +229,7 @@ export default async function ParentPage({
                   <p className="truncate text-sm font-semibold text-text-primary">
                     {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
                   </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
                     <span>{formatTime(row.startTime, locale)}</span>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -8,6 +8,7 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Button } from "@/components/ui/button";
 import { IDLE_PEOPLE_STATE, type PeopleActionState } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The danger zone at the foot of a student or teacher page (R10b, docs/04 §5
@@ -40,7 +41,7 @@ export function DeleteRecordCard({
   const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(action, IDLE_PEOPLE_STATE);
+  const [state, formAction] = useGuardedActionState(action, IDLE_PEOPLE_STATE);
   const [confirming, setConfirming] = useState(false);
 
   return (

@@ -2,10 +2,11 @@
 
 import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, ScanLine, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { Ltr } from "@/components/shared/ltr";
 import { Input } from "@/components/ui/input";
 import { useRouter } from "@/lib/i18n/navigation";
 import { cn } from "@/lib/utils";
@@ -80,6 +81,9 @@ export function TypeAheadSearch({
   controlRef,
   onSubmitValue,
   onSelect,
+  size = "default",
+  hideLabel,
+  hint,
 }: {
   name?: string;
   value?: string;
@@ -104,6 +108,15 @@ export function TypeAheadSearch({
   onSubmitValue?: (value: string) => void;
   /** When set, choosing a suggestion calls this instead of navigating to its `href`. */
   onSelect?: (result: TypeAheadResult) => void;
+  /**
+   * `lg` is the reception desk's find / scan field (docs/04 §14.5): 56px, a
+   * scan icon at its start, a larger type size.
+   */
+  size?: "default" | "lg";
+  /** Keep the label for assistive technology only, when a card title already says it. */
+  hideLabel?: boolean;
+  /** A line under the field (session mode's "Ready to scan"). */
+  hint?: React.ReactNode;
 }) {
   const t = useTranslations("Shared.typeAhead");
   const router = useRouter();
@@ -270,7 +283,10 @@ export function TypeAheadSearch({
 
   return (
     <form
-      className="flex flex-col gap-2 sm:flex-row sm:items-end"
+      // With a visible label the button sits on the field's baseline; with the
+      // label hidden (the desk's scan field) it aligns to the field's top, so a
+      // hint under the field does not push it down.
+      className={cn("flex flex-col gap-2 sm:flex-row", hideLabel ? "sm:items-start" : "sm:items-end")}
       role="search"
       onSubmit={onSubmit}
     >
@@ -281,16 +297,24 @@ export function TypeAheadSearch({
       )}
 
       <div ref={containerRef} className="relative flex min-w-0 flex-1 flex-col gap-1.5">
-        <label htmlFor={inputId} className="text-xs font-medium text-text-secondary">
+        <label htmlFor={inputId} className={hideLabel ? "sr-only" : "text-xs font-medium text-text-secondary"}>
           {label}
         </label>
         <div ref={fieldRef} className="relative">
+          {size === "lg" ? (
+            <ScanLine
+              className="pointer-events-none absolute start-4 top-1/2 size-5 -translate-y-1/2 text-text-secondary"
+              aria-hidden
+            />
+          ) : null}
           <Input
             ref={inputRef}
             id={inputId}
             name={name}
             type="search"
             autoComplete="off"
+            spellCheck={false}
+            autoCapitalize="none"
             autoFocus={autoFocus}
             value={query}
             onChange={(event) => {
@@ -308,9 +332,13 @@ export function TypeAheadSearch({
             aria-expanded={open}
             aria-controls={listboxId}
             aria-autocomplete="list"
+            className={size === "lg" ? "h-14 ps-12 text-base" : undefined}
           />
           {loading && !queryTooShort ? (
-            <Loader2 className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-text-muted" />
+            <Loader2
+              className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-text-muted"
+              aria-hidden
+            />
           ) : null}
         </div>
 
@@ -347,8 +375,8 @@ export function TypeAheadSearch({
                             {result.primary}
                           </span>
                           {result.secondary ? (
-                            <span className="truncate text-xs text-text-muted" dir="ltr">
-                              {result.secondary}
+                            <span className="truncate text-xs text-text-secondary">
+                              <Ltr>{result.secondary}</Ltr>
                             </span>
                           ) : null}
                         </button>
@@ -356,7 +384,7 @@ export function TypeAheadSearch({
                     ))}
                   </ul>
                 ) : searched && !loading ? (
-                  <div className="flex flex-col gap-2 px-3 py-3 text-sm text-text-muted">
+                  <div className="flex flex-col gap-2 px-3 py-3 text-sm text-text-secondary">
                     <span>{t("noResults")}</span>
                     {emptyAction}
                   </div>
@@ -365,10 +393,15 @@ export function TypeAheadSearch({
               document.body,
             )
           : null}
+        {hint ? <div className="text-xs text-text-secondary">{hint}</div> : null}
+        {/* Says what the search found without moving focus (docs/04 §14.5). */}
+        <p className="sr-only" aria-live="polite">
+          {queryTooShort ? "" : loading ? t("searching") : searched ? t("resultCount", { count: results.length }) : ""}
+        </p>
       </div>
 
-      <Button type="submit" variant="outline" className="h-11 px-4">
-        <Search className="size-4" />
+      <Button type="submit" variant="outline" className={size === "lg" ? "h-14 px-5" : "h-11 px-4"}>
+        <Search className="size-4" aria-hidden />
         {submitLabel}
       </Button>
     </form>

@@ -1,16 +1,18 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Ban } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { voidExpenseAction } from "@/app/[locale]/(center)/expenses/actions";
 import { FormMessage } from "@/components/shared/form-message";
+import { SubmitButton } from "@/components/shared/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type ExpenseRowData = {
   id: string;
@@ -32,34 +34,37 @@ export function ExpenseRow({ expense, timeZone }: { expense: ExpenseRowData; tim
   const tErrors = useTranslations("Expenses.errors");
   const locale = useLocale();
   const [confirming, setConfirming] = useState(false);
-  const [state, formAction] = useActionState(voidExpenseAction, IDLE_ACTION_STATE);
+  const [state, formAction] = useGuardedActionState(voidExpenseAction, IDLE_ACTION_STATE);
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(state, { success: tToast("expenseVoided") });
   const voided = expense.voided;
-  const struck = voided ? "line-through text-text-muted" : "";
+  // A void stays legible (D-24, §11.9): struck through, never also faded.
+  const struck = voided ? "line-through text-text-secondary" : "";
 
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:flex-wrap md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
       <div className="flex md:w-32 md:shrink-0 flex-col">
-        <span className="text-xs text-text-muted md:hidden">{t("columns.date")}</span>
+        <span className="text-xs text-text-secondary md:sr-only">{t("columns.date")}</span>
         <span className={`truncate text-sm text-text-secondary ${struck}`}>
           {formatDate(new Date(expense.date), locale)}
         </span>
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-xs text-text-muted md:hidden">{t("columns.category")}</span>
+        <span className="text-xs text-text-secondary md:sr-only">{t("columns.category")}</span>
         <span className={`truncate text-sm text-text-primary ${struck}`}>
           {expense.categoryName ?? t("fields.categoryNone")}
         </span>
       </div>
 
       <div className="flex min-w-0 flex-[2] flex-col">
-        <span className="text-xs text-text-muted md:hidden">{t("columns.note")}</span>
+        <span className="text-xs text-text-secondary md:sr-only">{t("columns.note")}</span>
         <span className={`truncate text-sm text-text-secondary ${struck}`}>{expense.note ?? "—"}</span>
       </div>
 
-      <div className="flex md:w-28 md:shrink-0 flex-col">
-        <span className="text-xs text-text-muted md:hidden">{t("columns.amount")}</span>
-        <span className={`truncate text-sm font-medium tabular-nums text-text-primary ${struck}`}>
+      <div className="flex flex-col md:w-32 md:shrink-0 md:text-end">
+        <span className="text-xs text-text-secondary md:sr-only">{t("columns.amount")}</span>
+        <span className={`text-sm font-medium whitespace-nowrap tabular-nums text-text-primary ${struck}`}>
           {formatMoney(expense.amount, locale)}
         </span>
       </div>
@@ -74,7 +79,7 @@ export function ExpenseRow({ expense, timeZone }: { expense: ExpenseRowData; tim
             className="h-11 w-full px-4 md:w-auto"
             onClick={() => setConfirming(true)}
           >
-            <Ban className="size-4" />
+            <Ban className="size-4" aria-hidden />
             {t("void")}
           </Button>
         )}
@@ -94,12 +99,21 @@ export function ExpenseRow({ expense, timeZone }: { expense: ExpenseRowData; tim
           <input type="hidden" name="id" value={expense.id} />
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
             <span className="text-text-secondary">{t("voidReason")}</span>
-            <Input name="reason" required maxLength={200} className="h-11" />
+            <Input
+              name="reason"
+              required
+              maxLength={200}
+              autoFocus
+              autoComplete="off"
+              aria-invalid={state.fieldErrors?.reason ? true : undefined}
+              className="h-11"
+            />
           </label>
           <div className="flex gap-2">
-            <Button type="submit" variant="destructive" className="h-11 px-3">
+            {/* Pending state: a slow void cannot be submitted twice. */}
+            <SubmitButton variant="destructive" className="px-3">
               {t("voidYes")}
-            </Button>
+            </SubmitButton>
             <Button type="button" variant="outline" className="h-11 px-3" onClick={() => setConfirming(false)}>
               {t("cancel")}
             </Button>

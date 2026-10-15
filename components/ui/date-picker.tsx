@@ -98,9 +98,9 @@ export function DatePicker({
           disabled={disabled}
           aria-invalid={ariaInvalid}
           className={cn(
-            "flex h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3",
+            "flex h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-border-control bg-surface px-3",
             "text-start text-sm shadow-xs transition-ui outline-none",
-            "hover:border-border-strong hover:bg-surface-hover",
+            "hover:border-border-control-hover hover:bg-surface-hover",
             "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
             "data-[popup-open]:border-brand data-[popup-open]:ring-3 data-[popup-open]:ring-brand/25",
             "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",

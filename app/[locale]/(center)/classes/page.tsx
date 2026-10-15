@@ -231,13 +231,13 @@ export default async function ClassesPage({
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <ListHeader>
-                <span className="min-w-0 flex-1">{t("columns.subject")}</span>
+                <span className="min-w-0 flex-[2]">{t("columns.subject")}</span>
                 <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
-                <span className="min-w-0 flex-1">{t("columns.room")}</span>
-                <span className="w-28 shrink-0">{t("columns.price")}</span>
-                <span className="w-28 shrink-0">{t("columns.enrolled")}</span>
+                <span className="hidden min-w-0 flex-1 lg:block">{t("columns.room")}</span>
+                <span className="w-24 shrink-0 text-end">{t("columns.price")}</span>
+                <span className="w-20 shrink-0 text-end">{t("columns.enrolled")}</span>
                 <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-44 shrink-0 text-end">
+                <span className="w-32 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
               </ListHeader>

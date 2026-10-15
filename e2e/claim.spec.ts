@@ -54,6 +54,10 @@ for (const outcome of ["approve", "decline"] as const) {
     const card = await claimCard(manager, appLocale, email);
     await expect(card).toBeVisible();
     await card.getByRole("button", { name: msg(outcome === "approve" ? "Approvals.approve" : "Approvals.decline"), exact: true }).click();
+    // DES: a decline is final, so it asks first — confirm it in the dialog.
+    if (outcome === "decline") {
+      await openDialog(manager).getByRole("button", { name: msg("Approvals.decline"), exact: true }).click();
+    }
     // The action revalidates the queue: the claim leaves it (no reload needed)…
     await expect(card).toHaveCount(0);
     // …and stays gone on a fresh load.

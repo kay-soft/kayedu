@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { SettlementStatus } from "@prisma/client";
+import { Info } from "lucide-react";
 
 import {
   approveSettlementAction,
@@ -10,8 +10,9 @@ import {
   paySettlementAction,
 } from "@/app/[locale]/(center)/settlements/actions";
 import { FormMessage } from "@/components/shared/form-message";
-import { SubmitButton } from "@/components/shared/submit-button";
+import { ConfirmAction } from "@/components/shared/confirm-action";
 import { IDLE_SETTLEMENT_STATE } from "@/lib/validation/settlements";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * DRAFT → APPROVED → PAID, one button at a time (spec §5 "Teacher
@@ -35,12 +36,12 @@ export function SettlementTransitionActions({
   const tErrors = useTranslations("Settlements.errors");
   const locale = useLocale();
 
-  const [approveState, approveAction] = useActionState(
+  const [approveState, approveAction] = useGuardedActionState(
     approveSettlementAction,
     IDLE_SETTLEMENT_STATE,
   );
-  const [payState, payAction] = useActionState(paySettlementAction, IDLE_SETTLEMENT_STATE);
-  const [cancelState, cancelAction] = useActionState(cancelSettlementAction, IDLE_SETTLEMENT_STATE);
+  const [payState, payAction] = useGuardedActionState(paySettlementAction, IDLE_SETTLEMENT_STATE);
+  const [cancelState, cancelAction] = useGuardedActionState(cancelSettlementAction, IDLE_SETTLEMENT_STATE);
 
   const effectiveStatus =
     cancelState.status === "cancelled"
@@ -56,30 +57,46 @@ export function SettlementTransitionActions({
     <div className="flex flex-col items-stretch gap-2 sm:items-end">
       {error ? <FormMessage className="text-xs">{tErrors(error)}</FormMessage> : null}
       {ownBlocked && (effectiveStatus === "DRAFT" || effectiveStatus === "APPROVED") ? (
-        <p className="text-xs text-text-muted">{t("ownSettlementHint")}</p>
+        <p className="flex items-start gap-1.5 text-xs text-text-secondary">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          {t("ownSettlementHint")}
+        </p>
       ) : null}
+      {/* Every transition is final — Paid has no partly-paid or unpaid state,
+          and cancelling releases the claimed payments — so each asks first
+          (docs/04 §14.6). The actions and their rules are unchanged. */}
       <div className="flex flex-wrap gap-2 sm:justify-end">
         {effectiveStatus === "DRAFT" ? (
           <>
-            <form action={cancelAction}>
-              <input type="hidden" name="locale" value={locale} />
-              <input type="hidden" name="id" value={id} />
-              <SubmitButton variant="ghost">{t("cancelDraft")}</SubmitButton>
-            </form>
+            <ConfirmAction
+              label={t("cancelDraft")}
+              title={t("confirm.cancelTitle")}
+              description={t("confirm.cancelBody")}
+              action={cancelAction}
+              fields={{ locale, id }}
+            />
             {ownBlocked ? null : (
-              <form action={approveAction}>
-                <input type="hidden" name="locale" value={locale} />
-                <input type="hidden" name="id" value={id} />
-                <SubmitButton variant="outline">{t("approve")}</SubmitButton>
-              </form>
+              <ConfirmAction
+                label={t("approve")}
+                variant="outline"
+                tone="default"
+                title={t("confirm.approveTitle")}
+                description={t("confirm.approveBody")}
+                action={approveAction}
+                fields={{ locale, id }}
+              />
             )}
           </>
         ) : effectiveStatus === "APPROVED" && !ownBlocked ? (
-          <form action={payAction}>
-            <input type="hidden" name="locale" value={locale} />
-            <input type="hidden" name="id" value={id} />
-            <SubmitButton>{t("markPaid")}</SubmitButton>
-          </form>
+          <ConfirmAction
+            label={t("markPaid")}
+            variant="default"
+            tone="default"
+            title={t("confirm.payTitle")}
+            description={t("confirm.payBody")}
+            action={payAction}
+            fields={{ locale, id }}
+          />
         ) : null}
       </div>
     </div>

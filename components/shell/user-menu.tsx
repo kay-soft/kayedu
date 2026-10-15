@@ -26,17 +26,23 @@ export function UserMenu({ user }: { user: ShellUser }) {
 
   return (
     <Popover>
+      {/* The same 36px visual in a 44px hit area as the language toggle beside
+          it (docs/04 §14.3) — it had been a grey disc that read as disabled. */}
       <PopoverTrigger
         aria-label={t("accountMenu")}
-        className={cn(
-          "flex size-11 shrink-0 items-center justify-center rounded-full border border-transparent",
-          "bg-surface-subtle text-xs font-semibold text-text-secondary transition-ui outline-none",
-          "hover:border-border hover:bg-surface-hover active:bg-surface-active",
-          "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
-          "data-[popup-open]:border-brand data-[popup-open]:text-brand",
-        )}
+        className="group/account inline-flex size-11 shrink-0 items-center justify-center rounded-full focus-ring"
       >
-        {user.initials}
+        <span
+          aria-hidden
+          className={cn(
+            "flex size-9 items-center justify-center rounded-full border border-border-strong bg-surface",
+            "text-xs font-semibold text-text-primary shadow-card transition-ui",
+            "group-hover/account:border-brand group-hover/account:bg-brand/10 group-hover/account:text-brand",
+            "group-active/account:scale-95 group-data-[popup-open]/account:border-brand group-data-[popup-open]/account:text-brand",
+          )}
+        >
+          {user.initials}
+        </span>
       </PopoverTrigger>
 
       <PopoverContent align="end" className="w-60">
@@ -45,7 +51,7 @@ export function UserMenu({ user }: { user: ShellUser }) {
             {user.name}
           </p>
           {user.email ? (
-            <p className="truncate text-xs text-text-muted" dir="ltr">
+            <p className="truncate text-xs text-text-muted" dir="ltr" translate="no">
               {user.email}
             </p>
           ) : null}
@@ -60,7 +66,7 @@ export function UserMenu({ user }: { user: ShellUser }) {
             type="submit"
             className={cn(
               "flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start text-sm",
-              "text-danger transition-ui-fast focus-ring",
+              "text-danger-fg transition-ui-fast focus-ring",
               "hover:bg-danger-bg active:bg-danger-bg",
             )}
           >

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -9,6 +9,7 @@ import { ActionBarButton } from "@/components/shared/action-bar";
 import { DialogShell } from "@/components/shared/dialog-shell";
 import { FormMessage } from "@/components/shared/form-message";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * "Delete session" (R5) — offered only for a manual or one-time session that
@@ -24,7 +25,7 @@ export function DeleteSessionButton({ sessionId }: { sessionId: string }) {
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
   const [open, setOpen] = useState(false);
-  const [state, formAction, pending] = useActionState(deleteSessionAction, IDLE_SESSION_STATE);
+  const [state, formAction, pending] = useGuardedActionState(deleteSessionAction, IDLE_SESSION_STATE);
 
   return (
     <>

@@ -4,6 +4,7 @@ import { AcceptInvitationForm } from "@/app/[locale]/(auth)/invite/[token]/accep
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { AuthCard } from "@/components/shared/auth-card";
 import { FormMessage } from "@/components/shared/form-message";
+import { Ltr } from "@/components/shared/ltr";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -47,13 +48,22 @@ export default async function InvitePage({
   if (!invitation || invalidReason) {
     return (
       <AuthCard title={t("title")}>
+        {/* Nothing is broken — the link simply no longer works — so the
+            warning tone, a next step in the copy, and both ways forward
+            (DES, docs/04 §12). */}
         <div className="flex flex-col gap-3">
-          <FormMessage>{tErrors(invalidReason ?? "inviteNotFound")}</FormMessage>
+          <FormMessage tone="warning">{tErrors(invalidReason ?? "inviteNotFound")}</FormMessage>
           <Link
             href={ROUTES.login}
-            className={cn(buttonVariants({ variant: "outline" }), "h-11 w-full")}
+            className={cn(buttonVariants(), "h-11 w-full")}
           >
             {t("goToLogin")}
+          </Link>
+          <Link
+            href={ROUTES.register}
+            className={cn(buttonVariants({ variant: "outline" }), "h-11 w-full")}
+          >
+            {t("createAccount")}
           </Link>
         </div>
       </AuthCard>
@@ -73,19 +83,19 @@ export default async function InvitePage({
       <div className="flex flex-col gap-4">
         <dl className="flex flex-col gap-2 rounded-lg border border-border bg-surface-subtle p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-text-muted">{t("centerLabel")}</dt>
+            <dt className="text-text-secondary">{t("centerLabel")}</dt>
             <dd className="font-medium">{invitation.center.name}</dd>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-text-muted">{t("roleLabel")}</dt>
+            <dt className="text-text-secondary">{t("roleLabel")}</dt>
             <dd>
-              <Badge variant="brand">{tRoles(invitation.role)}</Badge>
+              <Badge variant="neutral">{tRoles(invitation.role)}</Badge>
             </dd>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-text-muted">{t("emailLabel")}</dt>
-            <dd className="font-medium" dir="ltr">
-              {invitation.email}
+            <dt className="text-text-secondary">{t("emailLabel")}</dt>
+            <dd className="font-medium">
+              <Ltr>{invitation.email}</Ltr>
             </dd>
           </div>
         </dl>
@@ -116,13 +126,11 @@ export default async function InvitePage({
             <p className="text-sm text-text-secondary">
               {t("signedInAs", { email: user.email ?? "" })}
             </p>
-            <div className="rounded-xl bg-sidebar p-2">
-              <SignOutButton />
-            </div>
+            <SignOutButton variant="light" className="rounded-lg border border-border-control" />
           </div>
         )}
 
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-text-secondary">
           {t("expiresAt", {
             date: formatDate(invitation.expiresAt, locale),
           })}

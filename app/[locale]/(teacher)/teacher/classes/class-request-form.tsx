@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createClassRequestAction } from "@/app/[locale]/(teacher)/teacher/classes/actions";
@@ -12,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type SelectOption = { value: string; label: string };
 
@@ -30,7 +30,7 @@ export function ClassRequestForm({
   const locale = useLocale();
   const dayNames = tClasses.raw("dayNames") as string[];
 
-  const [state, formAction] = useActionState(createClassRequestAction, IDLE_TEACHER_STATE);
+  const [state, formAction] = useGuardedActionState(createClassRequestAction, IDLE_TEACHER_STATE);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">

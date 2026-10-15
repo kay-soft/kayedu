@@ -225,24 +225,28 @@ export async function setMemberActiveAction(
  * layer") — OWNER only, by UI and by direct call: `membership.branch.grant`
  * is ceiling-forced to OWNER, so `staff.manage` alone is never enough.
  */
-export async function grantMembershipBranchAction(formData: FormData): Promise<void> {
+export async function grantMembershipBranchAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "membership.branch.grant")) return;
+  if (!ctxCan(ctx, "membership.branch.grant")) return FORBIDDEN;
 
   const parsed = membershipBranchGrantSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return;
+  // The one input a person chooses is the branch; an empty choice is "pick one".
+  if (!parsed.success) return { error: "invalidBranch" };
   const { membershipId, centerId: targetCenterId, locale } = parsed.data;
 
   const db = scoped(ctx);
   const membership = await db.memberships.findById(membershipId);
-  if (!membership) return;
-  if (!isBranchGrantableRole(membership.role)) return;
+  if (!membership) return NOT_FOUND;
+  if (!isBranchGrantableRole(membership.role)) return { error: "branchNotGrantable" };
 
   // The target must be a real sibling branch under this organization — never
   // trusted from the form beyond that.
   const siblings = await organizationBranches(prisma, ctx.center.organizationId);
   const target = siblings.find((branch) => branch.id === targetCenterId);
-  if (!target || target.id === ctx.center.id) return;
+  if (!target || target.id === ctx.center.id) return { error: "invalidBranch" };
 
   await grantMembershipBranch(prisma, membership.id, target.id, ctx.user.id);
 
@@ -256,19 +260,23 @@ export async function grantMembershipBranchAction(formData: FormData): Promise<v
   });
 
   revalidatePath(staffPath(locale));
+  return { status: "saved" };
 }
 
-export async function revokeMembershipBranchAction(formData: FormData): Promise<void> {
+export async function revokeMembershipBranchAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "membership.branch.grant")) return;
+  if (!ctxCan(ctx, "membership.branch.grant")) return FORBIDDEN;
 
   const parsed = membershipBranchGrantSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return;
+  if (!parsed.success) return NOT_FOUND;
   const { membershipId, centerId: targetCenterId, locale } = parsed.data;
 
   const db = scoped(ctx);
   const membership = await db.memberships.findById(membershipId);
-  if (!membership) return;
+  if (!membership) return NOT_FOUND;
 
   await revokeMembershipBranch(prisma, membership.id, targetCenterId);
 
@@ -282,4 +290,5 @@ export async function revokeMembershipBranchAction(formData: FormData): Promise<
   });
 
   revalidatePath(staffPath(locale));
+  return { status: "deleted" };
 }

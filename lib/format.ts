@@ -9,6 +9,13 @@ const NUMBER_LOCALE: Record<string, string> = {
   en: "en-US",
 };
 
+/**
+ * Day · short month · year in both locales (DES, docs/04 §3): "Oct 15, 2026" /
+ * "١٥ أكتوبر ٢٠٢٦". `dateStyle: "medium"` gave Arabic a numeric date that reads
+ * as either day-first or month-first.
+ */
+const DATE_PARTS: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
+
 export function formatNumber(value: number, locale: string): string {
   return new Intl.NumberFormat(NUMBER_LOCALE[locale] ?? "en-US").format(value);
 }
@@ -23,7 +30,7 @@ export function formatTwoDigits(value: number, locale: string): string {
 
 export function formatDate(value: Date, locale: string): string {
   return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
-    dateStyle: "medium",
+    ...DATE_PARTS,
   }).format(value);
 }
 
@@ -35,7 +42,7 @@ export function formatDate(value: Date, locale: string): string {
  */
 export function formatDay(value: Date, locale: string): string {
   return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
-    dateStyle: "medium",
+    ...DATE_PARTS,
     timeZone: "UTC",
   }).format(value);
 }
@@ -43,7 +50,7 @@ export function formatDay(value: Date, locale: string): string {
 /** A class period or a term: "9 Oct 2026 – 1 Apr 2027", day markers in UTC. */
 export function formatDayRange(start: Date, end: Date, locale: string): string {
   const format = new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {
-    dateStyle: "medium",
+    ...DATE_PARTS,
     timeZone: "UTC",
   });
   return normalizeSpaces(format.formatRange(start, end));
@@ -57,8 +64,9 @@ export function formatDayRange(start: Date, end: Date, locale: string): string {
  */
 export function formatDateTime(value: Date, locale: string, timeZone: string): string {
   const options: Intl.DateTimeFormatOptions = {
-    dateStyle: "medium",
-    timeStyle: "short",
+    ...DATE_PARTS,
+    hour: "numeric",
+    minute: "2-digit",
     hour12: true,
     timeZone,
   };
@@ -115,12 +123,25 @@ export function formatRating(average: number, locale: string): string {
  * Money display. Takes **piastres** (never EGP) so callers can't accidentally
  * format a raw float — conversion lives in lib/money.ts.
  */
-export function formatMoney(piastres: number, locale: string): string {
+export function formatMoney(
+  piastres: number,
+  locale: string,
+  options?: {
+    /**
+     * Always two decimals — for a column, where `EGP 728` beside
+     * `EGP 622.50` cannot line up (DES, docs/04 §3 "Figures").
+     */
+    fixed?: boolean;
+  },
+): string {
   return new Intl.NumberFormat(NUMBER_LOCALE[locale] ?? "en-US", {
     style: "currency",
     currency: "EGP",
-    minimumFractionDigits: piastres % 100 === 0 ? 0 : 2,
+    minimumFractionDigits: options?.fixed || piastres % 100 !== 0 ? 2 : 0,
     maximumFractionDigits: 2,
+    // The locale's own minus sign, on the right side of the figure in Arabic
+    // — never a hand-glued hyphen (DES, docs/04 §14.4).
+    signDisplay: "negative",
   }).format(fromPiastres(piastres));
 }
 
@@ -193,10 +214,19 @@ function normalizeSpaces(value: string): string {
   return value.replace(/[\u2009\u202F\u00A0]/g, " ");
 }
 
+/**
+ * A time keeps its meridiem attached ("12:10 PM" never wraps to "12:10 / PM")
+ * while a range may still break at its dash (DES, docs/04 §14.4). The same
+ * characters on the server and in the browser, so hydration agrees.
+ */
+function timeSpaces(value: string): string {
+  return value.replace(/[\u202F\u00A0]/g, "\u00A0").replace(/\u2009/g, " ");
+}
+
 export function formatTime(value: string, locale: string): string {
   const date = timeToUtcDate(value);
   if (!date) return value;
-  return normalizeSpaces(
+  return timeSpaces(
     new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).format(date),
   );
 }
@@ -210,7 +240,7 @@ export function formatTimeRange(start: string, end: string, locale: string): str
   const from = timeToUtcDate(start);
   const to = timeToUtcDate(end);
   if (!from || !to) return `${formatTime(start, locale)}–${formatTime(end, locale)}`;
-  return normalizeSpaces(
+  return timeSpaces(
     new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", timeFormatOptions).formatRange(
       from,
       to,

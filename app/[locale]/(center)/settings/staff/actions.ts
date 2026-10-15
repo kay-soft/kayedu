@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { writeAuditLog } from "@/lib/db/audit";
 import { scoped } from "@/lib/db/scoped";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
-import { fieldErrorsFrom } from "@/lib/validation/form";
+import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   createInvitationSchema,
   invitationIdSchema,
@@ -90,21 +90,27 @@ export async function createInvitationAction(
   return { token };
 }
 
+/**
+ * Returns a result (DES, Phase 3) — it had returned nothing, so a refused
+ * revoke looked exactly like a successful one. Error keys are `Settings.errors`.
+ */
 export async function revokeInvitationAction(
+  _state: ActionState,
   formData: FormData,
-): Promise<void> {
+): Promise<ActionState> {
   const ctx = await getTenantContext("center");
   // D-22 (a): revoking an invitation is OWNER-only, exactly like creating one
   // (SEC-42) — `membership.role.assign` is ceiling-forced to OWNER.
-  if (!ctxCan(ctx, "membership.role.assign")) return;
+  if (!ctxCan(ctx, "membership.role.assign")) return { error: "forbidden" };
 
   const parsed = invitationIdSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return;
+  if (!parsed.success) return { error: "notFound" };
 
   const db = scoped(ctx);
   // Scoped lookup: an id from another center simply does not resolve.
   const invitation = await db.invitations.findById(parsed.data.invitationId);
-  if (!invitation || invitation.status !== "PENDING") return;
+  if (!invitation) return { error: "notFound" };
+  if (invitation.status !== "PENDING") return { error: "invitationGone" };
 
   await db.invitations.update(invitation.id, { status: "REVOKED" });
 
@@ -119,4 +125,5 @@ export async function revokeInvitationAction(
   });
 
   revalidatePath(staffPath(parsed.data.locale));
+  return { status: "deleted" };
 }

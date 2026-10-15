@@ -78,8 +78,8 @@ export function SlotConflictNotice({
       className={cn(
         "flex flex-col gap-2 rounded-lg border p-3 text-sm",
         denied
-          ? "border-danger/30 bg-danger-bg text-danger"
-          : "border-warning/30 bg-warning-bg text-warning",
+          ? "border-danger/30 bg-danger-bg text-danger-fg"
+          : "border-warning/30 bg-warning-bg text-warning-fg",
         className,
       )}
     >

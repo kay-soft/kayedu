@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createPeriodSettlementAction } from "@/app/[locale]/(center)/settlements/actions";
@@ -10,6 +9,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { IDLE_SETTLEMENT_STATE } from "@/lib/validation/settlements";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type SettlementTeacherOption = { id: string; name: string };
 
@@ -22,7 +22,7 @@ export function PeriodSettlementForm({
   const t = useTranslations("Settlements");
   const tErrors = useTranslations("Settlements.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     createPeriodSettlementAction,
     IDLE_SETTLEMENT_STATE,
   );

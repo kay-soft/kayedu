@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  startTransition,
-  useActionState,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { startTransition, useEffect, useRef, useState, type FormEvent } from "react";
 import { CalendarClock, CalendarPlus, DoorOpen, Banknote, Layers, UserRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ShareType } from "@prisma/client";
@@ -43,6 +36,7 @@ import type { RoomLinkPair } from "@/lib/rooms";
 import { isValidTimeRange } from "@/lib/scheduling";
 import { cn } from "@/lib/utils";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /** An active class, with what the "For a class" mode defaults from. */
 export type NewSessionClassOption = {
@@ -135,7 +129,7 @@ function NewSessionDialogContent({
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
   const router = useRouter();
-  const [state, formAction, pending] = useActionState(createSessionAction, IDLE_SESSION_STATE);
+  const [state, formAction, pending] = useGuardedActionState(createSessionAction, IDLE_SESSION_STATE);
 
   const hasClasses = classes.length > 0;
   const [mode, setMode] = useState<Mode>(hasClasses ? "class" : "oneOff");

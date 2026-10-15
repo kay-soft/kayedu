@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -65,13 +65,25 @@ export function DialogShell({
   footerExtra?: ReactNode;
   children: ReactNode;
 }) {
+  // Hidden inputs (the record's id, the locale) are not a body: a confirmation
+  // that carries only those draws no body band.
+  const hasBody = Children.toArray(children).some(
+    (child) =>
+      !(isValidElement(child) && child.type === "input" && (child.props as { type?: string }).type === "hidden"),
+  );
   const bands = (
     <>
           <DialogHeader className="shrink-0">
             <DialogTitle>{title}</DialogTitle>
             {description ? <DialogDescription>{description}</DialogDescription> : null}
           </DialogHeader>
-          <DialogBody className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</DialogBody>
+          {/* No empty body band (docs/04 §14.1a): a confirmation whose title
+              and description say it all draws no body. */}
+          {hasBody ? (
+            <DialogBody className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</DialogBody>
+          ) : (
+            children
+          )}
           <DialogFooter className="shrink-0 flex-col-reverse bg-surface sm:items-center">
             {footerExtra ? <div className="min-w-0 sm:me-auto">{footerExtra}</div> : null}
             <Button
@@ -85,8 +97,11 @@ export function DialogShell({
             {submitLabel ? (
               <Button
                 type="submit"
-                variant={submitVariant}
-                disabled={submitPending || submitDisabled}
+                variant={submitVariant === "destructive" ? "danger-solid" : submitVariant}
+                // A closing dialog cannot submit again: after a success it
+                // animates out while the app navigates, and a second press in
+                // that window had created a duplicate (DES, docs/04 §14.2).
+                disabled={!open || submitPending || submitDisabled}
                 className={DIALOG_ACTION_CLASS}
               >
                 {submitPending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
@@ -98,13 +113,19 @@ export function DialogShell({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // A form dialog is not dismissed by a stray press on the backdrop
+    // (docs/04 §14.1a); Escape, Cancel and the close button still close it.
+    <Dialog open={open} onOpenChange={onOpenChange} disablePointerDismissal={Boolean(formProps)}>
       {trigger ? <DialogTrigger render={trigger} /> : null}
       <DialogContent
         className={cn(
           // The popup clips; the body is what scrolls (header/footer stay put).
           "overflow-hidden sm:max-h-[90vh]",
-          size === "wide" ? "sm:max-w-4xl" : "sm:max-w-lg",
+          size === "wide"
+            ? "sm:max-w-4xl"
+            : // A confirmation is a bottom sheet on a phone, not a full screen
+              // holding two lines (docs/04 §14.1a).
+              "top-auto max-h-[85vh] rounded-t-xl sm:max-w-lg",
         )}
       >
         {formProps ? (

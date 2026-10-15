@@ -3,6 +3,8 @@ import { getTranslations } from "next-intl/server";
 
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/shared/empty-state";
+import { cn } from "@/lib/utils";
+import { Ltr } from "@/components/shared/ltr";
 import { LinkButton } from "@/components/shared/link-button";
 import { formatClockTime, formatNumber } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -28,7 +30,9 @@ export async function RecentCheckIns({
   total,
   locale,
   timeZone,
+  className,
 }: {
+  className?: string;
   sessionId: string;
   rows: RecentCheckInRow[];
   total: number;
@@ -39,7 +43,7 @@ export async function RecentCheckIns({
   const tAttendance = await getTranslations("Sessions.attendance");
 
   return (
-    <section className="flex flex-col gap-3 border-t border-border-subtle pt-4">
+    <section className={cn("flex flex-col gap-3 border-t border-border-subtle pt-4", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-text-primary">{t("recent.title")}</h3>
         <p className="text-sm text-text-secondary">
@@ -57,7 +61,7 @@ export async function RecentCheckIns({
           {rows.map((row) => (
             <li
               key={row.id}
-              className="flex min-h-11 items-center gap-3 rounded-lg border border-border-subtle px-3 py-2"
+              className="flex min-h-12 items-center gap-3 rounded-lg border border-border-subtle px-3 py-1.5"
             >
               {row.photoUrl ? (
                 // A short-lived signed Storage URL, not a static/remote asset next/image can optimize.
@@ -74,15 +78,18 @@ export async function RecentCheckIns({
               )}
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-text-primary">{row.studentName}</p>
-                <p className="text-xs text-text-muted" dir="ltr">
-                  {row.studentCode}
+                {/* The code is an isolated LTR run inside a block that keeps the
+                    page direction — `dir="ltr"` on the block had pushed it to
+                    the far edge in Arabic (docs/04 §14.5). */}
+                <p className="text-xs text-text-secondary">
+                  <Ltr>{row.studentCode}</Ltr>
                 </p>
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
+              <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
                 <Badge variant={row.status === "LATE" ? "warning" : "success"}>
                   {tAttendance(row.status)}
                 </Badge>
-                <span className="text-xs tabular-nums text-text-muted" dir="ltr">
+                <span className="text-xs tabular-nums text-text-secondary">
                   {formatClockTime(row.recordedAt, locale, timeZone)}
                 </span>
               </div>

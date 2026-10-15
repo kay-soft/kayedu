@@ -99,10 +99,10 @@ export function Combobox({
           aria-invalid={ariaInvalid}
           aria-describedby={ariaDescribedBy}
           className={cn(
-            "flex h-11 w-full min-w-0 rounded-lg border border-border bg-background ps-3 text-sm text-foreground shadow-xs outline-none transition-colors",
+            "flex h-11 w-full min-w-0 rounded-lg border border-border-control bg-surface ps-3 text-sm text-foreground shadow-xs outline-none transition-colors",
             selected ? "pe-[5.25rem]" : "pe-11",
-            "placeholder:text-text-muted",
-            "hover:border-border-strong",
+            "placeholder:text-text-placeholder",
+            "hover:border-border-control-hover",
             "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
             "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
             "aria-invalid:border-danger aria-invalid:ring-3 aria-invalid:ring-danger/20",

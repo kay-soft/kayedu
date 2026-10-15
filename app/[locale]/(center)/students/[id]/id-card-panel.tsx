@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useActionState } from "react";
+
 import { Download } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -9,6 +9,7 @@ import { generateIdCardAction } from "@/app/[locale]/(center)/students/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The ID-card panel: the live preview (rendered on the server and passed in as
@@ -34,7 +35,7 @@ export function IdCardPanel({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     generateIdCardAction,
     IDLE_PEOPLE_STATE,
   );

@@ -89,6 +89,8 @@ Filters were a `grid sm:grid-cols-3` of hand-labelled selects; hand-copied list-
 **SEC-2b (D-24):** Delete is gone — "Void" opens an inline reason field (required) and a destructive confirm; a voided row stays in the list struck through with a red "Voided" badge and a "Voided by … · time · reason" line under it, and leaves both totals.
 Red "Total" KPI border (money going out is not an error); the date filter sat in a bare `<form>`; hand-copied list header. **R10a:** neutral KPI, `FilterBar`, `ListHeader`.
 
+**DES (Phase 3):** the add form checks the action's own schema before posting, opens with an error summary at two or more field errors, and toasts "Expense added"; voiding toasts too (docs/04 §14.2).
+
 ### `app/[locale]/(center)/settlements/page.tsx`
 **SEC-2b (D-12, D-16):** a DRAFT gets a ghost "Cancel draft" beside Approve; CANCELLED has a red badge; a settlement the viewer created (and the viewer is not an OWNER) shows no Approve/Mark-paid buttons, only a muted line saying another manager or the owner must do it.
 "No teachers" was a bare muted sentence in a card. **R10a:** compact `EmptyState`.
@@ -104,6 +106,8 @@ Page chrome already on the shared parts. Its "Recent check-ins" panel showed a b
 
 ### `app/[locale]/(center)/settings/page.tsx` (General)
 Section header under the settings layout's `PageHeader`; consistent. No change.
+
+**DES:** the result is said once, in the sticky save bar — no second toast; client validation with the action's schema and an error summary (docs/04 §14.2, §14.8).
 
 ### `app/[locale]/(center)/settings/payment-methods/page.tsx`
 Consistent (`EntityManager`). **R10a:** its list header uses `ListHeader` via the manager.
@@ -126,6 +130,8 @@ Consistent; matrix already collapses to cards below `md`. No change.
 ### `app/[locale]/(center)/settings/staff/page.tsx`
 Hand-copied list header. **R10a:** `ListHeader`.
 
+**DES (Phase 3):** revoking an invitation and granting or removing branch access return a result and toast it (`staff-result-actions.tsx`) — they had been silent `void` actions; role and access changes toast; the invitation link is `CopyLinkField`, which says when a copy is refused (docs/04 §14.2).
+
 ### `app/[locale]/(center)/classes/[id]/page.tsx` — **R10b**
 *Wrong now (at `ea7f645`):* the header's action slot is a loose flex row holding the Edit dialog button, an Active badge and the "All classes" link — three different heights and three different jobs, so the one verb on the page does not read as an action bar. The body is `xl:grid-cols-2` over a `display: contents` wrapper, so three cards of very different heights (key facts, the weekly-schedule builder, sessions) are dealt into two columns by the browser: the schedule builder is a tall card beside a 3-row facts card, leaving a blank block under it. Below `xl` (1024–1279px — a laptop with the sidebar open) it is a single column of full-width, mostly-empty cards. The roster, the most-used part of the page, is a full-width card *below* both. There is no upcoming-sessions list and no centre-cut figure on the page today, and the kept-sessions warning is buried inside the "Sessions" card.
 **R10b:** header with the period and rooms and **Edit class** as its action bar; the kept-sessions warning is a full-width amber panel directly under the header; `DetailLayout` — schedule and roster in `main`, Key facts and Sessions in a sticky `side` (the roster is no longer a separate full-width row). Not added: an upcoming-sessions list and a requests/approvals card (no such data on the page today — see the R10b entry in 03).
@@ -144,6 +150,8 @@ Hand-copied list header. **R10a:** `ListHeader`.
 *Wrong now (at `ea7f645`):* the header mixes the student code, the Active badge and a back link in one row, with no photo or initial (the photo lives in its own card two screens down). The left column is one tall edit-form card (person, contact, grade, four parent fields, Save and — beside it — Delete); the right column is **four** stacked cards (ID card, photo, parent summary, parent links) that are much taller than the form, so the form card ends and the left column is blank for hundreds of pixels. Enrolments and "blocked by" are a separate two-up row below, at `lg`, while the rest is `xl` — two different breakpoints for one page. The parent summary card repeats the parent fields the form above it already edits. The ID-card actions are three differently-shaped buttons in a wrapping row. There is no attendance or payment history on the page today.
 **R10b:** header with the photo (a signed URL) or first letter, code, Active and grade, and **Print ID card / Print paper form** as its action bar; `main` is the record (person · grade · parent contact, one Save), enrolments with the absence-streak alerts, and "blocked by"; `side` is the ID card (preview and the stored-card control), photo, parent summary and parent links (with the placeholder verify, behind `parent.link.manage`); Delete is a danger zone at the foot. The columns now end within a card of each other at 1280px. Not added: attendance/payment history (no data on the page today).
 
+**DES (Phase 3):** removing the photo confirms first (it deletes the file); photo save/remove toast.
+
 ### Add student and Add teacher dialogs (`students/add-student-dialog.tsx`, `teachers/add-teacher-dialog.tsx`) — **R10b**
 *Wrong now (at `ea7f645`):* both open the **old narrow `Dialog`** (`max-w-lg`) — not the R6 `DialogShell` the class and session dialogs use — so there is no sticky header/footer, no Cancel, and the submit button is the last thing at the bottom of a long, scrolling single column. The structure is one undifferentiated stack: a grey "look up by phone" box, a section heading, names (2-up), then email / phone / alt-phone (2-up, in that order, so the *real* phone is the second control after the lookup's own phone box), then — for a student — grade and four parent fields in **one** 2-up grid with no grouping. The duplicate-match panel (`MatchPanel`) renders **after** all of that, next to the submit button, a screenful away from the phone that caused it; its "Link to this person…" button is the same default button as the dialog's own submit. Both forms submit through `<form action>`, which React 19 resets after the action returns — so a failed or "match found" submit clears what was typed. The student form offers no photo (the create action has none; the upload lives on the student page) and says nothing about it.
 **R10b:** both are the `DialogShell` mounted by `DialogLauncher` (wide, sticky header and footer, Cancel + primary, full-screen sheet below `sm`); sections are `FormSection` cards — Person · Grade · Parent contact · Photo (a note) for a student, one Person card for a teacher; the phone leads, and the match panel is a full-width row directly under it, with **Use this person** as its own solid button while the dialog's primary is held back; both forms submit through `startTransition`, so a refused or "match found" submit keeps what was typed. The phone lookup's controls are 44px.
@@ -157,6 +165,8 @@ Hand-drawn `charAt(0)` initial per centre; 5-card KPI row stranded two tiles at 
 
 ### `app/[locale]/(teacher)/teacher/sessions/page.tsx`
 Blue KPI border; hand-labelled filter grid (in `session-filters.tsx`). **R10a:** neutral KPI, `FilterField`. (Its forward-looking day/week/month filter stays bespoke — docs/04 §11.7.)
+
+**DES:** "Request a new session" is a closed disclosure above the list (docs/04 §14.9); Arabic counts in Arabic-Indic digits with proper plural forms.
 
 ### `app/[locale]/(teacher)/teacher/students/page.tsx`
 Consistent. No change.
@@ -186,8 +196,12 @@ Teacher view of a student. Marked R10b but not among the four centre detail page
 ### `app/[locale]/(student)/student/schedule/page.tsx`
 Consistent. No change.
 
+**DES:** upcoming sessions show eight, then "Show N more" (`CappedList`, docs/04 §14.9).
+
 ### `app/[locale]/(student)/student/discover/page.tsx`
 Filter labels hand-built (in `discover-filters.tsx`). **R10a:** `FilterField`. The class card's subject-accent top border is the documented rotating subject palette (docs/04 §2), not a status colour.
+
+**DES:** "Request to join" is the outlined brand button with a spinner. Still one long column on a phone — capping a browse surface is a product call — **OD-13** (docs/00 §2.2), not guessed.
 
 ### `app/[locale]/(student)/student/reservations/page.tsx`
 `CardContent … pt-6` double padding. **R10a:** removed.
@@ -203,6 +217,8 @@ Redirect only. No change.
 "No children linked" was a bare muted sentence in a padded card. **R10a:** `EmptyState`.
 
 ---
+
+**DES:** upcoming sessions capped at eight with "Show N more" (`CappedList`).
 
 ## Platform admin (route group `(admin)`)
 
@@ -223,19 +239,30 @@ Consistent. No change.
 ## Other
 
 ### `app/[locale]/page.tsx`
-Entry redirect. No UI.
+Entry redirect. No UI. **DES:** signed out it is now the public landing — the public header (product mark + language toggle), the product name as `h1`, one plain line, Sign in / Create an account; a signed-in visitor is redirected home exactly as before (docs/04 §12).
+
+### `app/[locale]/[...rest]/page.tsx` — **DES (new)**
+The unknown-path catch-all: it calls `notFound()`, so an unknown URL renders the bilingual `app/[locale]/not-found.tsx` instead of Next's bare English default page. Renders nothing itself.
 
 ### `app/[locale]/(print)/sessions/[id]/print/page.tsx`
 Print sheet — outside the shell by design. No change.
 
+**DES:** the shared `PrintToolbar` (`components/shared/print-toolbar.tsx`); the roster prints as a sorted table (docs/04 §14.10).
+
 ### `app/[locale]/(print)/students/[id]/card/page.tsx`
 Print sheet. No change.
+
+**DES:** the shared `PrintToolbar`, with a card-specific hint (card size, card paper, no margins).
 
 ### `app/[locale]/(print)/students/[id]/paper/page.tsx`
 Print sheet. No change.
 
+**DES:** the shared `PrintToolbar`; labels stack over values (`DetailRow stacked`); the card prints at true size.
+
 ### `app/[locale]/(print)/teacher/sessions/[id]/print/page.tsx`
 Print sheet. No change.
+
+**DES:** its own toolbar is deleted for the shared `PrintToolbar`; the sheet sorts the roster itself, so this print is no longer unsorted.
 
 ### `app/[locale]/not-found.tsx` (not a `page.tsx`)
 Carried its own copy of the locale switch. **R10a:** `LocaleToggle`.

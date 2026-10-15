@@ -1,12 +1,10 @@
 import { getTranslations } from "next-intl/server";
 
 import {
-  grantMembershipBranchAction,
-  revokeMembershipBranchAction,
-} from "@/app/[locale]/(center)/settings/staff/member-actions";
+  GrantBranchForm,
+  RevokeBranchButton,
+} from "@/app/[locale]/(center)/settings/staff/staff-result-actions";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -69,59 +67,30 @@ export async function BranchGrants({
                 <ul className="flex flex-wrap gap-2">
                   {member.grantedBranches.map((branch) => (
                     <li key={branch.id}>
-                      <form
-                        action={revokeMembershipBranchAction}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-border py-1 ps-3 pe-1.5 text-xs"
-                      >
-                        <input type="hidden" name="locale" value={locale} />
-                        <input
-                          type="hidden"
-                          name="membershipId"
-                          value={member.membershipId}
-                        />
-                        <input type="hidden" name="centerId" value={branch.id} />
+                      {/* Revoking cross-branch access asks first, and the
+                          target is 44px — it had been a one-tap 24px "×". */}
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-border py-0.5 ps-3 pe-0.5 text-xs">
                         <span>{branch.name}</span>
-                        <button
-                          type="submit"
-                          aria-label={t("revoke", { branch: branch.name })}
-                          className="flex size-6 items-center justify-center rounded-full text-text-muted transition-ui-fast focus-ring hover:bg-danger-bg hover:text-danger"
-                        >
-                          ×
-                        </button>
-                      </form>
+                        <RevokeBranchButton
+                          locale={locale}
+                          membershipId={member.membershipId}
+                          branch={branch}
+                          memberName={member.name}
+                        />
+                      </span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-xs text-text-muted">{t("noBranches")}</p>
+                <p className="text-xs text-text-secondary">{t("noBranches")}</p>
               )}
 
               {available.length > 0 ? (
-                <form
-                  action={grantMembershipBranchAction}
-                  className="flex items-center gap-2"
-                >
-                  <input type="hidden" name="locale" value={locale} />
-                  <input
-                    type="hidden"
-                    name="membershipId"
-                    value={member.membershipId}
-                  />
-                  <Select
-                    name="centerId"
-                    aria-label={t("grantLabel")}
-                    className="min-w-0 flex-1"
-                  >
-                    {available.map((branch) => (
-                      <option key={branch.id} value={branch.id}>
-                        {branch.name}
-                      </option>
-                    ))}
-                  </Select>
-                  <Button type="submit" variant="outline" className="h-11 shrink-0 px-3">
-                    {t("grant")}
-                  </Button>
-                </form>
+                <GrantBranchForm
+                  locale={locale}
+                  membershipId={member.membershipId}
+                  branches={available}
+                />
               ) : null}
             </div>
           );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Inbox, Pencil, Plus, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -26,8 +26,10 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 import { CATALOG_NAME_MAX } from "@/lib/catalog";
+import { formatMoney } from "@/lib/format";
 import { piastresToInputValue } from "@/lib/money";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type CatalogEntryKind = "EDUCATION_SYSTEM" | "GRADE" | "SUBJECT";
 
@@ -88,7 +90,9 @@ export function CatalogSection({
   const tErrors = useTranslations("Settings.errors");
   const locale = useLocale();
 
-  const [pickState, pickFormAction] = useActionState(selectCatalogEntryAction, IDLE_ACTION_STATE);
+  const [pickState, pickFormAction] = useGuardedActionState(selectCatalogEntryAction, IDLE_ACTION_STATE);
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(pickState, { success: tToast("catalogAdded") });
 
   return (
     <Card>
@@ -173,18 +177,22 @@ function CatalogRow({
   const locale = useLocale();
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [updateState, updateFormAction] = useActionState(
+  const [updateState, updateFormAction] = useGuardedActionState(
     updateCatalogSelectionAction,
     IDLE_ACTION_STATE,
   );
-  const [deselectState, deselectFormAction] = useActionState(
+  const [deselectState, deselectFormAction] = useGuardedActionState(
     deselectCatalogEntryAction,
     IDLE_ACTION_STATE,
   );
-  const [toggleState, toggleFormAction] = useActionState(
+  const [toggleState, toggleFormAction] = useGuardedActionState(
     toggleCatalogSelectionAction,
     IDLE_ACTION_STATE,
   );
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(updateState, { success: tToast("saved") });
+  useActionFeedback(deselectState, { success: tToast("catalogRemoved") });
+  useActionFeedback(toggleState, { success: tToast("saved") });
 
   if (editing) {
     return (
@@ -266,11 +274,13 @@ function CatalogRow({
         <p className="truncate text-sm font-medium text-text-primary">
           {item.name}
           {item.name !== item.canonicalName ? (
-            <span className="ms-2 text-xs font-normal text-text-muted">({item.canonicalName})</span>
+            <span className="ms-2 text-xs font-normal text-text-secondary">({item.canonicalName})</span>
           ) : null}
         </p>
-        <p className="text-xs text-text-muted">
-          {[item.parentName, hasPricing ? `${piastresToInputValue(item.basePrice ?? 0)}` : null]
+        {/* The price is money: formatted with its currency in the locale's
+            digits — it had been a bare "200.00" from the input formatter. */}
+        <p className="text-xs text-text-secondary">
+          {[item.parentName, hasPricing ? formatMoney(item.basePrice ?? 0, locale) : null]
             .filter(Boolean)
             .join(" · ")}
         </p>
@@ -281,7 +291,7 @@ function CatalogRow({
         <Badge variant={item.active ? "success" : "neutral"}>
           {item.active ? tCommon("active") : tCommon("inactive")}
         </Badge>
-        <Button type="button" variant="outline" className="h-9 px-3" onClick={() => setEditing(true)}>
+        <Button type="button" variant="outline" className="h-11 px-3 md:h-9" onClick={() => setEditing(true)}>
           <Pencil className="size-4" />
           {tCommon("edit")}
         </Button>
@@ -289,7 +299,7 @@ function CatalogRow({
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="selectionId" value={item.selectionId} />
           {item.active ? null : <input type="hidden" name="active" value="true" />}
-          <Button type="submit" variant="ghost" className="h-9 px-3">
+          <Button type="submit" variant="ghost" className="h-11 px-3 md:h-9">
             {item.active ? tCommon("deactivate") : tCommon("activate")}
           </Button>
         </form>
@@ -298,13 +308,13 @@ function CatalogRow({
           <input type="hidden" name="selectionId" value={item.selectionId} />
           {confirmingDelete ? (
             <>
-              <Button type="submit" variant="destructive" className="h-9 px-3">
+              <Button type="submit" variant="destructive" className="h-11 px-3 md:h-9">
                 {tCommon("deleteYes")}
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 px-3"
+                className="h-11 px-3 md:h-9"
                 onClick={() => setConfirmingDelete(false)}
               >
                 {tCommon("cancel")}
@@ -314,7 +324,7 @@ function CatalogRow({
             <Button
               type="button"
               variant="destructive"
-              className="h-9 px-3"
+              className="h-11 px-3 md:h-9"
               onClick={() => setConfirmingDelete(true)}
             >
               <Trash2 className="size-4" />

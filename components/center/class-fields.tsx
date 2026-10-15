@@ -282,7 +282,9 @@ export function ClassFields({
       ) : null}
 
       <FormSection title={tSections("pricing")} icon={<Banknote />}>
-        <div className="grid gap-4 sm:grid-cols-3">
+        {/* The cut-type select keeps room for its label (it had truncated to
+            "Percenta…" in a half-width section) — DES, docs/04 §14.7. */}
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,auto)_minmax(0,1fr)]">
           <Field id={`${idPrefix}-price`} label={t("price")} error={error("price")}>
             <Input
               id={`${idPrefix}-price`}

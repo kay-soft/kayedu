@@ -2,7 +2,7 @@ import { FileQuestion } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AnchorButton } from "@/components/shared/link-button";
-import { LocaleToggle } from "@/components/shared/locale-toggle";
+import { PublicHeader } from "@/components/shared/public-header";
 
 /**
  * The 404 (docs/04-design-system.md §5 "Empty state"). It renders outside
@@ -14,33 +14,21 @@ import { LocaleToggle } from "@/components/shared/locale-toggle";
 export default async function NotFound() {
   const locale = await getLocale();
   const t = await getTranslations("Shared.notFound");
-  const tShell = await getTranslations("Shell");
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas text-text-primary">
-      <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden
-            className="flex size-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-brand-foreground"
-          >
-            K
-          </span>
-          <span className="text-sm font-semibold">{tShell("productName")}</span>
-        </span>
-        <LocaleToggle />
-      </header>
+      <PublicHeader />
 
       <main className="flex flex-1 items-center justify-center px-4 pb-16">
         <div className="flex max-w-md flex-col items-center gap-4 text-center">
           <span
             aria-hidden
-            className="flex size-12 items-center justify-center rounded-full bg-surface-subtle text-text-muted"
+            className="flex size-12 items-center justify-center rounded-full bg-surface-hover text-text-secondary"
           >
-            <FileQuestion className="size-6" />
+            <FileQuestion className="size-6" aria-hidden />
           </span>
           <div className="flex flex-col gap-1">
-            <h1 className="text-lg font-semibold text-text-primary">
+            <h1 className="text-xl font-semibold text-balance text-text-primary">
               {t("title")}
             </h1>
             <p className="text-sm text-text-secondary">{t("description")}</p>

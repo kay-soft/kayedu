@@ -3,6 +3,7 @@
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { AnchorButton } from "@/components/shared/link-button";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -19,9 +20,15 @@ import { Button } from "@/components/ui/button";
 export function ErrorState({
   error,
   reset,
+  homeHref,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
+  /**
+   * A way out beside Retry (DES, docs/04 §12): where the failure is a
+   * layout's own gate, retrying fails again.
+   */
+  homeHref?: string;
 }) {
   const t = useTranslations("Shared.error");
 
@@ -29,7 +36,7 @@ export function ErrorState({
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4 text-center">
       <span
         aria-hidden
-        className="flex size-12 items-center justify-center rounded-full bg-danger-bg text-danger"
+        className="flex size-12 items-center justify-center rounded-full bg-danger-bg text-danger-fg"
       >
         <TriangleAlert className="size-6" />
       </span>
@@ -41,10 +48,13 @@ export function ErrorState({
         <p className="text-sm text-text-secondary">{t("description")}</p>
       </div>
 
-      <Button onClick={reset} className="h-11 px-4">
-        <RefreshCw className="size-4" aria-hidden />
-        {t("retry")}
-      </Button>
+      <div className="grid w-full max-w-xs gap-2 sm:flex sm:w-auto sm:max-w-none">
+        <Button onClick={reset}>
+          <RefreshCw className="size-4" aria-hidden />
+          {t("retry")}
+        </Button>
+        {homeHref ? <AnchorButton href={homeHref}>{t("home")}</AnchorButton> : null}
+      </div>
 
       {process.env.NODE_ENV === "development" ? (
         <pre

@@ -77,7 +77,7 @@ function ToggleLink({
         aria-hidden
         className={cn(
           "flex size-9 items-center justify-center rounded-full border border-border-strong bg-surface",
-          "text-[11px] font-bold tracking-wide text-text-primary shadow-card transition-ui",
+          "text-xs font-bold text-text-primary shadow-card transition-ui",
           "group-hover/toggle:border-brand group-hover/toggle:bg-brand/10 group-hover/toggle:text-brand",
           "group-active/toggle:scale-95 group-active/toggle:bg-brand/15",
         )}

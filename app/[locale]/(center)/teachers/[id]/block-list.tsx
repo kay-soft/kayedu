@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { Ban, ShieldOff, UserMinus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -15,6 +14,7 @@ import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type BlockedStudent = {
   blockId: string;
@@ -52,14 +52,17 @@ export function BlockList({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [blockState, blockFormAction] = useActionState(
+  const [blockState, blockFormAction] = useGuardedActionState(
     blockStudentAction,
     IDLE_PEOPLE_STATE,
   );
-  const [unblockState, unblockFormAction] = useActionState(
+  const [unblockState, unblockFormAction] = useGuardedActionState(
     unblockStudentAction,
     IDLE_PEOPLE_STATE,
   );
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(blockState, { success: tToast("studentBlocked") });
+  useActionFeedback(unblockState, { success: tToast("studentUnblocked") });
 
   const error = blockState.error ?? unblockState.error;
 

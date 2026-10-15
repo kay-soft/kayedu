@@ -137,7 +137,8 @@ test("@write class: create with a weekly row and a brand-new teacher in one step
   // The class lists with its new teacher; open it and delete it (it never ran).
   await page.goto(`/${appLocale}/classes`);
   const row = page.getByRole("listitem").filter({ hasText: lastName }).first();
-  await row.getByRole("link", { name: msg("Classes.open"), exact: true }).click();
+  // DES: the row's name is its link (the separate "Open" button is gone).
+  await row.locator('a[href*="/classes/"]').first().click();
   await expect(page).toHaveURL(/\/classes\/[0-9a-f-]{36}$/);
   await page.getByRole("button", { name: msg("Classes.edit"), exact: true }).click();
   const edit = openDialog(page);

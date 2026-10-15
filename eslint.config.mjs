@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "e2e/.report/**",
     "e2e/.results/**",
     "e2e/.auth/**",
+    // DES design review: local capture scripts and screenshots (git-ignored).
+    "design-review/**",
   ]),
 ]);
 

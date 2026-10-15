@@ -121,13 +121,13 @@ export function WeeklyScheduleRows({
                 disabled={rows.length === 1}
                 aria-label={t("removeRow")}
                 onClick={() => commit(rows.filter((candidate) => candidate.key !== row.key))}
-                className="size-11 self-end p-0 text-text-muted hover:text-danger sm:mt-[1.625rem] sm:self-start"
+                className="size-11 self-end p-0 text-text-muted hover:text-danger-fg sm:mt-[1.625rem] sm:self-start"
               >
                 <X className="size-4" aria-hidden />
               </Button>
             </div>
             {overlapIndex === index ? (
-              <p role="alert" className="text-xs text-danger">
+              <p role="alert" className="text-xs text-danger-fg">
                 {tErrors("slotOverlap")}
               </p>
             ) : null}
@@ -149,7 +149,7 @@ export function WeeklyScheduleRows({
         <p className="text-xs text-text-muted">{t("rowsHint")}</p>
       </div>
       {error ? (
-        <p role="alert" className="text-xs text-danger">
+        <p role="alert" className="text-xs text-danger-fg">
           {error}
         </p>
       ) : null}

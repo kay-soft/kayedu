@@ -879,10 +879,13 @@ async function main() {
     dir: "rtl",
     layout,
   });
+  // DES: anchors are logical — under direction="rtl" a start-aligned text keeps
+  // text-anchor="start" (its right edge); flipping it to "end" as well had
+  // anchored every Arabic text at its left end (docs/04 §5, check:card-layout).
   check(
     "An Arabic card mirrors the layout and sets its direction",
     rtl.includes('direction="rtl"') &&
-      rtl.includes('text-anchor="end"') &&
+      rtl.includes('text-anchor="start" direction="rtl"') &&
       rtl !== svg,
   );
 

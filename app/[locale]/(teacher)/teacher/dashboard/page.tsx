@@ -89,7 +89,8 @@ export default async function TeacherDashboardPage() {
       <PageHeader
         title={t("title")}
         description={t("subtitle", { center: ctx.center.name })}
-        action={<Badge variant="brand">{tRoles(ctx.role)}</Badge>}
+        // A role is a fact, not an action — and not a status (docs/04 §14.1).
+        meta={<Badge variant="neutral">{tRoles(ctx.role)}</Badge>}
       />
 
       <StatGrid count={earningsVisibleAt.size > 0 ? 5 : 4}>
@@ -145,16 +146,18 @@ export default async function TeacherDashboardPage() {
                     size="lg"
                   />
                   <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 truncate text-sm font-semibold text-text-primary">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-text-primary">
                       {centerCtx.center.name}
                       {isActive ? (
                         <Badge variant="brand">{t("centers.active")}</Badge>
                       ) : null}
                     </p>
-                    <p className="mt-1 text-xs text-text-muted">
+                    <p className="mt-1 text-xs text-text-secondary">
                       {t("centers.summary", {
-                        today: summary?.sessionsToday ?? 0,
-                        week: summary?.sessionsThisWeek ?? 0,
+                        // Formatted here: a plain ICU placeholder prints a raw
+                        // number in Latin digits in Arabic (docs/04 §3).
+                        today: formatNumber(summary?.sessionsToday ?? 0, locale),
+                        week: formatNumber(summary?.sessionsThisWeek ?? 0, locale),
                         earnings: earningsVisibleAt.has(centerCtx.center.id)
                           ? formatMoney(summary?.earnings.teacherShare ?? 0, locale)
                           : "—",

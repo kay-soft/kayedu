@@ -17,6 +17,7 @@ import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/re
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { EmptyState } from "@/components/shared/empty-state";
+import { Ltr } from "@/components/shared/ltr";
 import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
@@ -33,13 +34,12 @@ import {
   loadReceptionSessions,
   openSessionsForStudent,
   recentCheckIns,
-  sessionPickerParts,
   validateReceptionSession,
 } from "@/lib/db/reception";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { signedUrlFor } from "@/lib/db/storage";
-import { formatMoney, formatTimeRange } from "@/lib/format";
+import { formatMoney, formatNumber, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { centerIdsMatch, parseScannedStudentInput } from "@/lib/id-card";
 import { Link, redirect } from "@/lib/i18n/navigation";
@@ -242,17 +242,17 @@ export default async function ReceptionPage({
       label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
     }));
 
-  const summaryOf = (card: (typeof cards)[number]) =>
-    [...sessionPickerParts(card), formatTimeRange(card.startTime, card.endTime, locale)].join(" · ");
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={t("title")}
         description={t("subtitle")}
+        compactOnPhone
         action={
+          // The desk's primary is the search, so Register student is outline here.
           <div className="flex flex-wrap items-center gap-2">
-            <AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} />
+            <AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} variant="outline" />
             <LinkButton href={ROUTES.centerSessions}>
               <CalendarPlus className="size-4" aria-hidden />
               {t("addSessionShortcut")}
@@ -265,7 +265,20 @@ export default async function ReceptionPage({
         <FormMessage tone="info">{t("sessionMode.sessionUnavailable")}</FormMessage>
       ) : null}
 
-      {attending ? <SessionBanner summary={summaryOf(attending)} /> : null}
+      {attending ? (
+        <SessionBanner
+          label={attending.label}
+          detail={[
+            attending.teacherName,
+            formatTimeRange(attending.startTime, attending.endTime, locale),
+            attending.rooms.join(" + "),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          live={attending.displayStatus === "LIVE"}
+          checkedIn={formatNumber(attending.checkedIn, locale)}
+        />
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -276,7 +289,9 @@ export default async function ReceptionPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {attending ? (
-            <>
+            // From xl the confirm area and the running list sit side by side,
+            // so a wide monitor does not put the status 1,400px from the name.
+            <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
               <SessionCheckIn
                 sessionId={attending.id}
                 priceLabel={attending.price > 0 ? formatMoney(attending.price, locale) : null}
@@ -288,11 +303,14 @@ export default async function ReceptionPage({
                 total={attending.checkedIn}
                 locale={locale}
                 timeZone={timeZone}
+                className="xl:border-t-0 xl:border-s xl:ps-4 xl:pt-0"
               />
-            </>
+            </div>
           ) : (
-            <>
+            <div className="flex max-w-3xl flex-col gap-4">
               <TypeAheadSearch
+                size="lg"
+                hideLabel
                 inputId={RECEPTION_SEARCH_INPUT_ID}
                 autoFocus
                 // A scanned payload (a long UUID) is shown as the student's code, not as raw text.
@@ -323,8 +341,8 @@ export default async function ReceptionPage({
                           <span className="truncate text-sm font-medium text-text-primary">
                             {result.name}
                           </span>
-                          <span className="shrink-0 text-xs text-text-muted" dir="ltr">
-                            {result.studentCode}
+                          <span className="shrink-0 text-xs text-text-secondary">
+                            <Ltr>{result.studentCode}</Ltr>
                           </span>
                         </Link>
                       </li>
@@ -338,6 +356,7 @@ export default async function ReceptionPage({
                   <CheckInForm
                     studentProfileId={selectedStudent.id}
                     studentName={selectedStudent.name}
+                    studentCode={selectedStudent.code}
                     studentPhotoUrl={selectedStudentPhotoUrl}
                     sessions={studentSessions.options.map((card) => ({
                       sessionId: card.id,
@@ -350,7 +369,7 @@ export default async function ReceptionPage({
                   />
                 </div>
               ) : null}
-            </>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -391,6 +410,7 @@ export default async function ReceptionPage({
           printHref={ROUTES.centerSessionPrint(receiptCard.id)}
           closeLabel={t("receipt.close")}
           printLabel={t("receipt.print")}
+          newTabLabel={t("receipt.opensInNewTab")}
         >
           <SessionReceipt
             totals={receiptView.totals}

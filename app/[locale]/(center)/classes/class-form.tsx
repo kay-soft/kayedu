@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { UserPlus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ShareType } from "@prisma/client";
@@ -32,6 +32,7 @@ import type { RoomLinkPair } from "@/lib/rooms";
 import { weeklySlotsError, type WeeklySlotRow } from "@/lib/scheduling";
 import { cn } from "@/lib/utils";
 import { IDLE_CLASS_STATE, type ClassActionState } from "@/lib/validation/classes";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type ClassFormDefaults = {
   centerShareType: ShareType;
@@ -100,8 +101,8 @@ export function NewClassDialogContent({
   const tPeopleErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [selectState, selectAction, selectPending] = useActionState(createClassAction, IDLE_CLASS_STATE);
-  const [newState, newAction, newPending] = useActionState(
+  const [selectState, selectAction, selectPending] = useGuardedActionState(createClassAction, IDLE_CLASS_STATE);
+  const [newState, newAction, newPending] = useGuardedActionState(
     createClassWithNewTeacherAction,
     IDLE_CLASS_STATE,
   );

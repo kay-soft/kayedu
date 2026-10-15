@@ -1,12 +1,12 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { verifyParentLinkAction } from "@/app/[locale]/(center)/students/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * ─────────────────────────────── OD-6 PLACEHOLDER ───────────────────────────
@@ -21,7 +21,7 @@ export function VerifyParentLinkButton({ parentLinkId }: { parentLinkId: string 
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(verifyParentLinkAction, IDLE_PEOPLE_STATE);
+  const [state, formAction] = useGuardedActionState(verifyParentLinkAction, IDLE_PEOPLE_STATE);
 
   if (state.status === "saved") {
     return <FormMessage tone="success">{t("verified")}</FormMessage>;

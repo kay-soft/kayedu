@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Check } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
@@ -12,9 +13,9 @@ export const ATTENDANCE_STATUS_ORDER: AttendanceStatusValue[] = ["PRESENT", "LAT
 
 /** Present = green, late = amber, absent = red (CLAUDE.md rule 8). */
 export const ATTENDANCE_STATUS_TINT: Record<AttendanceStatusValue, string> = {
-  PRESENT: "bg-success-bg text-success ring-1 ring-success/30",
-  LATE: "bg-warning-bg text-warning ring-1 ring-warning/30",
-  ABSENT: "bg-danger-bg text-danger ring-1 ring-danger/30",
+  PRESENT: "bg-success-bg text-success-fg ring-1 ring-success/30",
+  LATE: "bg-warning-bg text-warning-fg ring-1 ring-warning/30",
+  ABSENT: "bg-danger-bg text-danger-fg ring-1 ring-danger/30",
 };
 
 /**
@@ -71,13 +72,15 @@ export function AttendanceControl({
             disabled={pending}
             aria-pressed={selected}
             className={cn(
-              "min-h-11 min-w-11 rounded-lg px-3 text-sm font-medium transition-ui focus-ring disabled:pointer-events-none disabled:opacity-60",
+              "inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-ui focus-ring disabled:pointer-events-none disabled:opacity-60",
               size === "lg" ? "min-h-12 px-4 text-base" : undefined,
               selected
                 ? ATTENDANCE_STATUS_TINT[status]
-                : "border border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
+                : "border border-border-control bg-surface text-text-secondary hover:border-border-control-hover hover:bg-surface-hover active:bg-surface-active",
             )}
           >
+            {/* The chosen status is never colour alone (DES, docs/04 §14.7). */}
+            {selected ? <Check className="size-4 shrink-0" aria-hidden /> : null}
             {t(status)}
           </button>
         );

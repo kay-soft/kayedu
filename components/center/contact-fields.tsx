@@ -31,6 +31,7 @@ export function ContactFields({
   fieldErrors,
   atLeastOneRequired,
   belowPhone,
+  ownProfile,
 }: {
   idPrefix: string;
   values?: ContactValues;
@@ -39,6 +40,8 @@ export function ContactFields({
   atLeastOneRequired?: boolean;
   /** Full-width content directly under the phone row (the duplicate-match panel). */
   belowPhone?: ReactNode;
+  /** See `PersonFields`: autofill only for the person's own profile. */
+  ownProfile?: boolean;
 }) {
   const t = useTranslations("People.fields");
   const tErrors = useTranslations("People.errors");
@@ -58,6 +61,7 @@ export function ContactFields({
         <Input
           id={`${idPrefix}-phone`}
           name="phone"
+          autoComplete={ownProfile ? "tel" : "off"}
           type="tel"
           inputMode="tel"
           dir="ltr"
@@ -77,6 +81,7 @@ export function ContactFields({
         <Input
           id={`${idPrefix}-altPhone`}
           name="altPhone"
+          autoComplete="off"
           type="tel"
           inputMode="tel"
           dir="ltr"
@@ -97,7 +102,10 @@ export function ContactFields({
         <Input
           id={`${idPrefix}-email`}
           name="email"
+          autoComplete={ownProfile ? "email" : "off"}
           type="email"
+          spellCheck={false}
+          autoCapitalize="none"
           inputMode="email"
           // Addresses and numbers read left-to-right in both locales.
           dir="ltr"

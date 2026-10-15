@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { IDLE_ADMIN_ACTION_STATE } from "@/app/[locale]/(admin)/admin/centers/action-state";
@@ -9,6 +8,7 @@ import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The platform-admin override of a centre's data-visibility window (M19,
@@ -28,7 +28,7 @@ export function VisibilityWindowForm({
   const t = useTranslations("AdminCenters");
   const tErrors = useTranslations("AdminCenters.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     updateCenterVisibilityWindowAction,
     IDLE_ADMIN_ACTION_STATE,
   );

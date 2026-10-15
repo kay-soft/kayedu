@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { updateTeacherAction } from "@/app/[locale]/(center)/teachers/actions";
@@ -11,6 +10,7 @@ import { FormGroup } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * Edit one teacher's record at this center.
@@ -41,7 +41,7 @@ export function TeacherProfileForm({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     updateTeacherAction,
     IDLE_PEOPLE_STATE,
   );

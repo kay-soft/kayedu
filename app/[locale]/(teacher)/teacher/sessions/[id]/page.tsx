@@ -164,7 +164,7 @@ export default async function TeacherSessionDetailPage({
                           {row.isDropIn ? <span>{t("roster.dropIn")}</span> : null}
                         </p>
                         {row.status === "ABSENT" && row.consecutiveAbsences >= 2 ? (
-                          <p className="mt-1 text-xs font-medium text-danger">
+                          <p className="mt-1 text-xs font-medium text-danger-fg">
                             {t("roster.consecutiveAbsentAlert", {
                               count: row.consecutiveAbsences,
                             })}

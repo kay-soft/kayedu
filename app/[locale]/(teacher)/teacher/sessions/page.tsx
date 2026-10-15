@@ -1,4 +1,4 @@
-import { CalendarClock, CalendarSearch } from "lucide-react";
+import { CalendarClock, CalendarSearch, ChevronDown } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeacherSessionFilters } from "@/app/[locale]/(teacher)/teacher/sessions/session-filters";
@@ -167,15 +167,26 @@ export default async function TeacherSessionsPage({
         />
       </StatGrid>
 
+      {/* A request is occasional; the list is what a teacher came for. The
+          form is a disclosure, closed until asked for (DES, docs/04 §14.9) —
+          it had sat fully open above the list. */}
       {canRequestSession ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("request.title")}</CardTitle>
-            <CardDescription>{t("request.description")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SessionRequestForm classes={classOptions} />
-          </CardContent>
+        <Card className="gap-0 py-0">
+          <details className="group">
+            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 focus-ring md:px-5 [&::-webkit-details-marker]:hidden">
+              <span className="flex min-w-0 flex-col">
+                <span className="text-base font-semibold text-text-primary">{t("request.title")}</span>
+                <span className="text-sm text-text-secondary">{t("request.description")}</span>
+              </span>
+              <ChevronDown
+                className="size-5 shrink-0 text-text-secondary transition-transform duration-(--motion-base) group-open:rotate-180"
+                aria-hidden
+              />
+            </summary>
+            <div className="border-t border-border px-4 py-4 md:px-5">
+              <SessionRequestForm classes={classOptions} />
+            </div>
+          </details>
         </Card>
       ) : null}
 

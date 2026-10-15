@@ -1,20 +1,17 @@
 "use client";
 
-import {
-  startTransition,
-  useActionState,
-  useEffect,
-  useState,
-  type FormEvent,
-} from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { UserRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createTeacherAction } from "@/app/[locale]/(center)/teachers/actions";
 import { NewTeacherFields } from "@/components/center/new-teacher-fields";
 import { DialogSections, DialogShell, FormSection } from "@/components/shared/dialog-shell";
+import { ErrorSummary } from "@/components/shared/error-summary";
 import { FormMessage } from "@/components/shared/form-message";
-import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { IDLE_PEOPLE_STATE, teacherCreateSchema } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
+import { useClientValidation } from "@/lib/ui/client-validation";
 
 /**
  * Add a teacher — the body of the "Add teacher" dialog, in the shared
@@ -41,10 +38,13 @@ export function TeacherForm({
   const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
-  const [state, formAction, pending] = useActionState(
+  const [state, formAction, pending] = useGuardedActionState(
     createTeacherAction,
     IDLE_PEOPLE_STATE,
   );
+  // The action's own schema, run before the round trip (docs/04 §14.2).
+  const { clientErrors, check } = useClientValidation(teacherCreateSchema);
+  const fieldErrors = clientErrors ?? state.fieldErrors;
   const [matchPending, setMatchPending] = useState(false);
 
   useEffect(() => {
@@ -54,6 +54,7 @@ export function TeacherForm({
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    if (!check(event.currentTarget, formData)) return;
     startTransition(() => formAction(formData));
   }
 
@@ -73,6 +74,7 @@ export function TeacherForm({
 
       <div className="flex flex-col gap-4">
         {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+        <ErrorSummary fieldErrors={fieldErrors} />
 
         <DialogSections>
           <FormSection
@@ -84,7 +86,7 @@ export function TeacherForm({
             <NewTeacherFields
               idPrefix="teacher-create"
               showHeader={false}
-              fieldErrors={state.fieldErrors}
+              fieldErrors={fieldErrors}
               serverMatch={state.status === "matchFound" ? state.match : null}
               onPendingChange={setMatchPending}
               pending={pending}

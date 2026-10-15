@@ -1,4 +1,4 @@
-import { Banknote, GraduationCap, TrendingUp, UserPlus, Users, Wallet } from "lucide-react";
+import { Banknote, GraduationCap, TrendingDown, TrendingUp, UserPlus, Users, Wallet } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { BranchRevenueTable } from "@/app/[locale]/(center)/analytics/branch-revenue-table";
@@ -7,7 +7,7 @@ import { TeacherRevenueTable } from "@/app/[locale]/(center)/analytics/teacher-r
 import { DateFilter } from "@/components/shared/date-filter";
 import { FilterBar } from "@/components/shared/filter-bar";
 import { PageHeader } from "@/components/shared/page-header";
-import { SectionHeader } from "@/components/shared/section-header";
+import { PageSection } from "@/components/shared/page-section";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatGrid } from "@/components/shared/stat-grid";
 import { LinkButton } from "@/components/shared/link-button";
@@ -40,7 +40,7 @@ import {
 } from "@/lib/db/organizations";
 import { scoped } from "@/lib/db/scoped";
 import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatDayRange, formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import {
   centreTimeZone,
@@ -237,7 +237,9 @@ export default async function AnalyticsPage({
           Seven cards in one four-wide grid left an orphan row of three
           (docs/04 §5 "KPI grid"). `StatGrid` picks the columns from the
           count, so neither row can wrap into an orphan at any breakpoint. */}
-      <SectionHeader title={t("revenue.title")} />
+      {/* The period in words under the heading (docs/04 §14.4) — a highlighted
+          preset alone does not say which days are counted. */}
+      <PageSection title={t("revenue.title")} description={formatDayRange(from, to, locale)}>
       <StatGrid count={showProfit ? 3 : 1}>
         <StatCard
           label={t("revenue.collected")}
@@ -267,18 +269,22 @@ export default async function AnalyticsPage({
       <StatGrid count={secondaryCount}>
         {showProfit ? (
           <>
+            {/* With a teacher selected, revenue narrows but expenses cannot —
+                they are not split by teacher — so the two cards say so. */}
             <StatCard
               label={t("revenue.expenses")}
               value={formatMoney(expenses.total, locale)}
               zero={expenses.total === 0}
               zeroLabel={t("zeroHint")}
+              hint={filters.teacherId ? t("revenue.branchWide") : undefined}
             />
             <StatCard
               label={t("revenue.net")}
               value={formatMoney(net, locale)}
-              icon={<TrendingUp className="size-4" />}
+              icon={net < 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
               zero={noRevenue && expenses.total === 0}
               zeroLabel={t("zeroHint")}
+              hint={filters.teacherId ? t("revenue.branchWide") : undefined}
             />
           </>
         ) : null}
@@ -298,11 +304,12 @@ export default async function AnalyticsPage({
           />
         ) : null}
       </StatGrid>
+      </PageSection>
 
       {/* Two cards about students, three about teachers — five in one
           four-wide grid stranded a single tile on its own row. */}
-      <SectionHeader title={t("users.title")} />
-      <StatGrid count={2}>
+      <PageSection title={t("users.title")}>
+      <StatGrid count={2} dense>
         <StatCard
           label={t("users.totalStudents")}
           value={formatNumber(students.total, locale)}
@@ -316,7 +323,7 @@ export default async function AnalyticsPage({
           zeroLabel={t("zeroHint")}
         />
       </StatGrid>
-      <StatGrid count={3}>
+      <StatGrid count={3} dense>
         <StatCard
           label={t("users.totalTeachers")}
           value={formatNumber(teachers.total, locale)}
@@ -331,26 +338,26 @@ export default async function AnalyticsPage({
         />
       </StatGrid>
 
+      </PageSection>
+
       {orgGroup ? (
-        <>
-          <SectionHeader title={t("byBranch.title")} description={t("byBranch.description")} />
+        <PageSection title={t("byBranch.title")} description={t("byBranch.description")}>
           <Card>
             <CardContent>
               <BranchRevenueTable rows={byBranch} showProfit={showProfit} locale={locale} />
             </CardContent>
           </Card>
-        </>
+        </PageSection>
       ) : null}
 
       {!filters.teacherId && !orgGroup ? (
-        <>
-          <SectionHeader title={t("byTeacher.title")} description={t("byTeacher.description")} />
+        <PageSection title={t("byTeacher.title")} description={t("byTeacher.description")}>
           <Card>
             <CardContent>
               <TeacherRevenueTable rows={breakdownRows} showProfit={showProfit} locale={locale} />
             </CardContent>
           </Card>
-        </>
+        </PageSection>
       ) : null}
     </div>
   );

@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { ImageUp, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -8,6 +7,7 @@ import {
   removeStudentPhotoAction,
   uploadStudentPhotoAction,
 } from "@/app/[locale]/(center)/students/actions";
+import { ConfirmAction } from "@/components/shared/confirm-action";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { shrinkImageForUpload } from "@/components/center/resize-image";
 import { MAX_PHOTO_BYTES } from "@/lib/storage-paths";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The student's photo for their ID card. Stored in Supabase Storage under
@@ -33,14 +34,17 @@ export function PhotoForm({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     uploadStudentPhotoAction,
     IDLE_PEOPLE_STATE,
   );
-  const [removeState, removeFormAction] = useActionState(
+  const [removeState, removeFormAction] = useGuardedActionState(
     removeStudentPhotoAction,
     IDLE_PEOPLE_STATE,
   );
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(state, { success: tToast("photoSaved") });
+  useActionFeedback(removeState, { success: tToast("photoRemoved") });
 
   const error = state.error ?? removeState.error;
 
@@ -86,19 +90,19 @@ export function PhotoForm({
         </div>
       </form>
 
+      {/* Removing deletes the stored file, so it asks first (docs/04 §14.6);
+          it had been one tap. */}
       {hasPhoto ? (
-        <form action={removeFormAction}>
-          <input type="hidden" name="locale" value={locale} />
-          <input
-            type="hidden"
-            name="studentProfileId"
-            value={studentProfileId}
-          />
-          <SubmitButton variant="destructive" className="w-full sm:w-auto">
-            <Trash2 className="size-4" />
-            {t("remove")}
-          </SubmitButton>
-        </form>
+        <ConfirmAction
+          label={t("remove")}
+          icon={<Trash2 className="size-4" aria-hidden />}
+          variant="destructive"
+          triggerClassName="w-full sm:w-auto sm:self-start"
+          title={t("removeConfirm.title")}
+          description={t("removeConfirm.body")}
+          action={removeFormAction}
+          fields={{ locale, studentProfileId }}
+        />
       ) : null}
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Printer } from "lucide-react";
+import { ExternalLink, Printer } from "lucide-react";
 
 import { RECEPTION_SEARCH_INPUT_ID } from "@/app/[locale]/(center)/reception/constants";
 import { DialogShell } from "@/components/shared/dialog-shell";
@@ -24,6 +24,7 @@ export function ReceiptDialog({
   printHref,
   closeLabel,
   printLabel,
+  newTabLabel,
   children,
 }: {
   title: string;
@@ -32,6 +33,7 @@ export function ReceiptDialog({
   printHref: string;
   closeLabel: string;
   printLabel: string;
+  newTabLabel?: string;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -56,6 +58,9 @@ export function ReceiptDialog({
         <LinkButton href={printHref} target="_blank" className="w-full sm:w-auto">
           <Printer className="size-4" aria-hidden />
           {printLabel}
+          {/* It opens a new tab — say so (docs/04 §14.5). */}
+          <ExternalLink className="size-3.5 text-text-secondary" aria-hidden />
+          {newTabLabel ? <span className="sr-only">{newTabLabel}</span> : null}
         </LinkButton>
       }
     >

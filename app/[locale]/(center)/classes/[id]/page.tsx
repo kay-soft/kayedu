@@ -292,7 +292,7 @@ export default async function ClassDetailPage({
 
       {kept.length > 0 ? (
         <div
-          className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning-bg p-4 text-sm text-warning"
+          className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning-bg p-4 text-sm text-warning-fg"
           role="status"
         >
           <p className="font-medium">{t("sessionsSync.kept", { count: kept.length })}</p>
@@ -352,20 +352,20 @@ export default async function ClassDetailPage({
                 value={
                   roomSet.capacity > 0
                     ? t("fields.seatsValue", {
-                        enrolled: roster.length,
-                        seats: roomSet.capacity,
+                        enrolled: formatNumber(roster.length, locale),
+                        seats: formatNumber(roomSet.capacity, locale),
                       })
-                    : t("fields.seatsUnlimited", { enrolled: roster.length })
+                    : t("fields.seatsUnlimited", { enrolled: formatNumber(roster.length, locale) })
                 }
               />
-              <DetailRow label={t("fields.price")} value={formatMoney(classGroup.price, ctx.user.locale)} />
+              <DetailRow label={t("fields.price")} value={formatMoney(classGroup.price, locale)} />
               {showCut ? (
                 <DetailRow
                   label={t("fields.centerShare")}
                   value={
                     classGroup.centerShareType === "FIXED"
                       ? t("fields.centerCutFixed", {
-                          amount: formatMoney(classGroup.centerShareValue, ctx.user.locale),
+                          amount: formatMoney(classGroup.centerShareValue, locale),
                         })
                       : t("fields.centerCutPercent", {
                           value: formatNumber(classGroup.centerShareValue, locale),

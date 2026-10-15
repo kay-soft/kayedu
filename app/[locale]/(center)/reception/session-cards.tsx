@@ -100,7 +100,8 @@ export function SessionCards({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div role="group" aria-label={t("filters.label")} className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+        {/* One row of four segments, even at 375 (docs/04 §14.5). */}
+        <div role="group" aria-label={t("filters.label")} className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
           {FILTERS.map((value) => (
             <button
               key={value}
@@ -108,10 +109,10 @@ export function SessionCards({
               aria-pressed={filter === value}
               onClick={() => setFilter(value)}
               className={cn(
-                "inline-flex h-11 items-center justify-center rounded-lg border px-4 text-sm font-medium transition-ui focus-ring",
+                "inline-flex h-11 min-w-0 items-center justify-center rounded-lg border px-2 text-sm font-medium whitespace-nowrap transition-ui focus-ring sm:px-4",
                 filter === value
                   ? "border-brand bg-brand/10 text-brand"
-                  : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
+                  : "border-border-control bg-surface text-text-secondary hover:border-border-control-hover hover:bg-surface-hover active:bg-surface-active",
               )}
             >
               {t(`filters.${value}`)}
@@ -153,18 +154,21 @@ export function SessionCards({
                 <div className="flex items-start justify-between gap-2">
                   <Link
                     href={ROUTES.centerSession(card.id)}
-                    className="min-w-0 text-sm font-semibold text-text-primary hover:text-brand hover:underline"
+                    className="min-w-0 rounded-sm text-base font-semibold text-text-primary focus-ring hover:text-brand hover:underline"
                   >
                     <span className="line-clamp-2">{card.label}</span>
                   </Link>
-                  <Badge
-                    variant={live ? "success" : card.displayStatus === "SCHEDULED" ? "info" : "neutral"}
-                  >
-                    {live ? (
-                      <span className="me-1 inline-block size-1.5 animate-pulse rounded-full bg-success" aria-hidden />
-                    ) : null}
-                    {t(`status.${statusKey(card)}`)}
-                  </Badge>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Badge
+                      variant={live ? "success" : card.displayStatus === "SCHEDULED" ? "info" : "neutral"}
+                      pulse={live}
+                    >
+                      {t(`status.${statusKey(card)}`)}
+                    </Badge>
+                    {/* The card being attended says so in its header — the
+                        button-shaped chip it replaced read as disabled. */}
+                    {attending ? <Badge variant="brand">{t("card.attending")}</Badge> : null}
+                  </div>
                 </div>
 
                 <dl className="flex flex-col gap-1.5 text-sm text-text-secondary">
@@ -176,7 +180,7 @@ export function SessionCards({
                   <div className="flex items-center gap-2">
                     <Clock className="size-4 shrink-0 text-text-muted" aria-hidden />
                     <dt className="sr-only">{t("card.time")}</dt>
-                    <dd className="tabular-nums" dir="ltr" suppressHydrationWarning>
+                    <dd className="tabular-nums" suppressHydrationWarning>
                       {formatTimeRange(card.startTime, card.endTime, locale)}
                     </dd>
                   </div>
@@ -195,27 +199,26 @@ export function SessionCards({
                 </dl>
 
                 <div className="mt-auto flex flex-col gap-2 border-t border-border-subtle pt-3">
-                  <ActionBar>
-                    {card.canAttend ? (
-                      attending ? (
-                        <span className="col-span-2 inline-flex h-11 items-center justify-center rounded-lg bg-brand/10 px-4 text-sm font-medium text-brand sm:col-span-1">
-                          {t("card.attending")}
-                        </span>
-                      ) : (
-                        <LinkButton
-                          variant="default"
-                          href={receptionHref({ session: card.id })}
-                          className="w-full sm:w-auto"
-                        >
-                          <Play className="size-4" aria-hidden />
-                          {t("card.startAttending")}
-                        </LinkButton>
-                      )
+                  {/* Two equal columns at every width inside a card, so action rows
+                      line up across the grid; a lone verb spans both. Start
+                      attending is the primary only on a live card (§14.5). */}
+                  <ActionBar className="sm:grid sm:grid-cols-2 [&>*:only-child]:col-span-2">
+                    {card.canAttend && !attending ? (
+                      <LinkButton
+                        variant={live ? "default" : "outline"}
+                        href={receptionHref({ session: card.id })}
+                        className="w-full"
+                      >
+                        <Play className="size-4" aria-hidden />
+                        {t("card.startAttending")}
+                      </LinkButton>
                     ) : null}
-                    {card.end !== "hidden" ? (
+                    {/* Only once it can be used: an upcoming card's disabled
+                        End session and its hint were noise on every card. */}
+                    {card.end === "enabled" ? (
                       <EndSessionButton
                         sessionId={card.id}
-                        disabled={card.end === "disabled"}
+                        className="sm:w-full"
                         onClosed={() =>
                           router.push(
                             receptionHref({
@@ -230,16 +233,13 @@ export function SessionCards({
                     {card.canViewReceipt ? (
                       <LinkButton
                         href={receptionHref({ session: attendingId, receipt: card.id })}
-                        className="col-span-2 w-full sm:col-span-1 sm:w-auto"
+                        className="w-full"
                       >
                         <Receipt className="size-4" aria-hidden />
                         {t("card.viewReceipt")}
                       </LinkButton>
                     ) : null}
                   </ActionBar>
-                  {card.end === "disabled" ? (
-                    <p className="text-xs text-text-muted">{t("card.endNotStarted")}</p>
-                  ) : null}
                 </div>
               </li>
             );

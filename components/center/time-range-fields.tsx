@@ -103,7 +103,7 @@ export function TimeRangeFields({
         </Field>
       </div>
       {message ? (
-        <p role="alert" className="text-xs text-danger">
+        <p role="alert" className="text-xs text-danger-fg">
           {message}
         </p>
       ) : null}

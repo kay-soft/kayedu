@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useActionState,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Plus, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -51,6 +45,7 @@ import {
 } from "@/lib/id-card";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 import { cn } from "@/lib/utils";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 type ElementMap = Partial<Record<CardElementKey, CardElement>>;
 type ElementPatch = { [K in keyof CardElement]?: CardElement[K] | undefined };
@@ -117,12 +112,14 @@ export function CardLayoutForm({
 }) {
   const t = useTranslations("Settings.card");
   const tCommon = useTranslations("Settings.common");
+  const tShared = useTranslations("Shared");
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const tErrors = useTranslations("Settings.errors");
   const locale = useLocale();
   const dir = locale === "ar" ? "rtl" : "ltr";
   const theme = normalizeHex(brandColor) ?? FALLBACK_BRAND_COLOR;
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     saveCardLayoutAction,
     IDLE_ACTION_STATE,
   );
@@ -363,7 +360,13 @@ export function CardLayoutForm({
         <CardHeader>
           <CardTitle>{t("editorTitle")}</CardTitle>
           <CardDescription>
-            {t("editorDescription", { locale: t(`localeName.${locale}`) })}
+            {/* Below md there is no drag surface — say what to do instead. */}
+            <span className="hidden md:inline">
+              {t("editorDescription", { locale: t(`localeName.${locale}`) })}
+            </span>
+            <span className="md:hidden">
+              {t("editorDescriptionTouch", { locale: t(`localeName.${locale}`) })}
+            </span>
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
@@ -571,15 +574,39 @@ export function CardLayoutForm({
             <SubmitButton className="w-full sm:w-auto">
               {tCommon("save")}
             </SubmitButton>
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-11 w-full px-4 sm:w-auto"
-              onClick={resetToDefault}
-            >
-              <RotateCcw className="size-4 rtl:-scale-x-100" />
-              {t("resetDefault")}
-            </Button>
+            {/* Reset wipes every position, font and colour, so it asks first
+                (it sat beside Save and acted on one tap) — DES, docs/04 §14.8. */}
+            {confirmingReset ? (
+              <div role="group" className="flex flex-col gap-2 rounded-lg border border-danger/30 bg-danger-bg/40 p-2 sm:ms-auto sm:flex-row sm:items-center">
+                <span className="px-1 text-sm text-text-primary">{t("resetConfirm")}</span>
+                <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <Button
+                    type="button"
+                    variant="danger-solid"
+                    className="h-11 px-4"
+                    onClick={() => {
+                      resetToDefault();
+                      setConfirmingReset(false);
+                    }}
+                  >
+                    {t("resetDefault")}
+                  </Button>
+                  <Button type="button" variant="outline" className="h-11 px-4" onClick={() => setConfirmingReset(false)}>
+                    {tShared("keep")}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-11 w-full px-4 sm:ms-auto sm:w-auto"
+                onClick={() => setConfirmingReset(true)}
+              >
+                <RotateCcw className="size-4 rtl:-scale-x-100" aria-hidden />
+                {t("resetDefault")}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>

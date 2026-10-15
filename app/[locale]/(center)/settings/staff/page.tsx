@@ -1,17 +1,18 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import { MailPlus, Users } from "lucide-react";
 
-import { revokeInvitationAction } from "@/app/[locale]/(center)/settings/staff/actions";
 import { BranchGrants, type BranchGrantMember } from "@/app/[locale]/(center)/settings/staff/branch-grants";
 import { InviteForm } from "@/app/[locale]/(center)/settings/staff/invite-form";
+import { RevokeInvitationButton } from "@/app/[locale]/(center)/settings/staff/staff-result-actions";
 import {
   MemberRow,
   type MemberRowData,
 } from "@/app/[locale]/(center)/settings/staff/member-row";
 import { ListHeader } from "@/components/shared/list-header";
+import { Ltr } from "@/components/shared/ltr";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+
 import {
   Card,
   CardContent,
@@ -127,8 +128,7 @@ export default async function StaffSettingsPage() {
             <ul className="flex flex-col gap-3 md:gap-0">
               <ListHeader>
                 <span className="min-w-0 flex-1">{t("columns.name")}</span>
-                <span className="min-w-0 flex-1">{t("columns.email")}</span>
-                <span className="min-w-0 flex-1">{t("columns.role")}</span>
+                <span className="w-64 shrink-0">{t("columns.role")}</span>
                 <span className="w-20 shrink-0">{tCommon("status")}</span>
                 <span className="w-32 shrink-0 text-end">
                   {tCommon("actions")}
@@ -165,11 +165,12 @@ export default async function StaffSettingsPage() {
                   className="flex flex-col gap-3 rounded-xl border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium" dir="ltr">
-                      {invitation.email}
+                    <p className="truncate text-sm font-medium">
+                      <Ltr>{invitation.email}</Ltr>
                     </p>
-                    <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                      <Badge variant="warning">
+                    <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+                      {/* A role is not a status (docs/04 §14.1). */}
+                      <Badge variant="neutral">
                         {tRoles(invitation.role)}
                       </Badge>
                       <span>
@@ -181,22 +182,14 @@ export default async function StaffSettingsPage() {
                   </div>
 
                   {/* D-22 (a): revoking is OWNER-only, like creating. */}
+                  {/* DES: revoking asks first, like every other destructive
+                      action — the link dies at once (docs/04 §14.6). */}
                   {canAssignRole ? (
-                    <form action={revokeInvitationAction} className="shrink-0">
-                      <input type="hidden" name="locale" value={locale} />
-                      <input
-                        type="hidden"
-                        name="invitationId"
-                        value={invitation.id}
-                      />
-                      <Button
-                        type="submit"
-                        variant="destructive"
-                        className="h-11 w-full px-4 sm:w-auto"
-                      >
-                        {t("revoke")}
-                      </Button>
-                    </form>
+                    <RevokeInvitationButton
+                      locale={locale}
+                      invitationId={invitation.id}
+                      email={invitation.email}
+                    />
                   ) : null}
                 </li>
               ))}

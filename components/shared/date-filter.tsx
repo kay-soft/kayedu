@@ -124,9 +124,9 @@ export function DateFilter({
         <PopoverTrigger
           aria-labelledby="date-filter-label date-filter-value"
           className={cn(
-            "group flex h-11 min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3",
+            "group flex h-11 min-w-0 items-center gap-2 rounded-lg border border-border-control bg-surface px-3",
             "text-sm font-medium text-text-primary shadow-xs transition-ui outline-none",
-            "hover:border-border-strong hover:bg-surface-hover",
+            "hover:border-border-control-hover hover:bg-surface-hover",
             "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
             "data-[popup-open]:border-brand data-[popup-open]:ring-3 data-[popup-open]:ring-brand/25",
           )}
@@ -212,9 +212,9 @@ export function DateFilter({
         href={resetHref}
         title={t("reset")}
         className={cn(
-          "flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-background",
+          "flex size-11 shrink-0 items-center justify-center rounded-lg border border-border-control bg-surface",
           "text-text-secondary transition-ui focus-ring",
-          "hover:border-border-strong hover:bg-surface-hover hover:text-text-primary active:bg-surface-active",
+          "hover:border-border-control-hover hover:bg-surface-hover hover:text-text-primary active:bg-surface-active",
         )}
       >
         {/* A reset arrow turns back on itself — it reads the same either way. */}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Loader2, UserRound } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -19,7 +19,9 @@ import {
   TypeAheadSearch,
   type TypeAheadHandle,
 } from "@/components/center/type-ahead-search";
+import { StudentConfirmHeader } from "@/components/center/student-confirm-header";
 import { FormMessage } from "@/components/shared/form-message";
+import { Ltr } from "@/components/shared/ltr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RECEPTION_SEARCH_INPUT_ID } from "@/app/[locale]/(center)/reception/constants";
@@ -214,6 +216,9 @@ export function SessionCheckIn({
         label={t("searchLabel")}
         placeholder={t("sessionMode.placeholder")}
         submitLabel={t("searchSubmit")}
+        size="lg"
+        hideLabel
+        hint={t("sessionMode.ready")}
         search={searchStudentsForReceptionAction}
         onSubmitValue={onSubmitValue}
         onSelect={(result) =>
@@ -253,8 +258,8 @@ export function SessionCheckIn({
                     <span className="min-w-0 truncate text-sm font-medium text-text-primary">
                       {student.name}
                     </span>
-                    <span className="shrink-0 text-xs text-text-muted" dir="ltr">
-                      {student.code}
+                    <span className="shrink-0 text-xs text-text-secondary">
+                      <Ltr>{student.code}</Ltr>
                     </span>
                   </button>
                 </li>
@@ -274,35 +279,17 @@ export function SessionCheckIn({
           <input type="hidden" name="sessionId" value={sessionId} />
           <input type="hidden" name="studentProfileId" value={panel.ready.student.id} />
 
-          <div className="flex items-center gap-4">
-            {panel.ready.student.photoUrl ? (
-              // A short-lived signed Storage URL, not a static/remote asset next/image can optimize.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={panel.ready.student.photoUrl}
-                alt=""
-                className="size-20 shrink-0 rounded-full border border-border object-cover"
-              />
-            ) : (
-              <span className="flex size-20 shrink-0 items-center justify-center rounded-full border border-border bg-surface-subtle text-text-muted">
-                <UserRound className="size-8" aria-hidden />
-              </span>
-            )}
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <p className="truncate text-lg font-semibold text-text-primary">
-                {panel.ready.student.name}
-              </p>
-              <p className="text-sm text-text-secondary">
-                {t("sessionMode.code")}{" "}
-                <span className="font-medium tabular-nums" dir="ltr">
-                  {panel.ready.student.code}
-                </span>
-              </p>
+          <StudentConfirmHeader
+            name={panel.ready.student.name}
+            code={panel.ready.student.code}
+            codeLabel={t("sessionMode.code")}
+            photoUrl={panel.ready.student.photoUrl}
+            badge={
               <Badge variant={panel.ready.enrolled ? "success" : "warning"}>
                 {panel.ready.enrolled ? t("sessionMode.enrolled") : t("sessionMode.dropIn")}
               </Badge>
-            </div>
-          </div>
+            }
+          />
 
           {priceLabel ? (
             <p className="flex items-baseline justify-between gap-3 rounded-lg bg-surface px-3 py-2 text-sm">
@@ -324,7 +311,8 @@ export function SessionCheckIn({
           ) : null}
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <p className="text-xs text-text-muted sm:me-auto">{t("sessionMode.enterHint")}</p>
+            {/* A phone has no Enter key (docs/04 §14.5). */}
+            <p className="hidden text-xs text-text-secondary sm:me-auto sm:block">{t("sessionMode.enterHint")}</p>
             <Button
               type="button"
               variant="outline"

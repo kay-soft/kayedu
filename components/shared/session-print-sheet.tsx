@@ -3,7 +3,8 @@ import { getTranslations } from "next-intl/server";
 import type { SessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { DetailRow } from "@/components/shared/field";
-import { formatDate, formatTimeRange } from "@/lib/format";
+import { Ltr } from "@/components/shared/ltr";
+import { formatDate, formatNumber, formatTimeRange } from "@/lib/format";
 import { todayInTimezone } from "@/lib/scheduling";
 
 export type PrintRosterRow = {
@@ -45,19 +46,22 @@ export async function SessionPrintSheet({
 }) {
   const t = await getTranslations("SessionPrint");
   const tAttendance = await getTranslations("Sessions.attendance");
+  // Sorted here, not by each route, so the teacher's sheet and the staff
+  // sheet print the same order (the teacher's had been unsorted).
+  const rows = [...roster].sort((a, b) => a.name.localeCompare(b.name, locale));
 
   return (
     <div className="mx-auto w-full max-w-3xl p-4 sm:p-8 print:max-w-none print:p-0">
       <header className="flex flex-col gap-2 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs text-text-muted">{centerName}</p>
+          <p className="text-xs text-text-secondary">{centerName}</p>
           <h2 className="text-xl font-bold text-text-primary">{className}</h2>
           <p className="mt-1 text-sm text-text-secondary">
             {formatDate(session.date, locale)} ·{" "}
             {formatTimeRange(session.startTime, session.endTime, locale)}
           </p>
         </div>
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-text-secondary">
           {t("printedOn", { date: formatDate(todayInTimezone(timeZone), locale) })}
         </p>
       </header>
@@ -71,7 +75,10 @@ export async function SessionPrintSheet({
         </div>
       </section>
 
-      <section className="mt-6 break-inside-avoid">
+      {/* The receipt may run onto a second page: refusing to break had pushed
+          a long one whole to the next sheet and left the first half empty.
+          Its rows and cards still never split (globals.css, print). */}
+      <section className="mt-6">
         <h3 className="mb-2 text-sm font-semibold text-text-primary">{t("receiptTitle")}</h3>
         <SessionReceipt
           totals={receipt.totals}
@@ -88,23 +95,43 @@ export async function SessionPrintSheet({
 
       <section className="mt-6">
         <h3 className="text-sm font-semibold text-text-primary">{t("rosterTitle")}</h3>
-        {roster.length === 0 ? (
-          <p className="mt-2 text-sm text-text-muted">{t("rosterEmpty")}</p>
+        {rows.length === 0 ? (
+          <p className="mt-2 text-sm text-text-secondary">{t("rosterEmpty")}</p>
         ) : (
-          <ul className="mt-2 flex flex-col gap-1">
-            {roster.map((row) => (
-              <li
-                key={row.id}
-                className="flex flex-wrap items-center justify-between gap-x-3 border-b border-border-subtle py-2 text-sm last:border-0"
-              >
-                <span className="font-medium text-text-primary">{row.name}</span>
-                <span className="text-text-secondary" dir="ltr">
-                  {row.studentCode}
-                </span>
-                <span className="text-text-secondary">{tAttendance(row.status)}</span>
-              </li>
-            ))}
-          </ul>
+          // A real table: a header row that repeats on every printed page,
+          // and columns that line up down the sheet (DES, docs/04 §14.10).
+          <table className="mt-2 w-full border-collapse text-sm">
+            <thead className="table-header-group">
+              <tr className="border-b border-border text-xs text-text-secondary">
+                <th scope="col" className="w-10 py-2 pe-3 text-start font-medium">
+                  {t("columns.number")}
+                </th>
+                <th scope="col" className="py-2 pe-3 text-start font-medium">
+                  {t("columns.name")}
+                </th>
+                <th scope="col" className="py-2 pe-3 text-start font-medium">
+                  {t("columns.code")}
+                </th>
+                <th scope="col" className="py-2 text-start font-medium">
+                  {t("columns.status")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={row.id} className="border-b border-border-subtle last:border-0">
+                  <td className="py-2 pe-3 align-top tabular-nums text-text-secondary">
+                    {formatNumber(index + 1, locale)}
+                  </td>
+                  <td className="py-2 pe-3 align-top font-medium text-text-primary">{row.name}</td>
+                  <td className="py-2 pe-3 align-top text-text-secondary">
+                    <Ltr>{row.studentCode}</Ltr>
+                  </td>
+                  <td className="py-2 align-top text-text-primary">{tAttendance(row.status)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </section>
     </div>

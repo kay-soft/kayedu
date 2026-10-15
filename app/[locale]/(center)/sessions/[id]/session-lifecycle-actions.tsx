@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { CalendarClock, DoorOpen, XCircle } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -25,6 +25,7 @@ import { ROUTES } from "@/lib/routes";
 import type { RoomLinkPair } from "@/lib/rooms";
 import { isValidTimeRange } from "@/lib/scheduling";
 import { IDLE_SESSION_STATE, type SessionActionState } from "@/lib/validation/sessions";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /** Errors `SlotConflictNotice` already explains — never shown twice. */
 const CONFLICT_ERRORS = new Set(["conflict", "conflictsNeedConfirmation"]);
@@ -86,7 +87,7 @@ export function SessionLifecycleActions({
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
 
-  const [cancelState, cancelFormAction, cancelPending] = useActionState(cancelSessionAction, IDLE_SESSION_STATE);
+  const [cancelState, cancelFormAction, cancelPending] = useGuardedActionState(cancelSessionAction, IDLE_SESSION_STATE);
   const [open, setOpen] = useState<"reschedule" | "rooms" | "cancel" | null>(null);
   // Each open mounts a fresh dialog, so a form never shows the last attempt.
   const [generation, setGeneration] = useState(0);
@@ -195,7 +196,7 @@ function RescheduleDialog({
   const tErrors = useTranslations("Sessions.errors");
   const tCommon = useTranslations("Settings.common");
   const locale = useLocale();
-  const [state, formAction, pending] = useActionState(rescheduleSessionAction, IDLE_SESSION_STATE);
+  const [state, formAction, pending] = useGuardedActionState(rescheduleSessionAction, IDLE_SESSION_STATE);
 
   const [draft, setDraft] = useState({
     date,
@@ -325,7 +326,7 @@ function SessionRoomsDialog({
   const tErrors = useTranslations("Sessions.errors");
   const tCommon = useTranslations("Settings.common");
   const locale = useLocale();
-  const [state, formAction, pending] = useActionState(updateSessionRoomsAction, IDLE_SESSION_STATE);
+  const [state, formAction, pending] = useGuardedActionState(updateSessionRoomsAction, IDLE_SESSION_STATE);
   const [draft, setDraft] = useState<{ roomId: string | null; extraRoomIds: string[] } | null>(null);
   const conflicts = useSlotConflicts(
     draft ? { kind: "session", locale, sessionId, ...draft } : null,

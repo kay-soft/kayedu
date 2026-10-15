@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { setRoomLinksAction } from "@/app/[locale]/(center)/settings/actions";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { effectiveCapacity, linkedRoomIds, type RoomLinkPair } from "@/lib/rooms";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type LinkableRoom = { id: string; name: string; capacity: number };
 
@@ -79,7 +80,7 @@ function RoomLinksRow({
   const tErrors = useTranslations("Settings.errors");
   const tCommon = useTranslations("Settings.common");
   const locale = useLocale();
-  const [state, formAction] = useActionState(setRoomLinksAction, IDLE_ACTION_STATE);
+  const [state, formAction] = useGuardedActionState(setRoomLinksAction, IDLE_ACTION_STATE);
   const [selected, setSelected] = useState<string[]>(() => [...linked]);
 
   const seats = (rooms: LinkableRoom[]) => {

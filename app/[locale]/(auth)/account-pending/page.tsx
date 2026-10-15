@@ -29,12 +29,12 @@ export default async function AccountPendingPage() {
     <AuthCard title={t(`${reason}.title`)} description={t(`${reason}.body`)}>
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/60 p-4 text-sm text-text-secondary">
-          <Clock className="mt-0.5 size-5 shrink-0 text-warning" aria-hidden />
+          <Clock className="mt-0.5 size-5 shrink-0 text-warning-fg" aria-hidden />
           <p>{t(`${reason}.next`)}</p>
         </div>
         <form action={signOutAction}>
           <input type="hidden" name="locale" value={locale} />
-          <SubmitButton variant="outline" className="h-11 w-full sm:w-auto">
+          <SubmitButton variant="outline" className="h-11 w-full">
             {t("signOut")}
           </SubmitButton>
         </form>

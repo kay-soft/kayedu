@@ -50,7 +50,11 @@
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
+  --color-text-placeholder: var(--text-placeholder);
   --color-text-on-dark: var(--text-on-dark);
+  --color-text-on-dark-muted: var(--text-on-dark-muted);
+  --color-border-control: var(--border-control);
+  --color-border-control-hover: var(--border-control-hover);
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
   --color-warning: var(--warning);
@@ -59,6 +63,10 @@
   --color-danger-bg: var(--danger-bg);
   --color-info: var(--info);
   --color-info-bg: var(--info-bg);
+  --color-success-fg: var(--success-fg);
+  --color-warning-fg: var(--warning-fg);
+  --color-danger-fg: var(--danger-fg);
+  --color-info-fg: var(--info-fg);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -88,8 +96,14 @@
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  /* DES: was #94a3b8 (2.56:1 on white) — every 12px label failed AA. */
+  --text-muted: #5f6b7d;
+  /* DES: placeholders had no token and drew in the secondary text colour, so
+     an empty field looked already filled in. */
+  --text-placeholder: #64748b;
   --text-on-dark: #e2e8f0;
+  /* The muted line on the navy sidebar / auth panel (6.96:1 there). */
+  --text-on-dark-muted: #94a3b8;
 
   --success: #16a34a;
   --success-bg: #dcfce7;
@@ -99,6 +113,12 @@
   --danger-bg: #fee2e2;
   --info: #3b82f6;
   --info-bg: #dbeafe;
+  /* DES: the same hues one shade darker, for text and icons drawn in a status
+     colour — the base shades failed AA on their own tints (amber 1.93:1). */
+  --success-fg: #15803d;
+  --warning-fg: #b45309;
+  --danger-fg: #b91c1c;
+  --info-fg: #1d4ed8;
 
   /* ── Motion (docs/04 §4) ───────────────────────────────────────────── */
   --motion-fast: 120ms;
@@ -121,7 +141,7 @@
   --secondary: var(--bg-subtle);
   --secondary-foreground: var(--text-primary);
   --muted: var(--bg-subtle);
-  --muted-foreground: var(--text-secondary);
+  --muted-foreground: var(--text-placeholder);
   --accent: var(--bg-subtle);
   --accent-foreground: var(--text-primary);
   --destructive: var(--danger);
@@ -130,7 +150,10 @@
   /* The border a control takes on hover, so an input answers the pointer
      before it is ever focused. */
   --border-strong: #cbd5e1;
-  --input: #e5e7eb;
+  /* DES: a field on a white card needs an edge you can see (#e5e7eb is 1.24:1). */
+  --border-control: #848f9f;
+  --border-control-hover: #64748b;
+  --input: var(--border-control);
   --ring: var(--brand);
   --chart-1: var(--brand);
   --chart-2: var(--success);
@@ -161,6 +184,9 @@
   }
   html {
     @apply font-sans;
+    /* The sticky 64px app bar must never cover the focused element (DES). */
+    scroll-padding-top: 5rem;
+    color-scheme: light;
   }
   /* Arabic needs a little more room to breathe (docs/04 §3). */
   html[dir="rtl"] body {
@@ -227,6 +253,7 @@
   }
 }
 
+
 /* The same, on the dark sidebar, where brand blue on navy does not read. */
 @utility focus-ring-inverse {
   outline: 2px solid transparent;
@@ -243,4 +270,24 @@
   margin-inline: auto;
   width: 100%;
   max-width: var(--content-max);
+}
+
+/* Print (DES, docs/04 §14.10). Office lasers drop pale grey, so the two
+   lighter text tokens darken on paper; a heading stays with what follows it,
+   and a list row, a table row or a receipt card never splits across pages. */
+@media print {
+  :root {
+    --text-secondary: #1e293b;
+    --text-muted: #334155;
+  }
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+  li,
+  tr,
+  dl > div {
+    break-inside: avoid;
+  }
 }

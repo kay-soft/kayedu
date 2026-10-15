@@ -62,8 +62,12 @@ export function EntityFields({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {fields.map((field) => {
+      {fields.map((field, index) => {
         const id = `${idPrefix}-${field.name}`;
+        // With an odd number of fields the first takes the whole row, so a
+        // lone Name is not stranded at half width and two dates pair up
+        // beneath it (DES, docs/04 §14.7).
+        const spanRow = index === 0 && fields.length % 2 === 1;
         const error = fieldErrors?.[field.name];
         const invalid = error ? true : undefined;
         const defaultValue = values?.[field.name] ?? "";
@@ -77,7 +81,7 @@ export function EntityFields({
               : false;
 
         return (
-          <div key={field.name} className="flex min-w-0 flex-col gap-1.5">
+          <div key={field.name} className={`flex min-w-0 flex-col gap-1.5 ${spanRow ? "sm:col-span-2" : ""}`}>
             <Label htmlFor={id}>
               {field.label}
               {optional ? (

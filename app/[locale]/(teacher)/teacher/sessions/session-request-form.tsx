@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { BookOpen } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -13,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type TeacherClassOption = { value: string; label: string };
 
@@ -26,7 +26,7 @@ export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] 
   const tErrors = useTranslations("TeacherSessions.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     createSessionRequestAction,
     IDLE_TEACHER_STATE,
   );

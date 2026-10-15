@@ -6,8 +6,9 @@ import {
   type NewSessionClassOption,
 } from "@/app/[locale]/(center)/sessions/new-session-dialog";
 import { SessionFilters } from "@/app/[locale]/(center)/sessions/session-filters";
-import { SessionRow, type SessionRowData } from "@/app/[locale]/(center)/sessions/session-row";
+import { SESSION_COLUMNS, SessionRow, type SessionRowData } from "@/app/[locale]/(center)/sessions/session-row";
 import { ListHeader } from "@/components/shared/list-header";
+import { cn } from "@/lib/utils";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -317,14 +318,13 @@ export default async function SessionsPage({
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               <ListHeader>
-                <span className="w-44 shrink-0">{t("columns.when")}</span>
-                <span className="min-w-0 flex-1">{t("columns.class")}</span>
-                <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
-                <span className="min-w-0 flex-1">{t("columns.room")}</span>
-                <span className="w-28 shrink-0">{t("columns.marked")}</span>
-                <span className="w-28 shrink-0">{t("columns.price")}</span>
-                <span className="w-28 shrink-0">{tCommon("status")}</span>
-                <span className="w-24 shrink-0 text-end">{tCommon("actions")}</span>
+                <span className={SESSION_COLUMNS.when}>{t("columns.when")}</span>
+                <span className={SESSION_COLUMNS.name}>{t("columns.class")}</span>
+                <span className={SESSION_COLUMNS.teacher}>{t("columns.teacher")}</span>
+                <span className={cn("hidden lg:block", SESSION_COLUMNS.room)}>{t("columns.room")}</span>
+                <span className={SESSION_COLUMNS.marked}>{t("columns.marked")}</span>
+                <span className={SESSION_COLUMNS.price}>{t("columns.price")}</span>
+                <span className={SESSION_COLUMNS.status}>{tCommon("status")}</span>
               </ListHeader>
 
               {tableRows.map((row) => (

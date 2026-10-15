@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { getTranslations } from "next-intl/server";
 
 import { LocaleToggle } from "@/components/shared/locale-toggle";
+import { ProductMark } from "@/components/shared/product-mark";
 
 /**
  * The signed-out shell (docs/04-design-system.md §5 "Auth layout").
@@ -20,30 +21,19 @@ export default async function AuthLayout({
 }: {
   children: ReactNode;
 }) {
-  const t = await getTranslations("Shell");
   const tAuth = await getTranslations("Auth.shell");
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas text-text-primary lg:grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
       {/* Brand panel — the product saying what it is, once. */}
       <aside className="relative hidden flex-col justify-between overflow-hidden bg-sidebar p-10 lg:flex">
-        <span className="flex items-center gap-3">
-          <span
-            aria-hidden
-            className="flex size-10 items-center justify-center rounded-xl bg-brand text-base font-bold text-brand-foreground"
-          >
-            K
-          </span>
-          <span className="text-lg font-semibold text-white">
-            {t("productName")}
-          </span>
-        </span>
+        <ProductMark size="lg" inverse />
 
         <div className="flex max-w-xs flex-col gap-3">
-          <p className="text-2xl leading-snug font-semibold text-white">
+          <p className="text-2xl leading-snug font-semibold text-balance text-white">
             {tAuth("headline")}
           </p>
-          <p className="text-sm leading-relaxed text-text-on-dark/70">
+          <p className="text-sm leading-relaxed text-pretty text-text-on-dark-muted">
             {tAuth("subhead")}
           </p>
         </div>
@@ -59,15 +49,8 @@ export default async function AuthLayout({
 
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
-          <span className="flex items-center gap-2 lg:invisible">
-            <span
-              aria-hidden
-              className="flex size-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-brand-foreground"
-            >
-              K
-            </span>
-            <span className="text-sm font-semibold">{t("productName")}</span>
-          </span>
+          {/* The mark is on the panel from lg; keep its space so the toggle stays put. */}
+          <ProductMark className="lg:invisible" />
           <LocaleToggle />
         </header>
 

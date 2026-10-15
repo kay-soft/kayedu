@@ -86,6 +86,8 @@ test("@write payment method: add, deactivate, activate, delete", async ({ as, ap
   const row = rowWith(page, name);
   await expect(row).toContainText(msg("Settings.common.active"));
   await row.getByRole("button", { name: msg("Settings.common.deactivate"), exact: true }).click();
+  // DES: deactivating asks first — confirm it in the dialog.
+  await openDialog(page).getByRole("button", { name: msg("Settings.common.deactivate"), exact: true }).click();
   await expect(rowWith(page, name)).toContainText(msg("Settings.common.inactive"));
   await rowWith(page, name).getByRole("button", { name: msg("Settings.common.activate"), exact: true }).click();
   await expect(rowWith(page, name)).toContainText(msg("Settings.common.active"));
@@ -146,5 +148,7 @@ test("@write staff: invite a receptionist by email, then revoke the invitation",
   const pending = rowWith(page, email);
   await expect(pending).toBeVisible();
   await pending.getByRole("button", { name: msg("Staff.revoke"), exact: true }).click();
+  // DES: revoking asks first (the one behaviour change) — confirm it.
+  await openDialog(page).getByRole("button", { name: msg("Staff.revoke"), exact: true }).click();
   await expect(page.getByText(email)).toHaveCount(0);
 });

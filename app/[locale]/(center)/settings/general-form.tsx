@@ -1,11 +1,12 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ConflictPolicy, ShareType } from "@prisma/client";
 
 import { saveGeneralSettingsAction } from "@/app/[locale]/(center)/settings/actions";
 import { ToggleRow } from "@/components/settings/toggle-row";
+import { ErrorSummary } from "@/components/shared/error-summary";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import {
@@ -21,12 +22,9 @@ import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/format";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
-import {
-  MAX_EDIT_DEADLINE_HOURS,
-  MAX_LATE_THRESHOLD,
-  MAX_TIMEOUT_DAYS,
-  MAX_VISIBILITY_WINDOW_DAYS,
-} from "@/lib/validation/settings";
+import { MAX_EDIT_DEADLINE_HOURS, MAX_LATE_THRESHOLD, MAX_TIMEOUT_DAYS, MAX_VISIBILITY_WINDOW_DAYS, generalSettingsSchema } from "@/lib/validation/settings";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
+import { useClientValidation } from "@/lib/ui/client-validation";
 
 /** The session price the cut preview is worked out against: 120.00 EGP. */
 const PREVIEW_AMOUNT = 12_000;
@@ -54,10 +52,13 @@ export function GeneralSettingsForm({
   const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("Settings.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     saveGeneralSettingsAction,
     IDLE_ACTION_STATE,
   );
+  // The action's own schema, run before the round trip (docs/04 §14.2).
+  const { clientErrors, check } = useClientValidation(generalSettingsSchema);
+  const fieldErrors = clientErrors ?? state.fieldErrors;
 
   const [shareType, setShareType] = useState<ShareType>(values.defaultShareType);
   const [shareValue, setShareValue] = useState(
@@ -82,13 +83,24 @@ export function GeneralSettingsForm({
   const preview = typed !== null ? splitShare(PREVIEW_AMOUNT, shareType, typed) : null;
 
   return (
-    <form action={formAction} className="flex flex-col gap-6" noValidate>
+    // `startTransition` with the form's FormData: `<form action>` resets an
+    // uncontrolled form once the action returns, so a refused save lost every
+    // edit on the page (DES, docs/04 §14.8).
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+    if (!check(event.currentTarget, formData)) return;
+        startTransition(() => formAction(formData));
+      }}
+      className="flex flex-col gap-6"
+      noValidate
+    >
       <input type="hidden" name="locale" value={locale} />
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
-      {state.status === "saved" ? (
-        <FormMessage tone="success">{tCommon("saved")}</FormMessage>
-      ) : null}
+
+      <ErrorSummary fieldErrors={fieldErrors} />
 
       <Card>
         <CardHeader>
@@ -126,11 +138,11 @@ export function GeneralSettingsForm({
                   : { step: 1, max: 100 })}
                 value={shareValue}
                 onChange={(event) => setShareValue(event.target.value)}
-                aria-invalid={state.fieldErrors?.shareValue ? true : undefined}
+                aria-invalid={fieldErrors?.shareValue ? true : undefined}
               />
-              {state.fieldErrors?.shareValue ? (
+              {fieldErrors?.shareValue ? (
                 <FieldError>
-                  {tErrors(state.fieldErrors.shareValue)}
+                  {tErrors(fieldErrors.shareValue)}
                 </FieldError>
               ) : null}
             </div>
@@ -192,12 +204,12 @@ export function GeneralSettingsForm({
                   disabled={!timeoutEnabled}
                   defaultValue={values.teacherTimeoutDays ?? 30}
                   aria-invalid={
-                    state.fieldErrors?.teacherTimeoutDays ? true : undefined
+                    fieldErrors?.teacherTimeoutDays ? true : undefined
                   }
                 />
-                {state.fieldErrors?.teacherTimeoutDays ? (
+                {fieldErrors?.teacherTimeoutDays ? (
                   <FieldError>
-                    {tErrors(state.fieldErrors.teacherTimeoutDays)}
+                    {tErrors(fieldErrors.teacherTimeoutDays)}
                   </FieldError>
                 ) : null}
               </div>
@@ -220,15 +232,15 @@ export function GeneralSettingsForm({
                 step={1}
                 defaultValue={values.defaultLateThreshold}
                 aria-invalid={
-                  state.fieldErrors?.defaultLateThreshold ? true : undefined
+                  fieldErrors?.defaultLateThreshold ? true : undefined
                 }
               />
               <p className="text-xs text-text-muted">
                 {t("lateThresholdHint")}
               </p>
-              {state.fieldErrors?.defaultLateThreshold ? (
+              {fieldErrors?.defaultLateThreshold ? (
                 <FieldError>
-                  {tErrors(state.fieldErrors.defaultLateThreshold)}
+                  {tErrors(fieldErrors.defaultLateThreshold)}
                 </FieldError>
               ) : null}
             </div>
@@ -272,12 +284,12 @@ export function GeneralSettingsForm({
                   disabled={!editDeadlineEnabled}
                   defaultValue={values.teacherEditDeadlineHours ?? 48}
                   aria-invalid={
-                    state.fieldErrors?.teacherEditDeadlineHours ? true : undefined
+                    fieldErrors?.teacherEditDeadlineHours ? true : undefined
                   }
                 />
-                {state.fieldErrors?.teacherEditDeadlineHours ? (
+                {fieldErrors?.teacherEditDeadlineHours ? (
                   <FieldError>
-                    {tErrors(state.fieldErrors.teacherEditDeadlineHours)}
+                    {tErrors(fieldErrors.teacherEditDeadlineHours)}
                   </FieldError>
                 ) : null}
               </div>
@@ -305,13 +317,13 @@ export function GeneralSettingsForm({
               step={1}
               defaultValue={values.dataVisibilityDays}
               aria-invalid={
-                state.fieldErrors?.dataVisibilityDays ? true : undefined
+                fieldErrors?.dataVisibilityDays ? true : undefined
               }
             />
             <p className="text-xs text-text-muted">{t("visibilityHint")}</p>
-            {state.fieldErrors?.dataVisibilityDays ? (
+            {fieldErrors?.dataVisibilityDays ? (
               <FieldError>
-                {tErrors(state.fieldErrors.dataVisibilityDays)}
+                {tErrors(fieldErrors.dataVisibilityDays)}
               </FieldError>
             ) : null}
           </div>
@@ -333,10 +345,17 @@ export function GeneralSettingsForm({
         </CardContent>
       </Card>
 
-      <div>
-        <SubmitButton className="w-full sm:w-auto">
-          {tCommon("save")}
-        </SubmitButton>
+      {/* The save bar stays at the foot of the screen on a long page and says
+          what happened where the press was (the success is also a toast). */}
+      <div className="sticky bottom-0 z-10 -mx-1 flex flex-col gap-2 rounded-xl border border-border bg-surface/95 p-3 shadow-popover backdrop-blur sm:flex-row sm:items-center sm:justify-end">
+        {state.error ? (
+          <FormMessage className="sm:me-auto">{tErrors(state.error)}</FormMessage>
+        ) : state.status === "saved" ? (
+          <FormMessage tone="success" className="sm:me-auto">
+            {tCommon("saved")}
+          </FormMessage>
+        ) : null}
+        <SubmitButton className="w-full sm:w-auto">{tCommon("save")}</SubmitButton>
       </div>
     </form>
   );

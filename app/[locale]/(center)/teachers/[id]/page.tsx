@@ -209,7 +209,9 @@ export default async function TeacherDetailPage({
             >
               <DetailRow
                 label={t("fields.accountClaimed")}
-                value={teacher.user.authId ? tCommon("active") : tCommon("inactive")}
+                // A yes/no fact, not an active/inactive state — "Inactive" (in
+                // Arabic, "suspended") read as if the teacher were barred.
+                value={teacher.user.authId ? t("fields.accountClaimedYes") : t("fields.accountClaimedNo")}
               />
               <DetailRow
                 label={t("rating.title")}

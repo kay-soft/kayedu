@@ -28,6 +28,7 @@ export function PageHeader({
   leading,
   meta,
   back,
+  compactOnPhone,
   className,
 }: {
   title: string;
@@ -39,6 +40,8 @@ export function PageHeader({
   meta?: ReactNode;
   /** The link back to the list, already translated. */
   back?: { href: string; label: string };
+  /** Hide the description below `sm` — the desk, where the search must start high (docs/04 §14.5). */
+  compactOnPhone?: boolean;
   className?: string;
 }) {
   return (
@@ -54,7 +57,17 @@ export function PageHeader({
         </LinkButton>
       ) : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      {/* A detail page's action bar (several verbs) sits beside the title only
+          from lg — from sm it squeezed the title to a sliver at 768 (DES,
+          docs/04 §14.1). A list page's single action keeps sm. */}
+      <div
+        className={cn(
+          "flex flex-col gap-3",
+          back
+            ? "lg:flex-row lg:items-start lg:justify-between lg:gap-6"
+            : "sm:flex-row sm:items-start sm:justify-between sm:gap-6",
+        )}
+      >
         <div className="flex min-w-0 flex-1 items-start gap-4">
           {leading}
           <div className="min-w-0 flex-1">
@@ -62,7 +75,7 @@ export function PageHeader({
               {title}
             </h1>
             {description ? (
-              <p className="mt-1 max-w-prose text-sm text-text-secondary">
+              <p className={cn("mt-1 max-w-prose text-sm text-pretty text-text-secondary", compactOnPhone && "hidden sm:block")}>
                 {description}
               </p>
             ) : null}
@@ -74,7 +87,12 @@ export function PageHeader({
           </div>
         </div>
         {action ? (
-          <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div
+            className={cn(
+              "flex w-full shrink-0 flex-wrap items-center gap-2",
+              back ? "lg:w-auto lg:justify-end" : "sm:w-auto sm:justify-end",
+            )}
+          >
             {action}
           </div>
         ) : null}

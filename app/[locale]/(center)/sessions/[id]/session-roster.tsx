@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, Ban, LogIn, Undo2, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -39,6 +39,10 @@ import { formatMoney } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_SESSION_STATE, type SessionActionState } from "@/lib/validation/sessions";
 import { EmptyState } from "@/components/shared/empty-state";
+import { Ltr } from "@/components/shared/ltr";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
+
+const STATUS_VARIANT = { PRESENT: "success", LATE: "warning", ABSENT: "danger" } as const;
 
 export type RosterRowData = {
   studentProfileId: string;
@@ -144,10 +148,11 @@ function AttendeeRow({
   const t = useTranslations("Sessions.roster");
   const tErrors = useTranslations("Sessions.errors");
   const tAttendance = useTranslations("Sessions.attendance");
+  const tCommon = useTranslations("Settings.common");
   const locale = useLocale();
 
   const [absentConfirmOpen, setAbsentConfirmOpen] = useState(false);
-  const [attendanceState, attendanceFormAction, attendancePending] = useActionState(
+  const [attendanceState, attendanceFormAction, attendancePending] = useGuardedActionState(
     async (previous: SessionActionState, formData: FormData) => {
       const next = await setAttendanceAction(previous, formData);
       // The void-on-absent dialog closes once the change has landed.
@@ -156,21 +161,21 @@ function AttendeeRow({
     },
     IDLE_SESSION_STATE,
   );
-  const [checkInState, checkInFormAction] = useActionState(
+  const [checkInState, checkInFormAction] = useGuardedActionState(
     checkInRosterAction,
     IDLE_SESSION_STATE,
   );
-  const [paymentState, paymentFormAction] = useActionState(
+  const [paymentState, paymentFormAction] = useGuardedActionState(
     recordPaymentAction,
     IDLE_SESSION_STATE,
   );
   const [voidOpen, setVoidOpen] = useState(false);
-  const [voidState, voidFormAction] = useActionState(
+  const [voidState, voidFormAction] = useGuardedActionState(
     voidPaymentAction,
     IDLE_SESSION_STATE,
   );
   const [refundOpen, setRefundOpen] = useState(false);
-  const [refundState, refundFormAction] = useActionState(
+  const [refundState, refundFormAction] = useGuardedActionState(
     refundPaymentAction,
     IDLE_SESSION_STATE,
   );
@@ -195,12 +200,12 @@ function AttendeeRow({
         <div className="min-w-0">
           <Link
             href={ROUTES.centerStudent(row.studentProfileId)}
-            className="truncate text-sm font-medium text-brand hover:underline"
+            className="truncate rounded-sm text-sm font-medium text-brand focus-ring hover:underline"
           >
             {row.name}
           </Link>
-          <p className="flex items-center gap-2 text-xs text-text-muted" dir="ltr">
-            <span>{row.studentCode}</span>
+          <p className="flex items-center gap-2 text-xs text-text-secondary">
+            <Ltr>{row.studentCode}</Ltr>
             {row.isDropIn ? (
               <Badge variant="info">{t("dropIn")}</Badge>
             ) : null}
@@ -209,18 +214,20 @@ function AttendeeRow({
       </div>
 
       {row.consecutiveAbsences >= 2 ? (
-        <p className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs text-warning">
+        <p className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs text-warning-fg">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
           {t("consecutiveAbsentAlert", { count: row.consecutiveAbsences })}
         </p>
       ) : null}
 
       {readOnly || (!alreadyMarked && !canRecord) ? (
-        <Badge variant="neutral">
+        // Present / late / absent keep their colours on a closed roster too
+        // (they had all been grey) — docs/04 §2.
+        <Badge variant={row.status ? STATUS_VARIANT[row.status] : "neutral"}>
           {row.status ? tAttendance(row.status) : t("unmarked")}
         </Badge>
       ) : !alreadyMarked ? (
-        <form action={checkInFormAction} className="flex flex-col gap-2">
+        <form action={checkInFormAction} className="flex flex-col items-stretch gap-2 sm:items-start">
           {hiddenRowFields}
           <SubmitButton className="w-full sm:w-auto">
             <LogIn className="size-4" aria-hidden />
@@ -299,7 +306,7 @@ function AttendeeRow({
 
       {readOnly ? (
         row.payment ? (
-          <p className="text-sm font-medium text-success">
+          <p className="text-sm font-medium text-success-fg">
             {t("paid", {
               amount: formatMoney(row.payment.amount, locale),
               method: row.payment.methodLabel,
@@ -309,15 +316,16 @@ function AttendeeRow({
       ) : payable ? (
         row.payment ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-success-bg px-3 py-2">
-            <p className="text-sm font-medium text-success">
+            <p className="text-sm font-medium text-success-fg">
               {t("paid", {
                 amount: formatMoney(row.payment.amount, locale),
                 method: row.payment.methodLabel,
               })}
+              {/* A refund is not "upcoming": no status blue (docs/04 §11.9). */}
               {row.payment.refunded ? (
-                <span className="ms-2 inline-flex items-center rounded-full bg-info-bg px-2 py-0.5 text-xs font-medium text-info">
+                <Badge variant="neutral" className="ms-2">
                   {t("refunded")}
-                </span>
+                </Badge>
               ) : null}
             </p>
             {row.payment.refunded ? null : (
@@ -330,25 +338,33 @@ function AttendeeRow({
                     >
                       <input type="hidden" name="locale" value={locale} />
                       <input type="hidden" name="paymentId" value={row.payment.id} />
-                      <input
+                      <Input
                         type="text"
                         name="reason"
                         required
                         maxLength={200}
+                        autoFocus
+                        autoComplete="off"
+                        // A labelled field (it had been a bare input with a placeholder).
+                        aria-label={t("voidReasonPlaceholder")}
                         placeholder={t("voidReasonPlaceholder")}
-                        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
+                        className="min-w-0 flex-1"
                       />
                       <SubmitButton variant="destructive">
                         {t("confirmVoid")}
                       </SubmitButton>
+                      <Button type="button" variant="outline" className="h-11 px-4" onClick={() => setVoidOpen(false)}>
+                        {tCommon("cancel")}
+                      </Button>
                     </form>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setVoidOpen(true)}
-                      className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-xs font-medium text-danger hover:bg-danger-bg"
+                      // 44px — the hardest-to-undo money verbs on the screen.
+                      className="inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-danger-fg transition-ui focus-ring hover:bg-danger-bg"
                     >
-                      <Ban className="size-3.5" aria-hidden />
+                      <Ban className="size-4" aria-hidden />
                       {t("void")}
                     </button>
                   )
@@ -361,25 +377,32 @@ function AttendeeRow({
                     >
                       <input type="hidden" name="locale" value={locale} />
                       <input type="hidden" name="paymentId" value={row.payment.id} />
-                      <input
+                      <Input
                         type="text"
                         name="reason"
                         required
                         maxLength={200}
+                        autoFocus
+                        autoComplete="off"
+                        // A labelled field (it had been a bare input with a placeholder).
+                        aria-label={t("refundReasonPlaceholder")}
                         placeholder={t("refundReasonPlaceholder")}
-                        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
+                        className="min-w-0 flex-1"
                       />
                       <SubmitButton variant="destructive">
                         {t("confirmRefund")}
                       </SubmitButton>
+                      <Button type="button" variant="outline" className="h-11 px-4" onClick={() => setRefundOpen(false)}>
+                        {tCommon("cancel")}
+                      </Button>
                     </form>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setRefundOpen(true)}
-                      className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-xs font-medium text-info hover:bg-info-bg"
+                      className="inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-text-secondary transition-ui focus-ring hover:bg-surface-hover hover:text-text-primary"
                     >
-                      <Undo2 className="size-3.5" aria-hidden />
+                      <Undo2 className="size-4" aria-hidden />
                       {t("refund")}
                     </button>
                   )
@@ -395,7 +418,8 @@ function AttendeeRow({
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="sessionAttendeeId" value={row.attendeeId ?? ""} />
             <PaymentMethodSelector methods={paymentMethods} />
-            <SubmitButton className="w-full sm:w-auto" variant="outline">
+            {/* Recording the payment is the row's next step: the primary. */}
+            <SubmitButton className="w-full sm:w-auto sm:self-start">
               {t("recordPayment")}
             </SubmitButton>
           </form>

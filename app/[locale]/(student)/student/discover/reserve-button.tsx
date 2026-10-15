@@ -1,13 +1,15 @@
 "use client";
 
-import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { reserveClassAction } from "@/app/[locale]/(student)/student/discover/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { IDLE_STUDENT_STATE } from "@/lib/validation/student";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The card's action slot (docs/04-design-system.md §10): a solid button for
@@ -28,13 +30,20 @@ function SubmitAction({
 }) {
   const { pending } = useFormStatus();
   return (
+    // "Request to join" is the outlined brand button of docs/04 §10 — it had
+    // rendered as a grey filled block that read as disabled.
     <Button
       type="submit"
       variant={requiresConfirmation ? "outline" : "default"}
       disabled={pending}
-      className="h-11 w-full"
+      aria-busy={pending || undefined}
+      className={cn(
+        "h-11 w-full",
+        requiresConfirmation && "border-brand/50 text-brand hover:border-brand hover:bg-brand/10 hover:text-brand",
+      )}
     >
-      {pending ? "…" : requiresConfirmation ? requestLabel : enrollLabel}
+      {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+      {requiresConfirmation ? requestLabel : enrollLabel}
     </Button>
   );
 }
@@ -52,7 +61,7 @@ export function ReserveButton({
   const tErrors = useTranslations("StudentDiscover.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(reserveClassAction, IDLE_STUDENT_STATE);
+  const [state, formAction] = useGuardedActionState(reserveClassAction, IDLE_STUDENT_STATE);
 
   if (state.status === "pending" || state.status === "enrolled") {
     return (
@@ -68,7 +77,7 @@ export function ReserveButton({
       <input type="hidden" name="centerId" value={centerId} />
       <input type="hidden" name="classGroupId" value={classGroupId} />
       {state.error ? (
-        <p className="text-xs text-danger">
+        <p className="text-xs text-danger-fg">
           {state.error === "coolingOff" && state.errorDate
             ? tErrors("coolingOff", { date: state.errorDate })
             : tErrors(state.error)}

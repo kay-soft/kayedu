@@ -51,10 +51,11 @@ export function PaymentMethodSelector({
             onClick={() => setSelected(method.id)}
             aria-pressed={isSelected}
             className={cn(
-              "flex min-h-11 max-w-full items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-ui focus-ring",
+              // 48px: a desk control, larger than the 44px floor (docs/04 §6, §14.5).
+              "flex min-h-12 max-w-full items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-ui focus-ring",
               isSelected
                 ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/30"
-                : "border-border bg-surface text-text-secondary hover:border-border-strong hover:bg-surface-hover active:bg-surface-active",
+                : "border-border-control bg-surface text-text-secondary hover:border-border-control-hover hover:bg-surface-hover active:bg-surface-active",
             )}
           >
             <Wallet className="size-4 shrink-0" aria-hidden />

@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { Role } from "@prisma/client";
 
@@ -8,11 +7,14 @@ import {
   changeMemberRoleAction,
   setMemberActiveAction,
 } from "@/app/[locale]/(center)/settings/staff/member-actions";
+import { ConfirmAction } from "@/components/shared/confirm-action";
+import { Ltr } from "@/components/shared/ltr";
 import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 // Centre staff only (R9) — a teacher never appears on this screen.
 const ROLE_OPTIONS: Role[] = ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"];
@@ -41,14 +43,19 @@ export function MemberRow({ member }: { member: MemberRowData }) {
   const tRoles = useTranslations("Roles");
   const locale = useLocale();
 
-  const [roleState, roleAction] = useActionState(
+  const [roleState, roleAction] = useGuardedActionState(
     changeMemberRoleAction,
     IDLE_ACTION_STATE,
   );
-  const [activeState, activeFormAction] = useActionState(
+  const [activeState, activeFormAction] = useGuardedActionState(
     setMemberActiveAction,
     IDLE_ACTION_STATE,
   );
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(roleState, { success: tToast("memberRoleChanged") });
+  useActionFeedback(activeState, {
+    success: () => tToast(member.active ? "memberActivated" : "memberDeactivated"),
+  });
 
   const roleLocked = member.isSelf || !member.canChangeRole;
   const activeLocked = member.isSelf || !member.canToggleActive;
@@ -57,29 +64,27 @@ export function MemberRow({ member }: { member: MemberRowData }) {
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-xs text-text-muted md:hidden">
+        <span className="text-xs text-text-secondary md:sr-only">
           {t("columns.name")}
         </span>
-        <span className="truncate text-sm font-medium text-text-primary">
+        <span className="truncate text-sm font-medium text-text-primary" dir="auto">
           {member.name}
         </span>
-      </div>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-xs text-text-muted md:hidden">
-          {t("columns.email")}
-        </span>
-        <span className="truncate text-sm text-text-secondary" dir="ltr">
-          {member.email ?? "—"}
+        {/* The email under the name — two narrow columns had truncated both. */}
+        <span className="sr-only">{t("columns.email")}</span>
+        <span className="truncate text-xs text-text-secondary" title={member.email ?? undefined}>
+          <Ltr>{member.email ?? "—"}</Ltr>
         </span>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <span className="text-xs text-text-muted md:hidden">
+      {/* A fixed width: three equal columns plus Save had squeezed the role
+          to "M…" (docs/04 §14.8). */}
+      <div className="flex min-w-0 flex-col gap-1.5 md:w-64 md:shrink-0">
+        <span className="text-xs text-text-secondary md:sr-only">
           {t("columns.role")}
         </span>
         {roleLocked ? (
-          <Badge variant="brand">{tRoles(member.role)}</Badge>
+          <Badge variant="neutral">{tRoles(member.role)}</Badge>
         ) : (
           <form action={roleAction} className="flex items-center gap-2">
             <input type="hidden" name="locale" value={locale} />
@@ -119,24 +124,26 @@ export function MemberRow({ member }: { member: MemberRowData }) {
             {member.isSelf ? t("selfRow") : t("ownerRow")}
           </span>
         ) : (
-          <form action={activeFormAction}>
-            <input type="hidden" name="locale" value={locale} />
-            <input
-              type="hidden"
-              name="membershipId"
-              value={member.membershipId}
+          member.active ? (
+            <ConfirmAction
+              label={tCommon("deactivate")}
+              variant="destructive"
+              triggerClassName="h-11 w-full px-4"
+              title={t("deactivateConfirm.title", { name: member.name })}
+              description={t("deactivateConfirm.body")}
+              action={activeFormAction}
+              fields={{ locale, membershipId: member.membershipId }}
             />
-            {member.active ? null : (
+          ) : (
+            <form action={activeFormAction}>
+              <input type="hidden" name="locale" value={locale} />
+              <input type="hidden" name="membershipId" value={member.membershipId} />
               <input type="hidden" name="active" value="true" />
-            )}
-            <Button
-              type="submit"
-              variant={member.active ? "destructive" : "ghost"}
-              className="h-11 w-full px-4"
-            >
-              {member.active ? tCommon("deactivate") : tCommon("activate")}
-            </Button>
-          </form>
+              <Button type="submit" variant="ghost" className="h-11 w-full px-4">
+                {tCommon("activate")}
+              </Button>
+            </form>
+          )
         )}
       </div>
 

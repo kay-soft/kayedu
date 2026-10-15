@@ -31,7 +31,9 @@
       "pickRangeHint": "Pick a day, or a start and an end"
     },
     "typeAhead": {
-      "noResults": "No matches yet — keep typing, or add a new record."
+      "noResults": "No matches yet — keep typing, or add a new record.",
+      "searching": "Searching…",
+      "resultCount": "{count, plural, =0 {No matches} one {# match} other {# matches}}"
     },
     "calendar": {
       "gridLabel": "Calendar",
@@ -41,16 +43,19 @@
       "clear": "Clear date"
     },
     "error": {
-      "title": "This screen didn't load",
+      "title": "This screen didn’t load",
       "description": "Something broke on our side. Try again — if it keeps happening, tell your branch owner.",
-      "retry": "Try again"
+      "retry": "Try again",
+      "home": "Go to your home screen"
     },
     "notFound": {
-      "title": "This page doesn't exist",
-      "description": "The link may be out of date, or the record was removed. Go back to your home screen and start again.",
-      "home": "Go to my home screen"
+      "title": "This page doesn’t exist",
+      "description": "The link may be out of date, or the page was moved. Go to your home screen and start again.",
+      "home": "Go to your home screen",
+      "recordTitle": "We couldn’t find that",
+      "recordDescription": "It may have been removed, or the link is out of date."
     },
-    "loading": "Loading",
+    "loading": "Loading…",
     "close": "Close",
     "empty": {
       "noResults": "Nothing matched this filter"
@@ -68,6 +73,18 @@
       "invalid": "Enter a time like 4:30 PM or 16:30.",
       "outOfRange": "That isn't a valid time — use 1–12 with AM/PM, or 00–23.",
       "endAfterStart": "The end time must be after the start time."
+    },
+    "toast": {
+      "close": "Dismiss notification",
+      "retry": "Retry",
+      "region": "Notifications",
+      "networkError": "Couldn’t reach the server. Check the connection and try again.",
+      "saved": "Saved."
+    },
+    "keep": "Keep it",
+    "errorSummary": {
+      "title": "{count, plural, one {# field needs} other {# fields need}} attention.",
+      "first": "Go to the first"
     }
   },
   "Shell": {
@@ -82,7 +99,8 @@
     "branchesLabel": "Your branches",
     "accountMenu": "Account",
     "wholeManagement": "Whole Management — {organization}",
-    "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}"
+    "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
+    "skipToContent": "Skip to content"
   },
   "NavGroups": {
     "frontDesk": "Front desk",
@@ -132,8 +150,8 @@
       "lastName": "Last name",
       "phone": "Phone",
       "optional": "optional",
-      "firstNamePlaceholder": "Mona",
-      "lastNamePlaceholder": "Kamel"
+      "firstNamePlaceholder": "e.g. Mona",
+      "lastNamePlaceholder": "e.g. Kamel"
     },
     "login": {
       "title": "Sign in",
@@ -153,13 +171,14 @@
     "selectCenter": {
       "title": "Choose a branch",
       "subtitle": "You are connected to more than one branch. Pick where you want to work.",
-      "emptySubtitle": "Your account is not connected to a branch yet.",
-      "emptyHelp": "Ask a branch owner or manager to invite you by email, or open the invitation link you were sent — or browse classes to join a branch as a student, or find a branch to teach at.",
+      "emptySubtitle": "Join a branch",
+      "emptyHelp": "Open the invitation link your branch sent you, or ask them to invite you by email. You can also start on your own:",
       "browseClasses": "Browse classes",
       "findCenterToTeach": "Find a branch to teach at",
       "platformAdminLink": "Go to the platform admin",
       "wholeManagement": "Whole Management — {organization}",
-      "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}"
+      "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
+      "emptyTitle": "You’re not in a branch yet"
     },
     "invite": {
       "title": "Staff invitation",
@@ -185,11 +204,11 @@
       "invalidCredentials": "Wrong email or password.",
       "signUpFailed": "We could not create the account. Check the details and try again.",
       "invalidToken": "This invitation link is not valid.",
-      "inviteNotFound": "This invitation no longer exists.",
+      "inviteNotFound": "This invitation no longer works. Ask the branch that invited you to send a new link.",
       "inviteExpired": "This invitation has expired. Ask for a new one.",
       "inviteAlreadyAccepted": "This invitation was already accepted.",
       "inviteEmailMismatch": "This invitation was sent to a different email address.",
-      "centerInactive": "This branch is not active.",
+      "centerInactive": "This branch isn’t active right now. Ask the branch that invited you what to do next.",
       "invalidCenter": "Unknown branch.",
       "invalidInvitation": "Unknown invitation.",
       "rateLimited": "Too many attempts — wait a few minutes and try again.",
@@ -272,10 +291,30 @@
       "grantLabel": "Add a branch",
       "grant": "Grant",
       "revoke": "Remove access to {branch}",
-      "noBranches": "No extra branches granted yet."
+      "noBranches": "No extra branches granted yet.",
+      "revokeConfirm": {
+        "title": "Remove access to {branch}?",
+        "body": "{name} keeps their home branch; they can no longer open this one.",
+        "confirm": "Remove access"
+      },
+      "grantPlaceholder": "Choose a branch…"
     },
     "noMembersHint": "Invite someone by email and they appear here once they accept.",
-    "noInvitationsHint": "Invitations you send are listed here until they are accepted or expire."
+    "noInvitationsHint": "Invitations you send are listed here until they are accepted or expire.",
+    "revokeConfirm": {
+      "title": "Revoke this invitation?",
+      "body": "The link stops working at once. To invite {email} again, create a new invitation."
+    },
+    "deactivateConfirm": {
+      "title": "Deactivate {name}?",
+      "body": "They can no longer work at this branch. Their history is kept, and you can activate them again."
+    },
+    "toast": {
+      "invitationRevoked": "Invitation revoked. The link no longer works.",
+      "branchGranted": "Branch access granted.",
+      "branchRevoked": "Access to {branch} removed."
+    },
+    "copyFailed": "Couldn't copy. Select the link and copy it."
   },
   "People": {
     "fields": {
@@ -285,8 +324,8 @@
       "phone": "Phone",
       "phoneHint": "Egyptian mobile, e.g. 01012345678.",
       "altPhone": "Alternative phone",
-      "firstNamePlaceholder": "Ahmed",
-      "lastNamePlaceholder": "Hassan",
+      "firstNamePlaceholder": "e.g. Ahmed",
+      "lastNamePlaceholder": "e.g. Hassan",
       "emailPlaceholder": "name@example.com",
       "phonePlaceholder": "01012345678",
       "phoneOrEmailHint": "Provide a phone or an email — at least one is needed to match this person and to reach them."
@@ -315,7 +354,8 @@
       "submit": "Look up",
       "notFound": "No match for that number — fill in the form below to register them.",
       "rateLimited": "Too many lookups — wait a moment and try again.",
-      "usePerson": "Use this person"
+      "usePerson": "Use this person",
+      "placeholder": "01012345678"
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -379,7 +419,9 @@
     "classesEmpty": "No classes assigned to this teacher yet.",
     "deleteConfirm": "This removes them from this branch. It cannot be undone.",
     "fields": {
-      "accountClaimed": "Signed in before"
+      "accountClaimed": "Signed in before",
+      "accountClaimedYes": "Yes",
+      "accountClaimedNo": "Not yet"
     },
     "rating": {
       "title": "Rating",
@@ -419,11 +461,15 @@
     "danger": {
       "title": "Delete this teacher",
       "description": "Removes the teacher from this branch. A teacher who already has classes or sessions cannot be deleted."
+    },
+    "deactivateConfirm": {
+      "title": "Deactivate {name}?",
+      "body": "They leave this branch’s active lists. Their history is kept, and you can activate them again."
     }
   },
   "Students": {
     "title": "Students",
-    "subtitle": "{count} registered at this branch.",
+    "subtitle": "{count, plural, one {# student registered at this branch.} other {# students registered at this branch.}}",
     "add": "Register student",
     "addTitle": "Register a student",
     "addDescription": "Register a student once and connect them to this branch. A phone or email that already exists links to that person instead of creating a duplicate.",
@@ -478,7 +524,11 @@
       "label": "Student photo",
       "hint": "PNG, JPEG or WebP. Large photos are shrunk to about 1 MB before upload.",
       "upload": "Upload photo",
-      "remove": "Remove photo"
+      "remove": "Remove photo",
+      "removeConfirm": {
+        "title": "Remove the student's photo?",
+        "body": "The photo is deleted from this branch and no longer appears on the ID card. You can upload a new one at any time."
+      }
     },
     "card": {
       "title": "ID card",
@@ -526,7 +576,8 @@
       "print": "Print",
       "back": "Back to the student",
       "hint": "Only the sheet below is printed.",
-      "printedOn": "Printed {date}"
+      "printedOn": "Printed {date}",
+      "cardHint": "Prints at card size (85.6 × 54 mm). In the print dialog, choose card paper and no margins."
     },
     "emptyHint": "Students you register appear here with their code, grade and contact.",
     "noMatchesHint": "Check the spelling, or search by student code or phone number.",
@@ -545,11 +596,16 @@
     "danger": {
       "title": "Delete this student",
       "description": "Removes the student from this branch. A student who already has attendance or payments cannot be deleted."
+    },
+    "subtitleFiltered": "{count, plural, =0 {No students match “{query}”.} one {# student matches “{query}”.} other {# students match “{query}”.}}",
+    "deactivateConfirm": {
+      "title": "Deactivate {name}?",
+      "body": "They leave this branch’s active lists. Their history is kept, and you can activate them again."
     }
   },
   "Classes": {
     "title": "Classes",
-    "subtitle": "{count} classes at this branch.",
+    "subtitle": "{count, plural, one {# class at this branch.} other {# classes at this branch.}}",
     "add": "Add class",
     "addTitle": "Add a class",
     "addDescription": "A teacher teaching one subject to one grade — its price, branch cut, room and enrollment rules.",
@@ -689,7 +745,7 @@
       "empty": "No holidays added yet.",
       "date": "Date",
       "name": "Name",
-      "namePlaceholder": "Eid al-Fitr",
+      "namePlaceholder": "e.g. Eid al-Fitr",
       "add": "Add holiday",
       "remove": "Remove holiday",
       "emptyHint": "A date added here is skipped by every class, and that day's untouched sessions are removed."
@@ -712,7 +768,15 @@
       "enroll": "Enroll",
       "unknownStudent": "Former student",
       "emptyHint": "Enrol a student and they appear here with their enrolment date.",
-      "blockedEmptyHint": "A teacher can block a student from their class; blocks show up here."
+      "blockedEmptyHint": "A teacher can block a student from their class; blocks show up here.",
+      "removeConfirm": {
+        "title": "Remove {name} from this class?",
+        "body": "Their enrolment ends. Their attendance and payment history is kept."
+      },
+      "blockConfirm": {
+        "title": "Block {name} from this class?",
+        "body": "They are removed and cannot request to join this class again until they are unblocked."
+      }
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
@@ -776,7 +840,8 @@
       "teacherFailed": "The teacher could not be created: {reason}",
       "classFailed": "The class could not be created: {reason}",
       "checkFields": "check the highlighted fields."
-    }
+    },
+    "deactivateConfirmTitle": "Deactivate {name}?"
   },
   "RoomSets": {
     "room": "Room",
@@ -806,8 +871,8 @@
     }
   },
   "Sessions": {
-    "title": "Today's Sessions",
-    "subtitle": "{count} sessions in this view.",
+    "title": "Sessions",
+    "subtitle": "{count, plural, one {# session in this view.} other {# sessions in this view.}}",
     "open": "Open",
     "backToList": "All sessions",
     "detailSubtitle": "{teacher} · {date}",
@@ -1145,7 +1210,7 @@
       "endNotStarted": "You can end this session once it has started."
     },
     "scan": {
-      "notFound": "No student found for that code.",
+      "notFound": "No student found for that code. Search by name, or register them.",
       "otherBranch": "This card isn't valid at this branch.",
       "unreadable": "That card couldn't be read. Make sure the keyboard language is English, then scan it again.",
       "inactive": "This student's profile is inactive at this branch."
@@ -1170,7 +1235,9 @@
       "blocked": "{name} is blocked from this class or teacher and can't be checked in.",
       "inactive": "{name}'s profile is inactive at this branch.",
       "sessionUnavailable": "That session is no longer open for check-in, so session mode was closed.",
-      "failed": "Something went wrong. Try again."
+      "failed": "Something went wrong. Try again.",
+      "ready": "Ready to scan — the next card goes into this session.",
+      "checkedInCount": "{count} checked in"
     },
     "recent": {
       "title": "Recent check-ins",
@@ -1181,12 +1248,13 @@
     "receipt": {
       "title": "Receipt — {session}",
       "print": "Print",
-      "close": "Close"
+      "close": "Close",
+      "opensInNewTab": "(opens in a new tab)"
     }
   },
   "Analytics": {
     "title": "Analytics",
-    "subtitle": "Revenue and growth, read from recorded payments — never recomputed from current settings.",
+    "subtitle": "Revenue, expenses and growth for the period you choose.",
     "filters": {
       "teacher": "Teacher",
       "allTeachers": "All teachers"
@@ -1199,7 +1267,8 @@
       "expenses": "Expenses",
       "net": "Net",
       "avgPerPayment": "Average per payment",
-      "avgPerDay": "Average per day"
+      "avgPerDay": "Average per day",
+      "branchWide": "Branch-wide — expenses are not split by teacher."
     },
     "users": {
       "title": "People",
@@ -1266,10 +1335,10 @@
       "category": "Category",
       "categoryNone": "No category",
       "amount": "Amount (EGP)",
-      "amountHint": "Stored as piastres — never a float.",
+      "amountHint": "In EGP, up to two decimals — e.g. 250.50.",
       "date": "Date",
       "note": "Note",
-      "notePlaceholder": "Optional note"
+      "notePlaceholder": "e.g. Printer toner"
     },
     "categories": {
       "title": "Expense categories",
@@ -1388,6 +1457,10 @@
       "inPerson": "Check their identity in person before approving. Declining keeps the record as it is and gives them a new, separate account.",
       "approved": "Connected",
       "declined": "Declined"
+    },
+    "declineConfirm": {
+      "title": "Decline this request?",
+      "body": "This cannot be undone — the request leaves the queue as declined."
     }
   },
   "Refunds": {
@@ -1452,7 +1525,15 @@
     "teacherEmptyHint": "When the branch settles your earnings, each settlement appears here with its status.",
     "periodClosedOnlyHint": "Only sessions that are already closed count. A session still running today is left out — a later settlement over the same days picks it up once it has ended (each payment is settled once).",
     "cancelDraft": "Cancel draft",
-    "ownSettlementHint": "You created this settlement, so the owner or another manager approves and pays it."
+    "ownSettlementHint": "You created this settlement, so the owner or another manager approves and pays it.",
+    "confirm": {
+      "cancelTitle": "Cancel this draft?",
+      "cancelBody": "The payments it claims are released, so a new settlement can claim them. The cancelled draft stays on the list.",
+      "approveTitle": "Approve this settlement?",
+      "approveBody": "Its total is the sum of the payments it claims. Once approved it can be marked paid; it cannot go back to a draft.",
+      "payTitle": "Mark this settlement as paid?",
+      "payBody": "Paid is final — there is no partly-paid or unpaid state. Only mark it once the teacher has the money."
+    }
   },
   "Settings": {
     "title": "Branch configuration",
@@ -1485,7 +1566,12 @@
       "none": "Not set",
       "saved": "Changes saved.",
       "emptyHint": "Add the first one using the form above — it becomes selectable everywhere it applies.",
-      "deactivatedInstead": "Records already use this, so it was deactivated instead of deleted. Their history is unchanged."
+      "deactivatedInstead": "Records already use this, so it was deactivated instead of deleted. Their history is unchanged.",
+      "created": "Added.",
+      "deactivateConfirm": {
+        "title": "Deactivate this entry?",
+        "body": "It leaves every picker at this branch straight away. Anything that already uses it keeps showing it, and you can activate it again."
+      }
     },
     "errors": {
       "forbidden": "You are not allowed to change this branch's configuration.",
@@ -1513,7 +1599,10 @@
       "endBeforeStart": "The end date cannot be before the start date.",
       "periodTooLong": "A period can span at most 400 days.",
       "invalidCardLayout": "This card layout isn't valid, so it wasn't saved. Reset to default and try again.",
-      "teacherViaTeachersPage": "Teachers are added and managed from the Teachers page."
+      "teacherViaTeachersPage": "Teachers are added and managed from the Teachers page.",
+      "invitationGone": "That invitation was already accepted, revoked or has expired.",
+      "branchNotGrantable": "This role works at one branch only, so it can't be given another.",
+      "invalidBranch": "Choose one of this center's branches."
     },
     "general": {
       "title": "General",
@@ -1628,7 +1717,7 @@
       "emptyHint": "Add the first one with the Add button above.",
       "fields": {
         "name": "Name",
-        "namePlaceholder": "Semester 1",
+        "namePlaceholder": "e.g. Semester 1",
         "startDate": "Starts",
         "endDate": "Ends"
       }
@@ -1698,13 +1787,15 @@
         "resetToTheme": "Reset to theme color",
         "theme": "Theme color",
         "use": "Use {color}"
-      }
+      },
+      "resetConfirm": "Reset every element and colour to the built-in card?",
+      "editorDescriptionTouch": "Open an element below to move or style it. Previewing in {locale}."
     },
     "permissions": {
       "title": "Permissions",
       "description": "The action-level matrix for this branch: every role, every action, denied unless you grant it. Owner-only — an owner's own actions and role/branch grants are never part of this grid because they can never be taken away.",
       "actionColumn": "Action",
-      "lockedNote": "Greyed-out cells can never be granted to that role, however the matrix is edited — a platform-level safeguard, not this branch's choice.",
+      "lockedNote": "A dash marks an action that can never be granted to that role, however the matrix is edited — a platform safeguard, not this branch’s choice.",
       "saveMatrix": "Save matrix",
       "actions": {
         "center_settings_edit": "Edit branch settings",
@@ -1739,7 +1830,10 @@
         "audit_view": "View audit log",
         "parent_link_manage": "Manage parent links",
         "session_close": "End sessions"
-      }
+      },
+      "notGrantable": "Never grantable to this role — a platform safeguard, not a branch setting.",
+      "cellLabel": "{action} — {role}",
+      "saveMatrixCount": "{count, plural, one {Save # change} other {Save # changes}}"
     }
   },
   "CenterDashboard": {
@@ -1757,7 +1851,9 @@
       "sessionsListTitle": "Today's sessions",
       "viewAll": "View all sessions",
       "empty": "No sessions scheduled today.",
-      "viewClasses": "Manage classes"
+      "viewClasses": "Manage classes",
+      "checkedInOf": "{count} / {total} checked in",
+      "checkedIn": "{count} checked in"
     },
     "center": {
       "title": "Branch"
@@ -1769,7 +1865,9 @@
     },
     "emptyHint": "Nothing is scheduled for today. Sessions come from each class's weekly schedule and period.",
     "zeroHint": "No activity yet today",
-    "auditLink": "Audit trail"
+    "auditLink": "Audit trail",
+    "pageTitle": "Dashboard",
+    "pageDescription": "{center} · {date}"
   },
   "TeacherDashboard": {
     "title": "Teacher dashboard",
@@ -1980,7 +2078,11 @@
     },
     "emptyHint": "When a student asks to join one of your classes, the request appears here with their name and the class.",
     "headline": "Wants to join your class",
-    "kindLabel": "Joining a class"
+    "kindLabel": "Joining a class",
+    "declineConfirm": {
+      "title": "Decline this request?",
+      "body": "This cannot be undone — the request leaves your queue as declined."
+    }
   },
   "TeacherCenters": {
     "title": "Find a centre to teach at",
@@ -2029,7 +2131,8 @@
     "pastEmpty": "No past sessions yet.",
     "dropIn": "Drop-in",
     "upcomingEmptyHint": "Sessions for the classes you are enrolled in will appear here.",
-    "pastEmptyHint": "Your attendance shows up here after a session is marked."
+    "pastEmptyHint": "Your attendance shows up here after a session is marked.",
+    "showMoreUpcoming": "{count, plural, one {Show # more upcoming session} other {Show # more upcoming sessions}}"
   },
   "StudentDiscover": {
     "title": "Discover",
@@ -2123,7 +2226,8 @@
     "pastEmpty": "No past sessions yet.",
     "dropIn": "Drop-in",
     "upcomingEmptyHint": "Sessions scheduled for this child will appear here.",
-    "pastEmptyHint": "Attendance is listed here once a session has been marked."
+    "pastEmptyHint": "Attendance is listed here once a session has been marked.",
+    "showMoreUpcoming": "{count, plural, one {Show # more upcoming session} other {Show # more upcoming sessions}}"
   },
   "AdminCenters": {
     "title": "Branches",
@@ -2165,7 +2269,8 @@
       "inviteLinkLabel": "Owner invitation link",
       "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
       "copy": "Copy",
-      "copied": "Copied"
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy. Select the link and copy it."
     },
     "detail": {
       "subtitle": "/{slug}",
@@ -2250,7 +2355,7 @@
     "noMatches": "Nothing matches that search.",
     "noMatchesHint": "Try a different spelling, or clear the search.",
     "emptyHint": "Anything you add here becomes available for every branch to pick.",
-    "defaultShareValue": "Default centre cut {amount} EGP",
+    "defaultShareValue": "Default branch cut {amount}",
     "noEducationSystem": "No education system",
     "noGrade": "No grade",
     "usage": {
@@ -2326,20 +2431,6 @@
       "title": "Adoption trend",
       "description": "Branches created per month, most recent six months.",
       "newCenters": "{count} new"
-    },
-    "months": {
-      "jan": "January",
-      "feb": "February",
-      "mar": "March",
-      "apr": "April",
-      "may": "May",
-      "jun": "June",
-      "jul": "July",
-      "aug": "August",
-      "sep": "September",
-      "oct": "October",
-      "nov": "November",
-      "dec": "December"
     }
   },
   "SessionPrint": {
@@ -2354,7 +2445,13 @@
     "grade": "Grade",
     "room": "Room",
     "price": "Price",
-    "teacher": "Teacher"
+    "teacher": "Teacher",
+    "columns": {
+      "number": "#",
+      "name": "Student",
+      "code": "Code",
+      "status": "Attendance"
+    }
   },
   "Pickers": {
     "teacher": {
@@ -2396,7 +2493,30 @@
     "unpaidMeta": "Session on {date} · checked in by {name} at {time}",
     "status": {
       "PRESENT": "Present",
-      "LATE": "Late"
+      "LATE": "Late",
+      "ABSENT": "Absent",
+      "DRAFT": "Draft",
+      "APPROVED": "Approved",
+      "PAID": "Paid",
+      "CANCELLED": "Cancelled",
+      "SCHEDULED": "Scheduled",
+      "LIVE": "Live",
+      "COMPLETED": "Completed",
+      "RESCHEDULED": "Rescheduled",
+      "PERCENTAGE": "Percentage",
+      "FIXED": "Fixed amount",
+      "voided": "Voided",
+      "PENDING": "Pending",
+      "REVOKED": "Revoked",
+      "ACCEPTED": "Accepted",
+      "EXPIRED": "Expired",
+      "CONFIRMED": "Confirmed",
+      "REJECTED": "Declined",
+      "ACTIVE": "Active",
+      "ONBOARDING": "Onboarding",
+      "GRACE": "Grace period",
+      "SUSPENDED": "Suspended",
+      "ARCHIVED": "Archived"
     },
     "actions": {
       "payment": {
@@ -2420,7 +2540,13 @@
       },
       "classGroup": {
         "create": "Class created",
-        "update": "Class edited"
+        "update": "Class edited",
+        "deactivate": "Class deactivated",
+        "delete": "Class deleted",
+        "reactivate": "Class reactivated",
+        "sessions": {
+          "resync": "Class sessions updated"
+        }
       },
       "session": {
         "create": "Session added by hand",
@@ -2428,7 +2554,12 @@
           "update": "Session cut changed"
         },
         "cancel": "Session cancelled",
-        "close": "Session closed"
+        "close": "Session closed",
+        "delete": "Session deleted",
+        "reschedule": "Session rescheduled",
+        "rooms": {
+          "update": "Session rooms changed"
+        }
       },
       "center": {
         "settings": {
@@ -2439,6 +2570,89 @@
         "selection": {
           "update": "Catalog price or name changed"
         }
+      },
+      "account": {
+        "claim": {
+          "approve": "Account claim approved",
+          "reject": "Account claim declined"
+        }
+      },
+      "changeRequest": {
+        "approve": "Teacher request approved",
+        "decline": "Teacher request declined"
+      },
+      "expenseCategory": {
+        "create": "Expense category added",
+        "delete": "Expense category deleted",
+        "rename": "Expense category renamed"
+      },
+      "invitation": {
+        "create": "Staff invitation created",
+        "revoke": "Staff invitation revoked"
+      },
+      "membership": {
+        "activate": "Member activated or deactivated",
+        "branch": {
+          "grant": "Branch access granted",
+          "revoke": "Branch access removed"
+        },
+        "create": "Member added",
+        "delete": "Member removed",
+        "role": {
+          "change": "Role changed"
+        }
+      },
+      "parentLink": {
+        "revoke": "Parent link removed",
+        "verify": "Parent link verified"
+      },
+      "paymentMethod": {
+        "create": "Payment method added",
+        "rename": "Payment method renamed"
+      },
+      "permission": {
+        "matrix": {
+          "update": "Permissions changed"
+        }
+      },
+      "platform": {
+        "center": {
+          "create": "Branch created by the platform",
+          "lifecycle": {
+            "transition": "Branch status changed by the platform"
+          },
+          "visibilityWindow": {
+            "update": "Data window changed by the platform"
+          }
+        },
+        "support": {
+          "access": "Platform support viewed this branch"
+        }
+      },
+      "reservation": {
+        "confirm": "Enrolment request approved",
+        "reject": "Enrolment request declined"
+      },
+      "schedule": {
+        "conflict": {
+          "confirm": "Double-booking confirmed"
+        }
+      },
+      "student": {
+        "block": "Student blocked",
+        "create": "Student registered",
+        "delete": "Student deleted",
+        "photo": {
+          "remove": "Student photo removed",
+          "update": "Student photo changed"
+        },
+        "promote": "Grade promoted",
+        "unblock": "Student unblocked"
+      },
+      "term": {
+        "create": "Term added",
+        "delete": "Term deleted",
+        "update": "Term changed"
       }
     },
     "fields": {
@@ -2453,6 +2667,36 @@
       "attendanceStatus": "Attendance",
       "totalAmount": "Total",
       "timezone": "Timezone"
+    },
+    "unknownAction": "Other change",
+    "diffSet": "{field}: {after}"
+  },
+  "Public": {
+    "landing": {
+      "tagline": "Attendance, payments and schedules for education centres — in Arabic and English.",
+      "signIn": "Sign in",
+      "register": "Create an account",
+      "note": "Branch staff join through an invitation from their branch. Teachers and students can create an account."
     }
+  },
+  "Toasts": {
+    "saved": "Saved.",
+    "studentActivated": "Student reactivated.",
+    "studentDeactivated": "Student deactivated. Their history is kept.",
+    "teacherActivated": "Teacher reactivated.",
+    "teacherDeactivated": "Teacher deactivated. Their history is kept.",
+    "memberRoleChanged": "Role changed.",
+    "memberActivated": "Access restored.",
+    "memberDeactivated": "Access removed. They can no longer open this branch.",
+    "enrolled": "Student enrolled.",
+    "enrollmentRemoved": "Removed from the class.",
+    "studentBlocked": "Student blocked.",
+    "studentUnblocked": "Student unblocked.",
+    "photoSaved": "Photo saved.",
+    "photoRemoved": "Photo removed.",
+    "catalogAdded": "Added to this branch.",
+    "catalogRemoved": "Removed from this branch.",
+    "expenseAdded": "Expense added.",
+    "expenseVoided": "Expense voided. It stays in the list, struck through."
   }
 }

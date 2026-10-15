@@ -39,7 +39,7 @@ export function SkeletonStatRow({ count = 4 }: { count?: number }) {
       {Array.from({ length: count }, (_, index) => (
         <div
           key={index}
-          className="rounded-xl border border-border bg-surface p-4 sm:p-6"
+          className="rounded-xl border border-border bg-surface p-4 shadow-card sm:p-6"
         >
           <Skeleton className="h-3 w-24" />
           <Skeleton className="mt-3 h-8 w-32" />
@@ -52,7 +52,7 @@ export function SkeletonStatRow({ count = 4 }: { count?: number }) {
 /** A card wrapping a list — the shape every list-first screen in the ERP uses. */
 export function SkeletonList({ rows = 5 }: { rows?: number }) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl bg-card p-4 ring-1 ring-foreground/10 sm:p-6">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 shadow-card md:p-5">
       <div className="flex flex-col gap-2">
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-4 w-56" />

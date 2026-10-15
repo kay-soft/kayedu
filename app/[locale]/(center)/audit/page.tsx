@@ -11,7 +11,7 @@ import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { AUDIT_FILTERS, loadAuditFeed, loadUnpaidCheckIns, type AuditFilter } from "@/lib/db/audit-feed";
 import { prisma } from "@/lib/db/client";
 import { visibilityWindowFloor } from "@/lib/db/visibility";
-import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
+import { formatDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { fullName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -87,12 +87,18 @@ export default async function AuditPage({
     return qs ? `${ROUTES.centerAudit}?${qs}` : ROUTES.centerAudit;
   };
 
+  // DES: a status or cut-type value is translated — the trail had shown the
+  // raw enum ("CANCELLED"), in English inside the Arabic UI.
   const diffValue = (key: string, value: unknown): string =>
     typeof value === "number" && MONEY_KEYS.has(key)
       ? formatMoney(value, locale)
       : value === null || value === undefined
         ? "—"
-        : String(value);
+        : typeof value === "string" && t.has(`status.${value}`)
+          ? t(`status.${value}`)
+          : typeof value === "number"
+            ? formatNumber(value, locale)
+            : String(value);
 
   return (
     <div className="flex flex-col gap-6">
@@ -137,7 +143,9 @@ export default async function AuditPage({
               <article key={entry.id} className="flex flex-col gap-1 rounded-xl border border-border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-text-primary">
-                    {t.has(`actions.${entry.action}`) ? t(`actions.${entry.action}`) : entry.action}
+                    {/* Never the raw action key (it had shown "classGroup.deactivate"). */}
+                    {t.has(`actions.${entry.action}`) ? t(`actions.${entry.action}`) : t("unknownAction")}
+                    {entry.action.endsWith(".void") ? <Badge variant="danger">{t("status.voided")}</Badge> : null}
                     {entry.selfApproved ? <Badge variant="warning">{t("selfApproved")}</Badge> : null}
                   </p>
                   {entry.amount !== null ? (
@@ -153,7 +161,7 @@ export default async function AuditPage({
                   })}
                 </p>
                 {entry.subjectName ? (
-                  <p className="text-sm text-text-primary">{fullName(entry.subjectName)}</p>
+                  <p className="text-sm text-text-primary" dir="auto">{fullName(entry.subjectName)}</p>
                 ) : null}
                 {entry.reason ? (
                   <p className="text-xs text-text-secondary">{t("reason", { reason: entry.reason })}</p>
@@ -162,11 +170,16 @@ export default async function AuditPage({
                   <ul className="flex flex-col gap-0.5 text-xs text-text-secondary">
                     {changed.map((key) => (
                       <li key={key} className="break-words">
-                        {t("diff", {
-                          field: t.has(`fields.${key}`) ? t(`fields.${key}`) : key,
-                          before: diffValue(key, entry.before?.[key]),
-                          after: diffValue(key, entry.after?.[key]),
-                        })}
+                        {entry.before?.[key] === undefined || entry.before?.[key] === null
+                          ? t("diffSet", {
+                              field: t.has(`fields.${key}`) ? t(`fields.${key}`) : key,
+                              after: diffValue(key, entry.after?.[key]),
+                            })
+                          : t("diff", {
+                              field: t.has(`fields.${key}`) ? t(`fields.${key}`) : key,
+                              before: diffValue(key, entry.before?.[key]),
+                              after: diffValue(key, entry.after?.[key]),
+                            })}
                       </li>
                     ))}
                   </ul>

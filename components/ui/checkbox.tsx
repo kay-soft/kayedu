@@ -26,7 +26,7 @@ function Checkbox({
     <CheckboxPrimitive.Root
       indeterminate={indeterminate}
       className={cn(
-        "flex size-5 shrink-0 items-center justify-center rounded-md border border-border-strong bg-background",
+        "flex size-5 shrink-0 items-center justify-center rounded-md border border-border-control-hover bg-surface",
         "transition-ui-fast outline-none",
         "hover:border-brand hover:bg-brand/5",
         "focus-visible:ring-3 focus-visible:ring-brand/25 focus-visible:border-brand",

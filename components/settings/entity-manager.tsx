@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { Inbox, Pencil, Plus, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -8,6 +8,7 @@ import {
   EntityFields,
   type EntityField,
 } from "@/components/settings/entity-fields";
+import { ConfirmAction } from "@/components/shared/confirm-action";
 import { ListHeader } from "@/components/shared/list-header";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -21,15 +22,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { DialogLauncher, DialogShell } from "@/components/shared/dialog-shell";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 import { IDLE_ACTION_STATE, type ActionState } from "@/lib/validation/form";
 import { EmptyState } from "@/components/shared/empty-state";
 
@@ -169,27 +163,35 @@ export function EntityManager({
   );
 }
 
-/** The create form — inline in a card, or inside the add dialog. */
+/**
+ * The inline create form (Settings → Rooms keeps it on the page). It submits
+ * through `startTransition` with the form's own `FormData` rather than a
+ * `<form action>`, which React 19 resets once the action returns — a refused
+ * create (a duplicate name) had cleared what was typed (DES, docs/04 §14.7).
+ */
 function EntityCreateForm({
   fields,
   createAction,
-  onCreated,
 }: {
   fields: EntityField[];
   createAction: EntityAction;
-  onCreated?: () => void;
 }) {
   const t = useTranslations("Settings.common");
   const tErrors = useTranslations("Settings.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(createAction, IDLE_ACTION_STATE);
-
-  useEffect(() => {
-    if (state.status === "created") onCreated?.();
-  }, [state.status, onCreated]);
+  const [state, formAction] = useGuardedActionState(createAction, IDLE_ACTION_STATE);
+  useActionFeedback(state, { success: (status) => (status === "created" ? t("created") : null) });
 
   return (
-    <form action={formAction} className="flex flex-col gap-4" noValidate>
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        startTransition(() => formAction(formData));
+      }}
+      className="flex flex-col gap-4"
+      noValidate
+    >
       <input type="hidden" name="locale" value={locale} />
 
       {state.error ? <FormMessage>{tErrors(state.error, state.errorValues)}</FormMessage> : null}
@@ -201,8 +203,8 @@ function EntityCreateForm({
         translateError={tErrors}
       />
 
-      <SubmitButton className="w-full sm:w-auto">
-        <Plus className="size-4" />
+      <SubmitButton className="w-full sm:w-auto sm:self-start">
+        <Plus className="size-4" aria-hidden />
         {t("add")}
       </SubmitButton>
     </form>
@@ -210,9 +212,12 @@ function EntityCreateForm({
 }
 
 /**
- * The list-first "Add X" dialog (docs/04 §5), the same shape as
- * `add-class-dialog.tsx`: it owns `open` so a successful create closes it.
- * Closing unmounts the popup, so the next open starts on an empty form.
+ * The list-first "Add X" dialog (docs/04 §5) on the shared `DialogShell`
+ * (DES, docs/04 §14.7): the fixed header, the body, and the footer's Cancel +
+ * primary — it had no footer and no Cancel, with a full-width "Add" floating
+ * in the body. A fresh instance on every open (`DialogLauncher`); it submits
+ * through `startTransition`, so a refused create keeps what was typed, and a
+ * successful one closes it and says so.
  */
 function AddEntityDialog({
   fields,
@@ -226,32 +231,83 @@ function AddEntityDialog({
   description: string;
 }) {
   const t = useTranslations("Settings.common");
-  const [open, setOpen] = useState(false);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button className="h-11 px-4">
-            <Plus className="size-4" />
-            {t("add")}
-          </Button>
-        }
-      />
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <EntityCreateForm
-            fields={fields}
-            createAction={createAction}
-            onCreated={() => setOpen(false)}
-          />
-        </DialogBody>
-      </DialogContent>
-    </Dialog>
+    <DialogLauncher
+      button={(openDialog) => (
+        <Button className="h-11 px-4" onClick={openDialog}>
+          <Plus className="size-4" aria-hidden />
+          {t("add")}
+        </Button>
+      )}
+      render={(dialog) => (
+        <AddEntityDialogBody
+          {...dialog}
+          fields={fields}
+          createAction={createAction}
+          title={title}
+          description={description}
+        />
+      )}
+    />
+  );
+}
+
+function AddEntityDialogBody({
+  open,
+  onOpenChange,
+  fields,
+  createAction,
+  title,
+  description,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  fields: EntityField[];
+  createAction: EntityAction;
+  title: string;
+  description: string;
+}) {
+  const t = useTranslations("Settings.common");
+  const tErrors = useTranslations("Settings.errors");
+  const locale = useLocale();
+  const [state, formAction, pending] = useGuardedActionState(createAction, IDLE_ACTION_STATE);
+  useActionFeedback(state, { success: (status) => (status === "created" ? t("created") : null) });
+
+  useEffect(() => {
+    if (state.status === "created") onOpenChange(false);
+  }, [state, onOpenChange]);
+
+  return (
+    <DialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      size="narrow"
+      title={title}
+      description={description}
+      cancelLabel={t("cancel")}
+      submitLabel={t("add")}
+      submitPending={pending}
+      formProps={{
+        noValidate: true,
+        onSubmit: (event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          startTransition(() => formAction(formData));
+        },
+      }}
+    >
+      <input type="hidden" name="locale" value={locale} />
+      <div className="flex flex-col gap-4">
+        {state.error ? <FormMessage>{tErrors(state.error, state.errorValues)}</FormMessage> : null}
+        <EntityFields
+          fields={fields}
+          idPrefix="create"
+          fieldErrors={state.fieldErrors}
+          translateError={tErrors}
+        />
+      </div>
+    </DialogShell>
   );
 }
 
@@ -273,12 +329,12 @@ function EntityRow({
   const locale = useLocale();
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [state, formAction] = useActionState(updateAction, IDLE_ACTION_STATE);
-  const [deleteState, deleteFormAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(updateAction, IDLE_ACTION_STATE);
+  const [deleteState, deleteFormAction] = useGuardedActionState(
     deleteAction,
     IDLE_ACTION_STATE,
   );
-  const [toggleState, toggleFormAction] = useActionState(
+  const [toggleState, toggleFormAction] = useGuardedActionState(
     toggleAction,
     IDLE_ACTION_STATE,
   );
@@ -372,7 +428,7 @@ function EntityRow({
       {fields.map((field, index) => (
         <div key={field.name} className="flex min-w-0 flex-1 flex-col">
           {/* The column label rides along on mobile, where headers are gone. */}
-          <span className="text-xs text-text-muted md:hidden">
+          <span className="text-xs text-text-secondary md:sr-only">
             {field.label}
           </span>
           <span className="truncate text-sm text-text-primary">
@@ -394,21 +450,34 @@ function EntityRow({
           className="h-11 px-4"
           onClick={() => setEditing(true)}
         >
-          <Pencil className="size-4" />
+          <Pencil className="size-4" aria-hidden />
           {t("edit")}
         </Button>
 
-        <form action={toggleFormAction}>
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="id" value={record.id} />
-          {/* An absent checkbox means false, so only send it when activating. */}
-          {record.active ? null : (
+        {/* Deactivating takes the entry out of every picker at once (a payment
+            method out of Reception) — it asks first; activating is one tap
+            (docs/04 §14.6). An absent field means false, so only activating
+            sends `active`. */}
+        {record.active ? (
+          <ConfirmAction
+            label={t("deactivate")}
+            variant="outline"
+            triggerClassName="h-11 w-full px-4"
+            title={t("deactivateConfirm.title")}
+            description={t("deactivateConfirm.body")}
+            action={toggleFormAction}
+            fields={{ locale, id: record.id }}
+          />
+        ) : (
+          <form action={toggleFormAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="id" value={record.id} />
             <input type="hidden" name="active" value="true" />
-          )}
-          <Button type="submit" variant="ghost" className="h-11 w-full px-4">
-            {record.active ? t("deactivate") : t("activate")}
-          </Button>
-        </form>
+            <Button type="submit" variant="ghost" className="h-11 w-full px-4">
+              {t("activate")}
+            </Button>
+          </form>
+        )}
       </div>
 
       {toggleState.error ? (

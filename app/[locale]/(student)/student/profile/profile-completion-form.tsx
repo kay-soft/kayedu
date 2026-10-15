@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { completeStudentProfileAction } from "@/app/[locale]/(student)/student/profile/actions";
@@ -14,6 +13,7 @@ import {
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_STUDENT_STATE } from "@/lib/validation/student";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * The one-time profile-completion form (M18, spec §4.3 item 4): the
@@ -47,7 +47,7 @@ export function ProfileCompletionForm({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     completeStudentProfileAction,
     IDLE_STUDENT_STATE,
   );
@@ -68,8 +68,8 @@ export function ProfileCompletionForm({
 
         {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
 
-        <PersonFields idPrefix="profile" values={name} fieldErrors={state.fieldErrors} />
-        <ContactFields idPrefix="profile" values={contact} fieldErrors={state.fieldErrors} />
+        <PersonFields idPrefix="profile" values={name} fieldErrors={state.fieldErrors} ownProfile />
+        <ContactFields idPrefix="profile" values={contact} fieldErrors={state.fieldErrors} ownProfile />
         <StudentFields
           idPrefix="profile"
           values={student}

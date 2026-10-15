@@ -88,7 +88,9 @@ export function ClassPeriodFields({
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border p-3 sm:p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* Title and mode control side by side only from xl: the section is half
+          a dialog wide, and from sm the segments had wrapped inside their track. */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
           <CalendarRange className="size-4 text-text-muted" aria-hidden />
           {t("title")}
@@ -106,7 +108,7 @@ export function ClassPeriodFields({
               disabled={value === "term" && !hasTerms}
               onClick={() => setMode(value)}
               className={cn(
-                "flex h-full min-w-11 flex-1 items-center justify-center rounded-md px-3 text-sm font-medium",
+                "flex h-full min-w-11 flex-1 items-center justify-center rounded-md px-3 text-sm font-medium whitespace-nowrap",
                 "transition-ui focus-ring disabled:cursor-not-allowed disabled:opacity-50",
                 mode === value
                   ? "bg-surface text-text-primary shadow-card"

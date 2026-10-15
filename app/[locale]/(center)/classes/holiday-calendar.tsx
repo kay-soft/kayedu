@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { CalendarOff, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -18,6 +17,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { formatDay } from "@/lib/format";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type HolidayRow = { id: string; date: string; name: string | null };
 
@@ -35,11 +35,11 @@ export function HolidayCalendar({ holidays }: { holidays: HolidayRow[] }) {
   const tErrors = useTranslations("Classes.errors");
   const locale = useLocale();
 
-  const [createState, createAction] = useActionState(
+  const [createState, createAction] = useGuardedActionState(
     createHolidayAction,
     IDLE_CLASS_STATE,
   );
-  const [removeState, removeAction] = useActionState(
+  const [removeState, removeAction] = useGuardedActionState(
     removeHolidayAction,
     IDLE_CLASS_STATE,
   );

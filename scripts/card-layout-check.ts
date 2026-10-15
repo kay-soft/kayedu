@@ -171,13 +171,13 @@ const OLD_LAYOUTS: { name: string; raw: unknown; ltr: string; rtl: string }[] = 
     name: "no layout at all (the built-in card)",
     raw: null,
     ltr: "f5424847a1fbf1a02e2a33e597d57c0562d31baa41d84ba4992b604784c95208",
-    rtl: "7e818170d51d5c87bf44251d85ef4e8676fa2e3274600c9de58eb838f7ebca57",
+    rtl: "d5289c6471b3526c07c5b751251344ba2ed919a7a4720223f8d490336f72a24f",
   },
   {
     name: "a one-element override",
     raw: { version: 1, elements: { qr: { x: 70, width: 22 } } },
     ltr: "34d0fbff65436d29d75cdd802b78a5719387ab5069af4bd746152d04bbb97ae0",
-    rtl: "c9824540e0dc54d54026e0a5fb4c3bf5958166c90bd2725366b6969923330275",
+    rtl: "166ad45c6f229147a113ba656ed4a4b69ea07f06703b665f772613c203bf4c1b",
   },
   {
     name: "a solid background with a removed logo",
@@ -187,7 +187,7 @@ const OLD_LAYOUTS: { name: string; raw: unknown; ltr: string; rtl: string }[] = 
       elements: { logo: null, grade: { x: 40, y: 50, fontSize: 14, weight: 700 } },
     },
     ltr: "a21ce9a044053199a0c64ce7f63704e8997623c7d5ccfce1f03ee5c2267954a7",
-    rtl: "823f3724812bdb7ca6b8e40c9c444a28ce23339bcd786dc46fe27e2a9f9e78bc",
+    rtl: "02f1866a3e8a84e0fcc3de4a1a912770bd4b79f309c493b186b3361db0af5c12",
   },
   {
     name: "the full shape the M18 editor saved",
@@ -205,7 +205,7 @@ const OLD_LAYOUTS: { name: string; raw: unknown; ltr: string; rtl: string }[] = 
       },
     },
     ltr: "23c89e874699c3583ef00b0159621f638745b7c467d51e6a5f67031b96c98d29",
-    rtl: "3dce242065bcc3d296aa5fc540b218e80b75213184209163b2422072830a7325",
+    rtl: "05a45ce1b38f6786510a7510872aef5c360fdfcc9c93ddfd4fe76204e562346a",
   },
 ];
 
@@ -425,8 +425,12 @@ async function main() {
   console.log("\n3. One renderer");
   for (const old of OLD_LAYOUTS) {
     const layout = resolveCardLayout(old.raw);
-    check(`old layout renders byte-for-byte as before (LTR) — ${old.name}`, sha256(render(layout, "ltr")) === old.ltr);
-    check(`old layout renders byte-for-byte as before (RTL) — ${old.name}`, sha256(render(layout, "rtl")) === old.rtl);
+    const ltrHash = sha256(render(layout, "ltr"));
+    const rtlHash = sha256(render(layout, "rtl"));
+    check(`old layout renders byte-for-byte as before (LTR) — ${old.name}`, ltrHash === old.ltr, `got ${ltrHash}`);
+    // DES: the RTL goldens were re-taken once, for the Arabic anchor fix in
+    // lib/id-card.ts's text() — the only change; LTR is untouched.
+    check(`old layout renders byte-for-byte as before (RTL) — ${old.name}`, rtlHash === old.rtl, `got ${rtlHash}`);
   }
 
   const styledLtr = render(resolved, "ltr", { centerName: "Real Branch" });
@@ -448,12 +452,19 @@ async function main() {
     check(`the header band draws in the accent colour (${dir})`, svg.includes('<path d="M0 60.6V12a12 12 0 0 1 12-12H308a12 12 0 0 1 12 12V60.6Z" fill="#166534"/>'));
   }
   check("end alignment anchors at the box end in LTR", attr(textTag(styledLtr, "Mona Hassan"), "text-anchor") === "end");
-  check("end alignment anchors at the box's left edge in RTL (logical end)", attr(textTag(styledRtl, "Mona Hassan"), "text-anchor") === "start");
+  // DES: `direction="rtl"` makes the anchor logical, so the logical end is `end`
+  // (it had been "start", which anchored the run at its right edge — the
+  // Arabic-card bug, docs/09 §2.0 pattern 4).
+  check("end alignment anchors at the box's left edge in RTL (logical end)", attr(textTag(styledRtl, "Mona Hassan"), "text-anchor") === "end");
 
   const aligned = (align: string, dir: "ltr" | "rtl") =>
     render(resolveCardLayout({ elements: { studentName: { x: 36, align } } }), dir);
   check("centre alignment centres the text on its box (36% + half of 36% = 172.8)", attr(textTag(aligned("center", "ltr"), "Mona Hassan"), "x") === "172.8");
   check("end alignment in LTR sits at the box end (230.4)", attr(textTag(aligned("end", "ltr"), "Mona Hassan"), "x") === "230.4");
+  check(
+    "start alignment in RTL anchors at the logical start (text-anchor start under direction rtl — DES)",
+    attr(textTag(aligned("start", "rtl"), "Mona Hassan"), "text-anchor") === "start",
+  );
   check("end alignment in RTL sits at the mirrored box's left edge (89.6)", attr(textTag(aligned("end", "rtl"), "Mona Hassan"), "x") === "89.6");
   check("start alignment is the pre-R9 path (explicit 'start' = absent)", aligned("start", "ltr") === render(resolveCardLayout({ elements: { studentName: { x: 36 } } }), "ltr"));
 

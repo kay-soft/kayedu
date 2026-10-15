@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { MailCheck } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -12,6 +11,7 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * "Check your email" (SEC-2a): what sign-up and sign-in show when Supabase
@@ -24,7 +24,7 @@ export function CheckEmailNotice({ email }: { email: string }) {
   const t = useTranslations("Auth.checkEmail");
   const tErrors = useTranslations("Auth.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState<AuthFormState, FormData>(
+  const [state, formAction] = useGuardedActionState<AuthFormState>(
     resendConfirmationAction,
     {},
   );
@@ -32,7 +32,7 @@ export function CheckEmailNotice({ email }: { email: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/60 p-4">
-        <MailCheck className="mt-0.5 size-5 shrink-0 text-info" aria-hidden />
+        <MailCheck className="mt-0.5 size-5 shrink-0 text-info-fg" aria-hidden />
         <div className="min-w-0 text-sm">
           <p className="font-semibold text-text-primary">{t("title")}</p>
           <p className="mt-1 text-text-secondary">{t("body")}</p>
