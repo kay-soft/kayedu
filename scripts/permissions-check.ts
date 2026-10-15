@@ -46,7 +46,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Role } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
-import { can, isBranchGrantableRole } from "../lib/auth/permissions.ts";
+import { DEFAULT_ROLE_GRANTS, can, isBranchGrantableRole, type Permission } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { createCenterWithSettings } from "../lib/db/platform.ts";
 import {
@@ -452,6 +452,32 @@ async function checkProvisioningBaseline() {
     same(await navFor(bare.id, bareOwner.id, "OWNER"), EXPECTED_NAV.OWNER),
   );
   check("…and centerBaselineGaps reports every baseline row missing", (await centerBaselineGaps(prisma, bare.id)).missingGrants.length === expectedRows);
+
+  // (f) P1b: every nav item's permission is in the provisioning baseline of
+  // every role the hand-written expected nav says should see it — so a new nav
+  // item (or a renamed permission) cannot ship without its baseline row. The
+  // expected nav is the "meant to see" list; DEFAULT_ROLE_GRANTS is what
+  // provisionCenterBaseline writes. OWNER passes `can()` regardless of rows
+  // (SEC-45), so the baseline — not can() — is what must be checked for it.
+  const navPermission = new Map<string, Permission | undefined>(CENTER_NAV.map((def) => [def.labelKey, def.permission]));
+  for (const role of ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"] as const) {
+    const unbacked = EXPECTED_NAV[role].filter((key) => {
+      const permission = navPermission.get(key);
+      return permission !== undefined && !DEFAULT_ROLE_GRANTS[role].includes(permission);
+    });
+    const unknown = EXPECTED_NAV[role].filter((key) => !navPermission.has(key));
+    check(
+      `Every nav item ${role} is meant to see is in ${role}'s provisioning baseline`,
+      unbacked.length === 0 && unknown.length === 0,
+      [...unbacked.map((key) => `${key}:${navPermission.get(key)}`), ...unknown.map((key) => `${key}:(no such nav item)`)].join(", "),
+    );
+  }
+  check(
+    "Every centre nav item is listed in OWNER's and MANAGER's expected nav",
+    same(EXPECTED_NAV.OWNER, CENTER_NAV.map((def) => def.labelKey)) && same(EXPECTED_NAV.MANAGER, CENTER_NAV.map((def) => def.labelKey)),
+  );
+  const teacherUnbacked = TEACHER_NAV.filter((def) => def.permission && !DEFAULT_ROLE_GRANTS.TEACHER.includes(def.permission)).map((def) => def.labelKey);
+  check("Every teacher nav item's permission is in TEACHER's provisioning baseline", teacherUnbacked.length === 0, teacherUnbacked.join(", "));
 
   // (e) The page gate is the authority: each nav item's permission is exactly
   // the one its page asserts.

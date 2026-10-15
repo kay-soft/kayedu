@@ -355,7 +355,7 @@ async function main() {
       entityType: "Settlement",
       entityId: refund5.adjustedSettlements[0].settlement.id,
       before: { totalAmount: refund5.adjustedSettlements[0].previousTotal },
-      after: { totalAmount: refund5.adjustedSettlements[0].settlement.totalAmount, reason: "payment.refund", paymentId: paid5.payment.id },
+      after: { totalAmount: refund5.adjustedSettlements[0].settlement.totalAmount, trigger: "payment.refund", paymentId: paid5.payment.id },
     },
   });
   check(

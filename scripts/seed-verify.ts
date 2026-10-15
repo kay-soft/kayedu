@@ -33,7 +33,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient, type Role } from "@prisma/client";
-import { can } from "../lib/auth/permissions.ts";
+import { DEFAULT_ROLE_GRANTS, can, type PermissionGrants } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { expenseTotals, revenueTotals } from "../lib/db/analytics.ts";
 import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
@@ -236,7 +236,20 @@ async function main() {
     check(`${experience} nav items match their page gates`, differing.length === 0, differing.map((d) => d.href).join(", "));
   }
   // …and a role's expected nav is really what `can()` allows from the baseline.
-  check("OWNER and MANAGER hold every permission their nav items need", EXPECTED_CENTER_NAV.OWNER.length === 12 && can("OWNER", "settlement.manage", { "settlement.manage": true }));
+  // P1b: derived from the real nav definitions, not a hand-counted literal — a
+  // new nav item can no longer leave this check stale (it was `=== 12` and
+  // tested one fixed permission, so SEC-2c's 13th item broke it).
+  for (const role of ["OWNER", "MANAGER"] as const) {
+    const baseline: PermissionGrants = Object.fromEntries(DEFAULT_ROLE_GRANTS[role].map((permission) => [permission, true]));
+    const missing = CENTER_NAV.filter(
+      (def) => def.permission && !(DEFAULT_ROLE_GRANTS[role].includes(def.permission) && can(role, def.permission, baseline)),
+    ).map((def) => `${def.labelKey}:${def.permission}`);
+    check(`${role} holds every permission their nav items need (baseline + can())`, missing.length === 0, missing.join(", "));
+    check(
+      `${role}'s hand-written expected nav lists every centre nav item`,
+      same(EXPECTED_CENTER_NAV[role], CENTER_NAV.map((def) => def.labelKey)),
+    );
+  }
 
   // ── 3. Money reconciles ──────────────────────────────────────────────
   console.log("\n3. Money: analytics = the sum of the frozen payment snapshots");
