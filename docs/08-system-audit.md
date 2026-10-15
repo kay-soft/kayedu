@@ -167,6 +167,42 @@ The counts include Prisma's pgbouncer wrapper — every query over the pooled UR
 
 Flat in the data. The cheapest future win is not a loader but the wrapper itself (a direct, non-pgbouncer connection for read-heavy routes, or Prisma 7's driver adapters) — a dependency-major question deferred with the others.
 
+#### 4.6.2 DB round trips per request - Cairo -> Frankfurt (PERF)
+
+**Why dev is slow.** Every logical Prisma query is one pooler round trip of ~112 ms from Cairo (`DATABASE_URL` is the Supavisor **transaction pooler**, `aws-0-eu-central-1.pooler.supabase.com:6543`, `?pgbouncer=true&connection_limit=10&pool_timeout=20` - confirmed, unchanged), plus a ~56 ms `SELECT 1` each time the client opens a pooled connection. So page time is roughly *serial depth x 112 ms*; the number of queries matters far less than how many of them wait on each other. Two more Supabase Auth calls (~100 ms each) sit on top and are deliberately kept (`02` section 14).
+
+**Instrumentation (dev only).** `KAYEDU_DB_STATS=1` (`lib/db/client.ts`) prints `[kayedu:db] <ms>ms <sql>` per statement and a `request:` summary (queries, statements, summed ms, wall ms) once the database goes quiet. Never active in production. `npm run perf:db` starts its own dev server, loads each route twice as the **owner** over plain HTTP (the saved `e2e/.auth/owner.json` session plus the Downtown branch cookie - no browser), and prints the warm load's queries, statements, summed statement time, wall time and the statement shapes ranked by total ms (`DB_TIMING_DUMP=1` lists every query in order, `DB_TIMING_ONLY=<label>` narrows, `DB_TIMING_JSON=<file>` saves). There is no standalone Payments route: payments are recorded and shown on session detail and student detail, which is what is measured.
+
+**Where the time went (before).** The per-request auth/tenant resolution was a chain of six dependent hops (`User` -> `Membership` -> `Center` -> `StudentProfile` -> `CenterSettings` -> `PermissionGrant`) before any page query started, and several pages then ran their own second and third stages. The ranked shapes per route were dominated by that resolution (`User`, `Membership`, `Center` x2-4 each, every page) and by Prisma's per-level `include` loads (`CenterCatalogSelection` x7, `CatalogGrade` x4 on the schedule; `Room`/`ClassGroupRoom` on class detail). No N+1: a shape repeats only where independent loaders each resolve the same lookup, and none grows with the rows shown.
+
+**Fixes (no behaviour change; no schema, migration, money or permission-semantics change; per-request `cache()` only - nothing tenant- or permission-shaped is cached across requests).**
+
+| Change | Saves |
+|---|---|
+| `buildContext` (`lib/auth/tenant.ts`): `CenterSettings` and `PermissionGrant` loaded together | 1 serial hop on **every** page |
+| `resolveCenterRelations` (`lib/auth/relations.ts`): the student-profile read starts with the membership read instead of after it | 1-2 serial hops on every page |
+| Class detail: the class lookup, its teacher and the 11 lists in one stage | ~3 hops |
+| Sessions list: the "New session" picker data in the list's own stage | 1 hop (for who may create) |
+| Student detail: card SVG and photo URL with the lists; absence streaks with the block lookups | 3 hops |
+| Session detail: absence streaks and the add-student search in one stage | 1 hop |
+
+Already correct, left alone: `getTenantContext`/`getUserCenterRelations`/`getCurrentUser`/`getAuthUser` were already `cache()`d, so a layout and its page share one load; the lazy end-of-day close (`closeEndedSessions`, `closeSessionIfDayOver`) must finish before the reads it affects, so it stays first.
+
+**Before / after** (owner, warm second load, seeded dev data, one run each - expect +-5 % noise; counts move by +-3 with the lazy-close sweep, the gain is serial depth, not volume):
+
+| Route | Queries | Wall ms |
+|---|---|---|
+| `/dashboard` | 33 -> 33 | 3708 -> 3401 (-8 %) |
+| `/reception` | 26 -> 25 | 3685 -> 3707 (noise) |
+| `/students` | 17 -> 17 | 2866 -> 2622 (-9 %) |
+| `/classes/[id]` | 46 -> 47 | 4803 -> 3141 (-35 %) |
+| `/sessions?range=week` | 52 -> 55 | 4707 -> 3328 (-29 %) |
+| `/sessions/[id]` (payments) | 50 -> 53 | 6318 -> 6026 (-5 %) |
+| `/students/[id]` (payments) | 32 -> 31 | 3823 -> 3577 (-6 %) |
+| `/settlements` | 14 -> 13 | 2522 -> 2089 (-17 %) |
+
+**What is left, and why it was not done here.** (1) Prisma loads each nested `include`/`select` level as its own query; `relationLoadStrategy: "join"` (the `relationJoins` preview feature, a `generator` flag in `schema.prisma`) would turn those chains into one query each - the biggest remaining win (session detail, schedule, class detail), but it is a schema-file change and a Prisma-behaviour change, so it needs an explicit go-ahead. (2) The ~56 ms `SELECT 1` per newly opened pooled connection is a property of the pooled URL; a warm production instance reuses connections. (3) In production the app runs in Frankfurt next to the database, where every hop is a few ms - this work matters mainly for Cairo-side development.
+
 ### 4.7 Dead code
 
 Removed 20 exports referenced nowhere (not even their own file): `assertCan`, `findAttendeeById`, `classDisplayName`, `listBranchGrantsForMembership`, `matchedFields`, `toPiastres`, `looksLikePhone`, `combinationPairs`, `resolveDateRangeUtc` (+ its private `yearRangeUtc`, `DateRangeKind`), `centerIdSchema`, `parsePageSizeParam` (+ `MAX_PAGE_SIZE`), `requiredPhone`, and seven unused types. Removed 16 message keys nothing reads, static or dynamic (e.g. `Auth.errors.emailInUse`/`phoneInUse` left by SEC-40, `Analytics.emptyState`, `Students.moreResults`). ~170 other exports are only used inside their own module — harmless, kept.

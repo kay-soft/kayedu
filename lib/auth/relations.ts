@@ -68,6 +68,21 @@ export async function resolveCenterRelations(
   prisma: PrismaClient,
   userId: string,
 ): Promise<CenterRelation[]> {
+  // Student profiles depend only on the user, not on the memberships, so that
+  // read starts now and runs alongside the memberships (and their centre join)
+  // instead of after them — one fewer serial round trip (docs/08 §4.6.2).
+  const studentProfilesPromise = prisma.studentProfile.findMany({
+    where: {
+      userId,
+      active: true,
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    },
+    include: { center: true },
+  });
+  // If the memberships read throws first, this one must not surface as an
+  // unhandled rejection (it is awaited below only on the success path).
+  studentProfilesPromise.catch(() => undefined);
+
   const memberships = await prisma.membership.findMany({
     where: {
       userId,
@@ -90,14 +105,7 @@ export async function resolveCenterRelations(
     .map((membership) => membership.id);
 
   const [studentProfiles, siblingBranches, branchGrantsByMembership] = await Promise.all([
-    prisma.studentProfile.findMany({
-      where: {
-        userId,
-        active: true,
-        center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-      },
-      include: { center: true },
-    }),
+    studentProfilesPromise,
     ownerOrgIds.length > 0
       ? prisma.center.findMany({
           where: {

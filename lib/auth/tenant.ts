@@ -149,10 +149,6 @@ async function buildContext(
   relation: CenterRelation,
   experience: Experience | undefined,
 ): Promise<TenantContext> {
-  const settings = await prisma.centerSettings.findUnique({
-    where: { centerId: relation.center.id },
-  });
-
   const requested = roleForExperience(relation, experience);
   const experienceDenied = requested === null;
   const role = requested ?? roleForExperience(relation) ?? "STUDENT";
@@ -162,10 +158,15 @@ async function buildContext(
   // rows (docs/01-data-model.md "Permissions layer" is centerId × Role × action,
   // and Role has no STUDENT value), so there is nothing to load. A denied
   // experience loads nothing either: it grants nothing (SEC-09).
-  const grants =
+  //
+  // The settings row and the grants are independent reads, so they go out
+  // together — one round trip, not two (docs/08 §4.6.2).
+  const [settings, grants] = await Promise.all([
+    prisma.centerSettings.findUnique({ where: { centerId: relation.center.id } }),
     role === "STUDENT" || experienceDenied
-      ? {}
-      : await loadPermissionGrants(prisma, relation.center.id, role);
+      ? Promise.resolve<PermissionGrants>({})
+      : loadPermissionGrants(prisma, relation.center.id, role),
+  ]);
 
   return {
     user,

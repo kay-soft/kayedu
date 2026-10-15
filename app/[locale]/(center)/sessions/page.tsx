@@ -112,7 +112,12 @@ export default async function SessionsPage({
     classGroupId: filters.classGroupId,
   });
 
-  const [rows, teachers, subjects, classes, revenue] = await Promise.all([
+  // R5 — "New session" (an extra session on a class, or a one-time one).
+  // Only loaded for who may create one; the action re-checks regardless. Its
+  // reads go out with the list's own, not after them (docs/08 §4.6.2).
+  const canCreate = ctxCan(ctx, "session.manage");
+
+  const [rows, teachers, subjects, classes, revenue, newSession] = await Promise.all([
     db.sessions.search({ where }),
     db.teachers.list({ active: true }),
     db.subjects.list(),
@@ -120,6 +125,36 @@ export default async function SessionsPage({
     // A 64-bit sum, net of refunds — the same figure the receipt and
     // Analytics show (SEC-2b: SEC-19, SEC-24).
     revenueTotals(prisma, ctx.center.id, { from, to }),
+    canCreate
+      ? Promise.all([
+            db.classGroups.listForNewSession(),
+            db.subjects.list({ active: true }),
+            db.grades.list({ active: true }),
+            db.rooms.list(),
+            db.roomLinks.list(),
+          ]).then(([activeClasses, activeSubjects, activeGrades, rooms, roomLinks]) => ({
+            classes: activeClasses.map((classGroup): NewSessionClassOption => {
+              const label = sessionDisplayName(locale, { classGroup });
+              return {
+                id: classGroup.id,
+                label: label === "—" ? t("columns.untitled") : label,
+                teacherId: classGroup.teacherId,
+                roomId: classGroup.roomId ?? "",
+                extraRoomIds: classGroup.roomId ? classGroup.extraRooms.map((extra) => extra.roomId) : [],
+                slots: classGroup.schedules,
+              };
+            }),
+            subjects: activeSubjects.map((subject) => ({ value: subject.id, label: subject.name })),
+            grades: activeGrades.map((grade) => ({ value: grade.id, label: grade.name })),
+            rooms: rooms.map((room) => ({
+              id: room.id,
+              name: room.name,
+              capacity: room.capacity,
+              active: room.active,
+            })),
+            roomLinks,
+          }))
+      : null,
   ]);
 
   const withStatus = rows.map((row) => ({
@@ -178,40 +213,6 @@ export default async function SessionsPage({
         .filter(Boolean)
         .join(" · ") || t("columns.untitled"),
   }));
-
-  // R5 — "New session" (an extra session on a class, or a one-time one).
-  // Only loaded for who may create one; the action re-checks regardless.
-  const canCreate = ctxCan(ctx, "session.manage");
-  const newSession = canCreate
-    ? await Promise.all([
-        db.classGroups.listForNewSession(),
-        db.subjects.list({ active: true }),
-        db.grades.list({ active: true }),
-        db.rooms.list(),
-        db.roomLinks.list(),
-      ]).then(([activeClasses, activeSubjects, activeGrades, rooms, roomLinks]) => ({
-        classes: activeClasses.map((classGroup): NewSessionClassOption => {
-          const label = sessionDisplayName(locale, { classGroup });
-          return {
-            id: classGroup.id,
-            label: label === "—" ? t("columns.untitled") : label,
-            teacherId: classGroup.teacherId,
-            roomId: classGroup.roomId ?? "",
-            extraRoomIds: classGroup.roomId ? classGroup.extraRooms.map((extra) => extra.roomId) : [],
-            slots: classGroup.schedules,
-          };
-        }),
-        subjects: activeSubjects.map((subject) => ({ value: subject.id, label: subject.name })),
-        grades: activeGrades.map((grade) => ({ value: grade.id, label: grade.name })),
-        rooms: rooms.map((room) => ({
-          id: room.id,
-          name: room.name,
-          capacity: room.capacity,
-          active: room.active,
-        })),
-        roomLinks,
-      }))
-    : null;
 
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();

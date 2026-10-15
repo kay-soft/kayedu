@@ -167,42 +167,43 @@ export default async function SessionDetailPage({
   const roster = [...rosterMap.values()].sort((a, b) => a.name.localeCompare(b.name));
 
   // An absence streak is per class; a one-time session (R5) belongs to none.
+  // The streaks and the add-student search both need only the roster, so they
+  // share one stage (docs/08 §4.6.2).
   const streakClassId = session.classGroupId;
-  if (streakClassId) {
-    await Promise.all(
-      roster
-        .filter((row) => row.status === "ABSENT")
-        .map(async (row) => {
-          // SEC-62: counted back no further than the visibility window.
-          row.consecutiveAbsences = await db.attendees.absenceStreak(
-            streakClassId,
-            row.studentProfileId,
-            session.date,
-          );
-        }),
-    );
-  }
-
   const rosterStudentIds = new Set(roster.map((row) => row.studentProfileId));
-  const candidates: AttendeeCandidate[] =
+  const [, candidateProfiles] = await Promise.all([
+    streakClassId
+      ? Promise.all(
+          roster
+            .filter((row) => row.status === "ABSENT")
+            .map(async (row) => {
+              // SEC-62: counted back no further than the visibility window.
+              row.consecutiveAbsences = await db.attendees.absenceStreak(
+                streakClassId,
+                row.studentProfileId,
+                session.date,
+              );
+            }),
+        )
+      : null,
     query.length > 0
-      ? (
-          await db.students.search({
-            where: {
-              ...studentSearchWhere(query),
-              active: true,
-              ...(rosterStudentIds.size > 0
-                ? { NOT: { id: { in: [...rosterStudentIds] } } }
-                : {}),
-            },
-            take: MAX_CANDIDATES,
-          })
-        ).map((profile) => ({
-          studentProfileId: profile.id,
-          name: fullName(localName(profile, profile.user)),
-          studentCode: profile.studentCode,
-        }))
-      : [];
+      ? db.students.search({
+          where: {
+            ...studentSearchWhere(query),
+            active: true,
+            ...(rosterStudentIds.size > 0
+              ? { NOT: { id: { in: [...rosterStudentIds] } } }
+              : {}),
+          },
+          take: MAX_CANDIDATES,
+        })
+      : null,
+  ]);
+  const candidates: AttendeeCandidate[] = (candidateProfiles ?? []).map((profile) => ({
+    studentProfileId: profile.id,
+    name: fullName(localName(profile, profile.user)),
+    studentCode: profile.studentCode,
+  }));
 
   const displayStatus = deriveSessionDisplayStatus(session, new Date(), timeZone);
   const teacherName = fullName(session.teacher);

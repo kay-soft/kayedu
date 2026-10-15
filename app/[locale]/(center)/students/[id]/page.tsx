@@ -67,7 +67,10 @@ export default async function StudentDetailPage({
 
   const hasStorage = storageConfigured();
 
-  const [grades, enrollments, blocks, otherRelations, cardStamp, parentLinks] =
+  // Everything that needs only the student row goes out together — the card,
+  // the photo URL and the lists — rather than one stage after another
+  // (docs/08 §4.6.2).
+  const [grades, enrollments, blocks, otherRelations, cardStamp, parentLinks, cardSvg, photoUrl] =
     await Promise.all([
       db.grades.list(),
       db.enrollments.listForStudent(student.id),
@@ -75,6 +78,15 @@ export default async function StudentDetailPage({
       countOtherCenterRelations(student.userId, ctx.center.id),
       hasStorage ? idCardGeneratedAt(ctx.center.id, student.id) : null,
       parentLinksForStudent(prisma, ctx.center.id, student.id),
+      studentCardSvg(ctx, student, {
+        dir: locale === "ar" ? "rtl" : "ltr",
+        codeLabel: t("card.codeLabel"),
+      }),
+      // A short-lived signed URL (the same helper Reception uses), or null with
+      // no photo on file / Storage unset — the avatar then shows the first letter.
+      hasStorage && student.photoUrl
+        ? signedUrlFor(ctx.center.id, AVATARS_BUCKET, student.photoUrl)
+        : null,
     ]);
 
   // A TEACHER block names the teacher by their User id; a CLASS block names
@@ -85,13 +97,39 @@ export default async function StudentDetailPage({
   const classRefIds = blocks
     .filter((block) => block.scope === "CLASS")
     .map((block) => block.refId);
-  const [blockingTeachers, blockingClasses] = await Promise.all([
+  // Consecutive-absence per active enrollment (spec §7 acceptance criterion
+  // 13, closing the gap flagged at M5 — the session receipt already showed
+  // this; the student profile did not). `consecutiveAbsenceCount` is
+  // class-scoped, so a student enrolled in two classes gets two independent
+  // streaks, not one blended count. It reads the enrollments, not the blocks,
+  // so it shares a stage with the block lookups.
+  const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
+  const [blockingTeachers, blockingClasses, absenceStreaks] = await Promise.all([
     teacherRefIds.length > 0
       ? db.teachers.list({ userId: { in: teacherRefIds } })
       : Promise.resolve([]),
     classRefIds.length > 0
       ? db.classGroups.list({ id: { in: classRefIds } })
       : Promise.resolve([]),
+    Promise.all(
+      activeEnrollments.map(async (enrollment) => ({
+        classGroupId: enrollment.classGroupId,
+        className:
+          [
+            enrollment.classGroup.subject ? catalogLabelWithSelection(locale, enrollment.classGroup.subject) : null,
+            enrollment.classGroup.grade ? catalogLabelWithSelection(locale, enrollment.classGroup.grade) : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || tCommon("none"),
+        // SEC-62: the streak counts back no further than the visibility window.
+        count: await db.attendees.absenceStreak(
+          enrollment.classGroupId,
+          student.id,
+          // R7b: the centre's calendar day, so today's sessions count at 00:30 Cairo time.
+          todayInTimezone(centreTimeZone(ctx.settings)),
+        ),
+      })),
+    ),
   ]);
   const teacherByUserId = new Map(
     blockingTeachers.map((teacher) => [teacher.userId, teacher]),
@@ -100,36 +138,6 @@ export default async function StudentDetailPage({
     blockingClasses.map((classGroup) => [classGroup.id, classGroup]),
   );
 
-  const cardSvg = await studentCardSvg(ctx, student, {
-    dir: locale === "ar" ? "rtl" : "ltr",
-    codeLabel: t("card.codeLabel"),
-  });
-
-  // Consecutive-absence per active enrollment (spec §7 acceptance criterion
-  // 13, closing the gap flagged at M5 — the session receipt already showed
-  // this; the student profile did not). `consecutiveAbsenceCount` is
-  // class-scoped, so a student enrolled in two classes gets two independent
-  // streaks, not one blended count.
-  const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
-  const absenceStreaks = await Promise.all(
-    activeEnrollments.map(async (enrollment) => ({
-      classGroupId: enrollment.classGroupId,
-      className:
-        [
-          enrollment.classGroup.subject ? catalogLabelWithSelection(locale, enrollment.classGroup.subject) : null,
-          enrollment.classGroup.grade ? catalogLabelWithSelection(locale, enrollment.classGroup.grade) : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || tCommon("none"),
-      // SEC-62: the streak counts back no further than the visibility window.
-      count: await db.attendees.absenceStreak(
-        enrollment.classGroupId,
-        student.id,
-        // R7b: the centre's calendar day, so today's sessions count at 00:30 Cairo time.
-        todayInTimezone(centreTimeZone(ctx.settings)),
-      ),
-    })),
-  );
   const activeStreaks = absenceStreaks.filter((streak) => streak.count > 0);
 
   // `grades` comes from `scoped(ctx).grades.list()`, which already resolves
@@ -146,12 +154,6 @@ export default async function StudentDetailPage({
     }));
 
   const personName = fullName(localName(student, student.user));
-  // A short-lived signed URL (the same helper Reception uses), or null with no
-  // photo on file / Storage unset — the avatar then shows the first letter.
-  const photoUrl =
-    hasStorage && student.photoUrl
-      ? await signedUrlFor(ctx.center.id, AVATARS_BUCKET, student.photoUrl)
-      : null;
   const gradeLabel = gradeOptions.find((option) => option.value === student.gradeId)?.label ?? null;
   const parentName = [student.parentFirstName, student.parentLastName].filter(Boolean).join(" ");
   const visibleEnrollments = enrollments.filter((e) => e.status !== "REMOVED");

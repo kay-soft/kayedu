@@ -97,7 +97,7 @@ lib/
   ui/
     sidebar-cookie.ts           # the sidebar-collapsed cookie name (docs/04 §5)
   db/
-    client.ts                   # Prisma singleton (KAYEDU_QUERY_LOG=1 logs every statement in dev — SYS)
+    client.ts                   # Prisma singleton (KAYEDU_QUERY_LOG=1 logs every statement in dev — SYS; KAYEDU_DB_STATS=1 adds per-statement ms + a per-request summary — PERF)
     tenant-scope.ts             # pure scoping primitives (no runtime imports)
     scoped.ts                   # tenant-scoped query helpers — the centerId AND the data-visibility floor
                                 #   (SEC-62); scopedWith(client, ctx) is the injected-client form the gates
@@ -647,6 +647,8 @@ Introduced during the M3 hardening pass, after navigation had grown noticeably s
 
 **Session write transactions get a realistic acquire budget (R2).** Prisma's interactive transactions wait at most 2 seconds for a pooled connection by default. The R2 closure guard adds a row lock (and, on a payment, an attendee lock) to every attendance/money write, so each transaction holds its connection slightly longer; under a check-in rush that default turns a short queue into failed check-ins. Every session write transaction — those `lib/db/session-lifecycle.ts`'s `runInTransaction` opens and the money transactions the Server Actions open around `recordPayment`/`voidPayment`/`refundPayment`/settlements — uses `WRITE_TRANSACTION_OPTIONS` (`maxWait` 10s, `timeout` 20s) instead. The guard also reads a session with **one** raw joined query (`loadGateSession`) rather than a nested Prisma `select`, which Prisma would split into four round trips. On a high-latency link (≈275 ms per round trip from a developer machine to the Frankfurt pooler) a check-in plus payment costs about 2.7 s against 1.5 s before R2; in the same-region deployment the difference is a few milliseconds.
 
+**Serial depth, not query count, is the latency (PERF).** Each logical query is one pooler round trip (~112 ms Cairo -> Frankfurt). Independent reads in a loader belong in one `Promise.all`; `buildContext` loads settings and grants together and `resolveCenterRelations` starts the student-profile read with the memberships. Per-request `cache()` is the only caching - never across requests (`center_id` is the sole isolation key). Measurements: `08` §4.6.2.
+
 **Two Supabase Auth network round trips are unavoidable per request today.** `proxy.ts` calls `supabase.auth.getUser()` to refresh the session cookie (`lib/supabase/proxy.ts`), and `getCurrentUser()` calls it again inside the page render (`lib/auth/session.ts`) — each is a real network call to the Supabase Auth server (not a local JWT decode), independently of `getTenantContext()`'s own `cache()`, because middleware and the page render are separate execution contexts. Each call cost ~100ms in local testing against the Frankfurt project; this is the standard `@supabase/ssr` pattern for verifying a token against the Auth server rather than trusting a possibly-stale cookie, so it is not something to "fix" without a deliberate security trade-off (e.g. local JWT verification via asymmetric signing keys) — flagged here so it isn't mistaken for a bug later.
 
 ---
@@ -667,6 +669,7 @@ Every variable the code reads, where, and who may see it. `.env.example` carries
 | `VERCEL_ENV` / `KAYEDU_ENV` | `lib/auth/auth-config.ts`, `prisma/seed-data/production-refs.ts` | Set by Vercel / set by hand elsewhere | server | Marks the production deployment (start-up guard; seed and wipe refuse it). |
 | `NODE_ENV`, `NEXT_RUNTIME` | `lib/db/client.ts`, `lib/supabase/env.ts`, `lib/auth/active-center.ts`, `components/shared/error-state.tsx`; `instrumentation.ts` | Set by Next | server (+ `NODE_ENV` inlined) | Development-only behaviour; the Node-runtime start-up guard. |
 | `KAYEDU_QUERY_LOG` | `lib/db/client.ts` | No (dev only) | server | `1` = log every SQL statement (`npm run perf:queries`). |
+| `KAYEDU_DB_STATS` | `lib/db/client.ts` | No (dev only; ignored in production) | server | `1` = per-statement ms and a per-request query/ms summary (`npm run perf:db`, `08` §4.6.2). |
 | `SEED_PASSWORD`, `SEED_ADMIN_PASSWORD`, `SEED_EMAIL_DOMAIN`, `DEV_PROJECT_REF` | `prisma/seed.ts`, `prisma/seed-data/*`, `scripts/*` (seed, preflight, wipe), `e2e/` | Dev only | local | The demo seed's sign-ins and its dev-project fence (`docs/dev-accounts.md`); the e2e suite signs in with the same two passwords. |
 | `ALLOW_DEV_WIPE` | `scripts/wipe-dev-data.ts` | Per command, never in `.env` | local | The dev wipe's arming switch. |
 | `GATE_TIMEOUT_MIN`, `GATE_USERS_BASELINE` | `scripts/run-gates.ts`, `scripts/lib/gate-users.ts` | No | CI/local | Gate runner knobs. |

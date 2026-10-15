@@ -68,15 +68,21 @@ export default async function ClassDetailPage({
   const query = (q ?? "").trim();
 
   const db = scoped(ctx);
-  const classGroup = await db.classGroups.findDetailById(id);
-  if (!classGroup) notFound();
-
   const t = await getTranslations("Classes");
   const tCommon = await getTranslations("Settings.common");
 
-  const teacher = await db.teachers.findByUserId(classGroup.teacherId);
-
+  // Every read below is keyed by the URL id and the centre, none by the class
+  // row itself except the teacher — so they go out together with the class
+  // lookup instead of after it (docs/08 §4.6.2). A class id from another
+  // centre still resolves to "not found": the scoped helper returns null and
+  // the other results are simply dropped.
+  const classGroupPromise = db.classGroups.findDetailById(id);
+  const teacherPromise = classGroupPromise.then((found) =>
+    found ? db.teachers.findByUserId(found.teacherId) : null,
+  );
   const [
+    classGroup,
+    teacher,
     teachers,
     subjects,
     grades,
@@ -89,6 +95,8 @@ export default async function ClassDetailPage({
     sessionCounts,
     kept,
   ] = await Promise.all([
+    classGroupPromise,
+    teacherPromise,
     db.teachers.list({ active: true }),
     db.subjects.list(),
     db.grades.list(),
@@ -101,6 +109,7 @@ export default async function ClassDetailPage({
     classSessionCounts(prisma, ctx.center.id, [id]),
     keptClassSessions(prisma, ctx.center.id, id),
   ]);
+  if (!classGroup) notFound();
   const sessionCount = sessionCounts.get(id) ?? 0;
 
   const roster: RosterRow[] = enrollments
