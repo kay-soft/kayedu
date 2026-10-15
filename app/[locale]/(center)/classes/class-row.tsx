@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { setClassActiveAction } from "@/app/[locale]/(center)/classes/actions";
@@ -52,6 +52,7 @@ export function ClassRow({
   const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("Classes.errors");
   const locale = useLocale();
+  const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
   const [state, formAction] = useActionState(
     setClassActiveAction,
     IDLE_CLASS_STATE,
@@ -139,15 +140,38 @@ export function ClassRow({
           {t("open")}
         </LinkButton>
 
-        {canManage ? (
-          <form action={formAction}>
-            {hiddenFields}
-            <Button type="submit" variant="ghost" className="h-11 w-full px-4">
-              {classGroup.active ? tCommon("deactivate") : tCommon("activate")}
+        {canManage && !(classGroup.active && confirmingDeactivate) ? (
+          classGroup.active ? (
+            // SYS: deactivating removes or cancels the class's upcoming
+            // sessions, so it asks first (activating needs no confirmation).
+            <Button type="button" variant="ghost" className="h-11 w-full px-4" onClick={() => setConfirmingDeactivate(true)}>
+              {tCommon("deactivate")}
             </Button>
-          </form>
+          ) : (
+            <form action={formAction}>
+              {hiddenFields}
+              <Button type="submit" variant="ghost" className="h-11 w-full px-4">
+                {tCommon("activate")}
+              </Button>
+            </form>
+          )
         ) : null}
       </div>
+
+      {canManage && classGroup.active && confirmingDeactivate ? (
+        <form action={formAction} className="flex flex-col gap-2 md:w-full md:basis-full sm:flex-row sm:items-center sm:justify-end">
+          {hiddenFields}
+          <span className="text-sm text-text-secondary">{t("deactivateConfirm")}</span>
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <Button type="submit" variant="destructive" className="h-11 w-full px-4 sm:w-auto" onClick={() => setConfirmingDeactivate(false)}>
+              {tCommon("deactivate")}
+            </Button>
+            <Button type="button" variant="outline" className="h-11 w-full px-4 sm:w-auto" onClick={() => setConfirmingDeactivate(false)}>
+              {tCommon("cancel")}
+            </Button>
+          </div>
+        </form>
+      ) : null}
 
       {conflicts.conflicts.length > 0 ? (
         <form action={formAction} className="flex flex-col gap-2 md:w-full md:basis-full">

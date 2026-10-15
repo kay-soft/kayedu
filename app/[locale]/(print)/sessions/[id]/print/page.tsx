@@ -10,7 +10,6 @@ import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { sessionDisplayName } from "@/lib/session-label";
-import { isWithinVisibilityWindow, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -39,7 +38,8 @@ export default async function SessionPrintPage({
   // R2's lazy end-of-day close, on read.
   await closeSessionIfDayOver(prisma, ctx.center.id, id);
   const session = await db.sessions.findDetailById(id);
-  if (!session || !isWithinVisibilityWindow(session.date, visibilityWindowFloor(ctx))) {
+  // SEC-62: the scoped helper applies the visibility window beside centerId.
+  if (!session) {
     notFound();
   }
 

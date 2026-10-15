@@ -4,10 +4,11 @@ import { requireSupabaseEnv } from "@/lib/supabase/env";
 /**
  * Service-role Supabase client — **server only**.
  *
- * Storage writes go through this rather than the user's session client: the
- * tenant boundary for files is `lib/storage-paths.ts` (layer 1, docs/02 §5),
- * exactly as `lib/db/tenant-scope.ts` is the boundary for queries. The storage
- * RLS policies are the backstop for anything that reaches Storage directly.
+ * Used only by the Storage adapter (`lib/storage/supabase.ts`, SYS) — never
+ * by a page or an action. The tenant boundary for files is
+ * `lib/storage-paths.ts` + `lib/db/storage.ts` (docs/02 §10), exactly as
+ * `lib/db/tenant-scope.ts` is the boundary for queries; every bucket is
+ * private with no `storage.objects` policy (D-19 (a)).
  *
  * `SUPABASE_SERVICE_ROLE_KEY` is deliberately not `NEXT_PUBLIC_*`, so it is
  * never substituted into a client bundle.
@@ -29,12 +30,4 @@ export function createSupabaseAdminClient(): SupabaseClient {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   return cached;
-}
-
-/** True when Storage can be used at all — screens degrade instead of crashing. */
-export function storageConfigured(): boolean {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && key && !key.startsWith("["),
-  );
 }

@@ -184,7 +184,12 @@ export default async function TeacherSessionDetailPage({
           <Card>
             <CardHeader>
               <CardTitle>{t("description.title")}</CardTitle>
-              <CardDescription>{t("description.hint")}</CardDescription>
+              <CardDescription>
+                {/* M10's edit deadline, as this branch set it (SYS: the copy used to say none existed). */}
+                {ctx.settings?.teacherEditDeadlineHours
+                  ? t("description.hintDeadline", { hours: ctx.settings.teacherEditDeadlineHours })
+                  : t("description.hintNoDeadline")}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <SessionDescriptionForm

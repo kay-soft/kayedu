@@ -11,6 +11,7 @@ import {
   approvalIdSchema,
   type ApprovalsActionState,
 } from "@/lib/validation/approvals";
+import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 /**
  * A teacher's own approvals queue (M15, spec §4.2 item 6): students
@@ -50,7 +51,7 @@ export async function approveOwnReservationAction(
 
   if (!(await ownReservation(ctx.center.id, ctx.user.id, id))) return NOT_FOUND;
 
-  const result = await prisma.$transaction((tx) =>
+  const result = await runInTransaction(prisma, (tx) =>
     confirmReservation(tx, ctx.center.id, id, ctx.user.id),
   );
   if (!result.ok) return { error: result.error };

@@ -18,6 +18,9 @@ import {
   platformCenterDetailStats,
   recordSupportAccess,
   validNextLifecycleStates,
+  platformCenterById,
+  platformCenterAuditTrail,
+  centerSettingsFor,
 } from "@/lib/db/platform";
 import { formatDate, formatNumber } from "@/lib/format";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -39,7 +42,7 @@ export default async function AdminCenterDetailPage({
   const admin = await requirePlatformAdmin();
   const { id } = await params;
 
-  const center = await prisma.center.findUnique({ where: { id } });
+  const center = await platformCenterById(prisma, id);
   if (!center) notFound();
 
   await recordSupportAccess(prisma, { centerId: center.id, actorUserId: admin.id });
@@ -49,13 +52,8 @@ export default async function AdminCenterDetailPage({
 
   const [stats, recentAudit, settings] = await Promise.all([
     platformCenterDetailStats(prisma, center.id),
-    prisma.auditLog.findMany({
-      where: { centerId: center.id },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      include: { actor: true },
-    }),
-    prisma.centerSettings.findUnique({ where: { centerId: center.id } }),
+    platformCenterAuditTrail(prisma, center.id),
+    centerSettingsFor(prisma, center.id),
   ]);
 
   return (

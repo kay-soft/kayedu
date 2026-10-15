@@ -11,7 +11,7 @@ import { AppShell } from "@/components/shell/app-shell";
 import { shellScope, shellUser } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireStudentUser, studentBrand } from "@/lib/auth/tenant";
-import { CATALOG_OVERRIDE_SELECT, catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
+import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { centerGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
@@ -19,6 +19,8 @@ import { attendedSessionsToRate } from "@/lib/db/ratings";
 import { formatDate } from "@/lib/format";
 import { localName } from "@/lib/identity";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
+import { centerNamesByIds } from "@/lib/db/platform";
+import { catalogSubjectsWithSelections } from "@/lib/db/catalog";
 
 /**
  * The M17 login pop-up's read side: sessions this student attended in the
@@ -40,19 +42,11 @@ async function pendingRatingViews(
   const subjectIds = [...new Set(pending.map((row) => row.subjectId).filter((id): id is string => id !== null))];
 
   const [centers, subjects, teacherNamesByCenter] = await Promise.all([
-    prisma.center.findMany({ where: { id: { in: centerIds } }, select: { id: true, name: true } }),
+    centerNamesByIds(prisma, centerIds),
     subjectIds.length > 0
       ? // Each centre's own rename travels with the subject (R8): a row is
         // labelled with the selections of *its* centre only.
-        prisma.catalogSubject.findMany({
-          where: { id: { in: subjectIds } },
-          include: {
-            selections: {
-              where: { centerId: { in: centerIds } },
-              select: { centerId: true, ...CATALOG_OVERRIDE_SELECT },
-            },
-          },
-        })
+        catalogSubjectsWithSelections(prisma, subjectIds, centerIds)
       : Promise.resolve([]),
     Promise.all(
       centerIds.map(async (centerId) => {

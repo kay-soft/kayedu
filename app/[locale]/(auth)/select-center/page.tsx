@@ -13,6 +13,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import {
   getOwnerOrgGroups,
   getUserCenterRelations,
+  getVerifiedParentChildren,
   primaryRole,
 } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
@@ -33,11 +34,18 @@ export default async function SelectCenterPage({
   const tRoles = await getTranslations("Roles");
 
   const { switch: switchMode } = await searchParams;
-  const [relations, orgGroups, activeId] = await Promise.all([
+  const [relations, orgGroups, activeId, children] = await Promise.all([
     getUserCenterRelations(user!.id),
     getOwnerOrgGroups(user!.id),
     getActiveCenterId(),
+    getVerifiedParentChildren(user!.id),
   ]);
+
+  // SYS: a parent with no branch relation belongs in the parent portal — the
+  // hub's "not connected to a branch" state was a dead end for them.
+  if (relations.length === 0 && children.length > 0) {
+    redirect({ href: ROUTES.parentHome, locale });
+  }
 
   // Exactly one center and no "Whole Management" option → skip the hub
   // entirely (docs/02 §3). An Owner of a multi-branch organization always
@@ -51,7 +59,8 @@ export default async function SelectCenterPage({
     <div className="flex flex-col gap-4">
       <AuthCard
         title={t("title")}
-        description={relations.length > 0 ? t("subtitle") : t("emptySubtitle")}
+        // The empty state below carries its own title — not said twice.
+        description={relations.length > 0 ? t("subtitle") : undefined}
       >
         <div className="flex flex-col gap-3">
           {relations.length === 0 ? (

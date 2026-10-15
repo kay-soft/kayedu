@@ -1002,6 +1002,39 @@ async function main() {
     return [[`client import closures reaching server-only modules: ${leaks.length === 0 ? "none" : leaks.slice(0, 5).join("; ")}`, leaks.length === 0]];
   });
 
+  await assertSec("SYS-STORAGE", "one storage seam: only the adapter talks to the provider, every file stays private (SYS)", () => {
+    const files = [...walk("app"), ...walk("components"), ...walk("lib")];
+    const callsStorageApi = files.filter((file) => /\.storage\s*\.\s*from\(/.test(read(file)));
+    const importsAdmin = files.filter((file) => /from\s+["']@\/lib\/supabase\/admin["']/.test(read(file)));
+    const importsAdapter = files.filter((file) => /from\s+["']@\/lib\/storage\/supabase["']/.test(read(file)));
+    const facade = read("lib/db/storage.ts");
+    return [
+      [`only lib/storage/supabase.ts calls the Storage API (${callsStorageApi.join(", ") || "none"})`, callsStorageApi.length === 1 && callsStorageApi[0] === "lib/storage/supabase.ts"],
+      [`only the adapter imports the service-role client (${importsAdmin.join(", ") || "none"})`, importsAdmin.length === 1 && importsAdmin[0] === "lib/storage/supabase.ts"],
+      ["only lib/storage/index.ts picks the adapter", importsAdapter.length === 1 && importsAdapter[0] === "lib/storage/index.ts"],
+      ["the tenant-scoped API reaches the provider only through storage()", /from "@\/lib\/storage"/.test(facade) && !/supabase/i.test(facade.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ""))],
+      ["a browser gets a file only as a short-lived signed URL", /SIGNED_URL_TTL_SECONDS = 60 \* 10/.test(facade) && !/getPublicUrl/.test(files.map(read).join("\n"))],
+    ];
+  });
+
+  await assertSec("SYS-TX", "money, seat and session-lifecycle transactions carry the write budget (SYS)", () => {
+    const usesBudget = (path: string, name: string) => {
+      const body = exportedBody(path, name);
+      return /runInTransaction\(/.test(body) || /WRITE_TRANSACTION_OPTIONS/.test(body);
+    };
+    const sites: [string, string][] = [
+      ["app/[locale]/(center)/expenses/actions.ts", "createExpenseAction"],
+      ["app/[locale]/(center)/expenses/actions.ts", "voidExpenseAction"],
+      ["app/[locale]/(center)/approvals/actions.ts", "approveReservationAction"],
+      ["app/[locale]/(center)/classes/actions.ts", "enrollStudentAction"],
+      ["app/[locale]/(student)/student/discover/actions.ts", "reserveClassAction"],
+      ["app/[locale]/(teacher)/teacher/approvals/actions.ts", "approveOwnReservationAction"],
+      ["lib/db/sessions.ts", "rescheduleSession"],
+      ["lib/db/approvals.ts", "resolveSessionRequest"],
+    ];
+    return sites.map(([path, name]) => [`${name} (${path}) runs with WRITE_TRANSACTION_OPTIONS`, usesBudget(path, name)] as Step);
+  });
+
   // ── Secrets & config ────────────────────────────────────────────────────
 
   await assertSec("SEC-38", "the seeded platform admin has its own password (D-21)", () => {

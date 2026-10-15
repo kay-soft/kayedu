@@ -220,7 +220,72 @@ function checkRootLayoutDirWiring() {
   );
 }
 
+// ── 5. Every literal message key a screen asks for exists (SYS) ────────────
+//
+// Parity (1) proves en and ar agree; it cannot see a key that is in NEITHER —
+// next-intl then prints the raw "Namespace.key" on screen (the admin sidebar
+// showed "Nav.catalog" until SYS). This resolves every `t("literal")` against
+// the namespace its translator was created with: `useTranslations("NS")`,
+// `getTranslations("NS")` / `getTranslations({ namespace: "NS" })`, and the
+// shells' `labelKey: "x"` nav entries (always rendered under `Nav`, or
+// `Settings.nav` for the settings sub-nav). Keys built at runtime (template
+// literals, variables) are out of reach here — the e2e suite catches those.
+
+function checkMessageKeysResolve() {
+  console.log("\nEvery literal message key resolves (SYS)");
+  const en = JSON.parse(readFileSync(join(ROOT, "messages/en.json"), "utf8")) as unknown;
+  const missing: string[] = [];
+  const scan = (dir: string) =>
+    walk(join(ROOT, dir)).concat(dir === "components" ? walkAll(join(ROOT, "components/ui")) : []);
+  const files = [...new Set([...scan("app"), ...scan("components"), ...scan("lib")])];
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    const rel = relative(ROOT, file).replace(/\\/g, "/");
+    // Each translator variable with every place it is (re)declared — a file may
+    // hold several components that each name theirs `t`; a call resolves
+    // against the nearest declaration above it.
+    const declarations = new Map<string, { at: number; namespace: string }[]>();
+    for (const m of source.matchAll(/(?:const|let)\s+(\w+)\s*=\s*(?:await\s+)?(?:useTranslations|getTranslations)\(\s*(?:["']([^"']+)["']|\{[^}]*namespace:\s*["']([^"']+)["'][^}]*\})\s*\)/g)) {
+      const list = declarations.get(m[1]) ?? [];
+      list.push({ at: m.index ?? 0, namespace: m[2] ?? m[3] });
+      declarations.set(m[1], list);
+    }
+    for (const [name, list] of declarations) {
+      const call = new RegExp(`\\b${name}(?:\\.(?:rich|markup|raw|has))?\\(\\s*["']([A-Za-z0-9_.]+)["']`, "g");
+      for (const m of source.matchAll(call)) {
+        if (/\.has\(/.test(m[0])) continue;
+        const at = m.index ?? 0;
+        const owner = [...list].reverse().find((declaration) => declaration.at < at) ?? list[0];
+        const key = `${owner.namespace}.${m[1]}`;
+        if (getPath(en, key) === undefined) missing.push(`${rel}: ${key}`);
+      }
+    }
+    const navNamespace = rel.endsWith("components/settings/settings-nav.tsx") || rel.includes("/settings/layout.tsx") ? "Settings.nav" : "Nav";
+    if (/components\/shell\/nav\.ts$|\(teacher\)\/layout\.tsx$|settings\/layout\.tsx$|settings-nav\.tsx$/.test(rel)) {
+      for (const m of source.matchAll(/labelKey:\s*["']([A-Za-z0-9_]+)["']/g)) {
+        const key = `${navNamespace}.${m[1]}`;
+        if (getPath(en, key) === undefined) missing.push(`${rel}: ${key}`);
+      }
+    }
+  }
+  check(
+    `Every literal t("…") key and nav labelKey exists in messages/en.json (and so, by parity, ar.json)`,
+    missing.length === 0,
+    missing.slice(0, 15).join("; "),
+  );
+}
+
+function walkAll(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walkAll(full, out);
+    else if (/\.(tsx?|jsx?)$/.test(entry)) out.push(full);
+  }
+  return out;
+}
+
 checkTranslationParity();
+checkMessageKeysResolve();
 checkNoPhysicalDirectionClasses();
 checkNoInlineLocaleFormatting();
 checkRootLayoutDirWiring();

@@ -58,8 +58,3 @@ export function phoneMatchesQuery(phone: string | null | undefined, query: strin
   return stored.includes(wanted);
 }
 
-/** Shape guard only — no normalization. Used to decide whether a raw search
- * token even looks like a phone before bothering to normalize it. */
-export function looksLikePhone(input: string): boolean {
-  return /\d{4,}/.test(input.replace(/[^\d]/g, ""));
-}

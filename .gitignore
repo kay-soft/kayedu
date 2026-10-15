@@ -72,3 +72,8 @@ next-env.d.ts
 # NOTE: prisma/migrations is intentionally NOT ignored — migrations are source code.
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+
+# Playwright e2e (SYS): saved sign-in sessions, results, reports, traces
+e2e/.auth/
+e2e/.results/
+e2e/.report/

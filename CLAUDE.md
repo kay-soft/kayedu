@@ -17,7 +17,7 @@ If the docs are silent on something that touches **money, permissions, or tenant
 
 ## Working rules (how to operate in this repo)
 
-**1. No browser testing.** Do NOT launch a browser, run headless browser automation, take screenshots, or curl pages in a loop to verify UI. This burns budget for little value. Verify with **static checks only**: `npx tsc --noEmit`, `npx eslint .`, `npx prisma validate`, and unit tests. For anything visual or interactive, **write a short numbered list of what the user should check themselves** and stop.
+**1. No browser testing unless the milestone prompt explicitly enables it; when enabled, use playwright-cli or @playwright/test, headless only.** Otherwise do NOT launch a browser, run headless browser automation, take screenshots, or curl pages in a loop to verify UI — it burns budget for little value. Verify with **static checks**: `npx tsc --noEmit`, `npx eslint .`, `npx prisma validate`, and unit tests. For anything visual or interactive, **write a short numbered list of what the user should check themselves** and stop. (The end-to-end smoke suite, `npm run e2e`, exists since SYS — run it only when a milestone prompt enables browser testing.)
 
 **2. Always end with staged changes + a commit message.** After any code change: run `git add -A`, then print a suggested commit message (conventional-commit style, e.g. `feat(auth): add membership resolution and center selection`) in a copyable block. **Do not commit or push** — the user reviews and commits.
 

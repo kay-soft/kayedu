@@ -29,16 +29,3 @@ export const optionalPhone = z
     return normalized;
   });
 
-/** Same shape, required — a phone that must be present and valid. */
-export const requiredPhone = z
-  .string()
-  .trim()
-  .max(20, "tooLong")
-  .transform((value, ctx) => {
-    const normalized = normalizePhone(value);
-    if (!normalized) {
-      ctx.addIssue({ code: "custom", message: "invalidPhone" });
-      return z.NEVER;
-    }
-    return normalized;
-  });

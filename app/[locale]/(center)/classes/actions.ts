@@ -14,6 +14,7 @@ import {
   reactivateClass,
   removeSessionsOnHoliday,
   updateClassWithSessions,
+  type RepriceReport,
   writeClassSlot,
   type ClassMoneyError,
   type ConflictRefusal,
@@ -54,6 +55,7 @@ import {
   type ClassActionState,
 } from "@/lib/validation/classes";
 import { boundSearchArgs, parseActionArgs } from "@/lib/validation/action-args";
+import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 /**
  * Classes, schedules, enrollment and the holiday calendar (M4). Every action
@@ -125,18 +127,28 @@ async function conflictRefusal(
   };
 }
 
-/** What a class write did to its sessions, for the form's success notice. */
+/**
+ * What a class write did to its sessions, for the form's success notice —
+ * and, for a price edit, how many open sessions took the new price and how
+ * many kept theirs (SYS price decision, docs/00 §5.1).
+ */
 async function sessionsOutcome(
   ctx: TenantContext,
   report: SessionSyncReport | null,
+  reprice: RepriceReport | null = null,
 ): Promise<Pick<ClassActionState, "sessions" | "conflicts">> {
-  if (!report) return {};
+  if (!report && !reprice) return {};
+  const priceCounts = reprice
+    ? { repriced: reprice.repriced, priceKept: reprice.keptWithPayments + reprice.keptCutAbovePrice }
+    : {};
+  if (!report) return { sessions: { created: 0, deleted: 0, updated: 0, kept: 0, ...priceCounts } };
   return {
     sessions: {
       created: report.created,
       deleted: report.deleted,
       updated: report.updated,
       kept: report.kept.length,
+      ...priceCounts,
     },
     conflicts:
       report.conflicts.length > 0
@@ -520,7 +532,7 @@ export async function updateClassAction(
 
   revalidateClassDetail(locale, id);
   revalidateClassList(locale);
-  return { status: "saved", ...(await sessionsOutcome(scope.ctx, result.report)) };
+  return { status: "saved", ...(await sessionsOutcome(scope.ctx, result.report, result.reprice)) };
 }
 
 export async function setClassActiveAction(
@@ -739,7 +751,7 @@ export async function enrollStudentAction(
   // SEC-13: the seat is claimed under the class's row lock, in a transaction,
   // through the one function every enrolment path shares (reactivating this
   // pair's removed row, if any, rather than inserting a second one).
-  const seat = await prisma.$transaction((tx) =>
+  const seat = await runInTransaction(prisma, (tx) =>
     claimClassSeat(tx, scope.ctx.center.id, classGroupId, studentProfileId),
   );
   if (!seat.ok) return seat.error === "classFull" ? { error: "classFull" } : NOT_FOUND;

@@ -7,7 +7,7 @@ import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant"
 import { MATRIX_ROLES, PERMISSIONS, editableActionsFor } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
-import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
 import {
   listPermissionGrants,
   savePermissionGrants,
@@ -145,11 +145,13 @@ async function deleteRoomRecord(formData: FormData): Promise<ActionState> {
   // a class or session that uses it as an *extra* room counts too (their
   // cascade would silently shrink a recorded room set). Its links alone do
   // not block: they cascade with the room.
+  // Every session counts, however old (SEC-62's "integrity" opt-out).
+  const history = scopedIgnoringVisibilityWindow(scope.ctx, "integrity");
   const [classes, sessions, classExtras, sessionExtras] = await Promise.all([
     scope.db.classGroups.count({ roomId: row.id }),
-    scope.db.sessions.count({ roomId: row.id }),
-    prisma.classGroupRoom.count({ where: { centerId: scope.ctx.center.id, roomId: row.id } }),
-    prisma.sessionRoom.count({ where: { centerId: scope.ctx.center.id, roomId: row.id } }),
+    history.sessions.count({ roomId: row.id }),
+    scope.db.classGroupRooms.countForRoom(row.id),
+    scope.db.sessionRooms.countForRoom(row.id),
   ]);
   if (classes + sessions + classExtras + sessionExtras > 0) {
     return { error: "inUse" };

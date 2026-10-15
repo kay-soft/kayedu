@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 // Relative imports on purpose — `npm run check:classes` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts).
-import { CATALOG_OVERRIDE_SELECT, catalogLabel } from "../catalog.ts";
+import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 import { ROOM_SET_SELECT } from "./room-sets.ts";
 
 /**
@@ -81,10 +81,6 @@ export function classDetailInclude(centerId: string) {
   } satisfies Prisma.ClassGroupInclude;
 }
 
-export type ClassDetailRow = Prisma.ClassGroupGetPayload<{
-  include: ReturnType<typeof classDetailInclude>;
-}>;
-
 export function classListWhere(filters: {
   teacherId?: string | null;
   subjectId?: string | null;
@@ -97,22 +93,3 @@ export function classListWhere(filters: {
   return Object.keys(where).length > 0 ? where : undefined;
 }
 
-/**
- * A short label for the class in a conflict message ("Math · Grade 10") —
- * the catalog entry's bilingual name in the given locale (M13), never a
- * centre's display-name override: a conflict warning is internal
- * plumbing text, not a screen a centre customizes.
- */
-export function classDisplayName(
-  locale: string,
-  row: Pick<ClassListRow, "subject" | "grade">,
-): string {
-  return (
-    [
-      row.subject ? catalogLabel(locale, row.subject) : null,
-      row.grade ? catalogLabel(locale, row.grade) : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "—"
-  );
-}

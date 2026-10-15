@@ -19,7 +19,7 @@ import {
 } from "../scheduling.ts";
 import { effectiveRoomIds } from "../rooms.ts";
 import { writeSessionExtraRooms } from "./room-sets.ts";
-import { centerTimeZone } from "./session-lifecycle.ts";
+import { centerTimeZone, runInTransaction } from "./session-lifecycle.ts";
 import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
@@ -136,7 +136,7 @@ export async function resolveSessionRequest(
   locale: string,
   options: { confirmConflicts: boolean; actorUserId?: string | null; now?: Date },
 ): Promise<ResolveSessionRequestResult> {
-  return db.$transaction(async (tx) => {
+  return runInTransaction(db, async (tx) => {
     const existing = await tx.changeRequest.findFirst({
       where: scopedWhere(centerId, { id: changeRequestId, type: NEW_SESSION }),
     });

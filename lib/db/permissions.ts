@@ -99,15 +99,6 @@ export async function membershipBranchGrantsFor(
   return byMembership;
 }
 
-/** A single membership's own granted branches — what the staff screen shows to edit. */
-export function listBranchGrantsForMembership(db: PrismaClient, membershipId: string) {
-  return db.membershipBranchGrant.findMany({
-    where: { membershipId },
-    include: { center: true },
-    orderBy: { createdAt: "asc" },
-  });
-}
-
 export function grantMembershipBranch(
   db: PrismaClient,
   membershipId: string,

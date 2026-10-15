@@ -15,7 +15,7 @@ import {
 } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { revokeStaleParentLinks, verifyParentLinkPlaceholder } from "@/lib/db/parents";
-import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
 import {
   claimStudentCode,
   studentDeleteBlockers,
@@ -52,6 +52,7 @@ import {
 } from "@/lib/validation/people";
 import { verifyParentLinkSchema } from "@/lib/validation/parents";
 import { parseActionArgs, phoneLookupArgs, searchArgs } from "@/lib/validation/action-args";
+import { logBestEffort } from "@/lib/log";
 
 /**
  * Students (M3, revised). Every action follows docs/02 §7: getTenantContext()
@@ -425,8 +426,9 @@ export async function deleteStudentAction(
   if (!student) return NOT_FOUND;
 
   // Attendance and money are append-only (CLAUDE.md rule 2): a student with
-  // history is deactivated, not deleted.
-  if ((await studentDeleteBlockers(db, student.id)) > 0) {
+  // history is deactivated, not deleted. The whole history counts, not just
+  // what the visibility window shows (SEC-62's "integrity" opt-out).
+  if ((await studentDeleteBlockers(scopedIgnoringVisibilityWindow(ctx, "integrity"), student.id)) > 0) {
     return { error: "studentInUse" };
   }
 
@@ -437,13 +439,13 @@ export async function deleteStudentAction(
       ctx.center.id,
       AVATARS_BUCKET,
       student.photoUrl,
-    ).catch(() => undefined);
+    ).catch(logBestEffort("deleted student's photo clean-up"));
   }
   await removeStoredObject(
     ctx.center.id,
     ID_CARDS_BUCKET,
     studentIdCardPath(ctx.center.id, student.id),
-  ).catch(() => undefined);
+  ).catch(logBestEffort("deleted student's ID card clean-up"));
 
   await db.students.remove(student.id);
 
@@ -587,7 +589,7 @@ export async function uploadStudentPhotoAction(
   await scope.db.students.update(student.id, { photoUrl: uploaded.path });
   if (previous && previous !== uploaded.path) {
     await removeStoredObject(scope.ctx.center.id, AVATARS_BUCKET, previous).catch(
-      () => undefined,
+      logBestEffort("replaced photo clean-up"),
     );
   }
 
@@ -626,7 +628,7 @@ export async function removeStudentPhotoAction(
     scope.ctx.center.id,
     AVATARS_BUCKET,
     student.photoUrl,
-  ).catch(() => undefined);
+  ).catch(logBestEffort("removed photo clean-up"));
   await scope.db.students.update(student.id, { photoUrl: null });
 
   await writeAuditLog({

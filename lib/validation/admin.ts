@@ -57,11 +57,6 @@ export const createCenterSchema = z.object({
   ownerEmail,
 });
 
-export const centerIdSchema = z.object({
-  locale: localeSchema,
-  id: centerId,
-});
-
 /** M19 — the five-state lifecycle replacing `Center.active` (docs/00 §5.1). */
 const centerLifecycleState = z.enum(["ONBOARDING", "ACTIVE", "GRACE", "SUSPENDED", "ARCHIVED"], {
   error: "invalidLifecycleState",

@@ -956,6 +956,8 @@ model SessionAttendee {
   @@unique([sessionId, studentProfileId])
   @@index([centerId])
   @@index([sessionId])
+  // SYS: a student's history and absence streak read by studentProfileId.
+  @@index([studentProfileId])
 }
 
 /**
@@ -1057,6 +1059,8 @@ model Payment {
   @@index([paymentMethodId])
   @@index([centerId, recordedAt])
   @@index([centerId, teacherId, recordedAt])
+  // SYS: the receipt and roster read a session's payments by sessionId.
+  @@index([sessionId])
 }
 
 /**
@@ -1318,6 +1322,8 @@ model Reservation {
 
   @@unique([classGroupId, studentId])
   @@index([centerId])
+  // SYS: the student portal reads a student's own reservations.
+  @@index([studentId])
 }
 
 model ChangeRequest {
@@ -1477,4 +1483,6 @@ model AuditLog {
 
   @@index([centerId])
   @@index([entityType, entityId])
+  // SYS: the audit screen reads a centre's newest rows.
+  @@index([centerId, createdAt])
 }

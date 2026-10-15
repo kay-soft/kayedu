@@ -57,14 +57,6 @@ export function findAttendee(
   });
 }
 
-export function findAttendeeById(
-  db: Db,
-  centerId: string,
-  id: string,
-): Promise<SessionAttendee | null> {
-  return db.sessionAttendee.findFirst({ where: { centerId, id } });
-}
-
 /**
  * Is this student blocked from the session — by its **teacher** (scope
  * TEACHER, `refId` = the teacher's User id) or, for a class session, by its
@@ -408,12 +400,18 @@ export async function consecutiveAbsenceCount(
   classGroupId: string,
   studentProfileId: string,
   uptoDate: Date,
+  /**
+   * SEC-62 — the data-visibility window floor for a centre-side reader
+   * (`scoped(ctx).attendees.absenceStreak` passes it): the streak counts back
+   * no further than the window. `null`/omitted = unbounded (teacher portal).
+   */
+  fromDate: Date | null = null,
 ): Promise<number> {
   const rows = await db.sessionAttendee.findMany({
     where: {
       centerId,
       studentProfileId,
-      session: { classGroupId, date: { lte: uptoDate } },
+      session: { classGroupId, date: { lte: uptoDate, ...(fromDate ? { gte: fromDate } : {}) } },
     },
     orderBy: { session: { date: "desc" } },
     select: { attendanceStatus: true },

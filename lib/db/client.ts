@@ -9,7 +9,11 @@ export const prisma =
   new PrismaClient({
     log:
       process.env.NODE_ENV === "development"
-        ? ["warn", "error"]
+        ? // `KAYEDU_QUERY_LOG=1` (dev only) prints every statement — what
+          // `npm run perf:queries` counts per page request (SYS, docs/08).
+          process.env.KAYEDU_QUERY_LOG === "1"
+          ? ["query", "warn", "error"]
+          : ["warn", "error"]
         : ["error"],
     // SEC-75 (SEC-2c): in production an error message carries no call-site
     // context — the default format quotes the failed call's arguments (a

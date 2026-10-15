@@ -62,18 +62,6 @@ export function contactMatchWhere(input: ContactInput): {
   return clauses.length > 0 ? { OR: clauses } : null;
 }
 
-/** Which field(s) of a candidate actually matched — shown in the match panel. */
-export function matchedFields(
-  input: ContactInput,
-  candidate: Pick<IdentityUser, "email" | "phone">,
-): ContactMatchField[] {
-  const { email, phone } = normalizeContact(input);
-  const fields: ContactMatchField[] = [];
-  if (email && normalizeEmail(candidate.email) === email) fields.push("email");
-  if (phone && normalizePhone(candidate.phone) === phone) fields.push("phone");
-  return fields;
-}
-
 export function fullName(user: Pick<IdentityUser, "firstName" | "lastName">): string {
   return [user.firstName, user.lastName.replace(/^-+$/, "")]
     .map((part) => part.trim())

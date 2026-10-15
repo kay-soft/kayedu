@@ -485,6 +485,25 @@ function checkAddDialogs() {
   );
 }
 
+
+// ── 10. Centring never mixes a logical inset with a physical translate (SYS) ─
+// `start-1/2` resolves to `right: 50%` in Arabic while `-translate-x-1/2`
+// always moves left — every dialog sat half its width off-centre in RTL.
+// Centre with symmetric insets + auto margins, or translate on both axes
+// with a physical-free layout.
+
+function checkRtlCentring() {
+  const offenders = FILES.filter((file) => {
+    const source = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    return /(?:^|[\s"'`])(?:\w+:)*(?:start|end)-1\/2/.test(source) && /-?translate-x-/.test(source);
+  });
+  check(
+    "No element is centred with a logical start/end-1/2 plus a physical translate-x (RTL off-centre, SYS)",
+    offenders.length === 0,
+    offenders.join(", "),
+  );
+}
+
 checkLocaleToggle();
 checkNav();
 checkNativeSelect();
@@ -496,6 +515,7 @@ checkShellBrandName();
 checkInitials();
 checkDetailPages();
 checkAddDialogs();
+checkRtlCentring();
 
 if (failures > 0) {
   console.error(`\n${failures} design check(s) failed.`);

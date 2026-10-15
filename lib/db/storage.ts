@@ -1,4 +1,4 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { storage } from "@/lib/storage";
 import {
   AVATARS_BUCKET,
   ID_CARDS_BUCKET,
@@ -17,6 +17,11 @@ import {
 /**
  * Tenant-scoped file access (docs/02-architecture.md §10).
  *
+ * SYS: the provider is behind `lib/storage` (`storage()` — today the
+ * Supabase adapter); this module never names a provider. It is the policy
+ * layer every caller uses: keys built here, re-checked against the centre,
+ * uploads typed by their bytes — then handed to the provider.
+ *
  * The rule mirrors `lib/db/scoped.ts`: nothing reaches Storage without a
  * resolved `centerId`. Paths are built by `centerObjectPath()` and any path
  * read back from the database is re-checked with `assertPathInCenter()` before
@@ -26,8 +31,6 @@ import {
 
 /** How long a card/photo link stays valid. Long enough to print, not to share. */
 const SIGNED_URL_TTL_SECONDS = 60 * 10;
-
-export type StoredPhoto = { path: string };
 
 type UploadRefusal = "photoType" | "photoTooLarge" | "storage";
 
@@ -67,12 +70,8 @@ export async function uploadStudentPhoto(
     Date.now().toString(36),
   );
 
-  const supabase = createSupabaseAdminClient();
-  const { error } = await supabase.storage
-    .from(AVATARS_BUCKET)
-    .upload(path, bytes, { contentType: type, upsert: true });
-
-  return error ? { ok: false, error: "storage" } : { ok: true, path };
+  const stored = await storage().upload(AVATARS_BUCKET, path, bytes, type);
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
 }
 
 /**
@@ -87,11 +86,8 @@ export async function uploadCenterLogo(
   const image = await readRasterImage(file, MAX_LOGO_BYTES);
   if (!image.ok) return image;
   const path = centerLogoPath(centerId, image.extension, Date.now().toString(36));
-  const supabase = createSupabaseAdminClient();
-  const { error } = await supabase.storage
-    .from(LOGOS_BUCKET)
-    .upload(path, image.bytes, { contentType: image.type, upsert: true });
-  return error ? { ok: false, error: "storage" } : { ok: true, path };
+  const stored = await storage().upload(LOGOS_BUCKET, path, image.bytes, image.type);
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
 }
 
 /** Writes the generated card. Deterministic path — regenerating replaces it. */
@@ -101,16 +97,13 @@ export async function uploadIdCard(
   svg: string,
 ): Promise<{ ok: true; path: string } | { ok: false; error: "storage" }> {
   const path = studentIdCardPath(centerId, studentProfileId);
-  const supabase = createSupabaseAdminClient();
-
-  const { error } = await supabase.storage
-    .from(ID_CARDS_BUCKET)
-    .upload(path, new Blob([svg], { type: "image/svg+xml" }), {
-      contentType: "image/svg+xml",
-      upsert: true,
-    });
-
-  return error ? { ok: false, error: "storage" } : { ok: true, path };
+  const stored = await storage().upload(
+    ID_CARDS_BUCKET,
+    path,
+    new Blob([svg], { type: "image/svg+xml" }),
+    "image/svg+xml",
+  );
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
 }
 
 export async function signedUrlFor(
@@ -119,11 +112,7 @@ export async function signedUrlFor(
   path: string,
 ): Promise<string | null> {
   assertPathInCenter(centerId, path);
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-  return error ? null : (data?.signedUrl ?? null);
+  return storage().signedUrl(bucket, path, SIGNED_URL_TTL_SECONDS);
 }
 
 /**
@@ -137,13 +126,11 @@ export async function objectAsDataUri(
   path: string,
 ): Promise<string | null> {
   assertPathInCenter(centerId, path);
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.storage.from(bucket).download(path);
-  if (error || !data) return null;
+  const bytes = await storage().download(bucket, path);
+  if (!bytes) return null;
 
   // Only a raster image is ever inlined into a card, whatever was stored:
   // the type comes from the bytes (SEC-54), not the object's metadata.
-  const bytes = new Uint8Array(await data.arrayBuffer());
   const mime = sniffImageType(bytes);
   if (!mime) return null;
   return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
@@ -155,8 +142,7 @@ export async function removeStoredObject(
   path: string,
 ): Promise<void> {
   assertPathInCenter(centerId, path);
-  const supabase = createSupabaseAdminClient();
-  await supabase.storage.from(bucket).remove([path]);
+  await storage().remove(bucket, [path]);
 }
 
 /** When a student's card was last generated, or null if there isn't one. */
@@ -164,12 +150,5 @@ export async function idCardGeneratedAt(
   centerId: string,
   studentProfileId: string,
 ): Promise<Date | null> {
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.storage
-    .from(ID_CARDS_BUCKET)
-    .list(centerId, { search: `${studentProfileId}.svg`, limit: 1 });
-
-  if (error || !data || data.length === 0) return null;
-  const stamp = data[0].updated_at ?? data[0].created_at;
-  return stamp ? new Date(stamp) : null;
+  return storage().lastModified(ID_CARDS_BUCKET, studentIdCardPath(centerId, studentProfileId));
 }

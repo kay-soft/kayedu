@@ -112,20 +112,3 @@ export function isValidCombination(
   return combinationError(primaryId, extraIds, links) === null;
 }
 
-/**
- * Every unordered pair a room set relies on — what "this combination is in
- * use" means when a link is about to be removed (the primary paired with
- * each extra).
- */
-export function combinationPairs(
-  primaryId: string | null | undefined,
-  extraIds: readonly string[],
-): { roomAId: string; roomBId: string }[] {
-  if (!primaryId) return [];
-  const pairs: { roomAId: string; roomBId: string }[] = [];
-  for (const id of extraIds) {
-    const pair = normalizeRoomPair(primaryId, id);
-    if (pair) pairs.push(pair);
-  }
-  return pairs;
-}

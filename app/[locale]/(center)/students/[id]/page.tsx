@@ -20,7 +20,6 @@ import { PersonAvatar } from "@/components/shared/person-avatar";
 import { Badge } from "@/components/ui/badge";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
-import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { countOtherCenterRelations } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
@@ -33,7 +32,7 @@ import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, todayInTimezone } from "@/lib/scheduling";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
-import { storageConfigured } from "@/lib/supabase/admin";
+import { storageConfigured } from "@/lib/storage";
 
 /**
  * One student at this center (spec §4.1 item 4): their record, their enrolment
@@ -122,9 +121,8 @@ export default async function StudentDetailPage({
         ]
           .filter(Boolean)
           .join(" · ") || tCommon("none"),
-      count: await consecutiveAbsenceCount(
-        prisma,
-        ctx.center.id,
+      // SEC-62: the streak counts back no further than the visibility window.
+      count: await db.attendees.absenceStreak(
         enrollment.classGroupId,
         student.id,
         // R7b: the centre's calendar day, so today's sessions count at 00:30 Cairo time.

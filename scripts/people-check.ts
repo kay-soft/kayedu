@@ -222,6 +222,11 @@ async function checkPhoneLookupShape(): Promise<void> {
 
   // The rate limiter itself, exercised directly (lib/rate-limit.ts) — a
   // fresh key allows exactly `limit` calls in the window, then refuses.
+  // Fixture timing (SYS): the window is fixed and epoch-aligned, so 25 remote
+  // calls (~7 s) started late in a minute could straddle two windows and be
+  // allowed 20 + n. Start with at least 15 s of the window left.
+  const msLeft = 60_000 - (Date.now() % 60_000);
+  if (msLeft < 15_000) await new Promise((resolve) => setTimeout(resolve, msLeft + 50));
   const key = `people-check-${Date.now()}`;
   let allowed = 0;
   for (let i = 0; i < 25; i += 1) {

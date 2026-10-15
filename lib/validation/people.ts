@@ -211,7 +211,6 @@ export const studentPhotoSchema = z.object({
 // ── List pagination (students & teachers dashboards) ───────────────────────
 
 export const DEFAULT_PAGE_SIZE = 25;
-const MAX_PAGE_SIZE = 100;
 
 /**
  * A page number from the URL — never trusted raw. Clamped rather than
@@ -220,13 +219,6 @@ const MAX_PAGE_SIZE = 100;
 export function parsePageParam(value: string | undefined): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-}
-
-export function parsePageSizeParam(value: string | undefined): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 && parsed <= MAX_PAGE_SIZE
-    ? parsed
-    : DEFAULT_PAGE_SIZE;
 }
 
 // ── Action state ───────────────────────────────────────────────────────────

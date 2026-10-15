@@ -20,7 +20,6 @@
       "week": "Week",
       "month": "Month",
       "pickDate": "Specific date",
-      "pickRange": "Range",
       "from": "From",
       "to": "To",
       "apply": "Apply",
@@ -52,10 +51,9 @@
       "home": "Go to my home screen"
     },
     "loading": "Loading",
+    "close": "Close",
     "empty": {
-      "noResults": "Nothing matched this filter",
-      "noResultsHint": "Widen the date range or clear a filter to see more.",
-      "noData": "Nothing here yet"
+      "noResults": "Nothing matched this filter"
     },
     "timePicker": {
       "placeholder": "e.g. 4:30 PM",
@@ -77,7 +75,6 @@
     "primaryNav": "Primary navigation",
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
-    "switchCenter": "Switch branch",
     "signOut": "Sign out",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
@@ -111,6 +108,7 @@
     "reservations": "My reservations",
     "centers": "Branches",
     "platform": "Platform",
+    "catalog": "Catalog",
     "settings": "Settings"
   },
   "Roles": {
@@ -150,8 +148,7 @@
       "submit": "Create account",
       "haveAccount": "Already have an account?",
       "loginLink": "Sign in",
-      "passwordHint": "At least 8 characters.",
-      "confirmEmail": "Check your inbox, confirm your email address, then sign in."
+      "passwordHint": "At least 8 characters."
     },
     "selectCenter": {
       "title": "Choose a branch",
@@ -186,8 +183,6 @@
       "passwordTooShort": "Password must be at least 8 characters.",
       "passwordMismatch": "The two passwords do not match.",
       "invalidCredentials": "Wrong email or password.",
-      "emailInUse": "An account already uses this email. Sign in instead.",
-      "phoneInUse": "This phone number belongs to another account.",
       "signUpFailed": "We could not create the account. Check the details and try again.",
       "invalidToken": "This invitation link is not valid.",
       "inviteNotFound": "This invitation no longer exists.",
@@ -432,14 +427,12 @@
     "add": "Register student",
     "addTitle": "Register a student",
     "addDescription": "Register a student once and connect them to this branch. A phone or email that already exists links to that person instead of creating a duplicate.",
-    "centerSectionTitle": "This branch's record",
     "centerSectionDescription": "This branch's own name, contact record, grade and parent details — seeded from the student's KayEdu identity and always editable here. The student code is assigned automatically.",
     "linkAsStudent": "Link this person as a student",
     "listTitle": "Registered students",
     "listDescription": "Search by name, student code, or a student's or parent's phone.",
     "empty": "No students yet.",
     "noMatches": "No students match that search.",
-    "moreResults": "Showing {shown} of {total}. Narrow the search to see the rest.",
     "searchLabel": "Search students",
     "searchPlaceholder": "Name, code or phone",
     "searchSubmit": "Search",
@@ -526,7 +519,7 @@
       },
       "verify": "Verify",
       "verified": "Verified.",
-      "emptyHint": "A parent who links to this student appears here once a staff member verifies them.",
+      "emptyHint": "A parent who signs up with this student's parent phone appears here as pending. Verifying them is turned off until a safe method is decided.",
       "verifyUnavailable": "Verification is turned off until a safe method is decided."
     },
     "print": {
@@ -568,8 +561,9 @@
     "activateAnyway": "Activate anyway",
     "backToList": "All classes",
     "deleteConfirm": "This removes the class. It cannot be undone.",
+    "deactivateConfirm": "Deactivate this class? Its upcoming sessions are removed — or cancelled if they already have records, and a cancelled session stays cancelled if you reactivate the class.",
     "profileTitle": "Class record",
-    "profileDescription": "Price and branch-cut changes never rewrite money already recorded — only new sessions use the new numbers.",
+    "profileDescription": "Price and branch-cut changes never rewrite money already recorded. A new price also applies to upcoming sessions that have no payment yet; the cut applies to payments recorded from now on.",
     "columns": {
       "subject": "Subject · Grade",
       "teacher": "Teacher",
@@ -586,12 +580,10 @@
     },
     "fields": {
       "teacher": "Teacher",
-      "teacherPlaceholder": "Choose a teacher",
       "subject": "Subject",
       "grade": "Grade",
       "educationSystem": "Education system",
       "room": "Room",
-      "moneyTitle": "Price & branch cut",
       "price": "Price per session",
       "shareType": "Cut type",
       "percentage": "Percentage of the amount",
@@ -675,7 +667,9 @@
       "updated": "{count, plural, one {# upcoming session moved to the new teacher or rooms} other {# upcoming sessions moved to the new teacher or rooms}}",
       "cancelled": "{count, plural, one {# upcoming session cancelled} other {# upcoming sessions cancelled}}",
       "unchanged": "Saved. No sessions needed to change.",
-      "kept": "{count, plural, one {# upcoming session was kept because it already has records or custom changes.} other {# upcoming sessions were kept because they already have records or custom changes.}}"
+      "kept": "{count, plural, one {# upcoming session was kept because it already has records or custom changes.} other {# upcoming sessions were kept because they already have records or custom changes.}}",
+      "repriced": "{count, plural, one {# upcoming session now charges the new price} other {# upcoming sessions now charge the new price}}",
+      "priceKept": "{count, plural, one {# session kept its old price because it already has a payment or its own branch cut.} other {# sessions kept their old price because they already have payments or their own branch cut.}}"
     },
     "deleteBlockers": {
       "title": "This class cannot be deleted because:",
@@ -762,7 +756,7 @@
     "clearFilters": "Clear filters",
     "edit": "Edit class",
     "editTitle": "Edit class",
-    "editDescription": "Price and branch-cut changes never rewrite money already recorded — only new sessions use them.",
+    "editDescription": "Never rewrites money already recorded: a new price applies to upcoming sessions with no payment yet, and the cut to payments recorded from now on.",
     "sections": {
       "basics": "Basics",
       "teacher": "Teacher",
@@ -911,6 +905,10 @@
     },
     "lifecycle": {
       "cancel": "Cancel session",
+      "cancelTitle": "Cancel this session?",
+      "cancelBody": "The session is marked cancelled and leaves every schedule. Nothing recorded on it changes. A cancelled session cannot be brought back — add a new session instead.",
+      "cancelConfirm": "Cancel session",
+      "cancelKeep": "Keep it",
       "reschedule": "Reschedule",
       "save": "Save new time",
       "rescheduled": "Session rescheduled.",
@@ -1241,8 +1239,6 @@
     "rollup": {
       "badge": "Whole Management — {organization}"
     },
-    "emptyState": "No revenue in this range",
-    "emptyStateHint": "Nothing was collected between these dates. Try a wider range.",
     "zeroHint": "No activity in this range",
     "auditLink": "Audit trail"
   },
@@ -1707,7 +1703,6 @@
     "permissions": {
       "title": "Permissions",
       "description": "The action-level matrix for this branch: every role, every action, denied unless you grant it. Owner-only — an owner's own actions and role/branch grants are never part of this grid because they can never be taken away.",
-      "ownerOnlyNote": "Only an owner may view or edit this matrix.",
       "actionColumn": "Action",
       "lockedNote": "Greyed-out cells can never be granted to that role, however the matrix is edited — a platform-level safeguard, not this branch's choice.",
       "saveMatrix": "Save matrix",
@@ -1850,7 +1845,8 @@
     },
     "description": {
       "title": "Session note",
-      "hint": "Visible to this branch's staff. No edit deadline is enforced yet.",
+      "hintDeadline": "Visible to this branch's staff. You can edit it until {hours, plural, one {# hour} other {# hours}} after the start of the session's day.",
+      "hintNoDeadline": "Visible to this branch's staff. This branch lets you edit it at any time.",
       "label": "Description",
       "placeholder": "What was covered, homework assigned, anything worth noting",
       "save": "Save note",
@@ -2026,7 +2022,6 @@
     "title": "My schedule",
     "subtitle": "Every class you're enrolled in, across every branch you've joined.",
     "filterDate": "Filter by date",
-    "clearDate": "Clear",
     "upcomingTitle": "Upcoming",
     "upcomingEmpty": "No upcoming sessions.",
     "upcomingBadge": "Upcoming",
@@ -2121,7 +2116,6 @@
     "noChildren": "No verified children yet. Once a branch verifies your account against your child's record, their schedule will appear here.",
     "childSelectorLabel": "Child",
     "filterDate": "Filter by date",
-    "clearDate": "Clear",
     "upcomingTitle": "Upcoming",
     "upcomingEmpty": "No upcoming sessions.",
     "upcomingBadge": "Upcoming",
@@ -2147,6 +2141,7 @@
     "lifecycleTransitionSubmit": "Move to this state",
     "lifecycleTransitionSaved": "Lifecycle state updated.",
     "lifecycleTerminal": "Archived is final — this branch has no further lifecycle transitions.",
+    "archiveConfirm": "I understand archiving is final — this branch can never be reopened.",
     "staffCount": "{count} staff",
     "teacherCount": "{count} teachers",
     "studentCount": "{count} students",

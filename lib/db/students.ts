@@ -79,10 +79,6 @@ export function studentListSelect(centerId: string) {
   } satisfies Prisma.StudentProfileSelect;
 }
 
-export type StudentListRow = Prisma.StudentProfileGetPayload<{
-  select: ReturnType<typeof studentListSelect>;
-}>;
-
 export const TEACHER_LIST_SELECT = {
   id: true,
   userId: true,
@@ -93,10 +89,6 @@ export const TEACHER_LIST_SELECT = {
   email: true,
   user: { select: { firstName: true, lastName: true } },
 } satisfies Prisma.MembershipSelect;
-
-export type TeacherListRow = Prisma.MembershipGetPayload<{
-  select: typeof TEACHER_LIST_SELECT;
-}>;
 
 /**
  * Reception searches by code, name or phone (spec §4.1 item 8). Each typed

@@ -390,3 +390,8 @@ export async function deletePersonIfOrphaned(userId: string): Promise<boolean> {
   await prisma.user.delete({ where: { id: userId } });
   return true;
 }
+
+/** People's global names by id (a fallback when no centre-local record exists yet). */
+export function usersByIds(db: Db, ids: string[]) {
+  return db.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true } });
+}

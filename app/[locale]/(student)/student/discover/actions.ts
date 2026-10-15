@@ -14,6 +14,7 @@ import {
   reserveClassSchema,
   type StudentActionState,
 } from "@/lib/validation/student";
+import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 const FORBIDDEN: StudentActionState = { error: "forbidden" };
 
@@ -47,7 +48,7 @@ export async function reserveClassAction(
   ]);
   if (!allowed) return { error: "rateLimited" };
 
-  const result = await prisma.$transaction((tx) =>
+  const result = await runInTransaction(prisma, (tx) =>
     reserveOrEnroll(tx, { centerId, classGroupId, studentUserId: user.id }),
   );
 

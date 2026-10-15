@@ -58,11 +58,12 @@ export type RecordPaymentResult =
  * (docs/01 §3, CLAUDE.md rule 2) — never recomputed later even if the
  * class's price or center-cut changes afterwards.
  *
- * - `amount`/`priceSnapshot` come from `Session.priceSnapshot` — itself
- *   already frozen at session-generation time (docs/02 §11) — not from the
- *   class's *current* price, so a manager editing a class's price after
- *   sessions were generated cannot retroactively change what an
- *   already-materialized session charges.
+ * - `amount`/`priceSnapshot` come from `Session.priceSnapshot`, read under
+ *   the session and roster locks. A session's price is set from its class
+ *   when it is created and — SYS price decision (docs/00 §5.1) — follows a
+ *   class price edit only while the session is open and holds no payment
+ *   (`repriceClassSessions`); once a payment exists the session keeps its
+ *   price, and this payment's own snapshot never changes.
  * - `centerShareSnapshot`/`teacherShareSnapshot` come from the session's own
  *   `centerShareType`/`centerShareValue` override when one is set (M13, spec
  *   §5.1 "Center cut" — "overridable per class and per session"), else from
@@ -138,7 +139,10 @@ export async function recordPayment(
   const method = await findActivePaymentMethod(tx, centerId, paymentMethodId);
   if (!method) return { ok: false, error: "invalidMethod" };
 
-  const amount = session.priceSnapshot;
+  // The session's price as read under the locks (`lockAttendeeRow`), not the
+  // unlocked peek above: a class price edit may have repriced this open
+  // session in between (SYS price decision, docs/00 §5.1).
+  const amount = roster.sessionPrice;
   // A session's own override (M13) wins when set; otherwise the class's
   // current cut. Both are read fresh, right now — this is the instant the
   // split is decided and frozen (CLAUDE.md rule 2). A one-time session (R5)

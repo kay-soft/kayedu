@@ -31,8 +31,21 @@ import {
   visibilityWindowFloor,
 } from "../lib/db/visibility.ts";
 import { startOfUtcDay } from "../lib/scheduling.ts";
+import { scopedIgnoringVisibilityWindow, scopedWith } from "../lib/db/scoped.ts";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 const prisma = await gatePrisma();
+
+/** Every .ts/.tsx file under `dir`. */
+function listTs(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) listTs(path, out);
+    else if (/\.tsx?$/.test(entry)) out.push(path.replaceAll("\\", "/"));
+  }
+  return out;
+}
 
 /** R1 fixture shape: a centre's first active payment method, created on demand. */
 const fixtureMethodIds = new Map<string, string>();
@@ -330,6 +343,150 @@ async function main() {
   check(
     "Audit-log carve-out: an old audit row is still readable regardless of the window",
     visibleAuditLogs.some((a) => a.id === oldAuditLog.id),
+  );
+
+  // ── 2b. SEC-62: the floor is in the scoped helpers, for every centre-side ─
+  //       role, by direct call — the same objects every page and action    ─
+  //       reads through (lib/db/scoped.ts), not a page-level clamp.        ─
+  console.log("\nSEC-62 — the scoped helpers apply the window beside centerId");
+  const category = await prisma.expenseCategory.create({ data: scopedData(center.id, { name: "Visibility-Check" }) });
+  const oldExpense = await prisma.expense.create({
+    data: scopedData(center.id, { categoryId: category.id, amount: 5_000, date: OLD_SESSION_DATE, recordedBy: teacherUser.id }),
+  });
+  const recentExpense = await prisma.expense.create({
+    data: scopedData(center.id, { categoryId: category.id, amount: 6_000, date: RECENT_SESSION_DATE, recordedBy: teacherUser.id }),
+  });
+  await prisma.sessionAttendanceChange.create({
+    data: scopedData(center.id, {
+      sessionId: oldFixture.session.id,
+      studentProfileId: student.id,
+      fromStatus: "PRESENT",
+      toStatus: "LATE",
+      changedBy: teacherUser.id,
+      changedAt: OLD_SESSION_DATE,
+    }),
+  });
+  const oldAttendee = await prisma.sessionAttendee.findFirstOrThrow({ where: { sessionId: oldFixture.session.id } });
+  const recentAttendee = await prisma.sessionAttendee.findFirstOrThrow({ where: { sessionId: recentFixture.session.id } });
+  const scopeFor = (role: string, extra: { isPlatformAdmin?: boolean } = {}) =>
+    scopedWith(
+      prisma,
+      {
+        center: { id: center.id },
+        user: { locale: "en" },
+        role,
+        isPlatformAdmin: extra.isPlatformAdmin ?? false,
+        settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" },
+      },
+      { now: NOW },
+    );
+
+  for (const role of ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"]) {
+    const db = scopeFor(role);
+    const refusedById = [
+      await db.sessions.findById(oldFixture.session.id),
+      await db.sessions.findDetailById(oldFixture.session.id),
+      await db.sessions.findForEdit(oldFixture.session.id),
+      await db.attendees.findById(oldAttendee.id),
+      await db.attendees.findDetailById(oldAttendee.id),
+      await db.attendees.findExisting(oldFixture.session.id, student.id),
+      await db.payments.findById(oldFixture.payment.id),
+      await db.expenses.findById(oldExpense.id),
+    ].every((row) => row === null);
+    check(`${role}: an out-of-window session, attendee, payment or expense by direct id is refused (null, like another centre's id)`, refusedById);
+    const recentReadable =
+      (await db.sessions.findById(recentFixture.session.id)) !== null &&
+      (await db.attendees.findById(recentAttendee.id)) !== null &&
+      (await db.payments.findById(recentFixture.payment.id)) !== null &&
+      (await db.expenses.findById(recentExpense.id)) !== null;
+    check(`${role}: the in-window rows of the same kinds still read`, recentReadable);
+    const listed = await db.sessions.search({ where: {} });
+    const counts = {
+      sessions: await db.sessions.count(),
+      attendees: await db.attendees.count(),
+      payments: await db.payments.count(),
+      expenses: await db.expenses.count(),
+      expenseRows: (await db.expenses.search({ where: {}, take: 50 })).length,
+    };
+    check(
+      `${role}: lists and counts carry the floor too (an unbounded ?from= cannot reach past it)`,
+      listed.every((row) => row.id !== oldFixture.session.id && row.id !== oldRefundedFixture.session.id) &&
+        listed.length === 2 && counts.sessions === 2 && counts.attendees === 2 && counts.payments === 2 &&
+        counts.expenses === 1 && counts.expenseRows === 1,
+      JSON.stringify(counts),
+    );
+    check(
+      `${role}: an out-of-window session's change log reads as empty`,
+      (await db.attendanceChanges.listForSession(oldFixture.session.id)).length === 0 &&
+        (await db.attendanceChanges.count()) === 0,
+    );
+    check(
+      `${role}: refunds.list is windowed by the same floor`,
+      (await db.refunds.list()).map((r) => r.id).join() === recentRefund.id,
+    );
+    check(
+      `${role}: settlements and audit logs stay carved out (old rows still read)`,
+      (await db.settlements.list()).some((s) => s.id === oldSettlement.id) &&
+        (await db.auditLogs.list(500)).some((a) => a.id === oldAuditLog.id) &&
+        (await db.settlements.findForSession(oldFixture.session.id))?.id === oldSettlement.id,
+    );
+  }
+
+  for (const role of ["TEACHER", "STUDENT", "PARENT"]) {
+    check(
+      `${role}: never windowed — the old session reads (docs/01 §7)`,
+      (await scopeFor(role).sessions.findById(oldFixture.session.id)) !== null,
+    );
+  }
+  check(
+    "A platform admin bypasses the floor in the scoped helpers too",
+    (await scopeFor("OWNER", { isPlatformAdmin: true }).sessions.findById(oldFixture.session.id)) !== null,
+  );
+  const integrity = scopedIgnoringVisibilityWindow(
+    { center: { id: center.id }, user: { locale: "en" }, role: "MANAGER", isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
+    "integrity",
+    prisma,
+  );
+  check(
+    "The named opt-out (scopedIgnoringVisibilityWindow) sees the whole history — what delete blockers count",
+    (await integrity.sessions.count()) === 4 && (await integrity.payments.count()) === 4 && integrity.visibilityFloor === null,
+  );
+  check(
+    "The absence streak counts back no further than the floor (scoped attendees.absenceStreak)",
+    await (async () => {
+      const streakClass = await prisma.classGroup.create({
+        data: scopedData(center.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherUser.id, price: 10_000 }),
+      });
+      const absent = async (date: Date) => {
+        const s = await prisma.session.create({
+          data: scopedData(center.id, { classGroupId: streakClass.id, teacherId: teacherUser.id, date, startTime: "08:00", endTime: "09:00", priceSnapshot: 10_000 }),
+        });
+        await prisma.sessionAttendee.create({
+          data: scopedData(center.id, { sessionId: s.id, studentProfileId: student.id, attendanceStatus: "ABSENT", isDropIn: false, recordedBy: "system" }),
+        });
+      };
+      await absent(new Date("2026-05-20T00:00:00Z")); // before the 14-day floor (1 June)
+      await absent(new Date("2026-05-25T00:00:00Z")); // before it
+      await absent(new Date("2026-06-12T00:00:00Z")); // inside it
+      const windowed = await scopeFor("MANAGER").attendees.absenceStreak(streakClass.id, student.id, NOW);
+      const unbounded = await scopeFor("TEACHER").attendees.absenceStreak(streakClass.id, student.id, NOW);
+      return windowed === 1 && unbounded === 3;
+    })(),
+  );
+  check(
+    "Static: every centre page reads sessions/attendees/payments/expenses through scoped helpers — no direct prisma.session/payment/sessionAttendee/expense read under app/(center) or app/(print)",
+    !listTs("app/[locale]/(center)").concat(listTs("app/[locale]/(print)")).some((file) =>
+      /\bprisma\.(session|payment|sessionAttendee|expense|sessionAttendanceChange)\.(find|count|aggregate|groupBy)/.test(readFileSync(file, "utf8")),
+    ),
+  );
+  check(
+    "Static: the opt-out is only used with a stated reason, and only for integrity, settlement or audit reads",
+    listTs("app").concat(listTs("lib")).every((file) => {
+      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      return [...source.matchAll(/scopedIgnoringVisibilityWindow\(([^)]*)\)/g)].every((m) =>
+        /"(integrity|settlement|audit)"/.test(m[1]) || file.endsWith("lib/db/scoped.ts"),
+      );
+    }),
   );
 
   // ── 3. Nothing is deleted — widening restores visibility instantly ──────

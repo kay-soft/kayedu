@@ -353,3 +353,29 @@ export function countCenterSubjectSelectionsUnderGrade(
     where: { centerId, kind: KIND.SUBJECT, subject: { gradeId } },
   });
 }
+
+/** Canonical subjects by id — for a request naming one this centre has not picked (SYS). */
+export function catalogSubjectsByIds(db: Db, ids: string[]) {
+  return db.catalogSubject.findMany({ where: { id: { in: ids } } });
+}
+
+/** Canonical grades by id — for a request naming one this centre has not picked (SYS). */
+export function catalogGradesByIds(db: Db, ids: string[]) {
+  return db.catalogGrade.findMany({ where: { id: { in: ids } } });
+}
+
+/**
+ * Subjects by id with each listed centre's own selection (R8 renames), for a
+ * cross-centre list labelled per row (the student's rating pop-up, SYS).
+ */
+export function catalogSubjectsWithSelections(db: Db, ids: string[], centerIds: string[]) {
+  return db.catalogSubject.findMany({
+    where: { id: { in: ids } },
+    include: {
+      selections: {
+        where: { centerId: { in: centerIds } },
+        select: { centerId: true, displayNameAr: true, displayNameEn: true },
+      },
+    },
+  });
+}

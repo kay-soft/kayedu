@@ -322,47 +322,6 @@ export function monthRangeUtc(date: Date): { start: Date; end: Date } {
   return { start, end };
 }
 
-/** Calendar year containing the day `date`, as a `[start, end]` UTC-midnight pair (M6 Analytics). */
-export function yearRangeUtc(date: Date): { start: Date; end: Date } {
-  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const end = new Date(Date.UTC(date.getUTCFullYear(), 11, 31));
-  return { start, end };
-}
-
-export type DateRangeKind = "day" | "week" | "month" | "year" | "all";
-
-/**
- * Resolves one of Analytics/Expenses' date-range filters (spec §4.1 items 5
- * & 6) to a `[start, end]` UTC-midnight bound around `anchor` — or `null`
- * bounds for "all-time", which `lib/db/analytics.ts` treats as unbounded
- * rather than a fabricated epoch date.
- *
- * @deprecated Analytics/Expenses moved to the shared date filter (M18,
- * `resolveSharedDateFilter` below) — kept only because `weekRangeUtc`/
- * `monthRangeUtc` (real calendar week/month) are still used by the teacher
- * dashboard's own KPIs, which this function composed. Do not wire this up to
- * a new screen.
- */
-export function resolveDateRangeUtc(
-  kind: DateRangeKind,
-  anchor: Date,
-): { start: Date | null; end: Date | null } {
-  switch (kind) {
-    case "day": {
-      const day = startOfUtcDay(anchor);
-      return { start: day, end: day };
-    }
-    case "week":
-      return weekRangeUtc(anchor);
-    case "month":
-      return monthRangeUtc(anchor);
-    case "year":
-      return yearRangeUtc(anchor);
-    case "all":
-      return { start: null, end: null };
-  }
-}
-
 // ── The shared date filter (M18, docs/04-design-system.md §11.7) ──────────
 //
 // One component for every screen: Day / Week (today −7) / Month (1st of the

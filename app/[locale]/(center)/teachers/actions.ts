@@ -11,7 +11,7 @@ import {
   resolveContact,
 } from "@/lib/db/identity";
 import { createTeacherMembership } from "@/lib/db/teacher-membership";
-import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
 import {
   studentSearchWhere,
   teacherDeleteBlockers,
@@ -312,7 +312,8 @@ export async function deleteTeacherAction(
 
   // A teacher who already carries classes or sessions is deactivated, not
   // deleted — the schedule and its money history must keep resolving.
-  if ((await teacherDeleteBlockers(db, teacher.userId)) > 0) {
+  // The whole history counts, not just the visibility window (SEC-62 "integrity").
+  if ((await teacherDeleteBlockers(scopedIgnoringVisibilityWindow(ctx, "integrity"), teacher.userId)) > 0) {
     return { error: "teacherInUse" };
   }
 

@@ -51,6 +51,7 @@ import {
 import { analyticsFilterSchema } from "@/lib/validation/analytics";
 import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
 import { ROUTES } from "@/lib/routes";
+import { centerSettingsFor } from "@/lib/db/platform";
 
 /**
  * Analytics (M6, spec §4.1 item 5): the shared date filter (M18, day/week/
@@ -127,7 +128,7 @@ export default async function AnalyticsPage({
             if (!role || role === "STUDENT") return null;
             const grants = await loadPermissionGrants(prisma, branch.id, role);
             if (!can(role, "analytics.center.view", grants)) return null;
-            const settings = await prisma.centerSettings.findUnique({ where: { centerId: branch.id } });
+            const settings = await centerSettingsFor(prisma, branch.id);
             const { start, end } = clampRangeToVisibility(
               resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
               visibilityWindowFloor({ isPlatformAdmin: ctx.isPlatformAdmin, settings }, now),

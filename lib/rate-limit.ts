@@ -1,6 +1,7 @@
 // Relative import on purpose: `npm run check:security` exercises this module
 // outside the Next.js runtime, where the `@/` alias does not resolve.
 import { prisma } from "./db/client.ts";
+import { logBestEffort } from "./log.ts";
 
 /**
  * The one rate limiter (SEC-2a — SEC-11, SEC-27, SEC-67; spec §5.1). A
@@ -39,7 +40,9 @@ export async function checkRateLimit(
     `;
     if (Math.random() < 0.01) void pruneRateLimitBuckets();
     return (rows[0]?.count ?? Number.POSITIVE_INFINITY) <= limit;
-  } catch {
+  } catch (error) {
+    // Fails closed (refuses), but never silently.
+    logBestEffort("rate-limit check")(error);
     return false;
   }
 }
@@ -52,7 +55,8 @@ export async function pruneRateLimitBuckets(): Promise<number> {
       where: { windowStart: { lt: cutoff } },
     });
     return count;
-  } catch {
+  } catch (error) {
+    logBestEffort("rate-limit prune")(error);
     return 0;
   }
 }

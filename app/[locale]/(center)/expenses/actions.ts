@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
-import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
 import { expenseDateError } from "@/lib/db/visibility";
 import { dateKey } from "@/lib/scheduling";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
@@ -19,6 +19,7 @@ import {
   expenseVoidSchema,
 } from "@/lib/validation/analytics";
 import { nameClashes } from "@/lib/like";
+import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 /**
  * Expenses (M6, spec §4.1 item 6): category CRUD + append-and-audit expense
@@ -156,7 +157,8 @@ export async function deleteExpenseCategoryAction(
 
   // A voided expense still references its category — it is a record, so the
   // category stays (deactivate it instead).
-  const inUse = await scope.db.expenses.count({ categoryId: row.id });
+  // However old the expense (SEC-62's "integrity" opt-out).
+  const inUse = await scopedIgnoringVisibilityWindow(scope.ctx, "integrity").expenses.count({ categoryId: row.id });
   if (inUse > 0) return { error: "inUse" };
 
   try {
@@ -201,7 +203,7 @@ export async function createExpenseAction(
 
   // A financial change — audited (CLAUDE.md rule 7) in the same transaction
   // as the row (SEC-60), even though Expense carries no snapshot machinery.
-  await prisma.$transaction(async (tx) => {
+  await runInTransaction(prisma, async (tx) => {
     const expense = await tx.expense.create({
       data: {
         centerId: scope.ctx.center.id,
@@ -248,7 +250,7 @@ export async function voidExpenseAction(
   if (!row) return NOT_FOUND;
   if (row.voided) return { error: "alreadyVoided" };
 
-  const voided = await prisma.$transaction(async (tx) => {
+  const voided = await runInTransaction(prisma, async (tx) => {
     const changed = await tx.expense.updateMany({
       where: { id, centerId: scope.ctx.center.id, voided: false },
       data: { voided: true, voidReason: reason, voidedAt: new Date(), voidedBy: scope.ctx.user.id },

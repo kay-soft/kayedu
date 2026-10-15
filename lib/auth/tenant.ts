@@ -432,6 +432,19 @@ export const getVerifiedParentChildren = cache(
   },
 );
 
+/**
+ * Where a signed-in user with NO centre relation belongs (SYS): the platform
+ * admin's console, the parent portal when they hold a verified child link
+ * (a `ParentLink` is not a centre relation, so the hub would otherwise tell a
+ * parent "not connected to a branch" with no way to their children), else the
+ * hub's empty state.
+ */
+export async function homeWithoutBranch(user: Pick<User, "id" | "isPlatformAdmin">): Promise<string> {
+  if (user.isPlatformAdmin) return ROUTES.adminCenters;
+  const children = await getVerifiedParentChildren(user.id);
+  return children.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
+}
+
 export type ParentSession = {
   user: User;
   /** Verified children only — see `getVerifiedParentChildren`'s doc comment. */

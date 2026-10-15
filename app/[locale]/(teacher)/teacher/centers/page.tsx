@@ -8,11 +8,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { requireTeacherUser } from "@/lib/auth/tenant";
 import { listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { catalogLabel } from "@/lib/catalog";
 import { ROUTES } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 import { EmptyState } from "@/components/shared/empty-state";
+import { listAccessibleCenters } from "@/lib/db/platform";
 
 /**
  * The centre directory (M15, spec §4.2 item 7 / §5.1 "Teacher onboarding"):
@@ -33,11 +33,7 @@ export default async function TeacherCentersPage() {
   const locale = await getLocale();
 
   const [centers, subjects, grades] = await Promise.all([
-    prisma.center.findMany({
-      where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-      select: { id: true, name: true, logoPath: true, themeColor: true },
-      orderBy: { name: "asc" },
-    }),
+    listAccessibleCenters(prisma),
     listCatalogSubjects(prisma),
     listCatalogGrades(prisma),
   ]);

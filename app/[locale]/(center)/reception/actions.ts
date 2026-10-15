@@ -27,7 +27,7 @@ import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
-import { storageConfigured } from "@/lib/supabase/admin";
+import { storageConfigured } from "@/lib/storage";
 import {
   receptionCheckInSchema,
   type SessionActionState,

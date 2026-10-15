@@ -93,5 +93,3 @@ export const acceptInvitationSchema = z.object({
   locale: localeSchema,
 });
 
-export type SignInInput = z.infer<typeof signInSchema>;
-export type SignUpInput = z.infer<typeof signUpSchema>;

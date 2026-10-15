@@ -14,6 +14,7 @@ import {
 import {
   getOwnerOrgGroups,
   getUserCenterRelations,
+  homeWithoutBranch,
   primaryRole,
   type CenterRelation,
 } from "@/lib/auth/tenant";
@@ -31,6 +32,7 @@ import {
   signUpSchema,
 } from "@/lib/validation/auth";
 import type { User } from "@prisma/client";
+import { logBestEffort } from "@/lib/log";
 
 export type AuthFormState = {
   /** Message key under `Auth.errors`. */
@@ -72,9 +74,8 @@ async function resolveLandingPath(user: User): Promise<string> {
     return homePathForRole(primaryRole(relation));
   }
 
-  if (relations.length === 0) {
-    return user.isPlatformAdmin ? ROUTES.adminCenters : ROUTES.selectCenter;
-  }
+  // No branch: the admin console, the parent portal (verified children), or the hub (SYS).
+  if (relations.length === 0) return homeWithoutBranch(user);
 
   return ROUTES.selectCenter;
 }
@@ -189,7 +190,7 @@ export async function signUpAction(
   // Best-effort: a person registering as themselves must never be blocked by
   // an unrelated parent-matching failure.
   await originateParentLinks(prisma, { parentUserId: identity.user.id, phone }).catch(
-    () => undefined,
+    logBestEffort("sign-up parent-link origination"),
   );
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(identity.user));
@@ -220,7 +221,7 @@ export async function resendConfirmationAction(
   const supabase = await createSupabaseServerClient();
   await supabase.auth
     .resend({ type: "signup", email, options: { emailRedirectTo: confirmRedirect(locale) } })
-    .catch(() => undefined);
+    .catch(logBestEffort("confirmation email resend"));
 
   return { status: "resent", email };
 }

@@ -306,10 +306,7 @@ export async function setAttendanceAction(
 
   const mayVoidPayment = ctxCan(ctx, "payment.void");
   if (status === "ABSENT") {
-    const activePayment = await prisma.payment.findFirst({
-      where: { centerId: ctx.center.id, sessionAttendeeId: existing.id, voided: false, refunded: false },
-      select: { id: true },
-    });
+    const activePayment = await db.payments.findActiveForAttendee(existing.id);
     if (activePayment && !mayVoidPayment) return FORBIDDEN;
     if (activePayment && !confirmVoid) return { error: "voidConfirmationRequired" };
     if (activePayment && !reason) return { fieldErrors: { reason: "reasonRequired" } };
@@ -767,7 +764,7 @@ export async function rescheduleSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const { ctx, db } = await sessionScope();
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = rescheduleSessionSchema.safeParse(Object.fromEntries(formData));
@@ -775,10 +772,7 @@ export async function rescheduleSessionAction(
   const { locale, sessionId, date, startTime, endTime, roomId, extraRoomIds, confirmConflicts } =
     parsed.data;
 
-  const before = await prisma.session.findFirst({
-    where: { centerId: ctx.center.id, id: sessionId },
-    select: { date: true, startTime: true, endTime: true, roomId: true },
-  });
+  const before = await db.sessions.findForEdit(sessionId);
 
   const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
   const result = await rescheduleSession(
@@ -810,7 +804,9 @@ export async function rescheduleSessionAction(
     action: "session.reschedule",
     entityType: "Session",
     entityId: sessionId,
-    before,
+    before: before
+      ? { date: before.date, startTime: before.startTime, endTime: before.endTime, roomId: before.roomId }
+      : null,
     after: {
       date: result.session.date,
       startTime,
@@ -841,17 +837,14 @@ export async function updateSessionRoomsAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const { ctx, db } = await sessionScope();
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = sessionRoomsSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, sessionId, roomId, extraRoomIds, confirmConflicts } = parsed.data;
 
-  const before = await prisma.session.findFirst({
-    where: { centerId: ctx.center.id, id: sessionId },
-    select: { roomId: true, extraRooms: { select: { roomId: true } } },
-  });
+  const before = await db.sessions.findForEdit(sessionId);
   if (!before) return NOT_FOUND;
 
   const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
@@ -911,17 +904,14 @@ export async function updateSessionShareOverrideAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const { ctx, db } = await sessionScope();
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = sessionShareOverrideSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, sessionId, override } = parsed.data;
 
-  const before = await prisma.session.findFirst({
-    where: { centerId: ctx.center.id, id: sessionId },
-    select: { centerShareType: true, centerShareValue: true },
-  });
+  const before = await db.sessions.findForEdit(sessionId);
   if (!before) return NOT_FOUND;
 
   const result = await updateSessionShareOverride(prisma, ctx.center.id, sessionId, override);
@@ -936,7 +926,7 @@ export async function updateSessionShareOverrideAction(
     action: "session.shareOverride.update",
     entityType: "Session",
     entityId: sessionId,
-    before,
+    before: { centerShareType: before.centerShareType, centerShareValue: before.centerShareValue },
     after: override,
   });
 

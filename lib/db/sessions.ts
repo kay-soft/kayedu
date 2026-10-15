@@ -361,7 +361,7 @@ export async function rescheduleSession(
     // One transaction: the new occurrence and the original's linkage are
     // written together, or not at all — never a replacement with no session
     // pointing at it, or a link to a replacement that doesn't exist.
-    const outcome = await db.$transaction(async (tx) => {
+    const outcome = await runInTransaction(db, async (tx) => {
       // The closure guard, inside the write's own transaction (R2). A refusal
       // is returned, not thrown, so a lazy end-of-day close still commits.
       const gate = await ensureSessionOpenOrAutoClose(tx, sessionId, centerId, options.now, {
@@ -600,10 +600,6 @@ export function sessionListSelect(centerId: string) {
   } satisfies Prisma.SessionSelect;
 }
 
-export type SessionListRow = Prisma.SessionGetPayload<{
-  select: ReturnType<typeof sessionListSelect>;
-}>;
-
 /** A session detail page — every field it renders, including the roster. */
 export function sessionDetailInclude(centerId: string) {
   const withSelection = { include: { selections: { where: { centerId } } } } as const;
@@ -625,10 +621,6 @@ export function sessionDetailInclude(centerId: string) {
     },
   } satisfies Prisma.SessionInclude;
 }
-
-export type SessionDetailRow = Prisma.SessionGetPayload<{
-  include: ReturnType<typeof sessionDetailInclude>;
-}>;
 
 export function sessionListWhere(filters: {
   from: Date;

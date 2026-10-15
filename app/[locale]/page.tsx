@@ -2,7 +2,7 @@ import { getLocale } from "next-intl/server";
 
 import { getAppIdentity } from "@/lib/auth/session";
 import { getActiveCenterId } from "@/lib/auth/active-center";
-import { getUserCenterRelations, primaryRole } from "@/lib/auth/tenant";
+import { getUserCenterRelations, homeWithoutBranch, primaryRole } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 
@@ -22,12 +22,8 @@ export default async function HomePage() {
 
   const relations = await getUserCenterRelations(user!.id);
 
-  if (relations.length === 0) {
-    redirect({
-      href: user!.isPlatformAdmin ? ROUTES.adminCenters : ROUTES.selectCenter,
-      locale,
-    });
-  }
+  // No branch: the admin console, the parent portal (verified children), or the hub.
+  if (relations.length === 0) redirect({ href: await homeWithoutBranch(user!), locale });
 
   const activeCenterId = await getActiveCenterId();
   const relation =

@@ -1,42 +1,59 @@
 import type {
   EnrollmentStatus,
   Prisma,
+  PrismaClient,
   ReservationStatus,
   Role,
   SessionStatus,
 } from "@prisma/client";
-import { prisma } from "@/lib/db/client";
-import * as catalog from "@/lib/db/catalog";
-import { CATALOG_OVERRIDE_SELECT, catalogLabel } from "@/lib/catalog";
-import type { TenantContext } from "@/lib/auth/tenant";
+// Relative imports and an injected client (SYS): `npm run check:visibility`
+// calls the real helpers by direct call, outside Next (docs/02 §5). The app
+// passes the shared singleton through `scoped(ctx)`.
+import { prisma as sharedClient } from "./client.ts";
+import * as catalog from "./catalog.ts";
+import { CATALOG_OVERRIDE_SELECT, catalogLabel } from "../catalog.ts";
 import {
   TEACHER_LIST_SELECT,
   studentListSelect,
-} from "@/lib/db/students";
+} from "./students.ts";
 import {
   classDetailInclude,
   classListSelect,
-} from "@/lib/db/classes";
+} from "./classes.ts";
 import {
   sessionDetailInclude,
   sessionListSelect,
-} from "@/lib/db/sessions";
+} from "./sessions.ts";
 import {
   requireScopedById,
   scopedData,
   scopedFindById,
   scopedWhere,
-} from "@/lib/db/tenant-scope";
-import { staffInvitationFilter, staffMembershipFilter } from "@/lib/db/staff-filter";
-import { visibilityWindowFloor } from "@/lib/db/visibility";
+} from "./tenant-scope.ts";
+import { staffInvitationFilter, staffMembershipFilter } from "./staff-filter.ts";
+import { centreReadFloor } from "./visibility.ts";
+import { consecutiveAbsenceCount } from "./attendance.ts";
 import {
   PAYMENT_METHOD_ORDER,
   listActivePaymentMethods,
-} from "@/lib/db/payment-methods";
-import { listSessionAttendanceChanges } from "@/lib/db/session-lifecycle";
-import { loadRoomLinks } from "@/lib/db/room-sets";
-import { OPEN_CLASS_SESSION } from "@/lib/db/slot-conflicts";
-import { listCenterTerms } from "@/lib/db/terms";
+} from "./payment-methods.ts";
+import { listSessionAttendanceChanges } from "./session-lifecycle.ts";
+import { loadRoomLinks } from "./room-sets.ts";
+import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
+import { listCenterTerms } from "./terms.ts";
+
+/**
+ * What a scoped data layer needs of the request's tenant context — a real
+ * `TenantContext` (`lib/auth/tenant.ts`) satisfies it; a gate builds one by
+ * hand.
+ */
+export type ScopeContext = {
+  center: { id: string };
+  user: { locale: string | null };
+  role: string;
+  isPlatformAdmin: boolean;
+  settings: { dataVisibilityDays: number; timezone: string } | null;
+};
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
@@ -58,15 +75,68 @@ const PENDING_RESERVATION: ReservationStatus = "PENDING";
  * Every helper below funnels through scopedWhere/scopedData, so a second (or
  * hundredth) center needs no code change — only its own rows.
  */
-export function scoped(ctx: TenantContext) {
+export function scoped(ctx: ScopeContext) {
+  return scopedWith(sharedClient, ctx);
+}
+
+/**
+ * `scoped(ctx)` over an explicit client — the dependency-injection seam
+ * (docs/02 §5): the app uses `scoped(ctx)`; a gate passes its own client.
+ */
+export function scopedWith(client: PrismaClient, ctx: ScopeContext, options: { now?: Date } = {}) {
+  // `now` is the gates' injectable clock; the app passes nothing.
+  return buildScoped(client, ctx, centreReadFloor(ctx, options.now));
+}
+
+/**
+ * Why a caller reads past the data-visibility window. The window is a read
+ * restriction for centre-side roles (CLAUDE.md rule 9), and only these may
+ * opt out of it — say which at the call site:
+ * - `"integrity"` — a writer's own guard that must see the whole history
+ *   (a delete blocker, an "in use" count): refusing a delete because of a
+ *   record the person cannot see is right; allowing it because the record is
+ *   old would corrupt history.
+ * - `"settlement"` / `"audit"` — the two carve-outs (docs/01 §7): payout
+ *   records and the audit trail stay readable whatever their age.
+ */
+export type VisibilityWindowOptOut = "integrity" | "settlement" | "audit";
+
+/**
+ * `scoped(ctx)` without the data-visibility window (SEC-62) — the one named
+ * opt-out. Every other read goes through `scoped(ctx)`, which injects the
+ * window floor beside `centerId`.
+ */
+export function scopedIgnoringVisibilityWindow(
+  ctx: ScopeContext,
+  // Documents the call site; the behaviour is the same for every reason.
+  _reason: VisibilityWindowOptOut,
+  client: PrismaClient = sharedClient,
+) {
+  return buildScoped(client, ctx, null);
+}
+
+function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: Date | null) {
   const centerId = ctx.center.id;
-  // M19 data-visibility window (docs/01 §7) — `null` for a platform admin.
-  // Every other date-filterable centre-side read (Sessions, Analytics,
-  // Expenses) clamps its own caller-supplied range with this same helper at
-  // the page level, since those already take an explicit `from`/`to`; this is
-  // only for `refunds.list` below, which has no caller-supplied date param at
-  // all to clamp.
-  const visibilityFloor = visibilityWindowFloor(ctx);
+  // SEC-62 — the M19 data-visibility window (docs/01 §7), injected here
+  // beside `centerId` into every session, attendee, attendance-change,
+  // payment and expense read (and `refunds.list`): a direct URL or API call
+  // cannot reach past it. `null` for a platform admin, for a TEACHER/
+  // STUDENT/PARENT context (never windowed) and for the opt-out above.
+  // Sessions/Analytics/Expenses still clamp their own date filter too, so a
+  // range that starts before the floor reads as starting at it.
+  const sessionInWindow = (where?: Prisma.SessionWhereInput): Prisma.SessionWhereInput | undefined =>
+    visibilityFloor ? { AND: [where ?? {}, { date: { gte: visibilityFloor } }] } : where;
+  const throughSession = visibilityFloor ? { session: { date: { gte: visibilityFloor } } } : null;
+  const attendeeInWindow = (where?: Prisma.SessionAttendeeWhereInput): Prisma.SessionAttendeeWhereInput | undefined =>
+    throughSession ? { AND: [where ?? {}, throughSession] } : where;
+  const changeInWindow = (
+    where?: Prisma.SessionAttendanceChangeWhereInput,
+  ): Prisma.SessionAttendanceChangeWhereInput | undefined =>
+    throughSession ? { AND: [where ?? {}, throughSession] } : where;
+  const paymentInWindow = (where?: Prisma.PaymentWhereInput): Prisma.PaymentWhereInput | undefined =>
+    throughSession ? { AND: [where ?? {}, throughSession] } : where;
+  const expenseInWindow = (where?: Prisma.ExpenseWhereInput): Prisma.ExpenseWhereInput | undefined =>
+    visibilityFloor ? { AND: [where ?? {}, { date: { gte: visibilityFloor } }] } : where;
   // The account's own remembered locale — the best signal available inside a
   // scoped-only helper for resolving a catalog entry's bilingual name into
   // the flat `.name` shape every existing list/select-option consumer
@@ -75,6 +145,9 @@ export function scoped(ctx: TenantContext) {
 
   return {
     centerId,
+
+    /** The window floor this object applies (SEC-62) — `null` when unbounded. */
+    visibilityFloor,
 
     memberships: {
       list: (args?: {
@@ -440,15 +513,15 @@ export function scoped(ctx: TenantContext) {
 
     attendees: {
       count: (where?: Prisma.SessionAttendeeWhereInput) =>
-        prisma.sessionAttendee.count({ where: scopedWhere(centerId, where) }),
+        prisma.sessionAttendee.count({ where: scopedWhere(centerId, attendeeInWindow(where)) }),
 
       findById: (id: string) =>
-        scopedFindById(prisma.sessionAttendee, centerId, id),
+        prisma.sessionAttendee.findFirst({ where: scopedWhere(centerId, attendeeInWindow({ id })) }),
 
       /** The full row a session-detail action needs to check/audit against. */
       findDetailById: (id: string) =>
         prisma.sessionAttendee.findFirst({
-          where: scopedWhere(centerId, { id }),
+          where: scopedWhere(centerId, attendeeInWindow({ id })),
           include: {
             studentProfile: { include: { user: true } },
             payments: { orderBy: { recordedAt: "desc" } },
@@ -458,8 +531,16 @@ export function scoped(ctx: TenantContext) {
       /** Existing roster row for (session, student) — null if never marked. */
       findExisting: (sessionId: string, studentProfileId: string) =>
         prisma.sessionAttendee.findFirst({
-          where: scopedWhere(centerId, { sessionId, studentProfileId }),
+          where: scopedWhere(centerId, attendeeInWindow({ sessionId, studentProfileId })),
         }),
+
+      /**
+       * "Absent N times in a row" for one class (M5/M10) — counted back only
+       * as far as the window floor (SEC-62), so an absence older than what
+       * this role may read is never revealed as a count either.
+       */
+      absenceStreak: (classGroupId: string, studentProfileId: string, uptoDate: Date) =>
+        consecutiveAbsenceCount(prisma, centerId, classGroupId, studentProfileId, uptoDate, visibilityFloor),
     },
 
     /**
@@ -469,20 +550,35 @@ export function scoped(ctx: TenantContext) {
      */
     attendanceChanges: {
       count: (where?: Prisma.SessionAttendanceChangeWhereInput) =>
-        prisma.sessionAttendanceChange.count({ where: scopedWhere(centerId, where) }),
+        prisma.sessionAttendanceChange.count({ where: scopedWhere(centerId, changeInWindow(where)) }),
 
-      findById: (id: string) => scopedFindById(prisma.sessionAttendanceChange, centerId, id),
+      findById: (id: string) =>
+        prisma.sessionAttendanceChange.findFirst({ where: scopedWhere(centerId, changeInWindow({ id })) }),
 
       /** The receipt's "Changes during session" rows, oldest first, names resolved. */
-      listForSession: (sessionId: string) =>
-        listSessionAttendanceChanges(prisma, centerId, sessionId),
+      listForSession: async (sessionId: string) => {
+        // SEC-62: a session before the window has no readable change log.
+        if (visibilityFloor) {
+          const visible = await prisma.session.count({ where: scopedWhere(centerId, sessionInWindow({ id: sessionId })) });
+          if (visible === 0) return [];
+        }
+        return listSessionAttendanceChanges(prisma, centerId, sessionId);
+      },
     },
 
     payments: {
       count: (where?: Prisma.PaymentWhereInput) =>
-        prisma.payment.count({ where: scopedWhere(centerId, where) }),
+        prisma.payment.count({ where: scopedWhere(centerId, paymentInWindow(where)) }),
 
-      findById: (id: string) => scopedFindById(prisma.payment, centerId, id),
+      findById: (id: string) =>
+        prisma.payment.findFirst({ where: scopedWhere(centerId, paymentInWindow({ id })) }),
+
+      /** The one active (not voided, not refunded) payment on a roster row, if any. */
+      findActiveForAttendee: (sessionAttendeeId: string) =>
+        prisma.payment.findFirst({
+          where: scopedWhere(centerId, paymentInWindow({ sessionAttendeeId, voided: false, refunded: false })),
+          select: { id: true },
+        }),
     },
 
     /**
@@ -553,6 +649,10 @@ export function scoped(ctx: TenantContext) {
         }),
 
       findById: (id: string) => scopedFindById(prisma.settlement, centerId, id),
+
+      /** A single session's settlement, if one was drafted (carved out of the window). */
+      findForSession: (sessionId: string) =>
+        prisma.settlement.findFirst({ where: scopedWhere(centerId, { sessionId }) }),
     },
 
     // ── Academic / config master data (docs/01-data-model.md §2) ───────────
@@ -594,6 +694,10 @@ export function scoped(ctx: TenantContext) {
 
     /** The extra rooms of each class (R3) — reads only, see `roomLinks`. */
     classGroupRooms: {
+      /** How many classes use this room as an extra room (a delete blocker). */
+      countForRoom: (roomId: string) =>
+        prisma.classGroupRoom.count({ where: scopedWhere(centerId, { roomId }) }),
+
       listForClass: (classGroupId: string) =>
         prisma.classGroupRoom.findMany({
           where: scopedWhere(centerId, { classGroupId }),
@@ -604,6 +708,10 @@ export function scoped(ctx: TenantContext) {
 
     /** The extra rooms of each session (R3) — reads only, see `roomLinks`. */
     sessionRooms: {
+      /** How many sessions use this room as an extra room (a delete blocker — the whole history). */
+      countForRoom: (roomId: string) =>
+        prisma.sessionRoom.count({ where: scopedWhere(centerId, { roomId }) }),
+
       listForSession: (sessionId: string) =>
         prisma.sessionRoom.findMany({
           where: scopedWhere(centerId, { sessionId }),
@@ -802,7 +910,7 @@ export function scoped(ctx: TenantContext) {
      */
     sessions: {
       count: (where?: Prisma.SessionWhereInput) =>
-        prisma.session.count({ where: scopedWhere(centerId, where) }),
+        prisma.session.count({ where: scopedWhere(centerId, sessionInWindow(where)) }),
 
       /**
        * The dashboard: a lean select, filtered and ordered by time of day.
@@ -815,18 +923,36 @@ export function scoped(ctx: TenantContext) {
        */
       search: (args: { where?: Prisma.SessionWhereInput }) =>
         prisma.session.findMany({
-          where: scopedWhere(centerId, args.where),
+          where: scopedWhere(centerId, sessionInWindow(args.where)),
           orderBy: [{ date: "asc" }, { startTime: "asc" }],
           select: sessionListSelect(centerId),
           take: 1000,
         }),
 
-      findById: (id: string) => scopedFindById(prisma.session, centerId, id),
+      findById: (id: string) =>
+        prisma.session.findFirst({ where: scopedWhere(centerId, sessionInWindow({ id })) }),
 
       findDetailById: (id: string) =>
         prisma.session.findFirst({
-          where: scopedWhere(centerId, { id }),
+          where: scopedWhere(centerId, sessionInWindow({ id })),
           include: sessionDetailInclude(centerId),
+        }),
+
+      /** The plain fields an edit's audit row records as "before" (reschedule, rooms, cut override). */
+      findForEdit: (id: string) =>
+        prisma.session.findFirst({
+          where: scopedWhere(centerId, sessionInWindow({ id })),
+          select: {
+            classGroupId: true,
+            teacherId: true,
+            date: true,
+            startTime: true,
+            endTime: true,
+            roomId: true,
+            centerShareType: true,
+            centerShareValue: true,
+            extraRooms: { select: { roomId: true } },
+          },
         }),
 
       /**
@@ -836,11 +962,14 @@ export function scoped(ctx: TenantContext) {
        */
       listForDay: (date: Date) =>
         prisma.session.findMany({
-          where: scopedWhere(centerId, {
-            date,
-            status: { not: CANCELLED_STATUS },
-            ...OPEN_CLASS_SESSION,
-          }),
+          where: scopedWhere(
+            centerId,
+            sessionInWindow({
+              date,
+              status: { not: CANCELLED_STATUS },
+              ...OPEN_CLASS_SESSION,
+            }),
+          ),
           orderBy: [{ startTime: "asc" }],
           select: sessionListSelect(centerId),
         }),
@@ -930,7 +1059,7 @@ export function scoped(ctx: TenantContext) {
      */
     expenses: {
       count: (where?: Prisma.ExpenseWhereInput) =>
-        prisma.expense.count({ where: scopedWhere(centerId, where) }),
+        prisma.expense.count({ where: scopedWhere(centerId, expenseInWindow(where)) }),
 
       /** The list screen: lean, filtered, ordered and paged. */
       search: (args: {
@@ -939,14 +1068,15 @@ export function scoped(ctx: TenantContext) {
         skip?: number;
       }) =>
         prisma.expense.findMany({
-          where: scopedWhere(centerId, args.where),
+          where: scopedWhere(centerId, expenseInWindow(args.where)),
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
           include: { category: true },
           take: args.take,
           skip: args.skip,
         }),
 
-      findById: (id: string) => scopedFindById(prisma.expense, centerId, id),
+      findById: (id: string) =>
+        prisma.expense.findFirst({ where: scopedWhere(centerId, expenseInWindow({ id })) }),
 
       create: (data: Omit<Prisma.ExpenseUncheckedCreateInput, "centerId">) =>
         prisma.expense.create({ data: scopedData(centerId, data) }),
@@ -1081,4 +1211,4 @@ export function scoped(ctx: TenantContext) {
   };
 }
 
-export type ScopedDb = ReturnType<typeof scoped>;
+export type ScopedDb = ReturnType<typeof buildScoped>;

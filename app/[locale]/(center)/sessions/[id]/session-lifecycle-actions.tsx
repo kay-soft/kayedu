@@ -19,7 +19,6 @@ import { ActionBarButton } from "@/components/shared/action-bar";
 import { DialogSections, DialogShell, FormSection } from "@/components/shared/dialog-shell";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
-import { SubmitButton } from "@/components/shared/submit-button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -44,8 +43,9 @@ type RoomSetProps = {
  * rooms** (R3 — this one session's room set) and **Cancel** — as the buttons
  * of the page's `ActionBar` (R6, docs/04 §11.15), so they share the bar's
  * height, spacing and wrapping with Delete beside them. Reschedule and Edit
- * rooms open the shared `DialogShell`; Cancel is one tap, red like every
- * destructive action but the same size.
+ * rooms open the shared `DialogShell`; Cancel — red like every destructive
+ * action but the same size — opens a confirmation first (SYS: cancelling
+ * cannot be undone, so it asks, the way End session and Delete session do).
  *
  * Cancelling never touches money or attendance rows (CLAUDE.md rule 2); a
  * manager who needs that too uses the roster's own void/correct controls,
@@ -86,8 +86,8 @@ export function SessionLifecycleActions({
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
 
-  const [cancelState, cancelFormAction] = useActionState(cancelSessionAction, IDLE_SESSION_STATE);
-  const [open, setOpen] = useState<"reschedule" | "rooms" | null>(null);
+  const [cancelState, cancelFormAction, cancelPending] = useActionState(cancelSessionAction, IDLE_SESSION_STATE);
+  const [open, setOpen] = useState<"reschedule" | "rooms" | "cancel" | null>(null);
   // Each open mounts a fresh dialog, so a form never shows the last attempt.
   const [generation, setGeneration] = useState(0);
   function openDialog(kind: "reschedule" | "rooms") {
@@ -112,14 +112,30 @@ export function SessionLifecycleActions({
         </>
       ) : null}
       {canCancel ? (
-        // `contents` keeps the form out of the bar's layout: its button is the grid item.
-        <form action={cancelFormAction} className="contents">
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="sessionId" value={sessionId} />
-          <CancelButton label={t("cancel")} />
-        </form>
+        <>
+          <ActionBarButton variant="destructive" onClick={() => setOpen("cancel")}>
+            <XCircle className="size-4" aria-hidden />
+            {t("cancel")}
+          </ActionBarButton>
+          <DialogShell
+            open={open === "cancel"}
+            onOpenChange={(next) => setOpen(next ? "cancel" : null)}
+            size="narrow"
+            title={t("cancelTitle")}
+            description={t("cancelBody")}
+            formProps={{ action: cancelFormAction }}
+            cancelLabel={t("cancelKeep")}
+            submitLabel={t("cancelConfirm")}
+            submitVariant="destructive"
+            submitPending={cancelPending}
+          >
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="sessionId" value={sessionId} />
+            {cancelState.error ? <FormMessage>{tErrors(cancelState.error)}</FormMessage> : null}
+          </DialogShell>
+        </>
       ) : null}
-      {cancelState.error ? (
+      {cancelState.error && open !== "cancel" ? (
         <div className="col-span-2 sm:basis-full">
           <FormMessage>{tErrors(cancelState.error)}</FormMessage>
         </div>
@@ -147,16 +163,6 @@ export function SessionLifecycleActions({
         </>
       ) : null}
     </>
-  );
-}
-
-/** The Cancel verb: pending-aware, but the bar's size, not a form-submit size. */
-function CancelButton({ label }: { label: string }) {
-  return (
-    <SubmitButton variant="destructive" className="w-full gap-2 sm:w-auto">
-      <XCircle className="size-4" aria-hidden />
-      {label}
-    </SubmitButton>
   );
 }
 

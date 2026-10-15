@@ -1001,8 +1001,87 @@ export async function previewNewClassSessions(
 
 // ── Edit ───────────────────────────────────────────────────────────────────
 
+/**
+ * What a class price edit did to the class's own sessions (SYS, docs/00 §5.1
+ * "A class price edit reprices its open sessions"). Counts only — the audit
+ * row and the form's notice carry these.
+ */
+export type RepriceReport = {
+  /** Sessions from today on, not closed, with no payment — now at the new price. */
+  repriced: number;
+  /** Sessions that already hold a payment (any, voided included) — price kept. */
+  keptWithPayments: number;
+  /** Sessions whose own FIXED cut override is above the new price — price kept (D-15). */
+  keptCutAbovePrice: number;
+};
+
+/**
+ * **The price decision (SYS).** Editing a class's price reprices the class's
+ * sessions dated today or later (the centre's day) that are not closed, not
+ * cancelled, not a rescheduled original, and hold **no payment at all** —
+ * extra (manual) sessions of the class included, since their price was the
+ * class's. A session with any payment keeps its price, and a recorded
+ * payment is never touched (CLAUDE.md rule 2 is about payments: each one
+ * froze its own `priceSnapshot`). The centre cut needs no equivalent: a
+ * payment reads the cut at payment time already (`recordPayment`).
+ *
+ * Runs inside the class edit's transaction. The candidate sessions are
+ * row-locked first and the payment fact is re-read by a fresh statement
+ * after the lock (READ COMMITTED — docs/02 §7), so a payment in flight
+ * (which holds the session's shared lock) is either seen here or waits and
+ * then reads the new price itself (`lockAttendeeRow` re-reads it).
+ */
+async function repriceClassSessions(
+  tx: Tx,
+  centerId: string,
+  classGroupId: string,
+  price: number,
+  now: Date,
+): Promise<RepriceReport> {
+  const { timeZone } = await centreScheduling(tx, centerId);
+  const today = todayInTimezone(timeZone, now);
+  const locked = await tx.$queryRaw<{ id: string }[]>`
+    SELECT s."id" FROM "Session" s
+    WHERE s."centerId" = ${centerId} AND s."classGroupId" = ${classGroupId}
+      AND s."date" >= ${today} AND s."closedAt" IS NULL
+      AND s."status" <> 'CANCELLED' AND s."rescheduledToId" IS NULL
+      AND s."priceSnapshot" <> ${price}
+    ORDER BY s."id"
+    FOR UPDATE OF s`;
+  if (locked.length === 0) return { repriced: 0, keptWithPayments: 0, keptCutAbovePrice: 0 };
+
+  // A NEW statement, after the locks are held.
+  const rows = await tx.session.findMany({
+    where: scopedWhere(centerId, { id: { in: locked.map((row) => row.id) } }),
+    select: { id: true, centerShareType: true, centerShareValue: true, _count: { select: { payments: true } } },
+  });
+  const toReprice: string[] = [];
+  let keptWithPayments = 0;
+  let keptCutAbovePrice = 0;
+  for (const row of rows) {
+    if (row._count.payments > 0) keptWithPayments += 1;
+    else if (
+      row.centerShareType !== null &&
+      row.centerShareValue !== null &&
+      centerCutError(price, row.centerShareType, row.centerShareValue) !== null
+    ) {
+      keptCutAbovePrice += 1;
+    } else toReprice.push(row.id);
+  }
+  const repriced =
+    toReprice.length === 0
+      ? 0
+      : (
+          await tx.session.updateMany({
+            where: scopedWhere(centerId, { id: { in: toReprice }, closedAt: null, payments: { none: {} } }),
+            data: { priceSnapshot: price },
+          })
+        ).count;
+  return { repriced, keptWithPayments, keptCutAbovePrice };
+}
+
 export type UpdateClassResult =
-  | { ok: true; report: SessionSyncReport | null }
+  | { ok: true; report: SessionSyncReport | null; reprice: RepriceReport | null }
   | ConflictRefusal
   | ClassPeriodRefusal
   | { ok: false; error: "notFound" | RoomSetError | ClassMoneyError };
@@ -1011,7 +1090,9 @@ export type UpdateClassResult =
  * Edits a class. When its period, teacher or room set changes (and the class
  * is active), its future sessions are resynced in the same transaction
  * (resolves OD-9): pristine ones follow the class, the rest are reported as
- * kept. A refused conflict decision rolls the whole edit back.
+ * kept. A refused conflict decision rolls the whole edit back. When its
+ * price changes, its open sessions without payments take the new price
+ * (`repriceClassSessions`, the SYS price decision), audited with the counts.
  */
 export async function updateClassWithSessions(
   db: PrismaClient,
@@ -1061,6 +1142,12 @@ export async function updateClassWithSessions(
       current.active && shapeChanged
         ? await resyncClassSessions(tx, centerId, plan, current.baseline, options, "classGroup.update")
         : null;
+    // After the resync, so sessions it just created (already at the new
+    // price) are not counted and pristine ones it deleted are not repriced.
+    const reprice =
+      input.price !== before.price
+        ? await repriceClassSessions(tx, centerId, classGroupId, input.price, options.now ?? new Date())
+        : null;
     await audit(tx, {
       centerId,
       actorUserId: options.actorUserId,
@@ -1085,9 +1172,10 @@ export async function updateClassWithSessions(
         startDate: dateKey(input.startDate),
         endDate: dateKey(input.endDate),
         ...(report ? { sessions: reportJson(report) } : {}),
+        ...(reprice ? { reprice } : {}),
       },
     });
-    return { ok: true as const, report };
+    return { ok: true as const, report, reprice };
   });
 }
 

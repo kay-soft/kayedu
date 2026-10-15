@@ -348,7 +348,17 @@ export type ClassActionState = SlotConflictState & {
   status?: "created" | "saved" | "deleted" | "matchFound";
   /** R6 — field errors of the new teacher's own fields (keys under `People.errors`). */
   teacherFieldErrors?: Record<string, string>;
-  sessions?: { created: number; deleted: number; updated: number; kept: number; cancelled?: number };
+  sessions?: {
+    created: number;
+    deleted: number;
+    updated: number;
+    kept: number;
+    cancelled?: number;
+    /** SYS — open sessions without payments that took a class's new price. */
+    repriced?: number;
+    /** SYS — sessions that kept their price (a payment, or a cut above the new price). */
+    priceKept?: number;
+  };
   blockers?: Record<string, number>;
   /**
    * R6 — which half of "create a class with a new teacher" refused. `error`

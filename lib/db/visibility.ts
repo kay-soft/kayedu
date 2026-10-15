@@ -20,7 +20,13 @@ import { addDays, centreTimeZone, dateKey, todayInTimezone } from "../scheduling
  * scoped to centre-side ERP roles only (spec §3's role table: "no centre-side
  * role may read data older than..."). Settlement/payout records and audit
  * logs are carved out and must never call this at all (`scoped(ctx).
- * settlements`/`auditLogs`/`refunds` — see lib/db/scoped.ts).
+ * settlements`/`auditLogs` — see lib/db/scoped.ts); refunds are windowed.
+ *
+ * SEC-62 (SYS): the floor lives in the scoped helpers alongside `centerId` —
+ * `scoped(ctx)` injects `centreReadFloor(ctx)` into every session, attendee,
+ * attendance-change, payment and expense read, and only
+ * `scopedIgnoringVisibilityWindow(ctx, reason)` (writers' integrity checks,
+ * settlement and audit reads) reads past it.
  */
 export const DEFAULT_VISIBILITY_WINDOW_DAYS = 30;
 
@@ -56,6 +62,23 @@ export function visibilityWindowFloor(
   if (ctx.isPlatformAdmin) return null;
   const days = ctx.settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS;
   return addDays(todayInTimezone(centreTimeZone(ctx.settings), now), -days);
+}
+
+/** The roles the window binds — the centre-side ERP roles (docs/01 §7). */
+const CENTRE_SIDE_ROLES: ReadonlySet<string> = new Set(["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"]);
+
+/**
+ * The floor `scoped(ctx)` injects into every session, attendee, attendance-
+ * change, payment and expense read (SEC-62, CLAUDE.md rule 9): the window
+ * floor for a centre-side role, `null` (unbounded) for a platform admin and
+ * for a TEACHER/STUDENT/PARENT context, whose reads are never windowed.
+ */
+export function centreReadFloor(
+  ctx: VisibilityAwareContext & { role: string },
+  now: Date = new Date(),
+): Date | null {
+  if (!CENTRE_SIDE_ROLES.has(ctx.role)) return null;
+  return visibilityWindowFloor(ctx, now);
 }
 
 /** Whether `date` falls on or after the window floor — always true when unbounded. */

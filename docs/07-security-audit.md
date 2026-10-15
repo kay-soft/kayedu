@@ -49,9 +49,9 @@
 3. **Owner visibility.** Voids and unpaid check-ins leave no trace that any centre screen shows (SEC-07).
 4. **Environment drift.** The PostgREST lockdown exists only as hand-made state on the dev project (SEC-10).
 
-### 1.1 Fix status after SEC-2c
+### 1.1 Fix status after SEC-2c (updated at SYS)
 
-**69 FIXED, 3 OPEN, 3 DEFERRED** (SEC-2a fixed 43, SEC-2b 19, SEC-2c 7). "FIXED" means the change shipped and `npm run check:security` asserts it as `SEC-NN`. **OPEN** means a decision blocks it; **DEFERRED** means it is decided and scheduled — every one to **M20**, because it needs something only M20 brings (email delivery, Sentry, a person's dashboard action). The decisions SEC-2a, SEC-2b and SEC-2c used are in §6 (marked "decided"); none of the six remaining findings is a Critical or a High.
+**70 FIXED, 2 OPEN, 3 DEFERRED** (SEC-2a fixed 43, SEC-2b 19, SEC-2c 7, SYS 1 — SEC-62, on the user's decision for option (a)). "FIXED" means the change shipped and `npm run check:security` asserts it as `SEC-NN`. **OPEN** means a decision blocks it; **DEFERRED** means it is decided and scheduled — every one to **M20**, because it needs something only M20 brings (email delivery, Sentry, a person's dashboard action). The decisions SEC-2a, SEC-2b and SEC-2c used are in §6 (marked "decided"); none of the six remaining findings is a Critical or a High.
 
 | ID | Status | What changed / why open |
 |---|---|---|
@@ -116,7 +116,7 @@
 | SEC-59 | FIXED | A rating needs a PRESENT/LATE attendance inside the 7-day window, by direct call; a skip for a session the student did not attend writes nothing. |
 | SEC-60 | FIXED | A trigger makes `AuditLog` append-only (no UPDATE but the FKs' own SET NULL, no DELETE outside an opted-in maintenance transaction that only test cleanup uses); every money action writes its audit row on the money transaction, so an audit failure rolls the money back. |
 | SEC-61 | FIXED | SEC-2c: Prisma's model queries cannot escape a LIKE pattern (a backslash escape matches through `$queryRaw` and nothing through a model query — probed), so search tokens drop `%`, `_` and `\` (`likeSearchToken`, `lib/like.ts`) and the payment-method, term, expense-category and room duplicate checks compare the branch's names in memory by the one name key (`nameClashes` → `catalogNameKey`: trimmed, spaces collapsed, lower-cased) instead of an insensitive `equals`. `%` finds nobody; `Cash_` can be created beside `Cash1`. |
-| SEC-62 | OPEN (writes covered) | Money writes on an old session are refused by the closure rules (SEC-08). The read side — the floor inside the scoped helpers rather than per page — changes what centre staff see on the student detail page and the session list, so it needs a decision; §1.2 sets out what it would take and three options. |
+| SEC-62 | FIXED (SYS, option (a)) | `scoped(ctx)` injects the window floor beside `centerId` into every session, attendee, attendance-change, payment and expense read, for the four centre-side roles (`centreReadFloor`, `lib/db/visibility.ts`); an out-of-window record by id is `null`, lists/counts/the absence streak stop at the floor. One named opt-out, `scopedIgnoringVisibilityWindow(ctx, "integrity" \| "settlement" \| "audit")` — delete blockers and the two carve-outs. The page-level reads that bypassed the helpers (session/payment reads in the session and conflict actions) moved onto them. Writes were already covered (SEC-08). `check:visibility` asserts it per role by direct call through the real helpers (`scopedWith`), plus two static sweeps. Visible effect listed in `00` §5.1 "Data visibility window". |
 | SEC-63 | FIXED | `lockAttendeeRow` takes `centerId` and filters on it in SQL. |
 | SEC-64 | FIXED | Photos capped at about 1 MB (under the Server Action body) and shrunk in the browser first. (D-27 (b)) |
 | SEC-65 | FIXED | Photo upload and removal are audited (`student.photo.update`/`.remove`). No rate limit was added — D-28 asked for the audit. (D-28) |
@@ -133,7 +133,7 @@
 
 ### 1.2 SEC-2c notes
 
-**SEC-62 — what moving the window floor into the data layer would take.** Today the floor (`visibilityWindowFloor`) is applied per page: Sessions, Analytics, Expenses, session detail and its print clamp their own ranges; `refunds.list` is the one scoped helper that applies it; the student detail page (attendance history, absence streaks) and a few session-scoped loaders do not. The surface is about 24 `scoped(ctx).sessions/attendees/payments/expenses` call sites, 5 direct `prisma.session/payment/…` reads in 2 centre files, and the `lib/db` readers those pages call (receipt, analytics, student detail). Writes are already covered (every session older than its day is closed). Three ways to finish it:
+**SEC-62 — decided (option (a)) and FIXED at SYS; the analysis below is kept as the record of the choice.** **What moving the window floor into the data layer would take.** Today the floor (`visibilityWindowFloor`) is applied per page: Sessions, Analytics, Expenses, session detail and its print clamp their own ranges; `refunds.list` is the one scoped helper that applies it; the student detail page (attendance history, absence streaks) and a few session-scoped loaders do not. The surface is about 24 `scoped(ctx).sessions/attendees/payments/expenses` call sites, 5 direct `prisma.session/payment/…` reads in 2 centre files, and the `lib/db` readers those pages call (receipt, analytics, student detail). Writes are already covered (every session older than its day is closed). Three ways to finish it:
 - **(a) Floor in the scoped helpers** (★ the one CLAUDE.md rule 9 describes): `scoped(ctx).sessions|attendees|payments|expenses` add `date ≥ floor` (a payment and an attendee through their session's date) for centre-side roles, with a named `unbounded()` opt-out for the writers, closures and settlement, which must see everything; the 5 direct reads move behind the helpers; analytics keeps its range clamp. About a day of work plus a `check:visibility` extension. Visible effect: a student's older attendance and absence streaks disappear from the student page for non-admins, and a direct link to an old session shows "not found" — **that visible effect is the decision.**
 - **(b) A per-request Prisma extension** that injects the floor into every read of those four models when the context is centre-side. It also catches direct `prisma.*` reads, but it is invisible at the call site, does not cover raw SQL, and has to be built per request.
 - **(c) Keep per-page clamps** and add a static gate that every centre page or action reading those models clamps or is on an allowlist, closing the student detail page by hand. Cheapest; it leaves rule 9 as a convention rather than a data-layer guarantee.
@@ -355,25 +355,23 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | (admin)/… | center id, catalog ids | `requirePlatformAdmin()` first in every action |
 
 ### 2.5 Raw SQL sites
+*(Refreshed at SYS against the current code; the SEC-1 list it replaces had drifted — line numbers move, so sites are named by function.)* Every site is a Prisma **tagged template** (`$queryRaw\`…\`` / `$executeRaw\`…\``) or a `Prisma.sql` fragment: every value is a bound parameter, and the only interpolated SQL text is a **static** fragment defined in the same file (never built from input). No `$queryRawUnsafe`/`$executeRawUnsafe` exists in `app/` or `lib/`.
+
 | Site | Kind | Interpolations | User-influenced? |
 |---|---|---|---|
-| `lib/db/attendance.ts:169-180` | `$queryRaw` + `Prisma.empty`/`Prisma.sql` fragment | studentProfileId, enrollmentId, status, isDropIn, recordedBy, sessionId, centerId (all bound); `openOnly` is a static fragment | ids yes (bound params) — safe |
-| `lib/db/class-sessions.ts:1334` | `$queryRaw` FOR UPDATE | classGroupId, centerId | bound — safe |
-| `lib/db/class-sessions.ts:1971` | `$queryRaw` FOR UPDATE | sessionId, centerId | bound — safe |
-| `lib/db/payment-methods.ts:94` | `$queryRaw` FOR UPDATE | centerId | bound — safe |
-| `lib/db/session-lifecycle.ts:178,190` | `Prisma.sql` constants `GATE_COLUMNS`/`GATE_FROM` | none | static |
-| `lib/db/session-lifecycle.ts:200,212` | `$queryRaw` | sessionId/attendeeId, centerId | bound — safe |
-| `lib/db/session-lifecycle.ts:265-266` | `$queryRaw` FOR SHARE/UPDATE | sessionId, centerId | bound — safe |
-| `lib/db/session-lifecycle.ts:292-296` | `$queryRaw` FOR UPDATE | attendeeId (**no centerId** — see SEC-63) | bound — safe from injection |
-| `lib/db/students.ts:38` | `$queryRaw` INSERT…ON CONFLICT | centerId, constant | bound — safe |
-| `lib/db/terms.ts:50` | `$queryRaw` FOR UPDATE | centerId | bound — safe |
-| `scripts/catalog-check.ts:303-307` | `$queryRaw` | constants | no |
-| `scripts/catalog-check.ts:1234-1243` | `$executeRawUnsafe`/`$queryRawUnsafe` | SQL text read from a committed migration file; sample values passed as `$1,$2` | no (dev gate script) |
-| `scripts/lib/wipe.ts:14,40` | `$queryRaw` | none (pg catalog) | no |
-| `scripts/lib/wipe.ts:56` | `$executeRawUnsafe` TRUNCATE | table names from pg_class, regex-checked `^[A-Za-z0-9_]+$` (wipe.ts:27-29) | no |
-| `scripts/payment-methods-check.ts:151`, `seed-preflight.ts:39`, `seed-verify.ts:226`, `wipe-dev-data.ts:105` | `$queryRaw` | constants | no |
-| `scripts/seed-verify.ts:69` | `$queryRawUnsafe(sql)` | SQL literals in the script | no |
-| `scripts/session-lifecycle-check.ts:103-104,681-690` | `$executeRawUnsafe` DDL | constant trigger name + script-created payment UUID | no |
+| `lib/db/analytics.ts` — `revenueTotals`, `refundTotals`, `revenueByTeacher`, `expenseTotals` (`dayRangeSql`) | `$queryRaw` + `Prisma.sql`/`Prisma.join` | centerId, teacherId, date keys (bound); the column fragments `SESSION_DATE` / `e."date"` are constants | bound — safe |
+| `lib/db/attendance.ts` — `createAttendance` | `$queryRaw` INSERT … SELECT … FOR SHARE | ids, status, flags (bound); `openOnly` static | bound — safe |
+| `lib/db/class-sessions.ts` — `repriceClassSessions` (SYS), `deleteClass`, `deleteManualSession` | `$queryRaw` … FOR UPDATE | centerId, classGroupId/sessionId, today, price (bound) | bound — safe |
+| `lib/db/payment-methods.ts` — the last-active lock | `$queryRaw` FOR UPDATE | centerId | bound — safe |
+| `lib/db/payments.ts` — `recordPayment` (INSERT … ON CONFLICT), `lockPaymentRow`, `sessionReceiptTotals` | `$queryRaw` | ids, amounts (bound) | bound — safe |
+| `lib/db/reservations.ts` — `lockClassRow`; the per-account advisory lock | `$queryRaw` / `$executeRaw` | ids; the lock key string (bound) | bound — safe |
+| `lib/db/session-lifecycle.ts` — `loadGateSession*`, the session lock, `lockAttendeeRow` | `$queryRaw` + static `GATE_COLUMNS`/`GATE_FROM` | ids, centerId (bound) | bound — safe |
+| `lib/db/settlements.ts` — the per-(centre, teacher) advisory lock | `$executeRaw` | the key string (bound) | bound — safe |
+| `lib/db/students.ts` — `claimStudentCode` | `$queryRaw` INSERT … ON CONFLICT | centerId, constant | bound — safe |
+| `lib/db/terms.ts` — the centre lock | `$queryRaw` FOR UPDATE | centerId | bound — safe |
+| `lib/rate-limit.ts` — `checkRateLimit` | `$queryRaw` upsert | key, window start (bound) | bound — safe |
+| `app/[locale]/(teacher)/teacher/centers/actions.ts` — `requestToTeachAction` | `$executeRaw` advisory lock | the key string (bound) | bound — safe |
+| scripts (gates, seed, wipe) | as in the SEC-1 list | constants, script-created ids; the wipe's TRUNCATE uses `pg_class` names regex-checked `^[A-Za-z0-9_]+$` | no |
 
 **LIKE/ILIKE sites fed by user input:**
 
@@ -1482,6 +1480,7 @@ Low findings use a compact form. Every field is still present.
 **SEC-62 — The data-visibility window is enforced per page, not in the scoped helpers (CLAUDE.md rule 9).**
 - Status (SEC-2b): **OPEN (writes covered).** Money writes on an old session are refused by the closure rules (every session older than its day is closed, cancelled ones included since D-07), asserted under SEC-08. The read side — moving the window floor into the scoped session/attendee/payment helpers instead of each page — is a separate refactor not taken here.
 - Status (SEC-2c): **OPEN, needs a decision** — what it would take and three options are in §1.2.
+- Status (SYS): **FIXED** — option (a), the user's decision: the floor is in `lib/db/scoped.ts` beside `centerId`; `scopedIgnoringVisibilityWindow(ctx, reason)` is the one opt-out; asserted by `check:visibility` for every centre-side role.
 - Sev: Low.
 - Area: visibility window.
 - Evidence:
@@ -1790,7 +1789,7 @@ SEC-1 changes no behaviour, so these passages are **not** rewritten here. Each o
 |---|---|---|---|
 | `docs/03-build-order.md:186` (R2) says the "second active payment" race is closed | It is open; the lock query's EXISTS is stale | SEC-05 | **Corrected at SEC-2b** (the R2 entry says so; the race is closed by a fresh read and a partial unique index) |
 | `docs/00` §5 and CLAUDE.md rule 4: duplicate matching uses verified phone/email only | No phone is ever verified, and sign-up phones and student-edited local phones are matched | SEC-02 | **Corrected at SEC-2a** (matching now links on the global email only; a phone is never a key) |
-| CLAUDE.md rule 9: the visibility window is enforced in the scoped helpers | Enforced per page; only `refunds.list` applies it in `scoped.ts`; money writes skip it | SEC-62, SEC-08 | **Partly** — money writes on old sessions are refused at SEC-2b (closure); the reads are still per page (SEC-62 open) |
+| CLAUDE.md rule 9: the visibility window is enforced in the scoped helpers | Enforced per page; only `refunds.list` applies it in `scoped.ts`; money writes skip it | SEC-62, SEC-08 | **Yes** — writes at SEC-2b (closure), reads at SYS (the floor is in `scoped()`) |
 | `docs/02` §10 "Layer 2": `storage.objects` policies mirror membership, using three `kayedu_*` helpers | 0 storage policies and no helpers on the live project; the repo has no `avatars`/`id-cards` policies | SEC-55 | **Corrected at SEC-2a** (§10 now: no Layer 2 by design) |
 | `docs/00` §2.1-B (line 69): `public.rls_auto_enable()` is executable by anon/authenticated | The function does not exist | SEC-56 | **Corrected at SEC-2a** |
 | `docs/00` §2.1-B (line 71) and `docs/01:58,130`: avatars/id-cards policies exist; tables are "in the RLS backstop list" | No policies; the backstop script fails as written | SEC-30, SEC-56 | **Corrected at SEC-2a** |

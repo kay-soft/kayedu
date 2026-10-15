@@ -15,6 +15,7 @@ import {
   approveSessionRequestSchema,
   type ApprovalsActionState,
 } from "@/lib/validation/approvals";
+import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 /**
  * The Approvals queue's write path (docs/00-master-product-spec.md §4.1 item
@@ -108,7 +109,7 @@ export async function approveReservationAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, id } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
+  const result = await runInTransaction(prisma, (tx) =>
     confirmReservation(tx, ctx.center.id, id, ctx.user.id),
   );
   if (!result.ok) return { error: result.error };

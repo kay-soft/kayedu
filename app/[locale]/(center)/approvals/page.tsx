@@ -20,6 +20,8 @@ import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import { usersByIds } from "@/lib/db/identity";
+import { catalogGradesByIds, catalogSubjectsByIds } from "@/lib/db/catalog";
 
 type ChangeRequestPayload = {
   subjectId?: string | null;
@@ -120,7 +122,7 @@ export default async function ApprovalsPage() {
   // so fall back to the person's global `User` name for anyone still missing.
   const unresolvedTeacherIds = teacherIds.filter((id) => !teacherNameById.has(id));
   if (unresolvedTeacherIds.length > 0) {
-    const users = await prisma.user.findMany({ where: { id: { in: unresolvedTeacherIds } } });
+    const users = await usersByIds(prisma, unresolvedTeacherIds);
     for (const user of users) teacherNameById.set(user.id, fullName(user));
   }
   // `subjects`/`grades` come from `scoped(ctx)`'s catalog collections, which
@@ -139,11 +141,11 @@ export default async function ApprovalsPage() {
     .map((request) => (request.payload as unknown as ChangeRequestPayload).gradeId)
     .filter((id): id is string => Boolean(id) && !gradeNameById.has(id!));
   if (requestedSubjectIds.length > 0) {
-    const rows = await prisma.catalogSubject.findMany({ where: { id: { in: requestedSubjectIds } } });
+    const rows = await catalogSubjectsByIds(prisma, requestedSubjectIds);
     for (const row of rows) subjectNameById.set(row.id, catalogLabel(locale, row));
   }
   if (requestedGradeIds.length > 0) {
-    const rows = await prisma.catalogGrade.findMany({ where: { id: { in: requestedGradeIds } } });
+    const rows = await catalogGradesByIds(prisma, requestedGradeIds);
     for (const row of rows) gradeNameById.set(row.id, catalogLabel(locale, row));
   }
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));

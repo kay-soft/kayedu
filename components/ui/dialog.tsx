@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
@@ -28,6 +29,7 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Popup> & {
   showClose?: boolean;
 }) {
+  const t = useTranslations("Shared");
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
@@ -42,10 +44,12 @@ function DialogContent({
           "fixed inset-0 z-50 flex flex-col overflow-y-auto bg-surface outline-none",
           "transition-all duration-200",
           "data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
-          // Desktop: a centered card. Centering via translate is direction-
-          // agnostic, so it needs no RTL mirroring (docs/04 §7).
-          "sm:inset-auto sm:start-1/2 sm:top-1/2 sm:max-h-[85vh] sm:w-full",
-          "sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl",
+          // Desktop: a centered card. Horizontally by symmetric insets and
+          // auto margins — direction-agnostic. (SYS: it was `start-1/2` plus a
+          // physical `-translate-x-1/2`, which in RTL resolves `start` to
+          // `right` and pushed every dialog half its width off-centre.)
+          "sm:inset-x-0 sm:bottom-auto sm:top-1/2 sm:mx-auto sm:max-h-[85vh] sm:w-full",
+          "sm:max-w-lg sm:-translate-y-1/2 sm:rounded-xl",
           "sm:shadow-card-hover sm:ring-1 sm:ring-foreground/10",
           "data-[starting-style]:sm:scale-95 data-[ending-style]:sm:scale-95",
           className,
@@ -55,7 +59,7 @@ function DialogContent({
         {showClose ? (
           <DialogPrimitive.Close
             className="absolute end-3 top-3 flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-subtle sm:size-9"
-            aria-label="Close"
+            aria-label={t("close")}
           >
             <X className="size-5 sm:size-4" />
           </DialogPrimitive.Close>

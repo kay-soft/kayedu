@@ -323,6 +323,14 @@ export async function lockAttendeeRow(
   attendanceStatus: AttendanceStatus;
   studentProfileId: string | null;
   hasActivePayment: boolean;
+  /**
+   * The session's `priceSnapshot`, read by the same fresh statement — the
+   * price a payment freezes. A class price edit reprices open sessions under
+   * the session's exclusive lock (SYS, `repriceClassSessions`), and the
+   * caller already holds the session's shared lock here, so this is the
+   * price as of the payment, never one read before a concurrent reprice.
+   */
+  sessionPrice: number;
 } | null> {
   const locked = await tx.$queryRaw<
     { attendanceStatus: AttendanceStatus; studentProfileId: string | null }[]
@@ -333,12 +341,18 @@ export async function lockAttendeeRow(
   const row = locked[0];
   if (!row) return null;
   // A NEW statement, after the lock is held (see above).
-  const active = await tx.$queryRaw<{ hasActivePayment: boolean }[]>`
+  const active = await tx.$queryRaw<{ hasActivePayment: boolean; sessionPrice: number }[]>`
     SELECT EXISTS (
       SELECT 1 FROM "Payment" p
       WHERE p."sessionAttendeeId" = ${attendeeId} AND p."centerId" = ${centerId} AND p."voided" = false
-    ) AS "hasActivePayment"`;
-  return { ...row, hasActivePayment: Boolean(active[0]?.hasActivePayment) };
+    ) AS "hasActivePayment",
+    (SELECT s."priceSnapshot" FROM "SessionAttendee" a JOIN "Session" s ON s."id" = a."sessionId"
+      WHERE a."id" = ${attendeeId} AND a."centerId" = ${centerId}) AS "sessionPrice"`;
+  return {
+    ...row,
+    hasActivePayment: Boolean(active[0]?.hasActivePayment),
+    sessionPrice: Number(active[0]?.sessionPrice ?? 0),
+  };
 }
 
 /**

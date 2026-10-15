@@ -10,6 +10,7 @@ import {
 } from "@/lib/id-card";
 import { AVATARS_BUCKET, LOGOS_BUCKET } from "@/lib/storage-paths";
 import { catalogLabelWithSelection, type CatalogNameOverride } from "@/lib/catalog";
+import { logBestEffort } from "@/lib/log";
 
 export type CardStudent = StudentProfile & {
   user: User;
@@ -38,7 +39,9 @@ export async function studentCardSvg(
     // The logo is a private object in this centre's own folder (D-25) — no
     // server-side fetch of an arbitrary URL any more (SEC-53).
     ctx.center.logoPath
-      ? objectAsDataUri(centerId, LOGOS_BUCKET, ctx.center.logoPath).catch(() => null)
+      ? objectAsDataUri(centerId, LOGOS_BUCKET, ctx.center.logoPath).catch(
+          (error: unknown) => logBestEffort("ID card logo inline")(error) ?? null,
+        )
       : null,
     student.photoUrl
       ? objectAsDataUri(centerId, AVATARS_BUCKET, student.photoUrl).catch(

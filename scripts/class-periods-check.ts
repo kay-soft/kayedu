@@ -962,6 +962,85 @@ async function main() {
       (await prisma.classGroup.findUniqueOrThrow({ where: { id: classZ.classGroupId } })).active === true,
   );
   check("Centre B reads no kept sessions of Centre A's class", (await keptClassSessions(prisma, B, classZ.classGroupId, NOW)).length === 0);
+
+  // ── 10. A class price edit reprices its open sessions (SYS decision) ─────
+  console.log("\n10. A price edit reprices open sessions without payments (SYS)");
+  const r11 = await makeRoom(A, "R11");
+  const tPrice = await makeTeacher(A, "price");
+  const pricedInput = classInput(tPrice.id, r11.id, day("2026-10-12"), day("2026-11-30"));
+  const priced = await createClass(A, pricedInput, [{ dayOfWeek: 2, startTime: "07:00", endTime: "08:00" }]);
+  const pricedSessions = await sessionsOf(priced.classGroupId); // Tuesdays 13 Oct → 24 Nov
+  const [paidS, overrideS, cancelledS, ...pristineS] = pricedSessions;
+  const onClass = { classGroupId: priced.classGroupId, teacherId: tPrice.id, roomId: r11.id, priceSnapshot: 12_000 };
+  const closedS = await prisma.session.create({
+    data: scopedData(A, { ...onClass, date: day("2026-10-06"), startTime: "07:00", endTime: "08:00", status: "COMPLETED", closedAt: NOW }),
+  });
+  const startedTodayS = await prisma.session.create({
+    data: scopedData(A, { ...onClass, date: TODAY, startTime: "09:00", endTime: "10:00" }),
+  });
+  const manualS = await prisma.session.create({
+    data: scopedData(A, { ...onClass, isManual: true, date: day("2026-10-15"), startTime: "07:00", endTime: "08:00" }),
+  });
+  await pay(A, (await attend(A, paidS.id, student.profile.id, staff.id)).id, staff.id);
+  const paymentBefore = await prisma.payment.findFirstOrThrow({ where: { sessionId: paidS.id } });
+  await prisma.session.update({ where: { id: overrideS.id }, data: { centerShareType: "FIXED", centerShareValue: 12_500 } });
+  await prisma.session.update({ where: { id: cancelledS.id }, data: { status: "CANCELLED" } });
+
+  const lowered = await updateClassWithSessions(prisma, A, priced.classGroupId, { ...pricedInput, price: 10_000 }, { confirmConflicts: true, now: NOW, actorUserId: staff.id });
+  const priceOf = async (id: string) => (await prisma.session.findUniqueOrThrow({ where: { id }, select: { priceSnapshot: true } })).priceSnapshot;
+  check(
+    "The edit reports the counts: open, payment-free sessions repriced; one kept for its payment, one for its own cut",
+    lowered.ok && lowered.reprice?.repriced === pristineS.length + 2 && lowered.reprice.keptWithPayments === 1 && lowered.reprice.keptCutAbovePrice === 1,
+    JSON.stringify(lowered.ok ? lowered.reprice : lowered),
+  );
+  check(
+    "Future pristine sessions, a started-but-open session today and the class's extra session take the new price",
+    (await Promise.all([...pristineS.map((s) => s.id), startedTodayS.id, manualS.id].map(priceOf))).every((p) => p === 10_000),
+  );
+  check(
+    "A session with a payment, a FIXED override above the new price, a cancelled and a closed session keep 120 EGP",
+    (await Promise.all([paidS.id, overrideS.id, cancelledS.id, closedS.id].map(priceOf))).every((p) => p === 12_000),
+  );
+  const paymentAfter = await prisma.payment.findFirstOrThrow({ where: { id: paymentBefore.id } });
+  check(
+    "The recorded payment is untouched (amount, price and both share snapshots)",
+    paymentAfter.amount === paymentBefore.amount && paymentAfter.priceSnapshot === paymentBefore.priceSnapshot &&
+      paymentAfter.centerShareSnapshot === paymentBefore.centerShareSnapshot &&
+      paymentAfter.teacherShareSnapshot === paymentBefore.teacherShareSnapshot && paymentAfter.updatedAt.getTime() === paymentBefore.updatedAt.getTime(),
+  );
+  const priceAudit = await prisma.auditLog.findFirst({
+    where: { action: "classGroup.update", entityId: priced.classGroupId },
+    orderBy: { createdAt: "desc" },
+  });
+  const auditedReprice = (priceAudit?.after as { reprice?: Record<string, number> } | null)?.reprice;
+  check(
+    "The edit is audited with the counts (classGroup.update → after.reprice)",
+    auditedReprice?.repriced === pristineS.length + 2 && auditedReprice.keptWithPayments === 1 && auditedReprice.keptCutAbovePrice === 1 &&
+      (priceAudit?.before as { price?: number } | null)?.price === 12_000,
+    JSON.stringify(priceAudit?.after),
+  );
+  await pay(A, (await attend(A, pristineS[0].id, student.profile.id, staff.id)).id, staff.id);
+  const newPayment = await prisma.payment.findFirstOrThrow({ where: { sessionId: pristineS[0].id } });
+  check(
+    "A payment recorded afterwards freezes the new price; the cut is still read at payment time (15% of 100 EGP)",
+    newPayment.amount === 10_000 && newPayment.priceSnapshot === 10_000 && newPayment.centerShareSnapshot === 1_500,
+  );
+  const cutOnly = await updateClassWithSessions(prisma, A, priced.classGroupId, { ...pricedInput, price: 10_000, centerShareValue: 20 }, { confirmConflicts: true, now: NOW });
+  check(
+    "A cut-only edit reprices nothing (the cut is read at payment time) and moves no recorded payment",
+    cutOnly.ok && cutOnly.reprice === null && (await priceOf(pristineS[1].id)) === 10_000 &&
+      (await prisma.payment.findFirstOrThrow({ where: { id: newPayment.id } })).centerShareSnapshot === 1_500,
+  );
+  const extended = await updateClassWithSessions(prisma, A, priced.classGroupId, { ...pricedInput, price: 10_000, centerShareValue: 20, endDate: day("2026-12-15") }, { confirmConflicts: true, now: NOW });
+  const added = await prisma.session.findMany({ where: { classGroupId: priced.classGroupId, date: { gt: day("2026-11-30") } } });
+  check(
+    "Sessions the class creates later carry the class's current price",
+    extended.ok && added.length > 0 && added.every((s) => s.priceSnapshot === 10_000),
+  );
+  check(
+    "recordPayment freezes the session price read under its locks (lockAttendeeRow), not the unlocked peek",
+    /const amount = roster\.sessionPrice;/.test(readFileSync("lib/db/payments.ts", "utf8")),
+  );
 }
 
 main()

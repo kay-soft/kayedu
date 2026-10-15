@@ -46,7 +46,7 @@ import { Link, redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
 import { AVATARS_BUCKET } from "@/lib/storage-paths";
-import { storageConfigured } from "@/lib/supabase/admin";
+import { storageConfigured } from "@/lib/storage";
 
 /**
  * Reception Desk (spec §4.1 item 8, reworked in R7): **Find a student** is a

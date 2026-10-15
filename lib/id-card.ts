@@ -30,6 +30,7 @@ import {
   type CardTextAlign,
 } from "./card-layout.ts";
 import { toAsciiDigits } from "./digits.ts";
+import { centerInitial, personInitials } from "./initials.ts";
 import { qrMatrix } from "./qr.ts";
 
 /** Card face in layout units. 320 × 202 ≈ credit-card 85.6 × 54 mm. */
@@ -435,10 +436,10 @@ function paint(value: string | undefined, fallback: string): string {
   return normalizeHex(value) ?? fallback;
 }
 
+/** The photo placeholder's monogram — the one initials rule (`lib/initials.ts`, SYS). */
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const letters = parts.slice(0, 2).map((part) => part.charAt(0));
-  return letters.join("").toUpperCase() || "?";
+  const [first = "", second = ""] = name.trim().split(/\s+/).filter(Boolean);
+  return personInitials(first, second);
 }
 
 /**
@@ -517,7 +518,7 @@ export function renderIdCardSvg(data: IdCardData): string {
           `<rect x="${x}" y="${y}" width="${size}" height="${size}" rx="6" ${tile}/>` +
             `<text x="${round(x + size / 2)}" y="${round(y + size * 0.7)}" ` +
             `font-size="${round(size * 0.55)}" font-weight="700" fill="#ffffff" ` +
-            `text-anchor="middle">${escapeXml(data.centerName.trim().charAt(0))}</text>`,
+            `text-anchor="middle">${escapeXml(centerInitial(data.centerName))}</text>`,
         ),
       );
     }

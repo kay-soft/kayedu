@@ -34,10 +34,6 @@ export const MAX_PRICE_PIASTRES = 10_000_000;
  */
 export const MAX_STORED_PIASTRES = 2_147_483_647;
 
-export function toPiastres(egp: number): number {
-  return Math.round(egp * 100);
-}
-
 export function fromPiastres(piastres: number): number {
   return piastres / 100;
 }

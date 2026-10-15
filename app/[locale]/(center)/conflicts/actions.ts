@@ -7,7 +7,7 @@ import { previewClassSessions, previewManualSession, previewNewClassSessions } f
 import { prisma } from "@/lib/db/client";
 import { resolveRoomSet } from "@/lib/db/room-sets";
 import { describeConflicts, loadSessionOccupancy } from "@/lib/db/slot-conflicts";
-import { scopedWhere } from "@/lib/db/tenant-scope";
+import { scoped } from "@/lib/db/scoped";
 import { effectiveRoomIds } from "@/lib/rooms";
 import {
   dateKey,
@@ -211,12 +211,9 @@ export async function checkSlotConflictsAction(
       )
     ).conflicts;
   } else {
-    const session = await prisma.session.findFirst({
-      where: scopedWhere(centerId, { id: value.sessionId }),
-      select: { classGroupId: true, teacherId: true, date: true, startTime: true, endTime: true },
-    });
+    const session = await scoped(ctx).sessions.findForEdit(value.sessionId);
     if (!session) return { ...NONE, policy };
-    const date = value.date ? new Date(`${value.date}T00:00:00.000Z`) : session.date;
+    const date = value.date ? dayMarker(value.date) : session.date;
     const startTime = value.startTime ?? session.startTime;
     const endTime = value.endTime ?? session.endTime;
     if (!isValidTimeRange(startTime, endTime)) return { ...NONE, policy };

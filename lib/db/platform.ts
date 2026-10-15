@@ -169,9 +169,9 @@ export async function createCenterWithSettings(
         lifecycleState: "ONBOARDING",
         // A platform-created center starts as its own single-branch
         // organization (M11) — the same shape the M11 migration's backfill
-        // gave every pre-existing center. Turning it into a real multi-branch
-        // organization later is an Owner-side action, not something this
-        // provisioning step decides.
+        // gave every pre-existing center. Nothing yet adds a branch to an
+        // existing organization — how that should work is OD-12
+        // (docs/00 §2.2), not something this provisioning step decides.
         organization: {
           create: {
             name: input.name,
@@ -388,4 +388,53 @@ export async function recordSupportAccess(
     entityType: "Center",
     entityId: input.centerId,
   });
+}
+
+// ── Plain lookups the pages used to make with `prisma.*` directly (SYS) ─────
+// Global by nature (a platform admin's view, the invite page, the public
+// directories), so they take no centre scope — but they live here, behind
+// the injected client, rather than in a page (docs/02 §5, §7).
+
+/** One centre row — the platform admin's support view. */
+export function platformCenterById(db: Db, id: string) {
+  return db.center.findUnique({ where: { id } });
+}
+
+/** A centre's newest audit rows (carved out of the visibility window — docs/01 §7). */
+export function platformCenterAuditTrail(db: Db, centerId: string, take = 20) {
+  return db.auditLog.findMany({
+    where: { centerId },
+    orderBy: { createdAt: "desc" },
+    take,
+    include: { actor: true },
+  });
+}
+
+/** A centre's settings row (`null` before it was ever configured). */
+export function centerSettingsFor(db: Db, centerId: string) {
+  return db.centerSettings.findUnique({ where: { centerId } });
+}
+
+/** Every centre that may operate (ONBOARDING/ACTIVE/GRACE), for the public directories. */
+export function listAccessibleCenters(db: Db) {
+  return db.center.findMany({
+    where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    select: { id: true, name: true, logoPath: true, themeColor: true },
+    orderBy: { name: "asc" },
+  });
+}
+
+/** Centre names by id (a cross-centre list the caller already scoped by identity). */
+export function centerNamesByIds(db: Db, ids: string[]) {
+  return db.center.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+}
+
+/** A centre's stored logo key, for the signing route (`/api/logos/[centerId]`). */
+export function centerLogoPath(db: Db, centerId: string) {
+  return db.center.findUnique({ where: { id: centerId }, select: { id: true, logoPath: true } });
+}
+
+/** An invitation by its token, with its centre — the accept page (the token is the only link). */
+export function invitationByToken(db: Db, token: string) {
+  return db.invitation.findUnique({ where: { token }, include: { center: true } });
 }

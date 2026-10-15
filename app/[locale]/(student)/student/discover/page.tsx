@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { requireStudentUser } from "@/lib/auth/tenant";
 import { listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import {
   discoverClassesForCenter,
   teacherDisplayNames,
@@ -32,6 +31,7 @@ import { ROUTES } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
+import { listAccessibleCenters } from "@/lib/db/platform";
 
 type CardStatus = "enrolled" | "pending" | "full" | "open" | "requiresApproval";
 
@@ -82,11 +82,7 @@ export default async function StudentDiscoverPage({
 
   const [centers, blockedByCenter, reservationByClass, enrolledClassIds, allSubjects, allGrades] =
     await Promise.all([
-      prisma.center.findMany({
-        where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-        select: { id: true, name: true, logoPath: true, themeColor: true },
-        orderBy: { name: "asc" },
-      }),
+      listAccessibleCenters(prisma),
       studentBlockedRefsByCenter(prisma, session.user.id),
       studentReservationStatusByClass(prisma, session.user.id),
       studentActiveEnrollmentClassIds(prisma, session.user.id),

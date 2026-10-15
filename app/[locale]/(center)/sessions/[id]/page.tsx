@@ -19,12 +19,10 @@ import { PageHeader } from "@/components/shared/page-header";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { manualSessionDeleteState } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
-import { isWithinVisibilityWindow, visibilityWindowFloor } from "@/lib/db/visibility";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { studentSearchWhere } from "@/lib/db/students";
@@ -85,12 +83,9 @@ export default async function SessionDetailPage({
   await closeSessionIfDayOver(prisma, ctx.center.id, id);
   const session = await db.sessions.findDetailById(id);
   // A session older than the data-visibility window (M19) refuses the same
-  // way a cross-tenant id does — "not found", not a visible-but-locked page —
-  // mirroring the receptionist profit-denial shape (spec §7 criterion 9) at
-  // the direct-URL level this milestone's acceptance criteria call out.
-  if (!session || !isWithinVisibilityWindow(session.date, visibilityWindowFloor(ctx))) {
-    notFound();
-  }
+  // way a cross-tenant id does — "not found", not a visible-but-locked page.
+  // Since SEC-62 the scoped helper itself applies the floor beside centerId.
+  if (!session) notFound();
 
   const t = await getTranslations("Sessions");
   const tStatus = await getTranslations("Sessions.status");
@@ -106,7 +101,7 @@ export default async function SessionDetailPage({
     session.classGroupId ? db.enrollments.listForClass(session.classGroupId) : Promise.resolve([]),
     loadSessionReceiptView(ctx.center.id, session),
     ctxCan(ctx, "settlement.manage")
-      ? prisma.settlement.findFirst({ where: { centerId: ctx.center.id, sessionId: session.id } })
+      ? db.settlements.findForSession(session.id)
       : Promise.resolve(null),
     // R1: only active methods are offered; recorded payments show their own
     // frozen label regardless of what happens to the method afterwards.
@@ -178,9 +173,8 @@ export default async function SessionDetailPage({
       roster
         .filter((row) => row.status === "ABSENT")
         .map(async (row) => {
-          row.consecutiveAbsences = await consecutiveAbsenceCount(
-            prisma,
-            ctx.center.id,
+          // SEC-62: counted back no further than the visibility window.
+          row.consecutiveAbsences = await db.attendees.absenceStreak(
             streakClassId,
             row.studentProfileId,
             session.date,

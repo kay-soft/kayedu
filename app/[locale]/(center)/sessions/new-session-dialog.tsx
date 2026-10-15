@@ -311,7 +311,7 @@ function NewSessionDialogContent({
                     aria-invalid={state.fieldErrors?.title ? true : undefined}
                   />
                 </Field>
-                <Field id="new-session-subject" label={tClasses("subject")} optional error={error("subjectId")}>
+                <Field id="new-session-subject" label={tClasses("fields.subject")} optional error={error("subjectId")}>
                   <Select id="new-session-subject" name="subjectId" defaultValue="">
                     <option value="">{noneLabel}</option>
                     {subjects.map((option) => (
@@ -321,7 +321,7 @@ function NewSessionDialogContent({
                     ))}
                   </Select>
                 </Field>
-                <Field id="new-session-grade" label={tClasses("grade")} optional error={error("gradeId")}>
+                <Field id="new-session-grade" label={tClasses("fields.grade")} optional error={error("gradeId")}>
                   <Select id="new-session-grade" name="gradeId" defaultValue="">
                     <option value="">{noneLabel}</option>
                     {grades.map((option) => (
@@ -400,7 +400,7 @@ function NewSessionDialogContent({
           {mode === "oneOff" ? (
             <FormSection title={tSections("money")} icon={<Banknote />}>
               <div className="grid gap-4 sm:grid-cols-3">
-                <Field id="new-session-price" label={tClasses("price")} error={error("price")}>
+                <Field id="new-session-price" label={tClasses("fields.price")} error={error("price")}>
                   <Input
                     id="new-session-price"
                     name="price"
@@ -414,20 +414,20 @@ function NewSessionDialogContent({
                     aria-invalid={state.fieldErrors?.price ? true : undefined}
                   />
                 </Field>
-                <Field id="new-session-shareType" label={tClasses("shareType")}>
+                <Field id="new-session-shareType" label={tClasses("fields.shareType")}>
                   <Select
                     id="new-session-shareType"
                     name="centerShareType"
                     value={shareType}
                     onValueChange={(next) => setShareType(next as ShareType)}
                   >
-                    <option value="PERCENTAGE">{tClasses("percentage")}</option>
-                    <option value="FIXED">{tClasses("fixed")}</option>
+                    <option value="PERCENTAGE">{tClasses("fields.percentage")}</option>
+                    <option value="FIXED">{tClasses("fields.fixed")}</option>
                   </Select>
                 </Field>
                 <Field
                   id="new-session-shareValue"
-                  label={shareType === "FIXED" ? tClasses("shareValueEgp") : tClasses("shareValuePct")}
+                  label={shareType === "FIXED" ? tClasses("fields.shareValueEgp") : tClasses("fields.shareValuePct")}
                   error={error("shareValue")}
                 >
                   <Input
@@ -464,11 +464,11 @@ function NewSessionDialogContent({
               {preview ? (
                 <dl className="flex flex-col gap-1 text-sm sm:flex-row sm:gap-6">
                   <div className="flex justify-between gap-3 sm:block">
-                    <dt className="text-text-secondary">{tClasses("centerShare")}</dt>
+                    <dt className="text-text-secondary">{tClasses("fields.centerShare")}</dt>
                     <dd className="font-semibold tabular-nums">{formatMoney(preview.centerShare, locale)}</dd>
                   </div>
                   <div className="flex justify-between gap-3 sm:block">
-                    <dt className="text-text-secondary">{tClasses("teacherShare")}</dt>
+                    <dt className="text-text-secondary">{tClasses("fields.teacherShare")}</dt>
                     <dd className="font-semibold tabular-nums">{formatMoney(preview.teacherShare, locale)}</dd>
                   </div>
                 </dl>

@@ -183,15 +183,6 @@ export class PermissionError extends Error {
   }
 }
 
-/** Server-side authoritative check. Client-side `can()` only hides controls. */
-export function assertCan(
-  role: TenantRole,
-  permission: Permission,
-  grants?: PermissionGrants,
-): void {
-  if (!can(role, permission, grants)) throw new PermissionError(role, permission);
-}
-
 export function permissionsFor(role: TenantRole, grants?: PermissionGrants): Permission[] {
   return PERMISSIONS.filter((permission) => can(role, permission, grants));
 }

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
@@ -50,7 +51,10 @@
     "check:security": "node --env-file-if-exists=.env scripts/security-check.ts",
     "check:rls": "node --env-file-if-exists=.env scripts/rls-check.ts",
     "check:all": "node --env-file-if-exists=.env scripts/run-gates.ts",
-    "gates:users": "node --env-file-if-exists=.env scripts/gate-users.ts"
+    "gates:users": "node --env-file-if-exists=.env scripts/gate-users.ts",
+    "e2e": "playwright test",
+    "e2e:report": "playwright show-report e2e/.report",
+    "perf:queries": "node --env-file-if-exists=.env scripts/query-count.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -70,6 +74,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

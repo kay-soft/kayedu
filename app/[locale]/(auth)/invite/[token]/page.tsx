@@ -8,10 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
+import { ACCESSIBLE_LIFECYCLE_STATES, invitationByToken } from "@/lib/db/platform";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format";
 
 /**
  * Staff invite acceptance (docs/02 §3). The unguessable token is the entry
@@ -29,10 +30,7 @@ export default async function InvitePage({
   const tErrors = await getTranslations("Auth.errors");
   const tRoles = await getTranslations("Roles");
 
-  const invitation = await prisma.invitation.findUnique({
-    where: { token },
-    include: { center: true },
-  });
+  const invitation = await invitationByToken(prisma, token);
 
   const invalidReason = !invitation
     ? "inviteNotFound"
@@ -126,10 +124,7 @@ export default async function InvitePage({
 
         <p className="text-xs text-text-muted">
           {t("expiresAt", {
-            date: new Intl.DateTimeFormat(
-              locale === "ar" ? "ar-EG-u-nu-arab" : "en-US",
-              { dateStyle: "medium" },
-            ).format(invitation.expiresAt),
+            date: formatDate(invitation.expiresAt, locale),
           })}
         </p>
       </div>
