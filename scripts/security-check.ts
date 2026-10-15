@@ -653,7 +653,9 @@ async function main() {
     rateLimitKeys.add(`identityLookupPerUser:${actor.id}`);
     rateLimitKeys.add(`identityLookupPerCenter:${siblingCenter.id}`);
     let lastKind = "";
-    await awayFromWindowEdge(60_000);
+    // 21 sequential lookups are slow over a Cairo -> Frankfurt link, so the
+    // default 20 s margin let the minute window roll mid-loop (a flake).
+    await awayFromWindowEdge(60_000, 45_000);
     for (let i = 0; i < 21; i++) {
       lastKind = (
         await resolveContact({ centerId: siblingCenter.id, actorUserId: actor.id, adding: "student" }, { email: null, phone: minorPhone })

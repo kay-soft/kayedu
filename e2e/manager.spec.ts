@@ -4,7 +4,7 @@ import { uniqueTag } from "./support/accounts";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import type { AppLocale } from "./support/i18n";
 import { t } from "./support/i18n";
-import { choose, dayFromToday, field, openDialog, pickDate, submitConfirmingConflicts } from "./support/ui";
+import { choose, dayFromToday, field, isoDayFromToday, openDialog, pickDate, submitConfirmingConflicts } from "./support/ui";
 
 /**
  * Journey 3 — the manager (SYS Part A): classes, sessions (one-time,
@@ -14,8 +14,8 @@ import { choose, dayFromToday, field, openDialog, pickDate, submitConfirmingConf
  */
 
 /** Opens the first detail link of a list page and returns to the list by the header's back link. */
-async function openFirstDetailAndBack(page: Page, locale: AppLocale, list: string, back: string) {
-  await page.goto(`/${locale}${list}`);
+async function openFirstDetailAndBack(page: Page, locale: AppLocale, list: string, back: string, query = "") {
+  await page.goto(`/${locale}${list}${query}`);
   await expectHealthy(page, locale);
   const detail = page.locator(`main a[href*="${list}/"]`).first();
   await expect(detail).toBeVisible();
@@ -31,8 +31,12 @@ test("detail pages open from their lists and their back links return", async ({ 
   await openFirstDetailAndBack(page, appLocale, "/classes", "Classes.backToList");
   await openFirstDetailAndBack(page, appLocale, "/students", "Students.backToList");
   await openFirstDetailAndBack(page, appLocale, "/teachers", "Teachers.backToList");
-  await page.goto(`/${appLocale}/sessions?range=week`);
-  await openFirstDetailAndBack(page, appLocale, "/sessions", "Sessions.backToList");
+  // The sessions list defaults to *today*, which holds nothing on a day with
+  // no classes (a Friday, a holiday) - so look across a window around today
+  // that always contains the seeded history and the upcoming sessions. The
+  // back link returns to the list with its filter, which the URL check allows.
+  const window = `?range=range&from=${isoDayFromToday(-30)}&to=${isoDayFromToday(30)}`;
+  await openFirstDetailAndBack(page, appLocale, "/sessions", "Sessions.backToList", window);
 });
 
 test("approvals, settlements, analytics, expenses, refunds and audit render for the manager", async ({ as, appLocale }) => {

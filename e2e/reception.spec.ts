@@ -27,10 +27,16 @@ test("the desk renders, a search finds a seeded student, and profit pages refuse
   }
 });
 
-/** "HH:mm" in Cairo, `offsetMinutes` from now. */
+/** "HH:mm" in Cairo, `offsetMinutes` from now - clamped to the same Cairo day (00:00-23:59). */
 function cairoTime(offsetMinutes: number): string {
-  const at = new Date(Date.now() + offsetMinutes * 60_000);
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
+  const format = (at: Date) =>
+    new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
+  const now = format(new Date());
+  const shifted = format(new Date(Date.now() + offsetMinutes * 60_000));
+  // A shift that crossed midnight wrapped round the clock: stay on today's side of it.
+  if (offsetMinutes < 0 && shifted > now) return "00:00";
+  if (offsetMinutes > 0 && shifted < now) return "23:59";
+  return shifted;
 }
 
 async function createLiveOneOff(page: Page, locale: AppLocale, title: string) {
@@ -56,8 +62,11 @@ async function createLiveOneOff(page: Page, locale: AppLocale, title: string) {
 }
 
 test("@write the daily loop: register, check in, switch to Absent (voids), end, receipt, print", async ({ as, appLocale, msg }) => {
+  // The session is live from (now - 15 min, clamped to 00:00) to (now + 45 min,
+  // clamped to 23:59), all on today's Cairo date, so any hour works - except
+  // the last minutes of the day, when the session would end under the test.
   const nowCairo = cairoTime(0);
-  test.skip(nowCairo < "00:30" || nowCairo > "22:30", "needs a live session window today in Cairo");
+  test.skip(nowCairo > "23:49", "needs a few minutes before Cairo midnight for a live session to survive the run");
 
   // A live one-time session of our own (a manager adds it — reception cannot).
   const manager = await as("manager");

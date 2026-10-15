@@ -25,7 +25,7 @@ Each journey was traced in code (screens → Server Actions → the permission e
 | 1 | Platform admin | `admin.spec.ts` | **Pass** (writes: en-1280, ar-375) |
 | 2 | Owner | `owner.spec.ts` (+ navigation) | **Pass** |
 | 3 | Manager | `manager.spec.ts` | **Pass** |
-| 4 | Receptionist | `reception.spec.ts` | **Pass** (the daily loop needs a live-session window, 00:30–22:30 Cairo) |
+| 4 | Receptionist | `reception.spec.ts` | **Pass** (the daily loop needs a live-session window - any hour except the last ten minutes before Cairo midnight) |
 | 5 | Accountant | `accountant.spec.ts` | **Pass** |
 | 6 | Teacher — one / two / zero centres | `teacher.spec.ts` | **Pass** |
 | 7 | Student | `student.spec.ts` | **Pass** (sign-up: en-1280 only) |
@@ -202,6 +202,16 @@ Already correct, left alone: `getTenantContext`/`getUserCenterRelations`/`getCur
 | `/settlements` | 14 -> 13 | 2522 -> 2089 (-17 %) |
 
 **What is left, and why it was not done here.** (1) Prisma loads each nested `include`/`select` level as its own query; `relationLoadStrategy: "join"` (the `relationJoins` preview feature, a `generator` flag in `schema.prisma`) would turn those chains into one query each - the biggest remaining win (session detail, schedule, class detail), but it is a schema-file change and a Prisma-behaviour change, so it needs an explicit go-ahead. (2) The ~56 ms `SELECT 1` per newly opened pooled connection is a property of the pooled URL; a warm production instance reuses connections. (3) In production the app runs in Frankfurt next to the database, where every hop is a few ms - this work matters mainly for Cairo-side development.
+
+#### 4.6.3 E2E is independent of the wall clock (PERF)
+
+Three time dependencies were removed from the suite - none was a product bug (the centre's calendar day is Cairo's, and the app correctly refused a session "in the past"):
+
+1. **"Today" in the date picker was the UTC date** (`dayFromToday`, `e2e/support/ui.ts`). Between 00:00 and 03:00 Cairo the UTC date is still yesterday, so the reception daily loop picked yesterday and the form refused it. It now computes the Cairo date.
+2. **The manager "detail pages" test opened `/sessions`, which defaults to today.** On a day with no classes (a Friday, a holiday) or once the seeded history ages out of the default view the list was empty. It now opens the list through `?range=range&from=<today-30>&to=<today+30>` (relative, so no seed change) and clicks the first session.
+3. **The reception test skipped itself outside 00:30-22:30 Cairo.** Its live session now runs from `now-15 min` (clamped to 00:00) to `now+45 min` (clamped to 23:59) on the Cairo date, so any hour works; it skips only after 23:49, when a live session cannot outlast the run - a physical limit, not a date one.
+
+No assertion was weakened.
 
 ### 4.7 Dead code
 

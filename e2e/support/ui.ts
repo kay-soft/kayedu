@@ -33,10 +33,28 @@ export async function choose(scope: Page | Locator, label: string | RegExp, opti
   await page.getByRole("option", { name: option, exact: typeof option === "string", disabled: false }).first().click();
 }
 
-/** A calendar day `offset` days from today (UTC day marker), as the picker labels it. */
+/**
+ * A calendar day `offset` days from today (UTC day marker), as the picker
+ * labels it. "Today" is the **centre's** day, Cairo's - not the UTC day or the
+ * test machine's: between 00:00 and 03:00 Cairo the UTC date is still
+ * yesterday, and the app (rightly) refuses a session "in the past" then.
+ */
 export function dayFromToday(offset: number): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset));
+  const [year, month, day] = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(new Date())
+    .split("-")
+    .map(Number);
+  return new Date(Date.UTC(year, month - 1, day + offset));
+}
+
+/** `dayFromToday(offset)` as `YYYY-MM-DD`, for URL filters. */
+export function isoDayFromToday(offset: number): string {
+  return dayFromToday(offset).toISOString().slice(0, 10);
 }
 
 /** Opens the shared DatePicker labelled `label` and picks `date` (navigating months as needed). */
