@@ -1,14 +1,12 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { Check, Copy } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { IDLE_ADMIN_ACTION_STATE } from "@/app/[locale]/(admin)/admin/centers/action-state";
 import { createCenterAction } from "@/app/[locale]/(admin)/admin/centers/actions";
+import { CopyLinkField } from "@/components/shared/copy-link-field";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -19,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ROUTES } from "@/lib/routes";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 const DEFAULT_THEME = "#2563EB";
 
@@ -29,33 +28,18 @@ function InviteLink({ token }: { token: string }) {
   // Only ever rendered after the action resolves, i.e. on the client.
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const href = `${origin}${path}`;
-  const [copied, setCopied] = useState(false);
-
   return (
     <div className="flex flex-col gap-2">
       <FormMessage tone="success">{t("create.created")}</FormMessage>
-      <Label htmlFor="owner-invite-link">{t("create.inviteLinkLabel")}</Label>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input id="owner-invite-link" readOnly value={href} dir="ltr" />
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 shrink-0 px-4"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(href);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            } catch {
-              setCopied(false);
-            }
-          }}
-        >
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? t("create.copied") : t("create.copy")}
-        </Button>
-      </div>
-      <p className="text-xs text-text-muted">{t("create.inviteLinkHint")}</p>
+      <CopyLinkField
+        id="owner-invite-link"
+        href={href}
+        label={t("create.inviteLinkLabel")}
+        hint={t("create.inviteLinkHint")}
+        copyLabel={t("create.copy")}
+        copiedLabel={t("create.copied")}
+        failedLabel={t("create.copyFailed")}
+      />
     </div>
   );
 }
@@ -72,7 +56,7 @@ export function CreateCenterForm() {
   const t = useTranslations("AdminCenters");
   const tErrors = useTranslations("AdminCenters.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     createCenterAction,
     IDLE_ADMIN_ACTION_STATE,
   );
@@ -141,18 +125,17 @@ export function CreateCenterForm() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="create-center-logo">{t("create.fields.logoUrl")}</Label>
-              <Input id="create-center-logo" name="logoUrl" dir="ltr" />
-              {state.fieldErrors?.logoUrl ? (
-                <FieldError>{tErrors(state.fieldErrors.logoUrl)}</FieldError>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="create-center-plan">{t("create.fields.plan")}</Label>
-              <Input id="create-center-plan" name="plan" dir="ltr" />
-              {state.fieldErrors?.plan ? (
-                <FieldError>{tErrors(state.fieldErrors.plan)}</FieldError>
+              <Label htmlFor="create-center-logo">{t("create.fields.logo")}</Label>
+              <Input
+                id="create-center-logo"
+                name="logo"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="h-11"
+              />
+              <p className="text-xs text-text-muted">{t("create.fields.logoHint")}</p>
+              {state.fieldErrors?.logo ? (
+                <FieldError>{tErrors(state.fieldErrors.logo)}</FieldError>
               ) : null}
             </div>
 
@@ -164,6 +147,8 @@ export function CreateCenterForm() {
                 id="create-center-owner-email"
                 name="ownerEmail"
                 type="email"
+          spellCheck={false}
+          autoCapitalize="none"
                 inputMode="email"
                 dir="ltr"
                 required

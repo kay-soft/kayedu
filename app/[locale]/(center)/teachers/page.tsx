@@ -1,13 +1,18 @@
 import { getTranslations } from "next-intl/server";
 
 import { AddTeacherDialog } from "@/app/[locale]/(center)/teachers/add-teacher-dialog";
+import { GraduationCap, SearchX } from "lucide-react";
+import { searchTeachersTypeAheadAction } from "@/app/[locale]/(center)/teachers/actions";
 import {
   TeacherRow,
   type TeacherRowData,
 } from "@/app/[locale]/(center)/teachers/teacher-row";
+import { ListHeader } from "@/components/shared/list-header";
 import { Pagination } from "@/components/center/pagination";
-import { SearchBox } from "@/components/center/search-box";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import {
   Card,
   CardContent,
@@ -96,31 +101,46 @@ export default async function TeachersPage({
           <CardDescription>{t("listDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SearchBox
+          <TypeAheadSearch
             value={query}
             label={t("searchLabel")}
             placeholder={t("searchPlaceholder")}
             submitLabel={t("searchSubmit")}
+            search={searchTeachersTypeAheadAction}
           />
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              {query.length > 0 ? t("noMatches") : t("empty")}
-            </p>
+            query.length > 0 ? (
+              <EmptyState
+                icon={<SearchX />}
+                tone="warning"
+                title={t("noMatches")}
+                description={t("noMatchesHint")}
+                action={
+                  <LinkButton href={ROUTES.centerTeachers} size="sm">
+                    {t("clearSearch")}
+                  </LinkButton>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<GraduationCap />}
+                title={t("empty")}
+                description={t("emptyHint")}
+                action={<AddTeacherDialog />}
+              />
+            )
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
+              <ListHeader>
                 <span className="min-w-0 flex-1">{t("columns.name")}</span>
                 <span className="min-w-0 flex-1">{t("columns.contact")}</span>
                 <span className="min-w-0 flex-1">{t("columns.blocked")}</span>
                 <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-44 shrink-0 text-end">
+                <span className="w-36 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
-              </li>
+              </ListHeader>
 
               {rows.map((teacher) => (
                 <TeacherRow

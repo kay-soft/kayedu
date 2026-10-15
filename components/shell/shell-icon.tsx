@@ -8,9 +8,13 @@ import {
   ClipboardCheck,
   ConciergeBell,
   GraduationCap,
+  HandCoins,
   LayoutDashboard,
+  Library,
+  ScrollText,
   Settings,
   ShieldCheck,
+  Undo2,
   UserRound,
   Users,
   Wallet,
@@ -18,7 +22,7 @@ import {
 import type { ComponentType } from "react";
 import type { ShellIconName } from "@/components/shell/nav";
 
-const ICONS: Record<ShellIconName, ComponentType<{ className?: string }>> = {
+const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hidden"?: boolean }>> = {
   dashboard: LayoutDashboard,
   reception: ConciergeBell,
   sessions: CalendarDays,
@@ -33,6 +37,10 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string }>> = {
   discover: BookOpen,
   centers: Building2,
   platform: ShieldCheck,
+  catalog: Library,
+  refunds: Undo2,
+  settlements: HandCoins,
+  audit: ScrollText,
 };
 
 export function ShellIcon({
@@ -43,5 +51,6 @@ export function ShellIcon({
   className?: string;
 }) {
   const Icon = ICONS[name] ?? UserRound;
-  return <Icon className={className} />;
+  // Always beside its label — decorative to assistive technology.
+  return <Icon className={className} aria-hidden />;
 }

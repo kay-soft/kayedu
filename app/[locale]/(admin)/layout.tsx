@@ -26,7 +26,6 @@ export default async function AdminLayout({
       nav={navForExperience("admin", "PLATFORM_ADMIN")}
       brand={{ name: "KayEdu", logoUrl: null, themeColor: "#2563EB" }}
       user={shellUser(user, "PLATFORM_ADMIN")}
-      canSwitchCenter={false}
       defaultCollapsed={defaultCollapsed}
     >
       {children}

@@ -3,15 +3,19 @@
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import { approveAccountClaim, rejectAccountClaim } from "@/lib/db/account-claims";
 import { resolveChangeRequest, resolveSessionRequest } from "@/lib/db/approvals";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { confirmReservation, rejectReservation } from "@/lib/db/reservations";
 import { ROUTES } from "@/lib/routes";
+import { describeConflicts } from "@/lib/db/slot-conflicts";
 import {
   approvalIdSchema,
+  approveSessionRequestSchema,
   type ApprovalsActionState,
 } from "@/lib/validation/approvals";
+import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 /**
  * The Approvals queue's write path (docs/00-master-product-spec.md §4.1 item
@@ -105,7 +109,7 @@ export async function approveReservationAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, id } = parsed.data;
 
-  const result = await prisma.$transaction((tx) =>
+  const result = await runInTransaction(prisma, (tx) =>
     confirmReservation(tx, ctx.center.id, id, ctx.user.id),
   );
   if (!result.ok) return { error: result.error };
@@ -165,19 +169,33 @@ export async function approveSessionRequestAction(
   const ctx = await approvalsScope();
   if (!ctx) return FORBIDDEN;
 
-  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  const parsed = approveSessionRequestSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "notFound" };
-  const { locale, id } = parsed.data;
+  const { locale, id, confirmConflicts } = parsed.data;
 
+  // R3: a double-booking is refused with its conflict list — DENY always,
+  // WARN until the approver ticks "I understand" (audited by the data layer).
+  const policy = ctx.settings?.scheduleConflictPolicy ?? "WARN";
   const result = await resolveSessionRequest(
     prisma,
     ctx.center.id,
     id,
     "APPROVED",
     ctx.user.id,
-    ctx.settings?.scheduleConflictPolicy ?? "WARN",
+    policy,
+    locale,
+    { confirmConflicts, actorUserId: ctx.user.id },
   );
-  if (!result.ok) return { error: result.error };
+  if (!result.ok) {
+    if ("conflicts" in result) {
+      return {
+        error: result.error,
+        conflicts: await describeConflicts(prisma, ctx.center.id, result.conflicts.slice(0, 30)),
+        conflictPolicy: policy,
+      };
+    }
+    return { error: result.error };
+  }
 
   await writeAuditLog({
     centerId: ctx.center.id,
@@ -211,6 +229,9 @@ export async function declineSessionRequestAction(
     "DECLINED",
     ctx.user.id,
     ctx.settings?.scheduleConflictPolicy ?? "WARN",
+    locale,
+    // Declining writes no slot; the flag is required but has nothing to confirm.
+    { confirmConflicts: false, actorUserId: ctx.user.id },
   );
   if (!result.ok) return { error: result.error };
 
@@ -223,6 +244,55 @@ export async function declineSessionRequestAction(
     before: { status: "PENDING" },
     after: { status: "DECLINED" },
   });
+
+  revalidateApprovals(locale);
+  return { status: "declined" };
+}
+
+// ── Account claims (SEC-2a, D-01) ───────────────────────────────────────────
+// A sign-up whose email matches a person this centre created waits here: staff
+// approve it with the person in front of them. Both decisions are audited by
+// the data layer, inside their own transaction (`lib/db/account-claims.ts`).
+
+export async function approveAccountClaimAction(
+  _state: ApprovalsActionState,
+  formData: FormData,
+): Promise<ApprovalsActionState> {
+  const ctx = await approvalsScope();
+  if (!ctx) return FORBIDDEN;
+
+  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+  const { locale, id } = parsed.data;
+
+  const result = await approveAccountClaim(prisma, {
+    claimId: id,
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+  });
+  if (!result.ok) return { error: result.error };
+
+  revalidateApprovals(locale);
+  return { status: "approved" };
+}
+
+export async function declineAccountClaimAction(
+  _state: ApprovalsActionState,
+  formData: FormData,
+): Promise<ApprovalsActionState> {
+  const ctx = await approvalsScope();
+  if (!ctx) return FORBIDDEN;
+
+  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+  const { locale, id } = parsed.data;
+
+  const result = await rejectAccountClaim(prisma, {
+    claimId: id,
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+  });
+  if (!result.ok) return { error: result.error };
 
   revalidateApprovals(locale);
   return { status: "declined" };

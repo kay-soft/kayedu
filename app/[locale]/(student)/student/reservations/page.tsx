@@ -1,13 +1,16 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { ClipboardList } from "lucide-react";
 
 import { CancelReservationButton } from "@/app/[locale]/(student)/student/reservations/cancel-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireStudentUser } from "@/lib/auth/tenant";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { listReservationsForStudent } from "@/lib/db/student-portal";
 import { formatDate } from "@/lib/format";
+import { EmptyState } from "@/components/shared/empty-state";
 
 const STATUS_BADGE = {
   PENDING: "warning",
@@ -34,9 +37,9 @@ export default async function StudentReservationsPage() {
       <PageHeader title={t("title")} description={t("subtitle", { count: reservations.length })} />
 
       <Card>
-        <CardContent className="flex flex-col gap-3 pt-6">
+        <CardContent className="flex flex-col gap-3">
           {reservations.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState icon={<ClipboardList />} title={t("empty")} description={t("emptyHint")} />
           ) : (
             reservations.map((reservation) => (
               <div
@@ -45,7 +48,10 @@ export default async function StudentReservationsPage() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-text-primary">
-                    {[reservation.classGroup.subject?.name, reservation.classGroup.grade?.name]
+                    {[
+                      reservation.classGroup.subject ? catalogLabelWithSelection(locale, reservation.classGroup.subject) : null,
+                      reservation.classGroup.grade ? catalogLabelWithSelection(locale, reservation.classGroup.grade) : null,
+                    ]
                       .filter(Boolean)
                       .join(" · ") || tCommon("none")}
                   </p>

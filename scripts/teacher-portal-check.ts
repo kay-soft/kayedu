@@ -13,10 +13,15 @@
  * primitives (`lib/db/tenant-scope.ts`) — against two throwaway centers that
  * share one teacher. Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type BlockScope } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type BlockScope } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 import {
   combineTeacherSummaries,
   studentSessionsWithTeacher,
@@ -27,7 +32,18 @@ import {
 import { can } from "../lib/auth/permissions.ts";
 import { startOfUtcDay, weekRangeUtc } from "../lib/scheduling.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
 
 const SLUG_A = "teacher-portal-check-a";
 const SLUG_B = "teacher-portal-check-b";
@@ -48,6 +64,13 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "teacher-portal-check-" } } });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({
+    where: { nameEn: { startsWith: "Teacher-Portal-Check" } },
+  });
+  await prisma.catalogGrade.deleteMany({
+    where: { nameEn: { startsWith: "Teacher-Portal-Check" } },
+  });
 }
 
 async function makeStudent(centerId: string, code: string) {
@@ -92,11 +115,11 @@ async function payFor(
     studentProfileId,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
+  const methodId = await fixtureMethodId(centerId);
   const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendee.id, "CASH", actorId),
+    recordPayment(tx, centerId, attendee.id, methodId, actorId, { historicalBackfill: true }),
   );
   if (!result.ok) throw new Error(`recordPayment failed: ${result.error}`);
   return { attendee, payment: result.payment };
@@ -105,10 +128,24 @@ async function payFor(
 async function main() {
   await cleanup();
 
+  // The seeded baseline a fresh center's TEACHER matrix rows carry
+  // (docs/03-build-order.md M12's backfill) — passed explicitly here so this
+  // stays a database-free resolution-logic check, the matrix's own DB-backed
+  // behavior is `check:permissions`'s job.
+  const TEACHER_BASELINE_GRANTS = {
+    "analytics.own.view": true,
+    "changeRequest.create": true,
+    "student.block": true,
+  } as const;
+
   console.log("Permission map (no database needed)");
   check(
     "TEACHER cannot view center.profit.view — M7 must not widen this",
     !can("TEACHER", "center.profit.view"),
+  );
+  check(
+    "TEACHER's profit-view ceiling holds even against a stray grant (M12)",
+    !can("TEACHER", "center.profit.view", { "center.profit.view": true }),
   );
   check(
     "TEACHER cannot view analytics.center.view — center-wide analytics stays center-staff only",
@@ -116,15 +153,19 @@ async function main() {
   );
   check(
     "TEACHER keeps its baseline: analytics.own.view, changeRequest.create, student.block",
-    can("TEACHER", "analytics.own.view") &&
-      can("TEACHER", "changeRequest.create") &&
-      can("TEACHER", "student.block"),
+    can("TEACHER", "analytics.own.view", TEACHER_BASELINE_GRANTS) &&
+      can("TEACHER", "changeRequest.create", TEACHER_BASELINE_GRANTS) &&
+      can("TEACHER", "student.block", TEACHER_BASELINE_GRANTS),
   );
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Teacher Portal A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Teacher Portal B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Teacher Portal A", organization: { create: { name: "Teacher Portal A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Teacher Portal B", organization: { create: { name: "Teacher Portal B" } } },
+  });
 
   // One teacher, shared by both centers — the flagship scenario.
   const teacher = await prisma.user.create({
@@ -137,12 +178,20 @@ async function main() {
     data: scopedData(centerB.id, { userId: teacher.id, role: "TEACHER", firstName: "T", lastName: "Shared", joinedAt: new Date() }),
   });
 
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
-  const gradeA = await prisma.grade.create({ data: scopedData(centerA.id, { name: "Grade 10" }) });
-  const subjectB = await prisma.subject.create({ data: scopedData(centerB.id, { name: "Physics" }) });
+  // Global catalog rows (M13) — no centerId; ClassGroup references them directly.
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: "Teacher-Portal-Check Math", nameEn: "Teacher-Portal-Check Math" },
+  });
+  const gradeA = await prisma.catalogGrade.create({
+    data: { nameAr: "Teacher-Portal-Check Grade 10", nameEn: "Teacher-Portal-Check Grade 10" },
+  });
+  const subjectB = await prisma.catalogSubject.create({
+    data: { nameAr: "Teacher-Portal-Check Physics", nameEn: "Teacher-Portal-Check Physics" },
+  });
 
   const classA = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacher.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -153,6 +202,7 @@ async function main() {
   });
   const classB = await prisma.classGroup.create({
     data: scopedData(centerB.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacher.id,
       subjectId: subjectB.id,
       price: 20_000, // 200 EGP
@@ -185,9 +235,8 @@ async function main() {
     studentProfileId: studentB2.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "ABSENT",
     recordedBy: teacher.id,
-  });
+  }, { historicalBackfill: true, status: "ABSENT" });
 
   // ── 1. Per-center session queries never cross ────────────────────────────
   const sessionsA = await prisma.session.findMany({

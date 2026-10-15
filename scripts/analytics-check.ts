@@ -11,10 +11,14 @@
  * `lib/db/payments.ts`/`lib/db/attendance.ts` — against two throwaway
  * centers. Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 import {
   attendanceStatusCounts,
   expenseTotals,
@@ -25,7 +29,18 @@ import {
 } from "../lib/db/analytics.ts";
 import { can } from "../lib/auth/permissions.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
 
 const SLUG_A = "analytics-check-a";
 const SLUG_B = "analytics-check-b";
@@ -44,6 +59,9 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "analytics-check-" } } });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Analytics-Check" } } });
+  await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "Analytics-Check" } } });
 }
 
 async function makeTeacher(centerId: string, email: string, createdAt: Date) {
@@ -111,11 +129,11 @@ async function payFor(
     studentProfileId,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
+  const methodId = await fixtureMethodId(centerId);
   const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendee.id, "CASH", actorId),
+    recordPayment(tx, centerId, attendee.id, methodId, actorId, { historicalBackfill: true }),
   );
   if (!result.ok) throw new Error(`recordPayment failed: ${result.error}`);
   return result.payment;
@@ -146,15 +164,23 @@ async function main() {
     !can("RECEPTIONIST", "expense.manage"),
   );
   check(
-    "RECEPTIONIST cannot be granted analytics.center.view even via settings grants",
-    !can("RECEPTIONIST", "analytics.center.view", { "analytics.center.view": true }),
+    "A centre CAN now grant RECEPTIONIST analytics.center.view via the matrix (M12 opens this beyond the old narrow allowlist)",
+    can("RECEPTIONIST", "analytics.center.view", { "analytics.center.view": true }),
   );
-  check("OWNER can view analytics and expenses", can("OWNER", "analytics.center.view") && can("OWNER", "expense.manage"));
+  check(
+    "OWNER can view analytics and expenses (seeded baseline grants)",
+    can("OWNER", "analytics.center.view", { "analytics.center.view": true }) &&
+      can("OWNER", "expense.manage", { "expense.manage": true }),
+  );
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Analytics A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Analytics B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Analytics A", organization: { create: { name: "Analytics A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Analytics B", organization: { create: { name: "Analytics B" } } },
+  });
 
   const { user: teacher1, membership: membership1 } = await makeTeacher(
     centerA.id,
@@ -175,11 +201,17 @@ async function main() {
   await prisma.membership.update({ where: { id: inactiveMembership.id }, data: { active: false } });
 
   const actorId = teacher1.id;
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
-  const gradeA = await prisma.grade.create({ data: scopedData(centerA.id, { name: "Grade 10" }) });
+  // Global catalog rows (M13) — no centerId; ClassGroup references them directly.
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: "Analytics-Check Math", nameEn: "Analytics-Check Math" },
+  });
+  const gradeA = await prisma.catalogGrade.create({
+    data: { nameAr: "Analytics-Check Grade 10", nameEn: "Analytics-Check Grade 10" },
+  });
 
   const class1 = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacher1.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -190,6 +222,7 @@ async function main() {
   });
   const class2 = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacher2.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,

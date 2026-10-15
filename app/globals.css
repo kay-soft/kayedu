@@ -26,6 +26,7 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -44,10 +45,16 @@
   --color-canvas: var(--bg-canvas);
   --color-surface: var(--bg-surface);
   --color-surface-subtle: var(--bg-subtle);
+  --color-surface-hover: var(--bg-hover);
+  --color-surface-active: var(--bg-active);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
+  --color-text-placeholder: var(--text-placeholder);
   --color-text-on-dark: var(--text-on-dark);
+  --color-text-on-dark-muted: var(--text-on-dark-muted);
+  --color-border-control: var(--border-control);
+  --color-border-control-hover: var(--border-control-hover);
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
   --color-warning: var(--warning);
@@ -56,6 +63,10 @@
   --color-danger-bg: var(--danger-bg);
   --color-info: var(--info);
   --color-info-bg: var(--info-bg);
+  --color-success-fg: var(--success-fg);
+  --color-warning-fg: var(--warning-fg);
+  --color-danger-fg: var(--danger-fg);
+  --color-info-fg: var(--info-fg);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -77,11 +88,22 @@
   --bg-sidebar: #0f172a;
   --bg-sidebar-hover: #1e293b;
   --bg-subtle: #f8fafc;
+  /* Interaction surfaces (docs/04 §2). `--bg-subtle` is a *resting* inset —
+     table headers, read-only panels — so it cannot double as the hover tint
+     for a control that already sits on one. These are the two steps above it. */
+  --bg-hover: #f1f5f9;
+  --bg-active: #e2e8f0;
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  /* DES: was #94a3b8 (2.56:1 on white) — every 12px label failed AA. */
+  --text-muted: #5f6b7d;
+  /* DES: placeholders had no token and drew in the secondary text colour, so
+     an empty field looked already filled in. */
+  --text-placeholder: #64748b;
   --text-on-dark: #e2e8f0;
+  /* The muted line on the navy sidebar / auth panel (6.96:1 there). */
+  --text-on-dark-muted: #94a3b8;
 
   --success: #16a34a;
   --success-bg: #dcfce7;
@@ -91,6 +113,21 @@
   --danger-bg: #fee2e2;
   --info: #3b82f6;
   --info-bg: #dbeafe;
+  /* DES: the same hues one shade darker, for text and icons drawn in a status
+     colour — the base shades failed AA on their own tints (amber 1.93:1). */
+  --success-fg: #15803d;
+  --warning-fg: #b45309;
+  --danger-fg: #b91c1c;
+  --info-fg: #1d4ed8;
+
+  /* ── Motion (docs/04 §4) ───────────────────────────────────────────── */
+  --motion-fast: 120ms;
+  --motion-base: 160ms;
+  --motion-slow: 200ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Layout (docs/04 §6) ───────────────────────────────────────────── */
+  --content-max: 96rem;
 
   /* ── shadcn/base-nova bindings — mapped onto the tokens above ─────── */
   --background: var(--bg-canvas);
@@ -104,13 +141,19 @@
   --secondary: var(--bg-subtle);
   --secondary-foreground: var(--text-primary);
   --muted: var(--bg-subtle);
-  --muted-foreground: var(--text-secondary);
+  --muted-foreground: var(--text-placeholder);
   --accent: var(--bg-subtle);
   --accent-foreground: var(--text-primary);
   --destructive: var(--danger);
   --border: #e5e7eb;
   --border-subtle: #f1f5f9;
-  --input: #e5e7eb;
+  /* The border a control takes on hover, so an input answers the pointer
+     before it is ever focused. */
+  --border-strong: #cbd5e1;
+  /* DES: a field on a white card needs an edge you can see (#e5e7eb is 1.24:1). */
+  --border-control: #848f9f;
+  --border-control-hover: #64748b;
+  --input: var(--border-control);
   --ring: var(--brand);
   --chart-1: var(--brand);
   --chart-2: var(--success);
@@ -141,10 +184,27 @@
   }
   html {
     @apply font-sans;
+    /* The sticky 64px app bar must never cover the focused element (DES). */
+    scroll-padding-top: 5rem;
+    color-scheme: light;
   }
   /* Arabic needs a little more room to breathe (docs/04 §3). */
   html[dir="rtl"] body {
     @apply leading-relaxed;
+  }
+
+  /* Nothing in the product animates for someone who has asked it not to
+     (docs/04 §4). One global rule rather than a per-component opt-out, so a
+     component added later cannot forget it. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -154,4 +214,80 @@
 
 @utility shadow-card-hover {
   box-shadow: 0 4px 12px rgb(15 23 42 / 0.08);
+}
+
+/* A floating surface (dropdown, popover, calendar) sits above the page rather
+   than in it, so it carries a deeper shadow than a card ever does. */
+@utility shadow-popover {
+  box-shadow:
+    0 12px 32px -12px rgb(15 23 42 / 0.22),
+    0 2px 6px rgb(15 23 42 / 0.06);
+}
+
+/* The one transition every interactive element uses, so hover, press and
+   focus feel identical everywhere (docs/04 §4). */
+@utility transition-ui {
+  transition-property:
+    color, background-color, border-color, box-shadow, opacity, transform,
+    filter;
+  transition-timing-function: var(--ease-out);
+  transition-duration: var(--motion-base);
+}
+
+@utility transition-ui-fast {
+  transition-property:
+    color, background-color, border-color, box-shadow, opacity, transform,
+    filter;
+  transition-timing-function: var(--ease-out);
+  transition-duration: var(--motion-fast);
+}
+
+/* Keyboard focus, written once. Everything interactive that is not a
+   `Button` — links, rows, calendar days, menu items — applies this instead
+   of inventing its own ring (docs/04 §4). */
+@utility focus-ring {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:focus-visible {
+    outline-color: var(--ring);
+  }
+}
+
+
+/* The same, on the dark sidebar, where brand blue on navy does not read. */
+@utility focus-ring-inverse {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:focus-visible {
+    outline-color: var(--brand-fg);
+  }
+}
+
+/* The app's one content-width rule (docs/04 §6): centred, capped at
+   `--content-max`, so a 2560px monitor gets a wider working area instead of a
+   narrow column stranded in grey — and a 1280px laptop is unchanged. */
+@utility content-shell {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--content-max);
+}
+
+/* Print (DES, docs/04 §14.10). Office lasers drop pale grey, so the two
+   lighter text tokens darken on paper; a heading stays with what follows it,
+   and a list row, a table row or a receipt card never splits across pages. */
+@media print {
+  :root {
+    --text-secondary: #1e293b;
+    --text-muted: #334155;
+  }
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+  li,
+  tr,
+  dl > div {
+    break-inside: avoid;
+  }
 }

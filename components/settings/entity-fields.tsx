@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { FieldError } from "@/components/shared/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SelectInput } from "@/components/ui/select-input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Select } from "@/components/ui/select";
 
 /**
  * One field descriptor drives both the create form and every row's edit form,
@@ -33,6 +34,8 @@ export type EntityField =
     }
   /** An EGP amount. Stored as piastres — the action converts (CLAUDE.md rule 2). */
   | { name: string; kind: "money"; label: string; hint?: string }
+  /** A calendar day, posted as "YYYY-MM-DD" through the shared DatePicker. */
+  | { name: string; kind: "date"; label: string; required?: boolean; hint?: string }
   | {
       name: string;
       kind: "select";
@@ -59,22 +62,26 @@ export function EntityFields({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {fields.map((field) => {
+      {fields.map((field, index) => {
         const id = `${idPrefix}-${field.name}`;
+        // With an odd number of fields the first takes the whole row, so a
+        // lone Name is not stranded at half width and two dates pair up
+        // beneath it (DES, docs/04 §14.7).
+        const spanRow = index === 0 && fields.length % 2 === 1;
         const error = fieldErrors?.[field.name];
         const invalid = error ? true : undefined;
         const defaultValue = values?.[field.name] ?? "";
         // The mandatory form convention (docs/04 §5 "Form fields"): a field
         // that is genuinely always optional gets a dimmed "(optional)" tag.
         const optional =
-          field.kind === "text"
+          field.kind === "text" || field.kind === "date"
             ? !field.required
             : field.kind === "select"
               ? field.emptyLabel !== undefined
               : false;
 
         return (
-          <div key={field.name} className="flex min-w-0 flex-col gap-1.5">
+          <div key={field.name} className={`flex min-w-0 flex-col gap-1.5 ${spanRow ? "sm:col-span-2" : ""}`}>
             <Label htmlFor={id}>
               {field.label}
               {optional ? (
@@ -84,8 +91,16 @@ export function EntityFields({
               ) : null}
             </Label>
 
-            {field.kind === "select" ? (
-              <SelectInput
+            {field.kind === "date" ? (
+              <DatePicker
+                id={id}
+                name={field.name}
+                defaultValue={defaultValue}
+                required={field.required}
+                aria-invalid={invalid}
+              />
+            ) : field.kind === "select" ? (
+              <Select
                 id={id}
                 name={field.name}
                 defaultValue={defaultValue}
@@ -100,7 +115,7 @@ export function EntityFields({
                     {option.label}
                   </option>
                 ))}
-              </SelectInput>
+              </Select>
             ) : (
               <Input
                 id={id}

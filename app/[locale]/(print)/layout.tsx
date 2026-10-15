@@ -27,7 +27,7 @@ export default async function PrintLayout({
   }
 
   return (
-    <div className="min-h-dvh bg-canvas text-text-primary print:bg-white">
+    <div className="min-h-dvh bg-canvas text-text-primary print:min-h-0 print:bg-white">
       {children}
     </div>
   );

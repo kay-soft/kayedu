@@ -16,13 +16,24 @@
  * `lib/auth/permissions.ts` that RECEPTIONIST cannot reach `approvals.manage`.
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type ChangeRequestStatus, type ReservationStatus } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type ChangeRequestStatus, type ReservationStatus } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { resolveChangeRequest, resolveSessionRequest } from "../lib/db/approvals.ts";
 import { confirmReservation, rejectReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { can } from "../lib/auth/permissions.ts";
+import { addDays, dateKey, todayInTimezone } from "../lib/scheduling.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
+
+/** Fixture dates relative to today in Cairo (SEC-2c) — never a calendar date that will pass. */
+const FIXTURE_TODAY = todayInTimezone("Africa/Cairo");
+const FIXTURE_CLASS_END = addDays(FIXTURE_TODAY, 400);
+function mondayOnOrAfter(day: Date): Date {
+  let next = day;
+  while (next.getUTCDay() !== 1) next = addDays(next, 1);
+  return next;
+}
 
 const SLUG_A = "approvals-check-a";
 const SLUG_B = "approvals-check-b";
@@ -44,6 +55,8 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "approvals-check-" } } });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Approvals-Check" } } });
 }
 
 async function makeTeacher(centerId: string, tag: string) {
@@ -67,6 +80,9 @@ async function makeChangeRequest(centerId: string, teacherId: string) {
     data: scopedData(centerId, {
       type: "NEW_CLASS",
       requestedBy: teacherId,
+      // Deliberately a legacy payload shape: requests written before R1 still
+      // carry the removed `attendanceRequired` key, and approving them must
+      // keep working — readers ignore the key rather than choking on it.
       payload: { dayOfWeek: 1, startTime: "16:00", endTime: "18:00", capacity: 10, attendanceRequired: true, lateThresholdMinutes: 10 },
       status: "PENDING",
     }),
@@ -81,13 +97,23 @@ async function main() {
     "RECEPTIONIST cannot reach approvals.manage — same denial shape as analytics.center.view/expense.manage (M6)",
     !can("RECEPTIONIST", "approvals.manage"),
   );
-  check("MANAGER can reach approvals.manage", can("MANAGER", "approvals.manage"));
-  check("OWNER can reach approvals.manage", can("OWNER", "approvals.manage"));
+  check(
+    "MANAGER can reach approvals.manage (seeded baseline grant)",
+    can("MANAGER", "approvals.manage", { "approvals.manage": true }),
+  );
+  check(
+    "OWNER can reach approvals.manage (seeded baseline grant)",
+    can("OWNER", "approvals.manage", { "approvals.manage": true }),
+  );
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Approvals Check A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Approvals Check B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Approvals Check A", organization: { create: { name: "Approvals Check A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Approvals Check B", organization: { create: { name: "Approvals Check B" } } },
+  });
   const managerA = await prisma.user.create({
     data: { firstName: "M", lastName: "A", email: "approvals-check-managerA@kayedu.test", locale: "en" },
   });
@@ -127,11 +153,16 @@ async function main() {
   );
 
   // ── 2. ChangeRequest type NEW_SESSION (M10): accepting creates a Session ──
-  const subjectS = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Physics" }) });
-  const classForSession = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+  // A global catalog row (M13) — no centerId.
+  const subjectS = await prisma.catalogSubject.create({
+    data: { nameAr: "Approvals-Check Physics", nameEn: "Approvals-Check Physics" },
   });
-  const sessionRequestDate = "2026-11-16"; // a Monday, arbitrary and far enough out not to collide
+  const classForSession = await prisma.classGroup.create({
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+  });
+  // SEC-2c: relative to today — approving a request for a past date is refused
+  // (SEC-51), so a fixed date would start failing the day it passed.
+  const sessionRequestDate = dateKey(mondayOnOrAfter(addDays(FIXTURE_TODAY, 35))); // a Monday 5–6 weeks out
 
   async function makeSessionRequest(classGroupId: string, startTime = "09:00", endTime = "10:00") {
     return prisma.changeRequest.create({
@@ -152,6 +183,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "resolveSessionRequest(APPROVED) creates a Session and flips the request to APPROVED",
@@ -170,6 +203,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Re-resolving an already-resolved NEW_SESSION request is refused as notPending",
@@ -185,6 +220,8 @@ async function main() {
     "DECLINED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "resolveSessionRequest(DECLINED) flips the request to DECLINED and creates no Session",
@@ -200,6 +237,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Approving a second request for the exact same class/date/time is refused as duplicateSlot",
@@ -209,7 +248,7 @@ async function main() {
 
   // A second class, sharing teacherA and overlapping the already-approved slot.
   const classConflicting = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
   const sessionRequestConflictWarn = await makeSessionRequest(classConflicting.id, "09:30", "10:30");
   const sessionConflictWarn = await resolveSessionRequest(
@@ -219,6 +258,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Under WARN, a teacher-conflicting session request is still approved, flagged with the conflict",
@@ -227,7 +268,7 @@ async function main() {
   );
 
   const classConflictingDeny = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectS.id, price: 5_000 }),
   });
   const sessionRequestConflictDeny = await makeSessionRequest(classConflictingDeny.id, "09:15", "09:45");
   const sessionConflictDeny = await resolveSessionRequest(
@@ -237,6 +278,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "DENY",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Under DENY, a teacher-conflicting session request is refused as conflict, no Session created",
@@ -251,6 +294,8 @@ async function main() {
     "APPROVED",
     managerA.id,
     "WARN",
+    "en",
+    { confirmConflicts: true },
   );
   check(
     "Center B cannot approve Center A's NEW_SESSION request by id — resolves to notFound",
@@ -259,9 +304,11 @@ async function main() {
   );
 
   // ── 3. Reservation accept/decline (reusing M8's confirm/reject) ─────────
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: "Approvals-Check Math", nameEn: "Approvals-Check Math" },
+  });
   const classConfirm = await prisma.classGroup.create({
-    data: scopedData(centerA.id, { teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
+    data: scopedData(centerA.id, { startDate: new Date("2026-01-01"), endDate: FIXTURE_CLASS_END, teacherId: teacherA.id, subjectId: subjectA.id, price: 10_000, requiresConfirmation: true }),
   });
   const studentToApprove = await makeStudentUser("studentApprove");
   const studentToDecline = await makeStudentUser("studentDecline");
@@ -350,6 +397,29 @@ async function main() {
     "Center A's pending-Reservation queue no longer includes the two already resolved above",
     pendingReservationsA.length === 0,
     JSON.stringify(pendingReservationsA.map((r) => r.id)),
+  );
+
+  // ── 6. M15: rejection starts the 7-day cooling-off, and a teacher's own
+  // approvals-queue permission resolves the way a separate reviewer needs ──
+  check(
+    "rejectReservation stamps rejectedAt — the whole cooling-off mechanism (M15, spec §5.1 'Approvals & enrolment')",
+    rejected.ok && rejected.reservation.rejectedAt !== null,
+    JSON.stringify(rejected),
+  );
+  const coolingOffRetry = await prisma.$transaction((tx) =>
+    reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classConfirm.id, studentUserId: studentToDecline.id }),
+  );
+  check(
+    "Re-requesting the same class within 7 days of a rejection is refused as coolingOff, not silently",
+    !coolingOffRetry.ok && coolingOffRetry.error === "coolingOff",
+    JSON.stringify(coolingOffRetry),
+  );
+
+  check(
+    "A TEACHER's own approvals queue (reservation.manage.own, M15) is grantable and off by default; never for STUDENT",
+    can("TEACHER", "reservation.manage.own", { "reservation.manage.own": true }) &&
+      !can("TEACHER", "reservation.manage.own") &&
+      !can("STUDENT", "reservation.manage.own"),
   );
 }
 

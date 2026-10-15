@@ -1,7 +1,9 @@
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
+import { SearchX, Users } from "lucide-react";
 
+import { searchTaughtStudentsTypeAheadAction } from "@/app/[locale]/(teacher)/teacher/students/actions";
 import { Pagination } from "@/components/center/pagination";
-import { SearchBox } from "@/components/center/search-box";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { PageHeader } from "@/components/shared/page-header";
 import {
   Card,
@@ -11,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getTenantContext } from "@/lib/auth/tenant";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
@@ -19,6 +22,7 @@ import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { EmptyState } from "@/components/shared/empty-state";
 
 /**
  * Every student this teacher has ever taught at the active center (spec
@@ -39,6 +43,7 @@ export default async function TeacherStudentsPage({
   const db = scoped(ctx);
   const t = await getTranslations("TeacherStudents");
   const tCommon = await getTranslations("Settings.common");
+  const locale = await getLocale();
 
   const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id);
 
@@ -78,24 +83,36 @@ export default async function TeacherStudentsPage({
           <CardDescription>{t("listDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <SearchBox
+          <TypeAheadSearch
             value={query}
             label={t("searchLabel")}
             placeholder={t("searchPlaceholder")}
             submitLabel={t("searchSubmit")}
+            search={searchTaughtStudentsTypeAheadAction}
           />
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              {query ? t("noMatches") : t("empty")}
-            </p>
+            query ? (
+              <EmptyState
+                icon={<SearchX />}
+                tone="warning"
+                title={t("noMatches")}
+                description={t("noMatchesHint")}
+              />
+            ) : (
+              <EmptyState
+                icon={<Users />}
+                title={t("empty")}
+                description={t("emptyHint")}
+              />
+            )
           ) : (
             <ul className="flex flex-col gap-2">
               {rows.map((row) => (
                 <li key={row.id}>
                   <Link
                     href={ROUTES.teacherStudent(row.id)}
-                    className="flex flex-col gap-1 rounded-xl border border-border p-3 transition-shadow hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-1 rounded-xl border border-border p-3 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-text-primary">
@@ -103,7 +120,7 @@ export default async function TeacherStudentsPage({
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
                         <span dir="ltr">{row.studentCode}</span>
-                        <span>{row.grade?.name ?? tCommon("none")}</span>
+                        <span>{row.grade ? catalogLabelWithSelection(locale, row.grade) : tCommon("none")}</span>
                       </p>
                     </div>
                   </Link>

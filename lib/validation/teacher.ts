@@ -5,6 +5,7 @@ import { z } from "zod";
 // Next.js runtime.
 import { localeSchema } from "./auth.ts";
 import { isValidTime } from "../scheduling.ts";
+import { dateKeyField } from "./class-period.ts";
 
 /**
  * Teacher portal schemas (M7). Every Server Action under
@@ -34,11 +35,6 @@ const optionalText = (max: number) =>
     .optional()
     .transform((value) => (value && value.length > 0 ? value : null));
 
-const checkbox = z
-  .string()
-  .optional()
-  .transform((value) => value === "on" || value === "true");
-
 const wholeNumber = (max: number) =>
   z
     .string()
@@ -56,7 +52,28 @@ const base = { locale: localeSchema };
 
 export const teacherSessionRangeSchema = z.enum(["day", "week", "month"]);
 
-export const teacherSessionListFilterSchema = z.object({
+/**
+ * A filter dropdown's "All" option submits an **empty string**, not nothing —
+ * so an optional enum has to read `""` as "no filter" rather than as an
+ * invalid value. Without this the whole filter object failed to parse the
+ * moment Status sat on "All" (its default), and the page's `safeParse`
+ * fallback then discarded *every* filter alongside it — including a date
+ * range the user had just picked, which is what made the Sessions tab snap
+ * back to today.
+ */
+const optionalSessionStatus = z
+  .preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(["SCHEDULED", "LIVE", "COMPLETED", "CANCELLED"]).optional(),
+  )
+  .transform((value) => value ?? null);
+
+/**
+ * Just the date half of the teacher's session filters, so the page can parse
+ * it on its own and a rejected sibling filter never resets the day the
+ * teacher is looking at.
+ */
+export const teacherSessionDateSchema = z.object({
   range: teacherSessionRangeSchema.default("week"),
   date: z
     .string()
@@ -66,11 +83,11 @@ export const teacherSessionListFilterSchema = z.object({
     .transform((value) =>
       value && !Number.isNaN(Date.parse(value)) ? value.slice(0, 10) : null,
     ),
+});
+
+export const teacherSessionListFilterSchema = teacherSessionDateSchema.extend({
   gradeId: optionalRef,
-  status: z
-    .enum(["SCHEDULED", "LIVE", "COMPLETED", "CANCELLED"])
-    .optional()
-    .transform((value) => value ?? null),
+  status: optionalSessionStatus,
   q: z
     .string()
     .trim()
@@ -104,6 +121,9 @@ export const teacherUnblockStudentSchema = z.object({
 });
 
 // ── Classes: request a new class (ChangeRequest, spec §4.2 item 4) ─────────
+// R3: no capacity — a class's seats come from the room set the centre picks
+// when it creates the class (a request never chooses a room). A stale form
+// still posting `capacity` parses; zod drops the key before the payload.
 
 const dayOfWeek = z
   .string()
@@ -116,7 +136,6 @@ const timeValue = z
   .trim()
   .refine((value) => isValidTime(value), "invalidTime");
 
-export const MAX_REQUEST_CAPACITY = 1_000;
 export const MAX_REQUEST_LATE_THRESHOLD_MINUTES = 240;
 
 export const classRequestSchema = z
@@ -127,8 +146,26 @@ export const classRequestSchema = z
     dayOfWeek,
     startTime: timeValue,
     endTime: timeValue,
-    capacity: wholeNumber(MAX_REQUEST_CAPACITY),
-    attendanceRequired: checkbox,
+    lateThresholdMinutes: wholeNumber(MAX_REQUEST_LATE_THRESHOLD_MINUTES),
+    note: optionalText(300),
+  })
+  .refine((value) => value.startTime < value.endTime, {
+    path: ["endTime"],
+    message: "invalidTimeRange",
+  });
+
+// ── Centre directory: request to teach at a centre with zero memberships
+// (M15, spec §5.1 "Teacher onboarding") ─────────────────────────────────────
+
+export const teachAtCenterRequestSchema = z
+  .object({
+    ...base,
+    centerId: recordId,
+    subjectId: optionalRef,
+    gradeId: optionalRef,
+    dayOfWeek,
+    startTime: timeValue,
+    endTime: timeValue,
     lateThresholdMinutes: wholeNumber(MAX_REQUEST_LATE_THRESHOLD_MINUTES),
     note: optionalText(300),
   })
@@ -139,11 +176,9 @@ export const classRequestSchema = z
 
 // ── Sessions: request a new one-off session (ChangeRequest, spec §4.2 item 2) ─
 
-const sessionDate = z
-  .string()
-  .trim()
-  .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate")
-  .transform((value) => value.slice(0, 10));
+// SEC-50: a strict "YYYY-MM-DD" calendar day, stored as that key — a
+// malformed one used to be sliced into the payload and break every approve.
+const sessionDate = dateKeyField;
 
 export const sessionRequestSchema = z
   .object({

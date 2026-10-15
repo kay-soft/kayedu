@@ -5,7 +5,10 @@ import { revalidatePath } from "next/cache";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
-import { scoped, type ScopedDb } from "@/lib/db/scoped";
+import { prisma } from "@/lib/db/client";
+import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
+import { expenseDateError } from "@/lib/db/visibility";
+import { dateKey } from "@/lib/scheduling";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   expenseCategoryDeleteSchema,
@@ -13,8 +16,10 @@ import {
   expenseCategoryToggleSchema,
   expenseCategoryUpdateSchema,
   expenseCreateSchema,
-  expenseDeleteSchema,
+  expenseVoidSchema,
 } from "@/lib/validation/analytics";
+import { nameClashes } from "@/lib/like";
+import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 /**
  * Expenses (M6, spec §4.1 item 6): category CRUD + append-and-audit expense
@@ -22,6 +27,13 @@ import {
  * check → zod → scoped write → audit → revalidate. `expense.manage` is
  * OWNER/MANAGER only (lib/auth/permissions.ts) — a receptionist has no path
  * to this module at all, matching the profit-denial pattern (spec §3).
+ *
+ * SEC-2b (D-24, SEC-51): an expense may be **backdated within the centre's
+ * visibility window** (never into a closed-off month the centre can no longer
+ * see, never into the future), and is **voided — never deleted** — with who,
+ * when and why kept on the row. Category create/rename/toggle/delete are
+ * audited like every other money-adjacent change. Audit rows carry ids and
+ * amounts only (D-20); the note and the void reason stay on the row.
  */
 
 const FORBIDDEN: ActionState = { error: "forbidden" };
@@ -40,11 +52,9 @@ function revalidateExpenses(locale: string): void {
 }
 
 async function nameTaken(db: ScopedDb, name: string, exceptId?: string): Promise<boolean> {
-  const where = {
-    name: { equals: name, mode: "insensitive" as const },
-    ...(exceptId ? { NOT: { id: exceptId } } : {}),
-  };
-  return (await db.expenseCategories.count(where)) > 0;
+  // SEC-61: compared by the one name key, never with an (I)LIKE.
+  const others = await db.expenseCategories.list(exceptId ? { NOT: { id: exceptId } } : undefined);
+  return nameClashes(name, others);
 }
 
 // ── Expense categories ──────────────────────────────────────────────────────
@@ -64,7 +74,15 @@ export async function createExpenseCategoryAction(
     return { fieldErrors: { name: "duplicateName" } };
   }
 
-  await scope.db.expenseCategories.create({ name });
+  const category = await scope.db.expenseCategories.create({ name });
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "expenseCategory.create",
+    entityType: "ExpenseCategory",
+    entityId: category.id,
+    after: { active: true },
+  });
   revalidateExpenses(locale);
   return { status: "created" };
 }
@@ -86,6 +104,13 @@ export async function updateExpenseCategoryAction(
   }
 
   await scope.db.expenseCategories.update(id, { name });
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "expenseCategory.rename",
+    entityType: "ExpenseCategory",
+    entityId: id,
+  });
   revalidateExpenses(locale);
   return { status: "saved" };
 }
@@ -104,6 +129,15 @@ export async function toggleExpenseCategoryAction(
   if (!row) return NOT_FOUND;
 
   await scope.db.expenseCategories.update(row.id, { active: parsed.data.active });
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: parsed.data.active ? "expenseCategory.activate" : "expenseCategory.deactivate",
+    entityType: "ExpenseCategory",
+    entityId: row.id,
+    before: { active: row.active },
+    after: { active: parsed.data.active },
+  });
   revalidateExpenses(parsed.data.locale);
   return { status: "saved" };
 }
@@ -121,7 +155,10 @@ export async function deleteExpenseCategoryAction(
   const row = await scope.db.expenseCategories.findById(parsed.data.id);
   if (!row) return NOT_FOUND;
 
-  const inUse = await scope.db.expenses.count({ categoryId: row.id });
+  // A voided expense still references its category — it is a record, so the
+  // category stays (deactivate it instead).
+  // However old the expense (SEC-62's "integrity" opt-out).
+  const inUse = await scopedIgnoringVisibilityWindow(scope.ctx, "integrity").expenses.count({ categoryId: row.id });
   if (inUse > 0) return { error: "inUse" };
 
   try {
@@ -132,6 +169,14 @@ export async function deleteExpenseCategoryAction(
     }
     throw error;
   }
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "expenseCategory.delete",
+    entityType: "ExpenseCategory",
+    entityId: row.id,
+    before: { active: row.active },
+  });
 
   revalidateExpenses(parsed.data.locale);
   return { status: "deleted" };
@@ -150,64 +195,83 @@ export async function createExpenseAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
   const { categoryId, amount, date, note, locale } = parsed.data;
+  const dateError = expenseDateError(scope.ctx, date);
+  if (dateError) return { fieldErrors: { date: dateError } };
   if (categoryId && !(await scope.db.expenseCategories.findById(categoryId))) {
     return { fieldErrors: { categoryId: "notFound" } };
   }
 
-  const expense = await scope.db.expenses.create({
-    categoryId,
-    amount,
-    date: new Date(`${date}T00:00:00.000Z`),
-    note,
-    recordedBy: scope.ctx.user.id,
-  });
-
-  // A financial change — audited (CLAUDE.md rule 7), same as recording a
-  // Payment, even though Expense carries no snapshot machinery of its own.
-  await writeAuditLog({
-    centerId: scope.ctx.center.id,
-    actorUserId: scope.ctx.user.id,
-    action: "expense.create",
-    entityType: "Expense",
-    entityId: expense.id,
-    before: null,
-    after: { categoryId, amount, date, note },
+  // A financial change — audited (CLAUDE.md rule 7) in the same transaction
+  // as the row (SEC-60), even though Expense carries no snapshot machinery.
+  await runInTransaction(prisma, async (tx) => {
+    const expense = await tx.expense.create({
+      data: {
+        centerId: scope.ctx.center.id,
+        categoryId,
+        amount,
+        date,
+        note,
+        recordedBy: scope.ctx.user.id,
+      },
+    });
+    await writeAuditLog(
+      {
+        centerId: scope.ctx.center.id,
+        actorUserId: scope.ctx.user.id,
+        action: "expense.create",
+        entityType: "Expense",
+        entityId: expense.id,
+        after: { categoryId, amount, date: dateKey(date) },
+      },
+      tx,
+    );
   });
 
   revalidateExpenses(locale);
   return { status: "created" };
 }
 
-export async function deleteExpenseAction(
+/**
+ * Voids an expense (D-24): it stays on the list, struck through, with who,
+ * when and why — and leaves every total. Never a delete.
+ */
+export async function voidExpenseAction(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
   if (!scope) return FORBIDDEN;
 
-  const parsed = expenseDeleteSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
+  const parsed = expenseVoidSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const { id, reason, locale } = parsed.data;
 
-  const row = await scope.db.expenses.findById(parsed.data.id);
+  const row = await scope.db.expenses.findById(id);
   if (!row) return NOT_FOUND;
+  if (row.voided) return { error: "alreadyVoided" };
 
-  await scope.db.expenses.remove(row.id);
-
-  await writeAuditLog({
-    centerId: scope.ctx.center.id,
-    actorUserId: scope.ctx.user.id,
-    action: "expense.delete",
-    entityType: "Expense",
-    entityId: row.id,
-    before: {
-      categoryId: row.categoryId,
-      amount: row.amount,
-      date: row.date.toISOString().slice(0, 10),
-      note: row.note,
-    },
-    after: null,
+  const voided = await runInTransaction(prisma, async (tx) => {
+    const changed = await tx.expense.updateMany({
+      where: { id, centerId: scope.ctx.center.id, voided: false },
+      data: { voided: true, voidReason: reason, voidedAt: new Date(), voidedBy: scope.ctx.user.id },
+    });
+    if (changed.count !== 1) return false;
+    await writeAuditLog(
+      {
+        centerId: scope.ctx.center.id,
+        actorUserId: scope.ctx.user.id,
+        action: "expense.void",
+        entityType: "Expense",
+        entityId: id,
+        before: { amount: row.amount, voided: false },
+        after: { voided: true },
+      },
+      tx,
+    );
+    return true;
   });
+  if (!voided) return { error: "alreadyVoided" };
 
-  revalidateExpenses(parsed.data.locale);
-  return { status: "deleted" };
+  revalidateExpenses(locale);
+  return { status: "voided" };
 }

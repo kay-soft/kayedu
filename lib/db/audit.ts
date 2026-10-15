@@ -1,32 +1,19 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
+import { writeAuditRow, type AuditRowInput } from "@/lib/db/audit-row";
 
-export type AuditInput = {
-  /** null only for platform-level actions that belong to no tenant. */
-  centerId: string | null;
-  actorUserId: string | null;
-  /** Dotted action name, e.g. "invitation.create", "membership.create". */
-  action: string;
-  entityType: string;
-  entityId: string;
-  before?: Prisma.InputJsonValue | null;
-  after?: Prisma.InputJsonValue | null;
-};
+export type AuditInput = AuditRowInput;
 
 /**
  * Financial changes, permission changes and attendance corrections MUST write
- * an audit row (CLAUDE.md rule 7, docs/01-data-model.md §2).
+ * an audit row (CLAUDE.md rule 7, docs/01-data-model.md §2). Pass the money
+ * transaction's client as `db` so the row commits with the change it records
+ * (SEC-60); the payload rule (ids and amounts only, D-20) is
+ * lib/db/audit-row.ts's.
  */
-export async function writeAuditLog(input: AuditInput) {
-  return prisma.auditLog.create({
-    data: {
-      centerId: input.centerId,
-      actorUserId: input.actorUserId,
-      action: input.action,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      before: input.before ?? undefined,
-      after: input.after ?? undefined,
-    },
-  });
+export async function writeAuditLog(
+  input: AuditInput,
+  db: PrismaClient | Prisma.TransactionClient = prisma,
+) {
+  return writeAuditRow(db, input);
 }

@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { SearchX } from "lucide-react";
 
 import { DiscoverFilters } from "@/app/[locale]/(student)/student/discover/discover-filters";
 import { ReserveButton } from "@/app/[locale]/(student)/student/discover/reserve-button";
@@ -6,21 +7,31 @@ import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { requireStudentUser } from "@/lib/auth/tenant";
+import { listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import {
   discoverClassesForCenter,
   teacherDisplayNames,
   type DiscoverClassRow,
 } from "@/lib/db/discover";
+import { teacherRatingAverages } from "@/lib/db/ratings";
 import {
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatRating, formatTimeRange } from "@/lib/format";
+import { nameInitial } from "@/lib/initials";
+import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
+import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { subjectAccentColor } from "@/lib/subject-accent";
+import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { ROUTES } from "@/lib/routes";
+import { centerLogoSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { EmptyState } from "@/components/shared/empty-state";
+import { listAccessibleCenters } from "@/lib/db/platform";
 
 type CardStatus = "enrolled" | "pending" | "full" | "open" | "requiresApproval";
 
@@ -32,6 +43,9 @@ type CardViewModel = {
   subjectName: string | null;
   gradeName: string | null;
   teacherName: string;
+  /** Average out of 5, platform-wide, across every centre this teacher works
+   * at (M17) — never a count alongside it (spec §5 "Teacher ratings"). */
+  teacherRating: number | null;
   roomName: string | null;
   price: number;
   requiresConfirmation: boolean;
@@ -46,6 +60,9 @@ const STATUS_BADGE: Record<CardStatus, "success" | "warning" | "neutral" | "info
   open: "info",
   requiresApproval: "warning",
 };
+
+/** Centres whose classes load in parallel on one Discover page load (SEC-32). */
+const DISCOVER_CENTER_CONCURRENCY = 5;
 
 export default async function StudentDiscoverPage({
   searchParams,
@@ -63,25 +80,43 @@ export default async function StudentDiscoverPage({
   const locale = await getLocale();
   const dayNames = tClasses.raw("dayNames") as string[];
 
-  const [centers, blockedByCenter, reservationByClass, enrolledClassIds] = await Promise.all([
-    prisma.center.findMany({
-      where: { active: true },
-      select: { id: true, name: true, logoUrl: true, themeColor: true },
-      orderBy: { name: "asc" },
-    }),
-    studentBlockedRefsByCenter(prisma, session.user.id),
-    studentReservationStatusByClass(prisma, session.user.id),
-    studentActiveEnrollmentClassIds(prisma, session.user.id),
-  ]);
+  const [centers, blockedByCenter, reservationByClass, enrolledClassIds, allSubjects, allGrades] =
+    await Promise.all([
+      listAccessibleCenters(prisma),
+      studentBlockedRefsByCenter(prisma, session.user.id),
+      studentReservationStatusByClass(prisma, session.user.id),
+      studentActiveEnrollmentClassIds(prisma, session.user.id),
+      // The full global catalog (M13) — filter options come from here, not
+      // from whatever happens to be in the current result set, so every
+      // pill stays available even while a filter narrows the cards shown.
+      listCatalogSubjects(prisma),
+      listCatalogGrades(prisma),
+    ]);
 
-  const perCenter = await Promise.all(
-    centers.map(async (center) => {
-      const classes = await discoverClassesForCenter(prisma, center.id);
+  // Global catalog ids (M13) mean the same thing at every centre, so the
+  // subject/grade filter is a real scoped `where` per centre now — never the
+  // pre-M13 in-memory name match (docs/02-architecture.md §14).
+  // SEC-32: at most DISCOVER_CENTER_CONCURRENCY centres in flight at once — a
+  // page load never holds one pool connection per centre on the platform.
+  const perCenter = await mapWithConcurrency(
+    centers,
+    DISCOVER_CENTER_CONCURRENCY,
+    async (center) => {
+      const classes = await discoverClassesForCenter(prisma, center.id, {
+        subjectId: subjectFilter || undefined,
+        gradeId: gradeFilter || undefined,
+      });
       const teacherIds = [...new Set(classes.map((row) => row.teacherId))];
       const teacherNames = await teacherDisplayNames(prisma, center.id, teacherIds);
       return { center, classes, teacherNames };
-    }),
+    },
   );
+
+  // Ratings are platform-wide by teacherId, never per-centre (M17, spec §5
+  // "Teacher ratings" — "follows the teacher across centres") — one batched
+  // lookup across every centre's classes combined, not one per centre.
+  const allTeacherIds = [...new Set(perCenter.flatMap(({ classes }) => classes.map((row) => row.teacherId)))];
+  const teacherRatings = await teacherRatingAverages(prisma, allTeacherIds);
 
   const blockedEverywhere = blockedByCenter;
   const cards: CardViewModel[] = [];
@@ -97,8 +132,7 @@ export default async function StudentDiscoverPage({
       const isFull =
         !isEnrolled &&
         !row.requiresConfirmation &&
-        row.capacity > 0 &&
-        row._count.enrollments >= row.capacity;
+        isAtCapacity(row._count.enrollments, enrollmentCap(classRoomSetFrom(row).capacity));
 
       let status: CardStatus;
       if (isEnrolled) status = "enrolled";
@@ -109,12 +143,13 @@ export default async function StudentDiscoverPage({
       cards.push({
         centerId: center.id,
         centerName: center.name,
-        centerLogoUrl: center.logoUrl,
+        centerLogoUrl: centerLogoSrc(center),
         classGroupId: row.id,
-        subjectName: row.subject?.name ?? null,
-        gradeName: row.grade?.name ?? null,
+        subjectName: catalogLabelWithSelection(locale, row.subject),
+        gradeName: catalogLabelWithSelection(locale, row.grade),
         teacherName: teacherNames.get(row.teacherId) ?? "—",
-        roomName: row.room?.name ?? null,
+        teacherRating: teacherRatings.get(row.teacherId) ?? null,
+        roomName: classRoomSetFrom(row).rooms.map((room) => room.name).join(" + ") || null,
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
         schedules: row.schedules,
@@ -123,12 +158,17 @@ export default async function StudentDiscoverPage({
     }
   }
 
-  const subjectOptions = [...new Set(cards.map((c) => c.subjectName).filter((v): v is string => !!v))].sort();
-  const gradeOptions = [...new Set(cards.map((c) => c.gradeName).filter((v): v is string => !!v))].sort();
+  const subjectOptions = allSubjects
+    .map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const gradeOptions = allGrades
+    .map((grade) => ({ value: grade.id, label: catalogLabel(locale, grade) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
+  // Subject/grade are already applied in each centre's own query above; only
+  // the day filter (a child-row check) still happens here, in memory, after
+  // the per-centre results are combined.
   const filtered = cards.filter((card) => {
-    if (subjectFilter && card.subjectName !== subjectFilter) return false;
-    if (gradeFilter && card.gradeName !== gradeFilter) return false;
     if (dayFilter) {
       const day = Number(dayFilter);
       if (!card.schedules.some((slot) => slot.dayOfWeek === day)) return false;
@@ -166,13 +206,13 @@ export default async function StudentDiscoverPage({
       />
 
       {pageEntries.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("empty")}</p>
+        <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {pageEntries.map((card) => (
             <div
               key={`${card.centerId}:${card.classGroupId}`}
-              className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card"
+              className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover"
             >
               <div
                 aria-hidden
@@ -196,9 +236,14 @@ export default async function StudentDiscoverPage({
                   className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
                   style={{ backgroundColor: subjectAccentColor(card.subjectName) }}
                 >
-                  {card.teacherName.trim().charAt(0) || "?"}
+                  {nameInitial(card.teacherName)}
                 </span>
                 <span className="min-w-0 truncate text-sm text-text-secondary">{card.teacherName}</span>
+                {card.teacherRating !== null ? (
+                  <span className="ms-auto shrink-0 text-xs font-medium text-text-muted">
+                    {t("card.rating", { value: formatRating(card.teacherRating, locale) })}
+                  </span>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
@@ -208,7 +253,10 @@ export default async function StudentDiscoverPage({
                 {card.schedules.length > 0 ? (
                   <span>
                     {card.schedules
-                      .map((slot) => `${dayNames[slot.dayOfWeek]} ${slot.startTime}–${slot.endTime}`)
+                      .map(
+                        (slot) =>
+                          `${dayNames[slot.dayOfWeek]} ${formatTimeRange(slot.startTime, slot.endTime, locale)}`,
+                      )
                       .join(" · ")}
                   </span>
                 ) : (

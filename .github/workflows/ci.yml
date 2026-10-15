@@ -32,6 +32,11 @@ jobs:
       - run: npx prisma validate
       - run: npm run typecheck
       - run: npm run lint
+      # R10a: static presentation gate (one locale toggle, no native select,
+      # no hardcoded colours, PageHeader coverage). Needs no database.
+      - run: npm run check:design
+      # SEC-35: no high/critical advisory in what ships to production.
+      - run: npm audit --omit=dev --audit-level=high
 
   gates:
     name: Migrations + acceptance gates
@@ -53,6 +58,14 @@ jobs:
       - name: Apply migrations (prisma migrate deploy)
         run: npx prisma migrate deploy
 
+      # SEC-2a (SEC-10/30/31/55): the Data API lockdown must hold on the
+      # freshly migrated CI project — read-only catalog checks.
+      - run: npm run check:rls
+
+      # SEC-2c: the run must leave no more User rows than it found — each gate
+      # deletes its own (scripts/lib/gate-db.ts); this proves it run-wide.
+      - run: npm run gates:users -- record
+
       # Every gate below is the "Delivered" claim for its milestone
       # (docs/02-architecture.md §5) — a failure here means a milestone's own
       # acceptance criteria regressed, not just "a test broke".
@@ -61,6 +74,7 @@ jobs:
       - run: npm run check:people
       - run: npm run check:classes
       - run: npm run check:payments
+      - run: npm run check:payment-methods
       - run: npm run check:analytics
       - run: npm run check:teacher-portal
       - run: npm run check:student-portal
@@ -68,3 +82,22 @@ jobs:
       - run: npm run check:admin
       - run: npm run check:performance
       - run: npm run check:rtl
+      - run: npm run check:branches
+      - run: npm run check:permissions
+      - run: npm run check:catalog
+      - run: npm run check:settlements
+      - run: npm run check:enrollment
+      - run: npm run check:parent
+      - run: npm run check:ratings
+      - run: npm run check:visibility
+      - run: npm run check:filters
+      - run: npm run check:session-lifecycle
+      - run: npm run check:rooms
+      - run: npm run check:class-periods
+      - run: npm run check:one-off-sessions
+      - run: npm run check:class-creation
+      - run: npm run check:reception
+      - run: npm run check:timezone
+      - run: npm run check:card-layout
+      - run: npm run check:security
+      - run: npm run gates:users -- verify

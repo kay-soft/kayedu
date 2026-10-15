@@ -3,8 +3,11 @@ import type { Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:teacher-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/sessions.ts).
+import { monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
 import { type DateRange, revenueTotals } from "./analytics.ts";
+import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
+import { likeSearchToken } from "../like.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string` (matches lib/db/sessions.ts). */
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
@@ -23,6 +26,22 @@ const CANCELLED_STATUS: SessionStatus = "CANCELLED";
 type Db = PrismaClient | Prisma.TransactionClient;
 
 // ── Dashboard: per-center summary, unioned into a combined view ────────────
+
+/**
+ * One centre's "today", calendar week (Sunday-start) and calendar month for
+ * the teacher dashboard (R7b). Resolved from **that centre's own timezone** —
+ * a teacher's centres may sit in different zones, so each per-centre query
+ * gets its own day and only the resulting counts are summed
+ * (`combineTeacherSummaries`); there is no single global "today". `now` is
+ * injectable so the gate can pin the boundary.
+ */
+export function teacherDashboardAnchors(
+  timeZone: string,
+  now: Date = new Date(),
+): { today: Date; week: { start: Date; end: Date }; month: { start: Date; end: Date } } {
+  const today = todayInTimezone(timeZone, now);
+  return { today, week: weekRangeUtc(today), month: monthRangeUtc(today) };
+}
 
 export type TeacherCenterSummary = {
   centerId: string;
@@ -47,14 +66,22 @@ export async function teacherCenterSummary(
   earningsRange: DateRange,
 ): Promise<TeacherCenterSummary> {
   const [sessionsToday, sessionsThisWeek, earnings] = await Promise.all([
+    // R4: a deactivated class's sessions count only once they are closed
+    // records (`OPEN_CLASS_SESSION`).
     db.session.count({
-      where: scopedWhere(centerId, { teacherId, date: today, status: { not: CANCELLED_STATUS } }),
+      where: scopedWhere(centerId, {
+        teacherId,
+        date: today,
+        status: { not: CANCELLED_STATUS },
+        ...OPEN_CLASS_SESSION,
+      }),
     }),
     db.session.count({
       where: scopedWhere(centerId, {
         teacherId,
         date: { gte: weekRange.start, lte: weekRange.end },
         status: { not: CANCELLED_STATUS },
+        ...OPEN_CLASS_SESSION,
       }),
     }),
     revenueTotals(db, centerId, earningsRange, teacherId),
@@ -98,6 +125,8 @@ export function combineTeacherSummaries(summaries: TeacherCenterSummary[]): {
  * within a center they both belong to. `studentQuery` matches a student
  * either enrolled in the class or ever an attendee of it (spec §4.2 item 2
  * "search by student"), covering both regulars and drop-ins/future roster.
+ * R4: a deactivated class's sessions show only once they are closed records
+ * (`OPEN_CLASS_SESSION`) — its history stays, its future is gone.
  */
 export function teacherSessionListWhere(filters: {
   teacherId: string;
@@ -106,16 +135,26 @@ export function teacherSessionListWhere(filters: {
   gradeId?: string | null;
   studentQuery?: string | null;
 }): Prisma.SessionWhereInput {
+  const and: Prisma.SessionWhereInput[] = [OPEN_CLASS_SESSION];
+  // A class session's grade is its class's; a one-time session's its own (R5).
+  if (filters.gradeId) {
+    and.push({
+      OR: [{ classGroup: { gradeId: filters.gradeId } }, { classGroupId: null, gradeId: filters.gradeId }],
+    });
+  }
   const where: Prisma.SessionWhereInput = {
     teacherId: filters.teacherId,
     date: { gte: filters.from, lte: filters.to },
+    AND: and,
   };
-  if (filters.gradeId) where.classGroup = { gradeId: filters.gradeId };
 
-  const query = filters.studentQuery?.trim();
-  if (query) {
+  // SEC-61: LIKE pattern characters removed — Prisma cannot escape them. A
+  // query that was only such characters matches nobody, never everyone.
+  const typed = filters.studentQuery?.trim() ?? "";
+  const query = likeSearchToken(typed);
+  if (typed) {
     const contains = { contains: query, mode: "insensitive" as const };
-    const studentMatch: Prisma.StudentProfileWhereInput = {
+    const studentMatch: Prisma.StudentProfileWhereInput = query === "" ? { id: { in: [] } } : {
       OR: [
         { studentCode: contains },
         { firstName: contains },
@@ -160,6 +199,16 @@ export async function teacherStudentProfileIds(
 }
 
 /**
+ * The same "taught by this teacher here" set as `teacherStudentProfileIds`,
+ * as a relational `where` on `StudentProfile` (SEC-2c, SEC-52): a type-ahead
+ * filters in the database instead of loading the teacher's all-history roster
+ * on every keystroke.
+ */
+export function taughtByTeacherWhere(centerId: string, teacherId: string): Prisma.StudentProfileWhereInput {
+  return { attendees: { some: scopedWhere(centerId, { session: { teacherId } }) } };
+}
+
+/**
  * Every session this student attended with *this* teacher only (spec §4.2
  * item 3) — never the student's full cross-teacher history, which would leak
  * other teachers' sessions to this one.
@@ -170,6 +219,7 @@ export function studentSessionsWithTeacher(
   teacherId: string,
   studentProfileId: string,
 ) {
+  const withSelection = { include: { selections: { where: { centerId } } } } as const;
   return db.sessionAttendee.findMany({
     where: scopedWhere(centerId, {
       studentProfileId,
@@ -177,7 +227,14 @@ export function studentSessionsWithTeacher(
     }),
     orderBy: { session: { date: "desc" } },
     include: {
-      session: { include: { classGroup: { include: { subject: true, grade: true } } } },
+      session: {
+        include: {
+          classGroup: { include: { subject: withSelection, grade: withSelection } },
+          // R5 — a one-time session's own subject/grade (no class).
+          subject: withSelection,
+          grade: withSelection,
+        },
+      },
       payments: { where: { voided: false }, orderBy: { recordedAt: "desc" }, take: 1 },
     },
   });

@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { CalendarClock, History } from "lucide-react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -7,15 +8,17 @@ import { getStudentContexts, requireStudentUser } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
-import { formatDate, formatMoney } from "@/lib/format";
-import { startOfUtcDay } from "@/lib/scheduling";
+import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
+import { centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 import { ScheduleDateFilter } from "./schedule-date-filter";
+import { CappedList } from "@/components/shared/capped-list";
+import { EmptyState } from "@/components/shared/empty-state";
+import { sessionLabelParts } from "@/lib/session-label";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
   LATE: "warning",
   ABSENT: "danger",
-  EXCUSED: "neutral",
 } as const;
 
 type UpcomingRow = {
@@ -39,7 +42,7 @@ type PastRow = {
   startTime: string;
   subjectName: string | null;
   gradeName: string | null;
-  attendanceStatus: "PRESENT" | "LATE" | "ABSENT" | "EXCUSED";
+  attendanceStatus: "PRESENT" | "LATE" | "ABSENT";
   isDropIn: boolean;
   paidAmount: number | null;
   teacherName: string;
@@ -49,8 +52,12 @@ async function loadCenterSchedule(
   centerId: string,
   centerName: string,
   studentProfileId: string,
-  today: Date,
+  timeZone: string,
+  now: Date,
+  locale: string,
 ): Promise<{ upcoming: UpcomingRow[]; past: PastRow[] }> {
+  // R7b: each centre's own calendar day splits its upcoming from its past.
+  const today = todayInTimezone(timeZone, now);
   const [futureSessions, history] = await Promise.all([
     studentUpcomingSessions(prisma, centerId, studentProfileId, today),
     studentPastAttendance(prisma, centerId, studentProfileId, today),
@@ -71,9 +78,8 @@ async function loadCenterSchedule(
     date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
-    subjectName: row.classGroup.subject?.name ?? null,
-    gradeName: row.classGroup.grade?.name ?? null,
-    roomName: row.room?.name ?? row.classGroup.room?.name ?? null,
+    ...sessionLabelParts(locale, row),
+    roomName: row.room?.name ?? row.classGroup?.room?.name ?? null,
     teacherName: names.get(row.teacherId) ?? "—",
   }));
 
@@ -83,8 +89,8 @@ async function loadCenterSchedule(
     attendeeId: row.id,
     date: row.session.date,
     startTime: row.session.startTime,
-    subjectName: row.session.classGroup.subject?.name ?? null,
-    gradeName: row.session.classGroup.grade?.name ?? null,
+    // R5 — a one-time (drop-in only) session shows its own title here.
+    ...sessionLabelParts(locale, row.session),
     attendanceStatus: row.attendanceStatus,
     isDropIn: row.isDropIn,
     paidAmount: row.payments[0]?.amount ?? null,
@@ -117,12 +123,34 @@ export default async function StudentSchedulePage({
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  const today = startOfUtcDay(new Date());
+  const now = new Date();
 
   const perCenter = await Promise.all(
     contexts
       .filter((ctx) => ctx.studentProfile)
-      .map((ctx) => loadCenterSchedule(ctx.center.id, ctx.center.name, ctx.studentProfile!.id, today)),
+      .map((ctx) =>
+        loadCenterSchedule(
+          ctx.center.id,
+          ctx.center.name,
+          ctx.studentProfile!.id,
+          centreTimeZone(ctx.settings),
+          now,
+          locale,
+        ),
+      ),
+  );
+
+  // The date picker's "today" marker is the one combined value on this page.
+  // Rule (`commonTimeZone`): the zone all this student's centres share, else
+  // the platform default — a cosmetic marker only; every query above used its
+  // own centre's day. Pinned by `check:timezone`.
+  const todayIso = dateKey(
+    todayInTimezone(
+      commonTimeZone(
+        contexts.filter((ctx) => ctx.studentProfile).map((ctx) => centreTimeZone(ctx.settings)),
+      ),
+      now,
+    ),
   );
 
   const upcoming = perCenter
@@ -132,15 +160,18 @@ export default async function StudentSchedulePage({
     .flatMap((entry) => entry.past)
     .sort((a, b) => b.date.getTime() - a.date.getTime() || b.startTime.localeCompare(a.startTime));
 
-  const dayKey = (date: Date) => date.toISOString().slice(0, 10);
-  const upcomingFiltered = dateFilter ? upcoming.filter((row) => dayKey(row.date) === dateFilter) : upcoming;
-  const pastFiltered = dateFilter ? past.filter((row) => dayKey(row.date) === dateFilter) : past;
+  const upcomingFiltered = dateFilter ? upcoming.filter((row) => dateKey(row.date) === dateFilter) : upcoming;
+  const pastFiltered = dateFilter ? past.filter((row) => dateKey(row.date) === dateFilter) : past;
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle")} />
 
-      <ScheduleDateFilter date={dateFilter} dateLabel={t("filterDate")} clearLabel={t("clearDate")} />
+      <ScheduleDateFilter
+        date={dateFilter}
+        todayIso={todayIso}
+        dateLabel={t("filterDate")}
+      />
 
       <Card>
         <CardHeader>
@@ -148,9 +179,12 @@ export default async function StudentSchedulePage({
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {upcomingFiltered.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("upcomingEmpty")}</p>
+            <EmptyState compact icon={<CalendarClock />} title={t("upcomingEmpty")} description={t("upcomingEmptyHint")} />
           ) : (
-            upcomingFiltered.map((row) => (
+            <CappedList
+              items={upcomingFiltered}
+              moreLabel={(hidden) => t("showMoreUpcoming", { count: hidden })}
+              render={(row) => (
               <div
                 key={row.sessionId}
                 className="flex flex-col gap-2 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -159,19 +193,18 @@ export default async function StudentSchedulePage({
                   <p className="truncate text-sm font-semibold text-text-primary">
                     {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
                   </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
                     <span>{row.centerName}</span>
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
-                    <span dir="ltr">
-                      {row.startTime}–{row.endTime}
-                    </span>
+                    <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                     {row.roomName ? <span>{row.roomName}</span> : null}
                   </p>
                 </div>
                 <Badge variant="info">{t("upcomingBadge")}</Badge>
               </div>
-            ))
+              )}
+            />
           )}
         </CardContent>
       </Card>
@@ -182,7 +215,7 @@ export default async function StudentSchedulePage({
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {pastFiltered.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("pastEmpty")}</p>
+            <EmptyState compact icon={<History />} title={t("pastEmpty")} description={t("pastEmptyHint")} />
           ) : (
             pastFiltered.map((row) => (
               <div
@@ -193,10 +226,11 @@ export default async function StudentSchedulePage({
                   <p className="truncate text-sm font-semibold text-text-primary">
                     {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
                   </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
                     <span>{row.centerName}</span>
                     <span>{row.teacherName}</span>
                     <span>{formatDate(row.date, locale)}</span>
+                    <span>{formatTime(row.startTime, locale)}</span>
                     {row.isDropIn ? <span>{t("dropIn")}</span> : null}
                     {row.paidAmount !== null ? <span>{formatMoney(row.paidAmount, locale)}</span> : null}
                   </p>

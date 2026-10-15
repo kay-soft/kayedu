@@ -1,6 +1,6 @@
 import type { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { supabaseCookieOptions, supabaseEnv } from "@/lib/supabase/env";
 
 /**
  * Refreshes the Supabase auth session and writes any rotated cookies onto the
@@ -16,6 +16,7 @@ export async function refreshSupabaseSession(
   if (!env) return response;
 
   const supabase = createServerClient(env.url, env.anonKey, {
+    cookieOptions: supabaseCookieOptions(),
     cookies: {
       getAll() {
         return request.cookies.getAll();

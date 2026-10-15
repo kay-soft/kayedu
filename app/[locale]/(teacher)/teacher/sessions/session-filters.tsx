@@ -2,7 +2,9 @@
 
 import { useTranslations } from "next-intl";
 
-import { SelectInput } from "@/components/ui/select-input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { FilterField } from "@/components/shared/filter-bar";
+import { Select } from "@/components/ui/select";
 
 export type SelectOption = { value: string; label: string };
 
@@ -14,6 +16,7 @@ export type SelectOption = { value: string; label: string };
 export function TeacherSessionFilters({
   range,
   date,
+  todayIso,
   gradeId,
   status,
   q,
@@ -22,6 +25,8 @@ export function TeacherSessionFilters({
 }: {
   range: "day" | "week" | "month";
   date: string;
+  /** Today, from the server — the same "now" the query itself resolves against. */
+  todayIso: string;
   gradeId: string;
   status: string;
   q: string;
@@ -36,63 +41,51 @@ export function TeacherSessionFilters({
       {/* Keeps the active student search when a filter control re-submits. */}
       {q ? <input type="hidden" name="q" value={q} /> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-date" className="text-xs font-medium text-text-secondary">
-            {t("date")}
-          </label>
-          <input
+        <FilterField label={t("date")} htmlFor="filter-date">
+          <DatePicker
             id="filter-date"
             name="date"
-            type="date"
             defaultValue={date}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
-            className="h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25"
+            todayIso={todayIso}
+            clearable
+            submitOnChange
           />
-        </div>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-range" className="text-xs font-medium text-text-secondary">
-            {t("range")}
-          </label>
-          <SelectInput
+        <FilterField label={t("range")} htmlFor="filter-range">
+          <Select
             id="filter-range"
             name="range"
             defaultValue={range}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="day">{t("rangeDay")}</option>
             <option value="week">{t("rangeWeek")}</option>
             <option value="month">{t("rangeMonth")}</option>
-          </SelectInput>
-        </div>
+          </Select>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-status" className="text-xs font-medium text-text-secondary">
-            {t("status")}
-          </label>
-          <SelectInput
+        <FilterField label={t("status")} htmlFor="filter-status">
+          <Select
             id="filter-status"
             name="status"
             defaultValue={status}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             <option value="SCHEDULED">{tStatus("SCHEDULED")}</option>
             <option value="LIVE">{tStatus("LIVE")}</option>
             <option value="COMPLETED">{tStatus("COMPLETED")}</option>
             <option value="CANCELLED">{tStatus("CANCELLED")}</option>
-          </SelectInput>
-        </div>
+          </Select>
+        </FilterField>
 
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <label htmlFor="filter-gradeId" className="text-xs font-medium text-text-secondary">
-            {t("grade")}
-          </label>
-          <SelectInput
+        <FilterField label={t("grade")} htmlFor="filter-gradeId">
+          <Select
             id="filter-gradeId"
             name="gradeId"
             defaultValue={gradeId}
-            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            submitOnChange
           >
             <option value="">{allLabel}</option>
             {grades.map((option) => (
@@ -100,8 +93,8 @@ export function TeacherSessionFilters({
                 {option.label}
               </option>
             ))}
-          </SelectInput>
-        </div>
+          </Select>
+        </FilterField>
       </div>
     </form>
   );

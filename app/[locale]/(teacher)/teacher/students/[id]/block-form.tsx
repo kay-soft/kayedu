@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { Ban, UserMinus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -12,6 +11,7 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * Block/unblock this student from the current teacher (spec §4.2 items 2/3),
@@ -30,11 +30,14 @@ export function StudentBlockForm({
   const tErrors = useTranslations("TeacherStudents.errors");
   const locale = useLocale();
 
-  const [blockState, blockAction] = useActionState(teacherBlockStudentAction, IDLE_TEACHER_STATE);
-  const [unblockState, unblockAction] = useActionState(
+  const [blockState, blockAction] = useGuardedActionState(teacherBlockStudentAction, IDLE_TEACHER_STATE);
+  const [unblockState, unblockAction] = useGuardedActionState(
     teacherUnblockStudentAction,
     IDLE_TEACHER_STATE,
   );
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(blockState, { success: tToast("studentBlocked") });
+  useActionFeedback(unblockState, { success: tToast("studentUnblocked") });
 
   const error = blockState.error ?? unblockState.error;
 

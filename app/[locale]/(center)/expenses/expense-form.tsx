@@ -1,15 +1,20 @@
 "use client";
 
-import { useActionState } from "react";
+import { startTransition } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createExpenseAction } from "@/app/[locale]/(center)/expenses/actions";
 import { Field } from "@/components/shared/field";
+import { ErrorSummary } from "@/components/shared/error-summary";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Select } from "@/components/ui/select";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
+import { expenseCreateSchema } from "@/lib/validation/analytics";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
+import { useClientValidation } from "@/lib/ui/client-validation";
 
 export type ExpenseCategoryOption = { value: string; label: string };
 
@@ -22,45 +27,68 @@ export type ExpenseCategoryOption = { value: string; label: string };
 export function ExpenseForm({
   categories,
   rowCount,
+  todayIso,
 }: {
   categories: ExpenseCategoryOption[];
   /** Remounts the form (clearing it) after a successful create. */
   rowCount: number;
+  /** The centre's calendar day (R7b), computed on the server — never the browser's. */
+  todayIso: string;
 }) {
   const t = useTranslations("Expenses");
   const tErrors = useTranslations("Expenses.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(createExpenseAction, IDLE_ACTION_STATE);
-  const today = new Date().toISOString().slice(0, 10);
+  const [state, formAction] = useGuardedActionState(createExpenseAction, IDLE_ACTION_STATE);
+  // The action's own schema, run before the round trip (docs/04 §14.2).
+  const { clientErrors, check } = useClientValidation(expenseCreateSchema);
+  const fieldErrors = clientErrors ?? state.fieldErrors;
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(state, { success: tToast("expenseAdded") });
 
   return (
-    <form key={`expense-${rowCount}`} action={formAction} className="flex flex-col gap-4" noValidate>
+    // `startTransition` with the form's own FormData, not `<form action>`: React
+    // 19 resets an uncontrolled form once its action returns, so a refused
+    // amount cleared everything typed (DES, docs/04 §14.7). A success still
+    // empties it — the key follows the row count.
+    <form
+      key={`expense-${rowCount}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+    if (!check(event.currentTarget, formData)) return;
+        startTransition(() => formAction(formData));
+      }}
+      className="flex flex-col gap-4"
+      noValidate
+    >
       <input type="hidden" name="locale" value={locale} />
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+
+      <ErrorSummary fieldErrors={fieldErrors} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field
           id="expense-categoryId"
           label={t("fields.category")}
           optional
-          error={state.fieldErrors?.categoryId ? tErrors(state.fieldErrors.categoryId) : undefined}
+          error={fieldErrors?.categoryId ? tErrors(fieldErrors.categoryId) : undefined}
         >
-          <SelectInput id="expense-categoryId" name="categoryId" defaultValue="">
+          <Select id="expense-categoryId" name="categoryId" defaultValue="">
             <option value="">{t("fields.categoryNone")}</option>
             {categories.map((category) => (
               <option key={category.value} value={category.value}>
                 {category.label}
               </option>
             ))}
-          </SelectInput>
+          </Select>
         </Field>
 
         <Field
           id="expense-amount"
           label={t("fields.amount")}
           hint={t("fields.amountHint")}
-          error={state.fieldErrors?.amount ? tErrors(state.fieldErrors.amount) : undefined}
+          error={fieldErrors?.amount ? tErrors(fieldErrors.amount) : undefined}
         >
           <Input
             id="expense-amount"
@@ -77,22 +105,28 @@ export function ExpenseForm({
         <Field
           id="expense-date"
           label={t("fields.date")}
-          error={state.fieldErrors?.date ? tErrors(state.fieldErrors.date) : undefined}
+          error={fieldErrors?.date ? tErrors(fieldErrors.date) : undefined}
         >
-          <Input id="expense-date" name="date" type="date" dir="ltr" defaultValue={today} required />
+          <DatePicker
+            id="expense-date"
+            name="date"
+            defaultValue={todayIso}
+            todayIso={todayIso}
+            required
+          />
         </Field>
 
         <Field
           id="expense-note"
           label={t("fields.note")}
           optional
-          error={state.fieldErrors?.note ? tErrors(state.fieldErrors.note) : undefined}
+          error={fieldErrors?.note ? tErrors(fieldErrors.note) : undefined}
         >
           <Input id="expense-note" name="note" maxLength={200} placeholder={t("fields.notePlaceholder")} />
         </Field>
       </div>
 
-      <SubmitButton className="w-full sm:w-auto">{t("add")}</SubmitButton>
+      <SubmitButton className="w-full sm:w-auto sm:self-start">{t("add")}</SubmitButton>
     </form>
   );
 }

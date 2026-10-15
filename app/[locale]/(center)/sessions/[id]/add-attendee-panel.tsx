@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -14,6 +14,8 @@ import { PersonFields } from "@/components/center/person-fields";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import { Button } from "@/components/ui/button";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type AttendeeCandidate = {
   studentProfileId: string;
@@ -27,9 +29,10 @@ export type AttendeeCandidate = {
  * drop-in — reusing M3's duplicate-match flow exactly (`components/center/
  * match-panel.tsx`, `components/center/{person,contact}-fields.tsx`).
  *
- * Both paths default the new roster row to PRESENT — the natural default for
- * "add them, they are right here" — and staff correct it from the roster
- * (`session-roster.tsx`'s Attendance control) if that is wrong.
+ * Both paths are a check-in: the server decides Present or Late from the
+ * arrival time (R2, `createAttendance`) — there is no status to pick — and
+ * staff correct it from the roster (`session-roster.tsx`'s Attendance
+ * control) while the session is live if that is wrong.
  */
 export function AddAttendeePanel({
   sessionId,
@@ -64,14 +67,10 @@ export function AddAttendeePanel({
       {showNewForm ? (
         <NewAttendeeForm sessionId={sessionId} onDone={() => setShowNewForm(false)} />
       ) : (
-        <button
-          type="button"
-          onClick={() => setShowNewForm(true)}
-          className="inline-flex h-11 w-fit items-center gap-2 rounded-lg border border-dashed border-border px-4 text-sm font-medium text-text-secondary hover:bg-surface-subtle"
-        >
+        <Button type="button" onClick={() => setShowNewForm(true)} variant="outline" className="h-11 px-4 border-dashed w-fit">
           <UserPlus className="size-4" aria-hidden />
           {t("registerNew")}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -87,7 +86,7 @@ function ExistingCandidateRow({
   const t = useTranslations("Sessions.addAttendee");
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     addExistingAttendeeAction,
     IDLE_SESSION_STATE,
   );
@@ -104,7 +103,6 @@ function ExistingCandidateRow({
         <input type="hidden" name="locale" value={locale} />
         <input type="hidden" name="sessionId" value={sessionId} />
         <input type="hidden" name="studentProfileId" value={candidate.studentProfileId} />
-        <input type="hidden" name="status" value="PRESENT" />
         <SubmitButton className="w-full sm:w-auto">
           <UserPlus className="size-4" />
           {t("add")}
@@ -125,7 +123,7 @@ function NewAttendeeForm({
   const t = useTranslations("Sessions.addAttendee");
   const tErrors = useTranslations("Sessions.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(addNewAttendeeAction, IDLE_SESSION_STATE);
+  const [state, formAction] = useGuardedActionState(addNewAttendeeAction, IDLE_SESSION_STATE);
   const [dismissedMatch, setDismissedMatch] = useState<string | null>(null);
 
   useEffect(() => {
@@ -147,7 +145,6 @@ function NewAttendeeForm({
     >
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="sessionId" value={sessionId} />
-      <input type="hidden" name="status" value="PRESENT" />
       {match ? <input type="hidden" name="linkUserId" value={match.userId} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
@@ -165,13 +162,9 @@ function NewAttendeeForm({
       ) : (
         <div className="flex flex-col gap-2 sm:flex-row">
           <SubmitButton className="w-full sm:w-auto">{t("add")}</SubmitButton>
-          <button
-            type="button"
-            onClick={onDone}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle sm:w-auto"
-          >
+          <Button type="button" onClick={onDone} variant="outline" className="h-11 px-4 sm:w-auto">
             {t("cancel")}
-          </button>
+          </Button>
         </div>
       )}
     </form>

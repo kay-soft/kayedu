@@ -1,4 +1,5 @@
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
+import { BookOpen, SearchX } from "lucide-react";
 
 import { AddClassDialog } from "@/app/[locale]/(center)/classes/add-class-dialog";
 import {
@@ -6,10 +7,12 @@ import {
   type ClassRowData,
 } from "@/app/[locale]/(center)/classes/class-row";
 import { ClassFilters } from "@/app/[locale]/(center)/classes/class-filters";
-import { GenerateSessionsButton } from "@/app/[locale]/(center)/classes/generate-sessions-button";
 import { HolidayCalendar } from "@/app/[locale]/(center)/classes/holiday-calendar";
+import { ListHeader } from "@/components/shared/list-header";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import {
   Card,
   CardContent,
@@ -18,18 +21,25 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { classSessionCounts } from "@/lib/db/class-sessions";
 import { classListWhere } from "@/lib/db/classes";
+import { prisma } from "@/lib/db/client";
+import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { scoped } from "@/lib/db/scoped";
+import { formatDayRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
+import { dateKey } from "@/lib/scheduling";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 
 /**
  * Classes (spec §4.1 item 3) — a filterable dashboard first, exactly like
  * Teachers/Students. "Add class" opens a dialog; the class detail page owns
- * its schedule (docs/04 §9), its roster and its own "generate sessions"
- * trigger. The holiday calendar and a center-wide "generate sessions" live
- * here because they apply to every class at once (docs/02 §11).
+ * its schedule (docs/04 §9) and its roster. Each row shows the class's period
+ * and how many sessions it has (R4 — they exist for the whole period, there
+ * is no generator to run). The holiday calendar lives here because it
+ * applies to every class at once (docs/02 §11).
  */
 export default async function ClassesPage({
   searchParams,
@@ -49,6 +59,7 @@ export default async function ClassesPage({
   const pageSize = DEFAULT_PAGE_SIZE;
 
   const db = scoped(ctx);
+  const locale = await getLocale();
   const t = await getTranslations("Classes");
   const tCommon = await getTranslations("Settings.common");
 
@@ -58,7 +69,7 @@ export default async function ClassesPage({
     gradeId: gradeId || null,
   });
 
-  const [classes, total, teachers, subjects, grades, educationSystems, rooms, holidays] =
+  const [classes, total, teachers, subjects, grades, educationSystems, rooms, roomLinks, holidays, terms] =
     await Promise.all([
       db.classGroups.search({
         where,
@@ -71,8 +82,15 @@ export default async function ClassesPage({
       db.grades.list(),
       db.educationSystems.list(),
       db.rooms.list(),
+      db.roomLinks.list(),
       db.holidays.list(),
+      db.terms.listActive(),
     ]);
+  const sessionCounts = await classSessionCounts(
+    prisma,
+    ctx.center.id,
+    classes.map((classGroup) => classGroup.id),
+  );
 
   const teacherByUserId = new Map(
     teachers.map((teacher) => [
@@ -81,43 +99,58 @@ export default async function ClassesPage({
     ]),
   );
 
-  const rows: ClassRowData[] = classes.map((classGroup) => ({
-    classGroupId: classGroup.id,
-    teacherName: teacherByUserId.get(classGroup.teacherId) ?? tCommon("none"),
-    subjectName: classGroup.subject?.name ?? null,
-    gradeName: classGroup.grade?.name ?? null,
-    roomName: classGroup.room?.name ?? null,
-    price: classGroup.price,
-    capacity: classGroup.capacity,
-    enrolledCount: classGroup._count.enrollments,
-    scheduleCount: classGroup._count.schedules,
-    active: classGroup.active,
-  }));
+  const rows: ClassRowData[] = classes.map((classGroup) => {
+    const roomSet = classRoomSetFrom(classGroup);
+    return {
+      classGroupId: classGroup.id,
+      teacherName: teacherByUserId.get(classGroup.teacherId) ?? tCommon("none"),
+      subjectName: classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+      gradeName: classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
+      roomName: roomSet.rooms.map((room) => room.name).join(" + ") || null,
+      price: classGroup.price,
+      seats: roomSet.capacity,
+      enrolledCount: classGroup._count.enrollments,
+      scheduleCount: classGroup._count.schedules,
+      period: formatDayRange(classGroup.startDate, classGroup.endDate, locale),
+      sessionCount: sessionCounts.get(classGroup.id) ?? 0,
+      active: classGroup.active,
+    };
+  });
 
   const teacherOptions = teachers.map((teacher) => ({
     value: teacher.userId,
     label: fullName(localName(teacher, teacher.user)),
+    // The centre's own phone for them (docs/01 §6) — what the picker searches.
+    phone: teacher.phone,
   }));
-  const subjectOptions = subjects.map((subject) => ({
-    value: subject.id,
-    label: subject.active
-      ? subject.name
-      : `${subject.name} · ${tCommon("inactive")}`,
-  }));
-  const gradeOptions = grades.map((grade) => ({
-    value: grade.id,
-    label: grade.active ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
-  }));
-  const educationSystemOptions = educationSystems.map((system) => ({
-    value: system.id,
-    label: system.active
-      ? system.name
-      : `${system.name} · ${tCommon("inactive")}`,
-  }));
+  // The list filter keeps every entry (an existing class may use one the
+  // platform has since deactivated); the New class dialog offers only the
+  // entries still on offer (R8).
+  const toOption = (row: { id: string; name: string; active: boolean }) => ({
+    value: row.id,
+    label: row.active ? row.name : `${row.name} · ${tCommon("inactive")}`,
+  });
+  const subjectOptions = subjects.map(toOption);
+  const gradeOptions = grades.map(toOption);
+  const pickableSubjectOptions = subjects.filter((row) => row.catalogActive).map(toOption);
+  const pickableGradeOptions = grades.filter((row) => row.catalogActive).map(toOption);
+  const educationSystemOptions = educationSystems
+    .filter((system) => system.catalogActive)
+    .map((system) => ({
+      value: system.id,
+      label: system.active
+        ? system.name
+        : `${system.name} · ${tCommon("inactive")}`,
+    }));
   const roomOptions = rooms.map((room) => ({
-    value: room.id,
-    label: room.active ? room.name : `${room.name} · ${tCommon("inactive")}`,
+    id: room.id,
+    name: room.name,
+    capacity: room.capacity,
+    active: room.active,
   }));
+  const educationSystemDefaultFixedShare = Object.fromEntries(
+    educationSystems.map((system) => [system.id, system.defaultFixedCenterShare]),
+  );
 
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();
@@ -137,10 +170,18 @@ export default async function ClassesPage({
         action={
           <AddClassDialog
             teachers={teacherOptions}
-            subjects={subjectOptions}
-            grades={gradeOptions}
+            subjects={pickableSubjectOptions}
+            grades={pickableGradeOptions}
             educationSystems={educationSystemOptions}
+            educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={roomOptions}
+            roomLinks={roomLinks}
+            terms={terms.map((term) => ({
+              id: term.id,
+              name: term.name,
+              startDate: dateKey(term.startDate),
+              endDate: dateKey(term.endDate),
+            }))}
             noneLabel={tCommon("none")}
             defaults={{
               centerShareType: ctx.settings?.defaultShareType ?? "PERCENTAGE",
@@ -168,25 +209,38 @@ export default async function ClassesPage({
           />
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              {teacherId || subjectId || gradeId ? t("noMatches") : t("empty")}
-            </p>
+            teacherId || subjectId || gradeId ? (
+              <EmptyState
+                icon={<SearchX />}
+                tone="warning"
+                title={t("noMatches")}
+                description={t("noMatchesHint")}
+                action={
+                  <LinkButton href={ROUTES.centerClasses} size="sm">
+                    {t("clearFilters")}
+                  </LinkButton>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<BookOpen />}
+                title={t("empty")}
+                description={t("emptyHint")}
+              />
+            )
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
-                <span className="min-w-0 flex-1">{t("columns.subject")}</span>
+              <ListHeader>
+                <span className="min-w-0 flex-[2]">{t("columns.subject")}</span>
                 <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
-                <span className="min-w-0 flex-1">{t("columns.room")}</span>
-                <span className="w-28 shrink-0">{t("columns.price")}</span>
-                <span className="w-28 shrink-0">{t("columns.enrolled")}</span>
+                <span className="hidden min-w-0 flex-1 lg:block">{t("columns.room")}</span>
+                <span className="w-24 shrink-0 text-end">{t("columns.price")}</span>
+                <span className="w-20 shrink-0 text-end">{t("columns.enrolled")}</span>
                 <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-44 shrink-0 text-end">
+                <span className="w-32 shrink-0 text-end">
                   {tCommon("actions")}
                 </span>
-              </li>
+              </ListHeader>
 
               {rows.map((classGroup) => (
                 <ClassRow
@@ -207,33 +261,21 @@ export default async function ClassesPage({
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("holidays.title")}</CardTitle>
-            <CardDescription>{t("holidays.description")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <HolidayCalendar
-              holidays={holidays.map((holiday) => ({
-                id: holiday.id,
-                date: holiday.date.toISOString(),
-                name: holiday.name,
-              }))}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("generate.title")}</CardTitle>
-            <CardDescription>{t("generate.description")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <GenerateSessionsButton />
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="lg:max-w-2xl">
+        <CardHeader>
+          <CardTitle>{t("holidays.title")}</CardTitle>
+          <CardDescription>{t("holidays.description")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <HolidayCalendar
+            holidays={holidays.map((holiday) => ({
+              id: holiday.id,
+              date: holiday.date.toISOString(),
+              name: holiday.name,
+            }))}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -29,12 +29,28 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { recordPayment } from "../lib/db/payments.ts";
+import { WRITE_TRANSACTION_OPTIONS } from "../lib/db/session-lifecycle.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
 
 const SLUG = "rush-performance-check";
 const SERIAL_COUNT = 6;
@@ -93,11 +109,12 @@ async function checkIn(centerId: string, sessionId: string, studentProfileId: st
     studentProfileId,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
-  const result = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerId, attendee.id, "CASH", actorId),
+  }, { historicalBackfill: true, status: "PRESENT" });
+  const methodId = await fixtureMethodId(centerId);
+  const result = await prisma.$transaction(
+    (tx) => recordPayment(tx, centerId, attendee.id, methodId, actorId, { historicalBackfill: true }),
+    WRITE_TRANSACTION_OPTIONS,
   );
   return { attendee, result };
 }
@@ -117,7 +134,13 @@ async function main() {
 
   console.log("\nRush simulation (real createAttendance + recordPayment writes)");
 
-  const center = await prisma.center.create({ data: { slug: SLUG, name: "Rush Performance Check" } });
+  const center = await prisma.center.create({
+    data: {
+      slug: SLUG,
+      name: "Rush Performance Check",
+      organization: { create: { name: "Rush Performance Check" } },
+    },
+  });
   await prisma.centerSettings.create({
     data: { centerId: center.id, defaultShareType: "PERCENTAGE", defaultShareValue: 15 },
   });
@@ -134,7 +157,7 @@ async function main() {
     }),
   });
   const classGroup = await prisma.classGroup.create({
-    data: scopedData(center.id, { teacherId: teacherUser.id, price: 10_000, capacity: 0 }),
+    data: scopedData(center.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherUser.id, price: 10_000 }),
   });
   const session = await prisma.session.create({
     data: scopedData(center.id, {

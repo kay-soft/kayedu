@@ -4,19 +4,19 @@ import { cn } from "@/lib/utils";
 
 const TONES = {
   error: {
-    className: "border-danger/30 bg-danger-bg text-danger",
+    className: "border-danger/30 bg-danger-bg text-danger-fg",
     Icon: AlertCircle,
   },
   success: {
-    className: "border-success/30 bg-success-bg text-success",
+    className: "border-success/30 bg-success-bg text-success-fg",
     Icon: CheckCircle2,
   },
   info: {
-    className: "border-info/30 bg-info-bg text-info",
+    className: "border-info/30 bg-info-bg text-info-fg",
     Icon: Info,
   },
   warning: {
-    className: "border-warning/30 bg-warning-bg text-warning",
+    className: "border-warning/30 bg-warning-bg text-warning-fg",
     Icon: AlertCircle,
   },
 } as const;
@@ -41,12 +41,16 @@ export function FormMessage({
         className,
       )}
     >
-      <Icon className="mt-0.5 size-4 shrink-0" />
+      <Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
       <span className="min-w-0">{children}</span>
     </p>
   );
 }
 
-export function FieldError({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-danger">{children}</p>;
+export function FieldError({ children, id }: { children: React.ReactNode; id?: string }) {
+  return (
+    <p id={id} className="text-xs font-medium text-danger-fg">
+      {children}
+    </p>
+  );
 }

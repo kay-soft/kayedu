@@ -2,15 +2,22 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, actionContext } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
+import { sessionTimeZone } from "@/lib/db/session-lifecycle";
+import { studentSearchWhere } from "@/lib/db/students";
+import { taughtByTeacherWhere } from "@/lib/db/teacher-portal";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import { centreTimeZone, startOfSessionDay } from "@/lib/scheduling";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   sessionRequestSchema,
   teacherSessionDescriptionSchema,
   type TeacherActionState,
 } from "@/lib/validation/teacher";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
+import { paramsSearchArgs, parseActionArgs } from "@/lib/validation/action-args";
 
 /**
  * Session-description edit only (spec §4.2 item 2). Attendance and payments
@@ -21,11 +28,48 @@ import {
 const NOT_FOUND: TeacherActionState = { error: "notFound" };
 const EDIT_DEADLINE_PASSED: TeacherActionState = { error: "editDeadlinePassed" };
 
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+// Narrowed to students this teacher has actually taught at the active
+// center — never the center's full roster — exactly like the /teacher/
+// students search. Selecting a result keeps the query in a "self-navigate"
+// href back to this page: `filters.q` becomes the exact student code, which
+// re-runs `teacherSessionListWhere`'s existing narrowing unchanged.
+export async function searchOwnSessionStudentsTypeAheadAction(
+  currentParams: string,
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const ctx = await actionContext("teacher");
+  if (!ctx) return [];
+  const args = parseActionArgs(paramsSearchArgs, [currentParams, query]);
+  if (!args) return [];
+  const [params, trimmed] = args;
+  if (trimmed.length < 2) return [];
+
+  // SEC-52: a relational filter, not this teacher's whole roster loaded per keystroke.
+  const rows = await scoped(ctx).students.search({
+    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id), ...studentSearchWhere(trimmed) },
+    take: 8,
+  });
+
+  const kept = new URLSearchParams(params);
+  return rows.map((row) => {
+    const params = new URLSearchParams(kept);
+    params.set("q", row.studentCode);
+    return {
+      id: row.id,
+      primary: fullName(localName(row, row.user)),
+      secondary: row.studentCode,
+      href: `${ROUTES.teacherSessions}?${params.toString()}`,
+    };
+  });
+}
+
 export async function updateSessionDescriptionAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return { error: "forbidden" };
   const db = scoped(ctx);
 
   const parsed = teacherSessionDescriptionSchema.safeParse(Object.fromEntries(formData));
@@ -39,8 +83,11 @@ export async function updateSessionDescriptionAction(
   // null means no deadline, the original M7 behavior.
   const deadlineHours = ctx.settings?.teacherEditDeadlineHours ?? null;
   if (deadlineHours !== null) {
-    const deadline = new Date(session.date);
-    deadline.setUTCHours(deadline.getUTCHours() + deadlineHours);
+    // R7b: the deadline counts hours from the start of the session's day *at
+    // the centre* (local midnight), not from UTC midnight — in the session's
+    // own frozen timezone (SEC-2b, D-14).
+    const dayStart = startOfSessionDay(session.date, sessionTimeZone(session, centreTimeZone(ctx.settings)));
+    const deadline = new Date(dayStart.getTime() + deadlineHours * 60 * 60 * 1000);
     if (new Date() > deadline) return EDIT_DEADLINE_PASSED;
   }
 
@@ -69,7 +116,8 @@ export async function createSessionRequestAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx) return { error: "forbidden" };
   if (!ctxCan(ctx, "changeRequest.create")) return FORBIDDEN;
   if (!(ctx.membership?.isTrustedTeacher ?? false)) return NOT_TRUSTED;
   const db = scoped(ctx);

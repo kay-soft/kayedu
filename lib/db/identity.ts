@@ -1,14 +1,24 @@
-import type { Prisma, User } from "@prisma/client";
-import { prisma } from "@/lib/db/client";
+import type { Prisma, PrismaClient, User } from "@prisma/client";
+// Relative imports on purpose (R6): `lib/db/teacher-membership.ts` — the one
+// teacher-creation path — runs inside the class-creation transaction, and
+// `npm run check:class-creation` calls it outside the Next.js runtime, so this
+// module and everything it pulls in must resolve without the `@/` alias (same
+// reasoning as lib/db/students.ts). The reads below take an optional client so
+// that path can read through its own transaction; the default is the shared one.
+import { prisma } from "./client.ts";
 import {
   fullName,
   normalizeContact,
   normalizeEmail,
-  normalizePhone,
   type ContactInput,
   type ContactMatchField,
-} from "@/lib/identity";
-import type { MatchCandidate } from "@/lib/validation/people";
+} from "../identity.ts";
+import { normalizePhone } from "../phone.ts";
+import { checkRateLimits, type RateLimitName } from "../rate-limit.ts";
+import { requireEmailConfirmation } from "../auth/auth-config.ts";
+import type { MatchCandidate } from "../validation/people.ts";
+
+type Db = PrismaClient | Prisma.TransactionClient;
 
 /**
  * The global identity layer (docs/01-data-model.md §1, §6, spec §5).
@@ -28,7 +38,33 @@ import type { MatchCandidate } from "@/lib/validation/people";
  * `User` (it only seeds `User` at the moment a brand-new person is created).
  */
 
-type ContactMatch = { user: User; matchedOn: ContactMatchField[] };
+export type ContactMatch = {
+  user: User;
+  matchedOn: ContactMatchField[];
+  /** The email matched the person's **global** `User.email` (their login). */
+  globalEmail: boolean;
+};
+
+/**
+ * Can staff attach a new centre record to this person (SEC-2a, D-01/D-02)?
+ *
+ * Only through the person's **global email** — their login credential, or the
+ * email a centre typed for a person who has never signed in. Never through a
+ * phone (no phone in this product is verified, D-02), and never through
+ * another centre's local record (a self-registered student can write their
+ * own local contact once, SEC-17). With `REQUIRE_EMAIL_CONFIRMATION=true`, an
+ * email that belongs to a login must also be confirmed. Linking to a person
+ * with no login exposes nothing to anyone: their own later sign-up still
+ * needs a staff-approved claim (`lib/db/account-claims.ts`).
+ */
+export function isLinkableMatch(
+  match: ContactMatch,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (!match.globalEmail) return false;
+  if (!match.user.authId) return true;
+  return !requireEmailConfirmation(env) || match.user.emailVerifiedAt !== null;
+}
 
 /**
  * People matching the submitted contact details, searched across the global
@@ -39,6 +75,7 @@ type ContactMatch = { user: User; matchedOn: ContactMatchField[] };
  */
 export async function findPeopleByContact(
   input: ContactInput,
+  db: Db = prisma,
 ): Promise<ContactMatch[]> {
   const { email, phone } = normalizeContact(input);
   if (!email && !phone) return [];
@@ -55,49 +92,102 @@ export async function findPeopleByContact(
   }
 
   const [globalUsers, localStudents, localTeachers] = await Promise.all([
-    prisma.user.findMany({ where: { OR: userOr } }),
-    prisma.studentProfile.findMany({
+    db.user.findMany({ where: { OR: userOr } }),
+    db.studentProfile.findMany({
       where: { OR: localOr },
       include: { user: true },
     }),
-    prisma.membership.findMany({
+    db.membership.findMany({
       where: { OR: localOr },
       include: { user: true },
     }),
   ]);
 
-  const byUser = new Map<string, { user: User; matchedOn: Set<ContactMatchField> }>();
-  const record = (user: User, contactEmail: string | null, contactPhone: string | null) => {
+  const byUser = new Map<
+    string,
+    { user: User; matchedOn: Set<ContactMatchField>; globalEmail: boolean }
+  >();
+  const record = (
+    user: User,
+    contactEmail: string | null,
+    contactPhone: string | null,
+    isGlobal: boolean,
+  ) => {
     const existing = byUser.get(user.id);
     const matchedOn = existing?.matchedOn ?? new Set<ContactMatchField>();
-    if (email && contactEmail === email) matchedOn.add("email");
+    const emailHit = Boolean(email && contactEmail === email);
+    if (emailHit) matchedOn.add("email");
     if (phone && contactPhone === phone) matchedOn.add("phone");
     if (matchedOn.size === 0) return;
-    byUser.set(user.id, { user: existing?.user ?? user, matchedOn });
+    byUser.set(user.id, {
+      user: existing?.user ?? user,
+      matchedOn,
+      globalEmail: (existing?.globalEmail ?? false) || (isGlobal && emailHit),
+    });
   };
 
-  for (const user of globalUsers) record(user, user.email, user.phone);
-  for (const profile of localStudents) record(profile.user, profile.email, profile.phone);
+  for (const user of globalUsers) record(user, user.email, user.phone, true);
+  for (const profile of localStudents) record(profile.user, profile.email, profile.phone, false);
   for (const membership of localTeachers) {
-    record(membership.user, membership.email, membership.phone);
+    record(membership.user, membership.email, membership.phone, false);
   }
 
-  return [...byUser.values()].map(({ user, matchedOn }) => ({
+  return [...byUser.values()].map(({ user, matchedOn, globalEmail }) => ({
     user,
     matchedOn: [...matchedOn],
+    globalEmail,
   }));
 }
 
-/** Memberships + student profiles this person holds at *other* centers. */
+/**
+ * Memberships + student profiles this person holds at *other* centers. Used
+ * by the student detail page's own "other branches" field — a different
+ * concern from the teacher-detail leak M12 closes (docs/00-master-product-spec.md
+ * §5 "Teacher detail leak"), which is specifically about a centre Owner/
+ * Manager seeing which *other centres a teacher works at*. Nothing in M12
+ * touches this student-facing count; it is out of that milestone's scope.
+ */
 export async function countOtherCenterRelations(
   userId: string,
   centerId: string,
+  db: Db = prisma,
 ): Promise<number> {
+  // SEC-47 / D-23 (a): only the *same organisation's* other branches. Whether
+  // this person studies or works at an unrelated organisation is theirs, not
+  // this centre's, to know.
+  const center = await db.center.findUnique({
+    where: { id: centerId },
+    select: { organizationId: true },
+  });
+  if (!center) return 0;
+  const sameOrgElsewhere = {
+    userId,
+    centerId: { not: centerId },
+    center: { organizationId: center.organizationId },
+  };
   const [memberships, profiles] = await Promise.all([
-    prisma.membership.count({ where: { userId, NOT: { centerId } } }),
-    prisma.studentProfile.count({ where: { userId, NOT: { centerId } } }),
+    db.membership.count({ where: sameOrgElsewhere }),
+    db.studentProfile.count({ where: sameOrgElsewhere }),
   ]);
   return memberships + profiles;
+}
+
+/**
+ * Does this person hold any relation inside the given centre's organisation?
+ * The D-08 (b) line: a match outside it is described without a name.
+ */
+async function knownInOrganization(db: Db, userId: string, centerId: string): Promise<boolean> {
+  const center = await db.center.findUnique({
+    where: { id: centerId },
+    select: { organizationId: true },
+  });
+  if (!center) return false;
+  const inOrg = { userId, center: { organizationId: center.organizationId } };
+  const [memberships, profiles] = await Promise.all([
+    db.membership.count({ where: inOrg }),
+    db.studentProfile.count({ where: inOrg }),
+  ]);
+  return memberships + profiles > 0;
 }
 
 /**
@@ -110,12 +200,14 @@ export async function describeMatch(
   centerId: string,
   match: ContactMatch,
   input: ContactInput,
+  db: Db = prisma,
 ): Promise<MatchCandidate> {
   const { user, matchedOn } = match;
   const { email, phone } = normalizeContact(input);
-  const [studentProfile, membership] = await Promise.all([
-    prisma.studentProfile.findFirst({ where: { userId: user.id, centerId } }),
-    prisma.membership.findFirst({ where: { userId: user.id, centerId } }),
+  const [studentProfile, membership, inOrganization] = await Promise.all([
+    db.studentProfile.findFirst({ where: { userId: user.id, centerId } }),
+    db.membership.findFirst({ where: { userId: user.id, centerId } }),
+    knownInOrganization(db, user.id, centerId),
   ]);
 
   let existingHere: MatchCandidate["existingHere"] = null;
@@ -126,36 +218,88 @@ export async function describeMatch(
 
   return {
     userId: user.id,
-    name: fullName(user),
+    // SEC-11 / D-08 (b): a person known only outside this organisation is
+    // described without a name — "an account with this contact exists".
+    name: inOrganization ? fullName(user) : null,
     email,
     phone,
     matchedOn,
     existingHere,
+    linkable: isLinkableMatch(match),
     ...(studentProfile ? { existingProfileId: studentProfile.id } : {}),
   };
 }
 
 /**
- * Resolves a person for a "add teacher / add student" submission.
+ * Resolves a person for an "add teacher / add student" submission — and for
+ * the phone lookup, which runs the very same thing (spec §5.1, M18).
  *
- * - `matched` — one existing person: the caller surfaces the match panel and
- *   only links once staff confirm (never a silent merge, spec §5).
- * - `conflict` — the email and the phone belong to two different people.
- *   Merging identities is a manual, audited admin action (docs/02 §3).
- * - `none` — nobody matches; create a new person, seeding the global `User`
- *   from the entered contact (docs/01 §6).
+ * - `matched` — one person staff may act on: someone they may **link** to
+ *   (`isLinkableMatch` — a global email, never a phone), or someone who
+ *   already holds the relationship being added **here** (refused as a
+ *   duplicate, never linked). The caller shows the match panel and only
+ *   links once staff confirm "Use this person" (never a silent merge, spec §5).
+ * - `conflict` — two such people. Merging identities is a manual, audited
+ *   admin action (docs/02 §3).
+ * - `none` — nobody staff may link to: create a new person. `others` carries
+ *   every other contact hit (a phone, another centre's local record) — never
+ *   linkable, used only to *refuse* (a staff member's or administrator's
+ *   phone in the inline new-teacher flow).
+ * - `rateLimited` — the lookup budget is spent (SEC-11 / D-08). Every path
+ *   that can reveal who owns a contact goes through here, so the limit — per
+ *   staff member and per centre, in the shared store — covers all of them.
  */
 export type ContactResolution =
-  | { kind: "none" }
-  | { kind: "matched"; match: ContactMatch }
-  | { kind: "conflict" };
+  | { kind: "none"; others: ContactMatch[] }
+  | { kind: "matched"; match: ContactMatch; others: ContactMatch[] }
+  | { kind: "conflict" }
+  | { kind: "rateLimited" };
+
+/** Who is looking, where, and which relationship they are adding. */
+export type LookupContext = {
+  centerId: string;
+  actorUserId: string | null;
+  adding: "student" | "teacher";
+};
 
 export async function resolveContact(
+  context: LookupContext,
   input: ContactInput,
+  db: Db = prisma,
 ): Promise<ContactResolution> {
-  const people = await findPeopleByContact(input);
-  if (people.length === 0) return { kind: "none" };
-  if (people.length === 1) return { kind: "matched", match: people[0] };
+  const { email, phone } = normalizeContact(input);
+  if (!email && !phone) return { kind: "none", others: [] };
+
+  const limits: { name: RateLimitName; key: string }[] = [
+    { name: "identityLookupPerCenter", key: context.centerId },
+  ];
+  if (context.actorUserId) {
+    limits.unshift({ name: "identityLookupPerUser", key: context.actorUserId });
+  }
+  if (!(await checkRateLimits(limits))) return { kind: "rateLimited" };
+
+  const people = await findPeopleByContact(input, db);
+  if (people.length === 0) return { kind: "none", others: [] };
+
+  const ids = people.map((person) => person.user.id);
+  const here =
+    context.adding === "student"
+      ? await db.studentProfile.findMany({
+          where: { centerId: context.centerId, userId: { in: ids } },
+          select: { userId: true },
+        })
+      : await db.membership.findMany({
+          where: { centerId: context.centerId, userId: { in: ids }, role: "TEACHER" },
+          select: { userId: true },
+        });
+  const alreadyHere = new Set(here.map((row) => row.userId));
+
+  const actionable = people.filter(
+    (person) => isLinkableMatch(person) || alreadyHere.has(person.user.id),
+  );
+  const others = people.filter((person) => !actionable.includes(person));
+  if (actionable.length === 0) return { kind: "none", others };
+  if (actionable.length === 1) return { kind: "matched", match: actionable[0], others };
   return { kind: "conflict" };
 }
 
@@ -170,13 +314,15 @@ export async function resolveContact(
 export function seedLocalName(
   resolution: ContactResolution,
   formName: { firstName: string; lastName: string },
+  described?: Pick<MatchCandidate, "name"> | null,
 ): { firstName: string; lastName: string } {
-  return resolution.kind === "matched"
-    ? {
-        firstName: resolution.match.user.firstName,
-        lastName: resolution.match.user.lastName,
-      }
-    : formName;
+  // A match described without a name (D-08 (b): known only outside this
+  // organisation) never leaks it through the seeded record either.
+  if (resolution.kind !== "matched" || described?.name === null) return formName;
+  return {
+    firstName: resolution.match.user.firstName,
+    lastName: resolution.match.user.lastName,
+  };
 }
 
 export type PersonInput = {
@@ -195,16 +341,26 @@ export type PersonInput = {
  * the center-local record. Later edits at any center touch only that
  * center's local copy, never this row again (docs/01 §6).
  */
-export function createPerson(
+export async function createPerson(
   data: PersonInput,
-  tx: Prisma.TransactionClient = prisma,
+  tx: Db = prisma,
 ): Promise<User> {
+  // A contact another person already holds globally is not copied onto the
+  // new `User` (SEC-2a): it was not a link (a phone never is, and an email may
+  // not be — `isLinkableMatch`), so it stays only on this centre's own local
+  // record, and nobody's global contact is squatted or blocked by it.
+  const email = normalizeEmail(data.email);
+  const phone = normalizePhone(data.phone);
+  const [emailTaken, phoneTaken] = await Promise.all([
+    email ? tx.user.findUnique({ where: { email }, select: { id: true } }) : null,
+    phone ? tx.user.findUnique({ where: { phone }, select: { id: true } }) : null,
+  ]);
   return tx.user.create({
     data: {
       firstName: data.firstName,
       lastName: data.lastName,
-      email: normalizeEmail(data.email),
-      phone: normalizePhone(data.phone),
+      email: emailTaken ? null : email,
+      phone: phoneTaken ? null : phone,
       altPhone: data.altPhone,
       locale: data.locale,
     },
@@ -233,4 +389,9 @@ export async function deletePersonIfOrphaned(userId: string): Promise<boolean> {
 
   await prisma.user.delete({ where: { id: userId } });
   return true;
+}
+
+/** People's global names by id (a fallback when no centre-local record exists yet). */
+export function usersByIds(db: Db, ids: string[]) {
+  return db.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true } });
 }

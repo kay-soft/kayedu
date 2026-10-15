@@ -1,13 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { LoginForm } from "@/app/[locale]/(auth)/login/login-form";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { AuthCard } from "@/components/shared/auth-card";
 import { safeNextPath } from "@/lib/routes";
 
 export default async function LoginPage({
@@ -19,14 +13,8 @@ export default async function LoginPage({
   const t = await getTranslations("Auth.login");
 
   return (
-    <Card className="p-2 sm:p-4">
-      <CardHeader>
-        <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
-        <CardDescription>{t("subtitle")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <LoginForm next={safeNextPath(next) ?? undefined} />
-      </CardContent>
-    </Card>
+    <AuthCard title={t("title")} description={t("subtitle")}>
+      <LoginForm next={safeNextPath(next) ?? undefined} />
+    </AuthCard>
   );
 }

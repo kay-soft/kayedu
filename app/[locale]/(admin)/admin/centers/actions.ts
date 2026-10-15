@@ -8,14 +8,15 @@ import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import {
   createCenterWithSettings,
-  setCenterActive,
-  updateCenterPlan,
+  transitionCenterLifecycle,
 } from "@/lib/db/platform";
+import { readRasterImage, uploadCenterLogo } from "@/lib/db/storage";
+import { MAX_LOGO_BYTES } from "@/lib/storage-paths";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
-  centerActiveSchema,
-  centerPlanSchema,
+  centerLifecycleTransitionSchema,
+  centerVisibilityWindowSchema,
   createCenterSchema,
 } from "@/lib/validation/admin";
 import type { AdminActionState } from "@/app/[locale]/(admin)/admin/centers/action-state";
@@ -23,8 +24,8 @@ import type { AdminActionState } from "@/app/[locale]/(admin)/admin/centers/acti
 /**
  * The admin panel's write path (M9, docs/00-master-product-spec.md §4.4).
  * Every action: `requirePlatformAdmin()` → zod → the real `lib/db/platform.ts`
- * function → `AuditLog` (tenant creation/activation/plan changes are
- * sensitive — CLAUDE.md rule 7) → `revalidatePath` (docs/02 §7).
+ * function → `AuditLog` (tenant creation/lifecycle/visibility-window changes
+ * are sensitive — CLAUDE.md rule 7) → `revalidatePath` (docs/02 §7).
  *
  * `requirePlatformAdmin()` redirects (never returns) for anyone whose
  * `User.isPlatformAdmin` is false, so a non-admin — including an OWNER of
@@ -52,6 +53,15 @@ export async function createCenterAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, ownerEmail, ...input } = parsed.data;
 
+  // The logo (D-25 (b)) is checked by its bytes before anything is created,
+  // then stored in the private `logos` bucket under the new centre's folder.
+  const logoField = formData.get("logo");
+  const logo = logoField instanceof File && logoField.size > 0 ? logoField : null;
+  if (logo) {
+    const checked = await readRasterImage(logo, MAX_LOGO_BYTES);
+    if (!checked.ok) return { fieldErrors: { logo: checked.error } };
+  }
+
   const invite = {
     email: ownerEmail,
     token: randomBytes(32).toString("base64url"),
@@ -62,6 +72,19 @@ export async function createCenterAction(
   const result = await createCenterWithSettings(prisma, { ...input, invite });
   if (!result.ok) return { error: result.error };
 
+  let logoError: string | undefined;
+  if (logo) {
+    const uploaded = await uploadCenterLogo(result.center.id, logo);
+    if (uploaded.ok) {
+      await prisma.center.update({
+        where: { id: result.center.id },
+        data: { logoPath: uploaded.path },
+      });
+    } else {
+      logoError = uploaded.error;
+    }
+  }
+
   await writeAuditLog({
     centerId: result.center.id,
     actorUserId: admin.id,
@@ -69,39 +92,50 @@ export async function createCenterAction(
     entityType: "Center",
     entityId: result.center.id,
     after: {
-      name: result.center.name,
       slug: result.center.slug,
-      plan: result.center.plan,
+      lifecycleState: result.center.lifecycleState,
     },
   });
 
   revalidatePath(centersPath(locale));
-  return { status: "created", invitationToken: invite.token };
+  return {
+    status: "created",
+    invitationToken: invite.token,
+    ...(logoError ? { fieldErrors: { logo: logoError } } : {}),
+  };
 }
 
-export async function setCenterActiveAction(
+/**
+ * The lifecycle-state transition (M19, replacing the old activate/suspend
+ * toggle) — validated against `isValidLifecycleTransition`'s table inside
+ * `transitionCenterLifecycle` itself, not just in the UI that only ever
+ * renders the valid next states (`lib/db/platform.ts`'s doc comment on
+ * `LIFECYCLE_TRANSITIONS`).
+ */
+export async function transitionCenterLifecycleAction(
   _prevState: AdminActionState,
   formData: FormData,
 ): Promise<AdminActionState> {
   const admin = await requirePlatformAdmin();
 
-  const parsed = centerActiveSchema.safeParse(Object.fromEntries(formData));
+  const parsed = centerLifecycleTransitionSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "notFound" };
-  const { locale, id, active } = parsed.data;
+  const { locale, id, to } = parsed.data;
 
   const before = await prisma.center.findUnique({ where: { id } });
   if (!before) return { error: "notFound" };
 
-  await setCenterActive(prisma, id, active);
+  const result = await transitionCenterLifecycle(prisma, id, to);
+  if (!result.ok) return { error: result.error };
 
   await writeAuditLog({
     centerId: id,
     actorUserId: admin.id,
-    action: active ? "platform.center.activate" : "platform.center.suspend",
+    action: "platform.center.lifecycle.transition",
     entityType: "Center",
     entityId: id,
-    before: { active: before.active },
-    after: { active },
+    before: { lifecycleState: before.lifecycleState },
+    after: { lifecycleState: to },
   });
 
   revalidatePath(centersPath(locale));
@@ -109,29 +143,35 @@ export async function setCenterActiveAction(
   return { status: "saved" };
 }
 
-export async function updateCenterPlanAction(
+/**
+ * The per-centre override of the data-visibility window (M19, docs/01 §7) —
+ * the same `CenterSettings.dataVisibilityDays` column a centre's own
+ * `/settings` screen edits, writable here too since the spec calls for both
+ * "per-centre configurable ... AND adjustable by a platform admin".
+ */
+export async function updateCenterVisibilityWindowAction(
   _prevState: AdminActionState,
   formData: FormData,
 ): Promise<AdminActionState> {
   const admin = await requirePlatformAdmin();
 
-  const parsed = centerPlanSchema.safeParse(Object.fromEntries(formData));
+  const parsed = centerVisibilityWindowSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-  const { locale, id, plan } = parsed.data;
+  const { locale, id, dataVisibilityDays } = parsed.data;
 
-  const before = await prisma.center.findUnique({ where: { id } });
+  const before = await prisma.centerSettings.findUnique({ where: { centerId: id } });
   if (!before) return { error: "notFound" };
 
-  await updateCenterPlan(prisma, id, plan);
+  await prisma.centerSettings.update({ where: { centerId: id }, data: { dataVisibilityDays } });
 
   await writeAuditLog({
     centerId: id,
     actorUserId: admin.id,
-    action: "platform.center.plan.update",
-    entityType: "Center",
-    entityId: id,
-    before: { plan: before.plan },
-    after: { plan },
+    action: "platform.center.visibilityWindow.update",
+    entityType: "CenterSettings",
+    entityId: before.id,
+    before: { dataVisibilityDays: before.dataVisibilityDays },
+    after: { dataVisibilityDays },
   });
 
   revalidatePath(centerPath(locale, id));

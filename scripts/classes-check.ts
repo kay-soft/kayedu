@@ -9,9 +9,10 @@
  * Exercises the pure scheduling primitives (`lib/scheduling.ts`) with no
  * database at all, then the real database-backed pieces — `classGroupSchema`
  * / `classScheduleSchema` (the same zod schemas the Server Actions parse
- * with), the tenant-scoping primitives, and `generateSessions` (the actual
- * production generator, `lib/db/sessions.ts`) — against two throwaway
- * centers. Capacity, duplicate-enrollment and the `StudentBlock` (scope
+ * with), the tenant-scoping primitives, and (R4) `materializeClassSessions`
+ * (the class-sessions engine that replaced the rolling-window generator,
+ * `lib/db/class-sessions.ts`) over a 6-week class period — against two
+ * throwaway centers. Capacity, duplicate-enrollment and the `StudentBlock` (scope
  * CLASS) check are exercised the same way `config-check.ts`/`people-check.ts`
  * exercise their Server Actions' logic: directly, through the same
  * primitives, since a Server Action itself needs a request context this
@@ -26,8 +27,8 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
+import { gatePrisma } from "./lib/gate-db.ts";
 import {
-  PrismaClient,
   type BlockScope,
   type EnrollmentStatus,
   type Role,
@@ -51,9 +52,38 @@ import {
   classGroupSchema,
   classScheduleSchema,
 } from "../lib/validation/classes.ts";
-import { cancelSession, generateSessions, rescheduleSession } from "../lib/db/sessions.ts";
+import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
+import { inClassTransaction, materializeClassSessions } from "../lib/db/class-sessions.ts";
+import { catalogLabel } from "../lib/catalog.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
+
+// R2 fixture clock: these lifecycle checks act on freshly generated sessions
+// (dated from UTC today onward). Pinning "now" to UTC midnight keeps every
+// one of them open in the centre's timezone whatever hour the gate runs.
+const LIFECYCLE_NOW = startOfUtcDay(new Date());
+
+// R4: the rolling 42-day generator window is gone — the M4 fixtures below
+// give their classes a 42-day PERIOD starting today instead, and create the
+// sessions through the class-sessions engine, as of the same pinned clock.
+const PERIOD_START = LIFECYCLE_NOW;
+const PERIOD_END = addDays(LIFECYCLE_NOW, 41);
+const isoDay = (date: Date) => date.toISOString().slice(0, 10);
+
+/**
+ * The engine on an existing class: every session of its period from today,
+ * one conflict decision for the whole range. `confirmConflicts: true` is
+ * the old generator's omitted-flag behaviour made explicit (R4 fixture
+ * change). A refusal comes back with `created: 0` and its conflict list.
+ */
+async function materialize(centerId: string, classGroupId: string) {
+  const result = await inClassTransaction(prisma, (tx) =>
+    materializeClassSessions(tx, centerId, classGroupId, { from: LIFECYCLE_NOW, confirmConflicts: true }),
+  );
+  return "created" in result
+    ? { created: result.created, conflicts: result.conflicts, refused: false }
+    : { created: 0, conflicts: result.conflicts, refused: true };
+}
 
 const TEACHER_ROLE: Role = "TEACHER";
 const CLASS_SCOPE: BlockScope = "CLASS";
@@ -93,10 +123,22 @@ function withoutLocale<T extends { locale: string }>(value: T): Omit<T, "locale"
   return copy as Omit<T, "locale">;
 }
 
+/** The prefix every global catalog fixture this script creates carries. */
+const CATALOG_PREFIX = "Classes-Check";
+
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({
     where: { email: { startsWith: "classes-check-" } },
+  });
+  // CatalogSubject/CatalogGrade are global (M13) — they don't cascade away
+  // with the throwaway centers above, so this script must clean up its own
+  // catalog fixtures explicitly, the same way it cleans up its own users.
+  await prisma.catalogSubject.deleteMany({
+    where: { nameEn: { startsWith: CATALOG_PREFIX } },
+  });
+  await prisma.catalogGrade.deleteMany({
+    where: { nameEn: { startsWith: CATALOG_PREFIX } },
   });
 }
 
@@ -211,6 +253,8 @@ function checkPurePrimitives() {
     sessionConflict.length === 1 && sessionConflict[0].type === "teacher",
   );
 
+  // R4 (R3 follow-up): the fixture carries everything a class requires — a
+  // room and a period — so the parse fails for the stated reason only.
   check(
     "The class schema rejects a percentage above 100",
     !classGroupSchema.safeParse({
@@ -219,19 +263,9 @@ function checkPurePrimitives() {
       price: "120",
       centerShareType: "PERCENTAGE",
       shareValue: "150",
-      capacity: "0",
-      lateThresholdMinutes: "10",
-    }).success,
-  );
-  check(
-    "The class schema rejects a negative capacity",
-    !classGroupSchema.safeParse({
-      locale: "en",
-      teacherId: "t",
-      price: "120",
-      centerShareType: "FIXED",
-      shareValue: "15",
-      capacity: "-1",
+      roomId: "r",
+      startDate: "2026-10-09",
+      endDate: "2027-04-01",
       lateThresholdMinutes: "10",
     }).success,
   );
@@ -255,30 +289,26 @@ function checkPurePrimitives() {
       endTime: "18:00",
     }).success,
   );
+  // R1 removed the per-class Excused toggle (M10) and attendanceRequired: a
+  // stale form still posting either key parses, and neither reaches a write.
+  const staleClassForm = classGroupSchema.safeParse({
+    locale: "en",
+    teacherId: "t",
+    price: "120",
+    centerShareType: "FIXED",
+    shareValue: "15",
+    roomId: "r",
+    startDate: "2026-10-09",
+    endDate: "2027-04-01",
+    lateThresholdMinutes: "10",
+    allowExcused: "on",
+    attendanceRequired: "on",
+  });
   check(
-    "The class schema parses allowExcused=on as true (M10, spec §5 'Excused configurable per class')",
-    classGroupSchema.safeParse({
-      locale: "en",
-      teacherId: "t",
-      price: "120",
-      centerShareType: "FIXED",
-      shareValue: "15",
-      capacity: "0",
-      lateThresholdMinutes: "10",
-      allowExcused: "on",
-    }).data?.allowExcused === true,
-  );
-  check(
-    "The class schema parses a missing allowExcused as false (an unchecked checkbox)",
-    classGroupSchema.safeParse({
-      locale: "en",
-      teacherId: "t",
-      price: "120",
-      centerShareType: "FIXED",
-      shareValue: "15",
-      capacity: "0",
-      lateThresholdMinutes: "10",
-    }).data?.allowExcused === false,
+    "The class schema drops the removed allowExcused/attendanceRequired keys (R1)",
+    staleClassForm.success &&
+      !("allowExcused" in staleClassForm.data) &&
+      !("attendanceRequired" in staleClassForm.data),
   );
 }
 
@@ -332,8 +362,8 @@ async function conflictCheckSlots(
         select: {
           teacherId: true,
           roomId: true,
-          subject: { select: { name: true } },
-          grade: { select: { name: true } },
+          subject: { select: { nameAr: true, nameEn: true } },
+          grade: { select: { nameAr: true, nameEn: true } },
         },
       },
     },
@@ -346,7 +376,10 @@ async function conflictCheckSlots(
     teacherId: row.classGroup.teacherId,
     roomId: row.classGroup.roomId,
     className:
-      [row.classGroup.subject?.name, row.classGroup.grade?.name]
+      [
+        row.classGroup.subject ? catalogLabel("en", row.classGroup.subject) : null,
+        row.classGroup.grade ? catalogLabel("en", row.classGroup.grade) : null,
+      ]
         .filter(Boolean)
         .join(" · ") || "—",
   }));
@@ -358,14 +391,26 @@ async function main() {
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Classes A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Classes B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Classes A", organization: { create: { name: "Classes A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Classes B", organization: { create: { name: "Classes B" } } },
+  });
 
   const teacherA = await makeTeacher(centerA.id, "classes-check-teacher-a@kayedu.test");
-  const roomA1 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 1" }) });
+  // R3 fixture shape: classA's "capacity 1" lives on its room now.
+  const roomA1 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 1", capacity: 1 }) });
   const roomA2 = await prisma.room.create({ data: scopedData(centerA.id, { name: "Room 2" }) });
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
-  const gradeA = await prisma.grade.create({ data: scopedData(centerA.id, { name: "Grade 10" }) });
+  // Global catalog rows (M13) — ClassGroup.subjectId/gradeId now reference
+  // the platform-owned catalog directly, not a centre-authored row. Named
+  // with CATALOG_PREFIX so cleanup() can find and remove them.
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: `${CATALOG_PREFIX} Math`, nameEn: `${CATALOG_PREFIX} Math` },
+  });
+  const gradeA = await prisma.catalogGrade.create({
+    data: { nameAr: `${CATALOG_PREFIX} Grade 10`, nameEn: `${CATALOG_PREFIX} Grade 10` },
+  });
 
   // ── 1. Two classes generate correct sessions across two weekly slots ─────
   const classGroupInput = parse(
@@ -380,7 +425,8 @@ async function main() {
       centerShareType: "PERCENTAGE",
       shareValue: "15",
       capacity: "1",
-      attendanceRequired: "on",
+      startDate: isoDay(PERIOD_START),
+      endDate: isoDay(PERIOD_END),
       lateThresholdMinutes: "10",
       acceptsNewStudents: "on",
       requiresConfirmation: "",
@@ -396,10 +442,11 @@ async function main() {
       price: classGroupInput.price,
       centerShareType: classGroupInput.centerShareType,
       centerShareValue: classGroupInput.centerShareValue,
-      capacity: classGroupInput.capacity,
       lateThresholdMinutes: classGroupInput.lateThresholdMinutes,
       acceptsNewStudents: classGroupInput.acceptsNewStudents,
       requiresConfirmation: classGroupInput.requiresConfirmation,
+      startDate: classGroupInput.startDate,
+      endDate: classGroupInput.endDate,
     }),
   });
 
@@ -420,7 +467,7 @@ async function main() {
     ],
   });
 
-  const firstRun = await generateSessions(prisma, centerA.id, "WARN", classA.id);
+  const firstRun = await materialize(centerA.id, classA.id);
   check(
     "A class with two weekly slots generates 12 sessions over a 6-week window",
     firstRun.created === 12,
@@ -436,7 +483,7 @@ async function main() {
   );
 
   // ── 2. Idempotent regeneration ───────────────────────────────────────────
-  const secondRun = await generateSessions(prisma, centerA.id, "WARN", classA.id);
+  const secondRun = await materialize(centerA.id, classA.id);
   check(
     "Regenerating the same window a second time creates zero new sessions",
     secondRun.created === 0,
@@ -444,9 +491,9 @@ async function main() {
   );
 
   // ── 3. Holiday calendar ───────────────────────────────────────────────────
-  // `generateSessions` always windows from *today* — recompute the real
-  // Monday occurrences for that same window, rather than reusing the earlier
-  // pure-primitive fixture's arbitrary January window.
+  // The class period starts *today* — recompute the real Monday occurrences
+  // for that same period, rather than reusing the earlier pure-primitive
+  // fixture's arbitrary January window.
   const today = startOfUtcDay(new Date());
   const realWindowEnd = addDays(today, 41);
   const realMondays = generateOccurrenceDates(
@@ -463,7 +510,7 @@ async function main() {
     data: scopedData(centerA.id, { date: secondMonday, name: "Test holiday" }),
   });
   await prisma.classSchedule.create({ data: scopedData(centerA.id, withoutLocale(scheduleMon)) });
-  const withHolidayRun = await generateSessions(prisma, centerA.id, "WARN", classA.id);
+  const withHolidayRun = await materialize(centerA.id, classA.id);
   check(
     "A date on the holiday calendar is skipped by the generator",
     withHolidayRun.created === realMondays.length - 1,
@@ -475,6 +522,7 @@ async function main() {
   // ── 4. Schedule-save-time conflict detection ─────────────────────────────
   const classB = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: PERIOD_START, endDate: PERIOD_END, // R4 fixture shape: a class period is required
       teacherId: teacherA.user.id, // same teacher as classA
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -496,6 +544,7 @@ async function main() {
   const teacherC = await makeTeacher(centerA.id, "classes-check-teacher-c@kayedu.test");
   const classC = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: PERIOD_START, endDate: PERIOD_END, // R4 fixture shape: a class period is required
       teacherId: teacherC.user.id, // different teacher
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -516,7 +565,7 @@ async function main() {
   // ── 5. Generation-time conflicts + DENY policy ───────────────────────────
   // classA's own sessions must actually exist in the database for the
   // conflict check below to have something to collide with.
-  const classARegen = await generateSessions(prisma, centerA.id, "WARN", classA.id);
+  const classARegen = await materialize(centerA.id, classA.id);
   check(
     "classA's sessions regenerate cleanly with no conflicts of their own",
     classARegen.created === 6 && classARegen.conflicts.length === 0,
@@ -531,7 +580,7 @@ async function main() {
       endTime: "19:00",
     }),
   });
-  const warnRun = await generateSessions(prisma, centerA.id, "WARN", classB.id);
+  const warnRun = await materialize(centerA.id, classB.id);
   check(
     "Under WARN, a conflicting session is still created and reported",
     warnRun.created === 6 && warnRun.conflicts.length > 0,
@@ -539,7 +588,17 @@ async function main() {
   );
 
   await prisma.session.deleteMany({ where: scopedWhere(centerA.id, { classGroupId: classB.id }) });
-  const denyRun = await generateSessions(prisma, centerA.id, "DENY", classB.id);
+  // R4: the engine reads the centre's own policy rather than taking one.
+  await prisma.centerSettings.upsert({
+    where: { centerId: centerA.id },
+    create: { centerId: centerA.id, scheduleConflictPolicy: "DENY" },
+    update: { scheduleConflictPolicy: "DENY" },
+  });
+  const denyRun = await materialize(centerA.id, classB.id);
+  await prisma.centerSettings.update({
+    where: { centerId: centerA.id },
+    data: { scheduleConflictPolicy: "WARN" },
+  });
   check(
     "Under DENY, the conflicting occurrence is skipped but still reported",
     denyRun.created === 0 && denyRun.conflicts.length > 0,
@@ -564,8 +623,8 @@ async function main() {
   });
   check(
     "A class at capacity blocks a second enrollment (capacity check)",
-    activeCount >= classA.capacity,
-    `active=${activeCount} capacity=${classA.capacity}`,
+    activeCount >= roomA1.capacity,
+    `active=${activeCount} capacity=${roomA1.capacity}`,
   );
 
   const duplicate = await prisma.enrollment.findFirst({
@@ -629,13 +688,13 @@ async function main() {
   );
 
   const sessionToCancel = classASessions[0];
-  const cancelled = await cancelSession(prisma, centerA.id, sessionToCancel.id);
+  const cancelled = await cancelSession(prisma, centerA.id, sessionToCancel.id, { now: LIFECYCLE_NOW });
   check(
     "cancelSession flips a SCHEDULED session to CANCELLED",
     cancelled.ok && cancelled.session.status === "CANCELLED",
     JSON.stringify(cancelled),
   );
-  const cancelledAgain = await cancelSession(prisma, centerA.id, sessionToCancel.id);
+  const cancelledAgain = await cancelSession(prisma, centerA.id, sessionToCancel.id, { now: LIFECYCLE_NOW });
   check(
     "Cancelling an already-cancelled session is refused as alreadyCancelled",
     !cancelledAgain.ok && cancelledAgain.error === "alreadyCancelled",
@@ -647,6 +706,8 @@ async function main() {
     sessionToCancel.id,
     { date: sessionToCancel.date, startTime: "10:00", endTime: "11:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "Rescheduling a cancelled session is refused",
@@ -662,6 +723,8 @@ async function main() {
     sessionToReschedule.id,
     { date: farDate, startTime: "12:00", endTime: "13:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "rescheduleSession moves date/startTime/endTime with no conflicts",
@@ -670,6 +733,33 @@ async function main() {
       rescheduled.session.date.getTime() === farDate.getTime() &&
       rescheduled.conflicts.length === 0,
     JSON.stringify(rescheduled),
+  );
+
+  // ── 8b. Reschedule links, it never mutates the original in place (M15) ───
+  const originalAfterReschedule = await prisma.session.findUnique({
+    where: { id: sessionToReschedule.id },
+  });
+  check(
+    "The original session is untouched — same date/time — and links to its replacement via rescheduledToId",
+    originalAfterReschedule?.date.getTime() === sessionToReschedule.date.getTime() &&
+      originalAfterReschedule?.startTime === sessionToReschedule.startTime &&
+      rescheduled.ok &&
+      originalAfterReschedule?.rescheduledToId === rescheduled.session.id,
+    JSON.stringify(originalAfterReschedule),
+  );
+  const rescheduleAlreadyRescheduled = await rescheduleSession(
+    prisma,
+    centerA.id,
+    sessionToReschedule.id,
+    { date: farDate, startTime: "13:00", endTime: "14:00" },
+    "WARN",
+    "en",
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
+  );
+  check(
+    "Rescheduling an already-rescheduled session is refused",
+    !rescheduleAlreadyRescheduled.ok && rescheduleAlreadyRescheduled.error === "alreadyRescheduled",
+    JSON.stringify(rescheduleAlreadyRescheduled),
   );
 
   // A same-teacher session on a different class, at a specific slot, to
@@ -693,6 +783,8 @@ async function main() {
     classASessions[2].id,
     { date: conflictDate, startTime: "14:30", endTime: "15:30" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "Under WARN, rescheduling into a teacher conflict still succeeds, flagged",
@@ -706,6 +798,8 @@ async function main() {
     classASessions[3].id,
     { date: conflictDate, startTime: "14:15", endTime: "15:15" },
     "DENY",
+    "en",
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "Under DENY, rescheduling into a teacher conflict is refused",
@@ -720,6 +814,8 @@ async function main() {
     classASessions[4].id,
     { date: duplicateTarget.date, startTime: duplicateTarget.startTime, endTime: duplicateTarget.endTime },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "Rescheduling onto another session's exact slot on the same class is refused as duplicateSlot",
@@ -727,7 +823,7 @@ async function main() {
     JSON.stringify(rescheduleIntoDuplicateSlot),
   );
 
-  const crossCenterCancel = await cancelSession(prisma, centerB.id, sessionToReschedule.id);
+  const crossCenterCancel = await cancelSession(prisma, centerB.id, sessionToReschedule.id, { now: LIFECYCLE_NOW });
   check(
     "Center B cannot cancel Center A's session by id",
     !crossCenterCancel.ok && crossCenterCancel.error === "notFound",
@@ -739,6 +835,8 @@ async function main() {
     classASessions[2].id,
     { date: farDate, startTime: "09:00", endTime: "10:00" },
     "WARN",
+    "en",
+    { now: LIFECYCLE_NOW, confirmConflicts: true },
   );
   check(
     "Center B cannot reschedule Center A's session by id",

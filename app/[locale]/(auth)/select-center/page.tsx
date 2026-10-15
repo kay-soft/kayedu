@@ -1,21 +1,25 @@
 import { getLocale, getTranslations } from "next-intl/server";
-import { Building2, ChevronLeft } from "lucide-react";
+import { Building2, Check, ChevronLeft } from "lucide-react";
 
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { SignOutButton } from "@/components/shell/sign-out-button";
-import { FormMessage } from "@/components/shared/form-message";
+import { AnchorButton } from "@/components/shared/link-button";
+import { AuthCard } from "@/components/shared/auth-card";
+import { BrandAvatar } from "@/components/shared/brand-avatar";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { getActiveCenterId } from "@/lib/auth/active-center";
 import { getCurrentUser } from "@/lib/auth/session";
-import { getUserCenterRelations, primaryRole } from "@/lib/auth/tenant";
+import {
+  getOwnerOrgGroups,
+  getUserCenterRelations,
+  getVerifiedParentChildren,
+  primaryRole,
+} from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
+import { centerLogoSrc } from "@/lib/storage-paths";
+import { cn } from "@/lib/utils";
 
 export default async function SelectCenterPage({
   searchParams,
@@ -30,92 +34,184 @@ export default async function SelectCenterPage({
   const tRoles = await getTranslations("Roles");
 
   const { switch: switchMode } = await searchParams;
-  const relations = await getUserCenterRelations(user!.id);
+  const [relations, orgGroups, activeId, children] = await Promise.all([
+    getUserCenterRelations(user!.id),
+    getOwnerOrgGroups(user!.id),
+    getActiveCenterId(),
+    getVerifiedParentChildren(user!.id),
+  ]);
 
-  // Exactly one center → skip the hub entirely (docs/02 §3).
-  if (relations.length === 1 && switchMode !== "1") {
+  // SYS: a parent with no branch relation belongs in the parent portal — the
+  // hub's "not connected to a branch" state was a dead end for them.
+  if (relations.length === 0 && children.length > 0) {
+    redirect({ href: ROUTES.parentHome, locale });
+  }
+
+  // Exactly one center and no "Whole Management" option → skip the hub
+  // entirely (docs/02 §3). An Owner of a multi-branch organization always
+  // sees the hub, even with one branch resolved today, because the roll-up
+  // option lives here.
+  if (relations.length === 1 && orgGroups.length === 0 && switchMode !== "1") {
     redirect({ href: homePathForRole(primaryRole(relations[0])), locale });
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <Card className="p-2 sm:p-4">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
-          <CardDescription>
-            {relations.length > 0 ? t("subtitle") : t("emptySubtitle")}
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="flex flex-col gap-3">
+      <AuthCard
+        // With nothing to choose, the title says so (DES, docs/04 §12).
+        title={relations.length > 0 ? t("title") : t("emptyTitle")}
+        // The empty state below carries its own title — not said twice.
+        description={relations.length > 0 ? t("subtitle") : undefined}
+      >
+        <div className="flex flex-col gap-3">
           {relations.length === 0 ? (
-            <>
-              <FormMessage tone="info">{t("emptyHelp")}</FormMessage>
-              <a
-                href={`/${locale}${ROUTES.studentDiscover}`}
-                className="flex min-h-11 items-center justify-center rounded-lg bg-brand px-3 py-2 text-sm font-medium text-brand-foreground hover:opacity-90"
-              >
-                {t("browseClasses")}
-              </a>
-            </>
+            <EmptyState
+              icon={<Building2 />}
+              tone="info"
+              title={t("emptySubtitle")}
+              description={t("emptyHelp")}
+              className="px-0 py-4 sm:py-6"
+              action={
+                /* A teacher with zero centres gets the directory, never only
+                   the student Discover link (M15, spec §5.1 "Teacher
+                   onboarding") — both stay offered here since a brand-new
+                   sign-up's intent (student or teacher) isn't known yet. */
+                <div className="grid w-full gap-2 sm:flex">
+                  <AnchorButton
+                    href={`/${locale}${ROUTES.studentDiscover}`}
+                    variant="default"
+                    className="w-full sm:w-auto"
+                  >
+                    {t("browseClasses")}
+                  </AnchorButton>
+                  <AnchorButton href={`/${locale}${ROUTES.teacherCenters}`} className="w-full sm:w-auto">
+                    {t("findCenterToTeach")}
+                  </AnchorButton>
+                </div>
+              }
+            />
           ) : null}
 
-          {relations.map((relation) => (
-            <form key={relation.center.id} action={selectCenterAction}>
-              <input type="hidden" name="locale" value={locale} />
-              <input
-                type="hidden"
-                name="centerId"
-                value={relation.center.id}
-              />
-              <button
-                type="submit"
-                className="flex w-full min-h-16 items-center gap-3 rounded-xl border border-border bg-surface p-3 text-start transition-shadow hover:shadow-card-hover sm:p-4"
-              >
-                <span
-                  aria-hidden
-                  className="flex size-11 shrink-0 items-center justify-center rounded-lg text-base font-bold text-brand-foreground"
-                  style={{ backgroundColor: relation.center.themeColor }}
-                >
-                  {relation.center.name.trim().charAt(0)}
-                </span>
-
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">
-                    {relation.center.name}
-                  </span>
-                  <span className="mt-1 flex flex-wrap gap-1">
-                    {relation.roles.map((role) => (
-                      <Badge key={role} variant="brand">
-                        {tRoles(role)}
-                      </Badge>
-                    ))}
-                  </span>
-                </span>
-
-                <ChevronLeft
-                  aria-hidden
-                  className="size-4 shrink-0 text-text-muted ltr:-scale-x-100"
+          {orgGroups.map((group) => {
+            const selected = activeId === group.organizationId;
+            return (
+              <form key={group.organizationId} action={selectCenterAction}>
+                <input type="hidden" name="locale" value={locale} />
+                <input
+                  type="hidden"
+                  name="selectionId"
+                  value={group.organizationId}
                 />
-              </button>
-            </form>
-          ))}
+                <button
+                  type="submit"
+                  aria-current={selected ? "true" : undefined}
+                  className={cn(CHOICE_CARD, selected ? CHOICE_SELECTED : CHOICE_IDLE)}
+                >
+                  <span
+                    aria-hidden
+                    className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground"
+                  >
+                    <Building2 className="size-5" />
+                  </span>
+
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">
+                      {t("wholeManagement", { organization: group.organizationName })}
+                    </span>
+                    <span className="block truncate text-xs text-text-secondary">
+                      {t("wholeManagementHint", { count: group.branches.length })}
+                    </span>
+                  </span>
+
+                  <ChoiceMark selected={selected} />
+                </button>
+              </form>
+            );
+          })}
+
+          {relations.map((relation) => {
+            const selected = activeId === relation.center.id;
+            return (
+              <form key={relation.center.id} action={selectCenterAction}>
+                <input type="hidden" name="locale" value={locale} />
+                <input
+                  type="hidden"
+                  name="selectionId"
+                  value={relation.center.id}
+                />
+                <button
+                  type="submit"
+                  aria-current={selected ? "true" : undefined}
+                  className={cn(CHOICE_CARD, selected ? CHOICE_SELECTED : CHOICE_IDLE)}
+                >
+                  <BrandAvatar
+                    name={relation.center.name}
+                    logoUrl={centerLogoSrc(relation.center)}
+                    themeColor={relation.center.themeColor}
+                    size="lg"
+                  />
+
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">
+                      {relation.center.name}
+                    </span>
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {relation.roles.map((role) => (
+                        // A role is not a status (docs/04 §14.1).
+                        <Badge key={role} variant="neutral">
+                          {tRoles(role)}
+                        </Badge>
+                      ))}
+                    </span>
+                  </span>
+
+                  <ChoiceMark selected={selected} />
+                </button>
+              </form>
+            );
+          })}
 
           {user!.isPlatformAdmin ? (
-            <a
+            <AnchorButton
               href={`/${locale}${ROUTES.adminCenters}`}
-              className="flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-brand hover:bg-surface-subtle"
+              variant="ghost"
+              className="w-full justify-start text-brand"
             >
-              <Building2 className="size-4" />
+              <Building2 className="size-4" aria-hidden />
               {t("platformAdminLink")}
-            </a>
+            </AnchorButton>
           ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </AuthCard>
 
-      <div className="rounded-xl bg-sidebar p-2">
-        <SignOutButton />
-      </div>
+      {/* The light sign-out (docs/04 §14.3) — the navy slab it used to be was
+          the heaviest thing on the screen. */}
+      <SignOutButton variant="light" />
     </div>
+  );
+}
+
+/** A branch / roll-up choice: one tappable card, 64px+ tall. */
+const CHOICE_CARD =
+  "flex min-h-16 w-full items-center gap-3 rounded-xl border p-3 text-start transition-ui focus-ring active:translate-y-px sm:p-4";
+const CHOICE_IDLE =
+  "border-border bg-surface hover:border-border-strong hover:bg-surface-hover hover:shadow-card-hover";
+// The branch you are already working in: brand outline + tint + a check, so
+// "current" never depends on colour alone.
+const CHOICE_SELECTED = "border-brand bg-brand/5 ring-2 ring-brand/20";
+
+function ChoiceMark({ selected }: { selected: boolean }) {
+  return selected ? (
+    <span
+      aria-hidden
+      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground"
+    >
+      <Check className="size-3.5" />
+    </span>
+  ) : (
+    <ChevronLeft
+      aria-hidden
+      className="size-4 shrink-0 text-text-muted ltr:-scale-x-100"
+    />
   );
 }

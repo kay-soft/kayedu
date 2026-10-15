@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { IdCardPreview } from "@/components/center/id-card-preview";
-import { PrintToolbar } from "@/components/center/print-toolbar";
+import { PrintToolbar } from "@/components/shared/print-toolbar";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped } from "@/lib/db/scoped";
@@ -43,7 +43,10 @@ export default async function StudentCardPrintPage({
 
       <PrintToolbar
         backHref={ROUTES.centerStudent(student.id)}
+        backLabel={t("print.back")}
         title={fullName(localName(student, student.user))}
+        hint={t("print.cardHint")}
+        printLabel={t("print.print")}
       />
 
       <div className="flex justify-center p-4 sm:p-8 print:p-0">

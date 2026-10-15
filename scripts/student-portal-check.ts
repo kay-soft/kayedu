@@ -12,7 +12,8 @@
  * primitives (`lib/db/tenant-scope.ts`) — against two throwaway centers.
  * Needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type BlockScope } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { type BlockScope } from "@prisma/client";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import {
   cancelReservation,
@@ -26,7 +27,7 @@ import {
   studentReservationStatusByClass,
 } from "../lib/db/student-portal.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "student-portal-check-a";
 const SLUG_B = "student-portal-check-b";
@@ -71,11 +72,19 @@ async function makeClass(
   teacherId: string,
   opts: { requiresConfirmation?: boolean; capacity?: number; acceptsNewStudents?: boolean } = {},
 ) {
+  // R3 fixture shape: a class's seats come from its room set, so a
+  // "capacity-N class" is a class on a capacity-N room.
+  const room = opts.capacity
+    ? await prisma.room.create({
+        data: scopedData(centerId, { name: `SP room ${Math.random()}`, capacity: opts.capacity }),
+      })
+    : null;
   return prisma.classGroup.create({
     data: scopedData(centerId, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId,
+      roomId: room?.id ?? null,
       price: 10_000,
-      capacity: opts.capacity ?? 0,
       requiresConfirmation: opts.requiresConfirmation ?? false,
       acceptsNewStudents: opts.acceptsNewStudents ?? true,
     }),
@@ -87,8 +96,12 @@ async function main() {
 
   console.log("Database-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Student Portal A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Student Portal B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Student Portal A", organization: { create: { name: "Student Portal A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Student Portal B", organization: { create: { name: "Student Portal B" } } },
+  });
 
   const teacherA = await makeTeacher(centerA.id, "teacherA");
   const teacherB = await makeTeacher(centerB.id, "teacherB");
@@ -229,6 +242,10 @@ async function main() {
   check("Confirming a reservation creates the StudentProfile at that center", profileYAfterConfirm !== null);
 
   // ── 10. Reject → re-request reuses the same Reservation row ──────────────
+  // (M15, spec §5.1 "Approvals & enrolment": a rejected student cannot
+  // re-request the same class for 7 days — full coverage of that cooling-off
+  // lives in `npm run check:enrollment`; this just confirms the pre-existing
+  // "same row reused" guarantee still holds once the cooldown has elapsed.)
   const firstRequest = await prisma.$transaction((tx) =>
     reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classReRequest.id, studentUserId: studentX.id }),
   );
@@ -236,11 +253,24 @@ async function main() {
   const rejected = await rejectReservation(prisma, centerA.id, firstReservationId, teacherA.id);
   check("rejectReservation marks a PENDING request REJECTED", rejected.ok && rejected.reservation.status === "REJECTED");
 
+  const immediateRetry = await prisma.$transaction((tx) =>
+    reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classReRequest.id, studentUserId: studentX.id }),
+  );
+  check(
+    "Re-requesting immediately after REJECTED is refused as coolingOff (M15)",
+    !immediateRetry.ok && immediateRetry.error === "coolingOff",
+    JSON.stringify(immediateRetry),
+  );
+
+  const eightDaysAgo = new Date();
+  eightDaysAgo.setUTCDate(eightDaysAgo.getUTCDate() - 8);
+  await prisma.reservation.update({ where: { id: firstReservationId }, data: { rejectedAt: eightDaysAgo } });
+
   const secondRequest = await prisma.$transaction((tx) =>
     reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: classReRequest.id, studentUserId: studentX.id }),
   );
   check(
-    "Re-requesting after REJECTED succeeds and reuses the same row (the (classGroupId, studentId) unique constraint)",
+    "Once the cooling-off has elapsed, re-requesting after REJECTED succeeds and reuses the same row (the (classGroupId, studentId) unique constraint)",
     secondRequest.ok &&
       secondRequest.kind === "pending" &&
       secondRequest.reservationId === firstReservationId,

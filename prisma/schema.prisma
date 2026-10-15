@@ -21,7 +21,21 @@ enum Role {
   OWNER
   MANAGER
   RECEPTIONIST
+  ACCOUNTANT
   TEACHER
+}
+
+// A centre's own lifecycle (M19, docs/00-master-product-spec.md §5.1 "Centre
+// lifecycle"), replacing the old `Center.active` boolean. ONBOARDING/ACTIVE/
+// GRACE all permit sign-in; SUSPENDED/ARCHIVED both refuse it — see
+// lib/db/platform.ts's `ACCESSIBLE_LIFECYCLE_STATES` and the transition table
+// next to it for the enforced state machine.
+enum CenterLifecycleState {
+  ONBOARDING
+  ACTIVE
+  GRACE
+  SUSPENDED
+  ARCHIVED
 }
 
 enum ShareType {
@@ -29,18 +43,12 @@ enum ShareType {
   PERCENTAGE // centerShareValue is a whole-number percent (e.g. 15)
 }
 
+// Exactly three statuses (R1, docs/00-master-product-spec.md §5.1). There is
+// no fourth state: a student who is not PRESENT or LATE is ABSENT.
 enum AttendanceStatus {
   PRESENT
   LATE
   ABSENT
-  EXCUSED
-}
-
-enum PaymentMethod {
-  CASH
-  INSTAPAY
-  WALLET
-  VISA
 }
 
 enum SessionStatus {
@@ -48,6 +56,15 @@ enum SessionStatus {
   LIVE
   COMPLETED
   CANCELLED
+}
+
+// How a session was closed (R2, docs/00-master-product-spec.md §5.1 "Session
+// lifecycle"). MANUAL = staff pressed "End session"; AUTO = the session's
+// calendar day ended in the centre's timezone without anyone closing it, and
+// the next read/write that touched it closed it (lib/db/session-lifecycle.ts).
+enum SessionCloseMode {
+  MANUAL
+  AUTO
 }
 
 enum EnrollmentStatus {
@@ -91,6 +108,50 @@ enum InvitationStatus {
   REVOKED
 }
 
+// The kind a CenterCatalogSelection targets (M13) — which of the three
+// nullable catalog FKs on the row is the populated one. (R8 removed the
+// suggestion queue that used to share this discriminator.)
+enum CatalogEntryKind {
+  EDUCATION_SYSTEM
+  GRADE
+  SUBJECT
+}
+
+// A teacher payout's lifecycle (M14, spec §5 "Teacher settlements"). No
+// partially-paid state — a settlement is fully paid or it is not.
+// SEC-2b (D-16): a DRAFT may be CANCELLED, which releases every payment it
+// claimed (SettlementClaim.releasedAt) so a corrected settlement can claim
+// them again. APPROVED and PAID are never cancelled.
+enum SettlementStatus {
+  DRAFT
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+// A parent↔child link's lifecycle (M16, spec §5.1 "Parent role & portal").
+// A phone match alone only ever produces PENDING — it grants zero reads.
+// VERIFIED is the only status any parent-portal read trusts. There is no
+// REJECTED state: OD-6 (00-master-product-spec.md §2.2) hasn't decided who
+// verifies or how, so this enum only carries what M16 actually needs.
+// REVOKED (SEC-2a, D-04): a VERIFIED link whose matched phone is no longer on
+// the student's record is revoked automatically (audited `parentLink.revoke`)
+// and never read again — revocation is final; a new match starts PENDING.
+enum ParentLinkStatus {
+  PENDING
+  VERIFIED
+  REVOKED
+}
+
+// A self-registered account's claim on a staff-created person (SEC-2a, D-01).
+// A sign-up whose email equals an unlinked, staff-created `User` never links
+// on its own: it opens a PENDING claim that centre staff approve in person.
+enum AccountClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ─────────────────────────────────────────────────────────────
 // IDENTITY (global — no centerId)
 // ─────────────────────────────────────────────────────────────
@@ -102,6 +163,13 @@ model User {
   firstName       String
   lastName        String
   email           String?  @unique
+  // SEC-2a (D-01): Supabase's `email_confirmed_at` for this login, mirrored on
+  // every sync. Null for a staff-created person who has never signed in. When
+  // REQUIRE_EMAIL_CONFIRMATION=true, an email-based link needs it set.
+  emailVerifiedAt DateTime?
+  // A staff-typed (never self-typed) contact, seeded once at creation. Phone
+  // is never an identity key (SEC-2a, D-02): nothing links on it, and sign-up
+  // never writes it.
   phone           String?  @unique
   altPhone        String?
   avatarUrl       String?
@@ -110,126 +178,206 @@ model User {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  memberships     Membership[]
-  studentProfiles StudentProfile[]
-  taughtClasses   ClassGroup[]     @relation("ClassTeacher")
-  taughtSessions  Session[]        @relation("SessionTeacher")
-  reservations    Reservation[]
-  auditLogs       AuditLog[]
+  memberships        Membership[]
+  studentProfiles    StudentProfile[]
+  taughtClasses      ClassGroup[]        @relation("ClassTeacher")
+  taughtSessions     Session[]           @relation("SessionTeacher")
+  reservations       Reservation[]
+  auditLogs          AuditLog[]
+  // M14 — this user's own payout history, as a TEACHER. Named distinctly
+  // from `taughtSessions`/`taughtClasses` since a Settlement references the
+  // teacher, not a class or session.
+  settlements        Settlement[]        @relation("SettlementTeacher")
+  // M16 — the children this User reads as a PARENT (inert until VERIFIED).
+  // Named distinctly from every relation above because this one isn't a
+  // Membership or a StudentProfile of their own — it's read access into
+  // someone else's.
+  parentLinks        ParentLink[]        @relation("ParentLinkParent")
+  // M17 — this User's own ratings and skips, as a STUDENT rating sessions
+  // they attended. Named off the global User (not a StudentProfile) because
+  // rating is the student's own act, the same identity the login pop-up
+  // authenticates against — see the note on SessionRating below.
+  sessionRatings     SessionRating[]     @relation("SessionRatingStudent")
+  sessionRatingSkips SessionRatingSkip[] @relation("SessionRatingSkipStudent")
+  // SEC-2a (D-01) — sign-ups claiming this staff-created person.
+  accountClaims      AccountClaim[]      @relation("AccountClaimTarget")
+}
+
+/**
+ * A pending "this staff-created person is me" claim (SEC-2a, D-01,
+ * docs/01-data-model.md "People layer"). Written by `syncUserFromAuth`
+ * (`lib/auth/identity-link.ts`) when a new login's email equals a `User` a
+ * centre created (`authId` null); that login has **no app `User` at all**
+ * until a staff member at a centre where the person is known approves the
+ * claim in person (`lib/db/account-claims.ts`). Approving sets the target's
+ * `authId`; rejecting detaches the email from the unlinked target so the
+ * claimant continues as a brand-new person. Global, like `User` — no
+ * `centerId`; the staff list is scoped through the target's relations.
+ */
+model AccountClaim {
+  id                 String             @id @default(uuid())
+  /// The Supabase auth user id making the claim.
+  authId             String
+  /// The (normalized) email that login signed up with.
+  email              String
+  targetUserId       String
+  targetUser         User               @relation("AccountClaimTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  status             AccountClaimStatus @default(PENDING)
+  resolvedAt         DateTime?
+  resolvedBy         String?
+  resolvedAtCenterId String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([authId, targetUserId])
+  @@index([targetUserId, status])
+  @@index([authId])
+}
+
+/**
+ * One fixed-window counter for `lib/rate-limit.ts` (SEC-2a): a shared store so
+ * the limit holds across serverless instances and cold starts. One row per
+ * key, upserted atomically; rows from old windows are pruned opportunistically.
+ */
+model RateLimitBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@index([windowStart])
 }
 
 // ─────────────────────────────────────────────────────────────
-// ORGANIZATION
+// ORGANIZATION (M11)
 // ─────────────────────────────────────────────────────────────
 
-model Center {
-  id         String   @id @default(uuid())
-  slug       String   @unique // subdomain / branding key
-  name       String
-  nameEn     String?
-  logoUrl    String?
-  themeColor String   @default("#2563EB")
-  active     Boolean  @default(true)
-  plan       String? // onboarding/plan metadata
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  settings          CenterSettings?
-  branches          Branch[]
-  memberships       Membership[]
-  invitations       Invitation[]
-  educationSystems  EducationSystem[]
-  grades            Grade[]
-  subjects          Subject[]
-  rooms             Room[]
-  classGroups       ClassGroup[]
-  studentProfiles   StudentProfile[]
-  enrollments       Enrollment[]
-  sessions          Session[]
-  attendees         SessionAttendee[]
-  payments          Payment[]
-  expenseCategories ExpenseCategory[]
-  expenses          Expense[]
-  reservations      Reservation[]
-  changeRequests    ChangeRequest[]
-  studentBlocks     StudentBlock[]
-  holidays          Holiday[]
-  auditLogs         AuditLog[]
-}
-
-model CenterSettings {
-  id                               String         @id @default(uuid())
-  centerId                         String         @unique
-  center                           Center         @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  defaultShareType                 ShareType      @default(PERCENTAGE)
-  defaultShareValue                Int            @default(15) // percent OR piastres per defaultShareType
-  teacherTimeoutDays               Int? // null = disabled
-  defaultLateThreshold             Int            @default(10) // minutes
-  cardLayout                       Json? // ID-card customization (positions of name/id/logo…)
-  timezone                         String         @default("Africa/Cairo")
-  // Permission grants — these only *widen* a role, never narrow it, and are
-  // read through permissionGrantsFromSettings() (docs/02-architecture.md §6).
-  // Receptionists are denied profit + corrections by default (spec §3).
-  receptionistCanViewProfit        Boolean        @default(false)
-  receptionistCanCorrectAttendance Boolean        @default(false)
-  // Teacher/room double-booking (docs/02-architecture.md §11): WARN saves the
-  // conflicting slot/session and surfaces it in the UI; DENY refuses it.
-  scheduleConflictPolicy           ConflictPolicy @default(WARN)
-  // A teacher's deadline to edit their own session description, in hours
-  // after the session date (M10, closing the gap flagged at M5/M7). Null =
-  // no deadline, editable any time — the M7 default.
-  teacherEditDeadlineHours         Int?
-  createdAt                        DateTime       @default(now())
-  updatedAt                        DateTime       @updatedAt
-}
-
-model Branch {
+/**
+ * The paying customer (docs/00-master-product-spec.md §5.1 "Branch
+ * architecture"). Global — no `centerId`, isolates nothing, and is
+ * deliberately not a tenant. In the UI this reads as "Center"; the DB name
+ * and the screen label differ on purpose (docs/02-architecture.md §8).
+ */
+model Organization {
   id        String   @id @default(uuid())
-  centerId  String
-  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
   name      String
-  address   String?
+  nameEn    String?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  rooms    Room[]
-  sessions Session[]
+  centers Center[]
+}
 
-  @@index([centerId])
+model Center {
+  id             String               @id @default(uuid())
+  slug           String               @unique // subdomain / branding key
+  name           String
+  nameEn         String?
+  // SEC-2a (D-25): a key in the private `logos` bucket, never a URL — served
+  // through `/api/logos/[centerId]`, which mints a short-lived signed URL.
+  logoPath       String?
+  themeColor     String               @default("#2563EB")
+  // M19: replaces the old `active` boolean — see the enum's own doc comment.
+  lifecycleState CenterLifecycleState @default(ACTIVE)
+  // The organization (paying customer) this branch belongs to (M11). The
+  // tenant, and the sole isolation key, stays Center/centerId — this is an
+  // additive parent, not a rewrite of scoping (docs/01-data-model.md §4).
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  settings           CenterSettings?
+  memberships        Membership[]
+  invitations        Invitation[]
+  catalogSelections  CenterCatalogSelection[]
+  rooms              Room[]
+  roomLinks          RoomLink[]
+  classGroupRooms    ClassGroupRoom[]
+  sessionRooms       SessionRoom[]
+  classGroups        ClassGroup[]
+  studentProfiles    StudentProfile[]
+  enrollments        Enrollment[]
+  sessions           Session[]
+  attendees          SessionAttendee[]
+  attendanceChanges  SessionAttendanceChange[]
+  payments           Payment[]
+  paymentMethods     CenterPaymentMethod[]
+  expenseCategories  ExpenseCategory[]
+  expenses           Expense[]
+  reservations       Reservation[]
+  changeRequests     ChangeRequest[]
+  studentBlocks      StudentBlock[]
+  holidays           Holiday[]
+  terms              CenterTerm[]
+  auditLogs          AuditLog[]
+  permissionGrants   PermissionGrant[]
+  branchGrants       MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
+  refunds            Refund[]
+  settlements        Settlement[]
+  settlementClaims   SettlementClaim[]
+  parentLinks        ParentLink[]
+
+  @@index([organizationId])
+}
+
+model CenterSettings {
+  id                       String         @id @default(uuid())
+  centerId                 String         @unique
+  center                   Center         @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  defaultShareType         ShareType      @default(PERCENTAGE)
+  defaultShareValue        Int            @default(15) // percent OR piastres per defaultShareType
+  teacherTimeoutDays       Int? // null = disabled
+  defaultLateThreshold     Int            @default(10) // minutes
+  cardLayout               Json? // ID-card customization (positions of name/id/logo…)
+  timezone                 String         @default("Africa/Cairo")
+  // Teacher/room double-booking (docs/02-architecture.md §11): WARN refuses
+  // the write with the conflict list until it is explicitly confirmed (R3,
+  // then saved and audited); DENY refuses it outright.
+  scheduleConflictPolicy   ConflictPolicy @default(WARN)
+  // A teacher's deadline to edit their own session description, in hours
+  // after the session date (M10, closing the gap flagged at M5/M7). Null =
+  // no deadline, editable any time — the M7 default.
+  teacherEditDeadlineHours Int?
+  // M19: how many days back a centre-side role (OWNER/MANAGER/RECEPTIONIST/
+  // ACCOUNTANT) may read analytics/money/sessions/attendance — a rolling
+  // window ending today, not a calendar-month anchor (docs/01-data-model.md
+  // §7). Platform admin bypasses this entirely; Settlement/payout and
+  // AuditLog reads are carved out and never consult it (lib/db/visibility.ts).
+  dataVisibilityDays       Int            @default(30)
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
 }
 
 model Membership {
-  id             String    @id @default(uuid())
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  centerId       String
-  center         Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  role           Role
-  active         Boolean   @default(true)
-  // Teacher-only: schema flexibility for a future per-center visibility
-  // toggle. Defaults true and nothing currently gates on it — teachers see
-  // their own earnings by default (docs/00-master-product-spec.md §3).
-  canSeeEarnings Boolean   @default(true)
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  centerId         String
+  center           Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  role             Role
+  active           Boolean   @default(true)
   // Center-local record for this person (docs/01-data-model.md §6). Identity
   // stays global on User (the auth credential + the platform-wide default),
   // but name and contact are what *this* center has on file — seeded from
   // User at creation, then editable here independently of what any other
   // center stores, and never written back to User.
-  firstName      String?
-  lastName       String?
-  email          String?
-  phone          String?
-  altPhone       String?
+  firstName        String?
+  lastName         String?
+  email            String?
+  phone            String?
+  altPhone         String?
   // Teacher-only (M10): gates the "request a new class/session" forms
   // (spec §4.2 items 2 & 4 say "a trusted teacher"). Defaults true so the
   // M7/M9 behavior ("every active TEACHER membership is trusted") is
   // unchanged until a manager deliberately revokes trust for one teacher.
-  isTrustedTeacher Boolean @default(true)
-  invitedAt      DateTime  @default(now())
-  joinedAt       DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  isTrustedTeacher Boolean   @default(true)
+  invitedAt        DateTime  @default(now())
+  joinedAt         DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  branchGrants MembershipBranchGrant[]
 
   @@unique([userId, centerId, role])
   @@index([centerId])
@@ -254,113 +402,305 @@ model Invitation {
 }
 
 // ─────────────────────────────────────────────────────────────
-// ACADEMIC / CONFIG (centerId-scoped)
+// PERMISSIONS (M12)
 // ─────────────────────────────────────────────────────────────
 
-model EducationSystem {
+/**
+ * The stored, action-level permission matrix (docs/02-architecture.md §6.1)
+ * that replaces the hardcoded role→permission map and the two
+ * `CenterSettings` booleans it grew out of. `action` is a `Permission` union
+ * member (`lib/auth/permissions.ts`) stored as a plain string so a new action
+ * needs no migration to become grantable.
+ * Deny by default: an action with no row here is denied to that role,
+ * including a brand-new action nobody has granted yet. A hardcoded ceiling
+ * (`lib/auth/permissions.ts`) still overrides this table both ways — an
+ * OWNER's ownership actions are always true regardless of rows here, and a
+ * few actions (e.g. a TEACHER holding `center.profit.view`) can never be
+ * granted no matter what row exists — so a bad or malicious row can never
+ * itself create a privilege escalation. Only OWNER may write these rows
+ * (`lib/db/permissions.ts`), and every write is audited.
+ */
+model PermissionGrant {
   id        String   @id @default(uuid())
   centerId  String
   center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  name      String
-  basePrice Int      @default(0) // piastres
-  active    Boolean  @default(true)
+  role      Role
+  action    String
+  allowed   Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  grades      Grade[]
-  classGroups ClassGroup[]
-
+  @@unique([centerId, role, action])
   @@index([centerId])
 }
 
-model Grade {
-  id                String           @id @default(uuid())
-  centerId          String
-  center            Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  name              String
-  educationSystemId String?
-  educationSystem   EducationSystem? @relation(fields: [educationSystemId], references: [id])
-  active            Boolean          @default(true)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+/**
+ * An Owner-granted widening of a branch-scoped membership's reach to an
+ * additional branch (docs/01-data-model.md "Organization layer"). Only
+ * MANAGER/RECEPTIONIST/ACCOUNTANT memberships are ever widened this way: an
+ * OWNER already resolves every branch under their organization
+ * (`getUserCenterRelations()`), and a TEACHER's multi-center reach is a
+ * second real `Membership` row at that center, not a widening of one.
+ * Resolution is additive and never subtractive — a grant can never remove
+ * the membership's own home branch. Only OWNER may write one, and every
+ * write is audited (`membership.branch.grant` / `membership.branch.revoke`).
+ */
+model MembershipBranchGrant {
+  id           String     @id @default(uuid())
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  centerId     String
+  center       Center     @relation("MembershipBranchGrantCenter", fields: [centerId], references: [id], onDelete: Cascade)
+  grantedBy    String
+  createdAt    DateTime   @default(now())
 
-  subjects        Subject[]
+  @@unique([membershipId, centerId])
+  @@index([membershipId])
+  @@index([centerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ACADEMIC CATALOG (M13 — GLOBAL, no centerId; docs/01-data-model.md
+// "Academic catalog layer"). Education systems, grades and subjects are
+// platform-owned reference data. A centre never authors these rows — it
+// picks one via CenterCatalogSelection; only a platform admin adds, edits,
+// deactivates or deletes an entry (R8 — the M13 suggestion queue is gone: a
+// centre that needs an entry contacts the platform). Every entry carries both
+// an Arabic and an English name; a centre's own display-name (one per
+// language) and price choices live only on its CenterCatalogSelection row,
+// never here.
+// ─────────────────────────────────────────────────────────────
+
+model CatalogEducationSystem {
+  id                      String   @id @default(uuid())
+  nameAr                  String
+  nameEn                  String
+  // The default FIXED-cut piastre amount a class inherits when its
+  // centerShareType is set to FIXED (CLAUDE.md rule 3, spec §5.1 "Center
+  // cut") — e.g. American 40 EGP, IGCSE 50 EGP. Configuration-time only:
+  // never read at payment time, so changing it moves zero existing classes
+  // and zero recorded payments.
+  defaultFixedCenterShare Int      @default(0)
+  active                  Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  grades      CatalogGrade[]
+  selections  CenterCatalogSelection[]
+  classGroups ClassGroup[]
+}
+
+model CatalogGrade {
+  id                String                  @id @default(uuid())
+  nameAr            String
+  nameEn            String
+  educationSystemId String?
+  educationSystem   CatalogEducationSystem? @relation(fields: [educationSystemId], references: [id])
+  active            Boolean                 @default(true)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  subjects        CatalogSubject[]
+  selections      CenterCatalogSelection[]
   classGroups     ClassGroup[]
   studentProfiles StudentProfile[]
+  sessions        Session[] // R5 — one-time sessions
 
-  @@index([centerId])
+  @@index([educationSystemId])
 }
 
-model Subject {
-  id        String   @id @default(uuid())
-  centerId  String
-  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  name      String
+model CatalogSubject {
+  id        String        @id @default(uuid())
+  nameAr    String
+  nameEn    String
   gradeId   String?
-  grade     Grade?   @relation(fields: [gradeId], references: [id])
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  grade     CatalogGrade? @relation(fields: [gradeId], references: [id])
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
+  selections  CenterCatalogSelection[]
   classGroups ClassGroup[]
+  sessions    Session[] // R5 — one-time sessions
 
-  @@index([centerId])
+  @@index([gradeId])
 }
+
+/**
+ * A centre's pick of one global catalog entry, and the *only* place a centre
+ * may record its own opinion about that entry: a display-name override and
+ * (for an education system) a base price. `kind` says which of the three
+ * nullable FKs is populated; the other two stay null for that row. Enforced
+ * in the application layer (`lib/db/catalog.ts`), the same "app-layer
+ * invariant over a DB constraint" shape `StudentBlock.refId` already uses in
+ * this schema — a `kind` mismatch would need a cross-column CHECK constraint
+ * Prisma migrations don't express, and the app never writes one.
+ */
+model CenterCatalogSelection {
+  id       String           @id @default(uuid())
+  centerId String
+  center   Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  kind     CatalogEntryKind
+
+  educationSystemId String?
+  educationSystem   CatalogEducationSystem? @relation(fields: [educationSystemId], references: [id], onDelete: Cascade)
+  gradeId           String?
+  grade             CatalogGrade?           @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+  subjectId         String?
+  subject           CatalogSubject?         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  // The two things a centre may edit about a picked entry — never the
+  // canonical row itself (CLAUDE.md M13 brief). R8: the rename is two optional
+  // fields, one per language. In the Arabic UI the label is displayNameAr, else
+  // the canonical nameAr; in the English UI displayNameEn, else the canonical
+  // nameEn — an Arabic override never shows in English and vice versa
+  // (lib/catalog.ts is the one resolver). basePrice is only meaningful for
+  // kind = EDUCATION_SYSTEM; null elsewhere.
+  displayNameAr String?
+  displayNameEn String?
+  basePrice     Int?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([centerId, kind, educationSystemId])
+  @@unique([centerId, kind, gradeId])
+  @@unique([centerId, kind, subjectId])
+  @@index([centerId])
+  @@index([educationSystemId])
+  @@index([gradeId])
+  @@index([subjectId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ACADEMIC / CONFIG (centerId-scoped)
+// ─────────────────────────────────────────────────────────────
 
 model Room {
   id        String   @id @default(uuid())
   centerId  String
   center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  branchId  String?
-  branch    Branch?  @relation(fields: [branchId], references: [id])
   name      String
   capacity  Int      @default(0)
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  classGroups ClassGroup[]
-  sessions    Session[]
+  classGroups      ClassGroup[]
+  sessions         Session[]
+  // R3 — joinable rooms. A link is stored once per pair (roomAId < roomBId),
+  // so "which rooms can this one combine with" reads both sides.
+  linksAsA         RoomLink[]       @relation("RoomLinkA")
+  linksAsB         RoomLink[]       @relation("RoomLinkB")
+  // R3 — this room used as an EXTRA room of a class / a session.
+  classGroupExtras ClassGroupRoom[]
+  sessionExtras    SessionRoom[]
 
   @@index([centerId])
 }
 
+/// R3 — two rooms of the same centre that may be combined into one bigger
+/// room (Room 1 + Room 2). Symmetric by construction: each pair is stored
+/// ONCE, normalized so roomAId < roomBId (compared as strings), and unique on
+/// that pair. Never a self-link, never across centres — both enforced in
+/// lib/db/room-sets.ts, the only writer. A combination is a star around a
+/// primary room, not transitive: A-B and B-C linked does not allow A+C
+/// (lib/rooms.ts `isValidCombination`).
+model RoomLink {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  roomAId   String
+  roomA     Room     @relation("RoomLinkA", fields: [roomAId], references: [id], onDelete: Cascade)
+  roomBId   String
+  roomB     Room     @relation("RoomLinkB", fields: [roomBId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([roomAId, roomBId])
+  @@index([centerId])
+}
+
+/// R3 — an EXTRA room a class uses alongside its primary `ClassGroup.roomId`.
+/// Each extra must be linked to the primary (RoomLink). The class's
+/// enrolment cap is the summed capacity of primary + extras (lib/rooms.ts).
+model ClassGroupRoom {
+  id           String     @id @default(uuid())
+  centerId     String
+  center       Center     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  classGroupId String
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  roomId       String
+  room         Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([classGroupId, roomId])
+  @@index([centerId])
+  @@index([centerId, roomId])
+}
+
+/// R3 — an EXTRA room one session uses alongside its primary
+/// `Session.roomId`. Copied from the class by the generator; a session may
+/// override its own set (that never changes the class's enrolment cap). While
+/// the session runs, every room in its set is busy (findSessionConflicts).
+model SessionRoom {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, roomId])
+  @@index([centerId])
+  @@index([centerId, roomId])
+}
+
 model ClassGroup {
-  id                   String           @id @default(uuid())
+  id                   String                  @id @default(uuid())
   centerId             String
-  center               Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center               Center                  @relation(fields: [centerId], references: [id], onDelete: Cascade)
   teacherId            String
-  teacher              User             @relation("ClassTeacher", fields: [teacherId], references: [id])
+  teacher              User                    @relation("ClassTeacher", fields: [teacherId], references: [id])
+  // Catalog references (M13) — global entries, resolved through the centre's
+  // own CenterCatalogSelection for display name and price
+  // (docs/01-data-model.md "Config layer"). Never a direct centre-authored
+  // row anymore.
   subjectId            String?
-  subject              Subject?         @relation(fields: [subjectId], references: [id])
+  subject              CatalogSubject?         @relation(fields: [subjectId], references: [id])
   gradeId              String?
-  grade                Grade?           @relation(fields: [gradeId], references: [id])
+  grade                CatalogGrade?           @relation(fields: [gradeId], references: [id])
   educationSystemId    String?
-  educationSystem      EducationSystem? @relation(fields: [educationSystemId], references: [id])
+  educationSystem      CatalogEducationSystem? @relation(fields: [educationSystemId], references: [id])
   roomId               String?
-  room                 Room?            @relation(fields: [roomId], references: [id])
-  price                Int              @default(0) // piastres per session
+  room                 Room?                   @relation(fields: [roomId], references: [id])
+  price                Int                     @default(0) // piastres per session
   // Center's cut config — resolved onto payments as a snapshot.
-  centerShareType      ShareType        @default(PERCENTAGE)
-  centerShareValue     Int              @default(15) // percent OR piastres
-  capacity             Int              @default(0)
-  attendanceRequired   Boolean          @default(true)
-  lateThresholdMinutes Int              @default(10)
-  acceptsNewStudents   Boolean          @default(true)
-  requiresConfirmation Boolean          @default(false)
-  // Whether EXCUSED is offered as an attendance status on this class's
-  // sessions (M10, closing the gap flagged at M5 — spec §5 "Excused
-  // configurable per class"). Defaults true, matching the M5 behavior where
-  // all four statuses were offered on every class.
-  allowExcused         Boolean          @default(true)
-  active               Boolean          @default(true)
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  centerShareType      ShareType               @default(PERCENTAGE)
+  centerShareValue     Int                     @default(15) // percent OR piastres
+  // R3: no `capacity` column — enrolment is capped by the class's room set
+  // (primary + extraRooms, lib/rooms.ts), reversing M15's min(class, room).
+  lateThresholdMinutes Int                     @default(10)
+  acceptsNewStudents   Boolean                 @default(true)
+  requiresConfirmation Boolean                 @default(false)
+  // R4 — the class's period, inclusive at both ends. Date-only, stored as a
+  // UTC-midnight day marker exactly like Session.date / Holiday.date. Either
+  // typed by hand or COPIED from a CenterTerm preset — there is no FK to the
+  // term, so editing a term never moves a class. Sessions exist for every
+  // matching weekday in this range from "now" on (lib/db/class-sessions.ts).
+  startDate            DateTime
+  endDate              DateTime
+  active               Boolean                 @default(true)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
 
   schedules    ClassSchedule[]
   sessions     Session[]
   enrollments  Enrollment[]
   reservations Reservation[]
+  // R3 — rooms combined with the primary `roomId` (each linked to it).
+  extraRooms   ClassGroupRoom[]
 
   @@index([centerId])
   @@index([centerId, teacherId])
@@ -385,37 +725,50 @@ model ClassSchedule {
 // ─────────────────────────────────────────────────────────────
 
 model StudentProfile {
-  id              String   @id @default(uuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  centerId        String
-  center          Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  studentCode     String // system-assigned per center via StudentCodeCounter — never typed
-  gradeId         String?
-  grade           Grade?   @relation(fields: [gradeId], references: [id])
+  id                 String        @id @default(uuid())
+  userId             String
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  centerId           String
+  center             Center        @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentCode        String // system-assigned per center via StudentCodeCounter — never typed
+  gradeId            String?
+  grade              CatalogGrade? @relation(fields: [gradeId], references: [id])
   // Center-local record for the student themselves — see the note on
   // Membership above. `User` stays the auth credential + platform default;
   // these are this center's own name/contact and never write back to it.
-  firstName       String?
-  lastName        String?
-  email           String?
-  phone           String?
-  altPhone        String?
-  parentFirstName String?
-  parentLastName  String?
-  parentPhone     String?
-  parentAltPhone  String?
+  firstName          String?
+  lastName           String?
+  email              String?
+  phone              String?
+  altPhone           String?
+  parentFirstName    String?
+  parentLastName     String?
+  parentPhone        String?
+  parentAltPhone     String?
   // Center-uploaded student photo (Storage `avatars/{centerId}/…`). It lives
   // here, not on User.avatarUrl, because the photo a center takes for its own
   // ID card is that center's data — see docs/01-data-model.md §2.
-  photoUrl        String?
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  photoUrl           String?
+  // M18: null on a self-registered student's auto-seeded profile (only name/
+  // email/phone/altPhone are copied from User — no grade, no parent contact);
+  // stamped the moment that profile is completed (`/student/profile`) or, for
+  // a receptionist-created student, at creation time (already a full form).
+  // A read restriction gate in the (student) layout uses this to send a
+  // self-registered student to complete their profile exactly once — never a
+  // second time, and never at all for a staff-created one.
+  profileCompletedAt DateTime?
+  active             Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  enrollments Enrollment[]
-  attendees   SessionAttendee[]
-  payments    Payment[]
+  enrollments       Enrollment[]
+  attendees         SessionAttendee[]
+  payments          Payment[]
+  // R2 — live-session attendance status changes made against this student.
+  attendanceChanges SessionAttendanceChange[]
+  // M16 — every parent account that has matched (or been verified) against
+  // this child, via `parentPhone`/`parentAltPhone` above.
+  parentLinks       ParentLink[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
@@ -478,32 +831,99 @@ model StudentBlock {
 // ─────────────────────────────────────────────────────────────
 
 model Session {
-  id            String        @id @default(uuid())
-  centerId      String
-  center        Center        @relation(fields: [centerId], references: [id], onDelete: Cascade)
-  classGroupId  String
-  classGroup    ClassGroup    @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
-  teacherId     String
-  teacher       User          @relation("SessionTeacher", fields: [teacherId], references: [id])
-  branchId      String?
-  branch        Branch?       @relation(fields: [branchId], references: [id])
-  roomId        String?
-  room          Room?         @relation(fields: [roomId], references: [id])
-  date          DateTime // the calendar day of the session
-  startTime     String // "16:00"
-  endTime       String // "18:00"
-  status        SessionStatus @default(SCHEDULED)
-  priceSnapshot Int           @default(0) // piastres; frozen from class at generation
-  description   String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id               String            @id @default(uuid())
+  centerId         String
+  center           Center            @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  // R5 — null for a **one-time session** that belongs to no class. The kind
+  // decides which fields apply (an application-layer invariant enforced by
+  // lib/db/sessions.ts's `oneOffSessionShapeError`, asserted by
+  // `npm run check:one-off-sessions`): classGroupId null => `title`,
+  // `teacherId`, `priceSnapshot` and BOTH `centerShareType` and
+  // `centerShareValue` are set — a one-time session carries its own cut,
+  // since there is no class to inherit one from.
+  classGroupId     String?
+  classGroup       ClassGroup?       @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  // R5 — a one-time session's own name and optional catalog references
+  // (global entries, labelled through the centre's CenterCatalogSelection
+  // exactly like ClassGroup's). Unused on a class session, whose name comes
+  // from its class (lib/session-label.ts).
+  title            String?
+  subjectId        String?
+  subject          CatalogSubject?   @relation(fields: [subjectId], references: [id])
+  gradeId          String?
+  grade            CatalogGrade?     @relation(fields: [gradeId], references: [id])
+  // R5 — created by hand (an extra session on a class, a one-time session,
+  // or an approved teacher NEW_SESSION request) rather than by the
+  // class-sessions engine. A manual session is never pristine to the engine:
+  // no resync, period change, holiday or class edit deletes or rewrites it
+  // (lib/db/class-sessions.ts).
+  isManual         Boolean           @default(false)
+  teacherId        String
+  teacher          User              @relation("SessionTeacher", fields: [teacherId], references: [id])
+  roomId           String?
+  room             Room?             @relation(fields: [roomId], references: [id])
+  date             DateTime // the calendar day of the session
+  startTime        String // "16:00"
+  endTime          String // "18:00"
+  status           SessionStatus     @default(SCHEDULED)
+  // The replacement session a reschedule created (M15, spec §5.1 "Reschedule
+  // with linkage"). Written immediately — the original row is never silently
+  // mutated into its new date/time — so history reads "this session moved to
+  // that one." A session carrying this is neither CANCELLED (it still
+  // happens, just elsewhere) nor open for new attendance/payment (see
+  // `lib/db/attendance.ts`/`lib/db/payments.ts`'s guard) — whatever attendance
+  // it already carries stays exactly as recorded (CLAUDE.md rule 2).
+  rescheduledToId  String?           @unique
+  rescheduledTo    Session?          @relation("SessionReschedule", fields: [rescheduledToId], references: [id], onDelete: SetNull)
+  rescheduledFrom  Session?          @relation("SessionReschedule")
+  priceSnapshot    Int               @default(0) // piastres; frozen from the class when the session is created
+  // Per-session centre-cut override (M13, spec §5.1 "Center cut" —
+  // "overridable per class and per session"). Null on both = inherit the
+  // class's own centerShareType/centerShareValue, which is every session's
+  // state until someone explicitly overrides this one. Consulted only by
+  // `recordPayment` at the moment a payment is frozen (CLAUDE.md rule 2) —
+  // never rewrites an already-recorded payment's snapshots.
+  centerShareType  ShareType?
+  centerShareValue Int?
+  description      String?
+  // R2 — a closed session is an immutable record: no attendance, payment,
+  // void, refund, cancel or reschedule is accepted once `closedAt` is set
+  // (lib/db/session-lifecycle.ts is the single owner of that rule). Closing
+  // also sets `status` to COMPLETED. `closedBy` is the closing user's id, or
+  // null when the close was automatic (`closeMode` AUTO, end of the
+  // session's day in the centre's timezone). There is no reopen path.
+  closedAt         DateTime?
+  closedBy         String?
+  closeMode        SessionCloseMode?
+  // SEC-2b (D-14) — the centre's `CenterSettings.timezone`, frozen when the
+  // session is created. Its lifecycle (auto-close, Present/Late, "is it today")
+  // reads this, never the centre's current setting, so editing the centre's
+  // timezone moves nothing already created. Filled by a database trigger on
+  // insert when the writer leaves it null, and never changed afterwards (the
+  // same trigger keeps the old value on update) — see the migration
+  // `20261018090000_sec2b_money_integrity`. Nullable in the schema only so
+  // writers need not pass it; every row has one.
+  timezone         String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
-  attendees SessionAttendee[]
-  payments  Payment[]
+  attendees         SessionAttendee[]
+  payments          Payment[]
+  settlements       Settlement[]
+  // R2 — every status change made while the session was live, in order.
+  attendanceChanges SessionAttendanceChange[]
+  // R3 — rooms combined with the primary `roomId` for this session only.
+  extraRooms        SessionRoom[]
+  // M17 — ratings/skips students recorded against this exact session. Never
+  // re-derived if the session is later rescheduled: a rating is for the
+  // session actually attended, at the teacher who actually taught it.
+  ratings           SessionRating[]
+  ratingSkips       SessionRatingSkip[]
 
-  // The idempotency key the session generator relies on (docs/02 §11):
-  // regenerating a window is a `createMany({ skipDuplicates: true })` against
-  // this constraint, so a class's own slot is never duplicated across runs.
+  // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
+  // lib/db/class-sessions.ts): materializing a class's range is a
+  // `createMany({ skipDuplicates: true })` against this constraint, so a
+  // class's own slot is never duplicated, however often its range is resynced.
   @@unique([classGroupId, date, startTime])
   @@index([centerId])
   @@index([centerId, date])
@@ -536,51 +956,245 @@ model SessionAttendee {
   @@unique([sessionId, studentProfileId])
   @@index([centerId])
   @@index([sessionId])
+  // SYS: a student's history and absence streak read by studentProfileId.
+  @@index([studentProfileId])
+}
+
+/**
+ * One attendance status change made while a session was still live (R2,
+ * docs/00-master-product-spec.md §5.1 "Session lifecycle"). The session
+ * receipt's "Changes during session" section reads this table; `AuditLog`
+ * (`attendance.correct`, plus `payment.void` when a payment was voided) stays
+ * the audit trail — both are written in the same transaction as the change
+ * itself (`lib/db/attendance.ts`'s `changeAttendanceStatus`). Append-only:
+ * nothing updates or deletes a row here. `voidedPaymentId` is set when the
+ * change was PRESENT/LATE → ABSENT on a paid student and the payment was
+ * voided in that same transaction. `reason` is required when the change
+ * voided a payment (SEC-2b, D-13), optional otherwise.
+ */
+model SessionAttendanceChange {
+  id               String           @id @default(uuid())
+  centerId         String
+  center           Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  sessionId        String
+  session          Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile   @relation(fields: [studentProfileId], references: [id])
+  fromStatus       AttendanceStatus
+  toStatus         AttendanceStatus
+  voidedPaymentId  String?
+  voidedPayment    Payment?         @relation(fields: [voidedPaymentId], references: [id], onDelete: SetNull)
+  reason           String?
+  changedBy        String
+  changedAt        DateTime         @default(now())
+
+  @@index([centerId])
+  @@index([centerId, sessionId])
 }
 
 // The financial ledger. Money fields are FROZEN at record time. Never recompute.
 model Payment {
-  id                   String          @id @default(uuid())
+  id                   String                    @id @default(uuid())
   centerId             String
-  center               Center          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  center               Center                    @relation(fields: [centerId], references: [id], onDelete: Cascade)
   sessionId            String
-  session              Session         @relation(fields: [sessionId], references: [id])
+  session              Session                   @relation(fields: [sessionId], references: [id])
   // Denormalized from session.teacherId at record time (M6, docs/02 §14): the
   // by-teacher analytics breakdown needs a single-table `groupBy`, and Prisma
   // cannot `groupBy` on a related model's scalar column. Not a money field —
   // just a reference snapshot, like `recordedBy` — so it carries none of the
   // "never recompute" weight CLAUDE.md rule 2 puts on the share snapshots.
   teacherId            String
-  // Deliberately NOT @unique (revised at M5): a void never deletes its row
+  // Not a plain @unique (revised at M5): a void never deletes its row
   // (CLAUDE.md rule 2), and a correction writes a *new* Payment for the same
-  // roster row rather than reusing or replacing the voided one — so one
-  // SessionAttendee can carry more than one Payment over its history, with
-  // the application layer (lib/db/payments.ts `recordPayment`) enforcing "at
-  // most one non-voided Payment per attendee at a time" instead of the
-  // database. See docs/01-data-model.md §3.
+  // roster row — so one SessionAttendee can carry several Payments over its
+  // history. "At most one non-voided Payment per attendee" is a **partial
+  // unique index** since SEC-2b (`Payment_one_active_per_attendee`, WHERE
+  // voided = false — raw SQL in the migration, Prisma cannot express it), and
+  // `recordPayment` inserts with ON CONFLICT against it (SEC-05). A CHECK
+  // (`Payment_not_voided_and_refunded`) keeps void and refund exclusive.
+  // See docs/01-data-model.md §3.
   sessionAttendeeId    String
-  sessionAttendee      SessionAttendee @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
+  sessionAttendee      SessionAttendee           @relation(fields: [sessionAttendeeId], references: [id], onDelete: Cascade)
   studentProfileId     String
-  studentProfile       StudentProfile  @relation(fields: [studentProfileId], references: [id])
+  studentProfile       StudentProfile            @relation(fields: [studentProfileId], references: [id])
   amount               Int // piastres collected
-  method               PaymentMethod   @default(CASH)
+  // The centre's configured method (R1). `methodLabelSnapshot` is the
+  // method's name FROZEN at record time — renaming the method later never
+  // relabels a recorded payment, the same principle as the money snapshots
+  // (CLAUDE.md rule 2). Display always reads the snapshot, never the live
+  // `paymentMethod.name`. RESTRICT: a referenced method is deactivated, never
+  // deleted (lib/db/payment-methods.ts).
+  paymentMethodId      String
+  paymentMethod        CenterPaymentMethod       @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  methodLabelSnapshot  String
   priceSnapshot        Int // frozen
   centerShareSnapshot  Int // frozen
   teacherShareSnapshot Int // frozen
   receiptRef           String?
-  voided               Boolean         @default(false)
+  voided               Boolean                   @default(false)
   voidReason           String?
   voidedAt             DateTime?
   voidedBy             String?
+  // M14 — a plain marker so a reader sees the refunded state without a join;
+  // the actual reversal amounts live on the `Refund` row, never here. A
+  // voided payment is never refunded and vice versa (CLAUDE.md rule 7: void
+  // and refund are different mechanisms, never collapsed into one flag).
+  refunded             Boolean                   @default(false)
+  refund               Refund?
+  // R2 — the live attendance change (PRESENT/LATE → ABSENT) that voided this
+  // payment, when that is how it was voided.
+  attendanceChanges    SessionAttendanceChange[]
+  // SEC-2b (D-05) — the settlements that claimed this payment's teacher share.
+  // At most one claim is live (not released) at a time — a partial unique
+  // index in the migration.
+  settlementClaims     SettlementClaim[]
   recordedBy           String
-  recordedAt           DateTime        @default(now())
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  recordedAt           DateTime                  @default(now())
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
 
   @@index([sessionAttendeeId])
   @@index([centerId])
+  @@index([paymentMethodId])
   @@index([centerId, recordedAt])
   @@index([centerId, teacherId, recordedAt])
+  // SYS: the receipt and roster read a session's payments by sessionId.
+  @@index([sessionId])
+}
+
+/**
+ * Money given back, in cash — never a balance (M14, spec §5 "Void vs.
+ * refund", docs/01-data-model.md "Finance-adjacent layer"). The `Payment`
+ * row it reverses is preserved byte-for-byte; this row is the only place a
+ * refund's amounts are recorded. Phase 1 refunds are whole-payment only —
+ * there is no partial-refund UI or schema support, matching "mark a
+ * recorded payment REFUNDED" (spec §4.1 item 12) rather than inventing a
+ * proration model nothing asked for. `amount`/`centerShareReversed`/
+ * `teacherShareReversed` are therefore always exactly the original payment's
+ * own `amount`/`centerShareSnapshot`/`teacherShareSnapshot` — stored here
+ * (not re-read from `Payment` on every analytics query) so the by-teacher
+ * breakdown can `groupBy` on `teacherId` in one query, the same reason
+ * `Payment.teacherId` itself is denormalized.
+ */
+model Refund {
+  id        String  @id @default(uuid())
+  centerId  String
+  center    Center  @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  // Denormalized from payment.teacherId, purely so revenueByTeacher can
+  // groupBy in one query — not a money field, like Payment.teacherId itself.
+  teacherId String
+
+  amount               Int // piastres reversed — always payment.amount (whole-payment refund)
+  centerShareReversed  Int // piastres reversed from the centre's share
+  teacherShareReversed Int // piastres reversed from the teacher's share
+
+  reason     String
+  refundedBy String
+  refundedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([centerId])
+  @@index([centerId, teacherId])
+}
+
+/**
+ * A teacher's payout record (M14, spec §5 "Teacher settlements"). Exactly
+ * one of `sessionId` (a single session's teacher share, for a centre that
+ * pays cash right after each session) or `periodFrom`+`periodTo` (a date-
+ * range roll-up) is set on any row — an application-layer invariant, the
+ * same "kind says which fields apply" shape `CenterCatalogSelection.kind`
+ * already uses in this schema, enforced in `lib/db/settlements.ts`.
+ * `totalAmount` is computed ONCE, at DRAFT creation, as the sum of frozen
+ * `Payment.teacherShareSnapshot` values in scope (excluding voided and
+ * already-refunded payments), and never recomputed against the *class's*
+ * config — a later cut change moves nothing here. A later *refund*, though,
+ * is a real event that reverses money still sitting in this record, and is
+ * handled differently depending on status (M14 follow-up, 00-master-
+ * product-spec.md §5 "Teacher settlements"): while this settlement is
+ * DRAFT or APPROVED — the payout has not left the centre yet —
+ * `lib/db/refunds.ts`'s `refundPayment` finds it and subtracts the refunded
+ * payment's `teacherShareReversed` from `totalAmount` in the same
+ * transaction, audited as `settlement.adjust`. Once **PAID**, this row is
+ * genuinely immutable — the money is already out the door, so a refund on a
+ * payment inside a paid settlement's scope is never applied here; it is a
+ * loss the centre absorbs or recovers directly with the teacher, and any
+ * accounting for it happens outside this record, exactly as spec §5's
+ * void/refund table already says for a PAID settlement.
+ */
+model Settlement {
+  id       String @id @default(uuid())
+  centerId String
+  center   Center @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  teacherId String
+  teacher   User   @relation("SettlementTeacher", fields: [teacherId], references: [id])
+
+  // Scope — exactly one of these two shapes is populated.
+  sessionId  String?
+  session    Session?  @relation(fields: [sessionId], references: [id])
+  periodFrom DateTime?
+  periodTo   DateTime?
+
+  totalAmount        Int
+  status             SettlementStatus @default(DRAFT)
+  // R2 — true for every settlement created since R2, whose total counts only
+  // payments of sessions already CLOSED at creation (so nothing in it can be
+  // voided or refunded afterwards — a closed session refuses both). False on
+  // rows that predate R2, whose total counted every non-voided, non-refunded
+  // payment in scope regardless of closure. `lib/db/settlements.ts`'s
+  // `adjustUnpaidSettlementsForReversal` reads it to decide whether a later
+  // void/refund was ever part of this total.
+  closedSessionsOnly Boolean          @default(true)
+
+  createdBy   String
+  createdAt   DateTime  @default(now())
+  approvedBy  String?
+  approvedAt  DateTime?
+  paidBy      String?
+  paidAt      DateTime?
+  // SEC-2b (D-16) — DRAFT → CANCELLED, releasing every claim.
+  cancelledBy String?
+  cancelledAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  // SEC-2b (D-05) — the payments whose teacher share this settlement counted.
+  claims SettlementClaim[]
+
+  @@index([centerId])
+  @@index([centerId, teacherId])
+  @@index([sessionId])
+}
+
+/**
+ * One payment's teacher share, claimed by one settlement (SEC-2b, D-05 (c) —
+ * closes OD-8 and SEC-06). A settlement's total is the sum of its claims'
+ * `teacherShare` (each a copy of the payment's frozen `teacherShareSnapshot`
+ * at claim time — CLAUDE.md rule 7, derive, never recompute). **A payment
+ * belongs to at most one live settlement**: a partial unique index on
+ * (`paymentId`) WHERE `releasedAt` IS NULL, raw SQL in the migration, and the
+ * claims are written in the same transaction that creates the settlement
+ * (`lib/db/settlements.ts`). Cancelling a DRAFT settlement stamps
+ * `releasedAt` on its claims — the rows stay as history, and the payments are
+ * claimable again. A claim is never deleted.
+ */
+model SettlementClaim {
+  id           String     @id @default(uuid())
+  centerId     String
+  center       Center     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  settlementId String
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  paymentId    String
+  payment      Payment    @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  teacherShare Int // piastres — the payment's frozen teacherShareSnapshot at claim time
+  releasedAt   DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@index([centerId])
+  @@index([settlementId])
+  @@index([paymentId])
 }
 
 /**
@@ -599,6 +1213,46 @@ model Holiday {
   createdAt DateTime @default(now())
 
   @@unique([centerId, date])
+  @@index([centerId])
+}
+
+// A centre's own payment method (R1) — centre-entered master data, one name
+// string like `Room.name` (not a bilingual catalog entry). At least one active
+// method always exists per centre; a method any Payment references is
+// deactivated rather than deleted. Both rules live in
+// lib/db/payment-methods.ts. New centres start with Cash / InstaPay /
+// Vodafone Cash (`DEFAULT_PAYMENT_METHOD_NAMES`).
+// R4 — a centre's own term presets ("Semester 1", "Full year"). A preset only
+// FILLS a class's startDate/endDate when the class form picks it; the dates
+// are copied, never linked, so renaming or redating a term moves no class and
+// a term can always be hard-deleted. Terms may overlap. The name is one
+// centre-entered string (like Room.name), unique per centre case-insensitively
+// — enforced by lib/db/terms.ts, not by a database index.
+model CenterTerm {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([centerId])
+}
+
+model CenterPaymentMethod {
+  id        String   @id @default(uuid())
+  centerId  String
+  center    Center   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
   @@index([centerId])
 }
 
@@ -632,6 +1286,12 @@ model Expense {
   note       String?
   recordedBy String
   createdAt  DateTime         @default(now())
+  // SEC-2b (D-24) — an expense is voided, never deleted: the row stays, with
+  // who, when and why, and every total skips it (lib/db/analytics.ts).
+  voided     Boolean          @default(false)
+  voidReason String?
+  voidedAt   DateTime?
+  voidedBy   String?
 
   @@index([centerId])
   @@index([centerId, date])
@@ -653,9 +1313,17 @@ model Reservation {
   requestedAt  DateTime          @default(now())
   resolvedAt   DateTime?
   resolvedBy   String?
+  // Set only on a REJECTED transition (M15, spec §5.1 "Approvals &
+  // enrolment") — the whole mechanism behind the 7-day re-request cooling-off:
+  // this same row is reused across its lifecycle (docs/01-data-model.md
+  // "Workflow layer"), so a re-request inside 7 days of this timestamp is
+  // refused, with the UI stating why rather than failing silently.
+  rejectedAt   DateTime?
 
   @@unique([classGroupId, studentId])
   @@index([centerId])
+  // SYS: the student portal reads a student's own reservations.
+  @@index([studentId])
 }
 
 model ChangeRequest {
@@ -674,9 +1342,132 @@ model ChangeRequest {
 }
 
 // ─────────────────────────────────────────────────────────────
+// PARENT (M16)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A parent↔child link (docs/01-data-model.md §2 "People layer, continued",
+ * docs/00-master-product-spec.md §5.1 "Parent role & portal"). Every row
+ * names exactly one `StudentProfile`, so a parent's read stays a tenant read
+ * through that child's `centerId` — `centerId` is denormalized here rather
+ * than re-joined every time, exactly like `Payment.teacherId`/`Refund.teacherId`
+ * are denormalized references, not money fields.
+ * Origination (a phone number matching some student's `parentPhone`/
+ * `parentAltPhone`) only ever produces a PENDING row — a phone match alone
+ * must never grant access. `status` flipping to VERIFIED is the ONLY thing
+ * any parent-portal read trusts (`lib/db/parents.ts`'s `verifiedChildLinks`).
+ * `verifiedBy`/`verifiedAt` are deliberately generic (a User id + a
+ * timestamp, not a "StaffApproval" shape) because **who or what verifies is
+ * OD-6** (00-master-product-spec.md §2.2) — still open. The only writer today
+ * is `lib/db/parents.ts`'s `verifyParentLinkPlaceholder`, an explicitly
+ * temporary centre-staff seam, not OD-6's real answer.
+ */
+model ParentLink {
+  id               String           @id @default(uuid())
+  parentUserId     String
+  parentUser       User             @relation("ParentLinkParent", fields: [parentUserId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile   @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  centerId         String
+  center           Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  status           ParentLinkStatus @default(PENDING)
+  // The normalized phone that produced this link. Re-checked on every read
+  // (SEC-2a, D-04): a link whose phone is no longer the student's parent
+  // phone or alt phone reads as nothing, and is revoked when staff change it.
+  matchedPhone     String
+  verifiedAt       DateTime?
+  verifiedBy       String?
+  revokedAt        DateTime?
+  revokedReason    String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([parentUserId, studentProfileId])
+  @@index([parentUserId])
+  @@index([studentProfileId])
+  @@index([centerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// TEACHER RATINGS (M17)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A student's 1-5 rating of one session they attended (M17, docs/00-master-
+ * product-spec.md §5 "Teacher ratings"). `studentUserId` names the global
+ * `User`, not a `StudentProfile` — rating is the student's own act, the same
+ * identity the login pop-up authenticates against, and it must read/write
+ * the same regardless of which centre's `StudentProfile` the attendance sat
+ * under.
+ * `teacherId` is denormalized from `session.teacherId` at rating time — same
+ * pattern as `Payment.teacherId` (M6, docs/02-architecture.md §14): the
+ * published aggregate is a single-table `aggregate`/`groupBy` on `teacherId`
+ * across every centre a teacher works at ("follows the teacher across
+ * centres" per spec §5), and Prisma cannot `groupBy` on a related model's
+ * scalar column. Not money, and never re-derived if the session is later
+ * rescheduled — a rating stays pinned to the teacher who actually taught the
+ * session the student attended.
+ * Deliberately carries **no `centerId`**: the published aggregate is
+ * platform-wide by design, never filtered to one centre, so there is no
+ * scoped read here to protect and this model has no entry in
+ * `lib/db/scoped.ts` — `lib/db/ratings.ts`'s functions take `teacherId`
+ * directly, the same "cross-cutting read, not a scoped() entry" shape
+ * `lib/db/settlements.ts`/`lib/db/refunds.ts` use for centerId. The teacher
+ * can never see who rated them or how many ratings exist: `lib/db/ratings.ts`
+ * exposes aggregate-only reads (`teacherRatingAverage`/`teacherRatingAverages`,
+ * `{ average }` only, never a count) and no function anywhere lists raw rows
+ * by `teacherId` — `studentUserId` is real, sensitive data on this table, but
+ * no exported read path ever hands it back to a teacher-facing caller.
+ */
+model SessionRating {
+  id            String   @id @default(uuid())
+  studentUserId String
+  studentUser   User     @relation("SessionRatingStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  teacherId     String
+  score         Int // 1-5
+  createdAt     DateTime @default(now())
+
+  // One rating per student per session — re-rating is not offered.
+  @@unique([studentUserId, sessionId])
+  @@index([teacherId])
+  @@index([sessionId])
+}
+
+/**
+ * A student's explicit "skip" of one session's rating prompt (M17). Persisted
+ * server-side — not browser storage — so "skipping costs nothing" holds
+ * across devices and logins, not just within one browser tab:
+ * `attendedSessionsToRate` (`lib/db/ratings.ts`) excludes any session with a
+ * row here exactly like it excludes an already-rated one, so a skipped
+ * session is never re-surfaced, on this device or any other.
+ * Its own table rather than a `SKIPPED` sentinel on `SessionRating.score`, so
+ * the aggregate's `avg`/`groupBy` over `SessionRating.score` never needs to
+ * filter out a placeholder value — a skip carries no score at all.
+ */
+model SessionRatingSkip {
+  id            String   @id @default(uuid())
+  studentUserId String
+  studentUser   User     @relation("SessionRatingSkipStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([studentUserId, sessionId])
+  @@index([studentUserId])
+}
+
+// ─────────────────────────────────────────────────────────────
 // AUDIT
 // ─────────────────────────────────────────────────────────────
 
+// Append-only (SEC-2b, SEC-60): a trigger refuses any UPDATE except the
+// foreign keys' own ON DELETE SET NULL, and any DELETE outside an explicit
+// maintenance transaction (`SET LOCAL kayedu.audit_maintenance = 'on'`, used
+// only by test cleanup — scripts/lib/audit-maintenance.ts). Rows carry ids,
+// amounts, counts, statuses and dates only — never a person's name or contact
+// and never free text (D-20); lib/db/audit-row.ts refuses such a payload.
 model AuditLog {
   id          String   @id @default(uuid())
   centerId    String?
@@ -692,4 +1483,6 @@ model AuditLog {
 
   @@index([centerId])
   @@index([entityType, entityId])
+  // SYS: the audit screen reads a centre's newest rows.
+  @@index([centerId, createdAt])
 }

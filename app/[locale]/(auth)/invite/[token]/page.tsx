@@ -2,21 +2,18 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { AcceptInvitationForm } from "@/app/[locale]/(auth)/invite/[token]/accept-invitation-form";
 import { SignOutButton } from "@/components/shell/sign-out-button";
+import { AuthCard } from "@/components/shared/auth-card";
 import { FormMessage } from "@/components/shared/form-message";
+import { Ltr } from "@/components/shared/ltr";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
+import { ACCESSIBLE_LIFECYCLE_STATES, invitationByToken } from "@/lib/db/platform";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format";
 
 /**
  * Staff invite acceptance (docs/02 §3). The unguessable token is the entry
@@ -34,10 +31,7 @@ export default async function InvitePage({
   const tErrors = await getTranslations("Auth.errors");
   const tRoles = await getTranslations("Roles");
 
-  const invitation = await prisma.invitation.findUnique({
-    where: { token },
-    include: { center: true },
-  });
+  const invitation = await invitationByToken(prisma, token);
 
   const invalidReason = !invitation
     ? "inviteNotFound"
@@ -45,7 +39,7 @@ export default async function InvitePage({
       ? "inviteNotFound"
       : invitation.status === "ACCEPTED"
         ? "inviteAlreadyAccepted"
-        : !invitation.center.active
+        : !ACCESSIBLE_LIFECYCLE_STATES.includes(invitation.center.lifecycleState)
           ? "centerInactive"
           : invitation.status === "EXPIRED" || invitation.expiresAt < new Date()
             ? "inviteExpired"
@@ -53,20 +47,26 @@ export default async function InvitePage({
 
   if (!invitation || invalidReason) {
     return (
-      <Card className="p-2 sm:p-4">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <FormMessage>{tErrors(invalidReason ?? "inviteNotFound")}</FormMessage>
+      <AuthCard title={t("title")}>
+        {/* Nothing is broken — the link simply no longer works — so the
+            warning tone, a next step in the copy, and both ways forward
+            (DES, docs/04 §12). */}
+        <div className="flex flex-col gap-3">
+          <FormMessage tone="warning">{tErrors(invalidReason ?? "inviteNotFound")}</FormMessage>
           <Link
             href={ROUTES.login}
-            className={cn(buttonVariants({ variant: "outline" }), "h-11 w-full")}
+            className={cn(buttonVariants(), "h-11 w-full")}
           >
             {t("goToLogin")}
           </Link>
-        </CardContent>
-      </Card>
+          <Link
+            href={ROUTES.register}
+            className={cn(buttonVariants({ variant: "outline" }), "h-11 w-full")}
+          >
+            {t("createAccount")}
+          </Link>
+        </div>
+      </AuthCard>
     );
   }
 
@@ -76,30 +76,26 @@ export default async function InvitePage({
   const nextPath = encodeURIComponent(ROUTES.invite(token));
 
   return (
-    <Card className="p-2 sm:p-4">
-      <CardHeader>
-        <CardTitle className="text-xl font-bold">{t("title")}</CardTitle>
-        <CardDescription>
-          {t("subtitle", { center: invitation.center.name })}
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-4">
+    <AuthCard
+      title={t("title")}
+      description={t("subtitle", { center: invitation.center.name })}
+    >
+      <div className="flex flex-col gap-4">
         <dl className="flex flex-col gap-2 rounded-lg border border-border bg-surface-subtle p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-text-muted">{t("centerLabel")}</dt>
+            <dt className="text-text-secondary">{t("centerLabel")}</dt>
             <dd className="font-medium">{invitation.center.name}</dd>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-text-muted">{t("roleLabel")}</dt>
+            <dt className="text-text-secondary">{t("roleLabel")}</dt>
             <dd>
-              <Badge variant="brand">{tRoles(invitation.role)}</Badge>
+              <Badge variant="neutral">{tRoles(invitation.role)}</Badge>
             </dd>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-text-muted">{t("emailLabel")}</dt>
-            <dd className="font-medium" dir="ltr">
-              {invitation.email}
+            <dt className="text-text-secondary">{t("emailLabel")}</dt>
+            <dd className="font-medium">
+              <Ltr>{invitation.email}</Ltr>
             </dd>
           </div>
         </dl>
@@ -130,21 +126,16 @@ export default async function InvitePage({
             <p className="text-sm text-text-secondary">
               {t("signedInAs", { email: user.email ?? "" })}
             </p>
-            <div className="rounded-xl bg-sidebar p-2">
-              <SignOutButton />
-            </div>
+            <SignOutButton variant="light" className="rounded-lg border border-border-control" />
           </div>
         )}
 
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-text-secondary">
           {t("expiresAt", {
-            date: new Intl.DateTimeFormat(
-              locale === "ar" ? "ar-EG-u-nu-arab" : "en-US",
-              { dateStyle: "medium" },
-            ).format(invitation.expiresAt),
+            date: formatDate(invitation.expiresAt, locale),
           })}
         </p>
-      </CardContent>
-    </Card>
+      </div>
+    </AuthCard>
   );
 }

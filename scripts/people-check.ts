@@ -18,19 +18,27 @@
  *
  * It needs a reachable database and cleans up after itself.
  */
-import { PrismaClient, type BlockScope, type Role } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { join, relative } from "node:path";
+import { type BlockScope, type Role } from "@prisma/client";
 import {
   MissingCenterScopeError,
   scopedData,
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
+import { fullName, localName } from "../lib/identity.ts";
 import {
-  fullName,
-  localName,
-  normalizeContact,
-  normalizePhone,
-} from "../lib/identity.ts";
+  createPerson,
+  describeMatch,
+  isLinkableMatch,
+  resolveContact,
+  seedLocalName,
+  type LookupContext,
+} from "../lib/db/identity.ts";
+import { normalizePhone } from "../lib/phone.ts";
+import { checkRateLimit } from "../lib/rate-limit.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 import {
   StoragePathError,
@@ -56,7 +64,7 @@ import {
   teacherCreateSchema,
 } from "../lib/validation/people.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 // Typed so a spread into a Prisma `where` keeps the enum, not `string`.
 const TEACHER_ROLE: Role = "TEACHER";
@@ -83,6 +91,153 @@ function check(name: string, passed: boolean, detail = "") {
   }
 }
 
+/**
+ * M18's single-normalizer assertion: `lib/phone.ts` is the ONLY file allowed
+ * to define phone-normalization logic anywhere in the tree. This is an
+ * import-graph/grep-level check (CLAUDE.md rule 10), not a behavioral one —
+ * a second regex that happens to produce the same output today would still
+ * be a second answer to "is this the same person" the moment one of the two
+ * drifts, and a behavioral test alone would never catch that.
+ */
+function checkSingleNormalizer(): void {
+  const root = join(process.cwd());
+  const scanDirs = ["lib", "app", "components", "scripts", "prisma"];
+  const skipDirs = new Set(["node_modules", ".next", ".git"]);
+  const files: string[] = [];
+
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (skipDirs.has(entry)) continue;
+      const stat = statSync(full);
+      if (stat.isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(entry)) files.push(full);
+    }
+  }
+
+  for (const dir of scanDirs) {
+    const full = join(root, dir);
+    if (existsSync(full)) walk(full);
+  }
+
+  const phoneTs = join(root, "lib", "phone.ts");
+  // This gate script itself quotes these very patterns as string literals
+  // (to define them) — exclude it from the scan, or it would flag itself.
+  const selfPath = join(root, "scripts", "people-check.ts");
+  const normalizerDefinitionPattern = /function\s+normalizePhone\s*\(/;
+  // The shape of an inline reimplementation even without that exact name —
+  // stripping to digits then hand-rolling an Egyptian-mobile prefix check.
+  const inlineReimplementationPattern = /01\[0125\]|replace\(\/\[\^\\d\]/;
+
+  const offenders: string[] = [];
+  for (const file of files) {
+    if (file === phoneTs || file === selfPath) continue;
+    const contents = readFileSync(file, "utf8");
+    if (normalizerDefinitionPattern.test(contents)) {
+      offenders.push(`${relative(root, file)} (defines normalizePhone)`);
+    }
+    if (inlineReimplementationPattern.test(contents)) {
+      offenders.push(`${relative(root, file)} (inline phone regex)`);
+    }
+  }
+
+  check(
+    "lib/phone.ts is the only file that defines phone-normalization logic",
+    offenders.length === 0,
+    offenders.join(", "),
+  );
+
+  // Every other file that imports `normalizePhone` must import it from
+  // lib/phone.ts (directly or via a relative path resolving there) — never
+  // from a second module that merely re-exports a redefinition.
+  const importPattern = /normalizePhone.*from\s+["']([^"']+)["']/;
+  const badImports: string[] = [];
+  for (const file of files) {
+    const contents = readFileSync(file, "utf8");
+    const match = contents.match(importPattern);
+    if (!match) continue;
+    const specifier = match[1];
+    const resolvesToPhoneTs =
+      specifier.endsWith("/phone") ||
+      specifier.endsWith("/phone.ts") ||
+      specifier === "./phone" ||
+      specifier === "./phone.ts" ||
+      specifier === "../phone" ||
+      specifier === "../phone.ts";
+    if (!resolvesToPhoneTs) {
+      badImports.push(`${relative(root, file)} imports normalizePhone from "${specifier}"`);
+    }
+  }
+
+  check(
+    "Every normalizePhone import resolves to lib/phone.ts",
+    badImports.length === 0,
+    badImports.join(", "),
+  );
+}
+
+/**
+ * M18's receptionist-phone-lookup shape assertion (spec §5.1): "reuses M3's
+ * duplicate-match panel — not a raw phone-to-record endpoint... minimum
+ * fields returned... rate-limited." Two static/grep checks plus one
+ * behavioral one against the real rate limiter — no database needed for any
+ * of them.
+ */
+async function checkPhoneLookupShape(): Promise<void> {
+  const root = join(process.cwd());
+  const files = [
+    join(root, "app", "[locale]", "(center)", "students", "actions.ts"),
+    join(root, "app", "[locale]", "(center)", "teachers", "actions.ts"),
+  ];
+
+  for (const file of files) {
+    const contents = readFileSync(file, "utf8");
+    const start = contents.indexOf("lookupPersonByPhoneAction");
+    const body = contents.slice(start, start + 800);
+    // SEC-11 (SEC-2a): the limit moved inside `resolveContact` itself, so it
+    // covers every path that can reveal a match, not just this one.
+    check(
+      `${relative(root, file)}'s lookupPersonByPhoneAction resolves through the rate-limited resolveContact`,
+      start !== -1 && /resolveContact\(/.test(body) && /rateLimited/.test(body),
+    );
+    check(
+      `${relative(root, file)}'s lookupPersonByPhoneAction reuses describeMatch (never a raw record fetch)`,
+      start !== -1 &&
+        /describeMatch\(/.test(body) &&
+        !/\.findMany\(/.test(body) &&
+        !/prisma\.user\.findUnique/.test(body),
+    );
+  }
+
+  const peopleValidation = readFileSync(
+    join(root, "lib", "validation", "people.ts"),
+    "utf8",
+  );
+  check(
+    "PhoneLookupResult's found case is a MatchCandidate — minimum fields, same shape the match panel already renders",
+    /found";\s*match:\s*MatchCandidate/.test(
+      peopleValidation.replace(/\s+/g, " "),
+    ),
+  );
+
+  // The rate limiter itself, exercised directly (lib/rate-limit.ts) — a
+  // fresh key allows exactly `limit` calls in the window, then refuses.
+  // Fixture timing (SYS): the window is fixed and epoch-aligned, so 25 remote
+  // calls (~7 s) started late in a minute could straddle two windows and be
+  // allowed 20 + n. Start with at least 15 s of the window left.
+  const msLeft = 60_000 - (Date.now() % 60_000);
+  if (msLeft < 15_000) await new Promise((resolve) => setTimeout(resolve, msLeft + 50));
+  const key = `people-check-${Date.now()}`;
+  let allowed = 0;
+  for (let i = 0; i < 25; i += 1) {
+    if (await checkRateLimit(key, 20, 60_000)) allowed += 1;
+  }
+  check(
+    "The rate limiter allows exactly the configured limit, then refuses",
+    allowed === 20 && !(await checkRateLimit(key, 20, 60_000)),
+  );
+}
+
 /** Parses like a Server Action does, and shouts if the fixture is wrong. */
 function parse<T>(
   schema: { safeParse: (input: unknown) => { success: boolean; data?: T; error?: unknown } },
@@ -96,7 +251,15 @@ function parse<T>(
   return result.data;
 }
 
+/** Centres this run created — their `resolveContact` rate-limit buckets go with them. */
+const createdCenterIds = new Set<string>();
+
 async function cleanup() {
+  if (createdCenterIds.size > 0) {
+    await prisma.rateLimitBucket.deleteMany({
+      where: { key: { in: [...createdCenterIds].map((id) => `identityLookupPerCenter:${id}`) } },
+    });
+  }
   await prisma.center.deleteMany({
     where: { slug: { in: [SLUG_A, SLUG_B, SLUG_C] } },
   });
@@ -109,73 +272,60 @@ async function cleanup() {
       ],
     },
   });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "People-Check" } } });
 }
 
-/**
- * Finds a match the way `resolveContact()` does at the DB layer: across the
- * global `User` and every center's local `StudentProfile`/`Membership`
- * record (`lib/db/identity.ts`). Reimplemented here at the query level (not
- * imported) so the gate exercises the actual tables/columns rather than
- * trusting the app module imported it correctly. Returns the matched
- * person's **real** name too — that's what a linked record's local name is
- * seeded from, never the (possibly mistyped) form input.
- */
-async function findMatch(
-  input: { email: string | null; phone: string | null },
-): Promise<{ userId: string; firstName: string; lastName: string } | "conflict" | null> {
-  const { email, phone } = normalizeContact(input);
-  if (!email && !phone) return null;
-
-  const userOr = [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])];
-  const [users, students, memberships] = await Promise.all([
-    prisma.user.findMany({ where: { OR: userOr } }),
-    prisma.studentProfile.findMany({ where: { OR: userOr }, include: { user: true } }),
-    prisma.membership.findMany({ where: { OR: userOr }, include: { user: true } }),
-  ]);
-
-  const byId = new Map<string, { firstName: string; lastName: string }>();
-  for (const u of users) byId.set(u.id, u);
-  for (const s of students) byId.set(s.userId, s.user);
-  for (const m of memberships) byId.set(m.userId, m.user);
-
-  if (byId.size === 0) return null;
-  if (byId.size > 1) return "conflict";
-  const [userId, name] = [...byId.entries()][0];
-  return { userId, ...name };
-}
+/** The lookup context the centre's Add-student action passes (no actor: this gate is not a staff member). */
+const lookupAt = (centerId: string): LookupContext => ({ centerId, actorUserId: null, adding: "student" });
 
 /**
- * Registers a student the way `createStudentAction` does: resolve the match
- * across global + local contacts, then claim a code and create the profile in
- * one transaction, seeding the local name from the matched person's real name
- * (or the form input for a brand-new person). Takes a centerId and nothing
- * else — same "zero code changes for a second center" claim the M2 gate makes.
+ * Registers a student the way `createStudentAction` does — through the REAL
+ * identity module (SEC-2c: this gate used to carry its own copy of the
+ * matching query, which could never disagree with itself): `resolveContact`
+ * across global + local contacts, `describeMatch` before linking, the local
+ * name seeded by `seedLocalName`, then `createPerson` (for a brand-new person),
+ * the code claim and the profile in one transaction. Takes a centerId and
+ * nothing else — same "zero code changes for a second center" claim the M2
+ * gate makes.
  */
 async function registerStudent(
   centerId: string,
   form: Record<string, string>,
 ): Promise<{ userId: string; profileId: string; studentCode: string; linked: boolean }> {
   const input = parse(studentCreateSchema, form, "studentCreate");
-  const matched = await findMatch({ email: input.email, phone: input.phone });
-  if (matched === "conflict") throw new Error("unexpected contact conflict in fixture");
+  const contact = { email: input.email, phone: input.phone };
+  const resolution = await resolveContact(lookupAt(centerId), contact);
+  if (resolution.kind === "conflict" || resolution.kind === "rateLimited") {
+    throw new Error(`unexpected ${resolution.kind} in fixture`);
+  }
 
-  const name = matched
-    ? { firstName: matched.firstName, lastName: matched.lastName }
-    : { firstName: input.firstName, lastName: input.lastName };
+  let described: Awaited<ReturnType<typeof describeMatch>> | null = null;
+  let linkTo: string | null = null;
+  if (resolution.kind === "matched") {
+    described = await describeMatch(centerId, resolution.match, contact);
+    if (described.existingHere === "student" || !described.linkable) {
+      throw new Error("unexpected alreadyStudent in fixture");
+    }
+    linkTo = resolution.match.user.id;
+  }
+  const name = seedLocalName(resolution, { firstName: input.firstName, lastName: input.lastName }, described);
 
   const created = await prisma.$transaction(async (tx) => {
     const userId =
-      matched?.userId ??
+      linkTo ??
       (
-        await tx.user.create({
-          data: {
+        await createPerson(
+          {
             firstName: input.firstName,
             lastName: input.lastName,
             email: input.email,
             phone: input.phone,
+            altPhone: input.altPhone,
             locale: input.locale,
           },
-        })
+          tx,
+        )
       ).id;
 
     const code = await claimStudentCode(tx, centerId);
@@ -200,28 +350,49 @@ async function registerStudent(
     userId: created.userId,
     profileId: created.profile.id,
     studentCode: created.profile.studentCode,
-    linked: matched !== null,
+    linked: linkTo !== null,
   };
 }
 
 async function main() {
+  // Database-free static gates first (M18) — no fixtures to clean up either
+  // way, so they run before anything else touches the database.
+  checkSingleNormalizer();
+  await checkPhoneLookupShape();
+
   await cleanup();
 
   const centerA = await prisma.center.create({
-    data: { slug: SLUG_A, name: "People A", themeColor: "#2563eb" },
+    data: {
+      slug: SLUG_A,
+      name: "People A",
+      themeColor: "#2563eb",
+      organization: { create: { name: "People A" } },
+    },
   });
+  createdCenterIds.add(centerA.id);
   const centerB = await prisma.center.create({
-    data: { slug: SLUG_B, name: "People B", themeColor: "#16a34a" },
+    data: {
+      slug: SLUG_B,
+      name: "People B",
+      themeColor: "#16a34a",
+      organization: { create: { name: "People B" } },
+    },
   });
+  createdCenterIds.add(centerB.id);
 
-  const gradeA1 = await prisma.grade.create({
-    data: { centerId: centerA.id, name: "Grade 10" },
+  // Global catalog rows (M13) — no centerId; StudentProfile.gradeId
+  // references them directly. Three distinct rows, matching the pre-M13
+  // fixture shape (this test only needs valid, distinct grade ids, not
+  // centre ownership of them).
+  const gradeA1 = await prisma.catalogGrade.create({
+    data: { nameAr: "People-Check Grade 10", nameEn: "People-Check Grade 10" },
   });
-  const gradeA2 = await prisma.grade.create({
-    data: { centerId: centerA.id, name: "Grade 11" },
+  const gradeA2 = await prisma.catalogGrade.create({
+    data: { nameAr: "People-Check Grade 11", nameEn: "People-Check Grade 11" },
   });
-  const gradeB1 = await prisma.grade.create({
-    data: { centerId: centerB.id, name: "Grade 10" },
+  const gradeB1 = await prisma.catalogGrade.create({
+    data: { nameAr: "People-Check Grade 10 (B)", nameEn: "People-Check Grade 10 (B)" },
   });
 
   console.log("People check (M3 revised — center-local contacts, system-assigned codes)");
@@ -263,7 +434,10 @@ async function main() {
   );
   check(
     "Nothing matchable means no match at all (a blank form matches nobody)",
-    (await findMatch({ email: null, phone: null })) === null,
+    await (async () => {
+      const blank = await resolveContact(lookupAt(centerA.id), { email: null, phone: null });
+      return blank.kind === "none" && blank.others.length === 0;
+    })(),
   );
 
   // ── 1b. Contact details are center-local, not global ───────────────────
@@ -300,12 +474,23 @@ async function main() {
   // The match must still find them — this is the reason local records are
   // searched at all, not just the global User.
   const centerC = await prisma.center.create({
-    data: { slug: SLUG_C, name: "People C", themeColor: "#f59e0b" },
+    data: {
+      slug: SLUG_C,
+      name: "People C",
+      themeColor: "#f59e0b",
+      organization: { create: { name: "People C" } },
+    },
   });
-  const matchedFromLocalOnly = await findMatch({ email: LOCAL_ONLY_EMAIL, phone: null });
+  createdCenterIds.add(centerC.id);
+  const matchedFromLocalOnly = await resolveContact(lookupAt(centerC.id), { email: LOCAL_ONLY_EMAIL, phone: null });
   check(
-    "A contact that exists only on another center's local record still matches",
-    matchedFromLocalOnly !== "conflict" && matchedFromLocalOnly?.userId === inA.userId,
+    "A contact that exists only on another center's local record is found, never linkable (SEC-2a)",
+    matchedFromLocalOnly.kind === "none" &&
+      matchedFromLocalOnly.others.some((other) => other.user.id === inA.userId && !isLinkableMatch(other)),
+    JSON.stringify({
+      kind: matchedFromLocalOnly.kind,
+      others: "others" in matchedFromLocalOnly ? matchedFromLocalOnly.others.map((other) => other.user.id === inA.userId) : null,
+    }),
   );
   await prisma.center.delete({ where: { id: centerC.id } });
 
@@ -694,10 +879,13 @@ async function main() {
     dir: "rtl",
     layout,
   });
+  // DES: anchors are logical — under direction="rtl" a start-aligned text keeps
+  // text-anchor="start" (its right edge); flipping it to "end" as well had
+  // anchored every Arabic text at its left end (docs/04 §5, check:card-layout).
   check(
     "An Arabic card mirrors the layout and sets its direction",
     rtl.includes('direction="rtl"') &&
-      rtl.includes('text-anchor="end"') &&
+      rtl.includes('text-anchor="start" direction="rtl"') &&
       rtl !== svg,
   );
 

@@ -1,9 +1,10 @@
-import { Building2, CalendarClock, CalendarDays, Coins } from "lucide-react";
+import { Building2, CalendarClock, CalendarDays, Coins, Star } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,13 +14,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
-import { combineTeacherSummaries, teacherCenterSummary } from "@/lib/db/teacher-portal";
-import { formatMoney, formatNumber } from "@/lib/format";
-import { Link } from "@/lib/i18n/navigation";
+import { teacherRatingAverage } from "@/lib/db/ratings";
+import {
+  combineTeacherSummaries,
+  teacherCenterSummary,
+  teacherDashboardAnchors,
+} from "@/lib/db/teacher-portal";
+import { formatMoney, formatNumber, formatRating } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { monthRangeUtc, startOfUtcDay, weekRangeUtc } from "@/lib/scheduling";
+import { centerLogoSrc } from "@/lib/storage-paths";
+import { centreTimeZone } from "@/lib/scheduling";
+import { BrandAvatar } from "@/components/shared/brand-avatar";
+import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * The teacher dashboard (spec §4.2 item 0/1, docs/03 M7): a combined summary
@@ -37,35 +45,55 @@ export default async function TeacherDashboardPage() {
   const tRoles = await getTranslations("Roles");
   const locale = await getLocale();
 
+  // R7b: a teacher works at centres that may sit in different timezones, so
+  // "today", "this week" and "this month" are resolved **per centre** — each
+  // centre's own calendar day anchors its own scoped query, and only the
+  // resulting counts/totals are summed in memory (`combineTeacherSummaries`).
+  // There is no single global day.
   const now = new Date();
-  const today = startOfUtcDay(now);
-  const week = weekRangeUtc(now);
-  const month = monthRangeUtc(now);
 
   const summaries = await Promise.all(
-    contexts.map((centerCtx) =>
-      teacherCenterSummary(
+    contexts.map((centerCtx) => {
+      const { today, week, month } = teacherDashboardAnchors(centreTimeZone(centerCtx.settings), now);
+      return teacherCenterSummary(
         prisma,
         centerCtx.center.id,
         ctx.user.id,
         today,
         week,
         { from: month.start, to: month.end },
-      ),
-    ),
+      );
+    }),
   );
   const combined = combineTeacherSummaries(summaries);
   const summaryByCenter = new Map(summaries.map((summary) => [summary.centerId, summary]));
+
+  // SEC-15: a teacher's own earnings show per centre under that centre's
+  // `analytics.own.view` (TEACHER baseline) — a centre that revokes the cell
+  // drops out of the combined figure and its own line hides the amount.
+  const earningsVisibleAt = new Set(
+    contexts.filter((centerCtx) => ctxCan(centerCtx, "analytics.own.view")).map((centerCtx) => centerCtx.center.id),
+  );
+  const visibleEarnings = summaries
+    .filter((summary) => earningsVisibleAt.has(summary.centerId))
+    .reduce((sum, summary) => sum + summary.earnings.teacherShare, 0);
+
+  // M17, spec §5 "Teacher ratings": the same average-out-of-5-only shape
+  // every other reader of this aggregate gets — a teacher reading their own
+  // rating is never shown a count either, and there is no separate,
+  // privileged rating query for this page to call.
+  const rating = await teacherRatingAverage(prisma, ctx.user.id);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={t("title")}
         description={t("subtitle", { center: ctx.center.name })}
-        action={<Badge variant="brand">{tRoles(ctx.role)}</Badge>}
+        // A role is a fact, not an action — and not a status (docs/04 §14.1).
+        meta={<Badge variant="neutral">{tRoles(ctx.role)}</Badge>}
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={earningsVisibleAt.size > 0 ? 5 : 4}>
         <StatCard
           label={t("stats.centers")}
           value={formatNumber(combined.centerCount, locale)}
@@ -75,20 +103,25 @@ export default async function TeacherDashboardPage() {
           label={t("stats.sessionsToday")}
           value={formatNumber(combined.sessionsToday, locale)}
           icon={<CalendarClock className="size-4" />}
-          accent="info"
         />
         <StatCard
           label={t("stats.sessionsThisWeek")}
           value={formatNumber(combined.sessionsThisWeek, locale)}
           icon={<CalendarDays className="size-4" />}
         />
+        {earningsVisibleAt.size > 0 ? (
+          <StatCard
+            label={t("stats.earningsThisMonth")}
+            value={formatMoney(visibleEarnings, locale)}
+            icon={<Coins className="size-4" />}
+          />
+        ) : null}
         <StatCard
-          label={t("stats.earningsThisMonth")}
-          value={formatMoney(combined.teacherShare, locale)}
-          icon={<Coins className="size-4" />}
-          accent="brand"
+          label={t("stats.rating")}
+          value={rating.average !== null ? formatRating(rating.average, locale) : t("stats.ratingNone")}
+          icon={<Star className="size-4" />}
         />
-      </div>
+      </StatGrid>
 
       <Card>
         <CardHeader>
@@ -106,37 +139,37 @@ export default async function TeacherDashboardPage() {
                 className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex min-w-0 items-center gap-3">
-                  <span
-                    aria-hidden
-                    className="flex size-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-brand-foreground"
-                    style={{ backgroundColor: centerCtx.center.themeColor }}
-                  >
-                    {centerCtx.center.name.trim().charAt(0)}
-                  </span>
+                  <BrandAvatar
+                    name={centerCtx.center.name}
+                    logoUrl={centerLogoSrc(centerCtx.center)}
+                    themeColor={centerCtx.center.themeColor}
+                    size="lg"
+                  />
                   <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 truncate text-sm font-semibold text-text-primary">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-text-primary">
                       {centerCtx.center.name}
                       {isActive ? (
                         <Badge variant="brand">{t("centers.active")}</Badge>
                       ) : null}
                     </p>
-                    <p className="mt-1 text-xs text-text-muted">
+                    <p className="mt-1 text-xs text-text-secondary">
                       {t("centers.summary", {
-                        today: summary?.sessionsToday ?? 0,
-                        week: summary?.sessionsThisWeek ?? 0,
-                        earnings: formatMoney(summary?.earnings.teacherShare ?? 0, locale),
+                        // Formatted here: a plain ICU placeholder prints a raw
+                        // number in Latin digits in Arabic (docs/04 §3).
+                        today: formatNumber(summary?.sessionsToday ?? 0, locale),
+                        week: formatNumber(summary?.sessionsThisWeek ?? 0, locale),
+                        earnings: earningsVisibleAt.has(centerCtx.center.id)
+                          ? formatMoney(summary?.earnings.teacherShare ?? 0, locale)
+                          : "—",
                       })}
                     </p>
                   </div>
                 </div>
 
                 {isActive ? (
-                  <Link
-                    href={ROUTES.teacherSessions}
-                    className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-                  >
+                  <LinkButton href={ROUTES.teacherSessions} className="shrink-0">
                     {t("centers.viewSchedule")}
-                  </Link>
+                  </LinkButton>
                 ) : (
                   <form action={selectCenterAction} className="shrink-0">
                     <input type="hidden" name="locale" value={locale} />

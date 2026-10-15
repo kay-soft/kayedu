@@ -1,12 +1,14 @@
 import type { Prisma } from "@prisma/client";
-// Relative import on purpose — `npm run check:classes` exercises this module
+// Relative imports on purpose — `npm run check:classes` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/students.ts).
-import type { ExistingScheduleSlot, ScheduleConflict } from "../scheduling.ts";
-import type { ScopedDb } from "@/lib/db/scoped";
+import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
+import { ROOM_SET_SELECT } from "./room-sets.ts";
 
 /**
  * Class-group policy that is neither a scoping primitive nor UI: the lean
- * list select, the search/filter `where`, and what makes a class undeletable.
+ * list select and the search/filter `where`. What makes a class undeletable
+ * moved to `lib/db/class-sessions.ts` (`classDeleteBlockers`, R4) beside the
+ * engine that owns the class's sessions.
  */
 
 /**
@@ -15,43 +17,69 @@ import type { ScopedDb } from "@/lib/db/scoped";
  * local record on the teacher's `Membership` (docs/01-data-model.md §6), not
  * the raw global `User`; the page batches that lookup once per page of rows,
  * the same way the teacher block-counts are batched (docs/02 §14).
+ *
+ * A function of `centerId`, not a static object (M13): `subject`/`grade`
+ * each carry a nested, centre-scoped `selections` lookup so a display reads
+ * this centre's own rename when it has one — no schema field freezes a
+ * catalog entry's name (unlike `priceSnapshot` for money), so every live
+ * read resolves the override, not just the settings/catalog screen and the
+ * class form. `lib/catalog.ts`'s `catalogLabelWithSelection` reads it back.
  */
-export const CLASS_LIST_SELECT = {
-  id: true,
-  active: true,
-  price: true,
-  capacity: true,
-  centerShareType: true,
-  centerShareValue: true,
-  teacherId: true,
-  subject: { select: { id: true, name: true } },
-  grade: { select: { id: true, name: true } },
-  room: { select: { id: true, name: true } },
-  _count: {
-    select: {
-      schedules: true,
-      enrollments: { where: { status: "ACTIVE" } },
+export function classListSelect(centerId: string) {
+  return {
+    id: true,
+    active: true,
+    // R4 — the class's period, shown on every row.
+    startDate: true,
+    endDate: true,
+    price: true,
+    centerShareType: true,
+    centerShareValue: true,
+    teacherId: true,
+    subject: {
+      select: {
+        id: true,
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
+      },
     },
-  },
-} satisfies Prisma.ClassGroupSelect;
+    grade: {
+      select: {
+        id: true,
+        nameAr: true,
+        nameEn: true,
+        selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
+      },
+    },
+    // R3 — the class's room set (primary + extras) and the seats it adds up to.
+    ...ROOM_SET_SELECT,
+    _count: {
+      select: {
+        schedules: true,
+        enrollments: { where: { status: "ACTIVE" } },
+      },
+    },
+  } satisfies Prisma.ClassGroupSelect;
+}
 
 export type ClassListRow = Prisma.ClassGroupGetPayload<{
-  select: typeof CLASS_LIST_SELECT;
+  select: ReturnType<typeof classListSelect>;
 }>;
 
 /** A class detail page — every field it actually renders, plus its schedules. */
-export const CLASS_DETAIL_INCLUDE = {
-  teacher: true,
-  subject: true,
-  grade: true,
-  educationSystem: true,
-  room: true,
-  schedules: { orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }] },
-} satisfies Prisma.ClassGroupInclude;
-
-export type ClassDetailRow = Prisma.ClassGroupGetPayload<{
-  include: typeof CLASS_DETAIL_INCLUDE;
-}>;
+export function classDetailInclude(centerId: string) {
+  const withSelection = { include: { selections: { where: { centerId } } } } as const;
+  return {
+    teacher: true,
+    subject: withSelection,
+    grade: withSelection,
+    educationSystem: withSelection,
+    room: true,
+    extraRooms: { include: { room: true }, orderBy: { createdAt: "asc" } },
+    schedules: { orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }] },
+  } satisfies Prisma.ClassGroupInclude;
+}
 
 export function classListWhere(filters: {
   teacherId?: string | null;
@@ -65,72 +93,3 @@ export function classListWhere(filters: {
   return Object.keys(where).length > 0 ? where : undefined;
 }
 
-/**
- * A class that already carries enrollments or generated sessions is
- * deactivated, not deleted — the roster and the calendar must keep resolving
- * (CLAUDE.md rule 2, docs/01-data-model.md §6 "config master data …
- * deactivates by default").
- */
-export async function classDeleteBlockers(
-  db: ScopedDb,
-  classGroupId: string,
-): Promise<number> {
-  const [enrollments, sessions] = await Promise.all([
-    db.enrollments.count({ classGroupId }),
-    db.sessions.count({ classGroupId }),
-  ]);
-  return enrollments + sessions;
-}
-
-/** A short label for the class in a conflict message ("Math · Grade 10"). */
-export function classDisplayName(
-  row: Pick<ClassListRow, "subject" | "grade">,
-): string {
-  return [row.subject?.name, row.grade?.name].filter(Boolean).join(" · ") || "—";
-}
-
-/** Renders the conflict list into i18n-safe pieces the UI can format. */
-export function summarizeConflicts(
-  conflicts: ScheduleConflict[],
-): { type: "teacher" | "room"; className: string }[] {
-  return conflicts.map((conflict) => ({
-    type: conflict.type,
-    className: conflict.className,
-  }));
-}
-
-/** The Prisma row shape `db.classSchedules.listForConflictCheck` returns. */
-export type ConflictCheckRow = {
-  classGroupId: string;
-  dayOfWeek: number;
-  startTime: string;
-  endTime: string;
-  classGroup: {
-    teacherId: string;
-    roomId: string | null;
-    subject: { name: string } | null;
-    grade: { name: string } | null;
-  };
-};
-
-/**
- * Flattens `listForConflictCheck`'s joined rows into the plain slots
- * `lib/scheduling.ts`'s `findScheduleConflicts` compares against — the
- * boundary between the Prisma shape and the pure primitive.
- */
-export function toExistingScheduleSlots(
-  rows: ConflictCheckRow[],
-): ExistingScheduleSlot[] {
-  return rows.map((row) => ({
-    classGroupId: row.classGroupId,
-    dayOfWeek: row.dayOfWeek,
-    startTime: row.startTime,
-    endTime: row.endTime,
-    teacherId: row.classGroup.teacherId,
-    roomId: row.classGroup.roomId,
-    className:
-      [row.classGroup.subject?.name, row.classGroup.grade?.name]
-        .filter(Boolean)
-        .join(" · ") || "—",
-  }));
-}

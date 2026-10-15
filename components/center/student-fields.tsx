@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { Field } from "@/components/shared/field";
 import { Input } from "@/components/ui/input";
-import { SelectInput } from "@/components/ui/select-input";
+import { Select } from "@/components/ui/select";
 
 export type GradeOption = { value: string; label: string };
 
@@ -22,21 +22,91 @@ export type StudentValues = {
  * The center-owned half of a student record — grade and parent details
  * (docs/01-data-model.md §2, §6, `StudentProfile`). Parent info is entirely
  * optional (spec §4.1): a center may not have it yet, or the student may not
- * have a reachable guardian on file. The student code is **not** a field
+ * have a reachable guardian on file. The student code is **not** an input
  * here — it is system-assigned (`lib/db/students.ts`) and shown read-only.
+ *
+ * R10b split the one grid into the pieces the add dialog and the edit card
+ * lay out separately — the code (edit only), the grade, and the parent
+ * contact — with the same names, labels, limits and placeholders as before.
  */
-export function StudentFields({
+
+/** The system-assigned code, read-only; edit context only (never submitted). */
+export function StudentCodeField({
   idPrefix,
-  values,
+  studentCode,
+}: {
+  idPrefix: string;
+  studentCode: string;
+}) {
+  const t = useTranslations("Students.fields");
+
+  return (
+    <Field id={`${idPrefix}-studentCode`} label={t("studentCode")}>
+      <Input
+        id={`${idPrefix}-studentCode`}
+        // Never submitted: the code is system-assigned and immutable
+        // (lib/db/students.ts) — this is display only.
+        name="studentCodeDisplay"
+        dir="ltr"
+        value={studentCode}
+        disabled
+        readOnly
+      />
+    </Field>
+  );
+}
+
+export function GradeField({
+  idPrefix,
+  gradeId,
   grades,
   fieldErrors,
   noneLabel,
 }: {
   idPrefix: string;
-  values?: StudentValues;
+  gradeId?: string;
   grades: GradeOption[];
   fieldErrors?: Record<string, string>;
   noneLabel: string;
+}) {
+  const t = useTranslations("Students.fields");
+  const tErrors = useTranslations("People.errors");
+
+  return (
+    <Field
+      id={`${idPrefix}-gradeId`}
+      label={t("grade")}
+      optional
+      error={fieldErrors?.gradeId ? tErrors(fieldErrors.gradeId) : undefined}
+    >
+      <Select
+        id={`${idPrefix}-gradeId`}
+        name="gradeId"
+        defaultValue={gradeId ?? ""}
+        aria-invalid={fieldErrors?.gradeId ? true : undefined}
+      >
+        <option value="">{noneLabel}</option>
+        {grades.map((grade) => (
+          <option key={grade.value} value={grade.value}>
+            {grade.label}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+export function ParentFields({
+  idPrefix,
+  values,
+  fieldErrors,
+}: {
+  idPrefix: string;
+  values?: Pick<
+    StudentValues,
+    "parentFirstName" | "parentLastName" | "parentPhone" | "parentAltPhone"
+  >;
+  fieldErrors?: Record<string, string>;
 }) {
   const t = useTranslations("Students.fields");
   const tPeople = useTranslations("People.fields");
@@ -47,42 +117,6 @@ export function StudentFields({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {values?.studentCode ? (
-        <Field id={`${idPrefix}-studentCode`} label={t("studentCode")}>
-          <Input
-            id={`${idPrefix}-studentCode`}
-            // Never submitted: the code is system-assigned and immutable
-            // (lib/db/students.ts) — this is display only.
-            name="studentCodeDisplay"
-            dir="ltr"
-            value={values.studentCode}
-            disabled
-            readOnly
-          />
-        </Field>
-      ) : null}
-
-      <Field
-        id={`${idPrefix}-gradeId`}
-        label={t("grade")}
-        optional
-        error={error("gradeId")}
-      >
-        <SelectInput
-          id={`${idPrefix}-gradeId`}
-          name="gradeId"
-          defaultValue={values?.gradeId ?? ""}
-          aria-invalid={fieldErrors?.gradeId ? true : undefined}
-        >
-          <option value="">{noneLabel}</option>
-          {grades.map((grade) => (
-            <option key={grade.value} value={grade.value}>
-              {grade.label}
-            </option>
-          ))}
-        </SelectInput>
-      </Field>
-
       <Field
         id={`${idPrefix}-parentFirstName`}
         label={t("parentFirstName")}
@@ -150,6 +184,41 @@ export function StudentFields({
           aria-invalid={fieldErrors?.parentAltPhone ? true : undefined}
         />
       </Field>
+    </div>
+  );
+}
+
+/**
+ * The grade and the parent contact together, for the one form that is not laid
+ * out in sections — the student's own profile-completion screen (M18). The add
+ * dialog and the student page use the three pieces above directly.
+ */
+export function StudentFields({
+  idPrefix,
+  values,
+  grades,
+  fieldErrors,
+  noneLabel,
+}: {
+  idPrefix: string;
+  values?: StudentValues;
+  grades: GradeOption[];
+  fieldErrors?: Record<string, string>;
+  noneLabel: string;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      {values?.studentCode ? (
+        <StudentCodeField idPrefix={idPrefix} studentCode={values.studentCode} />
+      ) : null}
+      <GradeField
+        idPrefix={idPrefix}
+        gradeId={values?.gradeId}
+        grades={grades}
+        fieldErrors={fieldErrors}
+        noneLabel={noneLabel}
+      />
+      <ParentFields idPrefix={idPrefix} values={values} fieldErrors={fieldErrors} />
     </div>
   );
 }

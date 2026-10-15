@@ -1,78 +1,99 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
+import { UserRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createTeacherAction } from "@/app/[locale]/(center)/teachers/actions";
-import { ContactFields } from "@/components/center/contact-fields";
-import { MatchPanel } from "@/components/center/match-panel";
-import { PersonFields } from "@/components/center/person-fields";
+import { NewTeacherFields } from "@/components/center/new-teacher-fields";
+import { DialogSections, DialogShell, FormSection } from "@/components/shared/dialog-shell";
+import { ErrorSummary } from "@/components/shared/error-summary";
 import { FormMessage } from "@/components/shared/form-message";
-import { SectionHeader } from "@/components/shared/section-header";
-import { SubmitButton } from "@/components/shared/submit-button";
-import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { IDLE_PEOPLE_STATE, teacherCreateSchema } from "@/lib/validation/people";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
+import { useClientValidation } from "@/lib/ui/client-validation";
 
 /**
- * Add a teacher. Rendered inside the "Add teacher" dialog (docs/04 §5
- * "Dialog") — the teachers screen itself is a list first.
+ * Add a teacher — the body of the "Add teacher" dialog, in the shared
+ * `DialogShell` (R10b, docs/04 §11.19).
  *
  * If the phone or email already belongs to someone on the platform, the
- * action returns the match instead of writing anything: the panel names
- * them, and confirming links a **membership** at this center to that
- * existing person (spec §5) rather than creating a second identity.
+ * action returns the match instead of writing anything: the panel sits
+ * directly under the phone field, names them, and confirming links a
+ * **membership** at this center to that existing person (spec §5) rather than
+ * creating a second identity. The fields and the match flow are
+ * `NewTeacherFields`, shared with the class dialog's "New teacher" (R6).
+ * The form submits through `startTransition` so a refused submit keeps what
+ * was typed (a `<form action>` is reset by React 19).
  */
-export function TeacherForm({ onCreated }: { onCreated: () => void }) {
+export function TeacherForm({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const t = useTranslations("Teachers");
+  const tSections = useTranslations("Teachers.addSections");
+  const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction, pending] = useGuardedActionState(
     createTeacherAction,
     IDLE_PEOPLE_STATE,
   );
-  const [dismissedMatch, setDismissedMatch] = useState<string | null>(null);
+  // The action's own schema, run before the round trip (docs/04 §14.2).
+  const { clientErrors, check } = useClientValidation(teacherCreateSchema);
+  const fieldErrors = clientErrors ?? state.fieldErrors;
+  const [matchPending, setMatchPending] = useState(false);
 
   useEffect(() => {
-    if (state.status === "created") onCreated();
-  }, [state.status, onCreated]);
+    if (state.status === "created") onOpenChange(false);
+  }, [state.status, onOpenChange]);
 
-  const match =
-    state.status === "matchFound" &&
-    state.match &&
-    state.match.userId !== dismissedMatch
-      ? state.match
-      : null;
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    if (!check(event.currentTarget, formData)) return;
+    startTransition(() => formAction(formData));
+  }
 
   return (
-    <form action={formAction} className="flex flex-col gap-5" noValidate>
+    <DialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t("addTitle")}
+      description={t("addDescription")}
+      formProps={{ onSubmit, noValidate: true }}
+      cancelLabel={tCommon("cancel")}
+      submitLabel={t("add")}
+      submitPending={pending}
+      submitDisabled={matchPending}
+    >
       <input type="hidden" name="locale" value={locale} />
-      {/* Present only after staff confirm the match — this is what links. */}
-      {match ? (
-        <input type="hidden" name="linkUserId" value={match.userId} />
-      ) : null}
 
-      {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+      <div className="flex flex-col gap-4">
+        {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+        <ErrorSummary fieldErrors={fieldErrors} />
 
-      <SectionHeader
-        title={t("contactTitle")}
-        description={t("contactDescription")}
-      />
-      <PersonFields idPrefix="teacher-create" fieldErrors={state.fieldErrors} />
-      <ContactFields
-        idPrefix="teacher-create"
-        fieldErrors={state.fieldErrors}
-        atLeastOneRequired
-      />
-
-      {match ? (
-        <MatchPanel
-          match={match}
-          linkLabel={t("linkAsTeacher")}
-          blocked={match.existingHere === "teacher"}
-          onCancel={() => setDismissedMatch(match.userId)}
-        />
-      ) : (
-        <SubmitButton className="w-full sm:w-auto">{t("add")}</SubmitButton>
-      )}
-    </form>
+        <DialogSections>
+          <FormSection
+            wide
+            title={tSections("person")}
+            description={tSections("personHint")}
+            icon={<UserRound />}
+          >
+            <NewTeacherFields
+              idPrefix="teacher-create"
+              showHeader={false}
+              fieldErrors={fieldErrors}
+              serverMatch={state.status === "matchFound" ? state.match : null}
+              onPendingChange={setMatchPending}
+              pending={pending}
+            />
+          </FormSection>
+        </DialogSections>
+      </div>
+    </DialogShell>
   );
 }

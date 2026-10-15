@@ -1,15 +1,17 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { signInAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
-import { FieldError, FormMessage } from "@/components/shared/form-message";
+import { Field } from "@/components/shared/field";
+import { CheckEmailNotice } from "@/components/shared/check-email-notice";
+import { FormMessage } from "@/components/shared/form-message";
+import { PasswordField } from "@/components/shared/password-field";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 const initialState: AuthFormState = {};
 
@@ -17,7 +19,11 @@ export function LoginForm({ next }: { next?: string }) {
   const t = useTranslations("Auth");
   const tErrors = useTranslations("Auth.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(signInAction, initialState);
+  const [state, formAction] = useGuardedActionState(signInAction, initialState);
+
+  if (state.status === "emailConfirmationRequired" && state.email) {
+    return <CheckEmailNotice email={state.email} />;
+  }
 
   return (
     <form action={formAction} className="flex flex-col gap-4" noValidate>
@@ -26,41 +32,43 @@ export function LoginForm({ next }: { next?: string }) {
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="email">{t("fields.email")}</Label>
+      <Field
+        id="email"
+        label={t("fields.email")}
+        error={state.fieldErrors?.email ? tErrors(state.fieldErrors.email) : undefined}
+      >
         <Input
           id="email"
           name="email"
           type="email"
+          spellCheck={false}
+          autoCapitalize="none"
           autoComplete="email"
           inputMode="email"
           dir="ltr"
+          placeholder="name@example.com"
           required
           aria-invalid={state.fieldErrors?.email ? true : undefined}
         />
-        {state.fieldErrors?.email ? (
-          <FieldError>{tErrors(state.fieldErrors.email)}</FieldError>
-        ) : null}
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">{t("fields.password")}</Label>
-        <Input
+      <Field
+        id="password"
+        label={t("fields.password")}
+        error={state.fieldErrors?.password ? tErrors(state.fieldErrors.password) : undefined}
+      >
+        <PasswordField
           id="password"
           name="password"
-          type="password"
           autoComplete="current-password"
           required
           aria-invalid={state.fieldErrors?.password ? true : undefined}
         />
-        {state.fieldErrors?.password ? (
-          <FieldError>{tErrors(state.fieldErrors.password)}</FieldError>
-        ) : null}
-      </div>
+      </Field>
 
       <SubmitButton className="w-full">{t("login.submit")}</SubmitButton>
 
-      <p className="text-center text-sm text-text-secondary">
+      <p className="border-t border-border pt-4 text-center text-sm text-text-secondary">
         {t("login.noAccount")}{" "}
         <Link
           href={

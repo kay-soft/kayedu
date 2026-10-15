@@ -6,13 +6,31 @@ import type {
   Prisma,
   PrismaClient,
   Session,
-  SessionStatus,
 } from "@prisma/client";
 // Relative imports on purpose — `npm run check:approvals` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/reservations.ts and lib/db/payments.ts).
-import { findSessionConflicts, type ScheduleConflict } from "../scheduling.ts";
+import {
+  dateKey,
+  decideConflicts,
+  findSessionConflicts,
+  zonedClock,
+  type ScheduleConflict,
+} from "../scheduling.ts";
+import { effectiveRoomIds } from "../rooms.ts";
+import { writeSessionExtraRooms } from "./room-sets.ts";
+import { centerTimeZone, runInTransaction } from "./session-lifecycle.ts";
+import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
+
+/**
+ * One page of each Approvals queue (SEC-25): a queue somebody floods must not
+ * grow the screen without bound. The page says how many more wait; resolving
+ * requests brings them up. Floods are also bounded at the source — one
+ * pending teach-here request per (requester, centre), and per-account and
+ * per-IP limits on requests and reservations (D-18).
+ */
+export const APPROVALS_PAGE_SIZE = 50;
 
 /**
  * The Approvals screen's write path for `ChangeRequest` (M6/M7 gap, closed at
@@ -39,7 +57,6 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 const PENDING: ChangeRequestStatus = "PENDING";
 const NEW_SESSION: ChangeRequestType = "NEW_SESSION";
-const CANCELLED: SessionStatus = "CANCELLED";
 
 export type ResolveChangeRequestResult =
   | { ok: true; changeRequest: ChangeRequest }
@@ -86,9 +103,28 @@ export type ResolveSessionRequestResult =
   | { ok: true; changeRequest: ChangeRequest; session: Session | null; conflicts: ScheduleConflict[] }
   | {
       ok: false;
-      error: "notFound" | "notPending" | "classNotFound" | "conflict" | "duplicateSlot";
+      error: "conflict" | "conflictsNeedConfirmation";
+      conflicts: ScheduleConflict[];
+    }
+  | {
+      ok: false;
+      error: "notFound" | "notPending" | "classNotFound" | "duplicateSlot" | "pastDate" | "invalidDate";
     };
 
+/**
+ * R3: accepting creates the session on the class's whole **room set**
+ * (primary + a `SessionRoom` per extra) and applies the same confirmation
+ * contract as every other slot write — DENY refuses, WARN refuses unless
+ * `confirmConflicts` (then creates and audits the confirmation in the same
+ * transaction). R4: `confirmConflicts` is required (there is no "omitted"
+ * path any more), and a **deactivated** class takes no new session — the
+ * request resolves as `classNotFound`, exactly like a class that is gone.
+ * R5: the session it creates is `isManual` — an extra session on the class,
+ * which the engine never deletes or rewrites. SEC-2b (SEC-51, SEC-50): an
+ * approval never creates a session in the past (`pastDate` — today or later
+ * in the centre's timezone, the manual-session rule), and a payload date that
+ * is not a real calendar day is refused (`invalidDate`) instead of throwing.
+ */
 export async function resolveSessionRequest(
   db: PrismaClient,
   centerId: string,
@@ -96,8 +132,11 @@ export async function resolveSessionRequest(
   decision: Exclude<ChangeRequestStatus, "PENDING">,
   resolvedBy: string,
   conflictPolicy: ConflictPolicy,
+  // Only labels a conflict for display (`ScheduleConflict.className`, M13).
+  locale: string,
+  options: { confirmConflicts: boolean; actorUserId?: string | null; now?: Date },
 ): Promise<ResolveSessionRequestResult> {
-  return db.$transaction(async (tx) => {
+  return runInTransaction(db, async (tx) => {
     const existing = await tx.changeRequest.findFirst({
       where: scopedWhere(centerId, { id: changeRequestId, type: NEW_SESSION }),
     });
@@ -113,51 +152,40 @@ export async function resolveSessionRequest(
     }
 
     const payload = existing.payload as unknown as SessionRequestPayload;
+    const date = new Date(`${String(payload.date)}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.date)) || Number.isNaN(date.getTime()) || dateKey(date) !== payload.date) {
+      return { ok: false, error: "invalidDate" };
+    }
+    const centreZone = await centerTimeZone(tx, centerId);
+    if (dateKey(date) < zonedClock(options.now ?? new Date(), centreZone).dayKey) {
+      return { ok: false, error: "pastDate" };
+    }
     const classGroup = await tx.classGroup.findFirst({
-      where: scopedWhere(centerId, { id: payload.classGroupId }),
-      include: { room: true },
+      where: scopedWhere(centerId, { id: payload.classGroupId, active: true }),
+      include: { extraRooms: { select: { roomId: true } } },
     });
     if (!classGroup) return { ok: false, error: "classNotFound" };
+    const extraRoomIds = classGroup.roomId
+      ? classGroup.extraRooms.map((extra) => extra.roomId)
+      : [];
 
-    const date = new Date(`${payload.date}T00:00:00.000Z`);
-    const existingSessions = await tx.session.findMany({
-      where: scopedWhere(centerId, { date, status: { not: CANCELLED } }),
-      select: {
-        classGroupId: true,
-        teacherId: true,
-        roomId: true,
-        date: true,
-        startTime: true,
-        endTime: true,
-        classGroup: {
-          select: { subject: { select: { name: true } }, grade: { select: { name: true } } },
-        },
-      },
-    });
+    const existingSessions = await loadSessionOccupancy(tx, centerId, locale, date, date);
     const conflicts = findSessionConflicts(
       {
         classGroupId: classGroup.id,
         teacherId: classGroup.teacherId,
         roomId: classGroup.roomId,
+        roomIds: effectiveRoomIds(classGroup.roomId, extraRoomIds),
         date,
         startTime: payload.startTime,
         endTime: payload.endTime,
       },
-      existingSessions.map((row) => ({
-        classGroupId: row.classGroupId,
-        teacherId: row.teacherId,
-        roomId: row.roomId,
-        date: row.date,
-        startTime: row.startTime,
-        endTime: row.endTime,
-        className:
-          [row.classGroup.subject?.name, row.classGroup.grade?.name]
-            .filter(Boolean)
-            .join(" · ") || "—",
-      })),
+      existingSessions,
     );
-    if (conflicts.length > 0 && conflictPolicy === "DENY") {
-      return { ok: false, error: "conflict" };
+    const conflictDecision = decideConflicts(conflicts.length, conflictPolicy, options.confirmConflicts);
+    if (conflictDecision === "denied") return { ok: false, error: "conflict", conflicts };
+    if (conflictDecision === "needsConfirmation") {
+      return { ok: false, error: "conflictsNeedConfirmation", conflicts };
     }
 
     let session: Session;
@@ -167,11 +195,14 @@ export async function resolveSessionRequest(
           classGroupId: classGroup.id,
           teacherId: classGroup.teacherId,
           roomId: classGroup.roomId,
-          branchId: classGroup.room?.branchId ?? null,
           date,
           startTime: payload.startTime,
           endTime: payload.endTime,
           priceSnapshot: classGroup.price,
+          // R5 — made by hand (a teacher asked, a person approved), not by
+          // the class-sessions engine, so no resync, holiday or class edit
+          // ever deletes or rewrites it.
+          isManual: true,
         }),
       });
     } catch (error) {
@@ -183,6 +214,18 @@ export async function resolveSessionRequest(
         return { ok: false, error: "duplicateSlot" };
       }
       throw error;
+    }
+
+    await writeSessionExtraRooms(tx, centerId, session.id, extraRoomIds);
+    if (options.confirmConflicts) {
+      await writeConfirmedConflictAudit(tx, {
+        centerId,
+        actorUserId: options.actorUserId ?? resolvedBy,
+        entityType: "Session",
+        entityId: session.id,
+        context: "changeRequest.session.approve",
+        conflicts,
+      });
     }
 
     const updated = await tx.changeRequest.update({

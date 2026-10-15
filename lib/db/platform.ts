@@ -1,8 +1,11 @@
-import type { Center, Prisma, PrismaClient, Role } from "@prisma/client";
+import type { Center, CenterLifecycleState, Prisma, PrismaClient, Role } from "@prisma/client";
 
 // Relative imports on purpose — `npm run check:admin` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/payments.ts,
 // lib/db/approvals.ts, lib/db/analytics.ts).
+import { provisionCenterBaseline } from "./provision.ts";
+import { runInTransaction } from "./session-lifecycle.ts";
+import { writeAuditRow } from "./audit-row.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -17,8 +20,91 @@ import type { Center, Prisma, PrismaClient, Role } from "@prisma/client";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const STAFF_ROLES: readonly Role[] = ["OWNER", "MANAGER", "RECEPTIONIST"];
+const STAFF_ROLES: readonly Role[] = ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"];
 const TEACHER_ROLE: Role = "TEACHER";
+
+// ── Centre lifecycle (M19, docs/00-master-product-spec.md §5.1) ─────────
+
+export const CENTER_LIFECYCLE_STATES: readonly CenterLifecycleState[] = [
+  "ONBOARDING",
+  "ACTIVE",
+  "GRACE",
+  "SUSPENDED",
+  "ARCHIVED",
+];
+
+/**
+ * States in which a centre's members may sign in and use the app at all. The
+ * old `active` boolean collapsed five real states into two; this is the
+ * confirmed mapping going forward — ONBOARDING (setup in progress, an invited
+ * Owner must still be able to accept and configure things) and GRACE (a
+ * lapse under notice, not yet a hard stop) both permit access exactly like
+ * ACTIVE; SUSPENDED and ARCHIVED both refuse it exactly like the old
+ * `active: false` did. `getUserCenterRelations()` (`lib/auth/tenant.ts`) is
+ * the sole place this gates sign-in — the same seam `center: { active: true
+ * }` used to.
+ */
+export const ACCESSIBLE_LIFECYCLE_STATES: readonly CenterLifecycleState[] = [
+  "ONBOARDING",
+  "ACTIVE",
+  "GRACE",
+];
+
+/**
+ * The valid lifecycle transition graph. Two rules, stated once and enforced
+ * everywhere through this table rather than ad hoc per-caller checks:
+ * **ARCHIVED is terminal** (closing a centre is final — a resumed
+ * relationship is a new Center, not a reactivation), and **SUSPENDED/ARCHIVED
+ * are reachable directly from any non-terminal state** (an admin must always
+ * be able to shut a problematic centre down immediately, regardless of where
+ * it currently sits in the lifecycle, without forcing it through intermediate
+ * states first). Recovery back to ACTIVE is otherwise only possible from
+ * ONBOARDING (finishing setup), GRACE (resolved before a hard suspension) and
+ * SUSPENDED (reinstated) — never from ARCHIVED.
+ */
+const LIFECYCLE_TRANSITIONS: Record<CenterLifecycleState, readonly CenterLifecycleState[]> = {
+  ONBOARDING: ["ACTIVE", "SUSPENDED", "ARCHIVED"],
+  ACTIVE: ["GRACE", "SUSPENDED", "ARCHIVED"],
+  GRACE: ["ACTIVE", "SUSPENDED", "ARCHIVED"],
+  SUSPENDED: ["ACTIVE", "ARCHIVED"],
+  ARCHIVED: [],
+};
+
+export function isValidLifecycleTransition(
+  from: CenterLifecycleState,
+  to: CenterLifecycleState,
+): boolean {
+  return LIFECYCLE_TRANSITIONS[from].includes(to);
+}
+
+/** The states `/admin/centers/[id]` may offer from a given current state. */
+export function validNextLifecycleStates(
+  from: CenterLifecycleState,
+): readonly CenterLifecycleState[] {
+  return LIFECYCLE_TRANSITIONS[from];
+}
+
+export type LifecycleTransitionResult =
+  | { ok: true; center: Center }
+  | { ok: false; error: "notFound" | "invalidTransition" };
+
+/** The Server Action's real write path — validated here, not just in the UI. */
+export async function transitionCenterLifecycle(
+  db: Db,
+  centerId: string,
+  to: CenterLifecycleState,
+): Promise<LifecycleTransitionResult> {
+  const center = await db.center.findUnique({ where: { id: centerId } });
+  if (!center) return { ok: false, error: "notFound" };
+  if (!isValidLifecycleTransition(center.lifecycleState, to)) {
+    return { ok: false, error: "invalidTransition" };
+  }
+  const updated = await db.center.update({
+    where: { id: centerId },
+    data: { lifecycleState: to },
+  });
+  return { ok: true, center: updated };
+}
 
 // ── Center tenant management ────────────────────────────────────────────
 
@@ -33,9 +119,7 @@ export type CreateCenterInput = {
   name: string;
   nameEn?: string | null;
   slug: string;
-  logoUrl?: string | null;
   themeColor: string;
-  plan?: string | null;
   /**
    * The center's first Owner, invited the same way `/settings/staff` invites
    * anyone else (docs/00 §2.1.A: "The first real owner is provisioned
@@ -51,12 +135,15 @@ export type CreateCenterResult =
   | { ok: false; error: "slugTaken" };
 
 /**
- * Creates a Center + its CenterSettings row + the founding Owner invitation
- * in one nested write — the M9 equivalent of how `configureCenter` (M2's
- * gate) provisions a fresh center's config in one call, no per-center
- * branching. Settings defaults mirror `prisma/seed.ts`'s (percentage cut
- * 15%, 10-minute late threshold, Cairo timezone) — a new tenant should start
- * from the same sane defaults the seeded demo center does.
+ * Creates a Center + its organization + the founding Owner invitation, then
+ * hands the centre to `provisionCenterBaseline` (`lib/db/provision.ts`) for
+ * everything it needs to actually work — its CenterSettings row, the baseline
+ * permission matrix and the default payment methods — all in one transaction.
+ * The M9 equivalent of how `configureCenter` (M2's gate) provisions a fresh
+ * center's config in one call, no per-center branching. The baseline is owned
+ * by that one function, not re-listed here (P1: the demo seed had its own copy
+ * of "create a centre" that forgot the grants, and its Owner saw only the
+ * Dashboard).
  */
 export async function createCenterWithSettings(
   db: Db,
@@ -65,53 +152,48 @@ export async function createCenterWithSettings(
   const existing = await db.center.findUnique({ where: { slug: input.slug } });
   if (existing) return { ok: false, error: "slugTaken" };
 
-  const center = await db.center.create({
-    data: {
-      name: input.name,
-      nameEn: input.nameEn ?? null,
-      slug: input.slug,
-      logoUrl: input.logoUrl ?? null,
-      themeColor: input.themeColor,
-      plan: input.plan ?? null,
-      active: true,
-      settings: {
-        create: {
-          defaultShareType: "PERCENTAGE",
-          defaultShareValue: 15,
-          defaultLateThreshold: 10,
-          timezone: "Africa/Cairo",
+  const center = await runInTransaction(db, async (tx) => {
+    const created = await tx.center.create({
+      data: {
+        name: input.name,
+        nameEn: input.nameEn ?? null,
+        slug: input.slug,
+        themeColor: input.themeColor,
+        // A freshly admin-provisioned center hasn't done anything yet — no
+        // staff signed in, no config touched — so it starts ONBOARDING rather
+        // than ACTIVE (docs/00 §5.1 "Centre lifecycle"). ONBOARDING already
+        // permits sign-in (`ACCESSIBLE_LIFECYCLE_STATES` above), so the invited
+        // Owner can still accept the invite below and set the center up; moving
+        // it to ACTIVE once setup is real is a deliberate lifecycle transition
+        // an admin makes from `/admin/centers/[id]`, not an automatic flip.
+        lifecycleState: "ONBOARDING",
+        // A platform-created center starts as its own single-branch
+        // organization (M11) — the same shape the M11 migration's backfill
+        // gave every pre-existing center. Nothing yet adds a branch to an
+        // existing organization — how that should work is OD-12
+        // (docs/00 §2.2), not something this provisioning step decides.
+        organization: {
+          create: {
+            name: input.name,
+            nameEn: input.nameEn ?? null,
+          },
+        },
+        invitations: {
+          create: {
+            email: input.invite.email,
+            role: "OWNER",
+            token: input.invite.token,
+            invitedBy: input.invite.invitedBy,
+            expiresAt: input.invite.expiresAt,
+          },
         },
       },
-      invitations: {
-        create: {
-          email: input.invite.email,
-          role: "OWNER",
-          token: input.invite.token,
-          invitedBy: input.invite.invitedBy,
-          expiresAt: input.invite.expiresAt,
-        },
-      },
-    },
+    });
+    await provisionCenterBaseline(tx, created.id);
+    return created;
   });
 
   return { ok: true, center };
-}
-
-export async function setCenterActive(
-  db: Db,
-  centerId: string,
-  active: boolean,
-): Promise<Center> {
-  return db.center.update({ where: { id: centerId }, data: { active } });
-}
-
-/** `Center.plan` is loose onboarding/plan metadata (docs/01 §2) — free text. */
-export async function updateCenterPlan(
-  db: Db,
-  centerId: string,
-  plan: string | null,
-): Promise<Center> {
-  return db.center.update({ where: { id: centerId }, data: { plan } });
 }
 
 // ── Center list (the /admin/centers table) ──────────────────────────────
@@ -120,9 +202,8 @@ export type PlatformCenterRow = {
   id: string;
   name: string;
   slug: string;
-  active: boolean;
+  lifecycleState: CenterLifecycleState;
   themeColor: string;
-  plan: string | null;
   createdAt: Date;
   staffCount: number;
   teacherCount: number;
@@ -145,9 +226,8 @@ export async function platformCenterList(db: Db): Promise<PlatformCenterRow[]> {
         id: true,
         name: true,
         slug: true,
-        active: true,
+        lifecycleState: true,
         themeColor: true,
-        plan: true,
         createdAt: true,
       },
     }),
@@ -189,14 +269,30 @@ export async function platformCenterList(db: Db): Promise<PlatformCenterRow[]> {
 
 // ── Platform KPIs (/admin/platform) ──────────────────────────────────────
 
-export type PlatformCenterCounts = { total: number; active: number; suspended: number };
+export type PlatformCenterCounts = {
+  total: number;
+  /** In ONBOARDING/ACTIVE/GRACE — i.e. currently able to sign in and operate. */
+  operational: number;
+  byState: Record<CenterLifecycleState, number>;
+};
 
 export async function platformCenterCounts(db: Db): Promise<PlatformCenterCounts> {
-  const [total, active] = await Promise.all([
+  const [total, grouped] = await Promise.all([
     db.center.count(),
-    db.center.count({ where: { active: true } }),
+    db.center.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
   ]);
-  return { total, active, suspended: total - active };
+
+  const byState = Object.fromEntries(
+    CENTER_LIFECYCLE_STATES.map((state) => [state, 0]),
+  ) as Record<CenterLifecycleState, number>;
+  for (const row of grouped) byState[row.lifecycleState] = row._count._all;
+
+  const operational = ACCESSIBLE_LIFECYCLE_STATES.reduce(
+    (sum, state) => sum + byState[state],
+    0,
+  );
+
+  return { total, operational, byState };
 }
 
 export async function platformTeacherCount(db: Db): Promise<number> {
@@ -285,13 +381,60 @@ export async function recordSupportAccess(
   db: Db,
   input: { centerId: string; actorUserId: string },
 ): Promise<void> {
-  await db.auditLog.create({
-    data: {
-      centerId: input.centerId,
-      actorUserId: input.actorUserId,
-      action: "platform.support.access",
-      entityType: "Center",
-      entityId: input.centerId,
-    },
+  await writeAuditRow(db, {
+    centerId: input.centerId,
+    actorUserId: input.actorUserId,
+    action: "platform.support.access",
+    entityType: "Center",
+    entityId: input.centerId,
   });
+}
+
+// ── Plain lookups the pages used to make with `prisma.*` directly (SYS) ─────
+// Global by nature (a platform admin's view, the invite page, the public
+// directories), so they take no centre scope — but they live here, behind
+// the injected client, rather than in a page (docs/02 §5, §7).
+
+/** One centre row — the platform admin's support view. */
+export function platformCenterById(db: Db, id: string) {
+  return db.center.findUnique({ where: { id } });
+}
+
+/** A centre's newest audit rows (carved out of the visibility window — docs/01 §7). */
+export function platformCenterAuditTrail(db: Db, centerId: string, take = 20) {
+  return db.auditLog.findMany({
+    where: { centerId },
+    orderBy: { createdAt: "desc" },
+    take,
+    include: { actor: true },
+  });
+}
+
+/** A centre's settings row (`null` before it was ever configured). */
+export function centerSettingsFor(db: Db, centerId: string) {
+  return db.centerSettings.findUnique({ where: { centerId } });
+}
+
+/** Every centre that may operate (ONBOARDING/ACTIVE/GRACE), for the public directories. */
+export function listAccessibleCenters(db: Db) {
+  return db.center.findMany({
+    where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    select: { id: true, name: true, logoPath: true, themeColor: true },
+    orderBy: { name: "asc" },
+  });
+}
+
+/** Centre names by id (a cross-centre list the caller already scoped by identity). */
+export function centerNamesByIds(db: Db, ids: string[]) {
+  return db.center.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+}
+
+/** A centre's stored logo key, for the signing route (`/api/logos/[centerId]`). */
+export function centerLogoPath(db: Db, centerId: string) {
+  return db.center.findUnique({ where: { id: centerId }, select: { id: true, logoPath: true } });
+}
+
+/** An invitation by its token, with its centre — the accept page (the token is the only link). */
+export function invitationByToken(db: Db, token: string) {
+  return db.invitation.findUnique({ where: { token }, include: { center: true } });
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -9,6 +8,7 @@ import {
 } from "@/app/[locale]/(auth)/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 const initialState: AuthFormState = {};
 
@@ -16,7 +16,7 @@ export function AcceptInvitationForm({ token }: { token: string }) {
   const t = useTranslations("Auth.invite");
   const tErrors = useTranslations("Auth.errors");
   const locale = useLocale();
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     acceptInvitationAction,
     initialState,
   );

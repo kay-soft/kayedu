@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { writeAuditLog } from "@/lib/db/audit";
 import { scoped } from "@/lib/db/scoped";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
-import { fieldErrorsFrom } from "@/lib/validation/form";
+import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   createInvitationSchema,
   invitationIdSchema,
@@ -39,18 +39,18 @@ export async function createInvitationAction(
   formData: FormData,
 ): Promise<InviteFormState> {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "staff.invite")) return { error: "forbidden" };
+  // Inviting someone assigns them a role, so this is an OWNER-only action
+  // (docs/00-master-product-spec.md §3: "the only role that may grant roles
+  // or permissions") — `membership.role.assign` is ceiling-forced to OWNER
+  // (lib/auth/permissions.ts), so this can never be satisfied by any stored
+  // grant, only by actually being OWNER.
+  if (!ctxCan(ctx, "membership.role.assign")) return { error: "forbidden" };
 
   const parsed = createInvitationSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
   const { email, role, locale } = parsed.data;
   const db = scoped(ctx);
-
-  // Only an Owner may mint another Owner.
-  if (role === "OWNER" && !ctxCan(ctx, "center.ownership.manage")) {
-    return { error: "ownerOnly" };
-  }
 
   const existingMember = await db.memberships.list({
     where: { role, active: true, user: { email } },
@@ -82,26 +82,35 @@ export async function createInvitationAction(
     action: "invitation.create",
     entityType: "Invitation",
     entityId: invitation.id,
-    after: { email, role, expiresAt: expiresAt.toISOString() },
+    // D-20: the invited address stays on the invitation row.
+    after: { role, expiresAt: expiresAt.toISOString() },
   });
 
   revalidatePath(staffPath(locale));
   return { token };
 }
 
+/**
+ * Returns a result (DES, Phase 3) — it had returned nothing, so a refused
+ * revoke looked exactly like a successful one. Error keys are `Settings.errors`.
+ */
 export async function revokeInvitationAction(
+  _state: ActionState,
   formData: FormData,
-): Promise<void> {
+): Promise<ActionState> {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "staff.invite")) return;
+  // D-22 (a): revoking an invitation is OWNER-only, exactly like creating one
+  // (SEC-42) — `membership.role.assign` is ceiling-forced to OWNER.
+  if (!ctxCan(ctx, "membership.role.assign")) return { error: "forbidden" };
 
   const parsed = invitationIdSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return;
+  if (!parsed.success) return { error: "notFound" };
 
   const db = scoped(ctx);
   // Scoped lookup: an id from another center simply does not resolve.
   const invitation = await db.invitations.findById(parsed.data.invitationId);
-  if (!invitation || invitation.status !== "PENDING") return;
+  if (!invitation) return { error: "notFound" };
+  if (invitation.status !== "PENDING") return { error: "invitationGone" };
 
   await db.invitations.update(invitation.id, { status: "REVOKED" });
 
@@ -116,4 +125,5 @@ export async function revokeInvitationAction(
   });
 
   revalidatePath(staffPath(parsed.data.locale));
+  return { status: "deleted" };
 }

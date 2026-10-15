@@ -1,0 +1,533 @@
+/**
+ * Data-visibility window check — the M19 acceptance gate
+ * (docs/00-master-product-spec.md §5.1 "Data visibility window",
+ * docs/01-data-model.md §7, docs/03-build-order.md M19 "Done when").
+ *
+ * Run with:  npm run check:visibility
+ *
+ * Modeled on the receptionist profit-denial shape (docs/02-architecture.md
+ * §5: "a loader-level refusal plus a scoped query, asserted directly ...
+ * rather than by rendering a page"). Exercises the real production functions
+ * — `lib/db/visibility.ts`'s `visibilityWindowFloor`/`clampRangeToVisibility`/
+ * `isWithinVisibilityWindow`, combined with `lib/db/analytics.ts` and
+ * `lib/db/tenant-scope.ts`'s `scopedWhere` (the exact shape
+ * `lib/db/scoped.ts`'s `refunds.list` uses) — against a throwaway center with
+ * deliberately old and recent money/session data. Needs a reachable database
+ * and cleans up after itself.
+ */
+import { gatePrisma } from "./lib/gate-db.ts";
+import { createAttendance } from "../lib/db/attendance.ts";
+import { recordPayment } from "../lib/db/payments.ts";
+import {
+  ensureDefaultPaymentMethods,
+  listActivePaymentMethods,
+} from "../lib/db/payment-methods.ts";
+import { revenueTotals } from "../lib/db/analytics.ts";
+import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
+import {
+  DEFAULT_VISIBILITY_WINDOW_DAYS,
+  clampRangeToVisibility,
+  isWithinVisibilityWindow,
+  visibilityWindowFloor,
+} from "../lib/db/visibility.ts";
+import { startOfUtcDay } from "../lib/scheduling.ts";
+import { scopedIgnoringVisibilityWindow, scopedWith } from "../lib/db/scoped.ts";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+const prisma = await gatePrisma();
+
+/** Every .ts/.tsx file under `dir`. */
+function listTs(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) listTs(path, out);
+    else if (/\.tsx?$/.test(entry)) out.push(path.replaceAll("\\", "/"));
+  }
+  return out;
+}
+
+/** R1 fixture shape: a centre's first active payment method, created on demand. */
+const fixtureMethodIds = new Map<string, string>();
+async function fixtureMethodId(centerId: string): Promise<string> {
+  const cached = fixtureMethodIds.get(centerId);
+  if (cached) return cached;
+  await ensureDefaultPaymentMethods(prisma, centerId);
+  const [method] = await listActivePaymentMethods(prisma, centerId);
+  fixtureMethodIds.set(centerId, method.id);
+  return method.id;
+}
+
+const SLUG = "visibility-check";
+
+let failures = 0;
+
+function check(name: string, passed: boolean, detail = "") {
+  if (passed) {
+    console.log(`  PASS  ${name}`);
+  } else {
+    failures += 1;
+    console.error(`  FAIL  ${name}${detail ? ` — ${detail}` : ""}`);
+  }
+}
+
+async function cleanup() {
+  await prisma.center.deleteMany({ where: { slug: SLUG } });
+  await prisma.user.deleteMany({ where: { email: { startsWith: "visibility-check-" } } });
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Visibility-Check" } } });
+}
+
+const NOW = new Date("2026-06-15T12:00:00Z");
+const WINDOW_DAYS = 14;
+const OLD_SESSION_DATE = new Date("2026-04-01T00:00:00Z"); // ~75 days before NOW
+const RECENT_SESSION_DATE = new Date("2026-06-10T00:00:00Z"); // 5 days before NOW
+
+async function main() {
+  await cleanup();
+
+  // ── 1. Pure date math (no database needed) ────────────────────────────
+  console.log("Visibility-window date math (no database needed)");
+
+  check(
+    "A platform admin bypasses the window entirely (spec §3: 'Bypasses the data-visibility window')",
+    visibilityWindowFloor({ isPlatformAdmin: true, settings: null }, NOW) === null,
+  );
+
+  const defaultFloor = visibilityWindowFloor({ isPlatformAdmin: false, settings: null }, NOW);
+  check(
+    "A centre with no CenterSettings row falls back to the default 30-day window, not unbounded",
+    defaultFloor !== null &&
+      defaultFloor.getTime() === startOfUtcDay(NOW).getTime() - DEFAULT_VISIBILITY_WINDOW_DAYS * 86_400_000,
+    String(defaultFloor),
+  );
+
+  const floor14 = visibilityWindowFloor(
+    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
+    NOW,
+  );
+  check(
+    "A centre's own dataVisibilityDays drives the floor — a rolling window ending today, not a calendar-month anchor",
+    floor14 !== null &&
+      floor14.getTime() === startOfUtcDay(NOW).getTime() - WINDOW_DAYS * 86_400_000,
+    String(floor14),
+  );
+
+  check(
+    "isWithinVisibilityWindow is inclusive at exactly the floor",
+    isWithinVisibilityWindow(floor14 as Date, floor14),
+  );
+  check(
+    "isWithinVisibilityWindow refuses one millisecond before the floor",
+    !isWithinVisibilityWindow(new Date((floor14 as Date).getTime() - 1), floor14),
+  );
+  check(
+    "isWithinVisibilityWindow is always true when unbounded (floor === null)",
+    isWithinVisibilityWindow(new Date("2000-01-01"), null),
+  );
+
+  const wideRequest = { start: new Date("2020-01-01"), end: NOW };
+  const clamped = clampRangeToVisibility(wideRequest, floor14);
+  check(
+    "clampRangeToVisibility raises a manipulated ?from= far in the past up to the window floor — the direct-URL bypass this milestone closes",
+    clamped.start.getTime() === (floor14 as Date).getTime() && clamped.end.getTime() === NOW.getTime(),
+    JSON.stringify(clamped),
+  );
+
+  const narrowRequest = { start: new Date("2026-06-12"), end: NOW };
+  const unclamped = clampRangeToVisibility(narrowRequest, floor14);
+  check(
+    "clampRangeToVisibility never narrows a range that was already inside the window",
+    unclamped.start.getTime() === narrowRequest.start.getTime(),
+  );
+
+  check(
+    "clampRangeToVisibility is a no-op when the floor is null (platform admin bypass)",
+    clampRangeToVisibility(wideRequest, null).start.getTime() === wideRequest.start.getTime(),
+  );
+
+  // ── 2. Database-backed: the denial actually excludes old data, and       ──
+  //      nothing was ever deleted to make that true                        ──
+  console.log("\nDatabase-backed checks");
+
+  const center = await prisma.center.create({
+    data: {
+      slug: SLUG,
+      name: "Visibility Check",
+      organization: { create: { name: "Visibility Check" } },
+      settings: { create: { dataVisibilityDays: WINDOW_DAYS } },
+    },
+  });
+
+  const teacherUser = await prisma.user.create({
+    data: { firstName: "T", lastName: "Visibility", email: "visibility-check-teacher@kayedu.test", locale: "en" },
+  });
+  await prisma.membership.create({
+    data: scopedData(center.id, {
+      userId: teacherUser.id,
+      role: "TEACHER",
+      firstName: "T",
+      lastName: "Visibility",
+      email: "visibility-check-teacher@kayedu.test",
+      joinedAt: OLD_SESSION_DATE,
+    }),
+  });
+  const studentUser = await prisma.user.create({
+    data: { firstName: "S", lastName: "Visibility", locale: "en" },
+  });
+  const student = await prisma.studentProfile.create({
+    data: scopedData(center.id, {
+      userId: studentUser.id,
+      studentCode: "VIS-1001",
+      firstName: "S",
+      lastName: "Visibility",
+    }),
+  });
+  const subject = await prisma.catalogSubject.create({
+    data: { nameAr: "Visibility-Check Math", nameEn: "Visibility-Check Math" },
+  });
+  const classGroup = await prisma.classGroup.create({
+    data: scopedData(center.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
+      teacherId: teacherUser.id,
+      subjectId: subject.id,
+      price: 10_000,
+    }),
+  });
+
+  async function makeSessionWithPayment(date: Date, startTime = "16:00", endTime = "17:00") {
+    const session = await prisma.session.create({
+      data: scopedData(center.id, {
+        classGroupId: classGroup.id,
+        teacherId: teacherUser.id,
+        date,
+        startTime,
+        endTime,
+        priceSnapshot: 10_000,
+      }),
+    });
+    const attendee = await createAttendance(prisma, {
+      centerId: center.id,
+      sessionId: session.id,
+      studentProfileId: student.id,
+      enrollmentId: null,
+      isDropIn: true,
+      recordedBy: teacherUser.id,
+    }, { historicalBackfill: true, status: "PRESENT" });
+    const methodId = await fixtureMethodId(center.id);
+    const result = await prisma.$transaction((tx) =>
+      recordPayment(tx, center.id, attendee.id, methodId, teacherUser.id, { historicalBackfill: true }),
+    );
+    if (!result.ok) throw new Error(`recordPayment failed: ${result.error}`);
+    return { session, payment: result.payment };
+  }
+
+  const oldFixture = await makeSessionWithPayment(OLD_SESSION_DATE);
+  const recentFixture = await makeSessionWithPayment(RECENT_SESSION_DATE);
+
+  // Separate, deliberately-refunded fixtures for the Refund-windowing checks
+  // below — kept apart from oldFixture/recentFixture above so refundTotals'
+  // own subtraction (keyed on the underlying session's date, not
+  // refundedAt) doesn't zero out the revenue-window assertion's numbers.
+  const oldRefundedFixture = await makeSessionWithPayment(OLD_SESSION_DATE, "18:00", "19:00");
+  const recentRefundedFixture = await makeSessionWithPayment(RECENT_SESSION_DATE, "18:00", "19:00");
+
+  // Refund is NOT a carve-out (only settlement/payout and audit logs are,
+  // spec §5.1) — an old refund must be excluded by the same windowing
+  // `lib/db/scoped.ts`'s `refunds.list` applies.
+  const oldRefund = await prisma.refund.create({
+    data: {
+      centerId: center.id,
+      paymentId: oldRefundedFixture.payment.id,
+      teacherId: teacherUser.id,
+      amount: oldRefundedFixture.payment.amount,
+      centerShareReversed: oldRefundedFixture.payment.centerShareSnapshot,
+      teacherShareReversed: oldRefundedFixture.payment.teacherShareSnapshot,
+      reason: "Visibility check fixture",
+      refundedBy: teacherUser.id,
+      refundedAt: OLD_SESSION_DATE,
+    },
+  });
+  const recentRefund = await prisma.refund.create({
+    data: {
+      centerId: center.id,
+      paymentId: recentRefundedFixture.payment.id,
+      teacherId: teacherUser.id,
+      amount: recentRefundedFixture.payment.amount,
+      centerShareReversed: recentRefundedFixture.payment.centerShareSnapshot,
+      teacherShareReversed: recentRefundedFixture.payment.teacherShareSnapshot,
+      reason: "Visibility check fixture",
+      refundedBy: teacherUser.id,
+      refundedAt: RECENT_SESSION_DATE,
+    },
+  });
+
+  // Settlement — a payout carve-out (spec §5.1: "a teacher must always
+  // verify they were paid").
+  const oldSettlement = await prisma.settlement.create({
+    data: {
+      centerId: center.id,
+      teacherId: teacherUser.id,
+      sessionId: oldFixture.session.id,
+      totalAmount: oldFixture.payment.teacherShareSnapshot,
+      status: "PAID",
+      createdBy: teacherUser.id,
+      createdAt: OLD_SESSION_DATE,
+    },
+  });
+
+  // AuditLog — the other carve-out.
+  const oldAuditLog = await prisma.auditLog.create({
+    data: {
+      centerId: center.id,
+      actorUserId: teacherUser.id,
+      action: "visibility-check.fixture",
+      entityType: "Session",
+      entityId: oldFixture.session.id,
+      createdAt: OLD_SESSION_DATE,
+    },
+  });
+
+  const floor = visibilityWindowFloor(
+    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
+    NOW,
+  ) as Date;
+
+  // Simulate a manipulated `?from=`/`?range=all` request reaching all the way
+  // back — clamped exactly the way Sessions/Analytics/Expenses clamp it.
+  const requestedRange = clampRangeToVisibility({ start: OLD_SESSION_DATE, end: NOW }, floor);
+
+  const revenue = await revenueTotals(prisma, center.id, {
+    from: requestedRange.start,
+    to: requestedRange.end,
+  });
+  check(
+    "revenueTotals with the clamped range counts only the two recent payments, not the two old ones",
+    revenue.paymentCount === 2 && revenue.collected === recentFixture.payment.amount,
+    JSON.stringify(revenue),
+  );
+
+  const unclampedRevenue = await revenueTotals(prisma, center.id, {
+    from: OLD_SESSION_DATE,
+    to: NOW,
+  });
+  check(
+    "Sanity check: without clamping, all four payments would have counted — proving the clamp is what excluded the old ones, not the fixtures themselves",
+    unclampedRevenue.paymentCount === 4,
+    JSON.stringify(unclampedRevenue),
+  );
+
+  // The exact shape lib/db/scoped.ts's refunds.list uses.
+  const visibleRefunds = await prisma.refund.findMany({
+    where: scopedWhere(center.id, { refundedAt: { gte: floor } }),
+  });
+  check(
+    "Refund reads windowed the same way — the old refund is excluded, the recent one is not",
+    visibleRefunds.length === 1 &&
+      visibleRefunds[0]?.id === recentRefund.id &&
+      !visibleRefunds.some((r) => r.id === oldRefund.id),
+    JSON.stringify(visibleRefunds.map((r) => r.id)),
+  );
+
+  // Settlement/audit reads apply NO date filter at all (lib/db/scoped.ts's
+  // settlements.list / auditLogs.list) — an old row must still come back.
+  const visibleSettlements = await prisma.settlement.findMany({
+    where: scopedWhere(center.id),
+  });
+  check(
+    "Settlement carve-out: an old settlement is still readable regardless of the window",
+    visibleSettlements.some((s) => s.id === oldSettlement.id),
+  );
+  const visibleAuditLogs = await prisma.auditLog.findMany({
+    where: { centerId: center.id },
+  });
+  check(
+    "Audit-log carve-out: an old audit row is still readable regardless of the window",
+    visibleAuditLogs.some((a) => a.id === oldAuditLog.id),
+  );
+
+  // ── 2b. SEC-62: the floor is in the scoped helpers, for every centre-side ─
+  //       role, by direct call — the same objects every page and action    ─
+  //       reads through (lib/db/scoped.ts), not a page-level clamp.        ─
+  console.log("\nSEC-62 — the scoped helpers apply the window beside centerId");
+  const category = await prisma.expenseCategory.create({ data: scopedData(center.id, { name: "Visibility-Check" }) });
+  const oldExpense = await prisma.expense.create({
+    data: scopedData(center.id, { categoryId: category.id, amount: 5_000, date: OLD_SESSION_DATE, recordedBy: teacherUser.id }),
+  });
+  const recentExpense = await prisma.expense.create({
+    data: scopedData(center.id, { categoryId: category.id, amount: 6_000, date: RECENT_SESSION_DATE, recordedBy: teacherUser.id }),
+  });
+  await prisma.sessionAttendanceChange.create({
+    data: scopedData(center.id, {
+      sessionId: oldFixture.session.id,
+      studentProfileId: student.id,
+      fromStatus: "PRESENT",
+      toStatus: "LATE",
+      changedBy: teacherUser.id,
+      changedAt: OLD_SESSION_DATE,
+    }),
+  });
+  const oldAttendee = await prisma.sessionAttendee.findFirstOrThrow({ where: { sessionId: oldFixture.session.id } });
+  const recentAttendee = await prisma.sessionAttendee.findFirstOrThrow({ where: { sessionId: recentFixture.session.id } });
+  const scopeFor = (role: string, extra: { isPlatformAdmin?: boolean } = {}) =>
+    scopedWith(
+      prisma,
+      {
+        center: { id: center.id },
+        user: { locale: "en" },
+        role,
+        isPlatformAdmin: extra.isPlatformAdmin ?? false,
+        settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" },
+      },
+      { now: NOW },
+    );
+
+  for (const role of ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"]) {
+    const db = scopeFor(role);
+    const refusedById = [
+      await db.sessions.findById(oldFixture.session.id),
+      await db.sessions.findDetailById(oldFixture.session.id),
+      await db.sessions.findForEdit(oldFixture.session.id),
+      await db.attendees.findById(oldAttendee.id),
+      await db.attendees.findDetailById(oldAttendee.id),
+      await db.attendees.findExisting(oldFixture.session.id, student.id),
+      await db.payments.findById(oldFixture.payment.id),
+      await db.expenses.findById(oldExpense.id),
+    ].every((row) => row === null);
+    check(`${role}: an out-of-window session, attendee, payment or expense by direct id is refused (null, like another centre's id)`, refusedById);
+    const recentReadable =
+      (await db.sessions.findById(recentFixture.session.id)) !== null &&
+      (await db.attendees.findById(recentAttendee.id)) !== null &&
+      (await db.payments.findById(recentFixture.payment.id)) !== null &&
+      (await db.expenses.findById(recentExpense.id)) !== null;
+    check(`${role}: the in-window rows of the same kinds still read`, recentReadable);
+    const listed = await db.sessions.search({ where: {} });
+    const counts = {
+      sessions: await db.sessions.count(),
+      attendees: await db.attendees.count(),
+      payments: await db.payments.count(),
+      expenses: await db.expenses.count(),
+      expenseRows: (await db.expenses.search({ where: {}, take: 50 })).length,
+    };
+    check(
+      `${role}: lists and counts carry the floor too (an unbounded ?from= cannot reach past it)`,
+      listed.every((row) => row.id !== oldFixture.session.id && row.id !== oldRefundedFixture.session.id) &&
+        listed.length === 2 && counts.sessions === 2 && counts.attendees === 2 && counts.payments === 2 &&
+        counts.expenses === 1 && counts.expenseRows === 1,
+      JSON.stringify(counts),
+    );
+    check(
+      `${role}: an out-of-window session's change log reads as empty`,
+      (await db.attendanceChanges.listForSession(oldFixture.session.id)).length === 0 &&
+        (await db.attendanceChanges.count()) === 0,
+    );
+    check(
+      `${role}: refunds.list is windowed by the same floor`,
+      (await db.refunds.list()).map((r) => r.id).join() === recentRefund.id,
+    );
+    check(
+      `${role}: settlements and audit logs stay carved out (old rows still read)`,
+      (await db.settlements.list()).some((s) => s.id === oldSettlement.id) &&
+        (await db.auditLogs.list(500)).some((a) => a.id === oldAuditLog.id) &&
+        (await db.settlements.findForSession(oldFixture.session.id))?.id === oldSettlement.id,
+    );
+  }
+
+  for (const role of ["TEACHER", "STUDENT", "PARENT"]) {
+    check(
+      `${role}: never windowed — the old session reads (docs/01 §7)`,
+      (await scopeFor(role).sessions.findById(oldFixture.session.id)) !== null,
+    );
+  }
+  check(
+    "A platform admin bypasses the floor in the scoped helpers too",
+    (await scopeFor("OWNER", { isPlatformAdmin: true }).sessions.findById(oldFixture.session.id)) !== null,
+  );
+  const integrity = scopedIgnoringVisibilityWindow(
+    { center: { id: center.id }, user: { locale: "en" }, role: "MANAGER", isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
+    "integrity",
+    prisma,
+  );
+  check(
+    "The named opt-out (scopedIgnoringVisibilityWindow) sees the whole history — what delete blockers count",
+    (await integrity.sessions.count()) === 4 && (await integrity.payments.count()) === 4 && integrity.visibilityFloor === null,
+  );
+  check(
+    "The absence streak counts back no further than the floor (scoped attendees.absenceStreak)",
+    await (async () => {
+      const streakClass = await prisma.classGroup.create({
+        data: scopedData(center.id, { startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), teacherId: teacherUser.id, price: 10_000 }),
+      });
+      const absent = async (date: Date) => {
+        const s = await prisma.session.create({
+          data: scopedData(center.id, { classGroupId: streakClass.id, teacherId: teacherUser.id, date, startTime: "08:00", endTime: "09:00", priceSnapshot: 10_000 }),
+        });
+        await prisma.sessionAttendee.create({
+          data: scopedData(center.id, { sessionId: s.id, studentProfileId: student.id, attendanceStatus: "ABSENT", isDropIn: false, recordedBy: "system" }),
+        });
+      };
+      await absent(new Date("2026-05-20T00:00:00Z")); // before the 14-day floor (1 June)
+      await absent(new Date("2026-05-25T00:00:00Z")); // before it
+      await absent(new Date("2026-06-12T00:00:00Z")); // inside it
+      const windowed = await scopeFor("MANAGER").attendees.absenceStreak(streakClass.id, student.id, NOW);
+      const unbounded = await scopeFor("TEACHER").attendees.absenceStreak(streakClass.id, student.id, NOW);
+      return windowed === 1 && unbounded === 3;
+    })(),
+  );
+  check(
+    "Static: every centre page reads sessions/attendees/payments/expenses through scoped helpers — no direct prisma.session/payment/sessionAttendee/expense read under app/(center) or app/(print)",
+    !listTs("app/[locale]/(center)").concat(listTs("app/[locale]/(print)")).some((file) =>
+      /\bprisma\.(session|payment|sessionAttendee|expense|sessionAttendanceChange)\.(find|count|aggregate|groupBy)/.test(readFileSync(file, "utf8")),
+    ),
+  );
+  check(
+    "Static: the opt-out is only used with a stated reason, and only for integrity, settlement or audit reads",
+    listTs("app").concat(listTs("lib")).every((file) => {
+      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      return [...source.matchAll(/scopedIgnoringVisibilityWindow\(([^)]*)\)/g)].every((m) =>
+        /"(integrity|settlement|audit)"/.test(m[1]) || file.endsWith("lib/db/scoped.ts"),
+      );
+    }),
+  );
+
+  // ── 3. Nothing is deleted — widening restores visibility instantly ──────
+  const oldSessionStillExists = await prisma.session.findUnique({ where: { id: oldFixture.session.id } });
+  const oldPaymentStillExists = await prisma.payment.findUnique({ where: { id: oldFixture.payment.id } });
+  check(
+    "The out-of-window session/payment rows were never pruned — only excluded from the windowed read",
+    oldSessionStillExists !== null && oldPaymentStillExists !== null,
+  );
+
+  await prisma.centerSettings.update({
+    where: { centerId: center.id },
+    data: { dataVisibilityDays: 200 },
+  });
+  const widenedFloor = visibilityWindowFloor(
+    { isPlatformAdmin: false, settings: { dataVisibilityDays: 200, timezone: "Africa/Cairo" } },
+    NOW,
+  ) as Date;
+  const widenedRange = clampRangeToVisibility({ start: OLD_SESSION_DATE, end: NOW }, widenedFloor);
+  const revenueAfterWidening = await revenueTotals(prisma, center.id, {
+    from: widenedRange.start,
+    to: widenedRange.end,
+  });
+  check(
+    "Widening the window restores full visibility on the very next read, with zero backfill — nothing was ever lost",
+    revenueAfterWidening.paymentCount === 4,
+    JSON.stringify(revenueAfterWidening),
+  );
+}
+
+main()
+  .catch((error) => {
+    console.error(error);
+    failures += 1;
+  })
+  .finally(async () => {
+    await cleanup();
+    await prisma.$disconnect();
+    if (failures > 0) {
+      console.error(`\n${failures} visibility check(s) failed.`);
+      process.exit(1);
+    }
+    console.log("\nAll visibility checks passed.");
+  });

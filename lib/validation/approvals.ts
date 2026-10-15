@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { localeSchema } from "./auth";
+import { confirmConflictsField, type SlotConflictState } from "./room-set";
 
 /**
  * The Approvals screen's schemas (M6/M7/M8 gap, closed at this milestone —
@@ -17,7 +18,12 @@ export const approvalIdSchema = z.object({
   id: recordId,
 });
 
-export type ApprovalsActionState = {
+/** Accepting a NEW_SESSION request (R3: may need a double-booking confirmed). */
+export const approveSessionRequestSchema = approvalIdSchema.extend({
+  confirmConflicts: confirmConflictsField,
+});
+
+export type ApprovalsActionState = SlotConflictState & {
   error?: string;
   status?: "approved" | "declined";
 };

@@ -16,7 +16,7 @@
  * call) — against two throwaway centers. Needs a reachable database and
  * cleans up after itself.
  */
-import { PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
 import {
   createAttendance,
@@ -26,7 +26,7 @@ import {
 import { recordPayment, voidPayment } from "../lib/db/payments.ts";
 import { splitShare } from "../lib/money.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "payments-check-a";
 const SLUG_B = "payments-check-b";
@@ -45,6 +45,9 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "payments-check-" } } });
+  // Global catalog rows (M13) don't cascade away with the centers above.
+  await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: "Payments-Check" } } });
+  await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "Payments-Check" } } });
 }
 
 async function makeTeacher(centerId: string, email: string) {
@@ -129,20 +132,39 @@ async function main() {
 
   console.log("\nDatabase-backed checks");
 
-  const centerA = await prisma.center.create({ data: { slug: SLUG_A, name: "Payments A" } });
-  const centerB = await prisma.center.create({ data: { slug: SLUG_B, name: "Payments B" } });
+  const centerA = await prisma.center.create({
+    data: { slug: SLUG_A, name: "Payments A", organization: { create: { name: "Payments A" } } },
+  });
+  const centerB = await prisma.center.create({
+    data: { slug: SLUG_B, name: "Payments B", organization: { create: { name: "Payments B" } } },
+  });
+
+  // R1: methods are per-centre rows now (fixture shape only — the assertions
+  // below are unchanged). `check:payment-methods` covers the method rules.
+  const [cashA, instapayA, walletA, cashB] = await Promise.all([
+    prisma.centerPaymentMethod.create({ data: { centerId: centerA.id, name: "Cash" } }),
+    prisma.centerPaymentMethod.create({ data: { centerId: centerA.id, name: "InstaPay" } }),
+    prisma.centerPaymentMethod.create({ data: { centerId: centerA.id, name: "Wallet" } }),
+    prisma.centerPaymentMethod.create({ data: { centerId: centerB.id, name: "Cash" } }),
+  ]);
 
   const teacherA = await makeTeacher(centerA.id, "payments-check-teacher-a@kayedu.test");
   const actorId = teacherA.id; // stands in for a recording staff member's userId
 
-  const subjectA = await prisma.subject.create({ data: scopedData(centerA.id, { name: "Math" }) });
-  const gradeA = await prisma.grade.create({ data: scopedData(centerA.id, { name: "Grade 10" }) });
+  // Global catalog rows (M13) — no centerId; ClassGroup references them directly.
+  const subjectA = await prisma.catalogSubject.create({
+    data: { nameAr: "Payments-Check Math", nameEn: "Payments-Check Math" },
+  });
+  const gradeA = await prisma.catalogGrade.create({
+    data: { nameAr: "Payments-Check Grade 10", nameEn: "Payments-Check Grade 10" },
+  });
 
   const PRICE = 12_000; // 120 EGP
 
   // ── 1. FIXED vs PERCENTAGE, both correct on a 120 EGP session ───────────
   const classFixed = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacherA.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -153,6 +175,7 @@ async function main() {
   });
   const classPercentage = await prisma.classGroup.create({
     data: scopedData(centerA.id, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"), // R4 fixture shape: a class period is required
       teacherId: teacherA.id,
       subjectId: subjectA.id,
       gradeId: gradeA.id,
@@ -177,11 +200,10 @@ async function main() {
     studentProfileId: student1.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const paymentFixedResult = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "FIXED class: recordPayment freezes centerShareSnapshot=15 EGP, teacherShareSnapshot=105 EGP",
@@ -204,11 +226,10 @@ async function main() {
     studentProfileId: student1.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const paymentPercentageResult = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeePercentage.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, attendeePercentage.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "PERCENTAGE class: recordPayment freezes centerShareSnapshot=18 EGP, teacherShareSnapshot=102 EGP",
@@ -248,11 +269,10 @@ async function main() {
     studentProfileId: student2.profile.id,
     enrollmentId: null,
     isDropIn: true,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const paymentAfterChange = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeAfterChange.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, attendeeAfterChange.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "A new payment recorded after the config change uses the new cut (30 EGP)",
@@ -287,7 +307,7 @@ async function main() {
 
   // ── 4. Attempting a second active payment for the same attendee fails ───
   const secondAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, "INSTAPAY", actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, instapayA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "recordPayment refuses a second active payment for the same attendee",
@@ -297,7 +317,7 @@ async function main() {
 
   // ── 5. Void-then-recreate leaves history intact ──────────────────────────
   const voidResult = await prisma.$transaction((tx) =>
-    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "Paid by mistake", actorId),
+    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "Paid by mistake", actorId, { historicalBackfill: true }),
   );
   check(
     "voidPayment marks the row voided without touching its money fields",
@@ -311,7 +331,7 @@ async function main() {
   );
 
   const recreated = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, attendeeFixed.id, "WALLET", actorId),
+    recordPayment(tx, centerA.id, attendeeFixed.id, walletA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "A corrected payment can be recorded for the same attendee once the old one is voided",
@@ -338,7 +358,7 @@ async function main() {
   );
 
   const doubleVoid = await prisma.$transaction((tx) =>
-    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "again", actorId),
+    voidPayment(tx, centerA.id, paymentFixedResult.payment.id, "again", actorId, { historicalBackfill: true }),
   );
   check(
     "Voiding an already-voided payment is refused, not silently repeated",
@@ -360,11 +380,10 @@ async function main() {
     studentProfileId: student3.profile.id,
     enrollmentId: null,
     isDropIn: false,
-    status: "ABSENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "ABSENT" });
   const absentPaymentAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerA.id, absentAttendee.id, "CASH", actorId),
+    recordPayment(tx, centerA.id, absentAttendee.id, cashA.id, actorId, { historicalBackfill: true }),
   );
   check(
     "\"Attend = pay, or not counted\": an ABSENT attendee cannot have a payment recorded",
@@ -388,9 +407,8 @@ async function main() {
       studentProfileId: studentAbsentee.profile.id,
       enrollmentId: null,
       isDropIn: false,
-      status: "ABSENT",
       recordedBy: actorId,
-    });
+    }, { historicalBackfill: true, status: "ABSENT" });
     lastSession = session;
   }
   const threeInARow = await consecutiveAbsenceCount(
@@ -414,9 +432,8 @@ async function main() {
     studentProfileId: studentAbsentee.profile.id,
     enrollmentId: null,
     isDropIn: false,
-    status: "PRESENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "PRESENT" });
   const resetToZero = await consecutiveAbsenceCount(
     prisma,
     centerA.id,
@@ -440,9 +457,8 @@ async function main() {
     studentProfileId: studentAbsentee.profile.id,
     enrollmentId: null,
     isDropIn: false,
-    status: "ABSENT",
     recordedBy: actorId,
-  });
+  }, { historicalBackfill: true, status: "ABSENT" });
   const startsOverAtOne = await consecutiveAbsenceCount(
     prisma,
     centerA.id,
@@ -466,7 +482,7 @@ async function main() {
     where: { centerId: centerA.id, sessionId: nextAbsentSession.id, studentProfileId: studentAbsentee.profile.id },
   });
   check("A roster row exists to correct", beforeCorrectionStatus !== null);
-  const corrected = await updateAttendanceStatus(prisma, beforeCorrectionStatus!.id, "PRESENT", actorId);
+  const corrected = await updateAttendanceStatus(prisma, beforeCorrectionStatus!, "PRESENT", actorId, { historicalBackfill: true });
   check(
     "attendance.correct changes the recorded status",
     corrected.attendanceStatus === "PRESENT",
@@ -507,7 +523,7 @@ async function main() {
     (await scopedFindById(prisma.payment, centerB.id, recreated.ok ? recreated.payment.id : "")) === null,
   );
   const crossCenterPaymentAttempt = await prisma.$transaction((tx) =>
-    recordPayment(tx, centerB.id, attendeePercentage.id, "CASH", actorId),
+    recordPayment(tx, centerB.id, attendeePercentage.id, cashB.id, actorId, { historicalBackfill: true }),
   );
   check(
     "Center B cannot record a payment against Center A's SessionAttendee",
@@ -515,7 +531,7 @@ async function main() {
     JSON.stringify(crossCenterPaymentAttempt),
   );
   const crossCenterVoidAttempt = await prisma.$transaction((tx) =>
-    voidPayment(tx, centerB.id, paymentPercentageResult.ok ? paymentPercentageResult.payment.id : "", "x", actorId),
+    voidPayment(tx, centerB.id, paymentPercentageResult.ok ? paymentPercentageResult.payment.id : "", "x", actorId, { historicalBackfill: true }),
   );
   check(
     "Center B cannot void Center A's Payment",

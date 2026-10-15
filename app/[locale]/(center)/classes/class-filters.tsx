@@ -2,14 +2,15 @@
 
 import { useTranslations } from "next-intl";
 
-import { SelectInput } from "@/components/ui/select-input";
+import { FilterField } from "@/components/shared/filter-bar";
+import { Select } from "@/components/ui/select";
 import type { SelectOption } from "@/components/center/class-fields";
 
 /**
  * The classes dashboard's filters (spec §4.1 item 3 "filterable dashboard").
- * A plain GET form, like `SearchBox` — filter state lives in the URL, and
- * changing a select re-submits immediately so there is no separate "Apply"
- * step.
+ * A plain GET form, like `TypeAheadSearch`'s own underlying form — filter
+ * state lives in the URL, and changing a select re-submits immediately so
+ * there is no separate "Apply" step.
  */
 export function ClassFilters({
   teacherId,
@@ -32,15 +33,12 @@ export function ClassFilters({
 
   return (
     <form className="grid gap-3 sm:grid-cols-3">
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-teacherId" className="text-xs font-medium text-text-secondary">
-          {t("teacher")}
-        </label>
-        <SelectInput
+      <FilterField label={t("teacher")} htmlFor="filter-teacherId">
+        <Select
           id="filter-teacherId"
           name="teacherId"
           defaultValue={teacherId}
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {teachers.map((option) => (
@@ -48,18 +46,15 @@ export function ClassFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
-      </div>
+        </Select>
+      </FilterField>
 
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-subjectId" className="text-xs font-medium text-text-secondary">
-          {t("subject")}
-        </label>
-        <SelectInput
+      <FilterField label={t("subject")} htmlFor="filter-subjectId">
+        <Select
           id="filter-subjectId"
           name="subjectId"
           defaultValue={subjectId}
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {subjects.map((option) => (
@@ -67,18 +62,15 @@ export function ClassFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
-      </div>
+        </Select>
+      </FilterField>
 
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor="filter-gradeId" className="text-xs font-medium text-text-secondary">
-          {t("grade")}
-        </label>
-        <SelectInput
+      <FilterField label={t("grade")} htmlFor="filter-gradeId">
+        <Select
           id="filter-gradeId"
           name="gradeId"
           defaultValue={gradeId}
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          submitOnChange
         >
           <option value="">{allLabel}</option>
           {grades.map((option) => (
@@ -86,8 +78,8 @@ export function ClassFilters({
               {option.label}
             </option>
           ))}
-        </SelectInput>
-      </div>
+        </Select>
+      </FilterField>
     </form>
   );
 }

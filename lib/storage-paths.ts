@@ -14,8 +14,11 @@
 
 export const AVATARS_BUCKET = "avatars";
 export const ID_CARDS_BUCKET = "id-cards";
+/** Centre logos (SEC-2a, D-25 (b)) — private like the others, served signed. */
+export const LOGOS_BUCKET = "logos";
 
 export type PeopleBucket = typeof AVATARS_BUCKET | typeof ID_CARDS_BUCKET;
+export type StorageBucket = PeopleBucket | typeof LOGOS_BUCKET;
 
 export class StoragePathError extends Error {
   readonly path: string;
@@ -81,6 +84,31 @@ export function assertPathInCenter(centerId: string, path: string): string {
   return path;
 }
 
+export type RasterImageType = "image/png" | "image/jpeg" | "image/webp";
+
+/**
+ * The image type the **bytes** say this is (SEC-54) — never the client's
+ * `File.type`, which is whatever the browser (or an attacker) claims. PNG,
+ * JPEG and WebP only: no SVG (it is a document that can carry script), no
+ * GIF, nothing else. Returns null for anything that is not one of the three.
+ */
+export function sniffImageType(bytes: Uint8Array): RasterImageType | null {
+  const at = (offset: number, ...expected: number[]) =>
+    expected.every((value, index) => bytes[offset + index] === value);
+  if (bytes.length >= 8 && at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (
+    bytes.length >= 12 &&
+    at(0, 0x52, 0x49, 0x46, 0x46) && // "RIFF"
+    at(8, 0x57, 0x45, 0x42, 0x50) // "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
+
 /** Extension for an accepted photo upload, or null if the type is not allowed. */
 export function photoExtensionFor(mimeType: string): string | null {
   switch (mimeType) {
@@ -95,7 +123,16 @@ export function photoExtensionFor(mimeType: string): string | null {
   }
 }
 
-export const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+/**
+ * About 1 MB (SEC-64, D-27 (b)) — under Next's default 1 MB Server Action
+ * body once the form's other fields are counted, so the limit a person sees is
+ * the one that applies. The photo form shrinks a larger picture in the
+ * browser before it is sent (`components/center/resize-image.ts`).
+ */
+export const MAX_PHOTO_BYTES = 1000 * 1024;
+
+/** A centre logo (D-25): small, raster, uploaded by a platform admin. */
+export const MAX_LOGO_BYTES = 512 * 1024;
 
 /**
  * A student's photo. The filename stem is the StudentProfile id, which is what
@@ -112,6 +149,23 @@ export function studentPhotoPath(
     centerId,
     `${studentProfileId}.${version}.${extension}`,
   );
+}
+
+/** A centre's logo; the version suffix busts any cached copy when replaced. */
+export function centerLogoPath(centerId: string, extension: string, version: string): string {
+  return centerObjectPath(centerId, `logo.${version}.${extension}`);
+}
+
+/**
+ * The `src` the UI renders for a centre logo (D-25 (b)): the app's own logo
+ * route, which mints a short-lived signed URL for exactly this centre's
+ * object — never a stored URL, never a public bucket. The stored path's
+ * version is in the query so a replaced logo is not served from cache.
+ */
+export function centerLogoSrc(center: { id: string; logoPath: string | null }): string | null {
+  if (!center.logoPath) return null;
+  const version = center.logoPath.split("/").pop() ?? "";
+  return `/api/logos/${encodeURIComponent(center.id)}?v=${encodeURIComponent(version)}`;
 }
 
 /** A generated ID card. Deterministic: regenerating replaces the same object. */

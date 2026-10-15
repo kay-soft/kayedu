@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
+import { Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { SessionDescriptionForm } from "@/app/[locale]/(teacher)/teacher/sessions/[id]/description-form";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
+import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { PageHeader } from "@/components/shared/page-header";
-import { FormMessage } from "@/components/shared/form-message";
+import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -13,29 +15,33 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
-import { sessionReceiptTotals } from "@/lib/db/payments";
 import { scoped } from "@/lib/db/scoped";
-import { deriveSessionDisplayStatus, sessionDisplayName } from "@/lib/db/sessions";
-import { formatDate, formatMoney } from "@/lib/format";
+import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
+import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
+import { sessionDisplayName, sessionKind } from "@/lib/session-label";
+import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 
 const STATUS_BADGE = {
   SCHEDULED: "info",
   LIVE: "success",
   COMPLETED: "neutral",
   CANCELLED: "danger",
+  RESCHEDULED: "warning",
 } as const;
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
   LATE: "warning",
   ABSENT: "danger",
-  EXCUSED: "info",
 } as const;
 
 /**
@@ -58,6 +64,10 @@ export default async function TeacherSessionDetailPage({
   const { id } = await params;
 
   const db = scoped(ctx);
+  const owned = await db.sessions.findById(id);
+  if (!owned || owned.teacherId !== ctx.user.id) notFound();
+  // R2's lazy end-of-day close, on read (lib/db/session-lifecycle.ts).
+  await closeSessionIfDayOver(prisma, ctx.center.id, id);
   const session = await db.sessions.findDetailById(id);
   if (!session || session.teacherId !== ctx.user.id) notFound();
 
@@ -67,7 +77,9 @@ export default async function TeacherSessionDetailPage({
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  const totals = await sessionReceiptTotals(prisma, ctx.center.id, session.id);
+  // D-14 — the session's own frozen timezone.
+  const timeZone = sessionTimeZone(session, ctx.settings?.timezone ?? DEFAULT_TIMEZONE);
+  const receipt = await loadSessionReceiptView(ctx.center.id, session);
 
   const roster = await Promise.all(
     session.attendees
@@ -78,8 +90,9 @@ export default async function TeacherSessionDetailPage({
         studentCode: attendee.studentProfile!.studentCode,
         status: attendee.attendanceStatus,
         isDropIn: attendee.isDropIn,
+        // An absence streak is per class; a one-time session (R5) has none.
         consecutiveAbsences:
-          attendee.attendanceStatus === "ABSENT"
+          attendee.attendanceStatus === "ABSENT" && session.classGroupId
             ? await consecutiveAbsenceCount(
                 prisma,
                 ctx.center.id,
@@ -91,8 +104,14 @@ export default async function TeacherSessionDetailPage({
       })),
   );
 
-  const displayStatus = deriveSessionDisplayStatus(session, new Date());
-  const className = sessionDisplayName({ classGroup: session.classGroup });
+  const displayStatus = deriveSessionDisplayStatus(
+    session,
+    new Date(),
+    timeZone,
+  );
+  const className = sessionDisplayName(locale, session);
+  // A class session's grade is its class's; a one-time session's is its own (R5).
+  const grade = session.classGroup ? session.classGroup.grade : session.grade;
   const absentCount = roster.filter((row) => row.status === "ABSENT").length;
 
   return (
@@ -100,24 +119,19 @@ export default async function TeacherSessionDetailPage({
       <PageHeader
         title={className}
         description={t("detailSubtitle", {
-          grade: session.classGroup.grade?.name ?? tCommon("none"),
+          grade: catalogLabelWithSelection(locale, grade) ?? tCommon("none"),
           date: formatDate(session.date, locale),
         })}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <SessionKindBadge kind={sessionKind(session)} />
             <Badge variant={STATUS_BADGE[displayStatus]}>{tStatus(displayStatus)}</Badge>
-            <Link
-              href={ROUTES.teacherSessionPrint(session.id)}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            <LinkButton href={ROUTES.teacherSessionPrint(session.id)}>
               {t("printAction")}
-            </Link>
-            <Link
-              href={ROUTES.teacherSessions}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
+            </LinkButton>
+            <LinkButton href={ROUTES.teacherSessions}>
               {t("backToList")}
-            </Link>
+            </LinkButton>
           </div>
         }
       />
@@ -133,7 +147,7 @@ export default async function TeacherSessionDetailPage({
             </CardHeader>
             <CardContent>
               {roster.length === 0 ? (
-                <p className="text-sm text-text-muted">{t("roster.empty")}</p>
+                <EmptyState compact icon={<Users />} title={t("roster.empty")} description={t("roster.emptyHint")} />
               ) : (
                 <ul className="flex flex-col gap-2">
                   {roster.map((row) => (
@@ -150,7 +164,7 @@ export default async function TeacherSessionDetailPage({
                           {row.isDropIn ? <span>{t("roster.dropIn")}</span> : null}
                         </p>
                         {row.status === "ABSENT" && row.consecutiveAbsences >= 2 ? (
-                          <p className="mt-1 text-xs font-medium text-danger">
+                          <p className="mt-1 text-xs font-medium text-danger-fg">
                             {t("roster.consecutiveAbsentAlert", {
                               count: row.consecutiveAbsences,
                             })}
@@ -170,7 +184,12 @@ export default async function TeacherSessionDetailPage({
           <Card>
             <CardHeader>
               <CardTitle>{t("description.title")}</CardTitle>
-              <CardDescription>{t("description.hint")}</CardDescription>
+              <CardDescription>
+                {/* M10's edit deadline, as this branch set it (SYS: the copy used to say none existed). */}
+                {ctx.settings?.teacherEditDeadlineHours
+                  ? t("description.hintDeadline", { hours: ctx.settings.teacherEditDeadlineHours })
+                  : t("description.hintNoDeadline")}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <SessionDescriptionForm
@@ -180,14 +199,6 @@ export default async function TeacherSessionDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("uploads.title")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <FormMessage tone="info">{t("uploads.comingSoon")}</FormMessage>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="flex flex-col gap-6">
@@ -197,9 +208,15 @@ export default async function TeacherSessionDetailPage({
             </CardHeader>
             <CardContent className="flex flex-col gap-2 text-sm">
               <div className="flex justify-between gap-3">
+                <span className="text-text-secondary">{t("fields.date")}</span>
+                <span className="font-medium text-text-primary">
+                  {formatDate(session.date, locale)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.time")}</span>
-                <span className="font-medium tabular-nums text-text-primary" dir="ltr">
-                  {session.startTime}–{session.endTime}
+                <span className="font-medium tabular-nums text-text-primary">
+                  {formatTimeRange(session.startTime, session.endTime, locale)}
                 </span>
               </div>
               <div className="flex justify-between gap-3">
@@ -211,7 +228,7 @@ export default async function TeacherSessionDetailPage({
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.grade")}</span>
                 <span className="font-medium text-text-primary">
-                  {session.classGroup.grade?.name ?? tCommon("none")}
+                  {catalogLabelWithSelection(locale, grade) ?? tCommon("none")}
                 </span>
               </div>
               <div className="flex justify-between gap-3">
@@ -230,10 +247,21 @@ export default async function TeacherSessionDetailPage({
             </CardHeader>
             <CardContent>
               {/* This is the teacher's own session — their earning and the
-                  center's cut on it are always shown here (spec §4.2 item 2),
-                  unlike the center staff receipt which gates on
-                  center.profit.view (a different, broader permission). */}
-              <SessionReceipt totals={totals} showProfit locale={locale} />
+                  center's cut on it are shown here (spec §4.2 item 2) under
+                  the teacher's own `analytics.own.view` (TEACHER baseline),
+                  never the centre staff's broader center.profit.view. SEC-15:
+                  a centre that revokes the cell hides the money. */}
+              <SessionReceipt
+                totals={receipt.totals}
+                showProfit={ctxCan(ctx, "analytics.own.view")}
+                locale={locale}
+                timeZone={timeZone}
+                closure={receipt.closure}
+                changes={receipt.changes}
+                voids={receipt.voids}
+                refunds={receipt.refunds}
+                unpaid={receipt.unpaid}
+              />
             </CardContent>
           </Card>
         </div>

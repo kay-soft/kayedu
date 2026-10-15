@@ -1,4 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
+import { BookOpen } from "lucide-react";
 
 import { ClassRequestForm } from "@/app/[locale]/(teacher)/teacher/classes/class-request-form";
 import { PageHeader } from "@/components/shared/page-header";
@@ -12,7 +13,8 @@ import {
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatTimeRange } from "@/lib/format";
+import { EmptyState } from "@/components/shared/empty-state";
 
 const STATUS_BADGE = {
   PENDING: "warning",
@@ -26,8 +28,7 @@ type RequestPayload = {
   dayOfWeek: number;
   startTime: string;
   endTime: string;
-  capacity: number;
-  attendanceRequired: boolean;
+  // R3: pre-R3 requests may still carry `capacity` in their JSON — ignored.
   lateThresholdMinutes: number;
   note?: string | null;
 };
@@ -50,13 +51,22 @@ export default async function TeacherClassesPage() {
   const locale = await getLocale();
 
   const [subjects, grades, requests] = await Promise.all([
-    db.subjects.list({ active: true }),
-    db.grades.list({ active: true }),
+    db.subjects.list(),
+    db.grades.list(),
     db.changeRequests.list({ requestedBy: ctx.user.id, type: "NEW_CLASS" }),
   ]);
 
-  const subjectOptions = subjects.map((subject) => ({ value: subject.id, label: subject.name }));
-  const gradeOptions = grades.map((grade) => ({ value: grade.id, label: grade.name }));
+  // The form offers only entries still on offer; a past request keeps naming
+  // the entry it asked for even if the platform has since deactivated it (R8),
+  // so the history lookup reads the full lists.
+  const subjectOptions = subjects
+    .filter((subject) => subject.active && subject.catalogActive)
+    .map((subject) => ({ value: subject.id, label: subject.name }));
+  const gradeOptions = grades
+    .filter((grade) => grade.active && grade.catalogActive)
+    .map((grade) => ({ value: grade.id, label: grade.name }));
+  const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));
+  const gradeNameById = new Map(grades.map((grade) => [grade.id, grade.name]));
   const dayNames = tDays.raw("dayNames") as string[];
 
   const canRequest =
@@ -85,13 +95,13 @@ export default async function TeacherClassesPage() {
         </CardHeader>
         <CardContent>
           {requests.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState icon={<BookOpen />} title={t("empty")} description={t("emptyHint")} />
           ) : (
             <ul className="flex flex-col gap-2">
               {requests.map((request) => {
                 const payload = request.payload as unknown as RequestPayload;
-                const subject = subjectOptions.find((s) => s.value === payload.subjectId);
-                const grade = gradeOptions.find((g) => g.value === payload.gradeId);
+                const subject = payload.subjectId ? subjectNameById.get(payload.subjectId) : undefined;
+                const grade = payload.gradeId ? gradeNameById.get(payload.gradeId) : undefined;
                 return (
                   <li
                     key={request.id}
@@ -99,14 +109,12 @@ export default async function TeacherClassesPage() {
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-text-primary">
-                        {[subject?.label, grade?.label].filter(Boolean).join(" · ") ||
+                        {[subject, grade].filter(Boolean).join(" · ") ||
                           tCommon("none")}
                       </p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                         <span>{dayNames[payload.dayOfWeek]}</span>
-                        <span dir="ltr">
-                          {payload.startTime}–{payload.endTime}
-                        </span>
+                        <span>{formatTimeRange(payload.startTime, payload.endTime, locale)}</span>
                         <span>{formatDate(request.createdAt, locale)}</span>
                       </p>
                     </div>

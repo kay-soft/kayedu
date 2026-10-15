@@ -14,8 +14,14 @@ import {
   seedLocalName,
 } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
-import { scoped, type ScopedDb } from "@/lib/db/scoped";
-import { claimStudentCode, studentDeleteBlockers } from "@/lib/db/students";
+import { revokeStaleParentLinks, verifyParentLinkPlaceholder } from "@/lib/db/parents";
+import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
+import {
+  claimStudentCode,
+  studentDeleteBlockers,
+  studentSearchWhere,
+} from "@/lib/db/students";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { scopedData } from "@/lib/db/tenant-scope";
 import {
   removeStoredObject,
@@ -24,6 +30,8 @@ import {
   uploadStudentPhoto,
 } from "@/lib/db/storage";
 import { fullName, localName } from "@/lib/identity";
+import { redirect } from "@/lib/i18n/navigation";
+import { normalizePhone } from "@/lib/phone";
 import { ROUTES } from "@/lib/routes";
 import {
   AVATARS_BUCKET,
@@ -40,7 +48,11 @@ import {
   studentPhotoSchema,
   studentUpdateSchema,
   type PeopleActionState,
+  type PhoneLookupResult,
 } from "@/lib/validation/people";
+import { verifyParentLinkSchema } from "@/lib/validation/parents";
+import { parseActionArgs, phoneLookupArgs, searchArgs } from "@/lib/validation/action-args";
+import { logBestEffort } from "@/lib/log";
 
 /**
  * Students (M3, revised). Every action follows docs/02 §7: getTenantContext()
@@ -89,13 +101,87 @@ function revalidateStudentPrintables(locale: string, studentId: string): void {
   revalidatePath(`/${locale}${ROUTES.centerStudentPaper(studentId)}`);
 }
 
-/** Re-resolves a form-supplied grade inside this center. */
+/**
+ * Re-resolves a form-supplied grade inside this center. A grade the platform
+ * has deactivated cannot be newly assigned (R8) — only kept, when it is the
+ * student's current one (`currentGradeId`).
+ */
 async function resolveGrade(
   db: ScopedDb,
   gradeId: string | null,
+  currentGradeId: string | null = null,
 ): Promise<{ ok: true; id: string | null } | { ok: false }> {
   if (gradeId === null) return { ok: true, id: null };
-  return (await db.grades.findById(gradeId)) ? { ok: true, id: gradeId } : { ok: false };
+  const grade = await db.grades.findById(gradeId);
+  if (!grade) return { ok: false };
+  if (!grade.catalogActive && gradeId !== currentGradeId) return { ok: false };
+  return { ok: true, id: gradeId };
+}
+
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+
+/**
+ * Bounded, server-checked results for the Students list's live search — the
+ * exact same `studentSearchWhere` the full-page search already uses, just
+ * capped short for a dropdown instead of paginated. Re-checks permission
+ * itself rather than trusting that the page that rendered the input did —
+ * every action in this file follows that rule.
+ */
+export async function searchStudentsTypeAheadAction(
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const scope = await studentScope();
+  if (!scope) return [];
+  const args = parseActionArgs(searchArgs, [query]);
+  if (!args) return [];
+  const [trimmed] = args;
+  if (trimmed.length < 2) return [];
+
+  const rows = await scope.db.students.search({
+    where: studentSearchWhere(trimmed),
+    take: 8,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    primary: fullName(localName(row, row.user)),
+    secondary: row.studentCode,
+    href: ROUTES.centerStudent(row.id),
+  }));
+}
+
+// ── Receptionist phone lookup (M18, spec §5.1) ──────────────────────────────
+// Explicitly NOT a raw "phone → full record" endpoint: it is the exact same
+// duplicate-match workflow (`resolveContact`/`describeMatch`) the add-student
+// form already runs on submit, just reachable from a phone alone, before the
+// rest of the form is filled in — minimum fields, rate-limited inside
+// `resolveContact` (the shared store, SEC-11), and a match still requires the
+// form's own explicit "link" submit to attach anything. Since SEC-2a (D-02) a
+// phone is never a link key, so a phone alone only ever finds someone who is
+// already a student here.
+
+export async function lookupPersonByPhoneAction(
+  phone: string,
+): Promise<PhoneLookupResult> {
+  const scope = await studentScope();
+  if (!scope) return { status: "notFound" };
+  const args = parseActionArgs(phoneLookupArgs, [phone]);
+  if (!args) return { status: "notFound" };
+
+  const normalized = normalizePhone(args[0]);
+  if (!normalized) return { status: "notFound" };
+
+  const resolution = await resolveContact(
+    { centerId: scope.ctx.center.id, actorUserId: scope.ctx.user.id, adding: "student" },
+    { phone: normalized },
+  );
+  if (resolution.kind === "rateLimited") return { status: "rateLimited" };
+  if (resolution.kind !== "matched") return { status: "notFound" };
+
+  const match = await describeMatch(scope.ctx.center.id, resolution.match, {
+    phone: normalized,
+  });
+  return { status: "found", match };
 }
 
 // ── Add ────────────────────────────────────────────────────────────────────
@@ -130,22 +216,28 @@ export async function createStudentAction(
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
 
   const contact = { email, phone };
-  const resolution = await resolveContact(contact);
+  const resolution = await resolveContact(
+    { centerId, actorUserId: scope.ctx.user.id, adding: "student" },
+    contact,
+  );
+  if (resolution.kind === "rateLimited") return { error: "rateLimited" };
 
   // Two different people carry these details — merging identities is a manual,
   // audited admin action (docs/02 §3), not something this form decides.
   if (resolution.kind === "conflict") return { error: "contactConflict" };
 
   let userId: string | null = null;
+  let described: Awaited<ReturnType<typeof describeMatch>> | null = null;
 
   if (resolution.kind === "matched") {
     const match = await describeMatch(centerId, resolution.match, contact);
+    described = match;
 
     // Show the person before linking anything (spec §5).
     if (linkUserId !== resolution.match.user.id) {
       return { status: "matchFound", match };
     }
-    if (match.existingHere === "student") {
+    if (match.existingHere === "student" || !match.linkable) {
       return { error: "alreadyStudent", match };
     }
     userId = resolution.match.user.id;
@@ -154,9 +246,10 @@ export async function createStudentAction(
   }
 
   // The name to seed onto this center's record: the existing person's real
-  // name when linking to a match, or the form's own input for a brand-new
-  // person (docs/01 §6) — editable here immediately either way, no lock.
-  const name = seedLocalName(resolution, { firstName, lastName });
+  // name when linking to a match (unless it is masked, D-08), or the form's
+  // own input for a brand-new person (docs/01 §6) — editable here immediately
+  // either way, no lock.
+  const name = seedLocalName(resolution, { firstName, lastName }, described);
 
   // The code claim, the (possible) new person, and the profile all happen in
   // one transaction: a rollback for any reason undoes the claim too, so a
@@ -188,6 +281,10 @@ export async function createStudentAction(
           parentLastName,
           parentPhone,
           parentAltPhone,
+          // A receptionist fills the same fields a self-registering student
+          // would later complete themselves (M18, spec §4.3 item 4) — this
+          // profile is already whole, so it never triggers that one-time gate.
+          profileCompletedAt: new Date(),
         }),
       });
     });
@@ -249,7 +346,7 @@ export async function updateStudentAction(
   const student = await scope.db.students.findDetailById(studentProfileId);
   if (!student) return NOT_FOUND;
 
-  const grade = await resolveGrade(scope.db, gradeId);
+  const grade = await resolveGrade(scope.db, gradeId, student.gradeId);
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
 
   // This center's own record — name included — is always editable, with no
@@ -267,6 +364,19 @@ export async function updateStudentAction(
     parentPhone,
     parentAltPhone,
   });
+
+  // D-04 (a), SEC-04: a parent phone that is no longer on the record takes
+  // every link it produced with it — revoked and audited, never left to read.
+  if (
+    normalizePhone(parentPhone) !== normalizePhone(student.parentPhone) ||
+    normalizePhone(parentAltPhone) !== normalizePhone(student.parentAltPhone)
+  ) {
+    await revokeStaleParentLinks(prisma, {
+      centerId: scope.ctx.center.id,
+      studentProfileId: student.id,
+      actorUserId: scope.ctx.user.id,
+    });
+  }
 
   revalidateStudentDetail(locale, student.id);
   revalidateStudentPrintables(locale, student.id);
@@ -316,8 +426,9 @@ export async function deleteStudentAction(
   if (!student) return NOT_FOUND;
 
   // Attendance and money are append-only (CLAUDE.md rule 2): a student with
-  // history is deactivated, not deleted.
-  if ((await studentDeleteBlockers(db, student.id)) > 0) {
+  // history is deactivated, not deleted. The whole history counts, not just
+  // what the visibility window shows (SEC-62's "integrity" opt-out).
+  if ((await studentDeleteBlockers(scopedIgnoringVisibilityWindow(ctx, "integrity"), student.id)) > 0) {
     return { error: "studentInUse" };
   }
 
@@ -328,13 +439,13 @@ export async function deleteStudentAction(
       ctx.center.id,
       AVATARS_BUCKET,
       student.photoUrl,
-    ).catch(() => undefined);
+    ).catch(logBestEffort("deleted student's photo clean-up"));
   }
   await removeStoredObject(
     ctx.center.id,
     ID_CARDS_BUCKET,
     studentIdCardPath(ctx.center.id, student.id),
-  ).catch(() => undefined);
+  ).catch(logBestEffort("deleted student's ID card clean-up"));
 
   await db.students.remove(student.id);
 
@@ -352,12 +463,18 @@ export async function deleteStudentAction(
     before: {
       userId: student.userId,
       studentCode: student.studentCode,
-      name: fullName(localName(student, student.user)),
     },
     after: { personDeleted, blocksRemoved: blocks.length },
   });
 
   revalidateStudentList(locale);
+  // The delete control lives on this very record's own detail page
+  // (/students/[id]) — without a redirect, Next's automatic post-action
+  // refresh of that same route re-fetches the now-deleted row and 404s
+  // (docs/00-master-product-spec.md §7.1's "student-delete 404" gap). Send
+  // the user back to the list instead of leaving them staring at a 404 for
+  // the record they just removed.
+  redirect({ href: ROUTES.centerStudents, locale });
   return { status: "deleted" };
 }
 
@@ -383,6 +500,8 @@ export async function promoteGradeAction(
     db.grades.findById(toGradeId),
   ]);
   if (!from || !to) return { fieldErrors: { fromGradeId: "notFound" } };
+  // Students may be moved *out of* a grade the platform has deactivated, never into one (R8).
+  if (!to.catalogActive) return { fieldErrors: { toGradeId: "notFound" } };
 
   const result = await db.students.promoteGrade(from.id, to.id);
   if (result.count === 0) return { error: "noStudentsToPromote" };
@@ -393,8 +512,8 @@ export async function promoteGradeAction(
     action: "student.promote",
     entityType: "Grade",
     entityId: from.id,
-    before: { gradeId: from.id, gradeName: from.name },
-    after: { gradeId: to.id, gradeName: to.name, students: result.count },
+    before: { gradeId: from.id },
+    after: { gradeId: to.id, students: result.count },
   });
 
   revalidateStudentList(locale);
@@ -417,7 +536,7 @@ export async function setStudentGradeAction(
   const student = await db.students.findById(studentProfileId);
   if (!student) return NOT_FOUND;
 
-  const grade = await resolveGrade(db, gradeId);
+  const grade = await resolveGrade(db, gradeId, student.gradeId);
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
   if (student.gradeId === grade.id) return { status: "saved" };
 
@@ -470,9 +589,22 @@ export async function uploadStudentPhotoAction(
   await scope.db.students.update(student.id, { photoUrl: uploaded.path });
   if (previous && previous !== uploaded.path) {
     await removeStoredObject(scope.ctx.center.id, AVATARS_BUCKET, previous).catch(
-      () => undefined,
+      logBestEffort("replaced photo clean-up"),
     );
   }
+
+  // D-28: the photo is reception's anti-impersonation check (§5.1), so every
+  // change to it is audited — who, when, and whether one was replaced. No
+  // storage path goes into the log.
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "student.photo.update",
+    entityType: "StudentProfile",
+    entityId: student.id,
+    before: { hadPhoto: Boolean(previous) },
+    after: { hasPhoto: true },
+  });
 
   revalidateStudentPrintables(parsed.data.locale, student.id);
   return { status: "saved" };
@@ -496,8 +628,18 @@ export async function removeStudentPhotoAction(
     scope.ctx.center.id,
     AVATARS_BUCKET,
     student.photoUrl,
-  ).catch(() => undefined);
+  ).catch(logBestEffort("removed photo clean-up"));
   await scope.db.students.update(student.id, { photoUrl: null });
+
+  await writeAuditLog({
+    centerId: scope.ctx.center.id,
+    actorUserId: scope.ctx.user.id,
+    action: "student.photo.remove",
+    entityType: "StudentProfile",
+    entityId: student.id,
+    before: { hadPhoto: true },
+    after: { hasPhoto: false },
+  });
 
   revalidateStudentPrintables(parsed.data.locale, student.id);
   return { status: "deleted" };
@@ -543,4 +685,48 @@ export async function generateIdCardAction(
   return downloadUrl
     ? { status: "generated", downloadUrl }
     : { error: "storage" };
+}
+
+// ── Parent links (M16) ──────────────────────────────────────────────────────
+
+/**
+ * ─────────────────────────────── OD-6 PLACEHOLDER ───────────────────────────
+ * See `lib/db/parents.ts`'s `verifyParentLinkPlaceholder` — this Server
+ * Action is the manual, staff-facing, audited seam it describes, NOT OD-6's
+ * real verification mechanism. `parent.link.manage` is a MANAGER_BASELINE
+ * permission (OWNER/MANAGER by default, configurable like any other post-M12
+ * action) — a Receptionist cannot flip this by direct call any more than by
+ * a hidden button.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export async function verifyParentLinkAction(
+  _state: PeopleActionState,
+  formData: FormData,
+): Promise<PeopleActionState> {
+  const ctx = await getTenantContext("center");
+  if (!ctxCan(ctx, "parent.link.manage")) return FORBIDDEN;
+
+  const parsed = verifyParentLinkSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const { parentLinkId, locale } = parsed.data;
+  const result = await verifyParentLinkPlaceholder(prisma, {
+    parentLinkId,
+    centerId: ctx.center.id,
+    verifiedByUserId: ctx.user.id,
+  });
+  if (!result.ok) return { error: result.error };
+
+  await writeAuditLog({
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    action: "parentLink.verify",
+    entityType: "ParentLink",
+    entityId: result.linkId,
+    before: { status: "PENDING" },
+    after: { status: "VERIFIED" },
+  });
+
+  revalidateStudentDetail(locale, result.studentProfileId);
+  return { status: "saved" };
 }

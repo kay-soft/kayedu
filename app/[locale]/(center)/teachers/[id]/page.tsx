@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { GraduationCap, Phone } from "lucide-react";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import {
   BlockList,
@@ -7,22 +8,25 @@ import {
   type BlockedStudent,
 } from "@/app/[locale]/(center)/teachers/[id]/block-list";
 import { TeacherProfileForm } from "@/app/[locale]/(center)/teachers/[id]/teacher-profile-form";
-import { SearchBox } from "@/components/center/search-box";
-import { DetailRow } from "@/components/shared/field";
-import { FormMessage } from "@/components/shared/form-message";
-import { PageHeader } from "@/components/shared/page-header";
-import { Badge } from "@/components/ui/badge";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  deleteTeacherAction,
+  searchBlockCandidatesAction,
+} from "@/app/[locale]/(center)/teachers/actions";
+import { DeleteRecordCard } from "@/components/center/delete-record-card";
+import { TypeAheadSearch } from "@/components/center/type-ahead-search";
+import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
+import { EmptyState } from "@/components/shared/empty-state";
+import { DetailRow } from "@/components/shared/field";
+import { PageHeader } from "@/components/shared/page-header";
+import { PersonAvatar } from "@/components/shared/person-avatar";
+import { Badge } from "@/components/ui/badge";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { countOtherCenterRelations } from "@/lib/db/identity";
+import { catalogLabelWithSelection } from "@/lib/catalog";
+import { prisma } from "@/lib/db/client";
+import { teacherRatingAverage } from "@/lib/db/ratings";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
+import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -32,6 +36,12 @@ const MAX_BLOCK_CANDIDATES = 8;
 /**
  * One teacher at this center (spec §4.1 item 2): their record, the classes they
  * carry, and their student block-list.
+ *
+ * R10b layout (docs/04 §5 "Detail page"): a header with the teacher's first
+ * letter, phone and active state; a main column of the record (including the
+ * trusted-teacher setting) and the classes they teach; a side column of the
+ * rating (average only) and the block list; the danger zone set apart at the
+ * foot.
  *
  * The id in the URL is a **membership** id and is resolved through the scoped
  * helper, so a teacher id from another center resolves to "not found" rather
@@ -57,11 +67,19 @@ export default async function TeacherDetailPage({
 
   const t = await getTranslations("Teachers");
   const tCommon = await getTranslations("Settings.common");
+  const locale = await getLocale();
 
-  const [classes, blocks, otherRelations] = await Promise.all([
+  // Security fix 16 (M12, docs/00-master-product-spec.md §5 "Teacher detail
+  // leak"): this page must never reveal which other centres this teacher
+  // works at, so nothing here queries across centres — everything below is
+  // scoped to this center alone.
+  const [classes, blocks, rating] = await Promise.all([
     db.classGroups.list({ teacherId: teacher.userId }),
     db.studentBlocks.list({ scope: "TEACHER", refId: teacher.userId }),
-    countOtherCenterRelations(teacher.userId, ctx.center.id),
+    // M17, spec §5 "Teacher ratings": platform-wide by the teacher's global
+    // id, average-only — the same shape the teacher's own dashboard and
+    // Discover cards read, never a centre-privileged view of the count.
+    teacherRatingAverage(prisma, teacher.userId),
   ]);
 
   // A block stores the student's *User* id; the name shown is this center's
@@ -108,77 +126,57 @@ export default async function TeacherDetailPage({
         }))
       : [];
 
+  const personName = fullName(localName(teacher, teacher.user));
+  const canBlock = ctxCan(ctx, "student.block");
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={fullName(localName(teacher, teacher.user))}
+        title={personName}
         description={t("detailSubtitle")}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
+        back={{ href: ROUTES.centerTeachers, label: t("backToList") }}
+        leading={<PersonAvatar name={personName} />}
+        meta={
+          <>
             <Badge variant={teacher.active ? "success" : "neutral"}>
               {teacher.active ? tCommon("active") : tCommon("inactive")}
             </Badge>
-            <Link
-              href={ROUTES.centerTeachers}
-              className="inline-flex h-11 items-center rounded-lg border border-border px-4 text-sm text-text-secondary hover:bg-surface-subtle"
-            >
-              {t("backToList")}
-            </Link>
-          </div>
+            {teacher.phone ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Phone className="size-4 text-text-muted" aria-hidden />
+                <span dir="ltr">{teacher.phone}</span>
+              </span>
+            ) : null}
+          </>
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("profileTitle")}</CardTitle>
-            <CardDescription>{t("profileDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <TeacherProfileForm
-              membershipId={teacher.id}
-              name={localName(teacher, teacher.user)}
-              contact={{
-                email: teacher.email ?? "",
-                phone: teacher.phone ?? "",
-                altPhone: teacher.altPhone ?? "",
-              }}
-              isTrustedTeacher={teacher.isTrustedTeacher}
-              canDelete={ctxCan(ctx, "teacher.delete")}
-            />
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("identityTitle")}</CardTitle>
-              <CardDescription>{t("identityDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DetailRow
-                label={t("fields.otherCenters")}
-                value={String(otherRelations)}
+      <DetailLayout
+        main={
+          <>
+            <DetailCard title={t("profileTitle")} description={t("profileDescription")}>
+              <TeacherProfileForm
+                membershipId={teacher.id}
+                name={localName(teacher, teacher.user)}
+                contact={{
+                  email: teacher.email ?? "",
+                  phone: teacher.phone ?? "",
+                  altPhone: teacher.altPhone ?? "",
+                }}
+                isTrustedTeacher={teacher.isTrustedTeacher}
               />
-              <DetailRow
-                label={t("fields.accountClaimed")}
-                value={
-                  teacher.user.authId ? tCommon("active") : tCommon("inactive")
-                }
-              />
-            </CardContent>
-          </Card>
+            </DetailCard>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("classesTitle")}</CardTitle>
-              <CardDescription>{t("classesDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent>
+            <DetailCard title={t("classesTitle")} description={t("classesDescription")}>
               {classes.length === 0 ? (
-                <FormMessage tone="info">{t("classesEmpty")}</FormMessage>
+                <EmptyState
+                  compact
+                  icon={<GraduationCap />}
+                  title={t("classesEmpty")}
+                  description={t("classesEmptyHint")}
+                />
               ) : (
-                <ul className="flex flex-col gap-2">
+                <ul className="grid gap-2 sm:grid-cols-2">
                   {classes.map((classGroup) => (
                     <li
                       key={classGroup.id}
@@ -188,10 +186,10 @@ export default async function TeacherDetailPage({
                         href={ROUTES.centerClass(classGroup.id)}
                         className="text-sm font-medium text-brand hover:underline"
                       >
-                        {classGroup.subject?.name ?? tCommon("none")}
+                        {classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : tCommon("none")}
                       </Link>
                       <span className="text-xs text-text-muted">
-                        {[classGroup.grade?.name, classGroup.room?.name]
+                        {[classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null, classGroup.room?.name]
                           .filter(Boolean)
                           .join(" · ") || tCommon("none")}
                       </span>
@@ -199,34 +197,61 @@ export default async function TeacherDetailPage({
                   ))}
                 </ul>
               )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </DetailCard>
+          </>
+        }
+        side={
+          <>
+            <DetailCard
+              title={t("identityTitle")}
+              description={t("identityDescription")}
+              contentClassName="gap-0"
+            >
+              <DetailRow
+                label={t("fields.accountClaimed")}
+                // A yes/no fact, not an active/inactive state — "Inactive" (in
+                // Arabic, "suspended") read as if the teacher were barred.
+                value={teacher.user.authId ? t("fields.accountClaimedYes") : t("fields.accountClaimedNo")}
+              />
+              <DetailRow
+                label={t("rating.title")}
+                value={rating.average !== null ? formatRating(rating.average, locale) : t("rating.none")}
+              />
+            </DetailCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("blocks.title")}</CardTitle>
-          <CardDescription>{t("blocks.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {ctxCan(ctx, "student.block") ? (
-            <SearchBox
-              value={query}
-              label={t("blocks.searchLabel")}
-              placeholder={t("blocks.searchPlaceholder")}
-              submitLabel={t("blocks.searchSubmit")}
+            <DetailCard title={t("blocks.title")} description={t("blocks.description")}>
+              {canBlock ? (
+                <TypeAheadSearch
+                  value={query}
+                  label={t("blocks.searchLabel")}
+                  placeholder={t("blocks.searchPlaceholder")}
+                  submitLabel={t("blocks.searchSubmit")}
+                  search={searchBlockCandidatesAction.bind(null, teacher.id)}
+                />
+              ) : null}
+
+              <BlockList
+                teacherUserId={teacher.userId}
+                blocked={blocked}
+                candidates={canBlock ? candidates : []}
+                query={canBlock ? query : ""}
+              />
+            </DetailCard>
+          </>
+        }
+        below={
+          ctxCan(ctx, "teacher.delete") ? (
+            <DeleteRecordCard
+              action={deleteTeacherAction}
+              idField="membershipId"
+              recordId={teacher.id}
+              title={t("danger.title")}
+              description={t("danger.description")}
+              confirmMessage={t("deleteConfirm")}
             />
-          ) : null}
-
-          <BlockList
-            teacherUserId={teacher.userId}
-            blocked={blocked}
-            candidates={ctxCan(ctx, "student.block") ? candidates : []}
-            query={ctxCan(ctx, "student.block") ? query : ""}
-          />
-        </CardContent>
-      </Card>
+          ) : null
+        }
+      />
     </div>
   );
 }

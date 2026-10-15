@@ -4,7 +4,8 @@ import { z } from "zod";
 // resolvable outside the Next.js runtime, so `npm run check:people` can
 // exercise the real schemas (same reasoning as ./settings.ts).
 import { localeSchema } from "./auth.ts";
-import { normalizeEmail, normalizePhone } from "../identity.ts";
+import { normalizeEmail } from "../identity.ts";
+import { optionalPhone } from "./phone-schema.ts";
 
 /**
  * Teacher & student schemas (M3, revised). Every Server Action parses its
@@ -43,25 +44,6 @@ const optionalEmail = z
     (value) => value === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
     "invalidEmail",
   );
-
-/**
- * Optional Egyptian mobile, stored in one canonical `01XXXXXXXXX` form so the
- * duplicate match cannot be dodged by typing `+20…` instead (spec §5).
- */
-const optionalPhone = z
-  .string()
-  .trim()
-  .max(20, "tooLong")
-  .optional()
-  .transform((value, ctx) => {
-    if (!value || value.length === 0) return null;
-    const normalized = normalizePhone(value);
-    if (!normalized) {
-      ctx.addIssue({ code: "custom", message: "invalidPhone" });
-      return z.NEVER;
-    }
-    return normalized;
-  });
 
 /** An unchecked checkbox is absent from FormData, which means false. */
 const checkbox = z
@@ -138,7 +120,13 @@ export const membershipActiveSchema = z.object({
 
 // ── Students ───────────────────────────────────────────────────────────────
 
-const studentFields = {
+/**
+ * Exported so the student portal's own profile-completion form (M18, spec
+ * §4.3 item 4) uses the exact same field set a receptionist's add-student
+ * form does — "the same fields... filled in by the student themselves" is
+ * one shared schema, not a second one that could quietly drift from it.
+ */
+export const studentFields = {
   firstName: personName,
   lastName: personName,
   email: optionalEmail,
@@ -223,7 +211,6 @@ export const studentPhotoSchema = z.object({
 // ── List pagination (students & teachers dashboards) ───────────────────────
 
 export const DEFAULT_PAGE_SIZE = 25;
-const MAX_PAGE_SIZE = 100;
 
 /**
  * A page number from the URL — never trusted raw. Clamped rather than
@@ -232,13 +219,6 @@ const MAX_PAGE_SIZE = 100;
 export function parsePageParam(value: string | undefined): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-}
-
-export function parsePageSizeParam(value: string | undefined): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 && parsed <= MAX_PAGE_SIZE
-    ? parsed
-    : DEFAULT_PAGE_SIZE;
 }
 
 // ── Action state ───────────────────────────────────────────────────────────
@@ -250,7 +230,12 @@ export function parsePageSizeParam(value: string | undefined): number {
  */
 export type MatchCandidate = {
   userId: string;
-  name: string;
+  /**
+   * Null when the person is known only outside this centre's organisation
+   * (SEC-11 / D-08 (b)) — the panel then says "an account with this contact
+   * exists" without naming anyone.
+   */
+  name: string | null;
   /**
    * The contact value(s) as typed into *this* form — echoed back so staff can
    * sanity-check the match, not pulled from another center's local record
@@ -264,6 +249,12 @@ export type MatchCandidate = {
   existingHere: "student" | "teacher" | "staff" | null;
   /** The StudentProfile id when `existingHere === "student"` — links to them. */
   existingProfileId?: string;
+  /**
+   * May staff attach a new record to this person (SEC-2a, D-01/D-02 —
+   * `lib/db/identity.ts`'s `isLinkableMatch`)? False for a match that is only
+   * reported because they already hold this relationship here.
+   */
+  linkable: boolean;
 };
 
 /**
@@ -280,3 +271,14 @@ export type PeopleActionState = {
 };
 
 export const IDLE_PEOPLE_STATE: PeopleActionState = {};
+
+/**
+ * The receptionist phone-lookup's result (M18, spec §5.1) — reuses
+ * `MatchCandidate` (the same minimum-fields shape the add-forms' own
+ * duplicate-match panel already renders) rather than a new, richer shape a
+ * raw "phone → record" endpoint would return.
+ */
+export type PhoneLookupResult =
+  | { status: "found"; match: MatchCandidate }
+  | { status: "notFound" }
+  | { status: "rateLimited" };

@@ -1,12 +1,12 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { cancelReservationAction } from "@/app/[locale]/(student)/student/reservations/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { IDLE_STUDENT_STATE } from "@/lib/validation/student";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export function CancelReservationButton({
   centerId,
@@ -19,7 +19,7 @@ export function CancelReservationButton({
   const tErrors = useTranslations("StudentReservations.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(cancelReservationAction, IDLE_STUDENT_STATE);
+  const [state, formAction] = useGuardedActionState(cancelReservationAction, IDLE_STUDENT_STATE);
 
   if (state.status === "cancelled") return null;
 

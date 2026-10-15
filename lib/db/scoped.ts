@@ -1,30 +1,59 @@
 import type {
   EnrollmentStatus,
   Prisma,
+  PrismaClient,
   ReservationStatus,
   Role,
   SessionStatus,
 } from "@prisma/client";
-import { prisma } from "@/lib/db/client";
-import type { TenantContext } from "@/lib/auth/tenant";
+// Relative imports and an injected client (SYS): `npm run check:visibility`
+// calls the real helpers by direct call, outside Next (docs/02 §5). The app
+// passes the shared singleton through `scoped(ctx)`.
+import { prisma as sharedClient } from "./client.ts";
+import * as catalog from "./catalog.ts";
+import { CATALOG_OVERRIDE_SELECT, catalogLabel } from "../catalog.ts";
 import {
-  STUDENT_LIST_SELECT,
   TEACHER_LIST_SELECT,
-} from "@/lib/db/students";
+  studentListSelect,
+} from "./students.ts";
 import {
-  CLASS_DETAIL_INCLUDE,
-  CLASS_LIST_SELECT,
-} from "@/lib/db/classes";
+  classDetailInclude,
+  classListSelect,
+} from "./classes.ts";
 import {
-  SESSION_DETAIL_INCLUDE,
-  SESSION_LIST_SELECT,
-} from "@/lib/db/sessions";
+  sessionDetailInclude,
+  sessionListSelect,
+} from "./sessions.ts";
 import {
   requireScopedById,
   scopedData,
   scopedFindById,
   scopedWhere,
-} from "@/lib/db/tenant-scope";
+} from "./tenant-scope.ts";
+import { staffInvitationFilter, staffMembershipFilter } from "./staff-filter.ts";
+import { centreReadFloor } from "./visibility.ts";
+import { consecutiveAbsenceCount } from "./attendance.ts";
+import {
+  PAYMENT_METHOD_ORDER,
+  listActivePaymentMethods,
+} from "./payment-methods.ts";
+import { listSessionAttendanceChanges } from "./session-lifecycle.ts";
+import { loadRoomLinks } from "./room-sets.ts";
+import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
+import { listCenterTerms } from "./terms.ts";
+
+/**
+ * What a scoped data layer needs of the request's tenant context — a real
+ * `TenantContext` (`lib/auth/tenant.ts`) satisfies it; a gate builds one by
+ * hand.
+ */
+export type ScopeContext = {
+  center: { id: string };
+  user: { locale: string | null };
+  role: string;
+  isPlatformAdmin: boolean;
+  settings: { dataVisibilityDays: number; timezone: string } | null;
+};
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER: Role = "TEACHER";
@@ -46,11 +75,79 @@ const PENDING_RESERVATION: ReservationStatus = "PENDING";
  * Every helper below funnels through scopedWhere/scopedData, so a second (or
  * hundredth) center needs no code change — only its own rows.
  */
-export function scoped(ctx: TenantContext) {
+export function scoped(ctx: ScopeContext) {
+  return scopedWith(sharedClient, ctx);
+}
+
+/**
+ * `scoped(ctx)` over an explicit client — the dependency-injection seam
+ * (docs/02 §5): the app uses `scoped(ctx)`; a gate passes its own client.
+ */
+export function scopedWith(client: PrismaClient, ctx: ScopeContext, options: { now?: Date } = {}) {
+  // `now` is the gates' injectable clock; the app passes nothing.
+  return buildScoped(client, ctx, centreReadFloor(ctx, options.now));
+}
+
+/**
+ * Why a caller reads past the data-visibility window. The window is a read
+ * restriction for centre-side roles (CLAUDE.md rule 9), and only these may
+ * opt out of it — say which at the call site:
+ * - `"integrity"` — a writer's own guard that must see the whole history
+ *   (a delete blocker, an "in use" count): refusing a delete because of a
+ *   record the person cannot see is right; allowing it because the record is
+ *   old would corrupt history.
+ * - `"settlement"` / `"audit"` — the two carve-outs (docs/01 §7): payout
+ *   records and the audit trail stay readable whatever their age.
+ */
+export type VisibilityWindowOptOut = "integrity" | "settlement" | "audit";
+
+/**
+ * `scoped(ctx)` without the data-visibility window (SEC-62) — the one named
+ * opt-out. Every other read goes through `scoped(ctx)`, which injects the
+ * window floor beside `centerId`.
+ */
+export function scopedIgnoringVisibilityWindow(
+  ctx: ScopeContext,
+  // Documents the call site; the behaviour is the same for every reason.
+  _reason: VisibilityWindowOptOut,
+  client: PrismaClient = sharedClient,
+) {
+  return buildScoped(client, ctx, null);
+}
+
+function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: Date | null) {
   const centerId = ctx.center.id;
+  // SEC-62 — the M19 data-visibility window (docs/01 §7), injected here
+  // beside `centerId` into every session, attendee, attendance-change,
+  // payment and expense read (and `refunds.list`): a direct URL or API call
+  // cannot reach past it. `null` for a platform admin, for a TEACHER/
+  // STUDENT/PARENT context (never windowed) and for the opt-out above.
+  // Sessions/Analytics/Expenses still clamp their own date filter too, so a
+  // range that starts before the floor reads as starting at it.
+  const sessionInWindow = (where?: Prisma.SessionWhereInput): Prisma.SessionWhereInput | undefined =>
+    visibilityFloor ? { AND: [where ?? {}, { date: { gte: visibilityFloor } }] } : where;
+  const throughSession = visibilityFloor ? { session: { date: { gte: visibilityFloor } } } : null;
+  const attendeeInWindow = (where?: Prisma.SessionAttendeeWhereInput): Prisma.SessionAttendeeWhereInput | undefined =>
+    throughSession ? { AND: [where ?? {}, throughSession] } : where;
+  const changeInWindow = (
+    where?: Prisma.SessionAttendanceChangeWhereInput,
+  ): Prisma.SessionAttendanceChangeWhereInput | undefined =>
+    throughSession ? { AND: [where ?? {}, throughSession] } : where;
+  const paymentInWindow = (where?: Prisma.PaymentWhereInput): Prisma.PaymentWhereInput | undefined =>
+    throughSession ? { AND: [where ?? {}, throughSession] } : where;
+  const expenseInWindow = (where?: Prisma.ExpenseWhereInput): Prisma.ExpenseWhereInput | undefined =>
+    visibilityFloor ? { AND: [where ?? {}, { date: { gte: visibilityFloor } }] } : where;
+  // The account's own remembered locale — the best signal available inside a
+  // scoped-only helper for resolving a catalog entry's bilingual name into
+  // the flat `.name` shape every existing list/select-option consumer
+  // already expects (M13, docs/01-data-model.md "Academic catalog layer").
+  const locale = ctx.user.locale ?? "ar";
 
   return {
     centerId,
+
+    /** The window floor this object applies (SEC-62) — `null` when unbounded. */
+    visibilityFloor,
 
     memberships: {
       list: (args?: {
@@ -64,9 +161,14 @@ export function scoped(ctx: TenantContext) {
           include: args?.include,
         }),
 
-      listWithUser: (where?: Prisma.MembershipWhereInput) =>
+      /**
+       * Users & Roles' list (R9): centre staff only — OWNER, MANAGER,
+       * RECEPTIONIST, ACCOUNTANT. Teachers are managed on the Teachers page
+       * (`teachers.list` below), never here.
+       */
+      listStaffWithUser: (where?: Prisma.MembershipWhereInput) =>
         prisma.membership.findMany({
-          where: scopedWhere(centerId, where),
+          where: scopedWhere(centerId, staffMembershipFilter(where)),
           orderBy: [{ role: "asc" }, { createdAt: "asc" }],
           include: { user: true },
         }),
@@ -93,6 +195,13 @@ export function scoped(ctx: TenantContext) {
       list: (where?: Prisma.InvitationWhereInput) =>
         prisma.invitation.findMany({
           where: scopedWhere(centerId, where),
+          orderBy: { createdAt: "desc" },
+        }),
+
+      /** Users & Roles' pending list (R9): staff roles only, see `staff-filter.ts`. */
+      listStaff: (where?: Prisma.InvitationWhereInput) =>
+        prisma.invitation.findMany({
+          where: scopedWhere(centerId, staffInvitationFilter(where)),
           orderBy: { createdAt: "desc" },
         }),
 
@@ -207,7 +316,7 @@ export function scoped(ctx: TenantContext) {
         prisma.studentProfile.findMany({
           where: scopedWhere(centerId, args.where),
           orderBy: [{ active: "desc" }, { studentCode: "asc" }],
-          select: STUDENT_LIST_SELECT,
+          select: studentListSelect(centerId),
           take: args.take,
           skip: args.skip,
         }),
@@ -218,7 +327,10 @@ export function scoped(ctx: TenantContext) {
       findDetailById: (id: string) =>
         prisma.studentProfile.findFirst({
           where: scopedWhere(centerId, { id }),
-          include: { user: true, grade: true },
+          include: {
+            user: true,
+            grade: { include: { selections: { where: { centerId } } } },
+          },
         }),
 
       findByUserId: (userId: string) =>
@@ -341,7 +453,11 @@ export function scoped(ctx: TenantContext) {
           orderBy: { enrolledAt: "desc" },
           include: {
             classGroup: {
-              include: { subject: true, grade: true, teacher: true },
+              include: {
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
+                teacher: true,
+              },
             },
           },
         }),
@@ -397,15 +513,15 @@ export function scoped(ctx: TenantContext) {
 
     attendees: {
       count: (where?: Prisma.SessionAttendeeWhereInput) =>
-        prisma.sessionAttendee.count({ where: scopedWhere(centerId, where) }),
+        prisma.sessionAttendee.count({ where: scopedWhere(centerId, attendeeInWindow(where)) }),
 
       findById: (id: string) =>
-        scopedFindById(prisma.sessionAttendee, centerId, id),
+        prisma.sessionAttendee.findFirst({ where: scopedWhere(centerId, attendeeInWindow({ id })) }),
 
       /** The full row a session-detail action needs to check/audit against. */
       findDetailById: (id: string) =>
         prisma.sessionAttendee.findFirst({
-          where: scopedWhere(centerId, { id }),
+          where: scopedWhere(centerId, attendeeInWindow({ id })),
           include: {
             studentProfile: { include: { user: true } },
             payments: { orderBy: { recordedAt: "desc" } },
@@ -415,15 +531,128 @@ export function scoped(ctx: TenantContext) {
       /** Existing roster row for (session, student) — null if never marked. */
       findExisting: (sessionId: string, studentProfileId: string) =>
         prisma.sessionAttendee.findFirst({
-          where: scopedWhere(centerId, { sessionId, studentProfileId }),
+          where: scopedWhere(centerId, attendeeInWindow({ sessionId, studentProfileId })),
         }),
+
+      /**
+       * "Absent N times in a row" for one class (M5/M10) — counted back only
+       * as far as the window floor (SEC-62), so an absence older than what
+       * this role may read is never revealed as a count either.
+       */
+      absenceStreak: (classGroupId: string, studentProfileId: string, uptoDate: Date) =>
+        consecutiveAbsenceCount(prisma, centerId, classGroupId, studentProfileId, uptoDate, visibilityFloor),
+    },
+
+    /**
+     * Live-session attendance status changes (R2) — read-only here; the only
+     * writer is `lib/db/attendance.ts`'s `changeAttendanceStatus`, inside the
+     * same transaction as the change (and any void) it records.
+     */
+    attendanceChanges: {
+      count: (where?: Prisma.SessionAttendanceChangeWhereInput) =>
+        prisma.sessionAttendanceChange.count({ where: scopedWhere(centerId, changeInWindow(where)) }),
+
+      findById: (id: string) =>
+        prisma.sessionAttendanceChange.findFirst({ where: scopedWhere(centerId, changeInWindow({ id })) }),
+
+      /** The receipt's "Changes during session" rows, oldest first, names resolved. */
+      listForSession: async (sessionId: string) => {
+        // SEC-62: a session before the window has no readable change log.
+        if (visibilityFloor) {
+          const visible = await prisma.session.count({ where: scopedWhere(centerId, sessionInWindow({ id: sessionId })) });
+          if (visible === 0) return [];
+        }
+        return listSessionAttendanceChanges(prisma, centerId, sessionId);
+      },
     },
 
     payments: {
       count: (where?: Prisma.PaymentWhereInput) =>
-        prisma.payment.count({ where: scopedWhere(centerId, where) }),
+        prisma.payment.count({ where: scopedWhere(centerId, paymentInWindow(where)) }),
 
-      findById: (id: string) => scopedFindById(prisma.payment, centerId, id),
+      findById: (id: string) =>
+        prisma.payment.findFirst({ where: scopedWhere(centerId, paymentInWindow({ id })) }),
+
+      /** The one active (not voided, not refunded) payment on a roster row, if any. */
+      findActiveForAttendee: (sessionAttendeeId: string) =>
+        prisma.payment.findFirst({
+          where: scopedWhere(centerId, paymentInWindow({ sessionAttendeeId, voided: false, refunded: false })),
+          select: { id: true },
+        }),
+    },
+
+    /**
+     * The refunds ledger (M14, spec §4.1 item 12) — read-only here; the
+     * write path (`lib/db/refunds.ts`'s `refundPayment`) takes `centerId`
+     * directly, the same shape `recordPayment`/`voidPayment` already use,
+     * since it runs inside the same transaction as the Server Action's
+     * audit write.
+     */
+    refunds: {
+      list: (take = 100) =>
+        prisma.refund.findMany({
+          where: scopedWhere(
+            centerId,
+            visibilityFloor ? { refundedAt: { gte: visibilityFloor } } : undefined,
+          ),
+          orderBy: { refundedAt: "desc" },
+          take,
+          include: {
+            payment: {
+              include: {
+                studentProfile: { include: { user: true } },
+                session: {
+                  include: {
+                    classGroup: {
+                      include: {
+                        subject: { include: { selections: { where: { centerId } } } },
+                        grade: { include: { selections: { where: { centerId } } } },
+                      },
+                    },
+                    // R5 — a one-time session's own subject/grade (no class).
+                    subject: { include: { selections: { where: { centerId } } } },
+                    grade: { include: { selections: { where: { centerId } } } },
+                  },
+                },
+              },
+            },
+          },
+        }),
+    },
+
+    /**
+     * Teacher settlements (M14, spec §4.1 item 11 / §4.2 item 9) — read-only
+     * here; creation and every DRAFT→APPROVED/APPROVED→PAID transition go
+     * through `lib/db/settlements.ts` directly with `centerId`, the same
+     * "money write takes centerId, not ScopedDb" shape as payments/refunds.
+     */
+    settlements: {
+      list: (where?: Prisma.SettlementWhereInput) =>
+        prisma.settlement.findMany({
+          where: scopedWhere(centerId, where),
+          orderBy: { createdAt: "desc" },
+          include: {
+            session: {
+              include: {
+                classGroup: {
+                  include: {
+                    subject: { include: { selections: { where: { centerId } } } },
+                    grade: { include: { selections: { where: { centerId } } } },
+                  },
+                },
+                // R5 — a one-time session's own subject/grade (no class).
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
+              },
+            },
+          },
+        }),
+
+      findById: (id: string) => scopedFindById(prisma.settlement, centerId, id),
+
+      /** A single session's settlement, if one was drafted (carved out of the window). */
+      findForSession: (sessionId: string) =>
+        prisma.settlement.findFirst({ where: scopedWhere(centerId, { sessionId }) }),
     },
 
     // ── Academic / config master data (docs/01-data-model.md §2) ───────────
@@ -431,34 +660,11 @@ export function scoped(ctx: TenantContext) {
     // `update`/`remove` go through updateMany/deleteMany with a scoped where so
     // an id from another center matches zero rows instead of the wrong one.
 
-    branches: {
-      list: (where?: Prisma.BranchWhereInput) =>
-        prisma.branch.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-        }),
-
-      count: (where?: Prisma.BranchWhereInput) =>
-        prisma.branch.count({ where: scopedWhere(centerId, where) }),
-
-      findById: (id: string) => scopedFindById(prisma.branch, centerId, id),
-
-      create: (data: Omit<Prisma.BranchUncheckedCreateInput, "centerId">) =>
-        prisma.branch.create({ data: scopedData(centerId, data) }),
-
-      update: (id: string, data: Omit<Prisma.BranchUncheckedUpdateManyInput, "centerId">) =>
-        prisma.branch.updateMany({ where: scopedWhere(centerId, { id }), data }),
-
-      remove: (id: string) =>
-        prisma.branch.deleteMany({ where: scopedWhere(centerId, { id }) }),
-    },
-
     rooms: {
       list: (where?: Prisma.RoomWhereInput) =>
         prisma.room.findMany({
           where: scopedWhere(centerId, where),
           orderBy: [{ active: "desc" }, { name: "asc" }],
-          include: { branch: true },
         }),
 
       count: (where?: Prisma.RoomWhereInput) =>
@@ -476,91 +682,135 @@ export function scoped(ctx: TenantContext) {
         prisma.room.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
-    educationSystems: {
-      list: (where?: Prisma.EducationSystemWhereInput) =>
-        prisma.educationSystem.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-        }),
+    /**
+     * Joinable rooms (R3, docs/01 "Config layer"). Reads only — every link
+     * write (and its "in use" refusal) goes through `lib/db/room-sets.ts`,
+     * which owns normalization, the same-centre rule and the self-link
+     * refusal; a generic `create`/`remove` here would be a way around them.
+     */
+    roomLinks: {
+      list: () => loadRoomLinks(prisma, centerId),
+    },
 
-      count: (where?: Prisma.EducationSystemWhereInput) =>
-        prisma.educationSystem.count({ where: scopedWhere(centerId, where) }),
+    /** The extra rooms of each class (R3) — reads only, see `roomLinks`. */
+    classGroupRooms: {
+      /** How many classes use this room as an extra room (a delete blocker). */
+      countForRoom: (roomId: string) =>
+        prisma.classGroupRoom.count({ where: scopedWhere(centerId, { roomId }) }),
 
-      findById: (id: string) =>
-        scopedFindById(prisma.educationSystem, centerId, id),
-
-      create: (
-        data: Omit<Prisma.EducationSystemUncheckedCreateInput, "centerId">,
-      ) => prisma.educationSystem.create({ data: scopedData(centerId, data) }),
-
-      update: (
-        id: string,
-        data: Omit<Prisma.EducationSystemUncheckedUpdateManyInput, "centerId">,
-      ) =>
-        prisma.educationSystem.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
-        }),
-
-      remove: (id: string) =>
-        prisma.educationSystem.deleteMany({
-          where: scopedWhere(centerId, { id }),
+      listForClass: (classGroupId: string) =>
+        prisma.classGroupRoom.findMany({
+          where: scopedWhere(centerId, { classGroupId }),
+          include: { room: true },
+          orderBy: { createdAt: "asc" },
         }),
     },
 
-    grades: {
-      list: (where?: Prisma.GradeWhereInput) =>
-        prisma.grade.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-          include: { educationSystem: true },
+    /** The extra rooms of each session (R3) — reads only, see `roomLinks`. */
+    sessionRooms: {
+      /** How many sessions use this room as an extra room (a delete blocker — the whole history). */
+      countForRoom: (roomId: string) =>
+        prisma.sessionRoom.count({ where: scopedWhere(centerId, { roomId }) }),
+
+      listForSession: (sessionId: string) =>
+        prisma.sessionRoom.findMany({
+          where: scopedWhere(centerId, { sessionId }),
+          include: { room: true },
+          orderBy: { createdAt: "asc" },
         }),
-
-      count: (where?: Prisma.GradeWhereInput) =>
-        prisma.grade.count({ where: scopedWhere(centerId, where) }),
-
-      findById: (id: string) => scopedFindById(prisma.grade, centerId, id),
-
-      create: (data: Omit<Prisma.GradeUncheckedCreateInput, "centerId">) =>
-        prisma.grade.create({ data: scopedData(centerId, data) }),
-
-      update: (id: string, data: Omit<Prisma.GradeUncheckedUpdateManyInput, "centerId">) =>
-        prisma.grade.updateMany({ where: scopedWhere(centerId, { id }), data }),
-
-      remove: (id: string) =>
-        prisma.grade.deleteMany({ where: scopedWhere(centerId, { id }) }),
-    },
-
-    subjects: {
-      list: (where?: Prisma.SubjectWhereInput) =>
-        prisma.subject.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-          include: { grade: true },
-        }),
-
-      count: (where?: Prisma.SubjectWhereInput) =>
-        prisma.subject.count({ where: scopedWhere(centerId, where) }),
-
-      findById: (id: string) => scopedFindById(prisma.subject, centerId, id),
-
-      create: (data: Omit<Prisma.SubjectUncheckedCreateInput, "centerId">) =>
-        prisma.subject.create({ data: scopedData(centerId, data) }),
-
-      update: (id: string, data: Omit<Prisma.SubjectUncheckedUpdateManyInput, "centerId">) =>
-        prisma.subject.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
-        }),
-
-      remove: (id: string) =>
-        prisma.subject.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     /**
-     * Classes (M4). The teacher detail page and settings' reference counts
-     * already used `count`/`list` before this milestone — extended here with
-     * the full CRUD the classes screens need.
+     * Payment methods (R1) — reads only. Every state change (create, rename,
+     * activate/deactivate, delete) goes through `lib/db/payment-methods.ts`,
+     * which owns the "at least one active method" and "referenced → deactivate,
+     * never delete" rules; a generic `update`/`remove` here would be a way
+     * around both.
+     */
+    paymentMethods: {
+      /** Settings list: active first, then picker order. */
+      list: () =>
+        prisma.centerPaymentMethod.findMany({
+          where: scopedWhere(centerId),
+          orderBy: [{ active: "desc" }, ...PAYMENT_METHOD_ORDER],
+        }),
+
+      /** What a payment picker offers — active only, oldest first. */
+      listActive: () => listActivePaymentMethods(prisma, centerId),
+
+      findById: (id: string) =>
+        scopedFindById(prisma.centerPaymentMethod, centerId, id),
+    },
+
+    /**
+     * The academic catalog (M13, docs/01-data-model.md "Academic catalog
+     * layer"). These three no longer author rows — `list`/`findById` read
+     * this centre's own `CenterCatalogSelection` picks joined with the
+     * global catalog entry, resolved into the same flat `{ id, active,
+     * name, ... }` shape every existing consumer already expects (`name` is
+     * resolved by `lib/catalog.ts`'s `catalogLabel`: the centre's override in
+     * the account's language if it set one, else the catalog entry's own name
+     * in that language). `findById` returning non-null **is** the tenant
+     * boundary: a catalog id this centre never selected resolves to
+     * nothing, exactly like an id from another centre used to. Selecting,
+     * renaming and deselecting go through `lib/db/catalog.ts` directly
+     * (`app/[locale]/(center)/settings/actions.ts`), since they are a
+     * materially different write shape than "author a new row."
+     *
+     * **`list({ active: true })` is the picker list (R8):** a pick the centre
+     * switched off *and* an entry the platform deactivated are both left out.
+     * `list()` / `findById` still return them — that is what lets a class, a
+     * session or a student that already uses a deactivated entry keep
+     * resolving its name; each row carries `catalogActive` for callers that
+     * need to tell the two apart.
+     */
+    educationSystems: {
+      list: async (opts?: { active?: boolean }) => {
+        const rows = await catalog.centerEducationSystems(prisma, centerId);
+        return rows
+          .filter((row) => (opts?.active ? row.active && row.catalogActive : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row) }));
+      },
+
+      findById: async (id: string) => {
+        const row = await catalog.centerEducationSystemById(prisma, centerId, id);
+        return row ? { ...row, name: catalogLabel(locale, row, row) } : null;
+      },
+    },
+
+    grades: {
+      list: async (opts?: { active?: boolean }) => {
+        const rows = await catalog.centerGrades(prisma, centerId);
+        return rows
+          .filter((row) => (opts?.active ? row.active && row.catalogActive : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row) }));
+      },
+
+      findById: async (id: string) => {
+        const row = await catalog.centerGradeById(prisma, centerId, id);
+        return row ? { ...row, name: catalogLabel(locale, row, row) } : null;
+      },
+    },
+
+    subjects: {
+      list: async (opts?: { active?: boolean }) => {
+        const rows = await catalog.centerSubjects(prisma, centerId);
+        return rows
+          .filter((row) => (opts?.active ? row.active && row.catalogActive : true))
+          .map((row) => ({ ...row, name: catalogLabel(locale, row, row) }));
+      },
+
+      findById: async (id: string) => {
+        const row = await catalog.centerSubjectById(prisma, centerId, id);
+        return row ? { ...row, name: catalogLabel(locale, row, row) } : null;
+      },
+    },
+
+    /**
+     * Classes (M4) — reads only since R4. Every class write (create, edit,
+     * slots, deactivate, reactivate, delete) goes through
+     * `lib/db/class-sessions.ts`, which owns the class's sessions; a generic
+     * `create`/`update`/`remove` here would be a way around that engine.
      */
     classGroups: {
       count: (where?: Prisma.ClassGroupWhereInput) =>
@@ -570,7 +820,11 @@ export function scoped(ctx: TenantContext) {
         prisma.classGroup.findMany({
           where: scopedWhere(centerId, where),
           orderBy: [{ active: "desc" }, { createdAt: "desc" }],
-          include: { subject: true, grade: true, room: true },
+          include: {
+            subject: { include: { selections: { where: { centerId } } } },
+            grade: { include: { selections: { where: { centerId } } } },
+            room: true,
+          },
         }),
 
       /** The list screen: a lean select, filtered, ordered and paged. */
@@ -582,7 +836,7 @@ export function scoped(ctx: TenantContext) {
         prisma.classGroup.findMany({
           where: scopedWhere(centerId, args.where),
           orderBy: [{ active: "desc" }, { createdAt: "desc" }],
-          select: CLASS_LIST_SELECT,
+          select: classListSelect(centerId),
           take: args.take,
           skip: args.skip,
         }),
@@ -592,31 +846,50 @@ export function scoped(ctx: TenantContext) {
       findDetailById: (id: string) =>
         prisma.classGroup.findFirst({
           where: scopedWhere(centerId, { id }),
-          include: CLASS_DETAIL_INCLUDE,
+          include: classDetailInclude(centerId),
         }),
 
-      create: (data: Omit<Prisma.ClassGroupUncheckedCreateInput, "centerId">) =>
-        prisma.classGroup.create({ data: scopedData(centerId, data) }),
-
-      update: (
-        id: string,
-        data: Omit<Prisma.ClassGroupUncheckedUpdateManyInput, "centerId">,
-      ) =>
-        prisma.classGroup.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
+      /**
+       * R5 — what the "New session" dialog's "For a class" mode defaults
+       * from: every **active** class (a deactivated one takes no new
+       * session) with its teacher, room set and weekly slots.
+       */
+      listForNewSession: () =>
+        prisma.classGroup.findMany({
+          where: scopedWhere(centerId, { active: true }),
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            teacherId: true,
+            roomId: true,
+            extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } },
+            schedules: {
+              select: { dayOfWeek: true, startTime: true, endTime: true },
+              orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+            },
+            subject: {
+              select: {
+                nameAr: true,
+                nameEn: true,
+                selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
+              },
+            },
+            grade: {
+              select: {
+                nameAr: true,
+                nameEn: true,
+                selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 },
+              },
+            },
+          },
         }),
-
-      remove: (id: string) =>
-        prisma.classGroup.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     /**
      * Recurring weekly slots for a class — the Schedule Builder (docs/04 §9).
-     * `listForConflictCheck` is every *other* class's slots in the center, the
-     * candidate universe `lib/scheduling.ts`'s `findScheduleConflicts` checks
-     * against; it excludes the class being edited so a class never "conflicts"
-     * with its own other slots.
+     * Reads only since R4: adding, moving or removing a slot resyncs the
+     * class's sessions, so it goes through `lib/db/class-sessions.ts`'s
+     * `writeClassSlot`.
      */
     classSchedules: {
       list: (classGroupId: string) =>
@@ -625,43 +898,7 @@ export function scoped(ctx: TenantContext) {
           orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
         }),
 
-      listForConflictCheck: (excludeClassGroupId: string) =>
-        prisma.classSchedule.findMany({
-          where: scopedWhere(centerId, {
-            classGroupId: { not: excludeClassGroupId },
-          }),
-          select: {
-            classGroupId: true,
-            dayOfWeek: true,
-            startTime: true,
-            endTime: true,
-            classGroup: {
-              select: {
-                teacherId: true,
-                roomId: true,
-                subject: { select: { name: true } },
-                grade: { select: { name: true } },
-              },
-            },
-          },
-        }),
-
       findById: (id: string) => scopedFindById(prisma.classSchedule, centerId, id),
-
-      create: (data: Omit<Prisma.ClassScheduleUncheckedCreateInput, "centerId">) =>
-        prisma.classSchedule.create({ data: scopedData(centerId, data) }),
-
-      update: (
-        id: string,
-        data: Omit<Prisma.ClassScheduleUncheckedUpdateManyInput, "centerId">,
-      ) =>
-        prisma.classSchedule.updateMany({
-          where: scopedWhere(centerId, { id }),
-          data,
-        }),
-
-      remove: (id: string) =>
-        prisma.classSchedule.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     /**
@@ -673,7 +910,7 @@ export function scoped(ctx: TenantContext) {
      */
     sessions: {
       count: (where?: Prisma.SessionWhereInput) =>
-        prisma.session.count({ where: scopedWhere(centerId, where) }),
+        prisma.session.count({ where: scopedWhere(centerId, sessionInWindow(where)) }),
 
       /**
        * The dashboard: a lean select, filtered and ordered by time of day.
@@ -686,29 +923,55 @@ export function scoped(ctx: TenantContext) {
        */
       search: (args: { where?: Prisma.SessionWhereInput }) =>
         prisma.session.findMany({
-          where: scopedWhere(centerId, args.where),
+          where: scopedWhere(centerId, sessionInWindow(args.where)),
           orderBy: [{ date: "asc" }, { startTime: "asc" }],
-          select: SESSION_LIST_SELECT,
+          select: sessionListSelect(centerId),
           take: 1000,
         }),
 
-      findById: (id: string) => scopedFindById(prisma.session, centerId, id),
+      findById: (id: string) =>
+        prisma.session.findFirst({ where: scopedWhere(centerId, sessionInWindow({ id })) }),
 
       findDetailById: (id: string) =>
         prisma.session.findFirst({
-          where: scopedWhere(centerId, { id }),
-          include: SESSION_DETAIL_INCLUDE,
+          where: scopedWhere(centerId, sessionInWindow({ id })),
+          include: sessionDetailInclude(centerId),
         }),
 
-      /** Today's non-cancelled sessions — the Reception Desk's live rail. */
+      /** The plain fields an edit's audit row records as "before" (reschedule, rooms, cut override). */
+      findForEdit: (id: string) =>
+        prisma.session.findFirst({
+          where: scopedWhere(centerId, sessionInWindow({ id })),
+          select: {
+            classGroupId: true,
+            teacherId: true,
+            date: true,
+            startTime: true,
+            endTime: true,
+            roomId: true,
+            centerShareType: true,
+            centerShareValue: true,
+            extraRooms: { select: { roomId: true } },
+          },
+        }),
+
+      /**
+       * Today's non-cancelled sessions — the Reception Desk's live rail and
+       * the dashboard's today list. R4: a deactivated class's sessions are
+       * not on it unless they are closed records (`OPEN_CLASS_SESSION`).
+       */
       listForDay: (date: Date) =>
         prisma.session.findMany({
-          where: scopedWhere(centerId, {
-            date,
-            status: { not: CANCELLED_STATUS },
-          }),
+          where: scopedWhere(
+            centerId,
+            sessionInWindow({
+              date,
+              status: { not: CANCELLED_STATUS },
+              ...OPEN_CLASS_SESSION,
+            }),
+          ),
           orderBy: [{ startTime: "asc" }],
-          select: SESSION_LIST_SELECT,
+          select: sessionListSelect(centerId),
         }),
 
       /**
@@ -725,7 +988,11 @@ export function scoped(ctx: TenantContext) {
         }),
     },
 
-    /** The center's holiday calendar (docs/02 §11) — dates the generator skips. */
+    /**
+     * The center's holiday calendar (docs/02 §11) — dates the class-sessions
+     * engine skips. Adding one also removes that day's pristine sessions, so
+     * the insert lives in the holiday action's own transaction.
+     */
     holidays: {
       list: () =>
         prisma.holiday.findMany({
@@ -735,11 +1002,21 @@ export function scoped(ctx: TenantContext) {
 
       findById: (id: string) => scopedFindById(prisma.holiday, centerId, id),
 
-      create: (data: Omit<Prisma.HolidayUncheckedCreateInput, "centerId">) =>
-        prisma.holiday.create({ data: scopedData(centerId, data) }),
-
       remove: (id: string) =>
         prisma.holiday.deleteMany({ where: scopedWhere(centerId, { id }) }),
+    },
+
+    /**
+     * The centre's term presets (R4) — reads only. Every write (and its
+     * case-insensitive name rule) is `lib/db/terms.ts`'s.
+     */
+    terms: {
+      list: () => listCenterTerms(prisma, centerId),
+
+      /** What the class form's "Choose a term" offers. */
+      listActive: () => listCenterTerms(prisma, centerId, { activeOnly: true }),
+
+      findById: (id: string) => scopedFindById(prisma.centerTerm, centerId, id),
     },
 
     /** Expense categories (M6) — same shape as the other master-data entities. */
@@ -775,14 +1052,14 @@ export function scoped(ctx: TenantContext) {
 
     /**
      * Expenses (M6, spec §4.1 item 6). Create-and-audit, never edited in
-     * place — a mistaken entry is deleted (also audited) and re-added, the
+     * place and — since SEC-2b (D-24) — **never deleted**: a mistaken entry is
+     * voided with a reason (`voidExpenseAction`, audited) and re-added, the
      * same "financial changes are audited" spirit as Payment/void
-     * (CLAUDE.md rule 7), without the append-only ledger machinery Payment
-     * needs (an Expense carries no downstream snapshot that must survive it).
+     * (CLAUDE.md rule 7). There is deliberately no `remove` here.
      */
     expenses: {
       count: (where?: Prisma.ExpenseWhereInput) =>
-        prisma.expense.count({ where: scopedWhere(centerId, where) }),
+        prisma.expense.count({ where: scopedWhere(centerId, expenseInWindow(where)) }),
 
       /** The list screen: lean, filtered, ordered and paged. */
       search: (args: {
@@ -791,20 +1068,18 @@ export function scoped(ctx: TenantContext) {
         skip?: number;
       }) =>
         prisma.expense.findMany({
-          where: scopedWhere(centerId, args.where),
+          where: scopedWhere(centerId, expenseInWindow(args.where)),
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
           include: { category: true },
           take: args.take,
           skip: args.skip,
         }),
 
-      findById: (id: string) => scopedFindById(prisma.expense, centerId, id),
+      findById: (id: string) =>
+        prisma.expense.findFirst({ where: scopedWhere(centerId, expenseInWindow({ id })) }),
 
       create: (data: Omit<Prisma.ExpenseUncheckedCreateInput, "centerId">) =>
         prisma.expense.create({ data: scopedData(centerId, data) }),
-
-      remove: (id: string) =>
-        prisma.expense.deleteMany({ where: scopedWhere(centerId, { id }) }),
     },
 
     settings: {
@@ -843,11 +1118,16 @@ export function scoped(ctx: TenantContext) {
      * teacher's own "my requests" list uses today.
      */
     changeRequests: {
-      list: (where?: Prisma.ChangeRequestWhereInput) =>
+      /** `take` bounds a queue a flood could grow (SEC-25): the Approvals screen reads one page. */
+      list: (where?: Prisma.ChangeRequestWhereInput, options?: { take?: number }) =>
         prisma.changeRequest.findMany({
           where: scopedWhere(centerId, where),
           orderBy: { createdAt: "desc" },
+          ...(options?.take ? { take: options.take } : {}),
         }),
+
+      count: (where?: Prisma.ChangeRequestWhereInput) =>
+        prisma.changeRequest.count({ where: scopedWhere(centerId, where) }),
 
       findById: (id: string) => scopedFindById(prisma.changeRequest, centerId, id),
 
@@ -874,15 +1154,56 @@ export function scoped(ctx: TenantContext) {
      * `voidPayment`, not through this object).
      */
     reservations: {
-      /** The Approvals queue's own section: this center's PENDING requests. */
-      listPending: () =>
+      /** The Approvals queue's own section: this center's PENDING requests — one page (SEC-25). */
+      listPending: (options?: { take?: number }) =>
         prisma.reservation.findMany({
-          where: scopedWhere(centerId, { status: PENDING_RESERVATION }),
+          // R4: a deactivated class's requests wait, unseen, until it is
+          // reactivated — `confirmReservation` refuses them meanwhile.
+          where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
+          orderBy: { requestedAt: "asc" },
+          ...(options?.take ? { take: options.take } : {}),
+          include: {
+            // SEC-72: the requester's name only — never a whole `User` row
+            // (authId, isPlatformAdmin, contacts) in a server component.
+            student: { select: { id: true, firstName: true, lastName: true } },
+            classGroup: {
+              include: {
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
+              },
+            },
+          },
+        }),
+
+      /**
+       * A teacher's own approvals queue (M15, spec §4.2 item 6): PENDING
+       * requests for classes *this* teacher teaches — a separate, narrower
+       * view of the same `Reservation` data the centre's own queue reads,
+       * never a parallel workflow.
+       */
+      listPendingForTeacher: (teacherId: string) =>
+        prisma.reservation.findMany({
+          where: scopedWhere(centerId, {
+            status: PENDING_RESERVATION,
+            classGroup: { teacherId, active: true },
+          }),
           orderBy: { requestedAt: "asc" },
           include: {
-            student: true,
-            classGroup: { include: { subject: true, grade: true } },
+            // SEC-72: the requester's name only — never a whole `User` row
+            // (authId, isPlatformAdmin, contacts) in a server component.
+            student: { select: { id: true, firstName: true, lastName: true } },
+            classGroup: {
+              include: {
+                subject: { include: { selections: { where: { centerId } } } },
+                grade: { include: { selections: { where: { centerId } } } },
+              },
+            },
           },
+        }),
+
+      countPending: () =>
+        prisma.reservation.count({
+          where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
         }),
 
       findById: (id: string) => scopedFindById(prisma.reservation, centerId, id),
@@ -890,4 +1211,4 @@ export function scoped(ctx: TenantContext) {
   };
 }
 
-export type ScopedDb = ReturnType<typeof scoped>;
+export type ScopedDb = ReturnType<typeof buildScoped>;

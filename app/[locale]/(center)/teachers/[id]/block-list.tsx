@@ -1,7 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
-import { Ban, UserMinus } from "lucide-react";
+import { Ban, ShieldOff, UserMinus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
@@ -14,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
+import { EmptyState } from "@/components/shared/empty-state";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type BlockedStudent = {
   blockId: string;
@@ -51,14 +52,17 @@ export function BlockList({
   const tErrors = useTranslations("People.errors");
   const locale = useLocale();
 
-  const [blockState, blockFormAction] = useActionState(
+  const [blockState, blockFormAction] = useGuardedActionState(
     blockStudentAction,
     IDLE_PEOPLE_STATE,
   );
-  const [unblockState, unblockFormAction] = useActionState(
+  const [unblockState, unblockFormAction] = useGuardedActionState(
     unblockStudentAction,
     IDLE_PEOPLE_STATE,
   );
+  const tToast = useTranslations("Toasts");
+  useActionFeedback(blockState, { success: tToast("studentBlocked") });
+  useActionFeedback(unblockState, { success: tToast("studentUnblocked") });
 
   const error = blockState.error ?? unblockState.error;
 
@@ -67,7 +71,7 @@ export function BlockList({
       {error ? <FormMessage>{tErrors(error)}</FormMessage> : null}
 
       {blocked.length === 0 ? (
-        <p className="text-sm text-text-muted">{t("empty")}</p>
+        <EmptyState compact icon={<ShieldOff />} title={t("empty")} description={t("emptyHint")} />
       ) : (
         <ul className="flex flex-col gap-2">
           {blocked.map((student) => (
@@ -122,7 +126,7 @@ export function BlockList({
               >
                 <form
                   action={blockFormAction}
-                  className="flex flex-col gap-3 sm:flex-row sm:items-end"
+                  className="flex flex-col gap-3"
                 >
                   <input type="hidden" name="locale" value={locale} />
                   <input
@@ -160,7 +164,7 @@ export function BlockList({
                     />
                   </div>
 
-                  <SubmitButton variant="destructive" className="w-full sm:w-auto">
+                  <SubmitButton variant="destructive" className="w-full">
                     <Ban className="size-4" />
                     {t("block")}
                   </SubmitButton>

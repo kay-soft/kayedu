@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { optionalPhone } from "./phone-schema.ts";
+
 export const localeSchema = z.enum(["ar", "en"]);
 
 const email = z
@@ -14,17 +16,18 @@ const password = z.string().min(8, "passwordTooShort").max(72, "tooLong");
 
 const personName = z.string().trim().min(1, "required").max(60, "tooLong");
 
-// Egyptian mobile numbers, optionally +20 / 0020 prefixed.
-const phone = z
-  .string()
-  .trim()
-  .regex(/^(\+?20|0)?1[0125]\d{8}$/, "invalidPhone");
-
 export const signInSchema = z.object({
   email,
-  password: z.string().min(1, "required"),
+  // Bounded like every other input (SEC-74): bcrypt reads 72 bytes anyway.
+  password: z.string().min(1, "required").max(72, "tooLong"),
   locale: localeSchema,
-  next: z.string().optional(),
+  next: z.string().max(512).optional(),
+});
+
+/** "Send the confirmation email again" (SEC-2a). */
+export const resendConfirmationSchema = z.object({
+  email,
+  locale: localeSchema,
 });
 
 export const signUpSchema = z
@@ -32,25 +35,51 @@ export const signUpSchema = z
     firstName: personName,
     lastName: personName,
     email,
-    phone: z.union([phone, z.literal("")]).optional(),
+    phone: optionalPhone,
     password,
-    confirmPassword: z.string(),
+    confirmPassword: z.string().max(72, "tooLong"),
     locale: localeSchema,
-    next: z.string().optional(),
+    next: z.string().max(512).optional(),
   })
   .refine((value) => value.password === value.confirmPassword, {
     path: ["confirmPassword"],
     message: "passwordMismatch",
   });
 
+/**
+ * A Center id for almost every submission — or, for an Owner picking "Whole
+ * Management" (M11), an Organization id. One field, one cookie value; which
+ * one it names is resolved server-side in `selectCenterAction`/
+ * `getTenantContext()`, never trusted from the client beyond that lookup
+ * (lib/auth/active-center.ts).
+ */
 export const selectCenterSchema = z.object({
-  centerId: z.string().uuid("invalidCenter"),
+  selectionId: z.string().uuid("invalidCenter"),
   locale: localeSchema,
+});
+
+/**
+ * The roles Users & Roles may hand out (R9): centre staff only. A TEACHER is a
+ * `Membership` too, but teachers are added and managed on the Teachers page —
+ * so this list, which both the invitation and the role-change schemas parse
+ * with, refuses it by direct call exactly as the dropdowns no longer offer it.
+ * Same four values as `CENTER_STAFF_ROLES` (lib/auth/permissions.ts).
+ */
+export const ASSIGNABLE_STAFF_ROLES = [
+  "OWNER",
+  "MANAGER",
+  "RECEPTIONIST",
+  "ACCOUNTANT",
+] as const;
+
+export const staffRoleField = z.enum(ASSIGNABLE_STAFF_ROLES, {
+  error: (issue) =>
+    issue.input === "TEACHER" ? "teacherViaTeachersPage" : "notFound",
 });
 
 export const createInvitationSchema = z.object({
   email,
-  role: z.enum(["OWNER", "MANAGER", "RECEPTIONIST", "TEACHER"]),
+  role: staffRoleField,
   locale: localeSchema,
 });
 
@@ -64,5 +93,3 @@ export const acceptInvitationSchema = z.object({
   locale: localeSchema,
 });
 
-export type SignInInput = z.infer<typeof signInSchema>;
-export type SignUpInput = z.infer<typeof signUpSchema>;

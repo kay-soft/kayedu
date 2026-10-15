@@ -2,18 +2,22 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getTenantContext } from "@/lib/auth/tenant";
+import { actionContext, ctxCan } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { studentSearchWhere } from "@/lib/db/students";
+import { taughtByTeacherWhere, teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
+import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   teacherBlockStudentSchema,
   teacherUnblockStudentSchema,
   type TeacherActionState,
 } from "@/lib/validation/teacher";
+import { parseActionArgs, searchArgs } from "@/lib/validation/action-args";
 
 /**
  * Teacher block-list (spec §4.2 items 2/3, reusing the `StudentBlock` scope
@@ -25,11 +29,42 @@ import {
 
 const NOT_FOUND: TeacherActionState = { error: "notFound" };
 
+// ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────
+
+/** Narrowed to students this teacher has actually taught — never the
+ * center's full roster (same scope `teacherStudentProfileIds` already
+ * enforces for the paginated list). */
+export async function searchTaughtStudentsTypeAheadAction(
+  query: string,
+): Promise<TypeAheadResult[]> {
+  const ctx = await actionContext("teacher");
+  if (!ctx) return [];
+  const args = parseActionArgs(searchArgs, [query]);
+  if (!args) return [];
+  const [trimmed] = args;
+  if (trimmed.length < 2) return [];
+
+  // SEC-52: a relational filter, not this teacher's whole roster loaded per keystroke.
+  const rows = await scoped(ctx).students.search({
+    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id), ...studentSearchWhere(trimmed) },
+    take: 8,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    primary: fullName(localName(row, row.user)),
+    secondary: row.studentCode,
+    href: ROUTES.teacherStudent(row.id),
+  }));
+}
+
 export async function teacherBlockStudentAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  // SEC-15: the matrix's TEACHER `student.block` cell means what it says.
+  if (!ctx || !ctxCan(ctx, "student.block")) return { error: "forbidden" };
   const db = scoped(ctx);
 
   const parsed = teacherBlockStudentSchema.safeParse(Object.fromEntries(formData));
@@ -61,7 +96,7 @@ export async function teacherBlockStudentAction(
     action: "student.block",
     entityType: "StudentBlock",
     entityId: block.id,
-    after: { scope: "TEACHER", teacherUserId: ctx.user.id, studentProfileId, reason },
+    after: { scope: "TEACHER", teacherUserId: ctx.user.id, studentProfileId },
   });
 
   revalidatePath(`/${locale}${ROUTES.teacherStudent(studentProfileId)}`);
@@ -72,7 +107,8 @@ export async function teacherUnblockStudentAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await getTenantContext("teacher");
+  const ctx = await actionContext("teacher");
+  if (!ctx || !ctxCan(ctx, "student.block")) return { error: "forbidden" };
   const db = scoped(ctx);
 
   const parsed = teacherUnblockStudentSchema.safeParse(Object.fromEntries(formData));

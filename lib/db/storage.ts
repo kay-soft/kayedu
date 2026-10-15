@@ -1,17 +1,26 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { storage } from "@/lib/storage";
 import {
   AVATARS_BUCKET,
   ID_CARDS_BUCKET,
+  LOGOS_BUCKET,
+  MAX_LOGO_BYTES,
   MAX_PHOTO_BYTES,
   assertPathInCenter,
+  centerLogoPath,
   photoExtensionFor,
+  sniffImageType,
   studentIdCardPath,
   studentPhotoPath,
-  type PeopleBucket,
+  type StorageBucket,
 } from "@/lib/storage-paths";
 
 /**
  * Tenant-scoped file access (docs/02-architecture.md §10).
+ *
+ * SYS: the provider is behind `lib/storage` (`storage()` — today the
+ * Supabase adapter); this module never names a provider. It is the policy
+ * layer every caller uses: keys built here, re-checked against the centre,
+ * uploads typed by their bytes — then handed to the provider.
  *
  * The rule mirrors `lib/db/scoped.ts`: nothing reaches Storage without a
  * resolved `centerId`. Paths are built by `centerObjectPath()` and any path
@@ -23,18 +32,34 @@ import {
 /** How long a card/photo link stays valid. Long enough to print, not to share. */
 const SIGNED_URL_TTL_SECONDS = 60 * 10;
 
-export type StoredPhoto = { path: string };
+type UploadRefusal = "photoType" | "photoTooLarge" | "storage";
+
+/**
+ * Reads an uploaded image and decides its type from its **bytes** (SEC-54):
+ * PNG/JPEG/WebP only, whatever `File.type` claims, under `maxBytes`. The
+ * stored object's content type is the sniffed one.
+ */
+export async function readRasterImage(
+  file: File,
+  maxBytes: number,
+): Promise<{ ok: true; bytes: Uint8Array; type: string; extension: string } | { ok: false; error: UploadRefusal }> {
+  if (file.size > maxBytes) return { ok: false, error: "photoTooLarge" };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength > maxBytes) return { ok: false, error: "photoTooLarge" };
+  const type = sniffImageType(bytes);
+  const extension = type ? photoExtensionFor(type) : null;
+  if (!type || !extension) return { ok: false, error: "photoType" };
+  return { ok: true, bytes, type, extension };
+}
 
 export async function uploadStudentPhoto(
   centerId: string,
   studentProfileId: string,
   file: File,
-): Promise<
-  { ok: true; path: string } | { ok: false; error: "photoType" | "photoTooLarge" | "storage" }
-> {
-  const extension = photoExtensionFor(file.type);
-  if (!extension) return { ok: false, error: "photoType" };
-  if (file.size > MAX_PHOTO_BYTES) return { ok: false, error: "photoTooLarge" };
+): Promise<{ ok: true; path: string } | { ok: false; error: UploadRefusal }> {
+  const image = await readRasterImage(file, MAX_PHOTO_BYTES);
+  if (!image.ok) return image;
+  const { bytes, type, extension } = image;
 
   // The version suffix busts any cached copy of a replaced photo; the filename
   // stem stays the profile id, which is what the read policy matches on.
@@ -45,12 +70,24 @@ export async function uploadStudentPhoto(
     Date.now().toString(36),
   );
 
-  const supabase = createSupabaseAdminClient();
-  const { error } = await supabase.storage
-    .from(AVATARS_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: true });
+  const stored = await storage().upload(AVATARS_BUCKET, path, bytes, type);
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
+}
 
-  return error ? { ok: false, error: "storage" } : { ok: true, path };
+/**
+ * A centre's logo (D-25 (b)) — into the private `logos` bucket under the
+ * centre's own folder, raster only by its bytes, size-capped. Served only
+ * through `/api/logos/[centerId]` as a short-lived signed URL.
+ */
+export async function uploadCenterLogo(
+  centerId: string,
+  file: File,
+): Promise<{ ok: true; path: string } | { ok: false; error: UploadRefusal }> {
+  const image = await readRasterImage(file, MAX_LOGO_BYTES);
+  if (!image.ok) return image;
+  const path = centerLogoPath(centerId, image.extension, Date.now().toString(36));
+  const stored = await storage().upload(LOGOS_BUCKET, path, image.bytes, image.type);
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
 }
 
 /** Writes the generated card. Deterministic path — regenerating replaces it. */
@@ -60,29 +97,22 @@ export async function uploadIdCard(
   svg: string,
 ): Promise<{ ok: true; path: string } | { ok: false; error: "storage" }> {
   const path = studentIdCardPath(centerId, studentProfileId);
-  const supabase = createSupabaseAdminClient();
-
-  const { error } = await supabase.storage
-    .from(ID_CARDS_BUCKET)
-    .upload(path, new Blob([svg], { type: "image/svg+xml" }), {
-      contentType: "image/svg+xml",
-      upsert: true,
-    });
-
-  return error ? { ok: false, error: "storage" } : { ok: true, path };
+  const stored = await storage().upload(
+    ID_CARDS_BUCKET,
+    path,
+    new Blob([svg], { type: "image/svg+xml" }),
+    "image/svg+xml",
+  );
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
 }
 
 export async function signedUrlFor(
   centerId: string,
-  bucket: PeopleBucket,
+  bucket: StorageBucket,
   path: string,
 ): Promise<string | null> {
   assertPathInCenter(centerId, path);
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-  return error ? null : (data?.signedUrl ?? null);
+  return storage().signedUrl(bucket, path, SIGNED_URL_TTL_SECONDS);
 }
 
 /**
@@ -92,42 +122,27 @@ export async function signedUrlFor(
  */
 export async function objectAsDataUri(
   centerId: string,
-  bucket: PeopleBucket,
+  bucket: StorageBucket,
   path: string,
 ): Promise<string | null> {
   assertPathInCenter(centerId, path);
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.storage.from(bucket).download(path);
-  if (error || !data) return null;
+  const bytes = await storage().download(bucket, path);
+  if (!bytes) return null;
 
-  const buffer = Buffer.from(await data.arrayBuffer());
-  const mime = data.type || "application/octet-stream";
-  return `data:${mime};base64,${buffer.toString("base64")}`;
-}
-
-/** Fetches a remote image (the center logo) as a data URI for the card. */
-export async function remoteImageAsDataUri(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const type = response.headers.get("content-type") ?? "";
-    if (!type.startsWith("image/")) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > MAX_PHOTO_BYTES) return null;
-    return `data:${type};base64,${buffer.toString("base64")}`;
-  } catch {
-    return null;
-  }
+  // Only a raster image is ever inlined into a card, whatever was stored:
+  // the type comes from the bytes (SEC-54), not the object's metadata.
+  const mime = sniffImageType(bytes);
+  if (!mime) return null;
+  return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
 export async function removeStoredObject(
   centerId: string,
-  bucket: PeopleBucket,
+  bucket: StorageBucket,
   path: string,
 ): Promise<void> {
   assertPathInCenter(centerId, path);
-  const supabase = createSupabaseAdminClient();
-  await supabase.storage.from(bucket).remove([path]);
+  await storage().remove(bucket, [path]);
 }
 
 /** When a student's card was last generated, or null if there isn't one. */
@@ -135,12 +150,5 @@ export async function idCardGeneratedAt(
   centerId: string,
   studentProfileId: string,
 ): Promise<Date | null> {
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.storage
-    .from(ID_CARDS_BUCKET)
-    .list(centerId, { search: `${studentProfileId}.svg`, limit: 1 });
-
-  if (error || !data || data.length === 0) return null;
-  const stamp = data[0].updated_at ?? data[0].created_at;
-  return stamp ? new Date(stamp) : null;
+  return storage().lastModified(ID_CARDS_BUCKET, studentIdCardPath(centerId, studentProfileId));
 }

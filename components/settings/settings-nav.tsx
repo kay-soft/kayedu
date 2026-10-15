@@ -25,7 +25,10 @@ export function SettingsNav({ items }: { items: SettingsNavItem[] }) {
 
   return (
     <nav aria-label={t("label")}>
-      <ul className="flex flex-wrap gap-2 lg:flex-col lg:gap-1">
+      {/* Two even columns of chips on a phone, a wrapping row from sm, the
+          side list from lg (DES, docs/04 §14.8) — at 375 it had wrapped to
+          three or four ragged rows of borderless text. */}
+      <ul className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:flex-col lg:gap-1">
         {items.map((item) => {
           // /settings is the general page; only an exact match highlights it.
           const active =
@@ -39,10 +42,10 @@ export function SettingsNav({ items }: { items: SettingsNavItem[] }) {
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm transition-colors lg:w-full",
+                  "flex min-h-11 items-center rounded-lg border px-3 py-2 text-sm transition-ui focus-ring lg:w-full",
                   active
                     ? "border-brand/30 bg-brand/10 font-medium text-brand"
-                    : "border-transparent text-text-secondary hover:bg-surface-subtle hover:text-text-primary",
+                    : "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary active:bg-surface-active lg:border-transparent lg:bg-transparent",
                 )}
               >
                 {t(item.labelKey)}

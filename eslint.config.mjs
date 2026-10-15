@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Playwright's generated output (SYS e2e suite).
+    "e2e/.report/**",
+    "e2e/.results/**",
+    "e2e/.auth/**",
+    // DES design review: local capture scripts and screenshots (git-ignored).
+    "design-review/**",
   ]),
 ]);
 

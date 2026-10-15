@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { localeSchema } from "./auth";
+import { studentFields } from "./people";
 
 /**
  * Student portal schemas (M8). Every Server Action under
@@ -29,9 +30,25 @@ export const cancelReservationSchema = z.object({
   reservationId: recordId,
 });
 
+// ── Self-registration profile completion (M18, spec §4.3 item 4) ──────────
+// The exact same fields a receptionist's add-student form collects — grade,
+// phone, alt phone, parent name/phone/alt phone — filled in by the student
+// themselves the first time they reach the portal with an auto-seeded,
+// incomplete profile (`StudentProfile.profileCompletedAt === null`).
+
+export const completeStudentProfileSchema = z.object({
+  locale: localeSchema,
+  centerId: recordId,
+  studentProfileId: recordId,
+  ...studentFields,
+});
+
 export type StudentActionState = {
   error?: string;
-  status?: "enrolled" | "pending" | "cancelled";
+  /** Formatted date for the `coolingOff` error message (M15). */
+  errorDate?: string;
+  status?: "enrolled" | "pending" | "cancelled" | "profileCompleted";
+  fieldErrors?: Record<string, string>;
 };
 
 export const IDLE_STUDENT_STATE: StudentActionState = {};

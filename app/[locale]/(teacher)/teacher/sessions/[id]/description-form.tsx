@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { updateSessionDescriptionAction } from "@/app/[locale]/(teacher)/teacher/sessions/actions";
@@ -8,6 +7,7 @@ import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
+import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /**
  * Session-description edit (spec §4.2 item 2). Editable up to the center's
@@ -25,7 +25,7 @@ export function SessionDescriptionForm({
   const tErrors = useTranslations("TeacherSessions.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useActionState(
+  const [state, formAction] = useGuardedActionState(
     updateSessionDescriptionAction,
     IDLE_TEACHER_STATE,
   );

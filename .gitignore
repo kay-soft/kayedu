@@ -70,3 +70,13 @@ next-env.d.ts
 .claude/local/
 
 # NOTE: prisma/migrations is intentionally NOT ignored — migrations are source code.
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+
+# DES design review: per-role sign-in sessions and screenshots (never committed)
+design-review/
+
+# Playwright e2e (SYS): saved sign-in sessions, results, reports, traces
+e2e/.auth/
+e2e/.results/
+e2e/.report/

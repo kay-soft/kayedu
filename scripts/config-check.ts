@@ -10,31 +10,26 @@
  * same zod schemas the settings Server Actions parse with and the same
  * tenant-scoping primitives lib/db/scoped.ts is built on. Then it asserts the
  * two configurations are independent, that neither center can see the other's
- * config rows, that the permission-grant seam widens a receptionist and
- * nobody else, and that the center-cut split is right in both modes.
+ * config rows, and that the center-cut split is right in both modes. The
+ * permission matrix itself (M12) has its own dedicated gate, `check:permissions`.
  *
  * It needs a reachable database and cleans up after itself.
  */
-import { Prisma, PrismaClient } from "@prisma/client";
+import { gatePrisma } from "./lib/gate-db.ts";
+import { Prisma } from "@prisma/client";
 import {
   scopedData,
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
-import { can, permissionGrantsFromSettings } from "../lib/auth/permissions.ts";
 import { splitShare } from "../lib/money.ts";
 import {
-  branchSchema,
   cardLayoutSchema,
-  educationSystemSchema,
   generalSettingsSchema,
-  gradeSchema,
-  permissionGrantsSchema,
   roomSchema,
-  subjectSchema,
 } from "../lib/validation/settings.ts";
 
-const prisma = new PrismaClient();
+const prisma = await gatePrisma();
 
 const SLUG_A = "config-check-a";
 const SLUG_B = "config-check-b";
@@ -66,67 +61,22 @@ function parse<T>(
 /**
  * The whole of M2's configuration surface, driven by form-shaped input.
  * Takes a centerId and nothing else — this function *is* the "zero code
- * changes for a second center" claim.
+ * changes for a second center" claim. Education systems/grades/subjects
+ * moved to the platform-owned global catalog at M13 (a centre picks/
+ * suggests rather than authors) — that surface has its own dedicated gate,
+ * `npm run check:catalog`; this script keeps only the config that is still
+ * genuinely centre-authored: rooms and general settings.
  */
 async function configureCenter(centerId: string) {
-  const system = parse(
-    educationSystemSchema,
-    { locale: "en", name: "National", basePrice: "120" },
-    "educationSystem",
-  );
-  const systemRow = await prisma.educationSystem.create({
-    data: scopedData(centerId, {
-      name: system.name,
-      basePrice: system.basePrice,
-    }),
-  });
-
-  const grade = parse(
-    gradeSchema,
-    { locale: "en", name: "Grade 10", educationSystemId: systemRow.id },
-    "grade",
-  );
-  const gradeRow = await prisma.grade.create({
-    data: scopedData(centerId, {
-      name: grade.name,
-      educationSystemId: grade.educationSystemId,
-    }),
-  });
-
-  const subject = parse(
-    subjectSchema,
-    { locale: "en", name: "Mathematics", gradeId: gradeRow.id },
-    "subject",
-  );
-  const subjectRow = await prisma.subject.create({
-    data: scopedData(centerId, {
-      name: subject.name,
-      gradeId: subject.gradeId,
-    }),
-  });
-
-  const branch = parse(
-    branchSchema,
-    { locale: "en", name: "Main branch", address: "12 Nile St" },
-    "branch",
-  );
-  const branchRow = await prisma.branch.create({
-    data: scopedData(centerId, {
-      name: branch.name,
-      address: branch.address,
-    }),
-  });
-
   const room = parse(
     roomSchema,
-    { locale: "en", name: "Room 1", capacity: "30", branchId: branchRow.id },
+    { locale: "en", name: "Room 1", capacity: "30" },
     "room",
   );
   const roomRow = await prisma.room.create({
     data: scopedData(centerId, {
       name: room.name,
       capacity: room.capacity,
-      branchId: room.branchId,
     }),
   });
 
@@ -150,16 +100,6 @@ async function configureCenter(centerId: string) {
     "cardLayout",
   );
 
-  const grants = parse(
-    permissionGrantsSchema,
-    {
-      locale: "en",
-      receptionistCanViewProfit: "on",
-      receptionistCanCorrectAttendance: "on",
-    },
-    "permissionGrants",
-  );
-
   const cardLayout = (card.cardLayout ?? undefined) as
     | Prisma.InputJsonValue
     | undefined;
@@ -173,8 +113,6 @@ async function configureCenter(centerId: string) {
       defaultLateThreshold: general.defaultLateThreshold,
       timezone: general.timezone,
       cardLayout,
-      receptionistCanViewProfit: grants.receptionistCanViewProfit,
-      receptionistCanCorrectAttendance: grants.receptionistCanCorrectAttendance,
     },
     create: {
       centerId,
@@ -184,12 +122,10 @@ async function configureCenter(centerId: string) {
       defaultLateThreshold: general.defaultLateThreshold,
       timezone: general.timezone,
       cardLayout,
-      receptionistCanViewProfit: grants.receptionistCanViewProfit,
-      receptionistCanCorrectAttendance: grants.receptionistCanCorrectAttendance,
     },
   });
 
-  return { systemRow, gradeRow, subjectRow, branchRow, roomRow, settingsRow };
+  return { roomRow, settingsRow };
 }
 
 async function cleanup() {
@@ -200,10 +136,10 @@ async function main() {
   await cleanup();
 
   const centerA = await prisma.center.create({
-    data: { slug: SLUG_A, name: "Config A" },
+    data: { slug: SLUG_A, name: "Config A", organization: { create: { name: "Config A" } } },
   });
   const centerB = await prisma.center.create({
-    data: { slug: SLUG_B, name: "Config B" },
+    data: { slug: SLUG_B, name: "Config B", organization: { create: { name: "Config B" } } },
   });
 
   console.log("Center configuration check");
@@ -214,34 +150,23 @@ async function main() {
 
   check(
     "One configureCenter() fully configures a fresh center",
-    Boolean(a.systemRow && a.gradeRow && a.subjectRow && a.branchRow && a.roomRow && a.settingsRow),
+    Boolean(a.roomRow && a.settingsRow),
   );
   check(
     "The identical call configures a second center — no code changes",
-    Boolean(b.systemRow && b.gradeRow && b.subjectRow && b.branchRow && b.roomRow && b.settingsRow) &&
-      b.systemRow.id !== a.systemRow.id,
+    Boolean(b.roomRow && b.settingsRow) && b.roomRow.id !== a.roomRow.id,
   );
 
   // ── 2. EGP typed into a form is stored as integer piastres ──────────────
   check(
-    "Base price 120 EGP is stored as 12000 piastres",
-    a.systemRow.basePrice === 12_000,
-    `got ${a.systemRow.basePrice}`,
+    "A teacher-timeout of 45 days round-trips exactly (integer, not a piastre amount)",
+    a.settingsRow.teacherTimeoutDays === 45,
+    `got ${a.settingsRow.teacherTimeoutDays}`,
   );
 
   // ── 3. Every config table is center-scoped ─────────────────────────────
   // One call per delegate, so each one is checked against its real Prisma type.
   const leaks: [string, unknown][] = [
-    [
-      "EducationSystem",
-      await scopedFindById(prisma.educationSystem, centerA.id, b.systemRow.id),
-    ],
-    ["Grade", await scopedFindById(prisma.grade, centerA.id, b.gradeRow.id)],
-    [
-      "Subject",
-      await scopedFindById(prisma.subject, centerA.id, b.subjectRow.id),
-    ],
-    ["Branch", await scopedFindById(prisma.branch, centerA.id, b.branchRow.id)],
     ["Room", await scopedFindById(prisma.room, centerA.id, b.roomRow.id)],
   ];
 
@@ -249,47 +174,15 @@ async function main() {
     check(`Center A cannot read Center B's ${label} by id`, leaked === null);
   }
 
-  const systemsInA = await prisma.educationSystem.findMany({
+  const roomsInA = await prisma.room.findMany({
     where: scopedWhere(centerA.id),
   });
   check(
     "A scoped config list contains only the active center's rows",
-    systemsInA.length === 1 && systemsInA[0].id === a.systemRow.id,
+    roomsInA.length === 1 && roomsInA[0].id === a.roomRow.id,
   );
 
-  // ── 4. The permission-grant seam ───────────────────────────────────────
-  const noGrants = permissionGrantsFromSettings({
-    receptionistCanViewProfit: false,
-    receptionistCanCorrectAttendance: false,
-  });
-  check(
-    "Receptionist is denied profit by default",
-    !can("RECEPTIONIST", "center.profit.view", noGrants),
-  );
-  check(
-    "Receptionist is denied attendance correction by default",
-    !can("RECEPTIONIST", "attendance.correct", noGrants),
-  );
-
-  const granted = permissionGrantsFromSettings(a.settingsRow);
-  check(
-    "Granting profit in settings lets a receptionist view profit",
-    can("RECEPTIONIST", "center.profit.view", granted),
-  );
-  check(
-    "Granting corrections in settings lets a receptionist correct attendance",
-    can("RECEPTIONIST", "attendance.correct", granted),
-  );
-  check(
-    "A grant cannot widen a role it is not grantable for (TEACHER + profit)",
-    !can("TEACHER", "center.profit.view", granted),
-  );
-  check(
-    "A grant never removes a baseline permission (OWNER keeps profit)",
-    can("OWNER", "center.profit.view", noGrants),
-  );
-
-  // ── 5. Center-cut math (the default this screen configures) ────────────
+  // ── 4. Center-cut math (the default this screen configures) ────────────
   const percentage = splitShare(12_000, "PERCENTAGE", 15);
   const fixed = splitShare(12_000, "FIXED", 1_500);
   check(
@@ -303,7 +196,7 @@ async function main() {
     JSON.stringify(fixed),
   );
 
-  // ── 6. The schemas reject what the UI must not store ───────────────────
+  // ── 5. The schemas reject what the UI must not store ───────────────────
   check(
     "A percentage above 100 is rejected",
     !generalSettingsSchema.safeParse({
@@ -315,16 +208,8 @@ async function main() {
     }).success,
   );
   check(
-    "A negative base price is rejected",
-    !educationSystemSchema.safeParse({
-      locale: "en",
-      name: "Bad",
-      basePrice: "-5",
-    }).success,
-  );
-  check(
     "A blank name is rejected",
-    !branchSchema.safeParse({ locale: "en", name: "   " }).success,
+    !roomSchema.safeParse({ locale: "en", name: "   " }).success,
   );
   check(
     "A non-JSON card layout is rejected",

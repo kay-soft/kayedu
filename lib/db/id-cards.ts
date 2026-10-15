@@ -1,16 +1,21 @@
-import type { Grade, StudentProfile, User } from "@prisma/client";
+import type { CatalogGrade, StudentProfile, User } from "@prisma/client";
 
 import type { TenantContext } from "@/lib/auth/tenant";
-import { objectAsDataUri, remoteImageAsDataUri } from "@/lib/db/storage";
+import { objectAsDataUri } from "@/lib/db/storage";
 import { fullName, localName } from "@/lib/identity";
 import {
   renderIdCardSvg,
   resolveCardLayout,
   studentQrPayload,
 } from "@/lib/id-card";
-import { AVATARS_BUCKET } from "@/lib/storage-paths";
+import { AVATARS_BUCKET, LOGOS_BUCKET } from "@/lib/storage-paths";
+import { catalogLabelWithSelection, type CatalogNameOverride } from "@/lib/catalog";
+import { logBestEffort } from "@/lib/log";
 
-export type CardStudent = StudentProfile & { user: User; grade: Grade | null };
+export type CardStudent = StudentProfile & {
+  user: User;
+  grade: (CatalogGrade & { selections?: CatalogNameOverride[] }) | null;
+};
 
 /**
  * Builds one student's ID card (docs/04 §5, docs/02 §10).
@@ -31,8 +36,12 @@ export async function studentCardSvg(
   // assertPathInCenter inside objectAsDataUri refuses a path that somehow
   // points at another center, rather than rendering it onto a card.
   const [logoDataUri, photoDataUri] = await Promise.all([
-    ctx.center.logoUrl
-      ? remoteImageAsDataUri(ctx.center.logoUrl).catch(() => null)
+    // The logo is a private object in this centre's own folder (D-25) — no
+    // server-side fetch of an arbitrary URL any more (SEC-53).
+    ctx.center.logoPath
+      ? objectAsDataUri(centerId, LOGOS_BUCKET, ctx.center.logoPath).catch(
+          (error: unknown) => logBestEffort("ID card logo inline")(error) ?? null,
+        )
       : null,
     student.photoUrl
       ? objectAsDataUri(centerId, AVATARS_BUCKET, student.photoUrl).catch(
@@ -47,7 +56,7 @@ export async function studentCardSvg(
     logoDataUri,
     photoDataUri,
     studentName: fullName(localName(student, student.user)),
-    gradeName: student.grade?.name ?? null,
+    gradeName: catalogLabelWithSelection(options.dir === "rtl" ? "ar" : "en", student.grade),
     studentCode: student.studentCode,
     qrPayload: studentQrPayload(centerId, student.studentCode),
     labels: { code: options.codeLabel },

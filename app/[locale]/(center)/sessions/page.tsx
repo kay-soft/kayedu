@@ -1,11 +1,20 @@
-import { CalendarClock, ClipboardCheck, Radio, Wallet } from "lucide-react";
+import { CalendarClock, CalendarSearch, ClipboardCheck, Radio, Wallet } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import {
+  NewSessionDialog,
+  type NewSessionClassOption,
+} from "@/app/[locale]/(center)/sessions/new-session-dialog";
 import { SessionFilters } from "@/app/[locale]/(center)/sessions/session-filters";
-import { SessionRow, type SessionRowData } from "@/app/[locale]/(center)/sessions/session-row";
+import { SESSION_COLUMNS, SessionRow, type SessionRowData } from "@/app/[locale]/(center)/sessions/session-row";
+import { ListHeader } from "@/components/shared/list-header";
+import { cn } from "@/lib/utils";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import {
   Card,
   CardContent,
@@ -13,20 +22,27 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { catalogLabelWithSelection } from "@/lib/catalog";
+import { revenueTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
-import {
-  deriveSessionDisplayStatus,
-  sessionDisplayName,
-  sessionListWhere,
-} from "@/lib/db/sessions";
+import { deriveSessionDisplayStatus, sessionListWhere } from "@/lib/db/sessions";
+import { sessionDisplayName, sessionKind } from "@/lib/session-label";
+import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
-import { monthRangeUtc, startOfUtcDay, weekRangeUtc } from "@/lib/scheduling";
+import {
+  centreTimeZone,
+  dateKey,
+  resolveSharedDateFilter,
+  todayInTimezone,
+} from "@/lib/scheduling";
+import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { sessionListFilterSchema } from "@/lib/validation/sessions";
+import { dateFilterSchema, toSharedDateFilterInput } from "@/lib/validation/date-filter";
 
 /**
  * Today's Sessions dashboard (spec §4.1 item 7): a KPI row, filters (date/
@@ -47,20 +63,41 @@ export default async function SessionsPage({
 
   const rawParams = await searchParams;
   const parsedFilters = sessionListFilterSchema.safeParse(rawParams);
+  // The date part is parsed on its own as well, so a rejected *sibling*
+  // filter can never discard a date range the user just picked. Coupling the
+  // two is what turned one over-strict enum into "the range resets to today":
+  // a single bad field failed the whole object, and the fallback below then
+  // silently replaced every filter, dates included.
+  const parsedDates = dateFilterSchema.safeParse(rawParams);
+  const dates = parsedDates.success
+    ? parsedDates.data
+    : { range: "day" as const, date: null, from: null, to: null };
   const filters = parsedFilters.success
     ? parsedFilters.data
-    : { range: "day" as const, date: null, teacherId: null, subjectId: null, classGroupId: null, status: null };
+    : {
+        ...dates,
+        teacherId: null,
+        subjectId: null,
+        classGroupId: null,
+        status: null,
+      };
 
-  const anchor = filters.date
-    ? new Date(`${filters.date}T00:00:00.000Z`)
-    : startOfUtcDay(new Date());
+  // R7b: the filter's "today", the visibility floor and the picker's today
+  // marker are all the centre's calendar day (`todayInTimezone`).
+  const now = new Date();
+  const timeZone = centreTimeZone(ctx.settings);
+  const todayIso = dateKey(todayInTimezone(timeZone, now));
+  // Clamped to the data-visibility window (M19, docs/01 §7): a receptionist
+  // (etc.) manipulating `?from=` cannot read further back than their centre's
+  // window, regardless of what the shared date filter itself would allow.
+  const { start: from, end: to } = clampRangeToVisibility(
+    resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
+    visibilityWindowFloor(ctx, now),
+  );
 
-  const { start: from, end: to } =
-    filters.range === "week"
-      ? weekRangeUtc(anchor)
-      : filters.range === "month"
-        ? monthRangeUtc(anchor)
-        : { start: anchor, end: anchor };
+  // R2's lazy end-of-day close for every session in view (one indexed query
+  // when there is nothing to close), so the list shows closed records as such.
+  await closeEndedSessions(prisma, ctx.center.id, now, { from, to });
 
   const db = scoped(ctx);
   const t = await getTranslations("Sessions");
@@ -75,25 +112,54 @@ export default async function SessionsPage({
     classGroupId: filters.classGroupId,
   });
 
-  const [rows, teachers, subjects, classes, paymentAgg] = await Promise.all([
+  // R5 — "New session" (an extra session on a class, or a one-time one).
+  // Only loaded for who may create one; the action re-checks regardless. Its
+  // reads go out with the list's own, not after them (docs/08 §4.6.2).
+  const canCreate = ctxCan(ctx, "session.manage");
+
+  const [rows, teachers, subjects, classes, revenue, newSession] = await Promise.all([
     db.sessions.search({ where }),
     db.teachers.list({ active: true }),
     db.subjects.list(),
     db.classGroups.list(),
-    prisma.payment.aggregate({
-      where: {
-        centerId: ctx.center.id,
-        voided: false,
-        session: { date: { gte: from, lte: to } },
-      },
-      _sum: { amount: true },
-    }),
+    // A 64-bit sum, net of refunds — the same figure the receipt and
+    // Analytics show (SEC-2b: SEC-19, SEC-24).
+    revenueTotals(prisma, ctx.center.id, { from, to }),
+    canCreate
+      ? Promise.all([
+            db.classGroups.listForNewSession(),
+            db.subjects.list({ active: true }),
+            db.grades.list({ active: true }),
+            db.rooms.list(),
+            db.roomLinks.list(),
+          ]).then(([activeClasses, activeSubjects, activeGrades, rooms, roomLinks]) => ({
+            classes: activeClasses.map((classGroup): NewSessionClassOption => {
+              const label = sessionDisplayName(locale, { classGroup });
+              return {
+                id: classGroup.id,
+                label: label === "—" ? t("columns.untitled") : label,
+                teacherId: classGroup.teacherId,
+                roomId: classGroup.roomId ?? "",
+                extraRoomIds: classGroup.roomId ? classGroup.extraRooms.map((extra) => extra.roomId) : [],
+                slots: classGroup.schedules,
+              };
+            }),
+            subjects: activeSubjects.map((subject) => ({ value: subject.id, label: subject.name })),
+            grades: activeGrades.map((grade) => ({ value: grade.id, label: grade.name })),
+            rooms: rooms.map((room) => ({
+              id: room.id,
+              name: room.name,
+              capacity: room.capacity,
+              active: room.active,
+            })),
+            roomLinks,
+          }))
+      : null,
   ]);
 
-  const now = new Date();
   const withStatus = rows.map((row) => ({
     row,
-    displayStatus: deriveSessionDisplayStatus(row, now),
+    displayStatus: deriveSessionDisplayStatus(row, now, timeZone),
   }));
   const filtered = filters.status
     ? withStatus.filter((entry) => entry.displayStatus === filters.status)
@@ -110,14 +176,17 @@ export default async function SessionsPage({
 
   const tableRows: SessionRowData[] = pageEntries.map(({ row, displayStatus }) => ({
     sessionId: row.id,
-    className: sessionDisplayName(row),
+    className: sessionDisplayName(locale, row),
+    kind: sessionKind(row),
     teacherName: teacherByUserId.get(row.teacherId) ?? tCommon("none"),
     roomName: row.room?.name ?? null,
+    date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
     price: row.priceSnapshot,
     attendeeCount: row._count.attendees,
-    enrolledCount: row.classGroup._count.enrollments,
+    // A one-time session (R5) has no class, so nobody is enrolled in it.
+    enrolledCount: row.classGroup?._count.enrollments ?? 0,
     displayStatus,
   }));
 
@@ -127,17 +196,30 @@ export default async function SessionsPage({
   const teacherOptions = teachers.map((teacher) => ({
     value: teacher.userId,
     label: fullName(localName(teacher, teacher.user)),
+    // The centre's own phone for them (docs/01 §6) — what the picker searches.
+    phone: teacher.phone,
   }));
+  // `subjects` comes from `scoped(ctx).subjects.list()`, which already
+  // resolves `.name` to this centre's own display-name override or the
+  // catalog entry's bilingual name.
   const subjectOptions = subjects.map((subject) => ({ value: subject.id, label: subject.name }));
   const classOptions = classes.map((classGroup) => ({
     value: classGroup.id,
-    label: [classGroup.subject?.name, classGroup.grade?.name].filter(Boolean).join(" · ") || t("columns.untitled"),
+    label:
+      [
+        classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+        classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || t("columns.untitled"),
   }));
 
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();
     if (filters.range !== "day") params.set("range", filters.range);
     if (filters.date) params.set("date", filters.date);
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
     if (filters.teacherId) params.set("teacherId", filters.teacherId);
     if (filters.subjectId) params.set("subjectId", filters.subjectId);
     if (filters.classGroupId) params.set("classGroupId", filters.classGroupId);
@@ -149,9 +231,30 @@ export default async function SessionsPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} description={t("subtitle", { count: total })} />
+      <PageHeader
+        title={t("title")}
+        description={t("subtitle", { count: total })}
+        action={
+          newSession ? (
+            <NewSessionDialog
+              classes={newSession.classes}
+              teachers={teacherOptions}
+              subjects={newSession.subjects}
+              grades={newSession.grades}
+              rooms={newSession.rooms}
+              roomLinks={newSession.roomLinks}
+              defaultCut={{
+                centerShareType: ctx.settings?.defaultShareType ?? "PERCENTAGE",
+                centerShareValue: ctx.settings?.defaultShareValue ?? 15,
+              }}
+              todayIso={todayIso}
+              noneLabel={tCommon("none")}
+            />
+          ) : undefined
+        }
+      />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={4}>
         <StatCard
           label={t("stats.total")}
           value={formatNumber(total, locale)}
@@ -161,7 +264,6 @@ export default async function SessionsPage({
           label={t("stats.live")}
           value={formatNumber(liveCount, locale)}
           icon={<Radio className="size-4" />}
-          accent="success"
         />
         <StatCard
           label={t("stats.marked")}
@@ -170,11 +272,12 @@ export default async function SessionsPage({
         />
         <StatCard
           label={t("stats.collected")}
-          value={formatMoney(paymentAgg._sum.amount ?? 0, locale)}
+          value={formatMoney(revenue.collected, locale)}
           icon={<Wallet className="size-4" />}
-          accent="brand"
+          zero={revenue.collected === 0}
+          zeroLabel={t("zeroHint")}
         />
-      </div>
+      </StatGrid>
 
       <Card>
         <CardHeader>
@@ -183,8 +286,14 @@ export default async function SessionsPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <SessionFilters
-            range={filters.range}
-            date={filters.date ?? anchor.toISOString().slice(0, 10)}
+            dateFilter={{
+              range: filters.range,
+              date: filters.date ?? "",
+              from: filters.from ?? "",
+              to: filters.to ?? "",
+            }}
+            todayIso={todayIso}
+            resetHref={ROUTES.centerSessions}
             teacherId={filters.teacherId ?? ""}
             subjectId={filters.subjectId ?? ""}
             classGroupId={filters.classGroupId ?? ""}
@@ -196,22 +305,28 @@ export default async function SessionsPage({
           />
 
           {tableRows.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("empty")}</p>
+            <EmptyState
+              icon={<CalendarSearch />}
+              tone="warning"
+              title={t("empty")}
+              description={t("emptyHint")}
+              action={
+                <LinkButton href={ROUTES.centerSessions} size="sm">
+                  {t("clearFilters")}
+                </LinkButton>
+              }
+            />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
-              <li
-                aria-hidden
-                className="hidden items-center gap-4 border-b border-border px-2 pb-2 text-xs font-medium text-text-muted md:flex"
-              >
-                <span className="w-24 shrink-0">{t("columns.time")}</span>
-                <span className="min-w-0 flex-1">{t("columns.class")}</span>
-                <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
-                <span className="min-w-0 flex-1">{t("columns.room")}</span>
-                <span className="w-28 shrink-0">{t("columns.marked")}</span>
-                <span className="w-28 shrink-0">{t("columns.price")}</span>
-                <span className="w-28 shrink-0">{tCommon("status")}</span>
-                <span className="w-24 shrink-0 text-end">{tCommon("actions")}</span>
-              </li>
+              <ListHeader>
+                <span className={SESSION_COLUMNS.when}>{t("columns.when")}</span>
+                <span className={SESSION_COLUMNS.name}>{t("columns.class")}</span>
+                <span className={SESSION_COLUMNS.teacher}>{t("columns.teacher")}</span>
+                <span className={cn("hidden lg:block", SESSION_COLUMNS.room)}>{t("columns.room")}</span>
+                <span className={SESSION_COLUMNS.marked}>{t("columns.marked")}</span>
+                <span className={SESSION_COLUMNS.price}>{t("columns.price")}</span>
+                <span className={SESSION_COLUMNS.status}>{tCommon("status")}</span>
+              </ListHeader>
 
               {tableRows.map((row) => (
                 <SessionRow key={row.sessionId} session={row} locale={locale} />

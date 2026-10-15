@@ -1,0 +1,281 @@
+import type { AttendanceStatus, Prisma, PrismaClient } from "@prisma/client";
+// Relative imports on purpose — `npm run check:ratings` exercises this module
+// directly, outside the Next.js runtime (same reasoning as
+// lib/db/student-portal.ts and lib/db/parents.ts).
+import { addDays, centreTimeZone, todayInTimezone } from "../scheduling.ts";
+import { sessionCatalogIds } from "../session-label.ts";
+
+/**
+ * Teacher ratings (M17, docs/00-master-product-spec.md §5 "Teacher ratings").
+ * Every read/write here is identity-scoped by `studentUserId` or by the
+ * teacher's global `teacherId` — never by `centerId` — because the whole
+ * point is a rating that follows the teacher across every centre they work
+ * at (see the doc comment on `SessionRating` in prisma/schema.prisma). This
+ * module has no entry in `lib/db/scoped.ts` for the same reason.
+ *
+ * The teacher-facing half of this file is deliberately narrow: the only
+ * exported reads are `teacherRatingAverage`/`teacherRatingAverages`, both
+ * `{ average }`-only. There is no function here — and must never be one —
+ * that lists raw `SessionRating` rows by `teacherId`, because that row
+ * carries `studentUserId`, the exact identity the teacher must never be able
+ * to reach.
+ */
+
+type Db = PrismaClient | Prisma.TransactionClient;
+
+/** The pop-up looks back this many calendar days, today included (7 days = today and the 6 before). */
+const RATING_WINDOW_DAYS = 7;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** A rating needs real attendance (SEC-59) — an ABSENT row is not it. */
+const ATTENDED: AttendanceStatus[] = ["PRESENT", "LATE"];
+
+/**
+ * Inside the pop-up's window: `[today − 6, today]` in the session's centre's
+ * calendar. `< today + 1` (not `<= today`) so a session dated today is in
+ * regardless of any time-of-day on the stored date. (Not exported: the
+ * module's exported surface is fixed by `check:ratings`.)
+ */
+function isWithinRatingWindow(sessionDate: Date, timeZone: string, now: Date): boolean {
+  const today = todayInTimezone(timeZone, now);
+  return (
+    sessionDate.getTime() >= addDays(today, -(RATING_WINDOW_DAYS - 1)).getTime() &&
+    sessionDate.getTime() < addDays(today, 1).getTime()
+  );
+}
+
+/** Rounded to one decimal — "however's sensible" per the M17 brief. */
+function roundRating(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+// ── Write path: student rates or skips a session they attended ─────────────
+
+export type PendingRatingSession = {
+  sessionId: string;
+  centerId: string;
+  teacherId: string;
+  date: Date;
+  /** A one-time session's own title (R5); null for a class session. */
+  title: string | null;
+  subjectId: string | null;
+  gradeId: string | null;
+};
+
+/**
+ * Sessions this student **attended** (has a `SessionAttendee` row — not
+ * merely enrolled) in the last 7 days, that they have neither rated nor
+ * explicitly skipped yet. This is the entire query behind the login pop-up.
+ * Identity-scoped across every centre the student has ever attended a
+ * session at, the same cross-centre shape `lib/db/student-portal.ts` already
+ * uses for a student's own reservations/enrollments.
+ *
+ * R7b: "the last 7 days" is counted in **calendar days of the session's own
+ * centre** (`todayInTimezone` of that centre's zone, applied per row) — a
+ * student's centres may sit in different timezones, so there is no one global
+ * day. The database read is only a deliberately generous coarse bound; the
+ * per-centre window is applied in memory.
+ */
+export async function attendedSessionsToRate(
+  db: Db,
+  studentUserId: string,
+  now: Date,
+): Promise<PendingRatingSession[]> {
+  const coarseFrom = new Date(now.getTime() - (RATING_WINDOW_DAYS + 2) * MS_PER_DAY);
+  const coarseTo = new Date(now.getTime() + 2 * MS_PER_DAY);
+
+  const candidateRows = await db.sessionAttendee.findMany({
+    where: {
+      studentProfile: { userId: studentUserId },
+      // SEC-59: only a session the student actually attended — never an
+      // ABSENT row (the close writes one for every enrolled no-show).
+      attendanceStatus: { in: ATTENDED },
+      session: { date: { gte: coarseFrom, lte: coarseTo } },
+    },
+    distinct: ["sessionId"],
+    select: {
+      sessionId: true,
+      session: {
+        select: {
+          id: true,
+          centerId: true,
+          teacherId: true,
+          date: true,
+          // R5 — a one-time session has no class: its own title/subject/grade.
+          title: true,
+          subjectId: true,
+          gradeId: true,
+          classGroup: { select: { subjectId: true, gradeId: true } },
+          center: { select: { settings: { select: { timezone: true } } } },
+        },
+      },
+    },
+  });
+  // Each row is held to its own centre's window: [today − 6, today], where
+  // "today" is that centre's calendar day. `< today + 1` (not `<= today`) so a
+  // session dated today is in regardless of any time-of-day on the stored date.
+  const attendeeRows = candidateRows.filter((row) =>
+    isWithinRatingWindow(row.session.date, centreTimeZone(row.session.center.settings), now),
+  );
+  if (attendeeRows.length === 0) return [];
+
+  const sessionIds = attendeeRows.map((row) => row.sessionId);
+  const [rated, skipped] = await Promise.all([
+    db.sessionRating.findMany({
+      where: { studentUserId, sessionId: { in: sessionIds } },
+      select: { sessionId: true },
+    }),
+    db.sessionRatingSkip.findMany({
+      where: { studentUserId, sessionId: { in: sessionIds } },
+      select: { sessionId: true },
+    }),
+  ]);
+  const excluded = new Set([
+    ...rated.map((row) => row.sessionId),
+    ...skipped.map((row) => row.sessionId),
+  ]);
+
+  return attendeeRows
+    .filter((row) => !excluded.has(row.sessionId))
+    .map((row) => ({
+      sessionId: row.session.id,
+      centerId: row.session.centerId,
+      teacherId: row.session.teacherId,
+      date: row.session.date,
+      title: row.session.classGroup ? null : row.session.title,
+      ...sessionCatalogIds(row.session),
+    }));
+}
+
+export type SubmitSessionRatingResult =
+  | { ok: true }
+  | { ok: false; error: "notAttended" | "alreadyRated" };
+
+/**
+ * Records one rating. Re-checks attendance itself rather than trusting the
+ * pop-up's own list — the same "never trust the client, re-derive from the
+ * database" discipline every other student-facing write in this app follows
+ * (`lib/db/reservations.ts`'s `reserveOrEnroll`). SEC-59: the student must
+ * have been PRESENT or LATE (an ABSENT row is not attendance), and the session
+ * must be inside the same 7-day window the pop-up offers — anything else is
+ * `notAttended`, by direct call too.
+ */
+export async function submitSessionRating(
+  db: Db,
+  params: { studentUserId: string; sessionId: string; score: number; now?: Date },
+): Promise<SubmitSessionRatingResult> {
+  const attendee = await db.sessionAttendee.findFirst({
+    where: {
+      sessionId: params.sessionId,
+      studentProfile: { userId: params.studentUserId },
+      attendanceStatus: { in: ATTENDED },
+    },
+    select: {
+      session: {
+        select: {
+          teacherId: true,
+          date: true,
+          center: { select: { settings: { select: { timezone: true } } } },
+        },
+      },
+    },
+  });
+  if (!attendee) return { ok: false, error: "notAttended" };
+  const timeZone = centreTimeZone(attendee.session.center.settings);
+  if (!isWithinRatingWindow(attendee.session.date, timeZone, params.now ?? new Date())) {
+    return { ok: false, error: "notAttended" };
+  }
+
+  const existing = await db.sessionRating.findUnique({
+    where: {
+      studentUserId_sessionId: {
+        studentUserId: params.studentUserId,
+        sessionId: params.sessionId,
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) return { ok: false, error: "alreadyRated" };
+
+  await db.sessionRating.create({
+    data: {
+      studentUserId: params.studentUserId,
+      sessionId: params.sessionId,
+      teacherId: attendee.session.teacherId,
+      score: params.score,
+    },
+  });
+  return { ok: true };
+}
+
+/**
+ * Records a skip. Idempotent (`skipDuplicates`) and never fails — a skip is
+ * not an assertion about anything, just "don't ask again for this one." SEC-59:
+ * only for a session this student attended; anything else writes nothing
+ * (and no longer surfaces a foreign-key error that told a caller whether a
+ * session id exists).
+ */
+export async function skipSessionRating(
+  db: Db,
+  params: { studentUserId: string; sessionId: string },
+): Promise<void> {
+  const attended = await db.sessionAttendee.count({
+    where: {
+      sessionId: params.sessionId,
+      studentProfile: { userId: params.studentUserId },
+      attendanceStatus: { in: ATTENDED },
+    },
+  });
+  if (attended === 0) return;
+  await db.sessionRatingSkip.createMany({
+    data: [{ studentUserId: params.studentUserId, sessionId: params.sessionId }],
+    skipDuplicates: true,
+  });
+}
+
+// ── Read path: the published, average-only aggregate ───────────────────────
+
+/**
+ * One teacher's platform-wide average — `{ average }` and **nothing else**,
+ * not just in the UI but in the shape of the object itself, so a teacher with
+ * one rating and a teacher with a hundred are indistinguishable by any caller
+ * of this function (spec §5 "Teacher ratings"). `null` means zero ratings.
+ */
+export async function teacherRatingAverage(
+  db: Db,
+  teacherId: string,
+): Promise<{ average: number | null }> {
+  const result = await db.sessionRating.aggregate({
+    where: { teacherId },
+    _avg: { score: true },
+  });
+  const avg = result._avg.score;
+  return { average: avg === null ? null : roundRating(avg) };
+}
+
+/**
+ * The same average, batched for many teachers at once (a Discover page's
+ * class cards, a centre's teacher list) — one `groupBy` instead of one query
+ * per teacher (docs/02-architecture.md §14). A teacher absent from the
+ * result (zero ratings) is the caller's job to default to `null`, exactly
+ * like `teacherRatingAverage` returns for that same case.
+ */
+export async function teacherRatingAverages(
+  db: Db,
+  teacherIds: string[],
+): Promise<Map<string, number>> {
+  if (teacherIds.length === 0) return new Map();
+
+  const rows = await db.sessionRating.groupBy({
+    by: ["teacherId"],
+    where: { teacherId: { in: teacherIds } },
+    _avg: { score: true },
+  });
+
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    if (row._avg.score !== null) map.set(row.teacherId, roundRating(row._avg.score));
+  }
+  return map;
+}

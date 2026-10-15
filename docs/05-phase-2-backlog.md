@@ -36,7 +36,7 @@
 
 **Why deferred.** Phase 1's rule is the simple one: enrollment is hard-capped by room capacity, a student may still *request* a full class, and staff cannot approve past the cap (`00-master-product-spec.md` §5 "Capacity"). A waitlist adds ordering, fairness, promotion timing, and a notification the moment a seat opens — and notifications are themselves deferred, so a waitlist would silently promote people who never find out.
 
-**Depends on.** The notification layer (entry 9's announcements, or an SMS/WhatsApp channel). Expiry additionally depends on a scheduled job beyond the single session-generation cron.
+**Depends on.** The notification layer (entry 9's announcements, or an SMS/WhatsApp channel). Expiry additionally depends on a scheduled job — and since R4 removed the session-generation cron, the product has none at all; expiry would introduce the first.
 
 ---
 
@@ -94,7 +94,7 @@
 
 **What it is.** In-app support ticketing between a center and KayEdu; platform-wide or per-center announcements; billing plans; and gating features per plan.
 
-**Why deferred.** `Center.plan` was a free-text field with an editor and no behavior behind it; it is **removed entirely** at M19 rather than left to imply a billing system that does not exist (`00-master-product-spec.md` §5 "Center lifecycle"). Module entitlements are explicitly rejected for Phase 1 — one product, configured, never forked per center (§8) — and a plan flag that switches features on and off is the first step toward that fork. Support tickets and announcements both need the messaging entity this app has nowhere: the Approvals screen's "contact" action was punted for exactly this reason (`03-build-order.md`, Approvals).
+**Why deferred.** `Center.plan` was a free-text field with an editor and no behavior behind it; it **was removed entirely at M19** rather than left to imply a billing system that does not exist (`00-master-product-spec.md` §5 "Center lifecycle"). Module entitlements are explicitly rejected for Phase 1 — one product, configured, never forked per center (§8) — and a plan flag that switches features on and off is the first step toward that fork. Support tickets and announcements both need the messaging entity this app has nowhere: the Approvals screen's "contact" action was punted for exactly this reason (`03-build-order.md`, Approvals).
 
 **Depends on.** A real billing relationship with more than one paying customer (the `Organization` model at M11 is the entity that would carry it); and one messaging/notification substrate serving tickets, announcements and Approvals-contact together, rather than three one-off inboxes.
 
@@ -110,13 +110,15 @@
 
 ---
 
-## 11. Academic year and term entities
+## 11. Academic year and term entities (beyond R4's term presets)
 
-**What it is.** First-class `AcademicYear` / `Term` records that sessions, enrollments, analytics and grade promotion hang off.
+**What it is.** First-class `AcademicYear` / `Term` records that enrolments, billing, analytics and grade promotion **hang off**: term-based enrolment (enrol a student "for Semester 2" rather than in a class open-endedly), billing by term, term-scoped analytics, automatic grade promotion at a term boundary, and report cards.
 
-**Why deferred.** Phase 1 is date-ranged, not term-ranged: analytics filters by day/week/month, sessions generate on a rolling window, and no entity says "this is the end of a term." **This resolves a live inconsistency the docs carried until now** — `00-master-product-spec.md` §4.1 item 4 promised "promote grade **at term end**" while no `Term` or `AcademicYear` model exists anywhere in `prisma/schema.prisma`. The shipped behavior is a **manual, staff-initiated bulk grade promotion** with no term trigger, and §4.1 now says exactly that.
+**What R4 already built — and why it is not this.** R4 shipped centre **term presets** (`CenterTerm`: a name and two dates, Settings → Terms — `03-build-order.md` R4, `00-master-product-spec.md` §5.1 "Class periods and centre terms"). A preset only **fills** a class's `startDate`/`endDate`; the dates are copied and nothing references the preset, so renaming, redating or deleting it never moves a class. That is a form convenience over a class's own period, not an entity anything hangs off — which is exactly what this entry still describes, so it stays here and does not appear in `03-build-order.md`.
 
-**Depends on.** Nothing technical — this is a modelling decision waiting on demand. Everything that would consume it (term-scoped analytics, automatic promotion, term-bounded enrollment, report cards) is itself deferred, so introducing the entity first would add a dimension to every query for no current reader. Entries 5 (grades/progress) and 17 (reporting) are its real customers.
+**Why deferred.** Phase 1 is date-ranged, not term-ranged: analytics filters by day/week/month, a class's sessions come from its own period (R4), and no entity says "this is the end of a term" in a way enrolment, money or promotion could act on. **This resolves a live inconsistency the docs carried until now** — `00-master-product-spec.md` §4.1 item 4 promised "promote grade **at term end**" while no `Term` or `AcademicYear` model existed anywhere in `prisma/schema.prisma`. The shipped behavior is a **manual, staff-initiated bulk grade promotion** with no term trigger, and §4.1 now says exactly that.
+
+**Depends on.** Mostly a modelling decision waiting on demand. Everything that would consume it (term-scoped analytics, automatic promotion, term-bounded enrolment, report cards) is itself deferred, so introducing the entity first would add a dimension to every query for no current reader. Entries 5 (grades/progress) and 17 (reporting) are its real customers. **Billing by term** additionally depends on prepaid packages/subscriptions, which Phase 1 excludes outright (`00-master-product-spec.md` §2 "Prepaid / packages / discounts / monthly subscriptions" — pay-per-session only — and this file's "Also deferred" row on packages). A future entity should be able to adopt R4's presets (a preset becomes, or links to, a `Term`) without moving any class, since classes only ever stored dates.
 
 ---
 
@@ -187,6 +189,62 @@
 **Why deferred.** M11 introduces the `Organization` model and makes `Center` the branch-level tenant, but keeps `center_id` as the sole isolation key, untouched (`01-data-model.md` §2, `02-architecture.md` §5). The rename would touch every table, every scoped helper, every gate script and every migration — a very large, purely cosmetic change to the one part of the system the whole product's correctness rests on. **The naming mismatch is resolved in the i18n layer instead**: the UI says "Branch" where the DB says `Center`, and "Center" where the DB says `Organization` (`02-architecture.md` §8). Nobody outside the schema ever sees the old vocabulary.
 
 **Depends on.** A quiet period with no in-flight milestone touching isolation, and a mechanical migration plan with every isolation gate (`check:isolation`, plus each gate asserting cross-center denial) green before and after. Do this as its own dedicated pass or not at all — never folded into a feature milestone.
+
+---
+
+## 19. Layout-independent card payload (a digits-only code a scanner types identically under any keyboard layout)
+
+**What it is.** A card payload — printed in the QR, or an additional short numeric code beside it — that a USB keyboard-wedge scanner types as the *same characters* whatever the OS keyboard layout is. Today `KAYEDU|{centerId}|{studentCode}` carries Latin letters (the prefix and the hex centre id) that arrive as Arabic letters when an Arabic layout is active, so the desk has to scan with the English layout.
+
+**Why deferred.** The static payload is a recorded decision (`00-master-product-spec.md` §5.1 "Check-in & the QR payload") and R7 was explicitly told not to change the format; changing it invalidates every card already printed. R7 instead makes the failure *visible* (a payload-shaped scan with an unreadable prefix says "check the keyboard language" rather than "no student") and keeps the bare digits-only code working under any layout. Student codes also restart at 1001 in every centre, so a digits-only payload cannot identify the centre by itself — the desk's own centre scoping would have to carry that, and a card from another branch would then be indistinguishable from a student of this one.
+
+**Depends on.** A decision on transition (accept both payloads for a period, or reprint), a way to keep a card from another branch refusable without the centre id in the text (a per-centre numeric prefix, or a check digit over centre + code), and the ID-card editor, where the card layout and the QR block are edited (R9 shipped the editor's styling and drag fixes with the payload deliberately untouched, so this dependency is still open).
+
+---
+
+## 20. The card font actually drawn: embed Cairo in the card SVG
+
+**What it is.** Make the "Cairo (card font)" choice in the ID-card editor render as Cairo everywhere — the editor preview, the print view and the stored `id-cards/` file — by embedding the font in the card SVG (a subset as a base64 `@font-face`), so the three-way font choice (card font / system sans / system serif) is three visibly different faces on every machine.
+
+**Why deferred.** The app loads Cairo through `next/font`, which serves it under a generated family name; the card SVG asks for `Cairo` by its plain name, which resolves only on a machine that has Cairo installed, and otherwise falls back to `'Segoe UI'` / `system-ui`. That is how the card has always rendered, and R9 deliberately added **no new web font** and kept every layout saved before it byte-identical. Embedding a font changes the size of every stored card file and the bytes of every card, which is a decision of its own — not something to slip into a styling pass. In practice today the "card font" and "system sans" options look alike in a browser; the serif option is visibly different.
+
+**Depends on.** A decision on how large a stored card may be (a subset of Cairo's Arabic + Latin ranges, with weights 400/500/600/700, is tens of KB per file), and on whether stored cards from before the change are regenerated or left as they are.
+
+---
+
+## 21. A platform-admin "repair this centre's baseline" action
+
+**What it is.** A button on `/admin/centers/[id]` that runs `provisionCenterBaseline` (`lib/db/provision.ts`) for a centre that lacks part of it — missing settings, missing baseline `PermissionGrant` rows, no active payment method — and writes an audit row saying what it added, with a preview of exactly which rows are missing (`centerBaselineGaps`) before anything is written.
+
+**Why deferred.** P1 fixed the cause (every centre-creating path now goes through that one function) and deliberately did **not** backfill existing centres: re-adding a grant row an Owner removed or never wanted is a permission change made by side effect, and the only centres known to lack the baseline were the two dev Center 60 branches, which a wipe + reseed replaces. There is no production centre in that state. A repair that is a visible, audited, deliberate platform action is the right shape if one ever appears; building it before one does would be speculative.
+
+**Depends on.** A decision on whether a repair may only *add* missing rows (the function's behaviour today — it never flips an existing row) or may also reset a centre's matrix to the baseline, which is a different and more dangerous operation; and on who may run it (platform admin only, per `00-master-product-spec.md` §3).
+
+---
+
+## 22. ~~Enforce the Content-Security-Policy~~ — moved to M20 (SEC-2c)
+
+**Moved, not dropped.** Enforcing the policy SEC-2a ships as `Content-Security-Policy-Report-Only` is now an **M20** build item (`03-build-order.md` M20, `00-master-product-spec.md` §2.1-C): it needs a browser pass over every route group in both locales and a reporting endpoint (Sentry's CSP intake), both of which M20 brings. The number is kept so older references still resolve; an item lives in one list only.
+
+---
+
+## 23. A dedicated Postgres role for the app that does not bypass RLS
+
+**What it is.** Connect Prisma as a `kayedu_app` role with exactly the table privileges the app needs and **no** BYPASSRLS, so the row-level-security backstop also covers the app's own connection — today it only covers the Supabase Data API (SEC-57).
+
+**Why deferred.** On Supabase the `postgres` role Prisma uses has BYPASSRLS, and the app's tenant isolation is enforced in code (`lib/db/scoped.ts`, CLAUDE.md rule 1). A non-bypass role only helps once there are **policies** that express tenant isolation per request (a `centerId` set per transaction, read by the policies) — a per-query design the audit lists as D-19 (c) and the project chose not to build (D-19 (a): deny-all, no policies). Without those policies a non-bypass app role would simply see nothing.
+
+**Depends on.** A decision to move from deny-all to per-tenant policies (setting the tenant per transaction from `getTenantContext()`), a migration path for the role and its grants that `prisma migrate deploy` can run, and connection-pooler support for per-transaction settings.
+
+---
+
+## 24. Identity merge: one person recorded as two `User` rows
+
+**What it is.** A platform-admin tool to merge two global `User` rows that turn out to be the same person (registered twice before the duplicate-match caught it, or a sign-up whose account claim was declined and who is later proven to be the staff-created person): move every `Membership`, `StudentProfile`, `ParentLink`, rating and claim from one `User` to the other, in one audited transaction, and retire the loser.
+
+**Why deferred.** Earlier docs described "merge is a manual, audited admin action" as if it existed; the SYS audit found no such tool (`docs/08-system-audit.md`). The match workflow (M3, SEC-2a) already prevents most duplicates by refusing to create a second `User` for a known global email, and an `AccountClaim` (D-01) covers the sign-up case without a merge. A merge touches money-bearing history across centres (`Payment.studentProfileId`, `Settlement.teacherId`, `Payment.teacherId`) and the identity rules of CLAUDE.md rule 4, so it needs its own design — including what happens when both rows hold a profile at the same centre.
+
+**Depends on.** A decision on conflict rules (two profiles at one centre; two Supabase logins), the verified-phone/OTP work (entry 12) for proving the merge is wanted, and the retention/erasure rule (OD-2) for the retired row.
 
 ---
 

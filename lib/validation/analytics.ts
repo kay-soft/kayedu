@@ -4,6 +4,8 @@ import { z } from "zod";
 // lib/validation/settings.ts: this module stays resolvable outside the
 // Next.js runtime so `npm run check:analytics` can exercise the real schemas.
 import { localeSchema } from "./auth.ts";
+import { dateFilterSchema } from "./date-filter.ts";
+import { dateOnlyField } from "./class-period.ts";
 import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
 
 /**
@@ -32,26 +34,15 @@ const checkbox = z
 
 const base = { locale: localeSchema };
 
-// ── Date-range filters (Analytics + Expenses share the same shape) ─────────
+// ── Date filters (Analytics + Expenses share the shared date filter, M18) ──
 
-export const analyticsRangeSchema = z.enum(["day", "week", "month", "year", "all"]);
-
-export const analyticsFilterSchema = z.object({
-  range: analyticsRangeSchema.default("month"),
-  /** Anchor date, "YYYY-MM-DD" — absent means today. Ignored when range="all". */
-  date: z
-    .string()
-    .trim()
-    .max(10)
-    .optional()
-    .transform((value) =>
-      value && !Number.isNaN(Date.parse(value)) ? value.slice(0, 10) : null,
-    ),
+/** Analytics adds one dimension (teacher) on top of the shared date filter. */
+export const analyticsFilterSchema = dateFilterSchema.extend({
   teacherId: optionalRef,
 });
 
 /** Expenses reuse the exact same date filter, with no teacher dimension. */
-export const expenseFilterSchema = analyticsFilterSchema.omit({ teacherId: true });
+export const expenseFilterSchema = dateFilterSchema;
 
 // ── Expense categories (master data — same shape as lib/validation/settings.ts) ─
 
@@ -64,7 +55,7 @@ export const expenseCategoryToggleSchema = z.object({
 });
 export const expenseCategoryDeleteSchema = z.object({ ...base, id: recordId });
 
-// ── Expenses (append-and-audit — see docs/01 §3 note on Expense in CLAUDE.md) ─
+// ── Expenses (append, void with a reason, audit — D-24) ─────────────────────
 
 export const expenseCreateSchema = z.object({
   ...base,
@@ -81,11 +72,10 @@ export const expenseCreateSchema = z.object({
       }
       return piastres;
     }),
-  date: z
-    .string()
-    .trim()
-    .min(1, "required")
-    .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate"),
+  // SEC-50: a strict calendar day. "Not in the future and not older than the
+  // centre's visibility window" (D-24) needs the centre's clock, so the
+  // action checks it (lib/db/expenses.ts's `expenseDateError`).
+  date: dateOnlyField,
   note: z
     .string()
     .trim()
@@ -94,4 +84,9 @@ export const expenseCreateSchema = z.object({
     .transform((value) => (value && value.length > 0 ? value : null)),
 });
 
-export const expenseDeleteSchema = z.object({ ...base, id: recordId });
+/** D-24: an expense is voided with a reason, never deleted. */
+export const expenseVoidSchema = z.object({
+  ...base,
+  id: recordId,
+  reason: z.string().trim().min(1, "required").max(200, "tooLong"),
+});

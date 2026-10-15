@@ -1,27 +1,38 @@
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
-import { Building2, GraduationCap, ShieldCheck, Users } from "lucide-react";
+import { Building2, GraduationCap, ScrollText, ShieldCheck, Users } from "lucide-react";
 
-import { ActiveToggleForm } from "@/app/[locale]/(admin)/admin/centers/active-toggle-form";
-import { PlanForm } from "@/app/[locale]/(admin)/admin/centers/[id]/plan-form";
+import { LifecycleTransitionForm } from "@/app/[locale]/(admin)/admin/centers/lifecycle-transition-form";
+import { LIFECYCLE_BADGE_VARIANT } from "@/app/[locale]/(admin)/admin/centers/lifecycle-badge";
+import { VisibilityWindowForm } from "@/app/[locale]/(admin)/admin/centers/visibility-window-form";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
-import { platformCenterDetailStats, recordSupportAccess } from "@/lib/db/platform";
+import { DEFAULT_VISIBILITY_WINDOW_DAYS } from "@/lib/db/visibility";
+import {
+  platformCenterDetailStats,
+  recordSupportAccess,
+  validNextLifecycleStates,
+  platformCenterById,
+  platformCenterAuditTrail,
+  centerSettingsFor,
+} from "@/lib/db/platform";
 import { formatDate, formatNumber } from "@/lib/format";
+import { EmptyState } from "@/components/shared/empty-state";
 
 /**
  * A center's support view (spec §4.4 "controlled privileged support access").
- * Read-only, and every visit writes an `AuditLog` row before anything is
- * shown — the audit trail the spec asks for, not a full masquerade/
- * impersonation system (docs/03-build-order.md M9). The admin never acts on
- * this center's data from here — activate/suspend and the plan editor are
- * tenant-management, not "browsing tenant data", so they stay separate from
- * the recent-activity read below.
+ * Read-only except for two tenant-management controls — the lifecycle
+ * transition and the data-visibility-window override (M19) — which stay
+ * separate from the recent-activity read below, since acting on the tenant
+ * itself is not "browsing tenant data". Every visit writes an `AuditLog` row
+ * before anything is shown — the audit trail the spec asks for, not a full
+ * masquerade/impersonation system (docs/03-build-order.md M9).
  */
 export default async function AdminCenterDetailPage({
   params,
@@ -31,7 +42,7 @@ export default async function AdminCenterDetailPage({
   const admin = await requirePlatformAdmin();
   const { id } = await params;
 
-  const center = await prisma.center.findUnique({ where: { id } });
+  const center = await platformCenterById(prisma, id);
   if (!center) notFound();
 
   await recordSupportAccess(prisma, { centerId: center.id, actorUserId: admin.id });
@@ -39,14 +50,10 @@ export default async function AdminCenterDetailPage({
   const locale = await getLocale();
   const t = await getTranslations("AdminCenters");
 
-  const [stats, recentAudit] = await Promise.all([
+  const [stats, recentAudit, settings] = await Promise.all([
     platformCenterDetailStats(prisma, center.id),
-    prisma.auditLog.findMany({
-      where: { centerId: center.id },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      include: { actor: true },
-    }),
+    platformCenterAuditTrail(prisma, center.id),
+    centerSettingsFor(prisma, center.id),
   ]);
 
   return (
@@ -55,16 +62,13 @@ export default async function AdminCenterDetailPage({
         title={center.name}
         description={t("detail.subtitle", { slug: center.slug })}
         action={
-          <div className="flex items-center gap-2">
-            <Badge variant={center.active ? "success" : "danger"}>
-              {center.active ? t("active") : t("suspended")}
-            </Badge>
-            <ActiveToggleForm centerId={center.id} active={center.active} />
-          </div>
+          <Badge variant={LIFECYCLE_BADGE_VARIANT[center.lifecycleState]}>
+            {t(`lifecycle.${center.lifecycleState}`)}
+          </Badge>
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid count={4}>
         <StatCard
           label={t("detail.stats.staff")}
           value={formatNumber(stats.staff, locale)}
@@ -85,12 +89,31 @@ export default async function AdminCenterDetailPage({
           value={formatNumber(stats.sessions, locale)}
           icon={<Building2 className="size-4" />}
         />
-      </div>
+      </StatGrid>
 
-      <SectionHeader title={t("detail.planTitle")} description={t("detail.planDescription")} />
+      <SectionHeader
+        title={t("detail.lifecycleTitle")}
+        description={t("detail.lifecycleDescription")}
+      />
       <Card>
-        <CardContent className="pt-6">
-          <PlanForm centerId={center.id} plan={center.plan} />
+        <CardContent>
+          <LifecycleTransitionForm
+            centerId={center.id}
+            validNext={validNextLifecycleStates(center.lifecycleState)}
+          />
+        </CardContent>
+      </Card>
+
+      <SectionHeader
+        title={t("detail.visibilityTitle")}
+        description={t("detail.visibilityDescription")}
+      />
+      <Card>
+        <CardContent>
+          <VisibilityWindowForm
+            centerId={center.id}
+            dataVisibilityDays={settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS}
+          />
         </CardContent>
       </Card>
 
@@ -99,9 +122,9 @@ export default async function AdminCenterDetailPage({
         description={t("detail.auditDescription")}
       />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent>
           {recentAudit.length === 0 ? (
-            <p className="text-sm text-text-muted">{t("detail.auditEmpty")}</p>
+            <EmptyState compact icon={<ScrollText />} title={t("detail.auditEmpty")} description={t("detail.auditEmptyHint")} />
           ) : (
             <ul className="flex flex-col gap-3 md:gap-0">
               {recentAudit.map((entry) => (

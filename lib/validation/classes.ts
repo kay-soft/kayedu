@@ -4,8 +4,15 @@ import { z } from "zod";
 // resolvable outside the Next.js runtime, so `npm run check:classes` can
 // exercise the real schemas (same reasoning as ./settings.ts and ./people.ts).
 import { localeSchema } from "./auth.ts";
-import { MAX_PIASTRES, parseEgpToPiastres } from "../money.ts";
-import { isValidTime } from "../scheduling.ts";
+import { MAX_PRICE_PIASTRES, centerCutError, parseEgpToPiastres } from "../money.ts";
+import { isValidTime, weeklySlotsError, type WeeklySlotRow } from "../scheduling.ts";
+import {
+  confirmConflictsField,
+  extraRoomIdsField,
+  type SlotConflictState,
+} from "./room-set.ts";
+import { dateOnlyField, withPeriodRule } from "./class-period.ts";
+import type { MatchCandidate } from "./people.ts";
 
 /**
  * Class, schedule, enrollment and holiday schemas (M4). Every Server Action
@@ -48,15 +55,22 @@ const wholeNumber = (max: number) =>
       "invalidNumber",
     );
 
+/** A price in EGP → piastres, at most `MAX_PRICE_PIASTRES` (D-17). */
 const moneyEgp = z
   .string()
   .trim()
   .default("0")
-  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value)))
+  .transform((value) => (value === "" ? 0 : parseEgpToPiastres(value, MAX_PRICE_PIASTRES)))
   .refine((value): value is number => value !== null, "invalidAmount");
 
-const MAX_CAPACITY = 1_000;
 export const MAX_LATE_THRESHOLD_MINUTES = 240;
+
+/**
+ * R3: every new or edited class must have a primary room — its seat limit
+ * is the room set's capacity, so a class without one would be silently
+ * uncapped. Existing rows with no room stay valid until next edited.
+ */
+const requiredRoom = z.string().trim().min(1, "roomRequired").max(64, "notFound");
 
 const base = { locale: localeSchema };
 
@@ -72,42 +86,46 @@ const classGroupFields = {
   subjectId: optionalRef,
   gradeId: optionalRef,
   educationSystemId: optionalRef,
-  roomId: optionalRef,
+  roomId: requiredRoom,
+  extraRoomIds: extraRoomIdsField,
   price: moneyEgp,
   centerShareType: z.enum(["FIXED", "PERCENTAGE"], { error: "invalidShareType" }),
   shareValue: z.string().trim().min(1, "required"),
-  capacity: wholeNumber(MAX_CAPACITY),
-  attendanceRequired: checkbox,
   lateThresholdMinutes: wholeNumber(MAX_LATE_THRESHOLD_MINUTES),
   acceptsNewStudents: checkbox,
   requiresConfirmation: checkbox,
-  // Whether EXCUSED is offered as an attendance status on this class's
-  // sessions (M10, spec §5 "Excused configurable per class").
-  allowExcused: checkbox,
+  // R4 — the class's period, required on every new and edited class. A term
+  // preset only fills these two; nothing about the term is posted.
+  startDate: dateOnlyField,
+  endDate: dateOnlyField,
+  confirmConflicts: confirmConflictsField,
 };
 
+/**
+ * The cut against the class's own price — the one rule (`lib/money.ts`'s
+ * `centerCutError`, SEC-2b D-15): a whole percent 0–100, or a FIXED amount
+ * no greater than the price. The same rule runs on every edit, so lowering a
+ * price below the class's FIXED cut is refused (`fixedAbovePrice`).
+ */
 function resolveShareValue(
-  value: { centerShareType: "FIXED" | "PERCENTAGE"; shareValue: string },
+  value: { centerShareType: "FIXED" | "PERCENTAGE"; shareValue: string; price: number },
   ctx: z.RefinementCtx,
 ): number | typeof z.NEVER {
-  if (value.centerShareType === "PERCENTAGE") {
-    const percent = Number(value.shareValue);
-    if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
-      ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidPercent" });
-      return z.NEVER;
-    }
-    return percent;
-  }
-  const piastres = parseEgpToPiastres(value.shareValue);
-  if (piastres === null || piastres > MAX_PIASTRES) {
-    ctx.addIssue({ code: "custom", path: ["shareValue"], message: "invalidAmount" });
+  const parsed =
+    value.centerShareType === "PERCENTAGE"
+      ? Number(value.shareValue)
+      : parseEgpToPiastres(value.shareValue, MAX_PRICE_PIASTRES);
+  const error = parsed === null ? "invalidAmount" : centerCutError(value.price, value.centerShareType, parsed);
+  if (error || parsed === null) {
+    ctx.addIssue({ code: "custom", path: ["shareValue"], message: error ?? "invalidAmount" });
     return z.NEVER;
   }
-  return piastres;
+  return parsed;
 }
 
 export const classGroupSchema = z
   .object({ ...base, ...classGroupFields })
+  .superRefine(withPeriodRule)
   .transform((value, ctx) => {
     const centerShareValue = resolveShareValue(value, ctx);
     if (centerShareValue === z.NEVER) return z.NEVER;
@@ -118,20 +136,22 @@ export const classGroupSchema = z
       gradeId: value.gradeId,
       educationSystemId: value.educationSystemId,
       roomId: value.roomId,
+      extraRoomIds: value.extraRoomIds,
       price: value.price,
       centerShareType: value.centerShareType,
       centerShareValue,
-      capacity: value.capacity,
-      attendanceRequired: value.attendanceRequired,
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
-      allowExcused: value.allowExcused,
+      startDate: value.startDate,
+      endDate: value.endDate,
+      confirmConflicts: value.confirmConflicts,
     };
   });
 
 export const classGroupUpdateSchema = z
   .object({ ...base, ...classGroupFields, id: recordId })
+  .superRefine(withPeriodRule)
   .transform((value, ctx) => {
     const centerShareValue = resolveShareValue(value, ctx);
     if (centerShareValue === z.NEVER) return z.NEVER;
@@ -143,16 +163,65 @@ export const classGroupUpdateSchema = z
       gradeId: value.gradeId,
       educationSystemId: value.educationSystemId,
       roomId: value.roomId,
+      extraRoomIds: value.extraRoomIds,
       price: value.price,
       centerShareType: value.centerShareType,
       centerShareValue,
-      capacity: value.capacity,
-      attendanceRequired: value.attendanceRequired,
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
-      allowExcused: value.allowExcused,
+      startDate: value.startDate,
+      endDate: value.endDate,
+      confirmConflicts: value.confirmConflicts,
     };
+  });
+
+// ── Weekly rows of a new class (R6) ─────────────────────────────────────────
+
+/** More than this many weekly rows is a typo, not a timetable. */
+export const MAX_WEEKLY_SLOT_ROWS = 14;
+
+/**
+ * The class dialog's weekly rows, posted as one JSON field (`slots`). A new
+ * class needs at least one; rows on the same weekday must not overlap
+ * (`lib/scheduling.ts`'s `weeklySlotsError`, the one rule). The issue is
+ * attached to the `slots` field with an i18n key under `Classes.errors`.
+ */
+export const classSlotsSchema = z
+  .string()
+  .trim()
+  .default("[]")
+  .transform((raw, ctx): WeeklySlotRow[] => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw === "" ? "[]" : raw);
+    } catch {
+      ctx.addIssue({ code: "custom", message: "invalidTime" });
+      return z.NEVER;
+    }
+    const rows = z
+      .array(
+        z.object({
+          dayOfWeek: z.number(),
+          startTime: z.string(),
+          endTime: z.string(),
+        }),
+      )
+      .max(MAX_WEEKLY_SLOT_ROWS, "tooManySlots")
+      .safeParse(parsed);
+    if (!rows.success) {
+      ctx.addIssue({
+        code: "custom",
+        message: rows.error.issues[0]?.message === "tooManySlots" ? "tooManySlots" : "invalidTime",
+      });
+      return z.NEVER;
+    }
+    const problem = weeklySlotsError(rows.data, { required: true });
+    if (problem) {
+      ctx.addIssue({ code: "custom", message: problem.error });
+      return z.NEVER;
+    }
+    return rows.data;
   });
 
 export const classRecordSchema = z.object({ ...base, id: recordId });
@@ -161,6 +230,8 @@ export const classActiveSchema = z.object({
   ...base,
   id: recordId,
   active: checkbox,
+  /** Reactivating regenerates the period's sessions — same contract (R4). */
+  confirmConflicts: confirmConflictsField,
 });
 
 // ── Class schedule (the Schedule Builder, docs/04 §9) ──────────────────────
@@ -183,6 +254,15 @@ const scheduleFields = {
   endTime: timeValue,
 };
 
+/**
+ * The R3 "I understand, create anyway" flag for a slot write, parsed beside
+ * the slot itself rather than inside it — the parsed slot is exactly the
+ * `ClassSchedule` row, so nothing outside its columns belongs in it.
+ */
+export const slotConfirmationSchema = z.object({
+  confirmConflicts: confirmConflictsField,
+});
+
 export const classScheduleSchema = z
   .object({ ...base, ...scheduleFields })
   .refine((value) => value.startTime < value.endTime, {
@@ -197,7 +277,11 @@ export const classScheduleUpdateSchema = z
     message: "invalidTimeRange",
   });
 
-export const classScheduleDeleteSchema = z.object({ ...base, id: recordId });
+export const classScheduleDeleteSchema = z.object({
+  ...base,
+  id: recordId,
+  confirmConflicts: confirmConflictsField,
+});
 
 // ── Enrollment (add / remove / block a student to/from a class) ───────────
 
@@ -221,11 +305,8 @@ export const classBlockCreateSchema = z.object({
 
 // ── Holiday calendar ────────────────────────────────────────────────────────
 
-const holidayDate = z
-  .string()
-  .trim()
-  .refine((value) => !Number.isNaN(Date.parse(value)), "invalidDate")
-  .transform((value) => new Date(`${value.slice(0, 10)}T00:00:00.000Z`));
+// SEC-50: a strict "YYYY-MM-DD" calendar day (the shared `dateOnlyField`).
+const holidayDate = dateOnlyField;
 
 export const holidaySchema = z.object({
   ...base,
@@ -234,14 +315,6 @@ export const holidaySchema = z.object({
 });
 
 export const holidayDeleteSchema = z.object({ ...base, id: recordId });
-
-// ── Session generation trigger ─────────────────────────────────────────────
-
-export const generateSessionsSchema = z.object({
-  ...base,
-  /** Absent = regenerate for the whole center. */
-  classGroupId: optionalRef,
-});
 
 // ── List filters (classes dashboard) ────────────────────────────────────────
 
@@ -253,25 +326,48 @@ export const classListFilterSchema = z.object({
 
 // ── Action state ────────────────────────────────────────────────────────────
 
-export type ScheduleConflictInfo = {
-  type: "teacher" | "room";
-  className: string;
-};
-
 /**
- * What the class/schedule/enrollment/generation actions return. `error` and
- * the values in `fieldErrors` are i18n keys under `Classes.errors`, not copy.
- * `conflicts` is populated whenever a save/generation surfaced a teacher/room
- * double-booking — under the WARN policy the row is still saved, so the UI
- * needs to show it; under DENY the action returns early with `error` set
- * instead.
+ * What the class/schedule/enrollment actions return. `error` and the values
+ * in `fieldErrors` are i18n keys under `Classes.errors`, not copy.
+ * `conflicts` (R3, print-ready `SlotConflictInfo`) is populated whenever a
+ * save found a teacher/room double-booking anywhere in the class's period:
+ * with `error` `conflictsNeedConfirmation` (WARN, not yet confirmed —
+ * nothing saved), `scheduleConflict` (DENY — refused), or alongside a
+ * success status when the person confirmed it.
+ *
+ * `sessions` (R4) is what the class-sessions engine did to the class's
+ * future sessions — created, removed, moved to the new teacher/rooms, and
+ * how many were kept because they carry records or custom changes.
+ * `blockers` names why a class cannot be deleted.
  */
-export type ClassActionState = {
+export type ClassActionState = SlotConflictState & {
   error?: string;
+  /** ICU values for `error` (e.g. how many classes still use a room). */
+  errorValues?: Record<string, number>;
   fieldErrors?: Record<string, string>;
-  status?: "created" | "saved" | "deleted" | "generated";
-  conflicts?: ScheduleConflictInfo[];
-  generated?: { created: number; conflicts: number };
+  status?: "created" | "saved" | "deleted" | "matchFound";
+  /** R6 — field errors of the new teacher's own fields (keys under `People.errors`). */
+  teacherFieldErrors?: Record<string, string>;
+  sessions?: {
+    created: number;
+    deleted: number;
+    updated: number;
+    kept: number;
+    cancelled?: number;
+    /** SYS — open sessions without payments that took a class's new price. */
+    repriced?: number;
+    /** SYS — sessions that kept their price (a payment, or a cut above the new price). */
+    priceKept?: number;
+  };
+  blockers?: Record<string, number>;
+  /**
+   * R6 — which half of "create a class with a new teacher" refused. `error`
+   * is then the *reason*, and the UI says "The teacher could not be created:
+   * …" or "The class could not be created: …".
+   */
+  part?: "teacher" | "class";
+  /** R6 — the person the new teacher's phone/email already belongs to. */
+  match?: MatchCandidate;
 };
 
 export const IDLE_CLASS_STATE: ClassActionState = {};
