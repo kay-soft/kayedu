@@ -31,6 +31,8 @@ If the docs are silent on something that touches **money, permissions, or tenant
 
 **7. Never reset a database.** Never run `prisma migrate reset`, `prisma migrate diff` with a `--shadow-database-url`, `prisma db push --force-reset`, or any other command that can drop or reset a schema, against **any** URL taken from `.env` (that is the shared dev Supabase database — a shadow-DB diff against it wiped it once, in R4). Schema comparison uses a throwaway local shadow database, or none: a read-only `prisma migrate diff --from-url <.env URL> --to-schema-datamodel prisma/schema.prisma --script` is fine, and so is `prisma migrate deploy` (it only applies pending migrations). Anything destructive needs the user's explicit approval first.
 
+**8. Run only the gates the change needs.** After a change, run the gates relevant to the touched area, plus `npx tsc --noEmit` and `npx eslint .`. Run the full `npm run check:all` and `npm run e2e` **only when the user asks, or before a deployment — and then only against a staging database**. Never run `e2e`, or any gate that writes data (most `check:*` gates create and clean up rows), against the shared dev project as routine verification.
+
 ---
 
 ## Stack

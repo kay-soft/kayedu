@@ -7,6 +7,7 @@ import { z } from "zod";
 import { normalizeEmail } from "../identity.ts";
 import {
   AuthMisconfiguredError,
+  allowAutoConfirmDemo,
   isProductionDeployment,
   requireEmailConfirmation,
 } from "./auth-config.ts";
@@ -109,7 +110,7 @@ export async function resolveAppIdentity(
   env: Env = process.env,
 ): Promise<AppIdentity> {
   const mustConfirm = requireEmailConfirmation(env);
-  if (isProductionDeployment(env) && !mustConfirm) {
+  if (isProductionDeployment(env) && !mustConfirm && !allowAutoConfirmDemo(env)) {
     throw new AuthMisconfiguredError('REQUIRE_EMAIL_CONFIRMATION is not "true"');
   }
 

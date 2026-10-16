@@ -2,6 +2,8 @@
 
 > The whole-system investigation that follows SEC-2c: every role's journey traced through the code and proven in a headless browser (`npm run e2e`), the architecture and code-health audit, and Vercel deployment readiness. Written against branch `dev`, October 2026. Decisions applied: the class price rule and SEC-62 option (a) (`00-master-product-spec.md` §5.1); dependency majors deliberately not upgraded.
 
+> **Verification policy (DEPLOY-1).** The gate and e2e runs this audit records were one-off, whole-system passes. They are not routine: after a change run only the gates for the touched area plus `tsc` and `eslint`; run `check:all` and `npm run e2e` only on request or before a deployment, and only against a staging database — never against the shared dev project (CLAUDE.md working rule 8).
+
 ---
 
 ## 0. Verdict
@@ -261,7 +263,7 @@ Still ungated (none is a money or isolation rule): the confirmation dialogs them
 ### 5.2 What M20 still has to do before the first real centre
 
 1. **Domain** (OD-1) and `NEXT_PUBLIC_APP_URL` per environment.
-2. **Email:** a real sender, password reset, Supabase *Confirm email* on, and `REQUIRE_EMAIL_CONFIRMATION=true` (start-up refuses production without it).
+2. **Email:** a real sender, password reset, Supabase *Confirm email* on, and `REQUIRE_EMAIL_CONFIRMATION=true` (start-up refuses production without it). Remove the `ALLOW_AUTO_CONFIRM_DEMO` demo override if it was used (DEPLOY-1).
 3. **Abuse:** CAPTCHA on sign-up and sign-in (D-18), Supabase leaked-password protection.
 4. **Observability:** Sentry (server + client) and an `app/global-error.tsx`.
 5. **CSP:** move from report-only to enforced.

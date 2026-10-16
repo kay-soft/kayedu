@@ -27,6 +27,18 @@ export function isProductionDeployment(env: Env = process.env): boolean {
   return env.VERCEL_ENV === "production" || env.KAYEDU_ENV === "production";
 }
 
+/**
+ * The demo override (DEPLOY-1): `ALLOW_AUTO_CONFIRM_DEMO=yes` lets a production
+ * deployment run while Supabase *Confirm email* is OFF — for a demo on seeded
+ * data, never for a real centre. Off by default, and it **never applies when
+ * `REQUIRE_EMAIL_CONFIRMATION=true`** (then the full guard stands). The account
+ * claim flow still stops a sign-up taking over a staff-created person.
+ * Removing it is on the M20 checklist (docs/03-build-order.md).
+ */
+export function allowAutoConfirmDemo(env: Env = process.env): boolean {
+  return env.ALLOW_AUTO_CONFIRM_DEMO === "yes" && !requireEmailConfirmation(env);
+}
+
 export class AuthMisconfiguredError extends Error {
   constructor(message: string) {
     super(`KayEdu auth is misconfigured for production: ${message}`);
@@ -45,6 +57,7 @@ export function productionAuthProblems(
   settings: { mailer_autoconfirm?: unknown } | null,
 ): string[] {
   if (!isProductionDeployment(env)) return [];
+  if (allowAutoConfirmDemo(env)) return [];
   const problems: string[] = [];
   if (!requireEmailConfirmation(env)) {
     problems.push("REQUIRE_EMAIL_CONFIRMATION is not \"true\"");

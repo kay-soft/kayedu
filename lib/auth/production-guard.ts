@@ -1,6 +1,7 @@
 // Relative imports: `npm run check:security` runs this outside Next.
 import {
   AuthMisconfiguredError,
+  allowAutoConfirmDemo,
   isProductionDeployment,
   productionAuthProblems,
 } from "./auth-config.ts";
@@ -36,6 +37,14 @@ export async function fetchSupabaseAuthSettings(
  */
 export async function enforceProductionAuthSettings(env: Env = process.env): Promise<void> {
   if (!isProductionDeployment(env)) return;
+  if (allowAutoConfirmDemo(env)) {
+    console.warn(
+      "\n!!! KayEdu: ALLOW_AUTO_CONFIRM_DEMO=yes — the production email-confirmation guard is OFF. " +
+        "Sign-ups are not email-verified. DEMO ONLY: never serve a real centre like this (remove the override, " +
+        "turn on Supabase Confirm email and set REQUIRE_EMAIL_CONFIRMATION=true). !!!\n",
+    );
+    return;
+  }
   const problems = productionAuthProblems(env, await fetchSupabaseAuthSettings(env));
   if (problems.length > 0) throw new AuthMisconfiguredError(problems.join("; "));
 }
