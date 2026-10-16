@@ -347,6 +347,12 @@ async function main() {
       ["production without REQUIRE_EMAIL_CONFIRMATION refuses to resolve anyone", productionRefused],
       ["production guard flags an auto-confirming project", productionAuthProblems(prodEnv, { mailer_autoconfirm: true }).length > 0],
       ["production guard passes a confirming project", productionAuthProblems(prodEnv, { mailer_autoconfirm: false }).length === 0],
+      // DEPLOY-1: the demo override is off by default, never beats REQUIRE_EMAIL_CONFIRMATION=true.
+      ["demo override: production without it still refuses (no override set)", productionAuthProblems({ VERCEL_ENV: "production" }, { mailer_autoconfirm: true }).length > 0],
+      ["demo override: any value but \"yes\" does not lift the guard", productionAuthProblems({ VERCEL_ENV: "production", ALLOW_AUTO_CONFIRM_DEMO: "true" }, { mailer_autoconfirm: true }).length > 0],
+      ["demo override: ALLOW_AUTO_CONFIRM_DEMO=yes lifts the guard only when REQUIRE_EMAIL_CONFIRMATION is not true", productionAuthProblems({ VERCEL_ENV: "production", ALLOW_AUTO_CONFIRM_DEMO: "yes" }, { mailer_autoconfirm: true }).length === 0],
+      ["demo override: never applies when REQUIRE_EMAIL_CONFIRMATION=true (auto-confirm still refused)", productionAuthProblems({ ...prodEnv, ALLOW_AUTO_CONFIRM_DEMO: "yes" }, { mailer_autoconfirm: true }).length > 0],
+      ["demo override: the start-up guard still throws without it", await enforceProductionAuthSettings({ VERCEL_ENV: "production" }).then(() => false, (error) => error instanceof AuthMisconfiguredError)],
       ["a centre that does not know the person never sees or approves the claim", !unrelatedSees && !unrelatedApprove.ok],
       ["the centre that knows the person sees the claim", ownSees],
       ["approval in person links exactly that login", approved.ok && afterApproval.kind === "user" && afterApproval.user.id === victim.id],
