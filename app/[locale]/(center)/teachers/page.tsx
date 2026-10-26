@@ -20,7 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { branchesWithPermission, ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { teacherSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
@@ -54,14 +54,17 @@ export default async function TeachersPage({
 
   const where = query.length > 0 ? teacherSearchWhere(query) : undefined;
 
-  const [teachers, total] = await Promise.all([
+  const [teachers, total, addBranches] = await Promise.all([
     db.teachers.search({
       where,
       take: pageSize,
       skip: (page - 1) * pageSize,
     }),
     db.teachers.count(where),
+    // F1: every branch where this actor may add a teacher.
+    branchesWithPermission("teacher.manage"),
   ]);
+  const addTeacher = <AddTeacherDialog branches={addBranches} activeBranchId={ctx.center.id} />;
 
   // Block counts only for the teachers on this page — never the whole table.
   const blockCounts = await db.studentBlocks.countByRef(
@@ -93,7 +96,7 @@ export default async function TeachersPage({
       <PageHeader
         title={t("title")}
         description={t("subtitle")}
-        action={<AddTeacherDialog />}
+        action={addTeacher}
       />
 
       <Card>
@@ -129,7 +132,7 @@ export default async function TeachersPage({
                   icon={<GraduationCap />}
                   title={t("empty")}
                   description={t("emptyHint")}
-                  action={<AddTeacherDialog />}
+                  action={addTeacher}
                 />
               )
             ) : (

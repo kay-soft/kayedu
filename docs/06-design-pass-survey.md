@@ -143,6 +143,11 @@ Hand-copied list header. **R10a:** `ListHeader`. **T1:** the members list is the
 
 **DES (Phase 3):** revoking an invitation and granting or removing branch access return a result and toast it (`staff-result-actions.tsx`) — they had been silent `void` actions; role and access changes toast; the invitation link is `CopyLinkField`, which says when a copy is refused (docs/04 §14.2).
 
+**F1:** with more than one branch where the Owner may invite, the invite form opens with a **Branch** select (default: the active branch); an invitation for another branch confirms with that branch's name. Hidden for a one-branch Owner.
+
+### `app/[locale]/(center)/settings/branches/page.tsx` — **F1**
+New. OWNER only (`organization.branch.create`). A usage card ("2 of 3 branches used") holding **Add branch** — disabled at the limit, with the reason under it — and the branch list (name, English name, "You're here", lifecycle badge; a card per branch below `md`). The Add branch dialog is the shared `DialogShell`: Branch (Arabic name, English name, timezone), Theme colour (native picker + swatches, 44px), Copy setup (source select + six ticks, all on, and a "never copied" note); a full-screen sheet on a phone.
+
 ### `app/[locale]/(center)/classes/[id]/page.tsx` — **R10b**
 *Wrong now (at `ea7f645`):* the header's action slot is a loose flex row holding the Edit dialog button, an Active badge and the "All classes" link — three different heights and three different jobs, so the one verb on the page does not read as an action bar. The body is `xl:grid-cols-2` over a `display: contents` wrapper, so three cards of very different heights (key facts, the weekly-schedule builder, sessions) are dealt into two columns by the browser: the schedule builder is a tall card beside a 3-row facts card, leaving a blank block under it. Below `xl` (1024–1279px — a laptop with the sidebar open) it is a single column of full-width, mostly-empty cards. The roster, the most-used part of the page, is a full-width card *below* both. There is no upcoming-sessions list and no centre-cut figure on the page today, and the kept-sessions warning is buried inside the "Sessions" card.
 **R10b:** header with the period and rooms and **Edit class** as its action bar; the kept-sessions warning is a full-width amber panel directly under the header; `DetailLayout` — schedule and roster in `main`, Key facts and Sessions in a sticky `side` (the roster is no longer a separate full-width row). Not added: an upcoming-sessions list and a requests/approvals card (no such data on the page today — see the R10b entry in 03).
@@ -235,9 +240,16 @@ Redirect only. No change.
 
 ### `app/[locale]/(admin)/admin/centers/page.tsx`
 Initial drawn with `charAt(0)` and a hard-coded `text-white` on an inline colour; "Open" a bare link; empty state was an info banner. **R10a:** `BrandAvatar`, outline `LinkButton`, `EmptyState`.
+**F1:** the header gains an outline **Centers & branch limits** button (to `/admin/organizations`); the Create form opens with a **New center / Add to an existing center** segmented control — New adds the center name, English name and branch limit above the branch fields, Existing swaps them for a searchable center pick (usage on each row) and drops the owner email (docs/04 §11.21).
 
 ### `app/[locale]/(admin)/admin/centers/[id]/page.tsx`
 `pt-6` double padding on three cards. **R10a:** removed.
+
+### `app/[locale]/(admin)/admin/organizations/page.tsx` — **F1**
+New, reached from the **Centers & branch limits** button in `/admin/centers`' header (no sidebar item). `PageHeader` with a back link; one card per organization (avatar, name, a "2 of 3 branches" badge — warning only when full — and an archived note); one column on a phone, two from `md`, three from `xl`.
+
+### `app/[locale]/(admin)/admin/organizations/[id]/page.tsx` — **F1**
+New. `PageHeader` (back to the list, the usage badge as meta), the **Branch limit** editor (a number field with the "lowering only stops new branches" hint, Save beside it from `sm`), and a card per branch — lifecycle badge, slug, staff/teacher/student counts, **Open** to its `/admin/centers/[id]` support view.
 
 ### `app/[locale]/(admin)/admin/platform/page.tsx`
 `pt-6`; a "brand" KPI border. **R10a:** both removed.

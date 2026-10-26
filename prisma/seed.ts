@@ -339,7 +339,13 @@ async function ensureOrganization(orgKey: string): Promise<string> {
   if (known) return known;
   const def = ORGANIZATIONS[orgKey];
   const existing = await prisma.organization.findFirst({ where: { name: def.name } });
-  const org = existing ?? (await prisma.organization.create({ data: def }));
+  // F1: a re-run puts the demo limit back too (an organization the migration
+  // backfilled to its branch count, or one an admin edited while testing).
+  const org = existing
+    ? existing.maxBranches === def.maxBranches
+      ? existing
+      : await prisma.organization.update({ where: { id: existing.id }, data: { maxBranches: def.maxBranches } })
+    : await prisma.organization.create({ data: def });
   orgIds.set(orgKey, org.id);
   return org.id;
 }

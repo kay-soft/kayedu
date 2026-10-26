@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { writeAuditLog } from "@/lib/db/audit";
 import { scoped } from "@/lib/db/scoped";
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan, getTenantContext, getTenantContextForBranch } from "@/lib/auth/tenant";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
   createInvitationSchema,
@@ -19,6 +19,8 @@ export type InviteFormState = {
   fieldErrors?: Record<string, string>;
   /** Set on success — the accept link is shown for manual delivery. */
   token?: string;
+  /** F1: set when the invitation is for a branch other than the active one. */
+  branchName?: string;
 };
 
 const INVITE_TTL_DAYS = 7;
@@ -49,8 +51,20 @@ export async function createInvitationAction(
   const parsed = createInvitationSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { email, role, locale } = parsed.data;
-  const db = scoped(ctx);
+  const { email, role, locale, branchId } = parsed.data;
+
+  // F1: an invitation may target another branch. The posted id is never
+  // trusted — the actor's context is re-resolved at that branch through the
+  // same relation resolution, the same permission is checked *there*, and
+  // the write is scoped to that branch's centerId. D-22 is unchanged: only
+  // an OWNER (at the target) can satisfy `membership.role.assign`.
+  const target = branchId && branchId !== ctx.center.id
+    ? await getTenantContextForBranch(branchId, "center")
+    : ctx;
+  if (!target) return { fieldErrors: { branchId: "invalidCenter" } };
+  if (!ctxCan(target, "membership.role.assign")) return { error: "forbidden" };
+
+  const db = scoped(target);
 
   const existingMember = await db.memberships.list({
     where: { role, active: true, user: { email } },
@@ -77,7 +91,7 @@ export async function createInvitationAction(
   });
 
   await writeAuditLog({
-    centerId: ctx.center.id,
+    centerId: target.center.id,
     actorUserId: ctx.user.id,
     action: "invitation.create",
     entityType: "Invitation",
@@ -87,7 +101,10 @@ export async function createInvitationAction(
   });
 
   revalidatePath(staffPath(locale));
-  return { token };
+  return {
+    token,
+    ...(target.center.id !== ctx.center.id ? { branchName: target.center.name } : {}),
+  };
 }
 
 /**

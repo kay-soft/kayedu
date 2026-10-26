@@ -82,6 +82,17 @@ export const createInvitationSchema = z.object({
   email,
   role: staffRoleField,
   locale: localeSchema,
+  /**
+   * F1: the branch to invite into; absent = the active branch. Only an id —
+   * the action re-resolves the actor's context there and checks the
+   * permission at that branch (`getTenantContextForBranch`).
+   */
+  branchId: z
+    .string()
+    .trim()
+    .max(64, "invalidCenter")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
 });
 
 export const invitationIdSchema = z.object({

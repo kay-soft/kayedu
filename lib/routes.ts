@@ -52,6 +52,8 @@ export const ROUTES = {
   centerSettingsCatalog: "/settings/catalog",
   centerSettingsCard: "/settings/card",
   centerSettingsPermissions: "/settings/permissions",
+  // F1: the organization's branches and an Owner's Add branch.
+  centerSettingsBranches: "/settings/branches",
   centerStaff: "/settings/staff",
   teacherDashboard: "/teacher/dashboard",
   teacherSessions: "/teacher/sessions",
@@ -70,6 +72,9 @@ export const ROUTES = {
   parentHome: "/parent",
   adminCenters: "/admin/centers",
   adminCenter: (id: string) => `/admin/centers/${id}`,
+  // F1: reached from a button on /admin/centers, not from the sidebar.
+  adminOrganizations: "/admin/organizations",
+  adminOrganization: (id: string) => `/admin/organizations/${id}`,
   adminPlatform: "/admin/platform",
   adminCatalog: "/admin/catalog",
 } as const;

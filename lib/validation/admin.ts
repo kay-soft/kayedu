@@ -5,6 +5,7 @@ import { z } from "zod";
 // lib/validation/settings.ts).
 import { localeSchema } from "./auth.ts";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres } from "../money.ts";
+import { MAX_BRANCH_LIMIT } from "../branch-setup.ts";
 
 /**
  * Platform-admin schemas (M9). Messages are i18n keys under
@@ -45,7 +46,21 @@ const ownerEmail = z
 /** Center ids are always `@default(uuid())` (unlike the seeded main branch). */
 const centerId = z.string().uuid("notFound");
 
-export const createCenterSchema = z.object({
+/**
+ * An organization id from a form (F1). Opaque: the M11 backfill reused each
+ * centre's id as its organization's, so it is not assumed to be a uuid — the
+ * lookup decides.
+ */
+const organizationId = z.string().trim().min(1, "organizationNotFound").max(64, "organizationNotFound");
+
+/** `Organization.maxBranches` as typed (F1) — `lib/db/platform.ts` re-checks it. */
+const maxBranches = z.coerce
+  .number({ error: "invalidLimit" })
+  .int("invalidLimit")
+  .min(1, "invalidLimit")
+  .max(MAX_BRANCH_LIMIT, "invalidLimit");
+
+const branchFields = {
   locale: localeSchema,
   name: centerName,
   nameEn: optionalText(120),
@@ -54,7 +69,43 @@ export const createCenterSchema = z.object({
   // its bytes and stored in the private `logos` bucket — never a URL the
   // server would fetch.
   themeColor,
-  ownerEmail,
+};
+
+/**
+ * The admin's create form (F1, OD-12 (a)): **New organization** — the branch,
+ * the organization it founds (its name defaults to the branch's when left
+ * blank, its branch limit to 1) and the founding Owner's invitation — or
+ * **Add to an existing organization**, which names the organization and
+ * invites nobody (its Owner already resolves every branch). A post with no
+ * mode is the pre-F1 form: a new organization.
+ */
+export const createCenterSchema = z.preprocess(
+  (raw) =>
+    raw && typeof raw === "object" && !("organizationMode" in raw)
+      ? { ...raw, organizationMode: "new" }
+      : raw,
+  z.discriminatedUnion("organizationMode", [
+    z.object({
+      ...branchFields,
+      organizationMode: z.literal("new"),
+      organizationName: optionalText(120),
+      organizationNameEn: optionalText(120),
+      maxBranches: maxBranches.default(1),
+      ownerEmail,
+    }),
+    z.object({
+      ...branchFields,
+      organizationMode: z.literal("existing"),
+      organizationId,
+    }),
+  ]),
+);
+
+/** F1 — the platform admin's branch-limit editor on `/admin/organizations/[id]`. */
+export const organizationBranchLimitSchema = z.object({
+  locale: localeSchema,
+  id: organizationId,
+  maxBranches,
 });
 
 /** M19 — the five-state lifecycle replacing `Center.active` (docs/00 §5.1). */

@@ -36,7 +36,10 @@ import { gatePrisma } from "./lib/gate-db.ts";
 import { type CenterLifecycleState } from "@prisma/client";
 import {
   ACCESSIBLE_LIFECYCLE_STATES,
+  addBranchToOrganization,
   createCenterWithSettings,
+  platformOrganizationList,
+  updateOrganizationBranchLimit,
   isValidLifecycleTransition,
   platformAdoptionTrend,
   platformCenterCounts,
@@ -49,12 +52,21 @@ import {
   transitionCenterLifecycle,
   validNextLifecycleStates,
 } from "../lib/db/platform.ts";
+import { centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
+import { createCenterSchema } from "../lib/validation/admin.ts";
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 
 const prisma = await gatePrisma();
 
 const SLUG_A = "admin-check-a";
 const SLUG_B = "admin-check-b";
 const SLUG_DUP = "admin-check-a"; // deliberately the same as SLUG_A
+// F1: an organization founded here and the branches added to it.
+const SLUG_F1_FOUNDER = "admin-check-f1-founder";
+const SLUG_F1_SECOND = "admin-check-f1-second";
+const SLUG_F1_THIRD = "admin-check-f1-third";
+const SLUG_F1_FOURTH = "admin-check-f1-fourth";
+const F1_ORG_NAME = "Admin Check F1 Org";
 
 let failures = 0;
 
@@ -68,7 +80,12 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 async function cleanup() {
-  await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
+  const f1Orgs = await prisma.organization.findMany({ where: { name: F1_ORG_NAME }, select: { id: true } });
+  await deleteAuditRows(prisma, { entityType: "Organization", entityId: { in: f1Orgs.map((org) => org.id) } });
+  await prisma.center.deleteMany({
+    where: { slug: { in: [SLUG_A, SLUG_B, SLUG_F1_FOUNDER, SLUG_F1_SECOND, SLUG_F1_THIRD, SLUG_F1_FOURTH] } },
+  });
+  await prisma.organization.deleteMany({ where: { id: { in: f1Orgs.map((org) => org.id) } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "admin-check-" } } });
   // CatalogSubject is global (M13) — it doesn't cascade away with the
   // throwaway centers above.
@@ -463,6 +480,162 @@ async function main() {
       supportRow?.entityType === "Center" &&
       supportRow?.entityId === centerA.id,
     JSON.stringify(supportRow),
+  );
+
+  await checkOrganizationsAndLimits(admin.id, centerA.organizationId);
+}
+
+// ── 8. F1: organizations, the branch limit, "add to an existing organization" ─
+
+async function checkOrganizationsAndLimits(adminId: string, centerAOrganizationId: string) {
+  console.log("\nF1 — organizations and their branch limit (OD-12 (a))");
+
+  // Old → new (F1): provisioning "creates a new organization, or adds a
+  // branch to an existing one within its limit". The pre-F1 call shape still
+  // founds a new one-branch organization named after the branch.
+  const centerAOrg = await prisma.organization.findUnique({ where: { id: centerAOrganizationId } });
+  check(
+    "createCenterWithSettings without an organization founds one named after the branch, limit 1",
+    centerAOrg?.name === "Admin Check Center A" && centerAOrg.maxBranches === 1,
+    JSON.stringify(centerAOrg),
+  );
+
+  const founded = await createCenterWithSettings(prisma, {
+    name: "Admin Check F1 Founder",
+    slug: SLUG_F1_FOUNDER,
+    themeColor: "#2563EB",
+    invite: invite("admin-check-f1-owner@kayedu.test", adminId),
+    organization: { name: F1_ORG_NAME, nameEn: "F1 Org", maxBranches: 2 },
+  });
+  const org = founded.ok
+    ? await prisma.organization.findUnique({ where: { id: founded.center.organizationId } })
+    : null;
+  check(
+    "New organization: its own name, English name and branch limit; the founder's invitation is created",
+    org?.name === F1_ORG_NAME &&
+      org.nameEn === "F1 Org" &&
+      org.maxBranches === 2 &&
+      founded.ok &&
+      (await prisma.invitation.count({ where: { centerId: founded.center.id, role: "OWNER" } })) === 1,
+    JSON.stringify(org),
+  );
+  if (!org) throw new Error("F1 setup failed — cannot continue.");
+
+  const added = await addBranchToOrganization(prisma, {
+    organizationId: org.id,
+    name: "Admin Check F1 Second",
+    slug: SLUG_F1_SECOND,
+    themeColor: "#16A34A",
+  });
+  check(
+    "Add to an existing organization under its limit: the branch joins it, starts ONBOARDING, gets the full baseline and invites nobody",
+    added.ok &&
+      added.center.organizationId === org.id &&
+      added.center.lifecycleState === "ONBOARDING" &&
+      hasFullBaseline(await centerBaselineGaps(prisma, added.center.id)) &&
+      (await prisma.invitation.count({ where: { centerId: added.center.id } })) === 0,
+    JSON.stringify(added),
+  );
+
+  const full = await addBranchToOrganization(prisma, {
+    organizationId: org.id,
+    name: "Admin Check F1 Third",
+    slug: SLUG_F1_THIRD,
+    themeColor: "#16A34A",
+  });
+  check(
+    "At the limit the admin's add is refused branchLimitReached, and nothing is created",
+    !full.ok && full.error === "branchLimitReached" && (await prisma.center.count({ where: { slug: SLUG_F1_THIRD } })) === 0,
+    JSON.stringify(full),
+  );
+  const unknownOrg = await addBranchToOrganization(prisma, {
+    organizationId: "00000000-0000-0000-0000-000000000000",
+    name: "Admin Check F1 Nowhere",
+    slug: SLUG_F1_THIRD,
+    themeColor: "#16A34A",
+  });
+  check("An unknown organization is refused organizationNotFound", !unknownOrg.ok && unknownOrg.error === "organizationNotFound");
+  const takenSlug = await addBranchToOrganization(prisma, {
+    organizationId: org.id,
+    name: "Admin Check F1 Dup",
+    slug: SLUG_F1_SECOND,
+    themeColor: "#16A34A",
+  });
+  check("A taken slug is refused slugTaken", !takenSlug.ok && takenSlug.error === "slugTaken");
+
+  // The limit editor: platform admin only (the action's requirePlatformAdmin),
+  // validated and audited here with no centre and numbers only.
+  const invalid = await updateOrganizationBranchLimit(prisma, { organizationId: org.id, maxBranches: 0, actorUserId: adminId });
+  check("A limit below 1 is refused invalidLimit", !invalid.ok && invalid.error === "invalidLimit");
+  const raised = await updateOrganizationBranchLimit(prisma, { organizationId: org.id, maxBranches: 3, actorUserId: adminId });
+  const limitAudit = await prisma.auditLog.findFirst({
+    where: { action: "platform.organization.limit.update", entityId: org.id },
+    orderBy: { createdAt: "desc" },
+  });
+  check(
+    "Raising the limit is audited platform.organization.limit.update — centerId null, before/after numbers only",
+    raised.ok &&
+      limitAudit?.centerId === null &&
+      limitAudit.actorUserId === adminId &&
+      limitAudit.entityType === "Organization" &&
+      JSON.stringify(limitAudit.before) === JSON.stringify({ maxBranches: 2 }) &&
+      JSON.stringify(limitAudit.after) === JSON.stringify({ maxBranches: 3 }),
+    JSON.stringify(limitAudit),
+  );
+  const third = await addBranchToOrganization(prisma, {
+    organizationId: org.id,
+    name: "Admin Check F1 Third",
+    slug: SLUG_F1_THIRD,
+    themeColor: "#16A34A",
+  });
+  check("Once the limit is raised, the same add succeeds", third.ok);
+
+  const lowered = await updateOrganizationBranchLimit(prisma, { organizationId: org.id, maxBranches: 1, actorUserId: adminId });
+  const fourth = await addBranchToOrganization(prisma, {
+    organizationId: org.id,
+    name: "Admin Check F1 Fourth",
+    slug: SLUG_F1_FOURTH,
+    themeColor: "#16A34A",
+  });
+  check(
+    "Lowering the limit below the current count is allowed, removes nothing, and only blocks new branches",
+    lowered.ok &&
+      (await prisma.center.count({ where: { organizationId: org.id } })) === 3 &&
+      !fourth.ok &&
+      fourth.error === "branchLimitReached",
+  );
+
+  const rows = await platformOrganizationList(prisma);
+  const row = rows.find((item) => item.id === org.id);
+  check(
+    "platformOrganizationList reports the organization's usage against its limit",
+    row?.usedBranches === 3 && row.totalBranches === 3 && row.maxBranches === 1,
+    JSON.stringify(row),
+  );
+  const branchesOfOrg = await platformCenterList(prisma, org.id);
+  check(
+    "platformCenterList(db, organizationId) lists exactly that organization's branches",
+    branchesOfOrg.length === 3 && branchesOfOrg.every((branch) => [SLUG_F1_FOUNDER, SLUG_F1_SECOND, SLUG_F1_THIRD].includes(branch.slug)),
+  );
+
+  // The create form's schema: two modes, the pre-F1 post still a new organization.
+  const legacy = createCenterSchema.safeParse({ locale: "en", name: "X", slug: "x-legacy", themeColor: "#2563EB", ownerEmail: "o@kayedu.test" });
+  const existingNoOwner = createCenterSchema.safeParse({
+    locale: "en",
+    name: "X",
+    slug: "x-existing",
+    themeColor: "#2563EB",
+    organizationMode: "existing",
+    organizationId: org.id,
+  });
+  const newNoOwner = createCenterSchema.safeParse({ locale: "en", name: "X", slug: "x-new", themeColor: "#2563EB", organizationMode: "new" });
+  check(
+    "createCenterSchema: a post without a mode is a new organization (limit 1); existing needs no owner; new still needs one",
+    legacy.success &&
+      legacy.data.organizationMode === "new" &&
+      legacy.data.maxBranches === 1 &&
+      existingNoOwner.success &&
+      !newNoOwner.success,
   );
 }
 

@@ -505,6 +505,55 @@ export async function actionContext(experience: Experience): Promise<TenantConte
 }
 
 /**
+ * A context for a branch the request **names** rather than the active one
+ * (F1: Settings → Staff "Invite" and Teachers → "Add teacher" take a Branch).
+ * The posted id is never trusted: it is looked up among the actor's own
+ * relations — the same `getUserCenterRelations()` resolution (Owner
+ * widening, branch grants, lifecycle filter) and the same `buildContext()`
+ * every request uses — so a branch the actor does not hold resolves to
+ * `null`, and so does one where they hold no role of this experience. The
+ * caller then checks its permission with `ctxCan` on the returned context
+ * and writes through `scoped()` on it, exactly as with the active branch.
+ */
+export async function getTenantContextForBranch(
+  centerId: string,
+  experience: Experience,
+): Promise<TenantContext | null> {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const relations = await getUserCenterRelations(user.id);
+  const relation = relations.find((item) => item.center.id === centerId);
+  if (!relation) return null;
+  const ctx = await buildContext(user, relation, experience);
+  if (ctx.experienceDenied || !hasExperience(ctx, experience)) return null;
+  return ctx;
+}
+
+export type BranchOption = { id: string; name: string };
+
+/**
+ * The branches where this user holds `permission` as centre staff (F1) —
+ * what a branch-aware "Invite" / "Add teacher" offers. Each branch is
+ * resolved through `buildContext()` and checked with `ctxCan`, so the list is
+ * exactly the set the action would accept.
+ */
+export const branchesWithPermission = cache(
+  async (permission: Permission): Promise<BranchOption[]> => {
+    const user = await getCurrentUser();
+    if (!user) return [];
+    const relations = await getUserCenterRelations(user.id);
+    const contexts = await Promise.all(
+      relations
+        .filter((relation) => relation.roles.some((role) => isCenterStaffRole(role)))
+        .map((relation) => buildContext(user, relation, "center")),
+    );
+    return contexts
+      .filter((ctx) => ctxCan(ctx, permission))
+      .map((ctx) => ({ id: ctx.center.id, name: ctx.center.name }));
+  },
+);
+
+/**
  * Authoritative permission check bound to the resolved context. A context
  * whose requested experience was denied grants nothing (SEC-09) — this is the
  * one choke point every `(center)` Server Action already passes through.

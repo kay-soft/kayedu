@@ -174,7 +174,7 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | 2 | `(admin)/admin/catalog/actions.ts:76` | `updateCatalogEntryAction` | requirePlatformAdmin() | NONE | catalogEntryUpdateSchema | catalog-admin.updateCatalogEntry |
 | 3 | `(admin)/admin/catalog/actions.ts:94` | `toggleCatalogEntryAction` | requirePlatformAdmin() | NONE | catalogEntryToggleSchema | catalog-admin.setCatalogEntryActive |
 | 4 | `(admin)/admin/catalog/actions.ts:111` | `deleteCatalogEntryAction` | requirePlatformAdmin() | NONE | catalogEntryDeleteSchema | catalog-admin.deleteCatalogEntry |
-| 5 | `(admin)/admin/centers/actions.ts:44` | `createCenterAction` | requirePlatformAdmin() | NONE | createCenterSchema | audit.writeAuditLog, platform.createCenterWithSettings |
+| 5 | `(admin)/admin/centers/actions.ts:44` | `createCenterAction` (F1: two modes — new organization, or add to an existing one within its limit) | requirePlatformAdmin() | NONE | createCenterSchema | audit.writeAuditLog, platform.createCenterWithSettings, platform.addBranchToOrganization |
 | 6 | `(admin)/admin/centers/actions.ts:88` | `transitionCenterLifecycleAction` | requirePlatformAdmin() | NONE | centerLifecycleTransitionSchema | audit.writeAuditLog, platform.transitionCenterLifecycle, prisma.center.findUnique |
 | 7 | `(admin)/admin/centers/actions.ts:125` | `updateCenterVisibilityWindowAction` | requirePlatformAdmin() | NONE | centerVisibilityWindowSchema | audit.writeAuditLog, prisma.centerSettings.findUnique, prisma.centerSettings.update |
 | 8 | `(auth)/actions.ts:65` | `signInAction` | NONE | NONE | signInSchema | - |
@@ -249,7 +249,7 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | 77 | `(center)/settings/actions.ts:701` | `saveGeneralSettingsAction` | getTenantContext("center") | center.settings.edit | generalSettingsSchema | audit.writeAuditLog, scoped.settings.get, scoped.settings.save |
 | 78 | `(center)/settings/actions.ts:772` | `saveCardLayoutAction` | getTenantContext("center") | center.settings.edit | cardLayoutSchema | scoped.settings.save |
 | 79 | `(center)/settings/actions.ts:805` | `savePermissionMatrixAction` | getTenantContext("center") | permission.manage | permissionMatrixSchema | audit.writeAuditLog, permissions.listPermissionGrants, permissions.savePermissionGrants |
-| 80 | `(center)/settings/staff/actions.ts:37` | `createInvitationAction` | getTenantContext("center") | membership.role.assign | createInvitationSchema | audit.writeAuditLog, scoped.memberships.list, scoped.invitations.updateMany, scoped.invitations.create |
+| 80 | `(center)/settings/staff/actions.ts:37` | `createInvitationAction` (F1: an optional `branchId` is re-resolved with `getTenantContextForBranch` and `membership.role.assign` checked there too; writes through `scoped(target)`) | getTenantContext("center") | membership.role.assign | createInvitationSchema | audit.writeAuditLog, scoped.memberships.list, scoped.invitations.updateMany, scoped.invitations.create |
 | 81 | `(center)/settings/staff/actions.ts:92` | `revokeInvitationAction` | getTenantContext("center") | staff.invite | invitationIdSchema | audit.writeAuditLog, scoped.invitations.findById, scoped.invitations.update |
 | 82 | `(center)/settings/staff/member-actions.ts:79` | `changeMemberRoleAction` | getTenantContext("center") | membership.role.assign, staff.manage, center.ownership.manage | memberRoleSchema | audit.writeAuditLog, scoped.memberships.findById, scoped.memberships.list, scoped.memberships.update, scoped.memberships.count |
 | 83 | `(center)/settings/staff/member-actions.ts:138` | `setMemberActiveAction` | getTenantContext("center") | staff.manage, center.ownership.manage | memberActiveSchema | audit.writeAuditLog, scoped.memberships.findById, scoped.memberships.update, scoped.memberships.count |
@@ -274,7 +274,7 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | 102 | `(center)/teachers/actions.ts:74` | `searchTeachersTypeAheadAction` | getTenantContext("center") | teacher.manage | NONE (raw string args; trimmed/sliced only) | scoped.teachers.search |
 | 103 | `(center)/teachers/actions.ts:104` | `searchBlockCandidatesAction` | getTenantContext("center") | student.block | NONE (raw string args; trimmed/sliced only) | scoped.teachers.findById, scoped.studentBlocks.list, scoped.students.search |
 | 104 | `(center)/teachers/actions.ts:141` | `lookupPersonByPhoneAction` | getTenantContext("center") | teacher.manage | NONE (raw string args; trimmed/sliced only) | identity.describeMatch, identity.resolveContact |
-| 105 | `(center)/teachers/actions.ts:165` | `createTeacherAction` | getTenantContext("center") | teacher.manage | teacherCreateSchema | teacher-membership.createTeacherMembership |
+| 105 | `(center)/teachers/actions.ts:165` | `createTeacherAction` (F1: an optional `branchId` is re-resolved with `getTenantContextForBranch` and `teacher.manage` checked there; the lookup `lookupPersonByPhoneAction` takes the same branch) | getTenantContext("center") | teacher.manage | teacherCreateSchema | teacher-membership.createTeacherMembership |
 | 106 | `(center)/teachers/actions.ts:208` | `updateTeacherAction` | getTenantContext("center") | teacher.manage | teacherUpdateSchema | scoped.teachers.findById, scoped.teachers.update |
 | 107 | `(center)/teachers/actions.ts:248` | `setTeacherActiveAction` | getTenantContext("center") | teacher.manage | membershipActiveSchema | audit.writeAuditLog, scoped.teachers.findById, scoped.teachers.update |
 | 108 | `(center)/teachers/actions.ts:286` | `deleteTeacherAction` | getTenantContext("center") | teacher.delete | membershipActionSchema | audit.writeAuditLog, identity.deletePersonIfOrphaned, students.teacherDeleteBlockers, scoped.teachers.findById, scoped.teachers.remove, scoped.studentBlocks.list, scoped.studentBlocks.remove |
@@ -295,6 +295,8 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | 123 | `(teacher)/teacher/students/actions.ts:36` | `searchTaughtStudentsTypeAheadAction` | getTenantContext("teacher") | NONE | NONE (raw string args; trimmed/sliced only) | teacher-portal.teacherStudentProfileIds, scoped.students.search |
 | 124 | `(teacher)/teacher/students/actions.ts:59` | `teacherBlockStudentAction` | getTenantContext("teacher") | NONE | teacherBlockStudentSchema | audit.writeAuditLog, teacher-portal.teacherStudentProfileIds, scoped.students.findById, scoped.studentBlocks.isBlocked, scoped.studentBlocks.create |
 | 125 | `(teacher)/teacher/students/actions.ts:102` | `teacherUnblockStudentAction` | getTenantContext("teacher") | NONE | teacherUnblockStudentSchema | audit.writeAuditLog, scoped.studentBlocks.findById, scoped.studentBlocks.remove, scoped.students.list |
+| 126 | `(admin)/admin/organizations/actions.ts` | `updateOrganizationBranchLimitAction` (F1) | requirePlatformAdmin() | NONE | organizationBranchLimitSchema | platform.updateOrganizationBranchLimit (audits `platform.organization.limit.update` on its transaction) |
+| 127 | `(center)/settings/branches/actions.ts` | `addBranchAction` (F1) | getTenantContext("center") | organization.branch.create (OWNER-only ceiling) | addBranchSchema | branches.addBranchAsOwner (re-resolves the actor; audits `organization.branch.create` on its transaction) |
 
 **Facts that apply to the whole table:**
 - 24 `"use server"` files, **125 exported Server Actions** (all under `app/`; none in `lib/` or `components/`).
@@ -363,6 +365,7 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | `lib/db/attendance.ts` — `createAttendance` | `$queryRaw` INSERT … SELECT … FOR SHARE | ids, status, flags (bound); `openOnly` static | bound — safe |
 | `lib/db/class-sessions.ts` — `repriceClassSessions` (SYS), `deleteClass`, `deleteManualSession` | `$queryRaw` … FOR UPDATE | centerId, classGroupId/sessionId, today, price (bound) | bound — safe |
 | `lib/db/payment-methods.ts` — the last-active lock | `$queryRaw` FOR UPDATE | centerId | bound — safe |
+| `lib/db/platform.ts` — `lockOrganizationBranches`, `updateOrganizationBranchLimit` (F1) | `$queryRaw` FOR UPDATE on `Organization` | organizationId (bound) | bound — safe |
 | `lib/db/payments.ts` — `recordPayment` (INSERT … ON CONFLICT), `lockPaymentRow`, `sessionReceiptTotals` | `$queryRaw` | ids, amounts (bound) | bound — safe |
 | `lib/db/reservations.ts` — `lockClassRow`; the per-account advisory lock | `$queryRaw` / `$executeRaw` | ids; the lock key string (bound) | bound — safe |
 | `lib/db/session-lifecycle.ts` — `loadGateSession*`, the session lock, `lockAttendeeRow` | `$queryRaw` + static `GATE_COLUMNS`/`GATE_FROM` | ids, centerId (bound) | bound — safe |

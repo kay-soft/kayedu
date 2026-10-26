@@ -53,6 +53,7 @@ Navigation is gated on the stored permission matrix (`PermissionGrant`), with ea
 ## The world behind them
 
 - **Organization "Center 60"** — two branches, **Downtown** (data-visibility window **30 days**) and **Nasr City** (**60 days**, a styled ID card). One org-level Owner; per branch a Manager, Receptionist and Accountant; six teachers each (Hesham Mansour teaches at both; Mahmoud Gaber also teaches at Al Nokhba); five rooms each with two joinable pairs; ~45 students and ~10 classes each. Downtown has a custom payment method ("Bank transfer").
+- **Branch limits (F1)** — Center 60 may have **3** branches (it has two, so `owner.center60@…` can try **Settings → Branches → Add branch** once; a fourth is refused until the platform admin raises the limit at **Branches → Centers & branch limits**). Al Nokhba Academy and both test centres have a limit of **1** and are at it. Re-running the seed puts these limits back. Settings → Branches is in the Owner's settings sub-navigation only — a Manager never sees it.
 - **Organization "Al Nokhba Academy"** — one smaller branch (20 students, 4 classes): the isolation test bed. Farida Salah studies here *and* at Downtown.
 - **Two sign-in test centres** — Al Amal Learning Hub (ONBOARDING) and Future Skills Academy (SUSPENDED), one staff account each.
 - **Catalog** — three education systems (Egyptian National, American, IGCSE), 19 grades and 71 subject rows, all bilingual.

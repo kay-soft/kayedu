@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import {
+  ctxCan,
+  getTenantContext,
+  getTenantContextForBranch,
+  type TenantContext,
+} from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import {
@@ -35,8 +40,8 @@ import {
 } from "@/lib/validation/people";
 import {
   boundSearchArgs,
+  branchPhoneLookupArgs,
   parseActionArgs,
-  phoneLookupArgs,
   searchArgs,
 } from "@/lib/validation/action-args";
 
@@ -60,9 +65,17 @@ const NOT_FOUND: PeopleActionState = { error: "notFound" };
 
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
-async function teacherScope(): Promise<Scope | null> {
-  const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "teacher.manage")) return null;
+/**
+ * The active branch — or, for Add teacher (F1), the branch the form names.
+ * A named branch is never trusted: the actor's context is re-resolved there
+ * (`getTenantContextForBranch`, the same relation resolution) and
+ * `teacher.manage` is checked at that branch; every write is then scoped to it.
+ */
+async function teacherScope(branchId?: string | null): Promise<Scope | null> {
+  const active = await getTenantContext("center");
+  const ctx =
+    branchId && branchId !== active.center.id ? await getTenantContextForBranch(branchId, "center") : active;
+  if (!ctx || !ctxCan(ctx, "teacher.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
 
@@ -149,11 +162,12 @@ export async function searchBlockCandidatesAction(
 
 export async function lookupPersonByPhoneAction(
   phone: string,
+  branchId?: string,
 ): Promise<PhoneLookupResult> {
-  const scope = await teacherScope();
-  if (!scope) return { status: "notFound" };
-  const args = parseActionArgs(phoneLookupArgs, [phone]);
+  const args = parseActionArgs(branchPhoneLookupArgs, [phone, branchId]);
   if (!args) return { status: "notFound" };
+  const scope = await teacherScope(args[1]);
+  if (!scope) return { status: "notFound" };
 
   const normalized = normalizePhone(args[0]);
   if (!normalized) return { status: "notFound" };
@@ -177,14 +191,19 @@ export async function createTeacherAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const scope = await teacherScope();
-  if (!scope) return FORBIDDEN;
+  const active = await teacherScope();
+  if (!active) return FORBIDDEN;
 
   const parsed = teacherCreateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { locale, firstName, lastName, email, phone, altPhone, linkUserId } =
+  const { locale, firstName, lastName, email, phone, altPhone, linkUserId, branchId } =
     parsed.data;
+
+  // F1: the teacher lands at the branch the form names — only where the
+  // actor holds `teacher.manage` there.
+  const scope = branchId && branchId !== active.ctx.center.id ? await teacherScope(branchId) : active;
+  if (!scope) return { fieldErrors: { branchId: "branchNotAllowed" } };
 
   // R6: the one teacher-creation path (lib/db/teacher-membership.ts) — also
   // what the class dialog's "New teacher" runs, inside its own transaction.
@@ -211,7 +230,10 @@ export async function createTeacherAction(
   }
 
   revalidateTeacherList(locale);
-  return { status: "created" };
+  return {
+    status: "created",
+    ...(scope.ctx.center.id !== active.ctx.center.id ? { branchName: scope.ctx.center.name } : {}),
+  };
 }
 
 // ── Edit ───────────────────────────────────────────────────────────────────

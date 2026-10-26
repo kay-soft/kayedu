@@ -369,11 +369,16 @@ const SUSPENDED: BranchDef = {
 
 export const BRANCHES: BranchDef[] = [DOWNTOWN, NASR_CITY, NOKHBA, ONBOARDING, SUSPENDED];
 
-export const ORGANIZATIONS: Record<string, { name: string; nameEn: string }> = {
-  center60: { name: OWNER_ORG_NAME, nameEn: OWNER_ORG_NAME },
-  nokhba: { name: NOKHBA_ORG_NAME, nameEn: NOKHBA_ORG_NAME },
-  onboarding: { name: "Al Amal Learning Hub", nameEn: "Al Amal Learning Hub" },
-  suspended: { name: "Future Skills Academy", nameEn: "Future Skills Academy" },
+/**
+ * F1: `maxBranches` is the organization's branch limit. Center 60 has two
+ * branches and room for a third, so an Owner's Add branch can be tried; every
+ * other organization is at its limit of one.
+ */
+export const ORGANIZATIONS: Record<string, { name: string; nameEn: string; maxBranches: number }> = {
+  center60: { name: OWNER_ORG_NAME, nameEn: OWNER_ORG_NAME, maxBranches: 3 },
+  nokhba: { name: NOKHBA_ORG_NAME, nameEn: NOKHBA_ORG_NAME, maxBranches: 1 },
+  onboarding: { name: "Al Amal Learning Hub", nameEn: "Al Amal Learning Hub", maxBranches: 1 },
+  suspended: { name: "Future Skills Academy", nameEn: "Future Skills Academy", maxBranches: 1 },
 };
 
 // ── The fixed account list ─────────────────────────────────────────────────

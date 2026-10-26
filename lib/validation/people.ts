@@ -92,7 +92,14 @@ function requireContact(
 }
 
 export const teacherCreateSchema = z
-  .object({ ...base, ...teacherFields, linkUserId })
+  .object({
+    ...base,
+    ...teacherFields,
+    linkUserId,
+    // F1: the branch to add the teacher at; absent = the active branch. The
+    // action re-resolves the actor's context there (never trusts the id).
+    branchId: optionalRecordId,
+  })
   .superRefine(requireContact);
 
 export const teacherUpdateSchema = z
@@ -268,6 +275,8 @@ export type PeopleActionState = {
   match?: MatchCandidate;
   /** A short-lived signed URL for a freshly generated ID card. */
   downloadUrl?: string;
+  /** F1: set when the row landed at a branch other than the active one — the confirmation names it. */
+  branchName?: string;
 };
 
 export const IDLE_PEOPLE_STATE: PeopleActionState = {};

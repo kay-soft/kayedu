@@ -23,7 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { branchesWithPermission, ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { isBranchGrantableRole } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/db/client";
 import { organizationBranches } from "@/lib/db/organizations";
@@ -46,9 +46,12 @@ export default async function StaffSettingsPage() {
   // hidden former member is how a center loses track of who has access.
   // Centre staff only (R9): teachers — members or pending invitations — are
   // managed on the Teachers page and filtered out here in the data layer.
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, inviteBranches] = await Promise.all([
     db.memberships.listStaffWithUser(),
     db.invitations.listStaff({ status: "PENDING" }),
+    // F1: every branch where this actor may invite — the same permission the
+    // action checks, resolved per branch.
+    branchesWithPermission("membership.role.assign"),
   ]);
 
   const canManage = ctxCan(ctx, "staff.manage");
@@ -109,7 +112,7 @@ export default async function StaffSettingsPage() {
             <CardDescription>{t("inviteSubtitle")}</CardDescription>
           </CardHeader>
           <CardContent>
-            <InviteForm />
+            <InviteForm branches={inviteBranches} activeBranchId={ctx.center.id} />
           </CardContent>
         </Card>
       ) : null}

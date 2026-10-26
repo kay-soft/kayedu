@@ -257,7 +257,8 @@
     "sendInvite": "Create invitation",
     "fields": {
       "email": "Email",
-      "role": "Role"
+      "role": "Role",
+      "branch": "Branch"
     },
     "membersTitle": "Members",
     "membersSubtitle": "Everyone connected to this branch. Change a role or suspend access here.",
@@ -319,7 +320,8 @@
       "branchGranted": "Branch access granted.",
       "branchRevoked": "Access to {branch} removed."
     },
-    "copyFailed": "Couldn't copy. Select the link and copy it."
+    "copyFailed": "Couldn't copy. Select the link and copy it.",
+    "inviteCreatedForBranch": "Invitation created for {branch}. Share the link below — it appears in {branch}'s pending invitations."
   },
   "People": {
     "fields": {
@@ -389,7 +391,8 @@
       "privilegedPerson": "That phone belongs to a platform administrator, so it cannot be used for a teacher.",
       "rateLimited": "Too many contact lookups — wait a minute and try again.",
       "alreadyCompleted": "Your profile is already complete. Ask the branch to change these details.",
-      "verificationUnavailable": "Parent verification is turned off until a safe verification method is decided."
+      "verificationUnavailable": "Parent verification is turned off until a safe verification method is decided.",
+      "branchNotAllowed": "You can't add teachers at that branch."
     }
   },
   "Teachers": {
@@ -470,6 +473,12 @@
     "deactivateConfirm": {
       "title": "Deactivate {name}?",
       "body": "They leave this branch’s active lists. Their history is kept, and you can activate them again."
+    },
+    "branchLabel": "Branch",
+    "branchHint": "The teacher is added at this branch. Changing it clears the details below.",
+    "toast": {
+      "added": "Teacher added.",
+      "addedAtBranch": "Teacher added at {branch}."
     }
   },
   "Students": {
@@ -1553,7 +1562,8 @@
       "catalog": "Academic catalog",
       "card": "ID card",
       "permissions": "Permissions",
-      "staff": "Users & roles"
+      "staff": "Users & roles",
+      "branches": "Branches"
     },
     "common": {
       "add": "Add",
@@ -1848,6 +1858,74 @@
       "notGrantable": "Never grantable to this role — a platform safeguard, not a branch setting.",
       "cellLabel": "{action} — {role}",
       "saveMatrixCount": "{count, plural, one {Save # change} other {Save # changes}}"
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "Every branch of this center. You can add branches up to the limit KayEdu has set for your center.",
+      "usage": "{used} of {max} branches used",
+      "underLimit": "You can add another branch.",
+      "atLimit": "Your center has reached its branch limit.",
+      "atLimitReason": "To add another branch, ask KayEdu to raise your center's branch limit.",
+      "add": "Add branch",
+      "listTitle": "Your branches",
+      "listDescription": "Archived branches are listed but don't count toward the limit.",
+      "empty": "No branches yet.",
+      "current": "You're here",
+      "dialogTitle": "Add a branch",
+      "dialogDescription": "The new branch starts with the setup you choose to copy — and nothing else.",
+      "created": "{branch} added. Switch to it from the branch switcher.",
+      "sections": {
+        "branch": "Branch",
+        "theme": "Theme colour",
+        "copy": "Copy setup"
+      },
+      "fields": {
+        "name": "Name (Arabic)",
+        "nameEn": "Name (English)",
+        "nameEnHint": "Optional. Shown in the English interface when set.",
+        "timezone": "Timezone",
+        "themeColor": "Theme colour",
+        "useColor": "Use {color}",
+        "copyFrom": "Copy setup from"
+      },
+      "copyDescription": "Everything ticked is copied from the branch you pick. You can change any of it at the new branch afterwards.",
+      "copy": {
+        "catalog": {
+          "label": "Academic catalog",
+          "hint": "Picked systems, grades and subjects, with your names and base prices."
+        },
+        "paymentMethods": {
+          "label": "Payment methods",
+          "hint": "The active methods, replacing the defaults."
+        },
+        "terms": {
+          "label": "Terms",
+          "hint": "The active term presets."
+        },
+        "holidays": {
+          "label": "Holidays",
+          "hint": "The holiday calendar."
+        },
+        "permissions": {
+          "label": "Permission matrix",
+          "hint": "What each role may do."
+        },
+        "generalSettings": {
+          "label": "General settings",
+          "hint": "Default cut, late threshold, conflict policy, visibility window and teacher edit deadline."
+        }
+      },
+      "neverCopied": "Never copied: rooms, classes, sessions, staff, teachers, students, money, the ID-card layout and the logo.",
+      "errors": {
+        "forbidden": "Only an owner can add a branch.",
+        "branchLimitReached": "Your center has reached its branch limit. Ask KayEdu to raise it.",
+        "sourceNotFound": "Choose a branch of this center to copy from.",
+        "tryAgain": "Something changed while the branch was being created. Nothing was saved — try again.",
+        "required": "This field is required.",
+        "tooLong": "This value is too long.",
+        "invalidColor": "Choose a colour.",
+        "invalidTimezone": "Choose a timezone from the list."
+      }
     }
   },
   "CenterDashboard": {
@@ -2276,7 +2354,14 @@
         "ownerEmail": "Founding owner's email",
         "ownerEmailHint": "They accept the invite link below to become this branch's first Owner.",
         "logo": "Logo",
-        "logoHint": "PNG, JPEG or WebP, up to 512 KB. Stored privately for this branch."
+        "logoHint": "PNG, JPEG or WebP, up to 512 KB. Stored privately for this branch.",
+        "organizationName": "Center name",
+        "organizationNameHint": "Leave blank to use the branch name.",
+        "organizationNameEn": "Center name (English)",
+        "maxBranches": "Branch limit",
+        "maxBranchesHint": "How many branches this center may have. Only a platform admin changes it.",
+        "organization": "Center",
+        "organizationHint": "Refused while the center is at its branch limit — raise the limit on its page first."
       },
       "submit": "Create branch",
       "created": "Branch created. Share the owner invite link below.",
@@ -2284,7 +2369,22 @@
       "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
       "copy": "Copy",
       "copied": "Copied",
-      "copyFailed": "Couldn't copy. Select the link and copy it."
+      "copyFailed": "Couldn't copy. Select the link and copy it.",
+      "modeLabel": "Which center does this branch belong to?",
+      "modeNew": "New center",
+      "modeExisting": "Add to an existing center",
+      "modeNewHint": "The branch founds a new center (the paying customer), and its founding Owner is invited.",
+      "modeExistingHint": "The branch joins a center that already exists, within that center's branch limit. Nobody is invited: the center's Owner already reaches every branch.",
+      "organizationUsage": "{used} of {max} branches",
+      "organizationFull": "{usage} — limit reached",
+      "submitExisting": "Add branch",
+      "branchAdded": "Branch added. The center's Owner sees it in their branch switcher.",
+      "organizationPicker": {
+        "placeholder": "Search centers",
+        "empty": "No centers match.",
+        "clear": "Clear center",
+        "open": "Show all centers"
+      }
     },
     "detail": {
       "subtitle": "/{slug}",
@@ -2321,8 +2421,12 @@
       "invalidNumber": "Enter a whole number of days, between 1 and 3650.",
       "photoType": "The logo must be a PNG, JPEG or WebP image.",
       "photoTooLarge": "The logo is larger than 512 KB.",
-      "storage": "The branch was created, but the logo could not be stored. Try again later."
-    }
+      "storage": "The branch was created, but the logo could not be stored. Try again later.",
+      "organizationNotFound": "Choose a center from the list.",
+      "branchLimitReached": "That center is at its branch limit. Raise the limit on its page, then try again.",
+      "invalidLimit": "Enter a whole number of branches, from 1 to 500."
+    },
+    "organizationsLink": "Centers & branch limits"
   },
   "AdminCatalog": {
     "title": "Academic catalog",
@@ -2784,6 +2888,31 @@
       "emailChangeDisabled": "Changing email needs email confirmation — coming soon.",
       "rateLimited": "Too many attempts — wait a few minutes, then try again.",
       "failed": "Something went wrong. Try again."
+    }
+  },
+  "AdminOrganizations": {
+    "title": "Centers",
+    "subtitle": "Every paying customer and how many branches it may have.",
+    "backToBranches": "All branches",
+    "backToList": "All centers",
+    "empty": "No centers yet.",
+    "usage": "{used} of {max} branches",
+    "countedNote": "Every branch counts toward the limit.",
+    "archivedNote": "{count} archived — archived branches don't count toward the limit.",
+    "openDetail": "Open",
+    "limit": {
+      "title": "Branch limit",
+      "description": "How many non-archived branches this center may have. Its Owner adds branches up to it from Settings → Branches; you can add one from All branches.",
+      "label": "Branches allowed",
+      "hint": "This center has {used, plural, one {# branch} other {# branches}} that count. Lowering the limit below that only stops new branches — nothing existing changes.",
+      "save": "Save limit",
+      "saved": "Limit saved."
+    },
+    "detail": {
+      "subtitle": "A center (the paying customer) and its branches.",
+      "branchesTitle": "Branches",
+      "branchesDescription": "Open a branch for its lifecycle, visibility window and recent activity.",
+      "noBranches": "This center has no branches."
     }
   }
 }

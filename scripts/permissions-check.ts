@@ -38,6 +38,10 @@
  *     manager, receptionist, accountant and teacher exactly their expected nav
  *     items, computed through the shell's own functions; and every nav item
  *     shows on the permission its page asserts.
+ *  8. (F1) `organization.branch.create` is an ownership action: OWNER-only by
+ *     the ceiling, never a matrix cell or a baseline row, asserted by the
+ *     Settings → Branches link, page and action alike; and every branch is
+ *     created through the one `provisionBranch`.
  *
  * Needs a reachable database and cleans up after itself.
  */
@@ -46,7 +50,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Role } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
-import { DEFAULT_ROLE_GRANTS, can, isBranchGrantableRole, type Permission } from "../lib/auth/permissions.ts";
+import {
+  DEFAULT_ROLE_GRANTS,
+  MATRIX_ROLES,
+  PERMISSIONS,
+  can,
+  editableActionsFor,
+  isBranchGrantableRole,
+  type Permission,
+} from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { createCenterWithSettings } from "../lib/db/platform.ts";
 import {
@@ -303,6 +315,60 @@ async function main() {
   );
 
   await checkProvisioningBaseline();
+  checkBranchCreatePermission();
+}
+
+// ── 8. F1: organization.branch.create is an ownership action ────────────────
+
+function checkBranchCreatePermission() {
+  console.log("\n8. F1 — organization.branch.create (Settings → Branches)");
+  const allOpen = Object.fromEntries(PERMISSIONS.map((permission) => [permission, true])) as Record<Permission, boolean>;
+  check(
+    "OWNER holds organization.branch.create with zero stored rows",
+    can("OWNER", "organization.branch.create", {}),
+  );
+  check(
+    "No other role can be granted it, whatever the matrix says — the ceiling (OWNER_ONLY_ACTIONS)",
+    (["MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"] as const).every((role) => !can(role, "organization.branch.create", allOpen)) &&
+      !can("STUDENT", "organization.branch.create", allOpen) &&
+      !can("PARENT", "organization.branch.create", allOpen),
+  );
+  check(
+    "It is never a matrix cell and never part of any role's baseline rows",
+    MATRIX_ROLES.every((role) => !editableActionsFor(role).includes("organization.branch.create")) &&
+      Object.values(DEFAULT_ROLE_GRANTS).every((actions) => !actions.includes("organization.branch.create")),
+  );
+
+  // The page gate is the authority (P1): the settings link, the page and the
+  // action all assert exactly this permission.
+  const read = (...segments: string[]) => readFileSync(join(ROOT, ...segments), "utf8");
+  const layout = read("app", "[locale]", "(center)", "settings", "layout.tsx");
+  const page = read("app", "[locale]", "(center)", "settings", "branches", "page.tsx");
+  const action = read("app", "[locale]", "(center)", "settings", "branches", "actions.ts");
+  check(
+    "Settings → Branches shows on organization.branch.create, and its page asserts the same (static)",
+    /ctxCan\(ctx, "organization\.branch\.create"\)\) \{\s*items\.push\(\{ href: ROUTES\.centerSettingsBranches/.test(layout) &&
+      /requirePermission\(ctx, "organization\.branch\.create"\)/.test(page),
+  );
+  check(
+    "addBranchAction refuses without organization.branch.create before parsing anything (static)",
+    /if \(!ctxCan\(ctx, "organization\.branch\.create"\)\) return \{ error: "forbidden" \};[\s\S]*addBranchSchema\.safeParse/.test(action),
+  );
+
+  // One provisioning path (P1, F1): every way a branch is born goes through
+  // provisionBranch, which is the only `center.create` in lib/db/platform.ts.
+  const platform = read("lib", "db", "platform.ts");
+  const centerCreates = platform.match(/\.center\.create\(/g) ?? [];
+  check(
+    "lib/db/platform.ts has exactly one center.create — inside provisionBranch, which calls provisionCenterBaseline (static)",
+    centerCreates.length === 1 &&
+      /export async function provisionBranch[\s\S]{0,1200}\.center\.create\([\s\S]{0,1200}provisionCenterBaseline\(tx, created\.id\)/.test(platform),
+  );
+  check(
+    "createCenterWithSettings and addBranchToOrganization both create through provisionBranch (static)",
+    /export async function createCenterWithSettings[\s\S]*?return provisionBranch\(tx,/.test(platform) &&
+      /export async function addBranchToOrganization[\s\S]*?await provisionBranch\(tx,/.test(platform),
+  );
 }
 
 // ── 7. P1: the provisioning baseline and the nav it unlocks ─────────────────
