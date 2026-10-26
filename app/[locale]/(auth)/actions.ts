@@ -21,7 +21,7 @@ import {
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { checkRateLimits } from "@/lib/rate-limit";
 import { redirect } from "@/lib/i18n/navigation";
-import { ROUTES, homePathForRole, safeNextPath } from "@/lib/routes";
+import { ROUTES, authConfirmUrl, homePathForRole, safeNextPath } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   acceptInvitationSchema,
@@ -50,15 +50,15 @@ export type AuthFormState = {
   email?: string;
 };
 
+/** `User.locale` when it is a locale this app speaks, else the form's (F2). */
+function preferredLocale(user: User, fallback: "ar" | "en"): "ar" | "en" {
+  const parsed = localeSchema.safeParse(user.locale);
+  return parsed.success ? parsed.data : fallback;
+}
+
 function readLocale(formData: FormData): "ar" | "en" {
   const parsed = localeSchema.safeParse(formData.get("locale"));
   return parsed.success ? parsed.data : "en";
-}
-
-/** Where Supabase's confirmation link should land (SEC-66). */
-function confirmRedirect(locale: "ar" | "en"): string | undefined {
-  const origin = process.env.NEXT_PUBLIC_APP_URL;
-  return origin ? `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.authConfirm}` : undefined;
 }
 
 /**
@@ -125,7 +125,9 @@ export async function signInAction(
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(identity.user));
 
-  redirect({ href: target, locale });
+  // F2: a signed-in person lands in their preferred language (User.locale,
+  // set on Account settings), not whichever page the form happened to be on.
+  redirect({ href: target, locale: preferredLocale(identity.user, locale) });
   return {};
 }
 
@@ -153,7 +155,7 @@ export async function signUpAction(
     email,
     password,
     options: {
-      emailRedirectTo: confirmRedirect(locale),
+      emailRedirectTo: authConfirmUrl(locale),
       data: { first_name: firstName, last_name: lastName, locale },
     },
   });
@@ -220,7 +222,7 @@ export async function resendConfirmationAction(
 
   const supabase = await createSupabaseServerClient();
   await supabase.auth
-    .resend({ type: "signup", email, options: { emailRedirectTo: confirmRedirect(locale) } })
+    .resend({ type: "signup", email, options: { emailRedirectTo: authConfirmUrl(locale) } })
     .catch(logBestEffort("confirmation email resend"));
 
   return { status: "resent", email };

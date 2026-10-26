@@ -27,7 +27,7 @@ import { loadPermissionGrants } from "@/lib/db/permissions";
 import { verifiedChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
-import { ROUTES, homePathForRole } from "@/lib/routes";
+import { ROUTES, SHELL_EXPERIENCES, homePathForRole, type ShellExperience } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 
 export type { CenterRelation, Experience };
@@ -531,4 +531,45 @@ export async function requirePlatformAdmin(): Promise<User> {
     return redirectTo(homePathForRole(role));
   }
   return user;
+}
+
+function experienceForRole(role: TenantRole): ShellExperience {
+  if (role === "TEACHER") return "teacher";
+  if (isCenterStaffRole(role)) return "center";
+  if (role === "PARENT") return "parent";
+  if (role === "PLATFORM_ADMIN") return "admin";
+  return "student";
+}
+
+/**
+ * Which shell Account settings renders in (F2): the experience the person
+ * came from — the user menu's `?from=` — when they may be there, else the one
+ * their sign-in would land them in. The hint only picks chrome: the page
+ * reads and writes nothing but the caller's own `User`, and each shell still
+ * runs its own gate. A `center` hint is honoured only while the active
+ * branch grants a staff role (`requireExperience` would otherwise bounce the
+ * page away); `teacher`, `student` and `parent` admit any signed-in user,
+ * exactly as their own layouts do.
+ */
+export async function resolveAccountExperience(hint: string | undefined): Promise<ShellExperience> {
+  const user = await getCurrentUser();
+  if (!user) return redirectTo(ROUTES.login);
+
+  const wanted = SHELL_EXPERIENCES.find((experience) => experience === hint);
+  if (wanted === "admin" && user.isPlatformAdmin) return "admin";
+  if (wanted === "teacher" || wanted === "student" || wanted === "parent") return wanted;
+
+  const relations = await getUserCenterRelations(user.id);
+  if (relations.length === 0) {
+    const home = await homeWithoutBranch(user);
+    if (home === ROUTES.adminCenters) return "admin";
+    return home === ROUTES.parentHome ? "parent" : "student";
+  }
+
+  if (wanted === "center") {
+    const ctx = await getTenantContext("center");
+    if (!ctx.experienceDenied && hasExperience(ctx, "center")) return "center";
+  }
+  const ctx = await getTenantContext();
+  return experienceForRole(ctx.role);
 }

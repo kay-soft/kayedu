@@ -85,6 +85,11 @@ export const RATE_LIMITS = {
   selfServicePerIp: { limit: 300, windowMs: 60 * 60_000 },
   teachRequestPerUser: { limit: 10, windowMs: 24 * 60 * 60_000 },
   teachRequestPerIp: { limit: 30, windowMs: 24 * 60 * 60_000 },
+  // F2: every Account-settings change that checks the current password
+  // (password, email) — counted before Supabase is asked, refused or not, so
+  // a stolen session cannot be used to guess its own password.
+  accountVerifyPerUser: { limit: 5, windowMs: 15 * 60_000 },
+  accountVerifyPerIp: { limit: 30, windowMs: 15 * 60_000 },
 } as const;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

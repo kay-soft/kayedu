@@ -12,6 +12,8 @@ export const ROUTES = {
   register: "/register",
   /** A login with no app user yet: a pending claim or an unconfirmed email (SEC-2a). */
   accountPending: "/account-pending",
+  /** Account settings (F2): every signed-in person, inside the shell they came from. */
+  account: "/account",
   /** Where Supabase's confirmation link lands (SEC-66). */
   authConfirm: "/auth/confirm",
   selectCenter: "/select-center",
@@ -71,6 +73,28 @@ export const ROUTES = {
   adminPlatform: "/admin/platform",
   adminCatalog: "/admin/catalog",
 } as const;
+
+/**
+ * Where a Supabase confirmation link should land (SEC-66) — sign-up's and
+ * Account settings' email change (F2) alike. Undefined without
+ * NEXT_PUBLIC_APP_URL: Supabase then falls back to its Site URL.
+ */
+export function authConfirmUrl(locale: "ar" | "en"): string | undefined {
+  const origin = process.env.NEXT_PUBLIC_APP_URL;
+  return origin ? `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.authConfirm}` : undefined;
+}
+
+/** The signed-in experiences, each with its own shell (docs/02 §2). */
+export const SHELL_EXPERIENCES = ["center", "teacher", "student", "parent", "admin"] as const;
+export type ShellExperience = (typeof SHELL_EXPERIENCES)[number];
+
+/**
+ * Account settings, asked for from inside `experience` (F2) — the page renders
+ * that experience's shell. Only a hint: the page re-checks it server-side.
+ */
+export function accountPath(experience: ShellExperience): string {
+  return `${ROUTES.account}?from=${experience}`;
+}
 
 export function homePathForRole(role: TenantRole): string {
   switch (role) {

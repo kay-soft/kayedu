@@ -32,6 +32,7 @@ export default async function SelectCenterPage({
 
   const t = await getTranslations("Auth.selectCenter");
   const tRoles = await getTranslations("Roles");
+  const tShell = await getTranslations("Shell");
 
   const { switch: switchMode } = await searchParams;
   const [relations, orgGroups, activeId, children] = await Promise.all([
@@ -183,6 +184,15 @@ export default async function SelectCenterPage({
           ) : null}
         </div>
       </AuthCard>
+
+      {/* F2: the hub has no user menu, so its account link sits here. */}
+      <AnchorButton
+        href={`/${locale}${ROUTES.account}`}
+        variant="ghost"
+        className="w-full font-medium text-text-secondary hover:text-text-primary"
+      >
+        {tShell("accountSettings")}
+      </AnchorButton>
 
       {/* The light sign-out (docs/04 §14.3) — the navy slab it used to be was
           the heaviest thing on the screen. */}

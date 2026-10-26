@@ -1,7 +1,9 @@
+import type { ReactNode } from "react";
 import type { User } from "@prisma/client";
 import { centerLogoSrc } from "@/lib/storage-paths";
 
 import type {
+  AppShellProps,
   ShellBrand,
   ShellScope,
   ShellUser,
@@ -9,6 +11,27 @@ import type {
 import type { CenterRelation, OwnerOrgGroup, TenantContext } from "@/lib/auth/tenant";
 import type { TenantRole } from "@/lib/auth/permissions";
 import { personInitials } from "@/lib/initials";
+
+/**
+ * One experience's shell, as data (F2): what its layout hands `AppShell`, and
+ * what goes around the page. Each `(group)/*-shell.tsx` builds one; the
+ * group's layout renders it, and so does Account settings — one shell
+ * selection, never a copy of it.
+ */
+export type ShellFrame = {
+  props: Omit<AppShellProps, "children">;
+  /** Rendered above the page — a notice, a pop-up. */
+  lead?: ReactNode;
+  /** Rendered instead of the page — the student completion gate. */
+  replace?: ReactNode;
+};
+
+/** The platform's own brand — a shell with no branch of its own (docs/04 §2). */
+export const PLATFORM_BRAND: ShellBrand = {
+  name: "KayEdu",
+  logoUrl: null,
+  themeColor: "#2563EB",
+};
 
 function initials(user: User): string {
   return personInitials(user.firstName, user.lastName);

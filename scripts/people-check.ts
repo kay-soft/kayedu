@@ -79,6 +79,8 @@ const TEACHER_EMAIL = "people-check-teacher@kayedu.test";
 const LOCAL_ONLY_EMAIL = "people-check-local-only@kayedu.test";
 const LOCAL_EMAIL = "people-check-local@kayedu.test";
 const RACE_EMAIL_PREFIX = "people-check-race";
+const CONTACT_PHONE_EMAIL = "people-check-contact-phone@kayedu.test";
+const CONTACT_PHONE = "01544443322";
 
 let failures = 0;
 
@@ -266,7 +268,7 @@ async function cleanup() {
   await prisma.user.deleteMany({
     where: {
       OR: [
-        { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_ONLY_EMAIL, LOCAL_EMAIL] } },
+        { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_ONLY_EMAIL, LOCAL_EMAIL, CONTACT_PHONE_EMAIL] } },
         { phone: SHARED_PHONE },
         { email: { startsWith: RACE_EMAIL_PREFIX } },
       ],
@@ -491,6 +493,18 @@ async function main() {
       kind: matchedFromLocalOnly.kind,
       others: "others" in matchedFromLocalOnly ? matchedFromLocalOnly.others.map((other) => other.user.id === inA.userId) : null,
     }),
+  );
+  // F2 (D-02 (a)): a self-declared `User.contactPhone` is never an identity
+  // key — the same lookup a receptionist runs finds nobody by it.
+  const declarer = await prisma.user.create({
+    data: { email: CONTACT_PHONE_EMAIL, firstName: "Self", lastName: "Declared", contactPhone: CONTACT_PHONE },
+  });
+  const byContactPhone = await resolveContact(lookupAt(centerC.id), { email: null, phone: CONTACT_PHONE });
+  check(
+    "A User's self-declared contactPhone never matches, links or describes them (F2, D-02 (a))",
+    byContactPhone.kind === "none" &&
+      !("others" in byContactPhone && byContactPhone.others.some((other) => other.user.id === declarer.id)),
+    JSON.stringify({ kind: byContactPhone.kind }),
   );
   await prisma.center.delete({ where: { id: centerC.id } });
 

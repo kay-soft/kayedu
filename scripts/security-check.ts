@@ -28,6 +28,9 @@ import { PrismaClient } from "@prisma/client";
 
 import { AuthMisconfiguredError, productionAuthProblems } from "../lib/auth/auth-config.ts";
 import { profileFromMetadata, resolveAppIdentity } from "../lib/auth/identity-link.ts";
+import { changeEmail, changePassword, type AccountAuthPort } from "../lib/auth/account.ts";
+import { updateAccountProfile } from "../lib/db/account.ts";
+import { accountProfileSchema } from "../lib/validation/account.ts";
 import { enforceProductionAuthSettings } from "../lib/auth/production-guard.ts";
 import {
   DEFAULT_ROLE_GRANTS,
@@ -402,6 +405,145 @@ async function main() {
       ["the new person does not take the held phone globally (no squatting either way)", newPerson?.phone === null],
       ["sign-up metadata never puts a phone on the global User", viaSignUp.kind === "user" && viaSignUp.user.phone === null],
       ["sign-up writes no phone and answers no 'phone in use'", !/prisma\.user\.update/.test(signUp) && !/phoneInUse/.test(signUp)],
+    ];
+  });
+
+  await assertSec("F2", "account settings: the current password, collisions, claims and the flag (ids-only audit)", async () => {
+    const self = await makeUser("acct-self", { authId: randomUUID() });
+    const second = await makeUser("acct-second", { authId: randomUUID() });
+    const holder = await makeUser("acct-holder", { authId: randomUUID() });
+    const staffMade = await createPerson(
+      { firstName: "Branch", lastName: "Made", email: EMAIL("acct-staffmade"), phone: null, altPhone: null, locale: "ar" },
+      prisma,
+    );
+    await makeStudent(orgCenter.id, staffMade, { email: EMAIL("acct-staffmade") });
+    const membership = await prisma.membership.create({
+      data: { centerId: orgCenter.id, userId: self.id, role: "TEACHER", joinedAt: new Date(), firstName: "Local", lastName: "Teacher" },
+    });
+    const profile = await makeStudent(otherCenter.id, self);
+
+    // A fake Supabase: one right password; every call recorded.
+    const RIGHT = "the-right-password";
+    const calls: string[] = [];
+    const port = (authId: string): AccountAuthPort => ({
+      verifyPassword: async (_email, password) => password === RIGHT,
+      setPassword: async () => {
+        calls.push("setPassword");
+        return { ok: true };
+      },
+      signOutOthers: async () => {
+        calls.push("signOutOthers");
+        return true;
+      },
+      setEmailConfirmed: async (email) => {
+        calls.push("setEmailConfirmed");
+        return { ok: true, identity: { id: authId, email, email_confirmed_at: new Date().toISOString() } };
+      },
+      requestEmailChange: async () => {
+        calls.push("requestEmailChange");
+        return { ok: true };
+      },
+    });
+    const ip = `seccheck-acct-${randomUUID()}`;
+    for (const key of [self.id, second.id]) rateLimitKeys.add(`accountVerifyPerUser:${key}`);
+    rateLimitKeys.add(`accountVerifyPerIp:${ip}`);
+    const callerFor = async (userId: string) => {
+      const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+      return { user, authEmail: user.email, ip };
+    };
+    const direct = { ALLOW_UNVERIFIED_EMAIL_CHANGE: "yes", REQUIRE_EMAIL_CONFIRMATION: "false" };
+    const selfPort = port(self.authId ?? "");
+
+    await awayFromWindowEdge(RATE_LIMITS.accountVerifyPerUser.windowMs);
+    // Flag off: refused before the password is even asked (no attempt counted).
+    const flagOff = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-new"), currentPassword: RIGHT }, {});
+    // Attempts 1-2: a wrong current password refuses both changes.
+    const wrongPw = await changePassword(prisma, selfPort, await callerFor(self.id), {
+      currentPassword: "nope",
+      newPassword: "another-password",
+      signOutOthers: true,
+    });
+    const wrongPwEmail = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-new"), currentPassword: "nope" }, direct);
+    const noWriteOnWrong = !calls.includes("setPassword") && !calls.includes("setEmailConfirmed");
+    // 3: another login's email. 4: a person a branch created, and no claim opens.
+    const taken = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: holder.email ?? "", currentPassword: RIGHT }, direct);
+    const claimsBefore = await prisma.accountClaim.count({ where: { targetUserId: staffMade.id } });
+    const branchRecord = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-staffmade"), currentPassword: RIGHT }, direct);
+    const claimsAfter = await prisma.accountClaim.count({ where: { targetUserId: staffMade.id } });
+    // 5: the direct change goes through the one sync, audited without the address.
+    const changed = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-new"), currentPassword: RIGHT }, direct);
+    const selfAfter = await prisma.user.findUniqueOrThrow({ where: { id: self.id } });
+    const emailAudit = await prisma.auditLog.findMany({ where: { action: "account.email.change", entityId: self.id } });
+    // 6: the per-account limit (5 per window) now refuses even the right password.
+    const limited = await changePassword(prisma, selfPort, await callerFor(self.id), {
+      currentPassword: RIGHT,
+      newPassword: "another-password",
+      signOutOthers: true,
+    });
+
+    // A second account: password change + sign-out-others, and the confirmation branch.
+    const secondPort = port(second.authId ?? "");
+    const pwChanged = await changePassword(prisma, secondPort, await callerFor(second.id), {
+      currentPassword: RIGHT,
+      newPassword: "a-new-password",
+      signOutOthers: true,
+    });
+    const pwAudit = await prisma.auditLog.findMany({ where: { action: "account.password.change", entityId: second.id } });
+    const requested = await changeEmail(
+      prisma,
+      secondPort,
+      await callerFor(second.id),
+      { newEmail: EMAIL("acct-second-new"), currentPassword: RIGHT },
+      { REQUIRE_EMAIL_CONFIRMATION: "true" },
+    );
+    const secondAfter = await prisma.user.findUniqueOrThrow({ where: { id: second.id } });
+
+    // Renaming the account never touches a branch record (rule 4).
+    const parsed = accountProfileSchema.parse({
+      firstName: "Renamed",
+      lastName: "Person",
+      contactPhone: "+20 101 234 5678",
+      preferredLocale: "en",
+      locale: "en",
+    });
+    await updateAccountProfile(prisma, self.id, { ...parsed, locale: parsed.preferredLocale });
+    const renamed = await prisma.user.findUniqueOrThrow({ where: { id: self.id } });
+    const membershipAfter = await prisma.membership.findUniqueOrThrow({ where: { id: membership.id } });
+    const profileAfter = await prisma.studentProfile.findUniqueOrThrow({ where: { id: profile.id } });
+
+    return [
+      ["flag off: the email change is refused (read-only)", !flagOff.ok && flagOff.error === "emailChangeDisabled"],
+      ["a wrong current password refuses a password change", !wrongPw.ok && wrongPw.fieldErrors?.currentPassword === "wrongPassword"],
+      ["a wrong current password refuses an email change", !wrongPwEmail.ok && wrongPwEmail.fieldErrors?.currentPassword === "wrongPassword"],
+      ["nothing reaches Supabase after a wrong password", noWriteOnWrong],
+      ["an email another account holds is refused", !taken.ok && taken.fieldErrors?.newEmail === "emailTaken"],
+      ["a staff-created person's email is refused (ask that branch)", !branchRecord.ok && branchRecord.fieldErrors?.newEmail === "emailOnBranchRecord"],
+      ["settings never opens an AccountClaim (D-01)", claimsBefore === claimsAfter],
+      ["the direct change lands on User.email through the sync", changed.ok && selfAfter.email === EMAIL("acct-new") && selfAfter.emailVerifiedAt !== null],
+      [
+        "account.email.change is audited once, centre-less, with no address (D-20)",
+        emailAudit.length === 1 &&
+          emailAudit[0].centerId === null &&
+          forbiddenAuditKey(emailAudit[0].after) === null &&
+          !JSON.stringify(emailAudit[0].after).includes("@"),
+      ],
+      ["the current-password check is rate-limited per account", !limited.ok && limited.error === "rateLimited"],
+      [
+        "a password change signs other devices out and is audited ids-only",
+        pwChanged.ok && calls.includes("signOutOthers") && pwAudit.length === 1 && pwAudit[0].centerId === null,
+      ],
+      [
+        "REQUIRE_EMAIL_CONFIRMATION: a link is requested; User.email waits for the confirmed sync",
+        requested.ok && requested.status === "emailChangeRequested" && calls.includes("requestEmailChange") && secondAfter.email === second.email,
+      ],
+      [
+        "the account name changes the User only; no branch record moves",
+        renamed.firstName === "Renamed" &&
+          membershipAfter.firstName === "Local" &&
+          profileAfter.firstName === profile.firstName &&
+          profileAfter.lastName === profile.lastName,
+      ],
+      ["contactPhone is normalized by lib/phone.ts and User.phone is untouched", renamed.contactPhone === "01012345678" && renamed.phone === self.phone],
     ];
   });
 

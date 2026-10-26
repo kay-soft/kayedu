@@ -16,6 +16,7 @@ import { RollupNavItem } from "@/components/shell/rollup-nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { UserMenu } from "@/components/shell/user-menu";
+import type { ShellExperience } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +45,9 @@ export type ShellScope = {
   rollups: RollupOption[];
 };
 
-type AppShellProps = {
+export type AppShellProps = {
+  /** Which experience this shell is — the user menu's Account settings link returns into it (F2). */
+  experience: ShellExperience;
   nav: ShellNavItem[];
   brand: ShellBrand;
   user: ShellUser;
@@ -225,6 +228,7 @@ function SidebarContent({
 }
 
 export function AppShell({
+  experience,
   nav,
   brand,
   user,
@@ -417,7 +421,7 @@ export function AppShell({
 
             <div className="content-edge-end ms-auto flex items-center gap-2">
               <LocaleToggle />
-              <UserMenu user={user} />
+              <UserMenu user={user} experience={experience} />
             </div>
           </div>
         </header>

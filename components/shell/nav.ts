@@ -4,7 +4,7 @@
 // `@/` alias does not resolve. (Same discipline as lib/db/*.)
 import type { TenantRole, PermissionGrants, Permission } from "../../lib/auth/permissions.ts";
 import { can } from "../../lib/auth/permissions.ts";
-import { ROUTES } from "../../lib/routes.ts";
+import { ROUTES, type ShellExperience } from "../../lib/routes.ts";
 
 /**
  * Icon names are passed as strings so the nav stays serializable across the
@@ -134,7 +134,7 @@ function visible(
 }
 
 export function navForExperience(
-  experience: "center" | "teacher" | "student" | "parent" | "admin",
+  experience: ShellExperience,
   role: TenantRole,
   grants?: PermissionGrants,
 ): ShellNavItem[] {

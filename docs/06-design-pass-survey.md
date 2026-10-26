@@ -40,6 +40,8 @@ Twelve nav items with no grouping; drawer opened on an empty row with a detached
 
 **T1:** the nav list wears `scrollbar-sidebar`; the header's start cluster (toggle, switcher) sits at the main column's start edge instead of centred on `content-shell`; under Whole Management the brand and the switcher name the organization (`brandFromRollup`), Reception / Sessions / Approvals render as `RollupNavItem`, and `RollupNotice` names the branch whose data a page shows. See 04 §11.1, §14.3.
 
+**F2:** the user menu gains **Account settings** (a `UserCog` row, 44px, above Sign out) in every experience. Each experience's shell data moved out of its layout into a frame builder (`(group)/*-shell.ts(x)`: `centerShell()` …); the layout and `/account` both render `<AppShell {...frame.props}>`, so the account page wears the shell of the experience it was opened from.
+
 ### `components/shell/nav.ts` / `nav-item.tsx`
 `teacher/analytics` was `disabled: true` with a "Soon" pill. **R10a:** removed (see "Removed nav items" in the R10a summary).
 
@@ -61,6 +63,13 @@ Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on
 
 ### `app/[locale]/(auth)/select-center/page.tsx`
 Branch cards had hover but **no selected state** — the branch you are already in looked like the others — and the "Whole Management" card was always brand-tinted, even when not selected. **R10a:** `AuthCard`; the active branch/roll-up gets a brand outline, tint and a check (not colour alone); idle cards share one hover state.
+
+---
+
+## Account (every experience)
+
+### `app/[locale]/account/page.tsx`
+**F2 (new).** Account settings, reached from the user menu (and the branch hub) by every signed-in role, rendered inside the shell of the experience it was opened from (`?from=`). `PageHeader`, then two `PageSection`s: **Profile** — one card (first/last name side by side from `sm`, contact phone LTR with its hint, preferred-language `Select`) and, below it, one read-only card per branch record ("How {branch} has you on file": role, local name, phone, "Ask the branch to update this"), two columns from `md`; **Sign-in & security** — Email and Password cards, side by side from `lg`, stacked below. Email shows the current address LTR and is read-only with an info notice until the override or confirmation is on. Password uses `PasswordField` ×3 and a `Checkbox` "Sign out other devices", ticked by default, in a 44px label row. Two named extension points between the sections render nothing until F3/F4 fill them.
 
 ---
 

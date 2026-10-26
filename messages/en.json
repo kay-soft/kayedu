@@ -104,7 +104,8 @@
     "wholeManagementLabel": "Whole Management",
     "rollupDisabledReason": "Pick a branch to use this",
     "rollupShowingBranch": "Showing {branch}. Pick a branch to change.",
-    "skipToContent": "Skip to content"
+    "skipToContent": "Skip to content",
+    "accountSettings": "Account settings"
   },
   "NavGroups": {
     "frontDesk": "Front desk",
@@ -2711,5 +2712,78 @@
     "catalogRemoved": "Removed from this branch.",
     "expenseAdded": "Expense added.",
     "expenseVoided": "Expense voided. It stays in the list, struck through."
+  },
+  "Account": {
+    "title": "Account settings",
+    "description": "Your own sign-in, name and language — the same in every branch you belong to.",
+    "profileSection": "Profile",
+    "profileSectionDescription": "How you appear when no branch has a name of its own for you.",
+    "securitySection": "Sign-in & security",
+    "securitySectionDescription": "Changing either one needs your current password.",
+    "profile": {
+      "title": "Your details",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "contactPhone": "Contact phone",
+      "contactPhoneHint": "Your own number, kept on your account. It does not change any branch's record.",
+      "preferredLocale": "Preferred language",
+      "preferredLocaleHint": "Where you land after signing in. The language switch at the top still changes this page.",
+      "localeAr": "العربية",
+      "localeEn": "English",
+      "save": "Save details",
+      "saving": "Saving…",
+      "saved": "Your details are saved."
+    },
+    "onFile": {
+      "title": "How {branch} has you on file",
+      "role": "As",
+      "name": "Name",
+      "phone": "Phone",
+      "askBranch": "Ask the branch to update this.",
+      "empty": "No branch has a record of you yet."
+    },
+    "email": {
+      "title": "Email",
+      "description": "You sign in with this address.",
+      "current": "Current email",
+      "newEmail": "New email",
+      "currentPassword": "Current password",
+      "submit": "Change email",
+      "submitting": "Changing…",
+      "changed": "Your email is changed. Sign in with the new address from now on.",
+      "requested": "We sent a confirmation link to the new address. Your email changes once you open it.",
+      "pending": "Waiting for confirmation of the new address:",
+      "comingSoon": "Changing email needs email confirmation — coming soon."
+    },
+    "password": {
+      "title": "Password",
+      "description": "At least 8 characters.",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "signOutOthers": "Sign out other devices",
+      "signOutOthersHint": "This device stays signed in.",
+      "submit": "Change password",
+      "submitting": "Changing…",
+      "changed": "Your password is changed.",
+      "changedOthersKept": "Your password is changed, but other devices could not be signed out. Try again later."
+    },
+    "errors": {
+      "required": "This field is required.",
+      "tooLong": "This is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidPhone": "Enter a valid Egyptian mobile number.",
+      "passwordTooShort": "Password must be at least 8 characters.",
+      "passwordMismatch": "The passwords do not match.",
+      "wrongPassword": "That is not your current password.",
+      "samePassword": "Choose a password different from your current one.",
+      "weakPassword": "This password is too weak. Choose a stronger one.",
+      "sameEmail": "That is already your email.",
+      "emailTaken": "This email is already used by another account.",
+      "emailOnBranchRecord": "This email is on a record at a branch. Ask that branch.",
+      "emailChangeDisabled": "Changing email needs email confirmation — coming soon.",
+      "rateLimited": "Too many attempts — wait a few minutes, then try again.",
+      "failed": "Something went wrong. Try again."
+    }
   }
 }

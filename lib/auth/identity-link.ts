@@ -5,6 +5,7 @@ import { z } from "zod";
 // "which app `User` is this login?" — kept loadable outside Next so
 // `npm run check:security` runs the REAL linking rule, not a copy of it.
 import { normalizeEmail } from "../identity.ts";
+import { writeAuditRow } from "../db/audit-row.ts";
 import {
   AuthMisconfiguredError,
   allowAutoConfirmDemo,
@@ -96,7 +97,8 @@ function isUniqueViolation(error: unknown): boolean {
  * Linking rules — the only place they live:
  * 1. A login already linked (`User.authId`) is that user. Its email is synced
  *    only when (under REQUIRE_EMAIL_CONFIRMATION) the new email is confirmed
- *    and no other person holds it; `emailVerifiedAt` mirrors Supabase.
+ *    and no other person holds it; `emailVerifiedAt` mirrors Supabase. The
+ *    change is audited `account.email.change` (F2) in the same transaction.
  * 2. A login whose email equals a person a centre created (`authId` null) is
  *    **never** linked here — not by email, not by phone, confirmed or not
  *    (D-01). It opens a PENDING claim; staff approve it in person
@@ -178,5 +180,22 @@ async function syncLinkedUser(
     if ((confirmed?.getTime() ?? null) !== current) data.emailVerifiedAt = confirmed;
   }
   if (Object.keys(data).length === 0) return user;
-  return db.user.update({ where: { id: user.id }, data });
+  if (!data.email) return db.user.update({ where: { id: user.id }, data });
+
+  // F2: an email change is audited with the write that makes it — whichever
+  // path changed the login's address (Account settings' direct override, or
+  // Supabase's confirmed email-change link). Ids only, never the address (D-20).
+  const write = async (tx: Prisma.TransactionClient) => {
+    const updated = await tx.user.update({ where: { id: user.id }, data });
+    await writeAuditRow(tx, {
+      centerId: null,
+      actorUserId: user.id,
+      action: "account.email.change",
+      entityType: "User",
+      entityId: user.id,
+      after: { verified: confirmed !== null },
+    });
+    return updated;
+  };
+  return "$transaction" in db ? db.$transaction(write) : write(db);
 }

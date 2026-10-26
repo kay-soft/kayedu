@@ -4,7 +4,7 @@ import { optionalPhone } from "./phone-schema.ts";
 
 export const localeSchema = z.enum(["ar", "en"]);
 
-const email = z
+export const email = z
   .string()
   .trim()
   .min(1, "required")
@@ -12,9 +12,10 @@ const email = z
   .email("invalidEmail")
   .transform((value) => value.toLowerCase());
 
-const password = z.string().min(8, "passwordTooShort").max(72, "tooLong");
+/** The password policy — sign-up and Account settings share it. */
+export const password = z.string().min(8, "passwordTooShort").max(72, "tooLong");
 
-const personName = z.string().trim().min(1, "required").max(60, "tooLong");
+export const personName = z.string().trim().min(1, "required").max(60, "tooLong");
 
 export const signInSchema = z.object({
   email,
