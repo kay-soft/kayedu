@@ -22,7 +22,7 @@ export function fieldErrorsFrom(error: ZodError): Record<string, string> {
 export type ActionState = {
   error?: string;
   /** ICU values for `error` — e.g. how many classes still use a room (R3). */
-  errorValues?: Record<string, number>;
+  errorValues?: Record<string, number | string>;
   fieldErrors?: Record<string, string>;
   /**
    * "deactivated": a delete that could not hard-delete because history

@@ -37,6 +37,13 @@
  *      what was typed on a refused submit, and put the duplicate-match panel
  *      under the phone field.
  *
+ * 12. (T4) URL state is soft: no GET filter form outside the shared
+ *      interceptor (`UrlFilterForm`; Reception's scan field is the one
+ *      allow-listed hard submit), every pager/tab link is a `SoftLink`, every
+ *      list/report page marks its results with `ResultsRegion`, and the merge
+ *      that turns a submitted form into the next query string is asserted by
+ *      running it (`lib/ui/url-filter-params.ts`).
+ *
  * Pure static analysis — no database needed. (The "no change under prisma/,
  * lib/db/, lib/money.ts, lib/auth/" constraint is reported with
  * `git diff --stat` in the R10a summary rather than gated here.)
@@ -45,6 +52,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import { centerInitial, nameInitial, personInitials } from "../lib/initials.ts";
+import { mergeFilterParams } from "../lib/ui/url-filter-params.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -627,6 +635,163 @@ function checkNoSilentCatches() {
   );
 }
 
+// ── 12. URL state is soft navigation (T4, docs/02-architecture.md §14) ──────
+
+/** Every `<form …>` opening tag in a source file, comments blanked. */
+function formTags(source: string): string[] {
+  return [...stripComments(source).matchAll(/<form\b[^>]*>/g)].map((match) => match[0]);
+}
+
+/** The one hard (full-document) GET submit left, and why. */
+const HARD_GET_SUBMIT_ALLOWLIST: Record<string, string> = {
+  "app/[locale]/(center)/reception/reception-search.tsx":
+    "Reception's scan field: the barcode scanner's type-fast-then-Enter submit is verified against the full-page GET (docs/04 §11.8 Scanner contract)",
+};
+
+/** Controls that change URL state — a page rendering any of them must mark its results region. */
+const URL_STATE_CONTROLS = [
+  "<Pagination",
+  "<FilterBar",
+  "<ClassFilters",
+  "<SessionFilters",
+  "<TeacherSessionFilters",
+  "<DiscoverFilters",
+  "<ChildSelector",
+  "<ParentDateFilter",
+  "<ScheduleDateFilter",
+  "<TypeAheadSearch",
+  "<AddAttendeeSearch",
+];
+
+function checkSoftUrlState() {
+  // The merge, by running it.
+  const query = (current: string, fields: [string, string][]) =>
+    mergeFilterParams(new URLSearchParams(current), fields).toString();
+  check(
+    "mergeFilterParams: a field replaces what the URL held, an empty field removes the param",
+    query("status=LIVE&q=ali", [
+      ["status", ""],
+      ["teacherId", "t1"],
+    ]) === "q=ali&teacherId=t1",
+  );
+  check(
+    "mergeFilterParams: params the form does not own are kept",
+    query("child=c1&date=2026-10-01", [["date", "2026-10-02"]]) === "child=c1&date=2026-10-02",
+  );
+  check(
+    "mergeFilterParams: page resets when a filter changed",
+    !query("status=LIVE&page=3", [["status", "COMPLETED"]]).includes("page="),
+  );
+  check(
+    "mergeFilterParams: page survives re-submitting the same filters",
+    query("status=LIVE&page=3", [["status", "LIVE"]]).split("&").sort().join("&") === "page=3&status=LIVE",
+  );
+  check(
+    "mergeFilterParams: a whitespace-only value is not written to the URL",
+    query("q=ali", [["q", "   "]]) === "",
+  );
+
+  // The interceptor.
+  const filters = read("components/shared/url-filters.tsx");
+  check(
+    "The interceptor navigates inside a transition, with scroll: false, on next-intl's router",
+    /useTransition\(\)/.test(filters) &&
+      /startTransition\(/.test(filters) &&
+      /scroll:\s*false/.test(filters) &&
+      /from\s+"@\/lib\/i18n\/navigation"/.test(filters),
+  );
+  check(
+    "The interceptor is a form with no action (a plain GET without JavaScript) that only preventDefaults in onSubmit",
+    /<form\b[\s\S]*?onSubmit=/.test(filters) && !/\baction=/.test(stripComments(filters)),
+  );
+
+  // No bare GET form anywhere: a `<form>` with neither an action nor a handler
+  // reloads the document. The soft ones are the interceptor and its callers.
+  const bare: string[] = [];
+  for (const file of FILES) {
+    if (!file.endsWith(".tsx")) continue;
+    const source = read(file);
+    for (const tag of formTags(source)) {
+      const flat = tag.replace(/\s+/g, " ");
+      if (/\baction=/.test(flat) || /\bonSubmit=/.test(flat) || /\{\.\.\./.test(flat)) continue;
+      bare.push(file);
+    }
+    if (/\bmethod=["']get["']/i.test(stripComments(source))) bare.push(`${file} (method="get")`);
+  }
+  check(
+    'No GET filter form outside the shared interceptor (UrlFilterForm) — no bare <form>, no method="get"',
+    bare.length === 0,
+    bare.join(", "),
+  );
+
+  const filterBar = read("components/shared/filter-bar.tsx");
+  check(
+    "FilterBar renders the interceptor, not its own <form>",
+    /<UrlFilterForm\b/.test(filterBar) && !/<form\b/.test(stripComments(filterBar)),
+  );
+  for (const file of [
+    "app/[locale]/(center)/classes/class-filters.tsx",
+    "app/[locale]/(teacher)/teacher/sessions/session-filters.tsx",
+    "app/[locale]/(student)/student/discover/discover-filters.tsx",
+    "app/[locale]/(student)/student/schedule/schedule-date-filter.tsx",
+    "app/[locale]/(parent)/parent/parent-date-filter.tsx",
+    "app/[locale]/(parent)/parent/child-selector.tsx",
+  ]) {
+    check(`${file} filters through UrlFilterForm`, /<UrlFilterForm\b/.test(read(file)));
+  }
+
+  // The type-ahead's submit is soft except where it is allow-listed.
+  const typeAhead = stripComments(read("components/center/type-ahead-search.tsx"));
+  check(
+    "TypeAheadSearch submits through useUrlFilters unless softSubmit is false",
+    /useUrlFilters\(\)/.test(typeAhead) &&
+      /urlFilters\.submit\(/.test(typeAhead) &&
+      /softSubmit\s*=\s*true/.test(typeAhead),
+  );
+  const hard = FILES.filter((file) => /softSubmit=\{false\}/.test(stripComments(read(file))));
+  check(
+    "Only the allow-listed scan field opts out of the soft submit",
+    hard.length === Object.keys(HARD_GET_SUBMIT_ALLOWLIST).length &&
+      hard.every((file) => file in HARD_GET_SUBMIT_ALLOWLIST),
+    hard.join(", "),
+  );
+
+  // Pagers, tabs and resets are SoftLinks, not scrolling Links or bare anchors.
+  const pagination = stripComments(read("components/center/pagination.tsx"));
+  check("Pagination links are SoftLinks", /<SoftLink\b/.test(pagination) && !/<Link\b/.test(pagination));
+  const soft = stripComments(read("components/shared/soft-link.tsx"));
+  check(
+    "SoftLink keeps the scroll position (scroll={false}) and reports pending",
+    /scroll\s*=\s*false/.test(soft) && /useLinkStatus/.test(soft) && /useReportUrlPending/.test(soft),
+  );
+  const dateFilter = stripComments(read("components/shared/date-filter.tsx"));
+  check(
+    "The date filter's Reset is a SoftLink, not a reloading <a>",
+    /<SoftLink\b/.test(dateFilter) && !/<a\b/.test(dateFilter),
+  );
+  const audit = stripComments(read("app/[locale]/(center)/audit/page.tsx"));
+  check("The audit filter tabs are SoftLinks", /<SoftLink\b[\s\S]*?hrefFor\(kind\)/.test(audit));
+
+  // Results regions: every page with URL-state controls dims its results while pending.
+  const region = stripComments(read("components/shared/results-region.tsx"));
+  check(
+    "ResultsRegion marks aria-busy and dims with opacity only (no skeleton, no height change)",
+    /aria-busy=\{pending\}/.test(region) &&
+      /opacity-60/.test(region) &&
+      !/Skeleton|animate-pulse|min-h-|h-\[/.test(region),
+  );
+  const missingRegion = FILES.filter((file) => {
+    if (!/\/page\.tsx$/.test(file)) return false;
+    const source = stripComments(read(file));
+    return URL_STATE_CONTROLS.some((control) => source.includes(control)) && !source.includes("<ResultsRegion");
+  });
+  check(
+    "Every page with URL-state controls wraps its results in ResultsRegion",
+    missingRegion.length === 0,
+    missingRegion.join(", "),
+  );
+}
+
 checkLocaleToggle();
 checkNav();
 checkNativeSelect();
@@ -644,6 +809,8 @@ checkRouteGroupBoundaries();
 checkActionsReport();
 checkActionsReturnResults();
 checkNoSilentCatches();
+console.log("\nSoft URL state (T4)");
+checkSoftUrlState();
 
 if (failures > 0) {
   console.error(`\n${failures} design check(s) failed.`);

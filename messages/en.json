@@ -31,6 +31,7 @@
       "pickRangeHint": "Pick a day, or a start and an end"
     },
     "typeAhead": {
+      "clear": "Clear",
       "noResults": "No matches yet — keep typing, or add a new record.",
       "searching": "Searching…",
       "resultCount": "{count, plural, =0 {No matches} one {# match} other {# matches}}"
@@ -100,6 +101,9 @@
     "accountMenu": "Account",
     "wholeManagement": "Whole Management — {organization}",
     "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
+    "wholeManagementLabel": "Whole Management",
+    "rollupDisabledReason": "Pick a branch to use this",
+    "rollupShowingBranch": "Showing {branch}. Pick a branch to change.",
     "skipToContent": "Skip to content"
   },
   "NavGroups": {
@@ -920,7 +924,7 @@
     },
     "roster": {
       "title": "Roster",
-      "description": "Every enrolled student, plus any drop-ins. Check students in — Present or Late is set from the arrival time — then record the payment. Corrections are possible until the session is ended.",
+      "description": "Every enrolled student, plus any drop-ins. Check a student in and choose the payment method in one step — Present or Late is set from the arrival time. Corrections are possible until the session is ended.",
       "empty": "No students enrolled or added yet.",
       "dropIn": "Drop-in",
       "unmarked": "Not marked",
@@ -1089,7 +1093,7 @@
       "cutRequired": "A one-time session needs its own centre cut.",
       "missingCut": "This session has no centre cut set, so the payment can't be recorded. Set the session's cut first.",
       "sessionInUse": "This session can no longer be deleted — it has started or has records on it. Cancel it instead.",
-      "sessionNotToday": "Only today's sessions can be checked in from the reception desk.",
+      "sessionNotToday": "Only today's sessions can be checked in.",
       "rateLimited": "Too many contact lookups — wait a minute and try again.",
       "reasonRequired": "Give a reason — switching a paid student to Absent voids their payment.",
       "hasPayments": "This session still has payments. Void or refund them first, each with its reason, then cancel or reschedule.",
@@ -1228,6 +1232,7 @@
       "dropIn": "Drop-in — not enrolled in this class",
       "price": "Session price",
       "enterHint": "Press Enter to confirm.",
+      "confirmTitle": "Confirm check-in",
       "cancel": "Cancel",
       "checkedInAs": "{name} checked in — {status}.",
       "alreadyCheckedIn": "{name} is already checked in at {time}.",
@@ -1593,7 +1598,8 @@
       "catalogAlreadySelected": "This branch has already picked that catalog entry.",
       "lastActiveMethod": "This is the branch's only active payment method. Add or activate another one first.",
       "roomInCombination": "This room is part of a combined room used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first.",
-      "combinationInUse": "That combination is still used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first, then unlink.",
+      "combinationInUse": "These rooms cannot be unlinked yet. They are still combined by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}.{classList, select, none {} other { Classes: {classList}{classMore, plural, =0 {} other { and # more}}.}}{sessionList, select, none {} other { Sessions: {sessionList}{sessionMore, plural, =0 {} other { and # more}}.}} Change their rooms first, then save again.",
+      "roomInactive": "Only active rooms can be combined. Reactivate it first, or pick another room.",
       "selfLink": "A room cannot be combined with itself.",
       "invalidDate": "Enter a valid date.",
       "endBeforeStart": "The end date cannot be before the start date.",
@@ -1654,7 +1660,9 @@
         "basePrice": "Base price",
         "displayNameAr": "Your name in Arabic",
         "displayNameEn": "Your name in English",
-        "displayNameHint": "Shown only in this language. Leave blank to use the catalog name."
+        "displayNameHint": "Shown only in this language. Leave blank to use the catalog name.",
+        "name": "Name",
+        "details": "Details"
       },
       "educationSystems": {
         "title": "Education systems",
@@ -1674,23 +1682,28 @@
     },
     "rooms": {
       "title": "Rooms",
-      "description": "Where sessions physically happen. A class's seat limit is the capacity of its room — or of its rooms added together when they are combined.",
+      "description": "Where sessions physically happen. A class's seat limit is the capacity of its room — or of its rooms added together when they are combined. Which rooms can be combined is set on each room.",
+      "addButton": "Add room",
       "addTitle": "Add a room",
       "addDescription": "Name it the way staff say it out loud — that is what they will pick from.",
+      "editTitle": "Edit room",
+      "editDescription": "Change its name, its seats, or which rooms it can be combined with.",
       "listTitle": "Rooms",
-      "listDescription": "Deactivate a room that is out of service.",
-      "empty": "No rooms yet. Add the first one above.",
+      "listDescription": "Deactivate a room that is out of service. A combination is listed on both of its rooms.",
+      "empty": "No rooms yet.",
+      "emptyHint": "Add the first one with the Add room button above.",
+      "deleteConfirm": {
+        "title": "Delete this room?"
+      },
       "fields": {
         "name": "Name",
         "capacity": "Capacity",
-        "capacityHint": "Seats. Use 0 if not set — a class using this room is then not capped."
-      },
-      "links": {
-        "title": "Rooms that can be combined",
-        "description": "Tick the rooms each room can be joined with to make one bigger room — for example Room 1 + Room 2. A class or session can then use a room plus any room linked to it, and its seats are the rooms' capacities added together.",
+        "capacityHint": "Seats. Use 0 if not set — a class using this room is then not capped.",
+        "combinesWith": "Combines with",
         "combinableWith": "Can be combined with",
-        "needTwo": "Add at least two active rooms to combine them.",
-        "save": "Save combinations"
+        "combineHint": "Rooms that can be joined with this one into a bigger room — for example Room 1 + Room 2. A class or session can then use this room plus any room linked to it, and its seats are their capacities added together. The link shows on both rooms.",
+        "combineNone": "There are no other active rooms to combine with yet.",
+        "removeLink": "Remove {room}"
       }
     },
     "paymentMethods": {

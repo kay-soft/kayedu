@@ -8,7 +8,10 @@ import {
   MemberRow,
   type MemberRowData,
 } from "@/app/[locale]/(center)/settings/staff/member-row";
-import { ListHeader } from "@/components/shared/list-header";
+import {
+  SettingsList,
+  SettingsListHeader,
+} from "@/components/settings/settings-list";
 import { Ltr } from "@/components/shared/ltr";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
@@ -125,21 +128,22 @@ export default async function StaffSettingsPage() {
               description={t("noMembersHint")}
             />
           ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                <span className="min-w-0 flex-1">{t("columns.name")}</span>
-                <span className="w-64 shrink-0">{t("columns.role")}</span>
-                <span className="w-20 shrink-0">{tCommon("status")}</span>
-                <span className="w-32 shrink-0 text-end">
-                  {tCommon("actions")}
-                </span>
-              </ListHeader>
+            <SettingsList>
+              <SettingsListHeader
+                columns={[
+                  { key: "name", label: t("columns.name") },
+                  { key: "role", label: t("columns.role"), className: "w-64 shrink-0" },
+                ]}
+                statusLabel={tCommon("status")}
+                actionsLabel={tCommon("actions")}
+                actionsSize="narrow"
+              />
 
               {/* Stacked cards below md, table rows from md up (docs/04 §6). */}
               {rows.map((member) => (
                 <MemberRow key={member.membershipId} member={member} />
               ))}
-            </ul>
+            </SettingsList>
           )}
         </CardContent>
       </Card>

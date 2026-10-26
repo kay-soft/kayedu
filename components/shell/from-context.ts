@@ -30,6 +30,23 @@ export function brandFromContext(ctx: TenantContext): ShellBrand {
   };
 }
 
+/**
+ * Under "Whole Management" the shell names the organization, never the
+ * representative branch the operational queries happen to scope on: its name
+ * and logo are replaced (the avatar then falls back to the name's initial),
+ * and only the theme colour — not a name — carries over.
+ */
+export function brandFromRollup(
+  ctx: TenantContext,
+  organizationName: string,
+): ShellBrand {
+  return {
+    name: organizationName,
+    logoUrl: null,
+    themeColor: ctx.center.themeColor,
+  };
+}
+
 export function shellUser(user: User, role: TenantRole): ShellUser {
   return {
     name: fullName(user),

@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 
+import { UrlFilterForm } from "@/components/shared/url-filters";
 import { cn } from "@/lib/utils";
 
 /**
  * The one filter-row pattern (docs/04-design-system.md §5 "Filter row").
  *
- * Every list and report screen filters with the same shape: a plain GET form
- * (filter state lives in the URL, §11.7), a row of labelled fields that wraps
+ * Every list and report screen filters with the same shape: a GET form
+ * (filter state lives in the URL, §11.7; `UrlFilterForm` makes the submit a
+ * soft navigation and leaves it a plain GET without JavaScript), a row of labelled fields that wraps
  * instead of scrolling, and every control 44px tall and bottom-aligned, so a
  * select, a date control and a reset button share one baseline whatever the
  * label above them is. Below `sm` the fields stack, each full width.
@@ -23,14 +25,14 @@ export function FilterBar({
   className?: string;
 }) {
   return (
-    <form
+    <UrlFilterForm
       className={cn(
         "flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-3 sm:gap-y-4",
         className,
       )}
     >
       {children}
-    </form>
+    </UrlFilterForm>
   );
 }
 

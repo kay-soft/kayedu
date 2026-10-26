@@ -172,7 +172,15 @@ model User {
   // never writes it.
   phone           String?  @unique
   altPhone        String?
+  // F2: the person's own self-declared phone, set on Account settings and
+  // normalized through lib/phone.ts. NOT unique and never an identity key
+  // (D-02 (a)): nothing matches, links, originates or refuses on it — only
+  // the account page reads it. Distinct from `phone` above, which is
+  // staff-typed and unique; a self-typed value there would let anyone squat
+  // a number (`check:account` asserts the identity modules never read this).
+  contactPhone    String?
   avatarUrl       String?
+  // The preferred language: where sign-in lands (F2), editable on Account settings.
   locale          String   @default("ar") // "ar" | "en"
   isPlatformAdmin Boolean  @default(false)
   createdAt       DateTime @default(now())
@@ -258,12 +266,18 @@ model RateLimitBucket {
  * and the screen label differ on purpose (docs/02-architecture.md §8).
  */
 model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  nameEn    String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String
+  nameEn      String?
+  active      Boolean  @default(true)
+  // F1: how many branches this organization may have, set by a platform
+  // admin only (audited `platform.organization.limit.update`). Counted
+  // branches are the non-ARCHIVED centres. Lowering it below the current
+  // count only blocks new branches — nothing existing is touched. >= 1 is a
+  // CHECK constraint in the migration (`20261026100000_f1_branch_limits`).
+  maxBranches Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   centers Center[]
 }

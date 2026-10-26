@@ -3,13 +3,15 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { formatNumber } from "@/lib/format";
 
-import { Link } from "@/lib/i18n/navigation";
+import { SoftLink } from "@/components/shared/soft-link";
 
 /**
  * Prev/next paging for a list page (docs/02-architecture.md §14). A center
  * with thousands of students must never load them all at once — this is the
  * control that keeps the query bounded, driven entirely by the URL so a page
  * is a real, shareable, back-button-safe address rather than client state.
+ * The links are `SoftLink`s: a page change updates the list in place, keeps the
+ * scroll position and dims the results while the next page loads (§14).
  */
 export async function Pagination({
   page,
@@ -45,14 +47,14 @@ export async function Pagination({
 
       <div className="flex items-center justify-center gap-2">
         {page > 1 ? (
-          <Link
+          <SoftLink
             href={buildHref(page - 1)}
             className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-primary transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
           >
             {/* The arrow means "previous", so it mirrors in RTL (docs/04 §7). */}
             <ChevronLeft className="size-4 rtl:-scale-x-100" aria-hidden />
             {t("previous")}
-          </Link>
+          </SoftLink>
         ) : (
           <span
             aria-disabled
@@ -68,13 +70,13 @@ export async function Pagination({
         </span>
 
         {page < totalPages ? (
-          <Link
+          <SoftLink
             href={buildHref(page + 1)}
             className="flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm text-text-primary transition-ui focus-ring hover:border-border-strong hover:bg-surface-hover active:bg-surface-active"
           >
             {t("next")}
             <ChevronRight className="size-4 rtl:-scale-x-100" aria-hidden />
-          </Link>
+          </SoftLink>
         ) : (
           <span
             aria-disabled

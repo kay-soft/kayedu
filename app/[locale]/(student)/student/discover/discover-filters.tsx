@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
+import { UrlFilterForm } from "@/components/shared/url-filters";
 
 export type DiscoverFilterOption = { value: string; label: string };
 
@@ -36,7 +37,7 @@ export function DiscoverFilters({
   const t = useTranslations("StudentDiscover.filters");
 
   return (
-    <form className="grid gap-3 sm:grid-cols-3">
+    <UrlFilterForm className="grid gap-3 sm:grid-cols-3">
       <FilterField label={t("subject")} htmlFor="filter-subject">
         <Select
           id="filter-subject"
@@ -87,6 +88,6 @@ export function DiscoverFilters({
           ))}
         </Select>
       </FilterField>
-    </form>
+    </UrlFilterForm>
   );
 }

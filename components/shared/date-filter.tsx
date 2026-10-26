@@ -10,7 +10,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SoftLink } from "@/components/shared/soft-link";
 import { formatDate } from "@/lib/format";
+import { useUrlFilterSync } from "@/lib/ui/url-filter-sync";
 import { cn } from "@/lib/utils";
 
 export type DateFilterValue = {
@@ -21,6 +23,14 @@ export type DateFilterValue = {
   from: string;
   to: string;
 };
+
+/** The calendar's working copy for a given URL value. */
+function draftFromValue(value: DateFilterValue): { from: string | null; to: string | null } {
+  return {
+    from: value.range === "range" ? value.from || null : value.date || null,
+    to: value.range === "range" ? value.to || null : null,
+  };
+}
 
 /** The three presets, paired with the message key that names each one. */
 const QUICK = [
@@ -52,6 +62,8 @@ const QUICK = [
  * existing filter form alongside whatever else that screen filters by, so one
  * submit carries every field. Presets apply on click; the calendar waits for
  * Apply, so a range never re-queries after only its first date is picked.
+ * That submit is a soft navigation (`UrlFilterForm`, §14): Apply and the
+ * presets update the results in place, and Reset is a `SoftLink`.
  */
 export function DateFilter({
   value,
@@ -71,12 +83,19 @@ export function DateFilter({
   const [kind, setKind] = useState<DateFilterValue["range"]>(value.range);
   // The calendar's working copy. It only reaches the URL on Apply, so an
   // in-progress range is never queried.
-  const [draft, setDraft] = useState<{ from: string | null; to: string | null }>(
-    () => ({
-      from: value.range === "range" ? value.from || null : value.date || null,
-      to: value.range === "range" ? value.to || null : null,
-    }),
+  const [draft, setDraft] = useState<{ from: string | null; to: string | null }>(() =>
+    draftFromValue(value),
   );
+  // The URL moved without this control being used (Back, Reset, a normalised
+  // value): take the server's selection instead of the stale local one. The
+  // seen-value check is the render-time re-seed pattern, not an effect.
+  const urlSync = useUrlFilterSync();
+  const [seenUrlSync, setSeenUrlSync] = useState(urlSync);
+  if (urlSync !== seenUrlSync) {
+    setSeenUrlSync(urlSync);
+    setKind(value.range);
+    setDraft(draftFromValue(value));
+  }
   const applyRef = useRef<HTMLButtonElement>(null);
 
   // Applying is a real form submit, fired from an effect so the hidden fields
@@ -208,7 +227,7 @@ export function DateFilter({
         </PopoverContent>
       </Popover>
 
-      <a
+      <SoftLink
         href={resetHref}
         title={t("reset")}
         className={cn(
@@ -220,7 +239,7 @@ export function DateFilter({
         {/* A reset arrow turns back on itself — it reads the same either way. */}
         <RotateCcw className="size-4" aria-hidden />
         <span className="sr-only">{t("reset")}</span>
-      </a>
+      </SoftLink>
       </div>
     </div>
   );

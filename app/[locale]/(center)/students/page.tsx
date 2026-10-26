@@ -29,6 +29,7 @@ import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
  * Students (spec §4.1 item 4) — a dashboard first: search, filter and a
@@ -140,58 +141,60 @@ export default async function StudentsPage({
             search={searchStudentsTypeAheadAction}
           />
 
-          {rows.length === 0 ? (
-            query.length > 0 ? (
-              <EmptyState
-                icon={<SearchX />}
-                tone="warning"
-                title={t("noMatches")}
-                description={t("noMatchesHint")}
-                action={
-                  <LinkButton href={ROUTES.centerStudents} size="sm">
-                    {t("clearSearch")}
-                  </LinkButton>
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={<Users />}
-                title={t("empty")}
-                description={t("emptyHint")}
-                action={
-                  <AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} />
-                }
-              />
-            )
-          ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                <span className="w-24 shrink-0">{t("columns.code")}</span>
-                <span className="min-w-0 flex-1">{t("columns.name")}</span>
-                <span className="min-w-0 flex-1">{t("columns.grade")}</span>
-                <span className="min-w-0 flex-1">{t("columns.contact")}</span>
-                <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-36 shrink-0 text-end">
-                  {tCommon("actions")}
-                </span>
-              </ListHeader>
-
-              {rows.map((student) => (
-                <StudentRow
-                  key={student.studentProfileId}
-                  student={student}
-                  canManage={ctxCan(ctx, "student.manage")}
+          <ResultsRegion className="flex flex-col gap-4">
+            {rows.length === 0 ? (
+              query.length > 0 ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  tone="warning"
+                  title={t("noMatches")}
+                  description={t("noMatchesHint")}
+                  action={
+                    <LinkButton href={ROUTES.centerStudents} size="sm" soft>
+                      {t("clearSearch")}
+                    </LinkButton>
+                  }
                 />
-              ))}
-            </ul>
-          )}
+              ) : (
+                <EmptyState
+                  icon={<Users />}
+                  title={t("empty")}
+                  description={t("emptyHint")}
+                  action={
+                    <AddStudentDialog grades={gradeOptions} noneLabel={tCommon("none")} />
+                  }
+                />
+              )
+            ) : (
+              <ul className="flex flex-col gap-3 md:gap-0">
+                <ListHeader>
+                  <span className="w-24 shrink-0">{t("columns.code")}</span>
+                  <span className="min-w-0 flex-1">{t("columns.name")}</span>
+                  <span className="min-w-0 flex-1">{t("columns.grade")}</span>
+                  <span className="min-w-0 flex-1">{t("columns.contact")}</span>
+                  <span className="w-24 shrink-0">{tCommon("status")}</span>
+                  <span className="w-36 shrink-0 text-end">
+                    {tCommon("actions")}
+                  </span>
+                </ListHeader>
 
-          <Pagination
-            page={page}
-            pageSize={pageSize}
-            total={total}
-            buildHref={buildHref}
-          />
+                {rows.map((student) => (
+                  <StudentRow
+                    key={student.studentProfileId}
+                    student={student}
+                    canManage={ctxCan(ctx, "student.manage")}
+                  />
+                ))}
+              </ul>
+            )}
+
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              buildHref={buildHref}
+            />
+          </ResultsRegion>
         </CardContent>
       </Card>
     </div>

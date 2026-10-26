@@ -33,6 +33,7 @@ import { piastresToInputValue } from "@/lib/money";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { dateKey } from "@/lib/scheduling";
 import { Link } from "@/lib/i18n/navigation";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const MAX_CANDIDATES = 8;
 
@@ -338,13 +339,15 @@ export default async function ClassDetailPage({
                 submitLabel={t("roster.searchSubmit")}
                 search={searchEnrollCandidatesAction.bind(null, classGroup.id)}
               />
-              <ClassRoster
-                classGroupId={classGroup.id}
-                roster={roster}
-                blocked={blocked}
-                candidates={candidates}
-                query={query}
-              />
+              <ResultsRegion>
+                <ClassRoster
+                  classGroupId={classGroup.id}
+                  roster={roster}
+                  blocked={blocked}
+                  candidates={candidates}
+                  query={query}
+                />
+              </ResultsRegion>
             </DetailCard>
           </>
         }

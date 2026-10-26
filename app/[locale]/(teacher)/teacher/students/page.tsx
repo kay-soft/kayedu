@@ -23,6 +23,7 @@ import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
  * Every student this teacher has ever taught at the active center (spec
@@ -91,45 +92,47 @@ export default async function TeacherStudentsPage({
             search={searchTaughtStudentsTypeAheadAction}
           />
 
-          {rows.length === 0 ? (
-            query ? (
-              <EmptyState
-                icon={<SearchX />}
-                tone="warning"
-                title={t("noMatches")}
-                description={t("noMatchesHint")}
-              />
+          <ResultsRegion className="flex flex-col gap-4">
+            {rows.length === 0 ? (
+              query ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  tone="warning"
+                  title={t("noMatches")}
+                  description={t("noMatchesHint")}
+                />
+              ) : (
+                <EmptyState
+                  icon={<Users />}
+                  title={t("empty")}
+                  description={t("emptyHint")}
+                />
+              )
             ) : (
-              <EmptyState
-                icon={<Users />}
-                title={t("empty")}
-                description={t("emptyHint")}
-              />
-            )
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {rows.map((row) => (
-                <li key={row.id}>
-                  <Link
-                    href={ROUTES.teacherStudent(row.id)}
-                    className="flex flex-col gap-1 rounded-xl border border-border p-3 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-text-primary">
-                        {fullName(localName(row, row.user))}
-                      </p>
-                      <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
-                        <span dir="ltr">{row.studentCode}</span>
-                        <span>{row.grade ? catalogLabelWithSelection(locale, row.grade) : tCommon("none")}</span>
-                      </p>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+              <ul className="flex flex-col gap-2">
+                {rows.map((row) => (
+                  <li key={row.id}>
+                    <Link
+                      href={ROUTES.teacherStudent(row.id)}
+                      className="flex flex-col gap-1 rounded-xl border border-border p-3 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-text-primary">
+                          {fullName(localName(row, row.user))}
+                        </p>
+                        <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
+                          <span dir="ltr">{row.studentCode}</span>
+                          <span>{row.grade ? catalogLabelWithSelection(locale, row.grade) : tCommon("none")}</span>
+                        </p>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-          <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+            <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+          </ResultsRegion>
         </CardContent>
       </Card>
     </div>

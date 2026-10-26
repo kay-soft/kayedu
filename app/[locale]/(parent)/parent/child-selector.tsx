@@ -2,10 +2,11 @@
 
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { UrlFilterForm } from "@/components/shared/url-filters";
 
 /**
  * The child selector (spec §4.5 item 1) — a parent with 2+ verified children
- * switches between them. A plain GET form, state lives in the URL (`?child=`),
+ * switches between them. A plain GET form (`UrlFilterForm`: a soft navigation with JavaScript, docs/02 §14), state lives in the URL (`?child=`),
  * the same "no client state" pattern as `ParentDateFilter`. Only ever offered
  * options from `session.children` — already filtered to VERIFIED
  * (`requireParentUser`, `lib/auth/tenant.ts`) — so this control itself can
@@ -24,7 +25,7 @@ export function ChildSelector({
   label: string;
 }) {
   return (
-    <form className="flex flex-col gap-1.5 sm:w-80">
+    <UrlFilterForm className="flex flex-col gap-1.5 sm:w-80">
       <Label htmlFor="parent-child">{label}</Label>
       <Select
         id="parent-child"
@@ -36,6 +37,6 @@ export function ChildSelector({
           label: option.label,
         }))}
       />
-    </form>
+    </UrlFilterForm>
   );
 }

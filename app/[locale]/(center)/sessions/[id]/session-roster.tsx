@@ -5,7 +5,6 @@ import { AlertTriangle, Ban, LogIn, Undo2, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
-  checkInRosterAction,
   recordPaymentAction,
   refundPaymentAction,
   setAttendanceAction,
@@ -34,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useRequestCheckIn } from "@/app/[locale]/(center)/sessions/[id]/session-check-in-provider";
 import { Link } from "@/lib/i18n/navigation";
 import { formatMoney } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -50,6 +50,10 @@ export type RosterRowData = {
   name: string;
   studentCode: string;
   isDropIn: boolean;
+  /** On the class's active enrolments — what the confirm panel's Enrolled / Drop-in badge shows. */
+  enrolled: boolean;
+  /** A short-lived signed URL for the confirm panel; only an unmarked row carries one. */
+  photoUrl: string | null;
   status: AttendanceStatusValue | null;
   /** `methodLabel` is the payment's frozen `methodLabelSnapshot` (R1), never the live name. */
   payment: { id: string; amount: number; methodLabel: string; refunded: boolean } | null;
@@ -59,8 +63,10 @@ export type RosterRowData = {
 /**
  * The session roster (spec §4.1 item 7): every actively-enrolled student
  * (marked or not) plus any drop-ins. An unmarked row gets a **Check in**
- * button — the server decides Present or Late from the clock (R2), there is
- * no status picker. A marked row gets the Attendance control for
+ * button that opens reception's confirm panel (T2: confirm, then write — the
+ * button itself calls no Server Action; the panel's confirm is the one write,
+ * attendance and payment together). The server decides Present or Late from
+ * the clock (R2), there is no status picker. A marked row gets the Attendance control for
  * corrections while the session is live, and, once PRESENT/LATE, the money —
  * record a payment, void one already recorded, or (M14) refund one.
  *
@@ -161,10 +167,7 @@ function AttendeeRow({
     },
     IDLE_SESSION_STATE,
   );
-  const [checkInState, checkInFormAction] = useGuardedActionState(
-    checkInRosterAction,
-    IDLE_SESSION_STATE,
-  );
+  const requestCheckIn = useRequestCheckIn();
   const [paymentState, paymentFormAction] = useGuardedActionState(
     recordPaymentAction,
     IDLE_SESSION_STATE,
@@ -227,14 +230,23 @@ function AttendeeRow({
           {row.status ? tAttendance(row.status) : t("unmarked")}
         </Badge>
       ) : !alreadyMarked ? (
-        <form action={checkInFormAction} className="flex flex-col items-stretch gap-2 sm:items-start">
-          {hiddenRowFields}
-          <SubmitButton className="w-full sm:w-auto">
-            <LogIn className="size-4" aria-hidden />
-            {t("checkIn")}
-          </SubmitButton>
-          {checkInState.error ? <FormMessage>{tErrors(checkInState.error)}</FormMessage> : null}
-        </form>
+        // Opens the confirm panel; nothing is written until its confirm button.
+        <Button
+          type="button"
+          className="h-11 w-full px-4 sm:w-auto sm:self-start"
+          onClick={() =>
+            requestCheckIn({
+              id: row.studentProfileId,
+              name: row.name,
+              code: row.studentCode,
+              photoUrl: row.photoUrl,
+              enrolled: row.enrolled,
+            })
+          }
+        >
+          <LogIn className="size-4" aria-hidden />
+          {t("checkIn")}
+        </Button>
       ) : (
         <>
           <AttendanceControl

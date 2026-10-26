@@ -64,28 +64,44 @@ export function BranchSwitcher({
 
   if (branches.length <= 1 && rollups.length === 0) return null;
 
+  // Under "Whole Management" `activeId` is the organization's id: the trigger
+  // shows the scope (icon + "Whole Management" + the organization), never a
+  // branch — `activeName` is the organization's name there as well.
+  const activeRollup = rollups.find((group) => group.organizationId === activeId);
+
   return (
     <Popover>
       <PopoverTrigger
         className={cn(
-          "group flex h-11 max-w-[13rem] min-w-0 items-center gap-2 rounded-lg border border-transparent px-2",
+          "group flex h-11 max-w-[14rem] min-w-0 items-center gap-2 rounded-lg border border-transparent px-2",
           "text-sm font-medium text-text-primary transition-ui outline-none",
           "hover:border-border hover:bg-surface-hover active:bg-surface-active",
           "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
           "data-[popup-open]:border-border data-[popup-open]:bg-surface-hover",
         )}
       >
-        <BrandAvatar
-          name={activeName}
-          logoUrl={activeLogoUrl}
-          themeColor={activeThemeColor}
-          size="sm"
-        />
+        {activeRollup ? (
+          <span
+            aria-hidden
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand"
+          >
+            <Layers className="size-4" />
+          </span>
+        ) : (
+          <BrandAvatar
+            name={activeName}
+            logoUrl={activeLogoUrl}
+            themeColor={activeThemeColor}
+            size="sm"
+          />
+        )}
         <span className="hidden min-w-0 flex-col text-start sm:flex">
           <span className="truncate text-[11px] leading-tight font-medium text-text-muted">
-            {t("branchLabel")}
+            {activeRollup ? t("wholeManagementLabel") : t("branchLabel")}
           </span>
-          <span className="truncate text-sm leading-tight">{activeName}</span>
+          <span className="truncate text-sm leading-tight">
+            {activeRollup ? activeRollup.organizationName : activeName}
+          </span>
         </span>
         <ChevronDown
           className="size-4 shrink-0 text-text-muted transition-transform duration-[var(--motion-fast)] group-data-[popup-open]:rotate-180"

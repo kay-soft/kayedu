@@ -3,16 +3,16 @@ import { Clock, DoorOpen, Lock, Printer } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
+import { AddAttendeeSearch } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-search";
 import { DeleteSessionButton } from "@/app/[locale]/(center)/sessions/[id]/delete-session-button";
 import { ActionBar } from "@/components/shared/action-bar";
 import { EndSessionButton } from "@/app/[locale]/(center)/sessions/[id]/end-session-button";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
+import { SessionCheckInProvider } from "@/app/[locale]/(center)/sessions/[id]/session-check-in-provider";
 import { SessionLifecycleActions } from "@/app/[locale]/(center)/sessions/[id]/session-lifecycle-actions";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { SessionRoster, type RosterRowData } from "@/app/[locale]/(center)/sessions/[id]/session-roster";
 import { SessionSettlementAction } from "@/app/[locale]/(center)/settlements/session-settlement-action";
-import { searchAddAttendeeCandidatesAction } from "@/app/[locale]/(center)/sessions/actions";
-import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { DetailRow } from "@/components/shared/field";
 import { PageHeader } from "@/components/shared/page-header";
@@ -26,6 +26,7 @@ import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecyc
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { studentSearchWhere } from "@/lib/db/students";
+import { signedUrlFor } from "@/lib/db/storage";
 import {
   formatDate,
   formatDateTime,
@@ -38,6 +39,9 @@ import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { LinkButton } from "@/components/shared/link-button";
 import { centreTimeZone, dateKey } from "@/lib/scheduling";
+import { AVATARS_BUCKET } from "@/lib/storage-paths";
+import { storageConfigured } from "@/lib/storage";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const MAX_CANDIDATES = 8;
 
@@ -128,10 +132,22 @@ export default async function SessionDetailPage({
 
   const rosterMap = new Map<string, RosterRowData>();
 
+  // Storage paths of the photos the confirm panel may show (signed below, once
+  // we know which rows can still be checked in).
+  const photoPathByStudentId = new Map<string, string>();
+
   const toRow = (
     studentProfileId: string,
-    profile: { firstName: string | null; lastName: string | null; studentCode: string; user: { firstName: string; lastName: string } },
+    profile: {
+      firstName: string | null;
+      lastName: string | null;
+      studentCode: string;
+      photoUrl: string | null;
+      user: { firstName: string; lastName: string };
+    },
+    enrolled: boolean,
   ): RosterRowData => {
+    if (profile.photoUrl) photoPathByStudentId.set(studentProfileId, profile.photoUrl);
     const attendee = attendeeByStudentId.get(studentProfileId);
     const activePayment = attendee?.payments.find((p) => !p.voided) ?? null;
     return {
@@ -140,6 +156,8 @@ export default async function SessionDetailPage({
       name: fullName(localName(profile, profile.user)),
       studentCode: profile.studentCode,
       isDropIn: attendee?.isDropIn ?? false,
+      enrolled,
+      photoUrl: null,
       status: attendee?.attendanceStatus ?? null,
       payment: activePayment
         ? {
@@ -156,12 +174,12 @@ export default async function SessionDetailPage({
   for (const enrollment of activeEnrollments) {
     rosterMap.set(
       enrollment.studentProfileId,
-      toRow(enrollment.studentProfileId, enrollment.studentProfile),
+      toRow(enrollment.studentProfileId, enrollment.studentProfile, true),
     );
   }
   for (const attendee of session.attendees) {
     if (!attendee.studentProfileId || rosterMap.has(attendee.studentProfileId)) continue;
-    rosterMap.set(attendee.studentProfileId, toRow(attendee.studentProfileId, attendee.studentProfile!));
+    rosterMap.set(attendee.studentProfileId, toRow(attendee.studentProfileId, attendee.studentProfile!, false));
   }
 
   const roster = [...rosterMap.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -199,12 +217,6 @@ export default async function SessionDetailPage({
         })
       : null,
   ]);
-  const candidates: AttendeeCandidate[] = (candidateProfiles ?? []).map((profile) => ({
-    studentProfileId: profile.id,
-    name: fullName(localName(profile, profile.user)),
-    studentCode: profile.studentCode,
-  }));
-
   const displayStatus = deriveSessionDisplayStatus(session, new Date(), timeZone);
   const teacherName = fullName(session.teacher);
   const className = sessionDisplayName(locale, session);
@@ -218,6 +230,37 @@ export default async function SessionDetailPage({
   const rosterReadOnly =
     closed || displayStatus === "CANCELLED" || displayStatus === "RESCHEDULED";
   const canEnd = !rosterReadOnly && displayStatus === "LIVE" && ctxCan(ctx, "session.close");
+
+  // T2 — a check-in here is reception's `checkInAction`, so it needs what that
+  // action checks: `reception.use` as well as `attendance.record`.
+  const canCheckIn = ctxCan(ctx, "attendance.record") && ctxCan(ctx, "reception.use");
+  const canRecordPayment = ctxCan(ctx, "payment.record");
+
+  // The confirm panel's photo (the anti-impersonation control, spec §5.1) must
+  // be on the page before the panel opens — nothing is fetched on click. Only
+  // rows that can still be checked in, and the search candidates, get one.
+  const signPhoto = (path: string | null | undefined) =>
+    path && storageConfigured() ? signedUrlFor(ctx.center.id, AVATARS_BUCKET, path) : Promise.resolve(null);
+  const candidateRows = canCheckIn && !rosterReadOnly ? (candidateProfiles ?? []) : [];
+  const [, candidates] = await Promise.all([
+    Promise.all(
+      roster
+        .filter((row) => canCheckIn && !rosterReadOnly && row.status === null)
+        .map(async (row) => {
+          row.photoUrl = await signPhoto(photoPathByStudentId.get(row.studentProfileId));
+        }),
+    ),
+    Promise.all(
+      candidateRows.map(
+        async (profile): Promise<AttendeeCandidate> => ({
+          studentProfileId: profile.id,
+          name: fullName(localName(profile, profile.user)),
+          studentCode: profile.studentCode,
+          photoUrl: await signPhoto(profile.photoUrl),
+        }),
+      ),
+    ),
+  ]);
   const tClosure = await getTranslations("Sessions.closure");
   const tEnd = await getTranslations("Sessions.endSession");
 
@@ -365,13 +408,19 @@ export default async function SessionDetailPage({
       <DetailLayout
         stickySide
         main={
+          <SessionCheckInProvider
+            sessionId={session.id}
+            priceLabel={session.priceSnapshot > 0 ? formatMoney(session.priceSnapshot, locale) : null}
+            paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
+            canRecordPayment={canRecordPayment}
+          >
           <DetailCard title={t("roster.title")} description={t("roster.description")}>
             <SessionRoster
               sessionId={session.id}
               rows={roster}
-              canRecord={ctxCan(ctx, "attendance.record")}
+              canRecord={canCheckIn}
               canCorrect={ctxCan(ctx, "attendance.correct")}
-              canRecordPayment={ctxCan(ctx, "payment.record")}
+              canRecordPayment={canRecordPayment}
               canVoid={ctxCan(ctx, "payment.void")}
               canRefund={ctxCan(ctx, "payment.refund")}
               paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
@@ -383,23 +432,21 @@ export default async function SessionDetailPage({
                 <p className="mb-2 text-sm font-medium text-text-primary">
                   {t("addAttendee.title")}
                 </p>
-                <TypeAheadSearch
-                  value={query}
-                  label={t("addAttendee.searchLabel")}
-                  placeholder={t("addAttendee.searchPlaceholder")}
-                  submitLabel={t("addAttendee.searchSubmit")}
-                  search={searchAddAttendeeCandidatesAction.bind(null, session.id)}
-                />
+                {canCheckIn ? <AddAttendeeSearch sessionId={session.id} value={query} /> : null}
                 <div className="mt-4">
-                  <AddAttendeePanel
-                    sessionId={session.id}
-                    candidates={candidates}
-                    hasQuery={query.length > 0}
-                  />
+                  <ResultsRegion>
+                    <AddAttendeePanel
+                      sessionId={session.id}
+                      candidates={candidates}
+                      hasQuery={query.length > 0}
+                      canCheckIn={canCheckIn}
+                    />
+                  </ResultsRegion>
                 </div>
               </div>
             )}
           </DetailCard>
+          </SessionCheckInProvider>
         }
         side={
           <>

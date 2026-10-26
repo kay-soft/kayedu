@@ -2,10 +2,9 @@ import { CalendarPlus, SearchX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddStudentDialog } from "@/app/[locale]/(center)/students/add-student-dialog";
-import { searchStudentsForReceptionAction } from "@/app/[locale]/(center)/reception/actions";
 import { CheckInForm } from "@/app/[locale]/(center)/reception/checkin-form";
-import { RECEPTION_SEARCH_INPUT_ID } from "@/app/[locale]/(center)/reception/constants";
 import { ReceiptDialog } from "@/app/[locale]/(center)/reception/receipt-dialog";
+import { ReceptionSearch } from "@/app/[locale]/(center)/reception/reception-search";
 import {
   RecentCheckIns,
   type RecentCheckInRow,
@@ -15,7 +14,6 @@ import { SessionCards } from "@/app/[locale]/(center)/reception/session-cards";
 import { SessionCheckIn } from "@/app/[locale]/(center)/reception/session-check-in";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
-import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Ltr } from "@/components/shared/ltr";
 import { FormMessage } from "@/components/shared/form-message";
@@ -308,17 +306,10 @@ export default async function ReceptionPage({
             </div>
           ) : (
             <div className="flex max-w-3xl flex-col gap-4">
-              <TypeAheadSearch
-                size="lg"
-                hideLabel
-                inputId={RECEPTION_SEARCH_INPUT_ID}
-                autoFocus
+              <ReceptionSearch
                 // A scanned payload (a long UUID) is shown as the student's code, not as raw text.
                 value={selectedStudent && parsed?.kind === "payload" ? selectedStudent.code : query}
-                label={t("searchLabel")}
-                placeholder={t("searchPlaceholder")}
-                submitLabel={t("searchSubmit")}
-                search={searchStudentsForReceptionAction}
+                hasSelection={selectedStudent !== null}
               />
 
               {scanProblem ? (

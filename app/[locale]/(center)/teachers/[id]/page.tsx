@@ -30,6 +30,7 @@ import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const MAX_BLOCK_CANDIDATES = 8;
 
@@ -230,12 +231,14 @@ export default async function TeacherDetailPage({
                 />
               ) : null}
 
-              <BlockList
-                teacherUserId={teacher.userId}
-                blocked={blocked}
-                candidates={canBlock ? candidates : []}
-                query={canBlock ? query : ""}
-              />
+              <ResultsRegion>
+                <BlockList
+                  teacherUserId={teacher.userId}
+                  blocked={blocked}
+                  candidates={canBlock ? candidates : []}
+                  query={canBlock ? query : ""}
+                />
+              </ResultsRegion>
             </DetailCard>
           </>
         }

@@ -32,6 +32,7 @@ import { dateKey } from "@/lib/scheduling";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
  * Classes (spec §4.1 item 3) — a filterable dashboard first, exactly like
@@ -208,56 +209,58 @@ export default async function ClassesPage({
             allLabel={t("filters.all")}
           />
 
-          {rows.length === 0 ? (
-            teacherId || subjectId || gradeId ? (
-              <EmptyState
-                icon={<SearchX />}
-                tone="warning"
-                title={t("noMatches")}
-                description={t("noMatchesHint")}
-                action={
-                  <LinkButton href={ROUTES.centerClasses} size="sm">
-                    {t("clearFilters")}
-                  </LinkButton>
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={<BookOpen />}
-                title={t("empty")}
-                description={t("emptyHint")}
-              />
-            )
-          ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                <span className="min-w-0 flex-[2]">{t("columns.subject")}</span>
-                <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
-                <span className="hidden min-w-0 flex-1 lg:block">{t("columns.room")}</span>
-                <span className="w-24 shrink-0 text-end">{t("columns.price")}</span>
-                <span className="w-20 shrink-0 text-end">{t("columns.enrolled")}</span>
-                <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-32 shrink-0 text-end">
-                  {tCommon("actions")}
-                </span>
-              </ListHeader>
-
-              {rows.map((classGroup) => (
-                <ClassRow
-                  key={classGroup.classGroupId}
-                  classGroup={classGroup}
-                  canManage={ctxCan(ctx, "class.manage")}
+          <ResultsRegion className="flex flex-col gap-4">
+            {rows.length === 0 ? (
+              teacherId || subjectId || gradeId ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  tone="warning"
+                  title={t("noMatches")}
+                  description={t("noMatchesHint")}
+                  action={
+                    <LinkButton href={ROUTES.centerClasses} size="sm" soft>
+                      {t("clearFilters")}
+                    </LinkButton>
+                  }
                 />
-              ))}
-            </ul>
-          )}
+              ) : (
+                <EmptyState
+                  icon={<BookOpen />}
+                  title={t("empty")}
+                  description={t("emptyHint")}
+                />
+              )
+            ) : (
+              <ul className="flex flex-col gap-3 md:gap-0">
+                <ListHeader>
+                  <span className="min-w-0 flex-[2]">{t("columns.subject")}</span>
+                  <span className="min-w-0 flex-1">{t("columns.teacher")}</span>
+                  <span className="hidden min-w-0 flex-1 lg:block">{t("columns.room")}</span>
+                  <span className="w-24 shrink-0 text-end">{t("columns.price")}</span>
+                  <span className="w-20 shrink-0 text-end">{t("columns.enrolled")}</span>
+                  <span className="w-24 shrink-0">{tCommon("status")}</span>
+                  <span className="w-32 shrink-0 text-end">
+                    {tCommon("actions")}
+                  </span>
+                </ListHeader>
 
-          <Pagination
-            page={page}
-            pageSize={pageSize}
-            total={total}
-            buildHref={buildHref}
-          />
+                {rows.map((classGroup) => (
+                  <ClassRow
+                    key={classGroup.classGroupId}
+                    classGroup={classGroup}
+                    canManage={ctxCan(ctx, "class.manage")}
+                  />
+                ))}
+              </ul>
+            )}
+
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              buildHref={buildHref}
+            />
+          </ResultsRegion>
         </CardContent>
       </Card>
 

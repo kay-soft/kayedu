@@ -12,6 +12,7 @@ import {
   type RoomLinkPair,
 } from "../rooms.ts";
 import { todayInTimezone } from "../scheduling.ts";
+import { sessionDisplayName, sessionLabelSelect } from "../session-label.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -69,15 +70,29 @@ export async function linkRooms(
   return { ok: true, created: created.count > 0 };
 }
 
+/** What still uses a combination — the counts, and the first few by name. */
+export type CombinationUsageDetail = {
+  classes: number;
+  sessions: number;
+  /** Class names ("Maths · Grade 5"), at most `USAGE_LIST_LIMIT`. */
+  classNames: string[];
+  /** Upcoming sessions (name, day, time), at most `USAGE_LIST_LIMIT`, soonest first. */
+  sessionList: { id: string; name: string; date: Date; startTime: string; endTime: string }[];
+};
+
+/** How many named classes / sessions a refusal lists; the counts stay exact. */
+export const USAGE_LIST_LIMIT = 5;
+
 export type UnlinkRoomsResult =
   | { ok: true; removed: boolean }
-  | { ok: false; error: "combinationInUse"; classes: number; sessions: number };
+  | ({ ok: false; error: "combinationInUse" } & CombinationUsageDetail);
 
 /**
  * Removes a link — refused while an **active class** or a **non-closed
  * future session** still uses that pair as primary + extra (the refusal
- * carries both counts so the message can name them). Past and closed
- * sessions keep their recorded rooms; they never block an unlink.
+ * carries both counts and the first few names so the message can say what
+ * uses it). Past and closed sessions keep their recorded rooms; they never
+ * block an unlink.
  */
 export async function unlinkRooms(
   db: Db,
@@ -85,13 +100,18 @@ export async function unlinkRooms(
   firstRoomId: string,
   secondRoomId: string,
   clock: { now: Date; timeZone: string },
+  locale = "en",
 ): Promise<UnlinkRoomsResult> {
   const pair = normalizeRoomPair(firstRoomId, secondRoomId);
   if (!pair) return { ok: true, removed: false };
 
   const usage = await combinationUsage(db, centerId, [pair], clock);
   if (usage.classes + usage.sessions > 0) {
-    return { ok: false, error: "combinationInUse", ...usage };
+    return {
+      ok: false,
+      error: "combinationInUse",
+      ...(await combinationUsageDetail(db, centerId, [pair], clock, locale, usage)),
+    };
   }
 
   const removed = await db.roomLink.deleteMany({
@@ -101,13 +121,86 @@ export async function unlinkRooms(
 }
 
 export type SetRoomLinksResult =
-  | { ok: true; added: string[]; removed: string[] }
-  | {
-      ok: false;
-      error: "selfLink" | "roomNotFound" | "combinationInUse";
-      classes?: number;
-      sessions?: number;
-    };
+  | { ok: true; roomId: string; added: string[]; removed: string[] }
+  | { ok: false; error: "selfLink" | "roomNotFound" | "roomInactive" }
+  | ({ ok: false; error: "combinationInUse" } & CombinationUsageDetail);
+
+type LinkPlan = {
+  added: string[];
+  removed: string[];
+  removedPairs: { roomAId: string; roomBId: string }[];
+};
+
+/**
+ * Works out the diff between `roomId`'s stored links and `linkedRoomIds`, and
+ * refuses it — **before anything is written** — when a removal is in use, a
+ * new link points at a room that is not in this centre (`roomNotFound`) or is
+ * inactive (`roomInactive`: only active rooms are offered). `roomId` null =
+ * a room that does not exist yet (nothing to remove). Pairs are stored once,
+ * so a link seen from either room is the same row.
+ */
+async function planRoomLinkDiff(
+  tx: Prisma.TransactionClient,
+  centerId: string,
+  roomId: string | null,
+  linkedRoomIds: readonly string[],
+  clock: { now: Date; timeZone: string },
+  locale: string,
+): Promise<{ ok: true; plan: LinkPlan } | Exclude<SetRoomLinksResult, { ok: true }>> {
+  const wanted = new Set(linkedRoomIds);
+  if (roomId && wanted.has(roomId)) return { ok: false, error: "selfLink" };
+
+  const current = new Set(
+    roomId
+      ? (await loadRoomLinks(tx, centerId))
+          .filter((link) => link.roomAId === roomId || link.roomBId === roomId)
+          .map((link) => (link.roomAId === roomId ? link.roomBId : link.roomAId))
+      : [],
+  );
+  const added = [...wanted].filter((id) => !current.has(id));
+  const removed = [...current].filter((id) => !wanted.has(id));
+
+  if (added.length > 0) {
+    const rows = await tx.room.findMany({
+      where: scopedWhere(centerId, { id: { in: added } }),
+      select: { id: true, active: true },
+    });
+    if (rows.length !== added.length) return { ok: false, error: "roomNotFound" };
+    if (rows.some((row) => !row.active)) return { ok: false, error: "roomInactive" };
+  }
+
+  const removedPairs = roomId
+    ? removed
+        .map((id) => normalizeRoomPair(roomId, id))
+        .filter((pair): pair is { roomAId: string; roomBId: string } => pair !== null)
+    : [];
+  if (removedPairs.length > 0) {
+    const usage = await combinationUsage(tx, centerId, removedPairs, clock);
+    if (usage.classes + usage.sessions > 0) {
+      return {
+        ok: false,
+        error: "combinationInUse",
+        ...(await combinationUsageDetail(tx, centerId, removedPairs, clock, locale, usage)),
+      };
+    }
+  }
+  return { ok: true, plan: { added, removed, removedPairs } };
+}
+
+async function writeRoomLinkDiff(
+  tx: Prisma.TransactionClient,
+  centerId: string,
+  roomId: string,
+  plan: LinkPlan,
+): Promise<void> {
+  for (const pair of plan.removedPairs) {
+    await tx.roomLink.deleteMany({ where: scopedWhere(centerId, pair) });
+  }
+  for (const id of plan.added) {
+    const result = await linkRooms(tx, centerId, roomId, id);
+    if (!result.ok) throw new RoomLinkWriteError(result.error);
+  }
+}
 
 /**
  * The "Can be combined with" save for one room: makes `roomId`'s links
@@ -121,41 +214,45 @@ export async function setRoomLinks(
   roomId: string,
   linkedRoomIds: readonly string[],
   clock: { now: Date; timeZone: string },
+  locale = "en",
 ): Promise<SetRoomLinksResult> {
-  const wanted = new Set(linkedRoomIds);
-  if (wanted.has(roomId)) return { ok: false, error: "selfLink" };
+  return saveRoomWithLinks(db, centerId, roomId, null, linkedRoomIds, clock, locale);
+}
 
+/**
+ * The Add room / Edit room save: the room's own fields **and** its link set,
+ * in one transaction. `roomId` null creates the room (then links it);
+ * otherwise `fields` (when given) updates it. The link diff is planned and
+ * refused first, so a refused save changes nothing — not the name, not the
+ * capacity, not a link. Every room id resolves inside `centerId`.
+ */
+export async function saveRoomWithLinks(
+  db: PrismaClient,
+  centerId: string,
+  roomId: string | null,
+  fields: { name: string; capacity: number } | null,
+  linkedRoomIds: readonly string[],
+  clock: { now: Date; timeZone: string },
+  locale = "en",
+): Promise<SetRoomLinksResult> {
   return db.$transaction(async (tx): Promise<SetRoomLinksResult> => {
-    const room = await tx.room.findFirst({ where: scopedWhere(centerId, { id: roomId }) });
-    if (!room) return { ok: false, error: "roomNotFound" };
+    if (roomId) {
+      const room = await tx.room.findFirst({ where: scopedWhere(centerId, { id: roomId }) });
+      if (!room) return { ok: false, error: "roomNotFound" };
+    }
+    const planned = await planRoomLinkDiff(tx, centerId, roomId, linkedRoomIds, clock, locale);
+    if (!planned.ok) return planned;
 
-    const current = new Set(
-      (await loadRoomLinks(tx, centerId))
-        .filter((link) => link.roomAId === roomId || link.roomBId === roomId)
-        .map((link) => (link.roomAId === roomId ? link.roomBId : link.roomAId)),
-    );
-    const added = [...wanted].filter((id) => !current.has(id));
-    const removed = [...current].filter((id) => !wanted.has(id));
-
-    if (removed.length > 0) {
-      const pairs = removed
-        .map((id) => normalizeRoomPair(roomId, id))
-        .filter((pair): pair is { roomAId: string; roomBId: string } => pair !== null);
-      const usage = await combinationUsage(tx, centerId, pairs, clock);
-      if (usage.classes + usage.sessions > 0) {
-        return { ok: false, error: "combinationInUse", ...usage };
-      }
-      for (const pair of pairs) {
-        await tx.roomLink.deleteMany({ where: scopedWhere(centerId, pair) });
-      }
+    let savedId = roomId;
+    if (!savedId) {
+      if (!fields) return { ok: false, error: "roomNotFound" };
+      savedId = (await tx.room.create({ data: scopedData(centerId, fields), select: { id: true } })).id;
+    } else if (fields) {
+      await tx.room.updateMany({ where: scopedWhere(centerId, { id: savedId }), data: fields });
     }
 
-    for (const id of added) {
-      const result = await linkRooms(tx, centerId, roomId, id);
-      if (!result.ok) throw new RoomLinkWriteError(result.error);
-    }
-
-    return { ok: true, added, removed };
+    await writeRoomLinkDiff(tx, centerId, savedId, planned.plan);
+    return { ok: true, roomId: savedId, added: planned.plan.added, removed: planned.plan.removed };
   }).catch((error: unknown) => {
     if (error instanceof RoomLinkWriteError) return { ok: false as const, error: error.reason };
     throw error;
@@ -198,7 +295,29 @@ export async function combinationUsage(
   clock: { now: Date; timeZone: string },
 ): Promise<{ classes: number; sessions: number }> {
   if (pairs.length === 0) return { classes: 0, sessions: 0 };
+  const { classWhere, sessionWhere } = pairUsageWhere(centerId, pairs, clock);
 
+  const [classRows, sessionRows] = await Promise.all([
+    db.classGroupRoom.findMany({
+      where: classWhere,
+      select: { classGroupId: true },
+      distinct: ["classGroupId"],
+    }),
+    db.sessionRoom.findMany({
+      where: sessionWhere,
+      select: { sessionId: true },
+      distinct: ["sessionId"],
+    }),
+  ]);
+  return { classes: classRows.length, sessions: sessionRows.length };
+}
+
+/** The one definition of "uses this pair as primary + extra" — counts and names share it. */
+function pairUsageWhere(
+  centerId: string,
+  pairs: readonly { roomAId: string; roomBId: string }[],
+  clock: { now: Date; timeZone: string },
+): { classWhere: Prisma.ClassGroupRoomWhereInput; sessionWhere: Prisma.SessionRoomWhereInput } {
   const classMatch: Prisma.ClassGroupRoomWhereInput[] = pairs.flatMap((pair) => [
     { roomId: pair.roomBId, classGroup: { roomId: pair.roomAId } },
     { roomId: pair.roomAId, classGroup: { roomId: pair.roomBId } },
@@ -207,20 +326,63 @@ export async function combinationUsage(
     { roomId: pair.roomBId, session: { roomId: pair.roomAId } },
     { roomId: pair.roomAId, session: { roomId: pair.roomBId } },
   ]);
+  return {
+    classWhere: scopedWhere(centerId, { OR: classMatch, classGroup: { active: true } }),
+    sessionWhere: scopedWhere(centerId, { OR: sessionMatch, session: futureOpenSessionWhere(clock) }),
+  };
+}
+
+/**
+ * `combinationUsage`, plus the first `USAGE_LIST_LIMIT` classes and sessions
+ * by name — what an "in use" refusal tells staff to go and change. A class is
+ * named like a session of it ("Maths · Grade 5", the centre's own catalog
+ * names, `lib/session-label.ts`); a session by that name, its day and time.
+ */
+export async function combinationUsageDetail(
+  db: Db,
+  centerId: string,
+  pairs: readonly { roomAId: string; roomBId: string }[],
+  clock: { now: Date; timeZone: string },
+  locale: string,
+  counts?: { classes: number; sessions: number },
+): Promise<CombinationUsageDetail> {
+  const usage = counts ?? (await combinationUsage(db, centerId, pairs, clock));
+  if (usage.classes + usage.sessions === 0) return { ...usage, classNames: [], sessionList: [] };
+  const { classWhere, sessionWhere } = pairUsageWhere(centerId, pairs, clock);
+  const label = sessionLabelSelect(centerId);
 
   const [classRows, sessionRows] = await Promise.all([
     db.classGroupRoom.findMany({
-      where: scopedWhere(centerId, { OR: classMatch, classGroup: { active: true } }),
-      select: { classGroupId: true },
+      where: classWhere,
+      select: { classGroup: { select: { subject: label.subject, grade: label.grade } } },
       distinct: ["classGroupId"],
+      orderBy: { createdAt: "asc" },
+      take: USAGE_LIST_LIMIT,
     }),
     db.sessionRoom.findMany({
-      where: scopedWhere(centerId, { OR: sessionMatch, session: futureOpenSessionWhere(clock) }),
-      select: { sessionId: true },
+      where: sessionWhere,
+      select: {
+        session: {
+          select: { id: true, date: true, startTime: true, endTime: true, ...label },
+        },
+      },
       distinct: ["sessionId"],
+      orderBy: [{ session: { date: "asc" } }, { session: { startTime: "asc" } }],
+      take: USAGE_LIST_LIMIT,
     }),
   ]);
-  return { classes: classRows.length, sessions: sessionRows.length };
+
+  return {
+    ...usage,
+    classNames: classRows.map((row) => sessionDisplayName(locale, { classGroup: row.classGroup })),
+    sessionList: sessionRows.map(({ session }) => ({
+      id: session.id,
+      name: sessionDisplayName(locale, session),
+      date: session.date,
+      startTime: session.startTime,
+      endTime: session.endTime,
+    })),
+  };
 }
 
 /**

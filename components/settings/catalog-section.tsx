@@ -10,6 +10,12 @@ import {
   toggleCatalogSelectionAction,
   updateCatalogSelectionAction,
 } from "@/app/[locale]/(center)/settings/actions";
+import {
+  SETTINGS_ACTION_BUTTON,
+  SettingsList,
+  SettingsListHeader,
+  SettingsListRow,
+} from "@/components/settings/settings-list";
 import { FormMessage } from "@/components/shared/form-message";
 import { Field } from "@/components/shared/field";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -28,6 +34,7 @@ import { IDLE_ACTION_STATE } from "@/lib/validation/form";
 import { CATALOG_NAME_MAX } from "@/lib/catalog";
 import { formatMoney } from "@/lib/format";
 import { piastresToInputValue } from "@/lib/money";
+import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
@@ -87,8 +94,10 @@ export function CatalogSection({
   };
 }) {
   const t = useTranslations("Settings.catalog");
+  const tCommon = useTranslations("Settings.common");
   const tErrors = useTranslations("Settings.errors");
   const locale = useLocale();
+  const showDetails = hasPricing || items.some((item) => item.parentName);
 
   const [pickState, pickFormAction] = useGuardedActionState(selectCatalogEntryAction, IDLE_ACTION_STATE);
   const tToast = useTranslations("Toasts");
@@ -153,11 +162,25 @@ export function CatalogSection({
         {items.length === 0 ? (
           <EmptyState compact icon={<Inbox />} title={labels.empty} description={t("emptyHint")} />
         ) : (
-          <ul className="flex flex-col gap-2">
+          <SettingsList>
+            <SettingsListHeader
+              columns={[
+                { key: "name", label: t("fields.name") },
+                ...(showDetails ? [{ key: "details", label: t("fields.details") }] : []),
+              ]}
+              statusLabel={tCommon("status")}
+              actionsLabel={tCommon("actions")}
+              actionsSize="wide"
+            />
             {items.map((item) => (
-              <CatalogRow key={item.selectionId} hasPricing={hasPricing} item={item} />
+              <CatalogRow
+                key={item.selectionId}
+                hasPricing={hasPricing}
+                showDetails={showDetails}
+                item={item}
+              />
             ))}
-          </ul>
+          </SettingsList>
         )}
       </CardContent>
     </Card>
@@ -166,9 +189,11 @@ export function CatalogSection({
 
 function CatalogRow({
   hasPricing,
+  showDetails,
   item,
 }: {
   hasPricing: boolean;
+  showDetails: boolean;
   item: CatalogSelectionItem;
 }) {
   const t = useTranslations("Settings.catalog");
@@ -268,81 +293,105 @@ function CatalogRow({
     );
   }
 
-  return (
-    <li className="flex flex-col gap-2 rounded-xl border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-text-primary">
-          {item.name}
-          {item.name !== item.canonicalName ? (
-            <span className="ms-2 text-xs font-normal text-text-secondary">({item.canonicalName})</span>
-          ) : null}
-        </p>
-        {/* The price is money: formatted with its currency in the locale's
-            digits — it had been a bare "200.00" from the input formatter. */}
-        <p className="text-xs text-text-secondary">
-          {[item.parentName, hasPricing ? formatMoney(item.basePrice ?? 0, locale) : null]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      </div>
+  const details = [item.parentName, hasPricing ? formatMoney(item.basePrice ?? 0, locale) : null]
+    .filter(Boolean)
+    .join(" · ");
 
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        {item.catalogActive ? null : <Badge variant="warning">{t("retired")}</Badge>}
-        <Badge variant={item.active ? "success" : "neutral"}>
-          {item.active ? tCommon("active") : tCommon("inactive")}
-        </Badge>
-        <Button type="button" variant="outline" className="h-11 px-3 md:h-9" onClick={() => setEditing(true)}>
-          <Pencil className="size-4" />
-          {tCommon("edit")}
-        </Button>
-        <form action={toggleFormAction}>
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="selectionId" value={item.selectionId} />
-          {item.active ? null : <input type="hidden" name="active" value="true" />}
-          <Button type="submit" variant="ghost" className="h-11 px-3 md:h-9">
-            {item.active ? tCommon("deactivate") : tCommon("activate")}
+  return (
+    <SettingsListRow
+      actionsSize="wide"
+      cells={[
+        {
+          key: "name",
+          label: t("fields.name"),
+          content: (
+            <span className="truncate text-sm font-medium text-text-primary" title={item.name}>
+              {item.name}
+              {item.name !== item.canonicalName ? (
+                <span className="ms-2 text-xs font-normal text-text-secondary">
+                  ({item.canonicalName})
+                </span>
+              ) : null}
+            </span>
+          ),
+        },
+        ...(showDetails
+          ? [
+              {
+                key: "details",
+                label: t("fields.details"),
+                // The price is money: formatted with its currency in the
+                // locale's digits — it had been a bare "200.00".
+                content: (
+                  <span className="truncate text-sm text-text-secondary">{details || "—"}</span>
+                ),
+              },
+            ]
+          : []),
+      ]}
+      status={
+        <div className="flex flex-col items-end gap-1 md:items-start">
+          <Badge variant={item.active ? "success" : "neutral"}>
+            {item.active ? tCommon("active") : tCommon("inactive")}
+          </Badge>
+          {item.catalogActive ? null : <Badge variant="warning">{t("retired")}</Badge>}
+        </div>
+      }
+      actions={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            className={SETTINGS_ACTION_BUTTON}
+            onClick={() => setEditing(true)}
+          >
+            <Pencil className="size-4" aria-hidden />
+            {tCommon("edit")}
           </Button>
-        </form>
-        <form action={deselectFormAction} className="flex items-center gap-2">
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="selectionId" value={item.selectionId} />
-          {confirmingDelete ? (
-            <>
-              <Button type="submit" variant="destructive" className="h-11 px-3 md:h-9">
-                {tCommon("deleteYes")}
-              </Button>
+          <form action={toggleFormAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="selectionId" value={item.selectionId} />
+            {item.active ? null : <input type="hidden" name="active" value="true" />}
+            <Button type="submit" variant="outline" className={SETTINGS_ACTION_BUTTON}>
+              {item.active ? tCommon("deactivate") : tCommon("activate")}
+            </Button>
+          </form>
+          <form action={deselectFormAction} className="grid grid-cols-2 gap-2 md:flex">
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="selectionId" value={item.selectionId} />
+            {confirmingDelete ? (
+              <>
+                <Button type="submit" variant="destructive" className={SETTINGS_ACTION_BUTTON}>
+                  {tCommon("deleteYes")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={SETTINGS_ACTION_BUTTON}
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  {tCommon("cancel")}
+                </Button>
+              </>
+            ) : (
               <Button
                 type="button"
-                variant="outline"
-                className="h-11 px-3 md:h-9"
-                onClick={() => setConfirmingDelete(false)}
+                variant="destructive"
+                className={cn(SETTINGS_ACTION_BUTTON, "col-span-2 md:col-auto")}
+                onClick={() => setConfirmingDelete(true)}
               >
-                {tCommon("cancel")}
+                <Trash2 className="size-4" aria-hidden />
+                {t("deselect")}
               </Button>
-            </>
-          ) : (
-            <Button
-              type="button"
-              variant="destructive"
-              className="h-11 px-3 md:h-9"
-              onClick={() => setConfirmingDelete(true)}
-            >
-              <Trash2 className="size-4" />
-              {t("deselect")}
-            </Button>
-          )}
-        </form>
-      </div>
-      {deselectState.error ? (
-        <div className="sm:basis-full">
-          <FormMessage>{tErrors(deselectState.error)}</FormMessage>
-        </div>
-      ) : null}
-      {toggleState.error ? (
-        <div className="sm:basis-full">
-          <FormMessage>{tErrors(toggleState.error)}</FormMessage>
-        </div>
-      ) : null}
-    </li>
+            )}
+          </form>
+        </>
+      }
+      notice={
+        deselectState.error || toggleState.error ? (
+          <FormMessage>{tErrors((deselectState.error ?? toggleState.error)!)}</FormMessage>
+        ) : null
+      }
+    />
   );
 }

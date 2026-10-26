@@ -237,6 +237,82 @@ function staticChecks() {
     /if \(onSubmitValue\) \{\s*event\.preventDefault\(\);/.test(typeAhead),
   );
 
+  // T2 — the type-ahead keeps a pick picked, and the desk can be cleared.
+  check(
+    "A pick records the text it was made for, and the search effect stands down for exactly that text",
+    /function select\([\s\S]*?settledQuery\.current = inputRef\.current\?\.value \?\? query;/.test(typeAhead) &&
+      /if \(settledQuery\.current === query\) return;/.test(typeAhead),
+  );
+  check(
+    "Refocus and a late search result cannot reopen the panel for settled text; typing is what lets it open again",
+    /onFocus=\{\(\) => \{\s*if \(results\.length > 0 && settledQuery\.current !== query\) setOpen\(true\);/.test(typeAhead) &&
+      /requestId\.current !== id \|\| settledQuery\.current === query/.test(typeAhead) &&
+      /onChange=\{\(event\) => \{\s*settledQuery\.current = null;/.test(typeAhead),
+  );
+  check(
+    "Text handed over by the URL on load counts as settled (no dropdown on arrival)",
+    /useRef<string \| null>\(value \? value : null\)/.test(typeAhead),
+  );
+  check(
+    "onClear adds a clear (X) control and Escape-with-no-list-open calls it; the scanner submit path is untouched",
+    /event\.key === "Escape" && onClear && !\(open && results\.length > 0\)/.test(typeAhead) &&
+      typeAhead.includes("onClick={clearSelection}"),
+  );
+  const receptionSearch = read(`${receptionDir}/reception-search.tsx`);
+  check(
+    "Plain mode: the desk's clear returns to the bare desk, and the field is the shared type-ahead with no onSubmitValue (plain GET form)",
+    receptionSearch.includes("router.push(ROUTES.centerReception)") &&
+      receptionSearch.includes("onClear={hasSelection ? clearDesk : undefined}") &&
+      !receptionSearch.includes("onSubmitValue") &&
+      page.includes("<ReceptionSearch") &&
+      page.includes("hasSelection={selectedStudent !== null}"),
+  );
+  const sessionMode = read(`${receptionDir}/session-check-in.tsx`);
+  check(
+    "Session mode: clear drops the panel and any answer in flight without leaving the session (no navigation)",
+    sessionMode.includes("onClear={") &&
+      /const clearDesk = useCallback\(\(\) => \{\s*latest\.current \+= 1;\s*setPanel\(\{ kind: "idle" \}\);/.test(sessionMode) &&
+      !/router\.|useRouter|ROUTES\./.test(sessionMode),
+  );
+
+  // T2 — the session page is confirm-then-write through reception's own function.
+  const sessionDir = "app/[locale]/(center)/sessions/[id]";
+  const panelSource = read("components/center/check-in-confirm-panel.tsx");
+  const provider = read(`${sessionDir}/session-check-in-provider.tsx`);
+  const roster = read(`${sessionDir}/session-roster.tsx`);
+  const addPanel = read(`${sessionDir}/add-attendee-panel.tsx`);
+  const addSearch = read(`${sessionDir}/add-attendee-search.tsx`);
+  const sessionActions = read("app/[locale]/(center)/sessions/actions.ts");
+  check(
+    "One confirm panel, one write: checkInAction is called by the shared panel and by nothing else in the UI",
+    panelSource.includes('import { checkInAction } from "@/app/[locale]/(center)/reception/actions"') &&
+      panelSource.includes("await checkInAction(") &&
+      [...listFiles("app"), ...listFiles("components")]
+        .filter((file) => /\.tsx$/.test(file) && !norm(file).endsWith("components/center/check-in-confirm-panel.tsx"))
+        .filter((file) => /checkInAction/.test(read(file)) && !/(checkin-form|\/reception\/actions)/.test(norm(file)))
+        .length === 0,
+  );
+  check(
+    "Reception's session mode and the session page both render CheckInConfirmPanel (no second panel)",
+    sessionMode.includes("<CheckInConfirmPanel") && provider.includes("<CheckInConfirmPanel"),
+  );
+  check(
+    "The roster's Check in button, the add-attendee pick and a candidate row only open the panel — no form, no action import",
+    roster.includes("requestCheckIn({") &&
+      !/checkInRosterAction|addExistingAttendeeAction/.test(roster + addPanel + addSearch + provider) &&
+      !/checkInAction/.test(roster + addPanel + addSearch) &&
+      addSearch.includes("onSelect={pick}") &&
+      addPanel.includes("requestCheckIn({"),
+  );
+  check(
+    "The old attendance-only paths are gone: no checkInRosterAction / addExistingAttendeeAction, no unconfirmed write on the session page",
+    !/export async function (checkInRosterAction|addExistingAttendeeAction)/.test(sessionActions),
+  );
+  check(
+    "Cancelling stores nothing: the provider holds the pick in React state only (no storage, no cookie, no action)",
+    !/localStorage|sessionStorage|document\.cookie|"use server"/.test(provider + panelSource),
+  );
+
   // Wiring.
   const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
   check("package.json wires check:reception", (pkg.scripts["check:reception"] ?? "").includes("scripts/reception-check.ts"));

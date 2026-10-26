@@ -31,6 +31,7 @@
       "pickRangeHint": "اختر يومًا، أو بداية ونهاية"
     },
     "typeAhead": {
+      "clear": "مسح",
       "noResults": "لا توجد نتائج مطابقة بعد — تابع الكتابة، أو أضِف سجلًا جديدًا.",
       "searching": "جارٍ البحث…",
       "resultCount": "{count, plural, =0 {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {{count, number, arab} نتائج} many {{count, number, arab} نتيجة} other {{count, number, arab} نتيجة}}"
@@ -100,6 +101,9 @@
     "accountMenu": "الحساب",
     "wholeManagement": "الإدارة الكاملة — {organization}",
     "wholeManagementHint": "{count, plural, zero {{count, number, arab} فرع مجمَّع} one {فرع واحد مجمَّع} two {فرعان مجمَّعان} few {{count, number, arab} فروع مجمَّعة} many {{count, number, arab} فرعًا مجمَّعًا} other {{count, number, arab} فرع مجمَّع}}",
+    "wholeManagementLabel": "الإدارة الكاملة",
+    "rollupDisabledReason": "اختر فرعًا لاستخدام هذه الصفحة",
+    "rollupShowingBranch": "تُعرض بيانات {branch}. اختر فرعًا لتغييره.",
     "skipToContent": "انتقل إلى المحتوى"
   },
   "NavGroups": {
@@ -920,7 +924,7 @@
     },
     "roster": {
       "title": "قائمة الحضور",
-      "description": "كل الطلاب المسجلين بالإضافة إلى الحضور لمرة واحدة. سجّل حضور الطلاب — يُحدَّد «حاضر» أو «متأخر» من وقت الوصول — ثم سجّل الدفع. يمكن التصحيح حتى إنهاء الحصة.",
+      "description": "كل الطلاب المسجلين بالإضافة إلى الحضور لمرة واحدة. سجّل حضور الطالب واختر طريقة الدفع في خطوة واحدة — يُحدَّد «حاضر» أو «متأخر» من وقت الوصول. يمكن التصحيح حتى إنهاء الحصة.",
       "empty": "لا يوجد طلاب مسجَّلون أو مُضافون بعد.",
       "dropIn": "زائر",
       "unmarked": "لم يُسجَّل بعد",
@@ -1089,7 +1093,7 @@
       "cutRequired": "الحصة المنفردة تحتاج إلى نصيب خاص بها للمركز.",
       "missingCut": "لا يوجد نصيب للمركز محدد لهذه الحصة، لذا لا يمكن تسجيل الدفعة. حدّد نصيب الحصة أولًا.",
       "sessionInUse": "لم يعد بالإمكان حذف هذه الحصة — فقد بدأت أو عليها سجلات. ألغِها بدلًا من ذلك.",
-      "sessionNotToday": "يمكن تسجيل الحضور من مكتب الاستقبال في حصص اليوم فقط.",
+      "sessionNotToday": "يمكن تسجيل الحضور في حصص اليوم فقط.",
       "rateLimited": "عمليات بحث كثيرة جدًا عن جهات الاتصال — انتظر دقيقة ثم حاول مرة أخرى.",
       "reasonRequired": "اكتب السبب — تحويل طالب دفع إلى غائب يلغي دفعته.",
       "hasPayments": "هذه الحصة ما زالت عليها مدفوعات. ألغِ الدفعات أو استردها أولًا مع ذكر السبب، ثم ألغِ الحصة أو غيّر موعدها.",
@@ -1228,6 +1232,7 @@
       "dropIn": "زائر — غير مسجّل في هذه المجموعة",
       "price": "سعر الحصة",
       "enterHint": "اضغط Enter للتأكيد.",
+      "confirmTitle": "تأكيد تسجيل الحضور",
       "cancel": "إلغاء",
       "checkedInAs": "تم تسجيل حضور {name} — {status}.",
       "alreadyCheckedIn": "{name} مسجّل حضوره بالفعل الساعة {time}.",
@@ -1593,7 +1598,8 @@
       "catalogAlreadySelected": "سبق لهذا الفرع اختيار هذا العنصر من الكتالوج.",
       "lastActiveMethod": "هذه طريقة الدفع النشطة الوحيدة في الفرع. أضف طريقة أخرى أو فعّلها أولًا.",
       "roomInCombination": "هذه القاعة جزء من قاعة مدمجة تستخدمها {classes, plural, =0 {لا مجموعات نشطة} one {مجموعة نشطة واحدة} two {مجموعتان نشطتان} few {{classes, number, arab} مجموعات نشطة} many {{classes, number, arab} مجموعة نشطة} other {{classes, number, arab} مجموعة نشطة}} و{sessions, plural, =0 {لا حصص قادمة} one {حصة قادمة واحدة} two {حصتان قادمتان} few {{sessions, number, arab} حصص قادمة} many {{sessions, number, arab} حصة قادمة} other {{sessions, number, arab} حصة قادمة}}. غيّر قاعاتها أولًا.",
-      "combinationInUse": "هذا الدمج ما زالت تستخدمه {classes, plural, =0 {لا مجموعات نشطة} one {مجموعة نشطة واحدة} two {مجموعتان نشطتان} few {{classes, number, arab} مجموعات نشطة} many {{classes, number, arab} مجموعة نشطة} other {{classes, number, arab} مجموعة نشطة}} و{sessions, plural, =0 {لا حصص قادمة} one {حصة قادمة واحدة} two {حصتان قادمتان} few {{sessions, number, arab} حصص قادمة} many {{sessions, number, arab} حصة قادمة} other {{sessions, number, arab} حصة قادمة}}. غيّر قاعاتها أولًا ثم ألغِ الربط.",
+      "combinationInUse": "لا يمكن فصل هاتين القاعتين بعد. ما زالتا مدمجتين في {classes, plural, =0 {لا مجموعات نشطة} one {مجموعة نشطة واحدة} two {مجموعتان نشطتان} few {{classes, number, arab} مجموعات نشطة} many {{classes, number, arab} مجموعة نشطة} other {{classes, number, arab} مجموعة نشطة}} و{sessions, plural, =0 {لا حصص قادمة} one {حصة قادمة واحدة} two {حصتان قادمتان} few {{sessions, number, arab} حصص قادمة} many {{sessions, number, arab} حصة قادمة} other {{sessions, number, arab} حصة قادمة}}. {classList, select, none {} other { المجموعات: {classList}{classMore, plural, =0 {} other { و{classMore, number, arab} أخرى}}.}}{sessionList, select, none {} other { الحصص: {sessionList}{sessionMore, plural, =0 {} other { و{sessionMore, number, arab} أخرى}}.}} غيّر قاعاتها أولًا ثم احفظ من جديد.",
+      "roomInactive": "لا يمكن دمج إلا القاعات النشطة. فعّل القاعة أولًا أو اختر قاعة أخرى.",
       "selfLink": "لا يمكن دمج القاعة مع نفسها.",
       "invalidDate": "أدخل تاريخًا صحيحًا.",
       "endBeforeStart": "لا يمكن أن يكون تاريخ النهاية قبل تاريخ البداية.",
@@ -1654,7 +1660,9 @@
         "basePrice": "السعر الأساسي",
         "displayNameAr": "اسمك بالعربية",
         "displayNameEn": "اسمك بالإنجليزية",
-        "displayNameHint": "يظهر في هذه اللغة فقط. اتركه فارغًا لاستخدام اسم الكتالوج."
+        "displayNameHint": "يظهر في هذه اللغة فقط. اتركه فارغًا لاستخدام اسم الكتالوج.",
+        "name": "الاسم",
+        "details": "التفاصيل"
       },
       "educationSystems": {
         "title": "أنظمة التعليم",
@@ -1674,23 +1682,28 @@
     },
     "rooms": {
       "title": "القاعات",
-      "description": "أماكن انعقاد الحصص فعليًا. حد مقاعد المجموعة هو سعة قاعتها — أو مجموع سعات قاعاتها عند دمجها.",
+      "description": "أماكن انعقاد الحصص فعليًا. حد مقاعد المجموعة هو سعة قاعتها — أو مجموع سعات قاعاتها عند دمجها. تُحدَّد القاعات القابلة للدمج في كل قاعة.",
+      "addButton": "إضافة قاعة",
       "addTitle": "إضافة قاعة",
       "addDescription": "سمّها بالاسم الذي يستخدمه الموظفون فعلًا — فهو ما سيختارونه.",
+      "editTitle": "تعديل القاعة",
+      "editDescription": "غيّر اسمها أو عدد مقاعدها أو القاعات التي يمكن دمجها معها.",
       "listTitle": "القاعات",
-      "listDescription": "أوقف أي قاعة خارج الخدمة.",
-      "empty": "لا توجد قاعات بعد. أضف الأولى من الأعلى.",
+      "listDescription": "أوقف أي قاعة خارج الخدمة. يظهر الدمج في القاعتين معًا.",
+      "empty": "لا توجد قاعات بعد.",
+      "emptyHint": "أضف الأولى بزر إضافة قاعة أعلاه.",
+      "deleteConfirm": {
+        "title": "حذف هذه القاعة؟"
+      },
       "fields": {
         "name": "الاسم",
         "capacity": "السعة",
-        "capacityHint": "عدد المقاعد. استخدم ٠ إن لم تُحدَّد — فلا يكون للمجموعة التي تستخدم هذه القاعة حد."
-      },
-      "links": {
-        "title": "القاعات القابلة للدمج",
-        "description": "حدّد القاعات التي يمكن ضمّها إلى كل قاعة لتصبح قاعة أكبر — مثل قاعة ١ + قاعة ٢. يمكن للمجموعة أو الحصة عندها استخدام قاعة مع أي قاعة مرتبطة بها، وتكون مقاعدها مجموع سعات القاعات.",
+        "capacityHint": "عدد المقاعد. استخدم ٠ إن لم تُحدَّد — فلا يكون للمجموعة التي تستخدم هذه القاعة حد.",
+        "combinesWith": "تُدمج مع",
         "combinableWith": "يمكن دمجها مع",
-        "needTwo": "أضف قاعتين نشطتين على الأقل لدمجهما.",
-        "save": "حفظ الدمج"
+        "combineHint": "القاعات التي يمكن ضمّها إلى هذه القاعة لتصبح قاعة أكبر — مثل قاعة ١ + قاعة ٢. يمكن للمجموعة أو الحصة عندها استخدام هذه القاعة مع أي قاعة مرتبطة بها، وتكون مقاعدها مجموع سعاتها. يظهر الربط في القاعتين معًا.",
+        "combineNone": "لا توجد قاعات نشطة أخرى لدمجها بعد.",
+        "removeLink": "إزالة {room}"
       }
     },
     "paymentMethods": {

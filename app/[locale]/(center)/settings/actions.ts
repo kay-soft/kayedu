@@ -13,10 +13,8 @@ import {
   savePermissionGrants,
   type PermissionGrantWrite,
 } from "@/lib/db/permissions";
-import {
-  roomCombinationUsage,
-  setRoomLinks,
-} from "@/lib/db/room-sets";
+import { roomCombinationUsage, saveRoomWithLinks } from "@/lib/db/room-sets";
+import { formatDay, formatTimeRange } from "@/lib/format";
 import { DEFAULT_TIMEZONE, dateKey } from "@/lib/scheduling";
 import { createTerm, deleteTerm, setTermActive, updateTerm } from "@/lib/db/terms";
 import {
@@ -47,7 +45,6 @@ import {
   permissionMatrixSchema,
   recordDeleteSchema,
   recordToggleSchema,
-  roomLinksSchema,
   roomSchema,
   roomUpdateSchema,
   termSchema,
@@ -324,11 +321,12 @@ export async function createRoomAction(
   const parsed = roomSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { name, capacity, locale } = parsed.data;
+  const { name, capacity, linkedRoomIds, locale } = parsed.data;
   // SEC-61: compared by the one name key, never with an (I)LIKE.
   if (nameClashes(name, await scope.db.rooms.list())) return { fieldErrors: { name: "duplicateName" } };
 
-  await scope.db.rooms.create({ name, capacity });
+  const failure = await saveRoom(scope, null, { name, capacity }, linkedRoomIds, locale);
+  if (failure) return failure;
   revalidateSettings(locale);
   return { status: "created" };
 }
@@ -343,16 +341,86 @@ export async function updateRoomAction(
   const parsed = roomUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { id, name, capacity, locale } = parsed.data;
+  const { id, name, capacity, linkedRoomIds, locale } = parsed.data;
   if (!(await scope.db.rooms.findById(id))) return NOT_FOUND;
 
   if (nameClashes(name, await scope.db.rooms.list({ NOT: { id } }))) {
     return { fieldErrors: { name: "duplicateName" } };
   }
 
-  await scope.db.rooms.update(id, { name, capacity });
+  // Capacity has no further rule today: it is a plain edit, and seats on a
+  // class are derived from it at read time (lib/rooms.ts), never stored.
+  const failure = await saveRoom(scope, id, { name, capacity }, linkedRoomIds, locale);
+  if (failure) return failure;
   revalidateSettings(locale);
   return { status: "saved" };
+}
+
+/** The "still in use" refusal: counts, plus the first few classes and sessions by name. */
+function inUseRefusal(
+  result: Extract<Awaited<ReturnType<typeof saveRoomWithLinks>>, { error: "combinationInUse" }>,
+  locale: string,
+): ActionState {
+  const list = new Intl.ListFormat(locale, { style: "long", type: "conjunction" });
+  const sessionNames = result.sessionList.map(
+    (row) => `${row.name} — ${formatDay(row.date, locale)}, ${formatTimeRange(row.startTime, row.endTime, locale)}`,
+  );
+  return {
+    error: "combinationInUse",
+    errorValues: {
+      classes: result.classes,
+      sessions: result.sessions,
+      classList: result.classNames.length > 0 ? list.format(result.classNames) : "none",
+      classMore: Math.max(0, result.classes - result.classNames.length),
+      sessionList: sessionNames.length > 0 ? list.format(sessionNames) : "none",
+      sessionMore: Math.max(0, result.sessions - sessionNames.length),
+    },
+  };
+}
+
+/**
+ * The one write behind Add room and Edit room: the room's fields and its
+ * "Can be combined with" set in a single transaction (a refusal changes
+ * nothing), then one `AuditLog` row per link added or removed. Returns the
+ * refusal, or null when saved. `roomId` null = create.
+ */
+async function saveRoom(
+  scope: Scope,
+  roomId: string | null,
+  fields: { name: string; capacity: number },
+  linkedRoomIds: string[],
+  locale: string,
+): Promise<ActionState | null> {
+  const result = await saveRoomWithLinks(
+    prisma,
+    scope.ctx.center.id,
+    roomId,
+    fields,
+    linkedRoomIds,
+    centreClock(scope.ctx),
+    locale,
+  );
+  if (!result.ok) {
+    if (result.error === "combinationInUse") return inUseRefusal(result, locale);
+    return { error: result.error === "roomNotFound" ? "notFound" : result.error };
+  }
+
+  for (const [action, ids] of [
+    ["room.link", result.added],
+    ["room.unlink", result.removed],
+  ] as const) {
+    for (const otherRoomId of ids) {
+      await writeAuditLog({
+        centerId: scope.ctx.center.id,
+        actorUserId: scope.ctx.user.id,
+        action,
+        entityType: "Room",
+        entityId: result.roomId,
+        after: { roomId: result.roomId, otherRoomId },
+      });
+    }
+  }
+  return null;
 }
 
 export async function toggleRoomAction(
@@ -367,61 +435,6 @@ export async function deleteRoomAction(
   formData: FormData,
 ): Promise<ActionState> {
   return deleteRoomRecord(formData);
-}
-
-/**
- * "Can be combined with" (R3) — makes one room's links exactly the posted
- * set. Same gate as the rest of rooms (`center.settings.edit`); every rule
- * that can refuse (self-link, a room from another centre, unlinking a pair
- * an active class or a non-closed future session still uses) lives in
- * `lib/db/room-sets.ts`. Each link and unlink is audited.
- */
-export async function setRoomLinksAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = roomLinksSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
-  const { locale, roomId, linkedRoomIds } = parsed.data;
-
-  const result = await setRoomLinks(
-    prisma,
-    scope.ctx.center.id,
-    roomId,
-    linkedRoomIds,
-    centreClock(scope.ctx),
-  );
-  if (!result.ok) {
-    if (result.error === "combinationInUse") {
-      return {
-        error: "combinationInUse",
-        errorValues: { classes: result.classes ?? 0, sessions: result.sessions ?? 0 },
-      };
-    }
-    return { error: result.error === "roomNotFound" ? "notFound" : result.error };
-  }
-
-  for (const [action, ids] of [
-    ["room.link", result.added],
-    ["room.unlink", result.removed],
-  ] as const) {
-    for (const otherRoomId of ids) {
-      await writeAuditLog({
-        centerId: scope.ctx.center.id,
-        actorUserId: scope.ctx.user.id,
-        action,
-        entityType: "Room",
-        entityId: roomId,
-        after: { roomId, otherRoomId },
-      });
-    }
-  }
-
-  revalidateSettings(locale);
-  return { status: "saved" };
 }
 
 // ── Payment methods (R1) ───────────────────────────────────────────────────

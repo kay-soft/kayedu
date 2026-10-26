@@ -104,6 +104,10 @@
   --text-on-dark: #e2e8f0;
   /* The muted line on the navy sidebar / auth panel (6.96:1 there). */
   --text-on-dark-muted: #94a3b8;
+  /* The scrollbar thumb on the navy sidebar: low contrast at rest, one step
+     brighter on hover (docs/04 §2). */
+  --sidebar-scrollbar: #334155;
+  --sidebar-scrollbar-hover: #475569;
 
   --success: #16a34a;
   --success-bg: #dcfce7;
@@ -263,6 +267,49 @@
   }
 }
 
+/* A thin scrollbar for the dark sidebar, its icon rail and the mobile drawer —
+   the browser's default light track clashed with the navy (docs/04 §5). The
+   Firefox pair and the WebKit pseudo-elements say the same thing. */
+@utility scrollbar-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sidebar-scrollbar) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--sidebar-scrollbar);
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--sidebar-scrollbar-hover);
+  }
+}
+
+/* The same shape on a light surface — popovers, selects, the combobox list,
+   the type-ahead dropdown — so a floating list never shows the OS scrollbar. */
+@utility scrollbar-neutral {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-placeholder);
+  }
+}
+
 /* The app's one content-width rule (docs/04 §6): centred, capped at
    `--content-max`, so a 2560px monitor gets a wider working area instead of a
    narrow column stranded in grey — and a 1280px laptop is unchanged. */
@@ -270,6 +317,13 @@
   margin-inline: auto;
   width: 100%;
   max-width: var(--content-max);
+}
+
+/* The inline-end inset that lines a full-width bar's last control up with the
+   centred `content-shell` edge below it: half of whatever the bar has beyond
+   `--content-max`, never negative. Logical, so it mirrors in Arabic. */
+@utility content-edge-end {
+  margin-inline-end: max(0px, calc((100% - var(--content-max)) / 2));
 }
 
 /* Print (DES, docs/04 §14.10). Office lasers drop pale grey, so the two

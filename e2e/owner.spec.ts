@@ -117,13 +117,19 @@ test("@write room: add one, then delete it", async ({ as, appLocale, msg }) => {
   await selectBranch(page, appLocale);
   const name = `${uniqueTag()} Room`;
   await page.goto(`/${appLocale}/settings/rooms`);
-  // Rooms add through the inline card at the top (not a dialog).
-  await page.getByLabel(field(msg("Settings.rooms.fields.name"))).first().fill(name);
-  await page.getByLabel(field(msg("Settings.rooms.fields.capacity"))).first().fill("12");
-  await page.getByRole("button", { name: msg("Settings.common.add"), exact: true }).first().click();
+  // T3: rooms add and edit in a dialog, "Can be combined with" included.
+  await page.getByRole("button", { name: msg("Settings.rooms.addButton"), exact: true }).click();
+  const dialog = openDialog(page);
+  await dialog.getByLabel(field(msg("Settings.rooms.fields.name"))).first().fill(name);
+  await dialog.getByLabel(field(msg("Settings.rooms.fields.capacity"))).first().fill("12");
+  await dialog.getByRole("button", { name: msg("Settings.common.add"), exact: true }).click();
+  await expect(dialog).toBeHidden();
   await expect(rowWith(page, name)).toBeVisible();
 
-  await deleteRow(page, name, msg);
+  // The row's own Delete asks first, in a dialog.
+  await rowWith(page, name).getByRole("button", { name: msg("Settings.common.delete"), exact: true }).click();
+  await openDialog(page).getByRole("button", { name: msg("Settings.common.deleteYes"), exact: true }).click();
+  await expect(page.getByText(name)).toHaveCount(0);
 });
 
 test("@write staff: invite a receptionist by email, then revoke the invitation", async ({ as, appLocale, msg }) => {

@@ -295,7 +295,7 @@ function ScrollList({
       ref={ref}
       role="group"
       aria-label={label}
-      className={cn("relative flex flex-col gap-0.5 overflow-y-auto", tall ? "max-h-56" : "max-h-36")}
+      className={cn("scrollbar-neutral relative flex flex-col gap-0.5 overflow-y-auto", tall ? "max-h-56" : "max-h-36")}
     >
       {children}
     </div>

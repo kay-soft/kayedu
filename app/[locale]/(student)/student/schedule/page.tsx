@@ -14,6 +14,7 @@ import { ScheduleDateFilter } from "./schedule-date-filter";
 import { CappedList } from "@/components/shared/capped-list";
 import { EmptyState } from "@/components/shared/empty-state";
 import { sessionLabelParts } from "@/lib/session-label";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
@@ -173,76 +174,78 @@ export default async function StudentSchedulePage({
         dateLabel={t("filterDate")}
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("upcomingTitle")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {upcomingFiltered.length === 0 ? (
-            <EmptyState compact icon={<CalendarClock />} title={t("upcomingEmpty")} description={t("upcomingEmptyHint")} />
-          ) : (
-            <CappedList
-              items={upcomingFiltered}
-              moreLabel={(hidden) => t("showMoreUpcoming", { count: hidden })}
-              render={(row) => (
-              <div
-                key={row.sessionId}
-                className="flex flex-col gap-2 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-text-primary">
-                    {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
-                  </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
-                    <span>{row.centerName}</span>
-                    <span>{row.teacherName}</span>
-                    <span>{formatDate(row.date, locale)}</span>
-                    <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
-                    {row.roomName ? <span>{row.roomName}</span> : null}
-                  </p>
+      <ResultsRegion className="flex flex-col gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("upcomingTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {upcomingFiltered.length === 0 ? (
+              <EmptyState compact icon={<CalendarClock />} title={t("upcomingEmpty")} description={t("upcomingEmptyHint")} />
+            ) : (
+              <CappedList
+                items={upcomingFiltered}
+                moreLabel={(hidden) => t("showMoreUpcoming", { count: hidden })}
+                render={(row) => (
+                <div
+                  key={row.sessionId}
+                  className="flex flex-col gap-2 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-text-primary">
+                      {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
+                    </p>
+                    <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
+                      <span>{row.centerName}</span>
+                      <span>{row.teacherName}</span>
+                      <span>{formatDate(row.date, locale)}</span>
+                      <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
+                      {row.roomName ? <span>{row.roomName}</span> : null}
+                    </p>
+                  </div>
+                  <Badge variant="info">{t("upcomingBadge")}</Badge>
                 </div>
-                <Badge variant="info">{t("upcomingBadge")}</Badge>
-              </div>
-              )}
-            />
-          )}
-        </CardContent>
-      </Card>
+                )}
+              />
+            )}
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("pastTitle")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {pastFiltered.length === 0 ? (
-            <EmptyState compact icon={<History />} title={t("pastEmpty")} description={t("pastEmptyHint")} />
-          ) : (
-            pastFiltered.map((row) => (
-              <div
-                key={row.attendeeId}
-                className="flex flex-col gap-2 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-text-primary">
-                    {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
-                  </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
-                    <span>{row.centerName}</span>
-                    <span>{row.teacherName}</span>
-                    <span>{formatDate(row.date, locale)}</span>
-                    <span>{formatTime(row.startTime, locale)}</span>
-                    {row.isDropIn ? <span>{t("dropIn")}</span> : null}
-                    {row.paidAmount !== null ? <span>{formatMoney(row.paidAmount, locale)}</span> : null}
-                  </p>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("pastTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {pastFiltered.length === 0 ? (
+              <EmptyState compact icon={<History />} title={t("pastEmpty")} description={t("pastEmptyHint")} />
+            ) : (
+              pastFiltered.map((row) => (
+                <div
+                  key={row.attendeeId}
+                  className="flex flex-col gap-2 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-text-primary">
+                      {[row.subjectName, row.gradeName].filter(Boolean).join(" · ") || tCommon("none")}
+                    </p>
+                    <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
+                      <span>{row.centerName}</span>
+                      <span>{row.teacherName}</span>
+                      <span>{formatDate(row.date, locale)}</span>
+                      <span>{formatTime(row.startTime, locale)}</span>
+                      {row.isDropIn ? <span>{t("dropIn")}</span> : null}
+                      {row.paidAmount !== null ? <span>{formatMoney(row.paidAmount, locale)}</span> : null}
+                    </p>
+                  </div>
+                  <Badge variant={ATTENDANCE_BADGE[row.attendanceStatus]}>
+                    {tAttendance(row.attendanceStatus)}
+                  </Badge>
                 </div>
-                <Badge variant={ATTENDANCE_BADGE[row.attendanceStatus]}>
-                  {tAttendance(row.attendanceStatus)}
-                </Badge>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </ResultsRegion>
     </div>
   );
 }

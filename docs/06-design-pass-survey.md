@@ -38,6 +38,8 @@ A note on the sidebar-initial complaint: the sidebar, the header label and the b
 ### `components/shell/app-shell.tsx` (sidebar, header, drawer)
 Twelve nav items with no grouping; drawer opened on an empty row with a detached close button; header carried `LocaleSwitcher` (segmented track, query lost). **R10a:** nav grouped (Front desk / Academics / Money) with headings, hairlines on the icon rail; close button moved onto the brand row; `LocaleToggle`; scrim on the sidebar token.
 
+**T1:** the nav list wears `scrollbar-sidebar`; the header's start cluster (toggle, switcher) sits at the main column's start edge instead of centred on `content-shell`; under Whole Management the brand and the switcher name the organization (`brandFromRollup`), Reception / Sessions / Approvals render as `RollupNavItem`, and `RollupNotice` names the branch whose data a page shows. See 04 §11.1, §14.3.
+
 ### `components/shell/nav.ts` / `nav-item.tsx`
 `teacher/analytics` was `disabled: true` with a "Soon" pill. **R10a:** removed (see "Removed nav items" in the R10a summary).
 
@@ -110,16 +112,16 @@ Section header under the settings layout's `PageHeader`; consistent. No change.
 **DES:** the result is said once, in the sticky save bar — no second toast; client validation with the action's schema and an error summary (docs/04 §14.2, §14.8).
 
 ### `app/[locale]/(center)/settings/payment-methods/page.tsx`
-Consistent (`EntityManager`). **R10a:** its list header uses `ListHeader` via the manager.
+Consistent (`EntityManager`). **R10a:** its list header uses `ListHeader` via the manager. **T1:** the manager's rows are the shared settings-list layout (04 §14.8) — Status in its own column, the Actions header over its buttons.
 
 ### `app/[locale]/(center)/settings/rooms/page.tsx`
-Consistent; "needs two rooms" note inside the links manager is a muted sentence (kept — it is an explanation, not an empty list). No change.
+**T3:** the separate "Rooms that can be combined" card and its "needs two rooms" note are gone; the list is `rooms-manager.tsx` (Add room button, shared settings list with a "Combines with" column) and add/edit are one dialog that carries "Can be combined with" (chips + checklist, 04 §11.12). **T1:** the Status badge was hidden under the Edit button and the Actions header did not line up with the buttons; the rooms list is now the shared settings-list layout (04 §14.8).
 
 ### `app/[locale]/(center)/settings/terms/page.tsx`
-Consistent (`EntityManager`). No change beyond `ListHeader`.
+Consistent (`EntityManager`). **T1:** shared settings-list layout (04 §14.8) — same fix as Rooms.
 
 ### `app/[locale]/(center)/settings/catalog/page.tsx`
-Page stack used `gap-8` where every other settings page uses `gap-6`. **R10a:** `gap-6`.
+Page stack used `gap-8` where every other settings page uses `gap-6`. **R10a:** `gap-6`. **T1:** each section's rows are the shared settings-list layout with a header (Name, Details when there is a price or a parent, Status, Actions); the retired badge sits under Active in the Status column; Edit / Deactivate / Remove in that order.
 
 ### `app/[locale]/(center)/settings/card/page.tsx`
 Consistent header; the editor itself is a canvas tool (R9) — no change.
@@ -128,7 +130,7 @@ Consistent header; the editor itself is a canvas tool (R9) — no change.
 Consistent; matrix already collapses to cards below `md`. No change.
 
 ### `app/[locale]/(center)/settings/staff/page.tsx`
-Hand-copied list header. **R10a:** `ListHeader`.
+Hand-copied list header. **R10a:** `ListHeader`. **T1:** the members list is the shared settings-list layout (name + email, role, Status, one-button Actions); invitations keep their own rows (no status).
 
 **DES (Phase 3):** revoking an invitation and granting or removing branch access return a result and toast it (`staff-result-actions.tsx`) — they had been silent `void` actions; role and access changes toast; the invitation link is `CopyLinkField`, which says when a copy is refused (docs/04 §14.2).
 

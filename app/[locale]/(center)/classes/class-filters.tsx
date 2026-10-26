@@ -5,10 +5,11 @@ import { useTranslations } from "next-intl";
 import { FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
 import type { SelectOption } from "@/components/center/class-fields";
+import { UrlFilterForm } from "@/components/shared/url-filters";
 
 /**
  * The classes dashboard's filters (spec §4.1 item 3 "filterable dashboard").
- * A plain GET form, like `TypeAheadSearch`'s own underlying form — filter
+ * A plain GET form (`UrlFilterForm`: a soft navigation with JavaScript, docs/02 §14), like `TypeAheadSearch`'s own underlying form — filter
  * state lives in the URL, and changing a select re-submits immediately so
  * there is no separate "Apply" step.
  */
@@ -32,7 +33,7 @@ export function ClassFilters({
   const t = useTranslations("Classes.filters");
 
   return (
-    <form className="grid gap-3 sm:grid-cols-3">
+    <UrlFilterForm className="grid gap-3 sm:grid-cols-3">
       <FilterField label={t("teacher")} htmlFor="filter-teacherId">
         <Select
           id="filter-teacherId"
@@ -80,6 +81,6 @@ export function ClassFilters({
           ))}
         </Select>
       </FilterField>
-    </form>
+    </UrlFilterForm>
   );
 }

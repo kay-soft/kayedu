@@ -42,6 +42,7 @@ import {
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { expenseFilterSchema } from "@/lib/validation/analytics";
 import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
  * Expenses (M6, spec §4.1 item 6): category CRUD, add-expense form, and a
@@ -187,29 +188,31 @@ export default async function ExpensesPage({
             />
           </FilterBar>
 
-          {tableRows.length === 0 ? (
-            <EmptyState
-              icon={<Wallet />}
-              title={t("empty")}
-              description={t("emptyHint")}
-            />
-          ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                <span className="w-32 shrink-0">{t("columns.date")}</span>
-                <span className="min-w-0 flex-1">{t("columns.category")}</span>
-                <span className="min-w-0 flex-[2]">{t("columns.note")}</span>
-                <span className="w-32 shrink-0 text-end">{t("columns.amount")}</span>
-                <span className="w-32 shrink-0 text-end">{t("columns.actions")}</span>
-              </ListHeader>
+          <ResultsRegion className="flex flex-col gap-4">
+            {tableRows.length === 0 ? (
+              <EmptyState
+                icon={<Wallet />}
+                title={t("empty")}
+                description={t("emptyHint")}
+              />
+            ) : (
+              <ul className="flex flex-col gap-3 md:gap-0">
+                <ListHeader>
+                  <span className="w-32 shrink-0">{t("columns.date")}</span>
+                  <span className="min-w-0 flex-1">{t("columns.category")}</span>
+                  <span className="min-w-0 flex-[2]">{t("columns.note")}</span>
+                  <span className="w-32 shrink-0 text-end">{t("columns.amount")}</span>
+                  <span className="w-32 shrink-0 text-end">{t("columns.actions")}</span>
+                </ListHeader>
 
-              {tableRows.map((expense) => (
-                <ExpenseRow key={expense.id} expense={expense} timeZone={timeZone} />
-              ))}
-            </ul>
-          )}
+                {tableRows.map((expense) => (
+                  <ExpenseRow key={expense.id} expense={expense} timeZone={timeZone} />
+                ))}
+              </ul>
+            )}
 
-          <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+            <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+          </ResultsRegion>
         </CardContent>
       </Card>
 

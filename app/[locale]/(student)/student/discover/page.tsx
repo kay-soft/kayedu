@@ -32,6 +32,7 @@ import { centerLogoSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
 import { listAccessibleCenters } from "@/lib/db/platform";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 type CardStatus = "enrolled" | "pending" | "full" | "open" | "requiresApproval";
 
@@ -205,93 +206,95 @@ export default async function StudentDiscoverPage({
         allLabel={t("filters.all")}
       />
 
-      {pageEntries.length === 0 ? (
-        <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {pageEntries.map((card) => (
-            <div
-              key={`${card.centerId}:${card.classGroupId}`}
-              className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover"
-            >
+      <ResultsRegion className="flex flex-col gap-6">
+        {pageEntries.length === 0 ? (
+          <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {pageEntries.map((card) => (
               <div
-                aria-hidden
-                className="absolute inset-x-0 top-0 h-1"
-                style={{ backgroundColor: subjectAccentColor(card.subjectName) }}
-              />
-
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-text-primary">
-                    {card.subjectName ?? tClasses("columns.untitled")}
-                  </p>
-                  <p className="truncate text-xs text-text-muted">{card.centerName}</p>
-                </div>
-                <Badge variant={STATUS_BADGE[card.status]}>{t(`status.${card.status}`)}</Badge>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span
+                key={`${card.centerId}:${card.classGroupId}`}
+                className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover"
+              >
+                <div
                   aria-hidden
-                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                  className="absolute inset-x-0 top-0 h-1"
                   style={{ backgroundColor: subjectAccentColor(card.subjectName) }}
-                >
-                  {nameInitial(card.teacherName)}
-                </span>
-                <span className="min-w-0 truncate text-sm text-text-secondary">{card.teacherName}</span>
-                {card.teacherRating !== null ? (
-                  <span className="ms-auto shrink-0 text-xs font-medium text-text-muted">
-                    {t("card.rating", { value: formatRating(card.teacherRating, locale) })}
-                  </span>
-                ) : null}
-              </div>
+                />
 
-              <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                {card.gradeName ? (
-                  <span className="rounded-full border border-border px-2 py-0.5">{card.gradeName}</span>
-                ) : null}
-                {card.schedules.length > 0 ? (
-                  <span>
-                    {card.schedules
-                      .map(
-                        (slot) =>
-                          `${dayNames[slot.dayOfWeek]} ${formatTimeRange(slot.startTime, slot.endTime, locale)}`,
-                      )
-                      .join(" · ")}
-                  </span>
-                ) : (
-                  <span>{t("card.noSchedule")}</span>
-                )}
-              </div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-text-primary">
+                      {card.subjectName ?? tClasses("columns.untitled")}
+                    </p>
+                    <p className="truncate text-xs text-text-muted">{card.centerName}</p>
+                  </div>
+                  <Badge variant={STATUS_BADGE[card.status]}>{t(`status.${card.status}`)}</Badge>
+                </div>
 
-              <p className="text-sm font-semibold text-text-primary">{formatMoney(card.price, locale)}</p>
-
-              <div className="mt-auto">
-                {card.status === "enrolled" || card.status === "pending" ? (
-                  <Badge
-                    variant={card.status === "enrolled" ? "success" : "warning"}
-                    className="w-full justify-center py-2"
+                <div className="flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: subjectAccentColor(card.subjectName) }}
                   >
-                    {t(`card.${card.status}`)}
-                  </Badge>
-                ) : card.status === "full" ? (
-                  <Badge variant="neutral" className="w-full justify-center py-2">
-                    {t("card.full")}
-                  </Badge>
-                ) : (
-                  <ReserveButton
-                    centerId={card.centerId}
-                    classGroupId={card.classGroupId}
-                    requiresConfirmation={card.requiresConfirmation}
-                  />
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+                    {nameInitial(card.teacherName)}
+                  </span>
+                  <span className="min-w-0 truncate text-sm text-text-secondary">{card.teacherName}</span>
+                  {card.teacherRating !== null ? (
+                    <span className="ms-auto shrink-0 text-xs font-medium text-text-muted">
+                      {t("card.rating", { value: formatRating(card.teacherRating, locale) })}
+                    </span>
+                  ) : null}
+                </div>
 
-      <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+                <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                  {card.gradeName ? (
+                    <span className="rounded-full border border-border px-2 py-0.5">{card.gradeName}</span>
+                  ) : null}
+                  {card.schedules.length > 0 ? (
+                    <span>
+                      {card.schedules
+                        .map(
+                          (slot) =>
+                            `${dayNames[slot.dayOfWeek]} ${formatTimeRange(slot.startTime, slot.endTime, locale)}`,
+                        )
+                        .join(" · ")}
+                    </span>
+                  ) : (
+                    <span>{t("card.noSchedule")}</span>
+                  )}
+                </div>
+
+                <p className="text-sm font-semibold text-text-primary">{formatMoney(card.price, locale)}</p>
+
+                <div className="mt-auto">
+                  {card.status === "enrolled" || card.status === "pending" ? (
+                    <Badge
+                      variant={card.status === "enrolled" ? "success" : "warning"}
+                      className="w-full justify-center py-2"
+                    >
+                      {t(`card.${card.status}`)}
+                    </Badge>
+                  ) : card.status === "full" ? (
+                    <Badge variant="neutral" className="w-full justify-center py-2">
+                      {t("card.full")}
+                    </Badge>
+                  ) : (
+                    <ReserveButton
+                      centerId={card.centerId}
+                      classGroupId={card.classGroupId}
+                      requiresConfirmation={card.requiresConfirmation}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+      </ResultsRegion>
     </div>
   );
 }

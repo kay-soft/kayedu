@@ -44,7 +44,7 @@ function PopoverContent({
       >
         <PopoverPrimitive.Popup
           className={cn(
-            "max-h-[min(28rem,var(--available-height))] w-max max-w-[min(22rem,var(--available-width))] overflow-y-auto",
+            "scrollbar-neutral max-h-[min(28rem,var(--available-height))] w-max max-w-[min(22rem,var(--available-width))] overflow-y-auto",
             "rounded-xl border border-border bg-popover p-1 text-sm text-popover-foreground shadow-popover outline-none",
             "origin-(--transform-origin) transition-ui",
             "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
