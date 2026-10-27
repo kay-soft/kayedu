@@ -5,6 +5,7 @@ import { NextIntlClientProvider, hasLocale } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { UiDirection } from "@/components/shell/ui-direction";
 import { Toaster } from "@/components/ui/toast";
+import { noIndexDemo } from "@/lib/auth/auth-config";
 import { FORMATS } from "@/lib/i18n/formats";
 import { routing } from "@/lib/i18n/routing";
 import "../globals.css";
@@ -19,10 +20,18 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "KayEdu",
-  description: "KayEdu — multi-tenant education center management",
-};
+/**
+ * A page's own `title` reads "<title> · KayEdu" (the public Explore pages set
+ * one each, F5). While the demo override is set, every page carries
+ * `noindex, nofollow` (`noIndexDemo`, removed at M20).
+ */
+export function generateMetadata(): Metadata {
+  return {
+    title: { default: "KayEdu", template: "%s · KayEdu" },
+    description: "KayEdu — multi-tenant education center management",
+    ...(noIndexDemo() ? { robots: { index: false, follow: false } } : {}),
+  };
+}
 
 // The mobile browser's chrome takes the canvas colour (--bg-canvas), so the
 // page and the bar above it read as one surface (DES).

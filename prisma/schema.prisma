@@ -417,6 +417,10 @@ model CenterSettings {
   // §7). Platform admin bypasses this entirely; Settlement/payout and
   // AuditLog reads are carved out and never consult it (lib/db/visibility.ts).
   dataVisibilityDays       Int            @default(30)
+  // F5: whether this branch appears on the public Explore pages (guests, no
+  // sign-in). Only ACTIVE/GRACE branches are ever listed, whatever this says
+  // (lib/db/public-catalog.ts). It never affects the signed-in student Discover.
+  publicListing            Boolean        @default(true)
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt
 }

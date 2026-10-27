@@ -24,6 +24,13 @@ export const ROUTES = {
    */
   familyJoin: "/family/join",
   invite: (token: string) => `/invite/${token}`,
+  // F5: the public Explore pages — guests, no sign-in (`(public)` route group).
+  explore: "/explore",
+  exploreBranch: (slug: string) => `/explore/${encodeURIComponent(slug)}`,
+  exploreClass: (slug: string, classId: string) =>
+    `/explore/${encodeURIComponent(slug)}/classes/${encodeURIComponent(classId)}`,
+  exploreTeacher: (slug: string, teacherUserId: string) =>
+    `/explore/${encodeURIComponent(slug)}/teachers/${encodeURIComponent(teacherUserId)}`,
   centerDashboard: "/dashboard",
   // People (M3). The print views live under the student they belong to.
   centerTeachers: "/teachers",
@@ -75,6 +82,9 @@ export const ROUTES = {
   teacherSettlements: "/teacher/settlements",
   studentSchedule: "/student/schedule",
   studentDiscover: "/student/discover",
+  // F5: a Discover class, on the same class page component Explore uses.
+  studentDiscoverClass: (centerId: string, classId: string) =>
+    `/student/discover/${encodeURIComponent(centerId)}/${encodeURIComponent(classId)}`,
   studentReservations: "/student/reservations",
   studentProfile: "/student/profile",
   // F4: "Your studies" — a new student's grade, then an optional parent invite.

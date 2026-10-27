@@ -1708,7 +1708,11 @@
       "schedulingTitle": "Scheduling conflicts",
       "schedulingDescription": "What happens when a class's sessions, or a single session, would double-book a teacher or a room.",
       "denyConflictsLabel": "Deny double-booked slots and sessions",
-      "denyConflictsDescription": "Off by default: a double-booked room or teacher can be saved only after staff tick “I understand, create anyway”, and the confirmation is recorded in the audit log. On: the conflicting slot or session is refused, with no override."
+      "denyConflictsDescription": "Off by default: a double-booked room or teacher can be saved only after staff tick “I understand, create anyway”, and the confirmation is recorded in the audit log. On: the conflicting slot or session is refused, with no override.",
+      "publicListingTitle": "Public listing",
+      "publicListingDescription": "Whether people without an account can find this branch on Explore — its name, logo, classes open to new students, their prices and teachers. Contact details and students are never shown.",
+      "publicListingLabel": "List this branch on Explore",
+      "publicListingHint": "On by default. Turn it off and the branch's public pages disappear at once; signed-in students can still find its classes in Discover."
     },
     "catalog": {
       "title": "Academic catalog",
@@ -2850,14 +2854,6 @@
     "unknownAction": "Other change",
     "diffSet": "{field}: {after}"
   },
-  "Public": {
-    "landing": {
-      "tagline": "Attendance, payments and schedules for education centres — in Arabic and English.",
-      "signIn": "Sign in",
-      "register": "Create an account",
-      "note": "Branch staff join through an invitation from their branch. Teachers and students can create an account."
-    }
-  },
   "Toasts": {
     "saved": "Saved.",
     "studentActivated": "Student reactivated.",
@@ -3154,6 +3150,68 @@
       "parentDescription": "Optional. Give us your parent's details and you get a one-time code to send them. A parent only sees your schedule and attendance. You can skip this and do it later in Account settings.",
       "skip": "Skip for now",
       "toDiscover": "Find classes"
+    }
+  },
+  "Explore": {
+    "title": "Explore",
+    "subtitle": "Browse branches, their classes and teachers. You only need an account to enrol.",
+    "viewsLabel": "Browse by",
+    "views": {
+      "branches": "Branches",
+      "classes": "Classes"
+    },
+    "branchCardHint": "See classes and teachers",
+    "branchesEmpty": "No branches to show yet.",
+    "branchesEmptyHint": "Branches appear here once they open to new students.",
+    "classesFound": "{count, plural, =0 {No classes found} one {# class found} other {# classes found}}",
+    "classesEmpty": "No classes match these filters.",
+    "classesEmptyHint": "Try another subject, grade or day, or set a filter back to All.",
+    "backToExplore": "Explore",
+    "backToBranch": "{branch}",
+    "backToDiscover": "Discover",
+    "branch": {
+      "subtitle": "Classes open to new students at this branch, and the teachers who teach them.",
+      "classesTitle": "Classes",
+      "classesEmpty": "This branch has no classes open to new students right now.",
+      "teachersTitle": "Teachers",
+      "teachersEmpty": "No teachers to show yet."
+    },
+    "teacher": {
+      "subtitle": "Teaches at {branch}",
+      "classesTitle": "Classes at this branch"
+    },
+    "class": {
+      "untitled": "Class",
+      "detailsTitle": "About this class",
+      "branch": "Branch",
+      "teacher": "Teacher",
+      "grade": "Grade",
+      "period": "Runs",
+      "periodValue": "{from} to {to}",
+      "schedule": "Weekly schedule",
+      "joinTitle": "Join this class",
+      "price": "Price",
+      "status": "Status",
+      "joinInstant": "You're enrolled as soon as you confirm. You pay for each session at the branch.",
+      "joinApproval": "The branch reviews each request before you're enrolled. You pay for each session at the branch."
+    },
+    "card": {
+      "rating": "★ {value}",
+      "noSchedule": "Schedule not set yet",
+      "perSession": "{price} / session"
+    },
+    "seats": {
+      "open": "Open",
+      "few": "Few seats left",
+      "full": "Full"
+    },
+    "shell": {
+      "home": "KayEdu — Explore",
+      "nav": "Main",
+      "explore": "Explore",
+      "signIn": "Sign in",
+      "register": "Create account",
+      "dashboard": "Go to my dashboard"
     }
   }
 }

@@ -49,6 +49,7 @@
     "check:card-layout": "node --env-file-if-exists=.env scripts/card-layout-check.ts",
     "check:design": "node scripts/design-check.ts",
     "check:account": "node scripts/account-check.ts",
+    "check:public": "node scripts/public-check.ts",
     "check:security": "node --env-file-if-exists=.env scripts/security-check.ts",
     "check:rls": "node --env-file-if-exists=.env scripts/rls-check.ts",
     "check:all": "node --env-file-if-exists=.env scripts/run-gates.ts",

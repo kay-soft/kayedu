@@ -42,6 +42,7 @@ export type GeneralSettingsValues = {
   scheduleConflictPolicy: ConflictPolicy;
   teacherEditDeadlineHours: number | null;
   dataVisibilityDays: number;
+  publicListing: boolean;
 };
 
 export function GeneralSettingsForm({
@@ -342,6 +343,21 @@ export function GeneralSettingsForm({
             label={t("denyConflictsLabel")}
             description={t("denyConflictsDescription")}
             defaultChecked={values.scheduleConflictPolicy === "DENY"}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("publicListingTitle")}</CardTitle>
+          <CardDescription>{t("publicListingDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ToggleRow
+            name="publicListing"
+            label={t("publicListingLabel")}
+            description={t("publicListingHint")}
+            defaultChecked={values.publicListing}
           />
         </CardContent>
       </Card>

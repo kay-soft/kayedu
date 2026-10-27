@@ -278,6 +278,16 @@
 
 ---
 
+## 28. Written reviews of teachers and classes
+
+**What it is.** Free-text reviews a student (or parent) writes about a teacher or a class, shown beside the star average on Explore (F5), Discover and the teacher's own view.
+
+**Why deferred.** Today a rating is a 1–5 score and what is published is the **average only, never a count** (spec §5 "Teacher ratings") — nothing a person wrote is ever shown. Written reviews change that in three ways the product has no answer for yet: **moderation** (who reads every review before it is public, what is removed, how fast, and who answers an appeal); **minors** — most reviewers are school students, so a public text field is a child's words published under (or traceable to) their name, with the retention and erasure questions of OD-2; and **defamation** — a public claim about a named teacher is the platform's liability the moment it is shown. F5's public pages make the exposure larger, not smaller: a review would be readable by anyone, without an account. Explore therefore shows the star average only, by design.
+
+**Depends on.** A moderation workflow and the people to run it; OD-2's retention and erasure rule (legal review for minors' data, M20); a terms-of-use and takedown policy (needs the domain and legal entity, OD-1); a decision on whether reviews are anonymous (and how anonymity holds with small classes — the same reasoning that keeps the count hidden).
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

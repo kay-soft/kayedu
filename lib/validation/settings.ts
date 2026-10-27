@@ -194,6 +194,8 @@ export const generalSettingsSchema = z
     teacherEditDeadlineEnabled: checkbox,
     teacherEditDeadlineHours: z.string().trim().optional(),
     dataVisibilityDays: visibilityWindowDays,
+    // F5: whether this branch appears on the public Explore pages.
+    publicListing: checkbox,
   })
   .transform((value, ctx) => {
     // The share value means two different things depending on the mode, so it
@@ -266,6 +268,7 @@ export const generalSettingsSchema = z
         : ("WARN" as const),
       teacherEditDeadlineHours,
       dataVisibilityDays: value.dataVisibilityDays,
+      publicListing: value.publicListing,
     };
   });
 

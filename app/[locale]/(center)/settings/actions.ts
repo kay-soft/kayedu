@@ -723,6 +723,7 @@ export async function saveGeneralSettingsAction(
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
     dataVisibilityDays,
+    publicListing,
   } = parsed.data;
 
   const before = await scope.db.settings.get();
@@ -735,6 +736,7 @@ export async function saveGeneralSettingsAction(
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
     dataVisibilityDays,
+    publicListing,
   });
 
   // The default center cut is money configuration, so the change is audited
@@ -756,6 +758,7 @@ export async function saveGeneralSettingsAction(
           scheduleConflictPolicy: before.scheduleConflictPolicy,
           dataVisibilityDays: before.dataVisibilityDays,
           teacherEditDeadlineHours: before.teacherEditDeadlineHours,
+          publicListing: before.publicListing,
         }
       : null,
     after: {
@@ -768,6 +771,8 @@ export async function saveGeneralSettingsAction(
       dataVisibilityDays,
       // SEC-74: the edit deadline is a setting too — it was missing here.
       teacherEditDeadlineHours,
+      // F5: listing on the public Explore pages.
+      publicListing,
     },
   });
 

@@ -33,6 +33,7 @@ export default async function GeneralSettingsPage() {
           scheduleConflictPolicy: settings?.scheduleConflictPolicy ?? "WARN",
           teacherEditDeadlineHours: settings?.teacherEditDeadlineHours ?? null,
           dataVisibilityDays: settings?.dataVisibilityDays ?? 30,
+          publicListing: settings?.publicListing ?? true,
         }}
       />
     </div>

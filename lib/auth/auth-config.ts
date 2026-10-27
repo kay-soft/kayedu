@@ -39,6 +39,18 @@ export function allowAutoConfirmDemo(env: Env = process.env): boolean {
   return env.ALLOW_AUTO_CONFIRM_DEMO === "yes" && !requireEmailConfirmation(env);
 }
 
+/**
+ * Search engines are kept off every page (F5) while the demo override is
+ * *set* — `ALLOW_AUTO_CONFIRM_DEMO=yes` means the site is showing seeded demo
+ * data, which must not be indexed as if it were real branches and teachers.
+ * Keyed on the variable being set, not on `allowAutoConfirmDemo()`, so a
+ * demo with email confirmation also on is still kept out of search.
+ * Removing it (and so the `noindex`) is on the M20 checklist.
+ */
+export function noIndexDemo(env: Env = process.env): boolean {
+  return env.ALLOW_AUTO_CONFIRM_DEMO === "yes";
+}
+
 /** The value the email-change override must be set to, exactly. */
 export function unverifiedEmailChangeRequested(env: Env = process.env): boolean {
   return env.ALLOW_UNVERIFIED_EMAIL_CHANGE === "yes";

@@ -264,6 +264,8 @@ Marketplace-style grid for browsing published classes. Filter bar: grade / subje
 - Needs approval (`requiresConfirmation = true`) → outlined brand-blue button, label "Request to Join."
 - After a request is sent, the button is replaced by a `Pending` badge (amber) in the same position — no button shown.
 
+**One card, two surfaces (F5).** The card is `ClassCard` (`components/explore/class-card.tsx`), shared by the signed-in Discover and the public Explore pages — each caller supplies the badge and the action slot. The subject name links to the class page (§11.24); the price reads "… / session".
+
 **Grid:** 3-up desktop, collapses to single column below `md` per §6. Filter bar collapses to a single "Filters" trigger opening a bottom sheet on mobile, per the existing modal→sheet rule.
 
 > **Note:** currency in all mockups must read **EGP**, not SAR — Phase 1 is Egypt-only per `00-master-product-spec.md` §1. Money still displays via `lib/format.ts`, never inline formatting.
@@ -498,6 +500,19 @@ All strings live under `Auth.register.intent`, `Onboarding.student`, `Account.st
 
 ---
 
+### 11.24 Public Explore: the public shell, branch, class and teacher pages (F5)
+
+The pages a guest browses without an account. One look with the rest of the product — the same tokens, cards, badges and pager — inside a lighter frame.
+
+- **Public shell** (`components/explore/public-shell.tsx`). A surface-white header with a bottom border: the KayEdu mark (`ProductMark`, linking to Explore) on the start edge, `LocaleToggle` on the end edge, and a nav of **Explore** (ghost) plus **Sign in** (ghost) and **Create account** (solid brand) — or a single solid **Go to my dashboard** when signed in. Every control is 44px (`LinkButton` `touch`). Below `sm` the header is two rows (mark + toggle, then the nav full width) so nothing shrinks under 44px at 375px; from `sm` it is one row. Content sits in a `max-w-6xl` column with the 16px gutter from §6. The `(public)` group has its own `error.tsx` and `not-found.tsx` inside this shell — an unlisted branch, a closed class and an unknown id are the same 404.
+- **Explore** (`/explore`). `PageHeader`, then **Branches / Classes** as the Audit page's pill links (`SoftLink`, `aria-current`). Branches: a 1 / 2 / 3-column grid of link cards — `BrandAvatar` (`lg`) + the branch name in the active locale + one muted hint — 12 per page. Classes: the Discover filter row (subject / grade / day pills) and the class card grid of §10, 20 per page, with a muted "N classes found". Pager and filters are T4 URL state (`Pagination`, `UrlFilterForm`, `ResultsRegion`).
+- **Branch page** (`/explore/[slug]`). `PageHeader` with the logo as `leading` and a back link to Explore; classes two-up from `md` (20 per page) beside a **Teachers** card — a list of 44px rows (initial avatar, the branch's name for the teacher, `★ 4.6` muted on the end edge) — that drops below the classes under `lg`.
+- **Class page** (`/explore/[slug]/classes/[classId]`, and Discover's `/student/discover/[centerId]/[classId]` on the same `ClassDetail`). Two cards, side by side from `lg`: **About this class** — a definition list (icon + muted label over the value) of branch (avatar + link), teacher (link + rating), grade, period ("from … to …", `formatDate`) and the weekly schedule (`formatTimeRange`); **Join this class** — price per session (`formatMoney`, never coloured), a **status badge**, one line on how joining works (instant or reviewed; pay per session at the branch), and the action.
+- **Seat badges are a status, never a number.** `Open` = info blue, `Few seats left` (3 or fewer) = amber, `Full` = neutral — the §2 semantic colours, as on the Discover card. No page says how many students are enrolled or how many seats are left.
+- **Teacher page** (`/explore/[slug]/teachers/[teacherUserId]`). `PageHeader` with an initial avatar as `leading` and the rating as a neutral badge in `meta` (`★ 4.6`, omitted when none — no count, §11.5), then that teacher's classes at this branch as class cards. Per branch: the name is that branch's record.
+- **Acting.** Enrol (solid) / Request to join (outlined brand), exactly the §10 buttons. A guest's is a link to Sign in carrying the page as `next`; a signed-in person's is the real `ReserveButton`. An instant class that is full shows the `Class full` badge instead of a button.
+- **Metadata.** Each public page sets its own `<title>` ("Physics · Center 60 · KayEdu"); every page is `noindex` while the demo flag is set (M20 removes it).
+
 ## 12. Auth surfaces (presentation pass)
 
 The four signed-out screens — `/login`, `/register`, `/invite/[token]`, `/select-center` — are the first thing anyone sees, and they shipped as a bare white card floating on the app canvas with a header of two loose text links.
@@ -512,8 +527,8 @@ The four signed-out screens — `/login`, `/register`, `/invite/[token]`, `/sele
 
 **DES additions.**
 
-- **The public landing (`/`, signed out).** It had been a bare redirect to the sign-in form. Signed out, `/` is now a page of its own: the public header (product mark + language toggle), the product name as the `h1`, one plain line saying what it is, and two actions — **Sign in** (primary) and **Create an account** (outline). Nothing else: no pricing, no claims, no screenshots. A signed-in visitor is still sent to their own home exactly as before, so nothing about routing changed for anyone with an account.
-- **One product mark** (`components/shared/product-mark.tsx`) — the brand tile and the product name, drawn once. The auth panel, the auth header and the public header had each hand-drawn their own "K" tile. **`PublicHeader`** (mark + `LocaleToggle`) is the chrome of every screen outside a shell: the landing, the 404 and the locale-level error page.
+- **The public landing (`/`, signed out) — replaced at F5:** a signed-out `/` now redirects to Explore (§11.24); the paragraph below records the DES landing it replaced. It had been a bare redirect to the sign-in form. Signed out, `/` is now a page of its own: the public header (product mark + language toggle), the product name as the `h1`, one plain line saying what it is, and two actions — **Sign in** (primary) and **Create an account** (outline). Nothing else: no pricing, no claims, no screenshots. A signed-in visitor is still sent to their own home exactly as before, so nothing about routing changed for anyone with an account.
+- **One product mark** (`components/shared/product-mark.tsx`) — the brand tile and the product name, drawn once. The auth panel, the auth header and the public header had each hand-drawn their own "K" tile. **`PublicHeader`** (mark + `LocaleToggle`) is the chrome of every screen outside a shell: the 404 and the locale-level error page (and, until F5, the landing; the Explore pages have their own `PublicShell`, §11.24).
 - **A 404 for every unknown URL.** `app/[locale]/[...rest]/page.tsx` calls `notFound()`, so an unknown path gets the bilingual 404 — it had fallen through to Next's default English page with no way back. A missing record *inside* an experience (an unknown student id) renders that route group's own `not-found.tsx` **inside its shell**, naming what was not found and linking back to the experience's home, rather than dropping the user out of the app.
 - **Errors keep a way home.** The locale-level error page carries the public header and offers **Go to your home screen** beside **Try again** — the case it catches (a layout's own gate failing) is the one where retrying fails again.
 - **Branch hub.** Sign out is the light `SignOutButton` under the card, not the navy slab (§14.3). With nothing to choose, the card's title says so ("You're not in a branch yet") instead of "Choose a branch", and the two next steps are full width on a phone. Role badges are `neutral` — a role is not a status (§14.1).

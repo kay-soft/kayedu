@@ -236,6 +236,11 @@ Filter labels hand-built (in `discover-filters.tsx`). **R10a:** `FilterField`. T
 
 **DES:** "Request to join" is the outlined brand button with a spinner. Still one long column on a phone — capping a browse surface is a product call — **OD-13** (docs/00 §2.2), not guessed.
 
+**F5:** the card is the shared `ClassCard` (`components/explore/class-card.tsx`) that Explore also renders; its subject name links to the Discover class page.
+
+### `app/[locale]/(student)/student/discover/[centerId]/[classId]/page.tsx` — **F5 (new)**
+A Discover class on the shared `ClassDetail` (the Explore class page's body) under Discover's own rules — any accessible branch, blocks hide it — with the student's own status and the same `ReserveButton`. `PageHeader` with a back link to Discover.
+
 ### `app/[locale]/(student)/student/reservations/page.tsx`
 `CardContent … pt-6` double padding. **R10a:** removed.
 
@@ -283,7 +288,25 @@ Consistent. No change.
 ## Other
 
 ### `app/[locale]/page.tsx`
-Entry redirect. No UI. **DES:** signed out it is now the public landing — the public header (product mark + language toggle), the product name as `h1`, one plain line, Sign in / Create an account; a signed-in visitor is redirected home exactly as before (docs/04 §12).
+Entry redirect. No UI. **DES:** signed out it is now the public landing — the public header (product mark + language toggle), the product name as `h1`, one plain line, Sign in / Create an account; a signed-in visitor is redirected home exactly as before (docs/04 §12). **F5:** the landing is gone — signed out, `/` redirects to Explore; signed in, unchanged.
+
+---
+
+## Public (route group `(public)`, F5)
+
+Every page renders inside `PublicShell` (`components/explore/public-shell.tsx`: mark, Explore, language toggle, Sign in / Create account or Go to my dashboard; two rows below `sm`) and opens with `PageHeader`. Reads come only from `lib/db/public-catalog.ts` (`check:public`).
+
+### `app/[locale]/(public)/explore/page.tsx` — **F5 (new)**
+Branches / Classes as two `SoftLink` pills (the Audit tab pattern). Branches: a card grid of `BrandAvatar` + name, 12 per page. Classes: the shared Discover filters (subject / grade / day) and `ClassCard`s, 20 per page. Both through `Pagination` + `ResultsRegion` (T4).
+
+### `app/[locale]/(public)/explore/[slug]/page.tsx` — **F5 (new)**
+`PageHeader` with the branch logo as `leading` and a back link to Explore; classes (two-up from `md`, 20 per page) beside a Teachers card (44px rows, average rating only) that drops below on a phone.
+
+### `app/[locale]/(public)/explore/[slug]/classes/[classId]/page.tsx` — **F5 (new)**
+`ClassDetail`: an "About this class" fact list (branch, teacher, grade, period, weekly schedule) and a "Join this class" card (price per session, a seat badge — Open / Few seats left / Full, never a number — and Enrol / Request to join). Stacks to one column below `lg`.
+
+### `app/[locale]/(public)/explore/[slug]/teachers/[teacherUserId]/page.tsx` — **F5 (new)**
+`PageHeader` with an initial avatar and the rating as a neutral badge in `meta` (omitted when none); the teacher's classes at this branch as `ClassCard`s.
 
 ### `app/[locale]/[...rest]/page.tsx` — **DES (new)**
 The unknown-path catch-all: it calls `notFound()`, so an unknown URL renders the bilingual `app/[locale]/not-found.tsx` instead of Next's bare English default page. Renders nothing itself.

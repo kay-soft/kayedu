@@ -29,11 +29,30 @@ import {
   studentBlockedRefsByCenter,
   studentReservationStatusByClass,
 } from "../lib/db/student-portal.ts";
+import {
+  listPublicBranches,
+  publicBranchBySlug,
+  publicBranchLogo,
+  publicClassById,
+  publicClassesForBranch,
+  publicTeacherAt,
+  searchPublicClasses,
+  EXPLORE_BRANCH_PAGE_SIZE,
+} from "../lib/db/public-catalog.ts";
 
 const prisma = await gatePrisma();
 
 const SLUG_A = "student-portal-check-a";
 const SLUG_B = "student-portal-check-b";
+/** F5 — one branch per listing case. */
+const PUBLIC_SLUGS = {
+  listed: "student-portal-check-pub-listed",
+  grace: "student-portal-check-pub-grace",
+  unlisted: "student-portal-check-pub-unlisted",
+  onboarding: "student-portal-check-pub-onboarding",
+  suspended: "student-portal-check-pub-suspended",
+  archived: "student-portal-check-pub-archived",
+} as const;
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const TEACHER_SCOPE: BlockScope = "TEACHER";
 const CLASS_SCOPE: BlockScope = "CLASS";
@@ -50,7 +69,7 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 async function cleanup() {
-  await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
+  await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B, ...Object.values(PUBLIC_SLUGS)] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "student-portal-check-" } } });
   // F4 fixture grades are global catalog rows — they do not cascade away with the centres.
   await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "Student-Portal-Check" } } });
@@ -363,6 +382,172 @@ async function main() {
   );
 
   await checkAccountSeeding(centerA, centerB, teacherA, teacherB);
+  await checkPublicCatalog();
+}
+
+/**
+ * F5 — the public catalog (lib/db/public-catalog.ts) lists only ACTIVE/GRACE
+ * branches with `publicListing`, only active, accepting, not-ended classes,
+ * keeps every read branch-scoped, and lets no count leave: seats are a
+ * status, and a teacher page is a name, an average and classes.
+ */
+async function checkPublicCatalog() {
+  console.log("\nF5 — public catalog");
+  const now = new Date();
+
+  const makeBranch = (
+    slug: string,
+    lifecycleState: "ACTIVE" | "GRACE" | "ONBOARDING" | "SUSPENDED" | "ARCHIVED",
+    publicListing = true,
+  ) =>
+    prisma.center.create({
+      data: {
+        slug,
+        name: slug,
+        lifecycleState,
+        organization: { create: { name: slug } },
+        settings: { create: { publicListing } },
+      },
+    });
+
+  const listed = await makeBranch(PUBLIC_SLUGS.listed, "ACTIVE");
+  const grace = await makeBranch(PUBLIC_SLUGS.grace, "GRACE");
+  const unlisted = await makeBranch(PUBLIC_SLUGS.unlisted, "ACTIVE", false);
+  const onboarding = await makeBranch(PUBLIC_SLUGS.onboarding, "ONBOARDING");
+  const suspended = await makeBranch(PUBLIC_SLUGS.suspended, "SUSPENDED");
+  const archived = await makeBranch(PUBLIC_SLUGS.archived, "ARCHIVED");
+
+  // Branches: listed and GRACE resolve; everything else is null (a 404).
+  check("a listed ACTIVE branch resolves by slug", (await publicBranchBySlug(prisma, PUBLIC_SLUGS.listed)) !== null);
+  check("a listed GRACE branch resolves by slug", (await publicBranchBySlug(prisma, PUBLIC_SLUGS.grace)) !== null);
+  const hiddenCases: [string, string][] = [
+    ["an unlisted (publicListing off)", PUBLIC_SLUGS.unlisted],
+    ["an ONBOARDING", PUBLIC_SLUGS.onboarding],
+    ["a SUSPENDED", PUBLIC_SLUGS.suspended],
+    ["an ARCHIVED", PUBLIC_SLUGS.archived],
+  ];
+  for (const [label, slug] of hiddenCases) {
+    check(`${label} branch is hidden (null, so 404)`, (await publicBranchBySlug(prisma, slug)) === null);
+  }
+
+  const listedSlugs = new Set<string>();
+  for (let page = 1; ; page += 1) {
+    const { branches, total } = await listPublicBranches(prisma, page);
+    branches.forEach((branch) => listedSlugs.add(branch.slug));
+    if (page * EXPLORE_BRANCH_PAGE_SIZE >= total) break;
+  }
+  check(
+    "the branch list shows listed and GRACE, never unlisted / ONBOARDING / SUSPENDED / ARCHIVED",
+    listedSlugs.has(PUBLIC_SLUGS.listed) &&
+      listedSlugs.has(PUBLIC_SLUGS.grace) &&
+      ![PUBLIC_SLUGS.unlisted, PUBLIC_SLUGS.onboarding, PUBLIC_SLUGS.suspended, PUBLIC_SLUGS.archived].some((slug) =>
+        listedSlugs.has(slug),
+      ),
+  );
+  check(
+    "a guest gets no logo key for an unlisted, ONBOARDING, SUSPENDED or ARCHIVED branch",
+    (await publicBranchLogo(prisma, unlisted.id)) === null &&
+      (await publicBranchLogo(prisma, onboarding.id)) === null &&
+      (await publicBranchLogo(prisma, suspended.id)) === null &&
+      (await publicBranchLogo(prisma, archived.id)) === null,
+  );
+
+  // Classes at the listed branch.
+  const teacher = await makeTeacher(listed.id, "pubTeacher");
+  const idleTeacher = await makeTeacher(listed.id, "pubIdleTeacher");
+  const hiddenTeacher = await makeTeacher(unlisted.id, "pubHiddenTeacher");
+  const open = await makeClass(listed.id, teacher.id);
+  const full = await makeClass(listed.id, teacher.id, { capacity: 1 });
+  const few = await makeClass(listed.id, teacher.id, { capacity: 4 });
+  const inactive = await prisma.classGroup.update({
+    where: { id: (await makeClass(listed.id, teacher.id)).id },
+    data: { active: false },
+  });
+  const ended = await prisma.classGroup.update({
+    where: { id: (await makeClass(listed.id, teacher.id)).id },
+    data: { startDate: new Date("2020-01-01"), endDate: new Date("2020-06-30") },
+  });
+  const closed = await makeClass(listed.id, teacher.id, { acceptsNewStudents: false });
+  await prisma.classGroup.update({
+    where: { id: (await makeClass(listed.id, idleTeacher.id)).id },
+    data: { active: false },
+  });
+  const unlistedClass = await makeClass(unlisted.id, hiddenTeacher.id);
+
+  const enrolFixtures: [string, string][] = [
+    ["pubFull", full.id],
+    ["pubFew", few.id],
+  ];
+  for (const [tag, classGroupId] of enrolFixtures) {
+    const student = await makeStudentUser(tag);
+    const result = await prisma.$transaction((tx) =>
+      reserveOrEnroll(tx, { centerId: listed.id, classGroupId, studentUserId: student.id }),
+    );
+    check(`fixture: ${tag} student enrolled`, result.ok);
+  }
+
+  const listedBranch = (await publicBranchBySlug(prisma, PUBLIC_SLUGS.listed))!;
+  const graceBranch = (await publicBranchBySlug(prisma, PUBLIC_SLUGS.grace))!;
+  const classes = await publicClassesForBranch(prisma, listedBranch, now);
+  const ids = new Set(classes.map((item) => item.id));
+  check("an active, accepting, running class is listed", ids.has(open.id) && ids.has(full.id) && ids.has(few.id));
+  check("an inactive class is hidden", !ids.has(inactive.id));
+  check("an ended class is hidden", !ids.has(ended.id));
+  check("a class not accepting new students is hidden", !ids.has(closed.id));
+  check("an ended class page is null (404)", (await publicClassById(prisma, listedBranch, ended.id, now)) === null);
+  check("an inactive class page is null (404)", (await publicClassById(prisma, listedBranch, inactive.id, now)) === null);
+  check(
+    "a class id read through another branch is null (branch-scoped)",
+    (await publicClassById(prisma, graceBranch, open.id, now)) === null,
+  );
+
+  const seatsOf = (id: string) => classes.find((item) => item.id === id)?.seats;
+  check("a class at capacity shows Full", seatsOf(full.id) === "full", String(seatsOf(full.id)));
+  check("a class with 3 or fewer seats left shows Few seats left", seatsOf(few.id) === "few", String(seatsOf(few.id)));
+  check("an uncapped class shows Open", seatsOf(open.id) === "open", String(seatsOf(open.id)));
+
+  const ALLOWED_CLASS_KEYS = [
+    "endDate", "grade", "id", "price", "requiresConfirmation", "schedules", "seats",
+    "startDate", "subject", "teacherName", "teacherRating", "teacherUserId",
+  ].join(",");
+  check(
+    "a public class carries exactly the allowlisted fields (no count, room, student, or money but price)",
+    classes.every((item) => Object.keys(item).sort().join(",") === ALLOWED_CLASS_KEYS),
+    Object.keys(classes[0] ?? {}).sort().join(","),
+  );
+
+  const search = await searchPublicClasses(prisma, now, {});
+  check("the class search never returns an unlisted branch class", !search.some((item) => item.id === unlistedClass.id));
+  check(
+    "the class search never returns an inactive, ended or closed class",
+    !search.some((item) => [inactive.id, ended.id, closed.id].includes(item.id)),
+  );
+
+  // The teacher page: a name, an average and classes — no count anywhere.
+  const teacherPage = await publicTeacherAt(prisma, listedBranch, teacher.id, now);
+  check("a teacher with listed classes has a page", teacherPage !== null);
+  check(
+    "the teacher page exposes exactly teacherUserId, name, rating and classes",
+    teacherPage !== null && Object.keys(teacherPage).sort().join(",") === "classes,name,rating,teacherUserId",
+    Object.keys(teacherPage ?? {}).join(","),
+  );
+  check("the teacher page exposes no count", !/count|capacity|enrolled|"ratings"/i.test(JSON.stringify(teacherPage)));
+  check(
+    "the teacher page rating is an average or null, never an object",
+    teacherPage !== null && (teacherPage.rating === null || typeof teacherPage.rating === "number"),
+  );
+  check(
+    "a teacher with nothing listed at the branch has no page",
+    (await publicTeacherAt(prisma, listedBranch, idleTeacher.id, now)) === null,
+  );
+  check(
+    "a teacher of an unlisted branch has no page",
+    (await publicTeacherAt(prisma, listedBranch, hiddenTeacher.id, now)) === null,
+  );
+
+  await deleteAuditRows(prisma, {
+    centerId: { in: [listed.id, grace.id, unlisted.id, onboarding.id, suspended.id, archived.id] },
+  });
 }
 
 /**
