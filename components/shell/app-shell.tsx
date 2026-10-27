@@ -30,6 +30,8 @@ export type ShellUser = {
   name: string;
   email: string | null;
   initials: string;
+  /** Profile photo, only when `MEDIA_AVATARS_DISPLAY` is on (F8) — otherwise null and initials show. */
+  photoSrc?: string | null;
   roleKey: string;
 };
 

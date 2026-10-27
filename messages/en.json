@@ -1685,7 +1685,8 @@
       "card": "ID card",
       "permissions": "Permissions",
       "staff": "Users & roles",
-      "branches": "Branches"
+      "branches": "Branches",
+      "branding": "Branding"
     },
     "common": {
       "add": "Add",
@@ -2051,6 +2052,27 @@
         "tooLong": "This value is too long.",
         "invalidColor": "Choose a colour.",
         "invalidTimezone": "Choose a timezone from the list."
+      }
+    },
+    "branding": {
+      "title": "Branding",
+      "description": "The logo shown beside this branch's name in the sidebar, branch switcher and branch pickers.",
+      "label": "Branch logo",
+      "hint": "PNG, JPEG or WebP, up to 512 KB. A larger picture is shrunk before it is sent.",
+      "upload": "Upload logo",
+      "remove": "Remove logo",
+      "removeConfirm": {
+        "title": "Remove the logo?",
+        "body": "The branch goes back to showing its initial on its theme color."
+      },
+      "errors": {
+        "forbidden": "You are not allowed to do this.",
+        "logoMissing": "Choose a logo first.",
+        "photoType": "The logo must be a PNG, JPEG or WebP image.",
+        "photoTooLarge": "The logo is larger than 512 KB.",
+        "storage": "The logo could not be stored. Try again later.",
+        "mediaNotConnected": "Logo storage isn't connected yet, so nothing was saved. It will work once media storage is switched on.",
+        "failed": "Something went wrong. Try again."
       }
     }
   },
@@ -3013,7 +3035,9 @@
     "familyInvitationCancelled": "Invitation cancelled",
     "familyCodeCancelled": "Code cancelled",
     "familyAccessRemoved": "Parent access removed",
-    "studentAccountGradeUsed": "Grade updated from the student's account."
+    "studentAccountGradeUsed": "Grade updated from the student's account.",
+    "logoSaved": "Logo saved.",
+    "logoRemoved": "Logo removed."
   },
   "Account": {
     "title": "Account settings",
@@ -3085,7 +3109,11 @@
       "emailOnBranchRecord": "This email is on a record at a branch. Ask that branch.",
       "emailChangeDisabled": "Changing email needs email confirmation — coming soon.",
       "rateLimited": "Too many attempts — wait a few minutes, then try again.",
-      "failed": "Something went wrong. Try again."
+      "failed": "Something went wrong. Try again.",
+      "photoMissing": "Choose a photo first.",
+      "photoType": "Photos must be PNG, JPEG or WebP.",
+      "photoTooLarge": "That photo is larger than 1 MB.",
+      "mediaNotConnected": "Photo storage isn't connected yet, so nothing was saved. It will work once media storage is switched on."
     },
     "study": {
       "title": "Study details",
@@ -3103,6 +3131,20 @@
         "gradePlaceholder": "Choose a grade",
         "none": "Not set",
         "noSystem": "Other grades"
+      }
+    },
+    "photo": {
+      "title": "Profile photo",
+      "label": "Photo",
+      "hint": "PNG, JPEG or WebP, up to 1 MB. Only you can set it.",
+      "upload": "Upload photo",
+      "remove": "Remove photo",
+      "visibility": "Shown here on your account. Other screens keep showing your initials until profile photos are switched on.",
+      "saved": "Your photo is saved.",
+      "removed": "Your photo is removed.",
+      "removeConfirm": {
+        "title": "Remove your photo?",
+        "body": "Your initials will show instead."
       }
     }
   },

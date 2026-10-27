@@ -11,6 +11,7 @@ import type {
 import type { CenterRelation, OwnerOrgGroup, TenantContext } from "@/lib/auth/tenant";
 import type { TenantRole } from "@/lib/auth/permissions";
 import { personInitials } from "@/lib/initials";
+import { profilePhotoForDisplay } from "@/lib/media";
 
 /**
  * One experience's shell, as data (F2): what its layout hands `AppShell`, and
@@ -75,6 +76,8 @@ export function shellUser(user: User, role: TenantRole): ShellUser {
     name: fullName(user),
     email: user.email,
     initials: initials(user),
+    // F8: no profile photo has a storage destination yet; when one does, its src goes here.
+    photoSrc: profilePhotoForDisplay(null),
     roleKey: role,
   };
 }

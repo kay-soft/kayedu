@@ -637,6 +637,11 @@ export function centerLogoPath(db: Db, centerId: string) {
   return db.center.findUnique({ where: { id: centerId }, select: { id: true, logoPath: true } });
 }
 
+/** Sets (or clears) a centre's logo key — the branch's own Branding page (F8). */
+export function setCenterLogoPath(db: Db, centerId: string, logoPath: string | null) {
+  return db.center.update({ where: { id: centerId }, data: { logoPath }, select: { id: true } });
+}
+
 /** An invitation by its token, with its centre — the accept page (the token is the only link). */
 export function invitationByToken(db: Db, token: string) {
   return db.invitation.findUnique({ where: { token }, include: { center: true } });

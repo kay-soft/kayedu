@@ -8,6 +8,7 @@ import { studentShell } from "@/app/[locale]/(student)/student-shell";
 import { teacherShell } from "@/app/[locale]/(teacher)/teacher-shell";
 import { AccountEmailForm, AccountPasswordForm, AccountProfileForm } from "@/app/[locale]/account/account-forms";
 import { FamilySection, StudyDetailsSection } from "@/app/[locale]/account/extension-points";
+import { ProfilePhotoForm } from "@/app/[locale]/account/photo-form";
 import { Ltr } from "@/components/shared/ltr";
 import { AppShell } from "@/components/shell/app-shell";
 import type { ShellFrame } from "@/components/shell/from-context";
@@ -20,6 +21,7 @@ import { resolveAccountExperience } from "@/lib/auth/tenant";
 import { recordsOnFile, type RecordOnFile } from "@/lib/db/account";
 import { prisma } from "@/lib/db/client";
 import { fullName, localName } from "@/lib/identity";
+import { personInitials } from "@/lib/initials";
 import type { ShellExperience } from "@/lib/routes";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -74,6 +76,9 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
         <PageHeader title={t("title")} description={t("description")} />
 
         <PageSection title={t("profileSection")} description={t("profileSectionDescription")}>
+          {/* F8: the preview always shows the photo; no storage destination yet, so photoSrc is null. */}
+          <ProfilePhotoForm initials={personInitials(user.firstName, user.lastName)} photoSrc={null} />
+
           <AccountProfileForm
             firstName={user.firstName}
             lastName={user.lastName}

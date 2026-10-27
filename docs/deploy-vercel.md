@@ -19,6 +19,8 @@ Set them in Vercel → Project → Settings → Environment Variables, per envir
 | `DIRECT_URL` | Yes for migrations (set it anyway — `prisma validate`/`generate` read the schema's `directUrl`) | server | Same screen → **Session pooler** (port 5432). |
 | `NEXT_PUBLIC_SUPABASE_URL` | **Yes** | public | Supabase → Project Settings → API → Project URL. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Yes** | public | Same page → `anon` / publishable key. (The Data API is closed to it — SEC-10.) |
+| `MEDIA_UPLOADS_ENABLED` | No (default off) | server only | `true` lets the Branding logo change store a file. While off, logo and profile-photo uploads validate and then answer "not connected" — nothing is stored. Turn on only once media storage is connected (M20). |
+| `MEDIA_AVATARS_DISPLAY` | No (default off) | server only | `true` shows profile photos in the user menu, teacher cards and rosters. Off: the photo shows only on the Account page. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes for photos, ID cards, logos, session uploads | **server only** | Same page → `service_role` key. Never prefix with `NEXT_PUBLIC_`. Without it, Storage features degrade. |
 | `NEXT_PUBLIC_APP_URL` | **Yes** in production | public | The deployment's real origin, e.g. `https://kayedu.example` — no trailing slash. Used for the email-confirmation redirect. |
 | `REQUIRE_EMAIL_CONFIRMATION` | **`true` in production** | server | A literal `true`. Needs Supabase *Confirm email* on **and** working SMTP. |

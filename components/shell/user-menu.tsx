@@ -9,6 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import type { ShellUser } from "@/components/shell/app-shell";
 import { Link } from "@/lib/i18n/navigation";
 import { accountPath, type ShellExperience } from "@/lib/routes";
@@ -41,17 +42,15 @@ export function UserMenu({
         aria-label={t("accountMenu")}
         className="group/account inline-flex size-11 shrink-0 items-center justify-center rounded-full focus-ring"
       >
-        <span
-          aria-hidden
+        <UserAvatar
+          initials={user.initials}
+          photoSrc={user.photoSrc}
           className={cn(
-            "flex size-9 items-center justify-center rounded-full border border-border-strong bg-surface",
-            "text-xs font-semibold text-text-primary shadow-card transition-ui",
+            "border border-border-strong shadow-card transition-ui",
             "group-hover/account:border-brand group-hover/account:bg-brand/10 group-hover/account:text-brand",
             "group-active/account:scale-95 group-data-[popup-open]/account:border-brand group-data-[popup-open]/account:text-brand",
           )}
-        >
-          {user.initials}
-        </span>
+        />
       </PopoverTrigger>
 
       <PopoverContent align="end" className="w-60">

@@ -66,6 +66,8 @@ export const ROUTES = {
   centerSettingsTerms: "/settings/terms",
   centerSettingsCatalog: "/settings/catalog",
   centerSettingsCard: "/settings/card",
+  // F8: the branch logo.
+  centerSettingsBranding: "/settings/branding",
   centerSettingsPermissions: "/settings/permissions",
   // F1: the organization's branches and an Owner's Add branch.
   centerSettingsBranches: "/settings/branches",

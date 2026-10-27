@@ -148,6 +148,9 @@ Page stack used `gap-8` where every other settings page uses `gap-6`. **R10a:** 
 ### `app/[locale]/(center)/settings/card/page.tsx`
 Consistent header; the editor itself is a canvas tool (R9) — no change.
 
+### `app/[locale]/(center)/settings/branding/page.tsx`
+**F8:** new. `SectionHeader` + one card: the branch's current mark (`BrandAvatar`), a file field with hint, Upload (full-width on a phone), and a confirmed Remove. Stacked at 375, same at 1280.
+
 ### `app/[locale]/(center)/settings/permissions/page.tsx`
 Consistent; matrix already collapses to cards below `md`. No change.
 

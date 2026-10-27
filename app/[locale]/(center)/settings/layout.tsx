@@ -34,6 +34,7 @@ export default async function SettingsLayout({
       { href: ROUTES.centerSettingsTerms, labelKey: "terms" },
       { href: ROUTES.centerSettingsCatalog, labelKey: "catalog" },
       { href: ROUTES.centerSettingsCard, labelKey: "card" },
+      { href: ROUTES.centerSettingsBranding, labelKey: "branding" },
     );
   }
 

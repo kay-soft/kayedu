@@ -51,6 +51,12 @@ import {
   termUpdateSchema,
 } from "@/lib/validation/settings";
 import { nameClashes } from "@/lib/like";
+import { logBestEffort } from "@/lib/log";
+import { mediaUploadsEnabled } from "@/lib/media";
+import { setCenterLogoPath } from "@/lib/db/platform";
+import { readRasterImage, removeStoredObject, uploadCenterLogo } from "@/lib/db/storage";
+import { LOGOS_BUCKET, MAX_LOGO_BYTES } from "@/lib/storage-paths";
+import { localeSchema } from "@/lib/validation/auth";
 
 /**
  * Center configuration (M2). Every action follows docs/02 §7:
@@ -863,4 +869,78 @@ export async function savePermissionMatrixAction(
 
   revalidateSettings(locale);
   return { status: "saved" };
+}
+
+// ── Branding: the branch's own logo (F8) ───────────────────────────────────
+
+/**
+ * Change the branch logo. Same checks as at creation — typed by its bytes,
+ * PNG/JPEG/WebP, `MAX_LOGO_BYTES` — then, until the media provider is
+ * connected (`MEDIA_UPLOADS_ENABLED`), refused as `mediaNotConnected` with
+ * nothing stored. Audited `center.logo.update`.
+ */
+export async function updateCenterLogoAction(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const file = formData.get("logo");
+  if (!(file instanceof File) || file.size === 0) return { error: "logoMissing" };
+
+  const image = await readRasterImage(file, MAX_LOGO_BYTES);
+  if (!image.ok) return { error: image.error };
+  if (!mediaUploadsEnabled()) return { error: "mediaNotConnected" };
+
+  const centerId = scope.ctx.center.id;
+  const uploaded = await uploadCenterLogo(centerId, file);
+  if (!uploaded.ok) return { error: uploaded.error };
+
+  const previous = scope.ctx.center.logoPath;
+  await setCenterLogoPath(prisma, centerId, uploaded.path);
+  if (previous && previous !== uploaded.path) {
+    await removeStoredObject(centerId, LOGOS_BUCKET, previous).catch(logBestEffort("replaced logo clean-up"));
+  }
+
+  await writeAuditLog({
+    centerId,
+    actorUserId: scope.ctx.user.id,
+    action: "center.logo.update",
+    entityType: "Center",
+    entityId: centerId,
+    before: { hadLogo: Boolean(previous) },
+    after: { hasLogo: true },
+  });
+
+  revalidateSettings(localeOf(formData));
+  return { status: "saved" };
+}
+
+/** Remove the branch logo (the mark falls back to the initial). Audited `center.logo.remove`. */
+export async function removeCenterLogoAction(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const scope = await editorScope();
+  if (!scope) return FORBIDDEN;
+
+  const centerId = scope.ctx.center.id;
+  const previous = scope.ctx.center.logoPath;
+  if (!previous) return { status: "deleted" };
+
+  await setCenterLogoPath(prisma, centerId, null);
+  await removeStoredObject(centerId, LOGOS_BUCKET, previous).catch(logBestEffort("removed logo clean-up"));
+
+  await writeAuditLog({
+    centerId,
+    actorUserId: scope.ctx.user.id,
+    action: "center.logo.remove",
+    entityType: "Center",
+    entityId: centerId,
+    before: { hadLogo: true },
+    after: { hasLogo: false },
+  });
+
+  revalidateSettings(localeOf(formData));
+  return { status: "deleted" };
+}
+
+function localeOf(formData: FormData): string {
+  const parsed = localeSchema.safeParse(formData.get("locale"));
+  return parsed.success ? parsed.data : "en";
 }
