@@ -339,12 +339,13 @@ export async function resolveStudentInput(
 export type StudentSessionState =
   /** `booked` (F6): a CONFIRMED single-session booking — still a drop-in at the same price. */
   | { outcome: "ready"; enrolled: boolean; booked: boolean }
-  | { outcome: "already"; status: AttendanceStatus; recordedAt: Date }
+  | { outcome: "already"; status: "PRESENT" | "LATE"; recordedAt: Date }
   | { outcome: "blocked" };
 
 /**
  * The pre-confirm look at one student against one (already validated)
- * session. It only reads: "already" when a roster row exists (no duplicate is
+ * session. It only reads: "already" when a PRESENT/LATE roster row exists —
+ * an ABSENT one is "Not arrived" and checks in again (T5) — (no duplicate is
  * ever written — `checkInAction` re-checks under the unique key regardless),
  * "blocked" for either `StudentBlock` scope, otherwise "ready" with whether
  * they are actively enrolled in the session's class (a student who is not is
@@ -362,7 +363,10 @@ export async function studentSessionState(
 ): Promise<StudentSessionState> {
   const { centerId, session, student } = params;
   const existing = await findAttendee(db, centerId, session.id, student.id);
-  if (existing) {
+  // T5: an ABSENT row on this (validated live) session is "Not arrived" — reset
+  // by a void or refund, corrected to Absent, or a drop-in who never came —
+  // and can be checked in again. Only PRESENT/LATE is "already".
+  if (existing && existing.attendanceStatus !== "ABSENT") {
     return { outcome: "already", status: existing.attendanceStatus, recordedAt: existing.recordedAt };
   }
   if (await isStudentBlockedFromSession(db, centerId, session, student.userId)) {

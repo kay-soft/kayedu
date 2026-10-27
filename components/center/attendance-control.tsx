@@ -30,6 +30,9 @@ export const ATTENDANCE_STATUS_TINT: Record<AttendanceStatusValue, string> = {
  * `interceptStatus` (R2): that one status's button does not submit — it
  * calls `onIntercept` instead, so the caller can confirm first. The roster
  * uses it for Absent on a paid student, whose payment the change voids.
+ *
+ * `statuses` (T5) narrows the buttons: a "Not arrived" row is corrected to
+ * Present or Late only — it is already ABSENT underneath.
  */
 export function AttendanceControl({
   formAction,
@@ -39,6 +42,7 @@ export function AttendanceControl({
   size = "md",
   interceptStatus,
   onIntercept,
+  statuses = ATTENDANCE_STATUS_ORDER,
 }: {
   formAction: (formData: FormData) => void;
   /** Currently recorded status, or null if this attendee has never been marked. */
@@ -48,6 +52,7 @@ export function AttendanceControl({
   size?: "md" | "lg";
   interceptStatus?: AttendanceStatusValue;
   onIntercept?: () => void;
+  statuses?: AttendanceStatusValue[];
 }) {
   const t = useTranslations("Sessions.attendance");
 
@@ -59,7 +64,7 @@ export function AttendanceControl({
       aria-label={t("groupLabel")}
     >
       {hiddenFields}
-      {ATTENDANCE_STATUS_ORDER.map((status) => {
+      {statuses.map((status) => {
         const selected = value === status;
         const intercepted = status === interceptStatus && !selected && onIntercept;
         return (

@@ -26,6 +26,7 @@ import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
+import { attendanceDisplay } from "@/lib/attendance-rules";
 import { studentSearchWhere } from "@/lib/db/students";
 import { signedUrlFor } from "@/lib/db/storage";
 import {
@@ -138,6 +139,15 @@ export default async function SessionDetailPage({
     : [];
   const sessionSeats = effectiveCapacity(sessionRooms);
 
+  // A cancelled session never happened; a rescheduled one moved to its
+  // replacement (M15); a closed one is a final record (R2). None accepts
+  // attendance or payment changes, and the server actions refuse every one
+  // by direct call, not just by hiding controls here.
+  const displayStatus = deriveSessionDisplayStatus(session, new Date(), timeZone);
+  const closed = session.closedAt !== null;
+  const rosterReadOnly =
+    closed || displayStatus === "CANCELLED" || displayStatus === "RESCHEDULED";
+
   const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
   const attendeeByStudentId = new Map(
     session.attendees
@@ -164,7 +174,13 @@ export default async function SessionDetailPage({
   ): RosterRowData => {
     if (profile.photoUrl) photoPathByStudentId.set(studentProfileId, profile.photoUrl);
     const attendee = attendeeByStudentId.get(studentProfileId);
-    const activePayment = attendee?.payments.find((p) => !p.voided) ?? null;
+    // The row's payment is its active one — neither voided nor refunded (T5:
+    // a refund frees the slot, so a student checked in again pays anew). A
+    // read-only roster also shows a refunded one, newest first, as history.
+    const activePayment =
+      attendee?.payments.find((p) => !p.voided && !p.refunded) ??
+      (rosterReadOnly ? attendee?.payments.find((p) => !p.voided) : undefined) ??
+      null;
     return {
       studentProfileId,
       attendeeId: attendee?.id ?? null,
@@ -175,6 +191,8 @@ export default async function SessionDetailPage({
       enrolled,
       photoUrl: null,
       status: attendee?.attendanceStatus ?? null,
+      // T5 — an ABSENT row on a live session, or a drop-in's: "Not arrived".
+      notArrived: attendee ? attendanceDisplay(attendee, closed) === "NOT_ARRIVED" : false,
       payment: activePayment
         ? {
             id: activePayment.id,
@@ -213,7 +231,7 @@ export default async function SessionDetailPage({
     streakClassId
       ? Promise.all(
           roster
-            .filter((row) => row.status === "ABSENT")
+            .filter((row) => row.status === "ABSENT" && !row.notArrived)
             .map(async (row) => {
               // SEC-62: counted back no further than the visibility window.
               row.consecutiveAbsences = await db.attendees.absenceStreak(
@@ -237,18 +255,10 @@ export default async function SessionDetailPage({
         })
       : null,
   ]);
-  const displayStatus = deriveSessionDisplayStatus(session, new Date(), timeZone);
   const teacherName = fullName(session.teacher);
   const className = sessionDisplayName(locale, session);
   const kind = sessionKind(session);
   const canDelete = deleteBlockers !== null && deleteBlockers.length === 0;
-  // A cancelled session never happened; a rescheduled one moved to its
-  // replacement (M15); a closed one is a final record (R2). None accepts
-  // attendance or payment changes, and the server actions refuse every one
-  // by direct call, not just by hiding controls here.
-  const closed = session.closedAt !== null;
-  const rosterReadOnly =
-    closed || displayStatus === "CANCELLED" || displayStatus === "RESCHEDULED";
   const canEnd = !rosterReadOnly && displayStatus === "LIVE" && ctxCan(ctx, "session.close");
 
   // T2 — a check-in here is reception's `checkInAction`, so it needs what that
@@ -266,7 +276,8 @@ export default async function SessionDetailPage({
   const [, candidates, bookedNotArrived] = await Promise.all([
     Promise.all(
       roster
-        .filter((row) => canCheckIn && !rosterReadOnly && row.status === null)
+        // T5 — a "Not arrived" row can be checked in again: it needs the photo too.
+        .filter((row) => canCheckIn && !rosterReadOnly && (row.status === null || row.notArrived))
         .map(async (row) => {
           row.photoUrl = await signPhoto(photoPathByStudentId.get(row.studentProfileId));
         }),

@@ -462,6 +462,40 @@ Every Critical and High was re-confirmed by the lead with `file:line` evidence.
 **Gates:** `tsc`, `eslint`, `check:design`, `check:rtl` run — no database gates. **Assertions added, none edited:** `check:design` section 12 (the merge by running it; the interceptor shape; no bare GET `<form>` and no `method="get"` outside it; the six filter forms and `FilterBar` use `UrlFilterForm`; `TypeAheadSearch` submits through the hook and only the allow-listed scan field opts out; pager, Audit tabs and Reset are `SoftLink`s; `ResultsRegion` is opacity-only; every page with URL-state controls renders it). Docs: 02 (§14), 04 (§5 Filter row, §11.7, §11.8), this file.
 
 
+### T5 — A void or refund on a live session resets the student; they check in and pay again (delivered)
+**Goal:** while a session is live, voiding or refunding a student's payment puts that student back where they were before check-in, and they can be checked in and pay again from the normal controls. A closed session stays immutable. `lib/money.ts` is untouched.
+**Why it failed before (reproduced first):**
+- `voidPayment` / `refundPayment` never touched the roster row; only "set Absent" reset it.
+- Reception's `studentSessionState` and `checkInAction` treated **any** existing row, ABSENT included, as already checked in, and the roster offered Check in only to unmarked rows.
+- A refunded payment still held the active-payment slot in three places: the index (`WHERE voided = false`), `lockAttendeeRow` and the `ON CONFLICT` predicate. The roster also showed it as the row's payment, so there was no Record payment form.
+- The Absent → Present correction itself worked, in the data layer and for `attendance.correct`. A Receptionist (`attendance.record` only) had no control, and after a refund the re-payment was blocked.
+
+**Build:**
+1. **One attendance-change writer** — `lib/db/attendance-change.ts`'s `applyAttendanceChange` (status, `SessionAttendanceChange`, `attendance.correct` audit), used by `changeAttendanceStatus`, the reset and the re-check-in.
+2. **The reset** — `voidPayment` / `refundPayment` lock session (shared) → attendee → payment, flip the flag, then `resetAttendanceAfterReversal`: Present/Late → ABSENT, one change row naming the payment (`voidedPaymentId` or the new `refundedPaymentId`), audit trigger `payment.void` / `payment.refund`. The row is never deleted. `historicalBackfill` skips it.
+3. **Re-check-in** — `recheckInAttendee` (session → attendee lock, fresh re-read): ABSENT → Present/Late decided by the server, `recordedAt` = now, trigger `attendance.recheckIn`, and the F6 booking is linked if it is not already. `checkInAction` uses it for an ABSENT row, re-checks both block scopes, then records a **new** payment. "Already checked in" now means PRESENT/LATE only.
+4. **Refund frees the slot** — migration `20261027190000_t5_void_refund_reset_attendance` creates `Payment_one_active_per_attendee_t5` (`WHERE voided = false AND refunded = false`), drops the old index and renames the new one. It also adds `SessionAttendanceChange.refundedPaymentId` (nullable, SetNull). `lockAttendeeRow`, the `ON CONFLICT` predicate, the receipt's and audit's "unpaid" readers and the roster's row payment all use the same predicate. `Payment_not_voided_and_refunded` is kept.
+5. **"Not arrived" and the drop-in rule** — `lib/attendance-rules.ts`: `attendanceDisplay` (a live ABSENT row, or a drop-in's, reads Not arrived) and `EXCLUDE_DROP_IN_NO_SHOWS`.
+   - **The display rule is applied in:** the session roster (badge, Check in, a Present/Late correction), the receipt's third count, the teacher session roster and absent count, the teacher's student history, both print sheets.
+   - **The drop-in filter is applied in:** `sessionReceiptTotals`, `consecutiveAbsenceCount` (so the roster and profile absence alerts too), `attendanceStatusCounts` (dashboard), `studentPastAttendance` (student and parent), `studentSessionsWithTeacher`.
+   - `attendedSessionsToRate` already required PRESENT/LATE (SEC-59) and is unchanged.
+6. **Receipt change log** — one timeline per changed student (`sessionChangeLog` / `orderChangeLog`), in causal order: checked in → paid → voided/refunded (amount, reason) → reset → checked in again → paid.
+
+**Done when:** at a live session, a checked-in and paid student who is voided shows **Not arrived**, leaves the checked-in count, and can be checked in and paid again: a second `Payment`, with the first still voided. The same holds for a refund. The change log shows who was voided or refunded, and why. A closed session refuses all of it. A voided or refunded drop-in is never absent anywhere. Revenue and settlements count only the live payment.
+
+**Gates:**
+- **Run:** `tsc`, `eslint`, `prisma validate`, `check:design` and `check:rtl`. `check:design` has one failure, `app/[locale]/page.tsx renders <PublicHeader />`; that file is not touched here.
+- **Assertions added:**
+  - `check:session-lifecycle` static section: the ON CONFLICT predicate equals the migration's index predicate; the index swap order; the lock order; one change writer; the display and drop-in rules; every consumer uses the filter; the change-log order under skewed clocks.
+  - `check:session-lifecycle` section 7 (database): void and refund reset, re-check-in, re-pay (two rows), refusals, void ∥ re-check-in, booking survives, change-log sequence, closed counts, drop-in exclusions (streak, analytics, student/parent and teacher history), ratings exclude ABSENT, revenue and settlement count only live payments, closed refuses void/refund/re-check-in, cross-centre re-check-in refused, backfill does not reset.
+  - `check:security` SEC-05: the index predicate in the database, the predicate match, refund → re-check-in → two concurrent payments ×3.
+- **Edited by instruction (old → new):**
+  - SEC-07: `unpaidCount` 2 → 1, plus `notArrivedCount` 1, because the void resets the voided student.
+  - SEC-08: "no absences" counts enrolled rows only (`isDropIn: false`), because the refunded drop-in now leaves an ABSENT row.
+- **Not run (they write to the database):** `npm run check:session-lifecycle`, `npm run check:security`, `npm run check:payments`, `npm run check:settlements`, `npm run check:reception`, `npm run check:student-portal`, `npm run check:parent`, `npm run check:teacher-portal`, `npm run check:analytics`, `npm run check:ratings`, `npm run check:one-off-sessions`, `npm run check:isolation`.
+
+**Docs:** 00 (§5 "Void vs. refund", "Attendance", ledger invariants, §5.1 "Session lifecycle"), 01 (SessionAttendanceChange, SessionAttendee, §3, index list), 02 (folder tree, §11 locking), 04 (Attendance control, Receipt), 07 (SEC-05), this file.
+
 ### F2 — Account settings for every role (delivered)
 **Goal:** every signed-in person — owner, manager, receptionist, accountant, teacher, student, parent, platform admin — opens Account settings from the user menu and manages their own account.
 **Build:**

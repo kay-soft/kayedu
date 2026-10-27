@@ -6,20 +6,50 @@ import {
   sessionReceiptTotals,
   type SessionReceiptTotals,
 } from "@/lib/db/payments";
-import { listSessionAttendanceChanges, sessionClosure } from "@/lib/db/session-lifecycle";
+import { sessionChangeLog, sessionClosure, type ChangeLogEvent } from "@/lib/db/session-lifecycle";
 import { fullName } from "@/lib/identity";
 
-/** One "Changes during session" line, names already resolved for display. */
+/** One line of a student's "Changes during session" timeline (T5), names resolved for display. */
+export type ReceiptChangeEvent =
+  | { kind: "checkIn"; at: Date; status: AttendanceStatus }
+  | { kind: "payment"; at: Date; amount: number; byName: string | null }
+  | { kind: "reversal"; at: Date; reversal: "void" | "refund"; amount: number; reason: string | null; byName: string | null }
+  | { kind: "change"; at: Date; fromStatus: AttendanceStatus; toStatus: AttendanceStatus; reason: string | null; byName: string | null };
+
+/** One changed student and their timeline, in order. */
 export type ReceiptChange = {
-  id: string;
+  studentProfileId: string;
   studentName: string;
-  fromStatus: AttendanceStatus;
-  toStatus: AttendanceStatus;
-  changedAt: Date;
-  changedByName: string | null;
-  reason: string | null;
-  paymentVoided: boolean;
+  events: ReceiptChangeEvent[];
 };
+
+function receiptEvent(event: ChangeLogEvent): ReceiptChangeEvent {
+  const name = (person: { firstName: string; lastName: string } | null) => (person ? fullName(person) : null);
+  switch (event.kind) {
+    case "checkIn":
+      return event;
+    case "payment":
+      return { kind: "payment", at: event.at, amount: event.amount, byName: name(event.byName) };
+    case "reversal":
+      return {
+        kind: "reversal",
+        at: event.at,
+        reversal: event.reversal,
+        amount: event.amount,
+        reason: event.reason,
+        byName: name(event.byName),
+      };
+    case "change":
+      return {
+        kind: "change",
+        at: event.at,
+        fromStatus: event.fromStatus,
+        toStatus: event.toStatus,
+        reason: event.reason,
+        byName: name(event.byName),
+      };
+  }
+}
 
 export type ReceiptClosure = {
   closedAt: Date;
@@ -67,7 +97,7 @@ export type SessionReceiptView = {
  * Everything a session receipt shows (R2, SEC-2b) — the frozen-snapshot
  * totals (`sessionReceiptTotals`: collected net of refunds, voided payments
  * outside every total), how and when the session closed, the live-session
- * change log, and — so nothing that took money off the books is invisible
+ * change log (T5: one timeline per changed student — `sessionChangeLog`), and — so nothing that took money off the books is invisible
  * (SEC-07) — every voided payment, every refund and every present-but-unpaid
  * attendee, by name. The on-screen receipt, the staff print route and the
  * teacher print route all load through here, so there is one receipt,
@@ -85,7 +115,7 @@ export async function loadSessionReceiptView(
   const [totals, closure, changes, lines] = await Promise.all([
     sessionReceiptTotals(prisma, centerId, session.id),
     sessionClosure(prisma, centerId, session),
-    listSessionAttendanceChanges(prisma, centerId, session.id),
+    sessionChangeLog(prisma, centerId, session.id),
     sessionReceiptLines(prisma, centerId, session.id),
   ]);
 
@@ -98,15 +128,10 @@ export async function loadSessionReceiptView(
           closedByName: closure.closedByName ? fullName(closure.closedByName) : null,
         }
       : null,
-    changes: changes.map((change) => ({
-      id: change.id,
-      studentName: fullName(change.studentName),
-      fromStatus: change.fromStatus,
-      toStatus: change.toStatus,
-      changedAt: change.changedAt,
-      changedByName: change.changedByName ? fullName(change.changedByName) : null,
-      reason: change.reason,
-      paymentVoided: change.voidedPaymentId !== null,
+    changes: changes.map((entry) => ({
+      studentProfileId: entry.studentProfileId,
+      studentName: fullName(entry.studentName),
+      events: entry.events.map(receiptEvent),
     })),
     voids: lines.voids.map((line) => ({
       paymentId: line.paymentId,

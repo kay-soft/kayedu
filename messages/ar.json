@@ -1002,7 +1002,8 @@
       "groupLabel": "الحضور",
       "PRESENT": "حاضر",
       "LATE": "متأخر",
-      "ABSENT": "غائب"
+      "ABSENT": "غائب",
+      "NOT_ARRIVED": "لم يصل بعد"
     },
     "paymentMethod": {
       "groupLabel": "طريقة الدفع",
@@ -1035,6 +1036,7 @@
         "cancel": "الإبقاء كما هو"
       },
       "paidAbsentNote": "مدفوع — التحويل إلى «غائب» يُلغي الدفع.",
+      "notArrivedCorrectHint": "أو صحّح التسجيل — إن كان حاضرًا طوال الوقت:",
       "booked": "محجوز"
     },
     "addAttendee": {
@@ -1097,6 +1099,13 @@
       "present": "حاضر",
       "late": "متأخر",
       "absent": "غائب",
+      "notArrived": "لم يصل بعد",
+      "logCheckedIn": "سُجِّل الحضور · {status}",
+      "logPaid": "دفع {amount}",
+      "logVoided": "أُلغي الدفع · {amount}",
+      "logRefunded": "اُسترد الدفع · {amount}",
+      "logReset": "أُعيد إلى «لم يُسجَّل حضوره»",
+      "logCheckedInAgain": "سُجِّل الحضور مجددًا · {status}",
       "closed": "أُغلقت",
       "closedManual": "{time} · {name}",
       "closedAuto": "{time} · تلقائيًا في نهاية اليوم",

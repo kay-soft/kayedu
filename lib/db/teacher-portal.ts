@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:teacher-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/sessions.ts).
+import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
 import { type DateRange, revenueTotals } from "./analytics.ts";
 import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
@@ -224,6 +225,8 @@ export function studentSessionsWithTeacher(
     where: scopedWhere(centerId, {
       studentProfileId,
       session: { teacherId },
+      // T5 — a drop-in's ABSENT row is not a session they had with this teacher.
+      ...EXCLUDE_DROP_IN_NO_SHOWS,
     }),
     orderBy: { session: { date: "desc" } },
     include: {

@@ -75,7 +75,7 @@ import { loadAuditFeed, loadUnpaidCheckIns } from "../lib/db/audit-feed.ts";
 import { AuditPayloadError, FORBIDDEN_AUDIT_KEYS, forbiddenAuditKey, writeAuditRow } from "../lib/db/audit-row.ts";
 import { revenueTotals } from "../lib/db/analytics.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
-import { changeAttendanceStatus, createAttendance, SessionClosedError } from "../lib/db/attendance.ts";
+import { changeAttendanceStatus, createAttendance, recheckInAttendee, SessionClosedError } from "../lib/db/attendance.ts";
 import { classMoneyError } from "../lib/db/class-sessions.ts";
 import { createPaymentMethod, listActivePaymentMethods } from "../lib/db/payment-methods.ts";
 import { recordPayment, sessionReceiptLines, sessionReceiptTotals, voidPayment } from "../lib/db/payments.ts";
@@ -1354,10 +1354,33 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
     }
     const index = await prisma.$queryRaw<{ indexdef: string }[]>`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'Payment_one_active_per_attendee'`;
+    // T5 — a refund frees the slot: refund → reset → re-check-in, then two
+    // desks pay at once. Exactly one wins; the invariant (at most one payment
+    // per attendee neither voided nor refunded) holds.
+    let refundBad = 0;
+    for (let i = 0; i < 3; i++) {
+      const r = await attendee(s.id);
+      const first = await pay(r.id);
+      const back = await prisma.$transaction((tx) => refundPayment(tx, centerId, first.id, "cash back", managerA.id), WRITE_TRANSACTION_OPTIONS);
+      const again = await recheckInAttendee(prisma, { centerId, attendeeId: r.id, recordedBy: managerA.id });
+      const run = (client: PrismaClient) =>
+        client.$transaction((tx) => recordPayment(tx, centerId, r.id, method.id, managerA.id), WRITE_TRANSACTION_OPTIONS);
+      const results = await Promise.all([run(deskA), run(deskB)]);
+      const active = await prisma.payment.count({ where: { sessionAttendeeId: r.id, voided: false, refunded: false } });
+      const oneOk = results.filter((x) => x.ok).length === 1;
+      const oneAlreadyPaid = results.some((x) => !x.ok && x.error === "alreadyPaid");
+      if (!back.ok || !again.ok || active !== 1 || !oneOk || !oneAlreadyPaid) refundBad++;
+    }
+    const t5Migration = read("prisma/migrations/20261027190000_t5_void_refund_reset_attendance/migration.sql");
+    const t5Predicate = t5Migration.match(/"Payment_one_active_per_attendee_t5"\s+ON "Payment"\("sessionAttendeeId"\) WHERE ([^;]+);/)?.[1];
+    const conflict = read("lib/db/payments.ts").match(/ON CONFLICT \("sessionAttendeeId"\) WHERE (.+?) DO NOTHING/)?.[1];
     return [
       [`4 rounds × 2 concurrent payments: one ok + one alreadyPaid + one active row each (${bad} bad)`, bad === 0],
       ["a second active payment written around the app is refused by the database", databaseRefused],
       ["the partial unique index is WHERE voided = false", /UNIQUE/.test(index[0]?.indexdef ?? "") && /voided = false/.test(index[0]?.indexdef ?? "")],
+      ["T5: the index is WHERE voided = false AND refunded = false (a refund frees the slot)", /voided = false\) AND \(refunded = false/.test(index[0]?.indexdef ?? "")],
+      ["T5: recordPayment's ON CONFLICT predicate is the migration's index predicate, exactly", t5Predicate !== undefined && conflict !== undefined && t5Predicate.replace(/\s+/g, " ").trim() === conflict.replace(/\s+/g, " ").trim()],
+      [`T5: refund → re-check-in → 2 concurrent payments ×3: one ok + one alreadyPaid + one active row each (${refundBad} bad)`, refundBad === 0],
       ["lockAttendeeRow re-reads the payment fact in a fresh statement after the lock", /FOR UPDATE OF a`;[\s\S]*SELECT EXISTS/.test(read("lib/db/session-lifecycle.ts"))],
     ];
   });
@@ -1543,9 +1566,11 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
     const receipt = read("app/[locale]/(center)/sessions/[id]/session-receipt.tsx");
     const entry = feed.entries.find((e) => e.entityId === paid.id);
     return [
-      ["the receipt counts the void and the unpaid check-ins", totals.voidedCount === 1 && totals.voidedAmount === paid.amount && totals.unpaidCount === 2],
+      // T5 (old → new, by instruction): the live void resets the voided
+      // student to Not arrived, so one present-but-unpaid student remains.
+      ["the receipt counts the void and the unpaid check-in", totals.voidedCount === 1 && totals.voidedAmount === paid.amount && totals.unpaidCount === 1 && totals.notArrivedCount === 1],
       ["the receipt lists the void with its actor and reason", lines.voids.length === 1 && lines.voids[0].reason === "Wrong student" && lines.voids[0].voidedByName !== null],
-      ["the receipt lists the present-but-unpaid students", lines.unpaid.length === 2],
+      ["the receipt lists the present-but-unpaid student", lines.unpaid.length === 1],
       ["SessionReceipt renders the voided and unpaid sections", /voidsTitle/.test(receipt) && /unpaidTitle/.test(receipt) && /voidedLine/.test(receipt)],
       ["the audit feed shows the void with its amount, student and reason", entry !== undefined && entry.amount === paid.amount && entry.reason === "Wrong student" && entry.subjectName !== null],
       ["the unpaid list is filterable and centre-scoped", unpaid.rows.some((row) => row.sessionId === s.id)],
@@ -1580,7 +1605,9 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
     const cancelAfterRefund = await cancelSession(prisma, centerId, s.id);
     const closedNextDay = await closeSessionIfDayOver(prisma, centerId, s.id, addDays(now, 1));
     const row = await prisma.session.findUniqueOrThrow({ where: { id: s.id } });
-    const absences = await prisma.sessionAttendee.count({ where: { sessionId: s.id, attendanceStatus: "ABSENT" } });
+    // T5: the live refund reset its drop-in to Not arrived (an ABSENT row that
+    // is no absence); "no absences" = none materialized for enrolled students.
+    const absences = await prisma.sessionAttendee.count({ where: { sessionId: s.id, attendanceStatus: "ABSENT", isDropIn: false } });
     // A legacy cancelled session still holding a payment: no void/refund path stays open.
     const legacy = await session(today);
     const lp = await pay((await attendee(legacy.id)).id);

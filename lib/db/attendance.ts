@@ -14,6 +14,8 @@ import {
   isSessionDayOver,
   resolveLateThreshold,
 } from "../scheduling.ts";
+import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
+import { applyAttendanceChange } from "./attendance-change.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { voidPaymentRow } from "./payments.ts";
 import {
@@ -297,43 +299,21 @@ export async function changeAttendanceStatus(
       }
     }
 
-    const updated = await tx.sessionAttendee.update({
-      where: { id: attendee.id },
-      data: { attendanceStatus: params.status, recordedBy: params.changedBy, recordedAt: now },
-    });
-    const change = await tx.sessionAttendanceChange.create({
-      data: {
-        centerId: params.centerId,
-        sessionId: attendee.sessionId,
-        studentProfileId: current.studentProfileId,
-        fromStatus,
-        toStatus: params.status,
-        voidedPaymentId: voidedPayment?.id ?? null,
-        reason,
-        changedBy: params.changedBy,
-        changedAt: now,
-      },
-    });
-
-    // The audit trail, in the same transaction as the change it records
-    // (CLAUDE.md rule 7): `attendance.correct` always; `payment.void` and one
+    // The status, its change row and the `attendance.correct` audit row — the
+    // one writer every live status change shares (lib/db/attendance-change.ts).
+    // Then, in the same transaction (CLAUDE.md rule 7), `payment.void` and one
     // `settlement.adjust` per live-adjusted settlement when a payment was
     // voided. Ids and amounts only (D-20) — the reason lives on the change
     // row and the payment. `SessionAttendanceChange` is the receipt's data
     // source; `AuditLog` stays the audit trail.
-    await writeAuditRow(tx, {
+    const { attendee: updated, change } = await applyAttendanceChange(tx, {
       centerId: params.centerId,
-      actorUserId: params.changedBy,
-      action: "attendance.correct",
-      entityType: "SessionAttendee",
-      entityId: attendee.id,
-      before: { attendanceStatus: fromStatus },
-      after: {
-        attendanceStatus: params.status,
-        sessionId: attendee.sessionId,
-        changeId: change.id,
-        voidedPaymentId: change.voidedPaymentId,
-      },
+      attendee: { ...attendee, studentProfileId: current.studentProfileId },
+      toStatus: params.status,
+      changedBy: params.changedBy,
+      reason,
+      voidedPaymentId: voidedPayment?.id ?? null,
+      now,
     });
     if (voidedPayment) {
       await writeAuditRow(tx, {
@@ -403,11 +383,85 @@ export async function updateAttendanceStatus(
   throw new SessionClosedError(result.error);
 }
 
+export type RecheckInResult =
+  | { ok: true; attendee: SessionAttendee; change: SessionAttendanceChange }
+  | { ok: false; error: SessionClosedReason | "notFound" | "alreadyCheckedIn" };
+
+/**
+ * T5 — checks a "Not arrived" student in again: a live session's ABSENT row
+ * (any origin — reset by a void or refund, corrected to Absent, or a drop-in
+ * who never came) becomes PRESENT or LATE, **decided here from the time of
+ * this arrival** (R2, `checkInStatus` — the same rule as a first check-in),
+ * with `recordedAt` = now, one ABSENT → PRESENT/LATE change row and its
+ * `attendance.correct` audit row (trigger `attendance.recheckIn`). The row is
+ * the same row — never a second one. A PRESENT/LATE row is refused
+ * (`alreadyCheckedIn`); a closed, cancelled or rescheduled session is refused
+ * by the shared guard. No payment here: the caller records a NEW one through
+ * `recordPayment`, with snapshots frozen at that moment.
+ *
+ * F6: a reset never unlinked the student's booking; if the booking was never
+ * linked (or is linked to nothing), this links it to this same row — the
+ * statement only fills a NULL link, so it can never conflict with the
+ * field's unique index.
+ *
+ * One transaction: session shared lock → attendee row lock → re-read, so a
+ * re-check-in racing a void, a second desk or a correction serializes, and
+ * the loser sees the winner's result.
+ */
+export async function recheckInAttendee(
+  db: Db,
+  params: { centerId: string; attendeeId: string; recordedBy: string },
+  options: { now?: Date } = {},
+): Promise<RecheckInResult> {
+  const now = options.now ?? new Date();
+  return runInTransaction(db, async (tx): Promise<RecheckInResult> => {
+    const current = await tx.sessionAttendee.findFirst({
+      where: { centerId: params.centerId, id: params.attendeeId },
+    });
+    if (!current || !current.studentProfileId) return { ok: false, error: "notFound" };
+
+    const gate = await ensureSessionOpenOrAutoClose(tx, current.sessionId, params.centerId, now);
+    if (gate.status === "missing") return { ok: false, error: "notFound" };
+    if (gate.status === "refused") return { ok: false, error: gate.reason };
+
+    await lockAttendeeRow(tx, current.id, params.centerId);
+    const attendee = await tx.sessionAttendee.findUniqueOrThrow({ where: { id: current.id } });
+    if (attendee.attendanceStatus !== "ABSENT") return { ok: false, error: "alreadyCheckedIn" };
+
+    const status = checkInStatus(
+      gate.session,
+      resolveLateThreshold(gate.session.classLateThresholdMinutes, gate.session.defaultLateThreshold),
+      now,
+      gate.timeZone,
+    );
+    const result = await applyAttendanceChange(tx, {
+      centerId: params.centerId,
+      attendee: { ...attendee, studentProfileId: current.studentProfileId },
+      toStatus: status,
+      changedBy: params.recordedBy,
+      reason: null,
+      trigger: "attendance.recheckIn",
+      now,
+    });
+    await tx.$executeRaw`
+      UPDATE "SessionBooking" b
+      SET "sessionAttendeeId" = ${attendee.id}
+      FROM "StudentProfile" sp
+      WHERE sp."id" = ${current.studentProfileId} AND sp."centerId" = ${params.centerId}
+        AND b."centerId" = ${params.centerId} AND b."sessionId" = ${attendee.sessionId}
+        AND b."studentId" = sp."userId" AND b."status" = 'CONFIRMED'
+        AND b."sessionAttendeeId" IS NULL`;
+    return { ok: true, attendee: result.attendee, change: result.change };
+  });
+}
+
 /**
  * How many of a student's most recent sessions *in this class*, counting
  * backwards from (and including) `uptoDate`, were marked ABSENT with no
  * PRESENT/LATE break in between (spec §7 acceptance criterion 13). With the
- * three statuses (R1) every non-ABSENT mark breaks the streak.
+ * three statuses (R1) every non-ABSENT mark breaks the streak. A drop-in's
+ * ABSENT row (T5, lib/attendance-rules.ts) is no absence and no attendance
+ * either — it is skipped, neither counted nor breaking the streak.
  * Capped at 50 rows — a real "in a row" alert never needs more, and this
  * keeps the query bounded without an unnecessary second round-trip to count.
  */
@@ -429,6 +483,7 @@ export async function consecutiveAbsenceCount(
       centerId,
       studentProfileId,
       session: { classGroupId, date: { lte: uptoDate, ...(fromDate ? { gte: fromDate } : {}) } },
+      ...EXCLUDE_DROP_IN_NO_SHOWS,
     },
     orderBy: { session: { date: "desc" } },
     select: { attendanceStatus: true },

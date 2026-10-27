@@ -1002,7 +1002,8 @@
       "groupLabel": "Attendance",
       "PRESENT": "Present",
       "LATE": "Late",
-      "ABSENT": "Absent"
+      "ABSENT": "Absent",
+      "NOT_ARRIVED": "Not arrived"
     },
     "paymentMethod": {
       "groupLabel": "Payment method",
@@ -1035,6 +1036,7 @@
         "cancel": "Keep as is"
       },
       "paidAbsentNote": "Paid — switching to Absent voids the payment.",
+      "notArrivedCorrectHint": "Or correct the mark — they were here all along:",
       "booked": "Booked"
     },
     "addAttendee": {
@@ -1097,6 +1099,13 @@
       "present": "Present",
       "late": "Late",
       "absent": "Absent",
+      "notArrived": "Not arrived",
+      "logCheckedIn": "Checked in · {status}",
+      "logPaid": "Paid {amount}",
+      "logVoided": "Payment voided · {amount}",
+      "logRefunded": "Payment refunded · {amount}",
+      "logReset": "Reset to not checked in",
+      "logCheckedInAgain": "Checked in again · {status}",
       "closed": "Closed",
       "closedManual": "{time} · {name}",
       "closedAuto": "{time} · automatically, end of day",

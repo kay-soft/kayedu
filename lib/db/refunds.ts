@@ -1,9 +1,11 @@
-import type { Payment, Prisma, PrismaClient, Refund } from "@prisma/client";
+import type { Payment, Prisma, PrismaClient, Refund, SessionAttendanceChange } from "@prisma/client";
 // Relative imports on purpose — `npm run check:settlements` exercises this
 // module directly, outside the Next.js runtime.
+import { resetAttendanceAfterReversal } from "./attendance-change.ts";
 import { lockPaymentRow } from "./payments.ts";
 import {
   ensureSessionOpenOrAutoClose,
+  lockAttendeeRow,
   type SessionWriteOptions,
 } from "./session-lifecycle.ts";
 import {
@@ -39,6 +41,12 @@ export type RefundPaymentResult =
        * appears here; see the `Settlement` schema comment.
        */
       adjustedSettlements: AdjustedSettlement[];
+      /**
+       * T5 — the reset this refund wrote on a live session (PRESENT/LATE →
+       * ABSENT, "Not arrived"), audited as `attendance.correct`; null when the
+       * row was already ABSENT or for a `historicalBackfill` script write.
+       */
+      attendanceChange: SessionAttendanceChange | null;
     }
   | {
       ok: false;
@@ -88,6 +96,16 @@ export type RefundPaymentResult =
  * session too — neither can be cancelled/rescheduled while it holds active
  * money, so there is nothing there to give back.
  *
+ * **T5 — on a live session the refund also resets attendance**, in this same
+ * transaction, exactly as a void does (lib/db/payments.ts `voidPayment`): the
+ * student goes back to ABSENT ("Not arrived") through the one attendance-
+ * change writer, with a change row naming this payment as
+ * `refundedPaymentId` (so the log reads as a refund, not a void). The
+ * refunded payment no longer holds the active-payment slot
+ * (`Payment_one_active_per_attendee` is WHERE voided = false AND refunded =
+ * false), so a re-checked-in student pays again with a NEW row; this one
+ * keeps its flag and its `Refund` row untouched.
+ *
  * SEC-12: the payment row is locked and re-read before anything is decided,
  * and the flag flips conditionally — a refund racing a void (or a second
  * refund) serializes here, and the loser gets `alreadyVoided`/
@@ -104,15 +122,20 @@ export async function refundPayment(
   if (reason.trim().length === 0) return { ok: false, error: "reasonRequired" };
   const located = await tx.payment.findFirst({
     where: { centerId, id: paymentId },
-    select: { sessionId: true },
+    select: { sessionId: true, sessionAttendeeId: true },
   });
   if (!located) return { ok: false, error: "notFound" };
-  const gate = await ensureSessionOpenOrAutoClose(tx, located.sessionId, centerId, options.now, {
+  const now = options.now ?? new Date();
+  const gate = await ensureSessionOpenOrAutoClose(tx, located.sessionId, centerId, now, {
     historicalBackfill: options.historicalBackfill,
   });
   if (gate.status === "missing") return { ok: false, error: "notFound" };
   if (gate.status === "refused") return { ok: false, error: gate.reason };
 
+  // Session (shared) → attendee → payment: the order every attendee/payment
+  // write takes, so a refund racing a void, a re-check-in or a second payment
+  // on the same student serializes on the attendee row (T5).
+  await lockAttendeeRow(tx, located.sessionAttendeeId, centerId);
   const payment = await lockPaymentRow(tx, centerId, paymentId);
   if (!payment) return { ok: false, error: "notFound" };
   if (payment.voided) return { ok: false, error: "alreadyVoided" };
@@ -144,5 +167,16 @@ export async function refundPayment(
     refund.teacherShareReversed,
   );
 
-  return { ok: true, refund, payment: updatedPayment, adjustedSettlements };
+  const attendanceChange = options.historicalBackfill
+    ? null
+    : await resetAttendanceAfterReversal(tx, {
+        centerId,
+        attendeeId: located.sessionAttendeeId,
+        changedBy: refundedBy,
+        reason: reason.trim(),
+        cause: { refundedPaymentId: payment.id },
+        now,
+      });
+
+  return { ok: true, refund, payment: updatedPayment, adjustedSettlements, attendanceChange };
 }

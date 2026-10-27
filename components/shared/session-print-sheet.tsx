@@ -6,12 +6,14 @@ import { DetailRow } from "@/components/shared/field";
 import { Ltr } from "@/components/shared/ltr";
 import { formatDate, formatNumber, formatTimeRange } from "@/lib/format";
 import { todayInTimezone } from "@/lib/scheduling";
+import type { AttendanceDisplay } from "@/lib/attendance-rules";
 
 export type PrintRosterRow = {
   id: string;
   name: string;
   studentCode: string;
-  status: "PRESENT" | "LATE" | "ABSENT";
+  /** T5 — `attendanceDisplay` (lib/attendance-rules.ts): "Not arrived" is never Absent. */
+  status: AttendanceDisplay;
 };
 
 /**

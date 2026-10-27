@@ -1160,7 +1160,12 @@ model SessionAttendanceChange {
   fromStatus       AttendanceStatus
   toStatus         AttendanceStatus
   voidedPaymentId  String?
-  voidedPayment    Payment?         @relation(fields: [voidedPaymentId], references: [id], onDelete: SetNull)
+  voidedPayment    Payment?         @relation("AttendanceChangeVoidedPayment", fields: [voidedPaymentId], references: [id], onDelete: SetNull)
+  // T5 — a refund on a live session resets the student to not checked in;
+  // this is the refunded payment that caused it, so the change log reads as a
+  // refund and not as a void. Null on every other change.
+  refundedPaymentId String?
+  refundedPayment  Payment?         @relation("AttendanceChangeRefundedPayment", fields: [refundedPaymentId], references: [id], onDelete: SetNull)
   reason           String?
   changedBy        String
   changedAt        DateTime         @default(now())
@@ -1185,9 +1190,10 @@ model Payment {
   // Not a plain @unique (revised at M5): a void never deletes its row
   // (CLAUDE.md rule 2), and a correction writes a *new* Payment for the same
   // roster row — so one SessionAttendee can carry several Payments over its
-  // history. "At most one non-voided Payment per attendee" is a **partial
-  // unique index** since SEC-2b (`Payment_one_active_per_attendee`, WHERE
-  // voided = false — raw SQL in the migration, Prisma cannot express it), and
+  // history. "At most one active Payment per attendee" is a **partial
+  // unique index** since SEC-2b (`Payment_one_active_per_attendee` — since T5
+  // WHERE voided = false AND refunded = false, so a refund frees the slot;
+  // raw SQL in the migration, Prisma cannot express it), and
   // `recordPayment` inserts with ON CONFLICT against it (SEC-05). A CHECK
   // (`Payment_not_voided_and_refunded`) keeps void and refund exclusive.
   // See docs/01-data-model.md §3.
@@ -1220,8 +1226,11 @@ model Payment {
   refunded             Boolean                   @default(false)
   refund               Refund?
   // R2 — the live attendance change (PRESENT/LATE → ABSENT) that voided this
-  // payment, when that is how it was voided.
-  attendanceChanges    SessionAttendanceChange[]
+  // payment, when that is how it was voided — or (T5) the reset its own void
+  // wrote on a live session.
+  attendanceChanges    SessionAttendanceChange[] @relation("AttendanceChangeVoidedPayment")
+  // T5 — the reset a refund of this payment wrote on a live session.
+  refundAttendanceChanges SessionAttendanceChange[] @relation("AttendanceChangeRefundedPayment")
   // SEC-2b (D-05) — the settlements that claimed this payment's teacher share.
   // At most one claim is live (not released) at a time — a partial unique
   // index in the migration.

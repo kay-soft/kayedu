@@ -6,6 +6,7 @@ import type { AttendanceStatus, PrismaClient } from "@prisma/client";
 // lib/db/payments.ts and lib/db/attendance.ts). `/dashboard` and `/analytics`
 // both call these functions with different date-range defaults, so the
 // revenue/count math lives here exactly once (docs/02-architecture.md §14).
+import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { dateKey } from "../scheduling.ts";
 import { moneyNumber } from "./money-sums.ts";
 
@@ -265,7 +266,8 @@ export async function attendanceStatusCounts(
   const date = dateWhere(range);
   const rows = await db.sessionAttendee.groupBy({
     by: ["attendanceStatus"],
-    where: { centerId, ...(date ? { session: { date } } : {}) },
+    // T5 — a drop-in's ABSENT row is never an absence (lib/attendance-rules.ts).
+    where: { centerId, ...EXCLUDE_DROP_IN_NO_SHOWS, ...(date ? { session: { date } } : {}) },
     _count: { attendanceStatus: true },
   });
 

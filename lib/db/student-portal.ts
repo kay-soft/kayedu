@@ -2,6 +2,7 @@ import type { EnrollmentStatus, Prisma, PrismaClient, SessionStatus } from "@pri
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/discover.ts).
+import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
@@ -280,6 +281,9 @@ export function studentPastAttendance(
     where: scopedWhere(centerId, {
       studentProfileId,
       session: { date: { lt: uptoDate } },
+      // T5 — a drop-in's ABSENT row is a "never really came" record, not a
+      // past session (lib/attendance-rules.ts).
+      ...EXCLUDE_DROP_IN_NO_SHOWS,
     }),
     include: {
       session: {

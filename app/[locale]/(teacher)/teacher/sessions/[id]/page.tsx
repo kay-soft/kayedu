@@ -23,6 +23,7 @@ import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
+import { attendanceDisplay } from "@/lib/attendance-rules";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -42,6 +43,8 @@ const ATTENDANCE_BADGE = {
   PRESENT: "success",
   LATE: "warning",
   ABSENT: "danger",
+  // T5 — a live session's ABSENT row, or a drop-in's: not an absence.
+  NOT_ARRIVED: "neutral",
 } as const;
 
 /**
@@ -81,6 +84,7 @@ export default async function TeacherSessionDetailPage({
   const timeZone = sessionTimeZone(session, ctx.settings?.timezone ?? DEFAULT_TIMEZONE);
   const receipt = await loadSessionReceiptView(ctx.center.id, session);
 
+  const closed = session.closedAt !== null;
   const roster = await Promise.all(
     session.attendees
       .filter((attendee) => attendee.studentProfileId)
@@ -88,11 +92,12 @@ export default async function TeacherSessionDetailPage({
         id: attendee.id,
         name: fullName(localName(attendee.studentProfile!, attendee.studentProfile!.user)),
         studentCode: attendee.studentProfile!.studentCode,
-        status: attendee.attendanceStatus,
+        // T5 — "Not arrived", never Absent, for a live ABSENT row or a drop-in's.
+        status: attendanceDisplay(attendee, closed),
         isDropIn: attendee.isDropIn,
         // An absence streak is per class; a one-time session (R5) has none.
         consecutiveAbsences:
-          attendee.attendanceStatus === "ABSENT" && session.classGroupId
+          attendanceDisplay(attendee, closed) === "ABSENT" && session.classGroupId
             ? await consecutiveAbsenceCount(
                 prisma,
                 ctx.center.id,
