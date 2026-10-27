@@ -664,6 +664,7 @@ const URL_STATE_CONTROLS = [
   "<ScheduleDateFilter",
   "<TypeAheadSearch",
   "<AddAttendeeSearch",
+  "<QueueTabs",
 ];
 
 function checkSoftUrlState() {
@@ -774,6 +775,18 @@ function checkSoftUrlState() {
   );
   const audit = stripComments(read("app/[locale]/(center)/audit/page.tsx"));
   check("The audit filter tabs are SoftLinks", /<SoftLink\b[\s\S]*?hrefFor\(kind\)/.test(audit));
+  // F7: the approvals type tabs — SoftLink pills from `sm`, a Select (moved
+  // through useUrlFilters) below it, and never a horizontally scrolling strip.
+  const queueTabs = stripComments(read("components/shared/queue-tabs.tsx"));
+  check(
+    "The approvals type tabs are SoftLinks from sm and a Select (useUrlFilters) below it, with no sideways scroll",
+    /<SoftLink\b/.test(queueTabs) &&
+      /useUrlFilters\(\)/.test(queueTabs) &&
+      /<Select\b/.test(queueTabs) &&
+      /hidden[^"]*sm:flex/.test(queueTabs) &&
+      /sm:hidden/.test(queueTabs) &&
+      !/overflow-x/.test(queueTabs),
+  );
 
   // Results regions: every page with URL-state controls dims its results while pending.
   const region = stripComments(read("components/shared/results-region.tsx"));

@@ -105,7 +105,9 @@
     "rollupDisabledReason": "اختر فرعًا لاستخدام هذه الصفحة",
     "rollupShowingBranch": "تُعرض بيانات {branch}. اختر فرعًا لتغييره.",
     "skipToContent": "انتقل إلى المحتوى",
-    "accountSettings": "إعدادات الحساب"
+    "accountSettings": "إعدادات الحساب",
+    "pendingNavLabel": "{label}، {count} قيد الانتظار",
+    "pendingCapped": "{max}+"
   },
   "NavGroups": {
     "frontDesk": "المكتب الأمامي",
@@ -1470,6 +1472,16 @@
     "unknownActor": "شخص ما"
   },
   "Approvals": {
+    "tabsLabel": "أنواع الطلبات",
+    "tabsSelectLabel": "عرض الطلبات من نوع",
+    "tabs": {
+      "all": "الكل",
+      "classRequests": "طلبات الفصول",
+      "sessionRequests": "طلبات الحصص",
+      "enrolments": "طلبات الالتحاق",
+      "bookings": "حجوزات الحصص",
+      "accountClaims": "ربط الحسابات"
+    },
     "pageCapped": "يُعرض {shown, number, arab} من {total, number, arab}. عالِج بعضها لعرض الباقي.",
     "title": "الموافقات",
     "subtitle": "{count, plural, =0 {لا يوجد طلبات معلقة} one {{count, number, arab} طلب معلق} other {{count, number, arab} طلب معلق}}.",
@@ -1546,6 +1558,8 @@
     "accountClaims": {
       "title": "طلبات ربط الحسابات",
       "description": "سجّل شخصٌ ببريد إلكتروني لشخص موجود بالفعل لدى هذا الفرع. وافِق فقط عندما يكون هذا الشخص أمامك.",
+      "empty": "لا توجد طلبات ربط حسابات معلقة.",
+      "emptyHint": "عندما يسجّل شخصٌ ببريد إلكتروني لشخص موجود بالفعل لدى هذا الفرع، ينتظر الطلب هنا حتى توافق عليه شخصيًا.",
       "headline": {
         "student": "يريد استخدام سجلّه كطالب",
         "teacher": "يريد استخدام سجلّه كمدرّس",
@@ -2263,6 +2277,12 @@
     "emptyHint": "تظهر هنا الفصول التي يُسندها إليك أي فرع. ويمكنك أيضًا طلب فصل جديد بالأسفل."
   },
   "TeacherApprovals": {
+    "tabsLabel": "أنواع الطلبات",
+    "tabsSelectLabel": "عرض الطلبات من نوع",
+    "tabs": {
+      "enrolments": "طلبات الالتحاق",
+      "bookings": "حجوزات الحصص"
+    },
     "title": "موافقاتي",
     "subtitle": "{count, plural, one {طالب واحد بانتظار} other {{count, number, arab} طلاب بانتظار}} الانضمام إلى مجموعاتك.",
     "listTitle": "الطلبات المعلقة",

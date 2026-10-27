@@ -2,6 +2,8 @@ import type {
   EnrollmentStatus,
   Prisma,
   PrismaClient,
+  ChangeRequestStatus,
+  ChangeRequestType,
   ReservationStatus,
   Role,
   SessionBookingStatus,
@@ -63,9 +65,30 @@ const TEACHER: Role = "TEACHER";
 const ACTIVE_ENROLLMENT: EnrollmentStatus = "ACTIVE";
 const EXISTING_ENROLLMENT_STATUSES: EnrollmentStatus[] = ["ACTIVE", "BLOCKED"];
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
+const PENDING_CHANGE_REQUEST: ChangeRequestStatus = "PENDING";
 const PENDING_RESERVATION: ReservationStatus = "PENDING";
 const PENDING_BOOKING: SessionBookingStatus = "PENDING";
 const CONFIRMED_BOOKING: SessionBookingStatus = "CONFIRMED";
+
+/**
+ * The PENDING bookings `/approvals` and a teacher's own queue list (F7: and
+ * count). One `where`, shared by `sessionBookings.listPending` and
+ * `countPending`, so a tab's number and its rows cannot disagree.
+ */
+function pendingBookingWhere(
+  centerId: string,
+  teacherId: string | undefined,
+  now: Date,
+): Prisma.SessionBookingWhereInput {
+  return scopedWhere(centerId, {
+    status: PENDING_BOOKING,
+    session: {
+      ...BOOKABLE_SESSION,
+      date: { gte: addDays(startOfUtcDay(now), -1) },
+      classGroup: { active: true, ...(teacherId ? { teacherId } : {}) },
+    },
+  });
+}
 
 /**
  * Tenant-scoped data access (docs/02-architecture.md §5).
@@ -1163,15 +1186,32 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
      */
     changeRequests: {
       /** `take` bounds a queue a flood could grow (SEC-25): the Approvals screen reads one page. */
-      list: (where?: Prisma.ChangeRequestWhereInput, options?: { take?: number }) =>
+      list: (
+        where?: Prisma.ChangeRequestWhereInput,
+        // Newest first by default (a teacher's own "my requests"); the
+        // Approvals queue passes "asc" — the oldest waits at the top (F7).
+        options?: { take?: number; order?: "asc" | "desc" },
+      ) =>
         prisma.changeRequest.findMany({
           where: scopedWhere(centerId, where),
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: options?.order ?? "desc" },
           ...(options?.take ? { take: options.take } : {}),
         }),
 
       count: (where?: Prisma.ChangeRequestWhereInput) =>
         prisma.changeRequest.count({ where: scopedWhere(centerId, where) }),
+
+      /** PENDING requests of this centre, one grouped count by type (F7). */
+      countPendingByType: async () => {
+        const groups = await prisma.changeRequest.groupBy({
+          by: ["type"],
+          where: scopedWhere(centerId, { status: PENDING_CHANGE_REQUEST }),
+          _count: { _all: true },
+        });
+        const countOf = (type: ChangeRequestType) =>
+          groups.find((group) => group.type === type)?._count._all ?? 0;
+        return { newClass: countOf("NEW_CLASS"), newSession: countOf("NEW_SESSION") };
+      },
 
       findById: (id: string) => scopedFindById(prisma.changeRequest, centerId, id),
 
@@ -1250,6 +1290,15 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
           where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
         }),
 
+      /** `listPendingForTeacher`'s rows, counted — the same `where` (F7). */
+      countPendingForTeacher: (teacherId: string) =>
+        prisma.reservation.count({
+          where: scopedWhere(centerId, {
+            status: PENDING_RESERVATION,
+            classGroup: { teacherId, active: true },
+          }),
+        }),
+
       findById: (id: string) => scopedFindById(prisma.reservation, centerId, id),
     },
 
@@ -1269,14 +1318,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       listPending: async (options: { teacherId?: string; now?: Date } = {}) => {
         const now = options.now ?? new Date();
         const rows = await prisma.sessionBooking.findMany({
-          where: scopedWhere(centerId, {
-            status: PENDING_BOOKING,
-            session: {
-              ...BOOKABLE_SESSION,
-              date: { gte: addDays(startOfUtcDay(now), -1) },
-              classGroup: { active: true, ...(options.teacherId ? { teacherId: options.teacherId } : {}) },
-            },
-          }),
+          where: pendingBookingWhere(centerId, options.teacherId, now),
           orderBy: { requestedAt: "asc" },
           take: 500,
           select: {
@@ -1307,6 +1349,36 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
           },
         });
         return rows.filter((row) => isBookableNow(row.session, now));
+      },
+
+      /**
+       * `listPending`'s rows, counted (F7). "Still bookable" depends on each
+       * session's own timezone, which SQL cannot express, so this reads the
+       * same rows with only the six columns `isBookableNow` needs and filters
+       * them the same way — the number is the queue's length by construction,
+       * not by a second rule that could drift from it.
+       */
+      countPending: async (options: { teacherId?: string; now?: Date } = {}) => {
+        const now = options.now ?? new Date();
+        const rows = await prisma.sessionBooking.findMany({
+          where: pendingBookingWhere(centerId, options.teacherId, now),
+          orderBy: { requestedAt: "asc" },
+          take: 500,
+          select: {
+            session: {
+              select: {
+                classGroupId: true,
+                status: true,
+                closedAt: true,
+                rescheduledToId: true,
+                date: true,
+                startTime: true,
+                timezone: true,
+              },
+            },
+          },
+        });
+        return rows.filter((row) => isBookableNow(row.session, now)).length;
       },
 
       /** A session's CONFIRMED bookings — the desk's "Booked" and "not arrived". */

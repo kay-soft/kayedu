@@ -11,8 +11,11 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
+import { QueueTabs } from "@/components/shared/queue-tabs";
 import { RequestCard } from "@/components/shared/request-card";
+import { ResultsRegion } from "@/components/shared/results-region";
 import { SectionHeader } from "@/components/shared/section-header";
+import { getPendingApprovalCounts } from "@/lib/auth/approval-counts";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { pendingClaimsForCenter } from "@/lib/db/account-claims";
@@ -24,6 +27,17 @@ import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { usersByIds } from "@/lib/db/identity";
 import { catalogGradesByIds, catalogSubjectsByIds } from "@/lib/db/catalog";
+
+/** The `?type=` tabs (F7), in the order they are drawn. */
+const APPROVALS_TABS = [
+  "all",
+  "classRequests",
+  "sessionRequests",
+  "enrolments",
+  "bookings",
+  "accountClaims",
+] as const;
+type ApprovalsTab = (typeof APPROVALS_TABS)[number];
 
 type ChangeRequestPayload = {
   subjectId?: string | null;
@@ -65,10 +79,19 @@ type SessionRequestPayload = {
  * `Session` (`lib/db/approvals.ts`'s `resolveSessionRequest`) — no money to
  * guess at, the same "approve == act" shape M8's `confirmReservation` uses.
  */
-export default async function ApprovalsPage() {
+export default async function ApprovalsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string }>;
+}) {
   const ctx = await getTenantContext("center");
   await requirePermission(ctx, "approvals.manage");
   const db = scoped(ctx);
+
+  const { type: rawType } = await searchParams;
+  const tab: ApprovalsTab = APPROVALS_TABS.find((key) => key === rawType) ?? "all";
+  // Only the queues the selected tab shows are read; "All" reads every one.
+  const shows = (...kinds: ApprovalsTab[]) => tab === "all" || kinds.includes(tab);
 
   const t = await getTranslations("Approvals");
   const tDays = await getTranslations("Classes");
@@ -76,7 +99,14 @@ export default async function ApprovalsPage() {
   const locale = await getLocale();
   const dayNames = tDays.raw("dayNames") as string[];
 
+  // F7 — every number on this screen (the tabs, the header, the "showing N of
+  // M" notes) is one `pendingApprovalCounts` read, the same one the sidebar
+  // badge shows, so none of them can disagree with the rows below.
+  const counts = await getPendingApprovalCounts(ctx);
+
+  // Oldest first in every queue: the request that has waited longest is on top.
   const page = { take: APPROVALS_PAGE_SIZE };
+  const oldestFirst = { ...page, order: "asc" as const };
   const [
     changeRequests,
     sessionRequests,
@@ -85,26 +115,23 @@ export default async function ApprovalsPage() {
     grades,
     classGroups,
     accountClaims,
-    changeRequestTotal,
-    sessionRequestTotal,
-    reservationTotal,
     allBookings,
   ] = await Promise.all([
-    db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }, page),
-    db.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }, page),
-    db.reservations.listPending(page),
-    db.subjects.list(),
-    db.grades.list(),
-    db.classGroups.list(),
-    pendingClaimsForCenter(prisma, ctx.center.id),
-    db.changeRequests.count({ status: "PENDING", type: "NEW_CLASS" }),
-    db.changeRequests.count({ status: "PENDING", type: "NEW_SESSION" }),
-    db.reservations.countPending(),
+    shows("classRequests")
+      ? db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }, oldestFirst)
+      : [],
+    shows("sessionRequests")
+      ? db.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }, oldestFirst)
+      : [],
+    shows("enrolments") ? db.reservations.listPending(page) : [],
+    shows("classRequests", "sessionRequests") ? db.subjects.list() : [],
+    shows("classRequests", "sessionRequests") ? db.grades.list() : [],
+    shows("sessionRequests") ? db.classGroups.list() : [],
+    shows("accountClaims") ? pendingClaimsForCenter(prisma, ctx.center.id) : [],
     // F6 — pending single-session bookings; an expired one is left out.
-    db.sessionBookings.listPending(),
+    shows("bookings") ? db.sessionBookings.listPending() : [],
   ]);
   const bookings = allBookings.slice(0, APPROVALS_PAGE_SIZE);
-  const bookingTotal = allBookings.length;
   // SEC-25: each queue shows one page; the rest wait behind it, counted.
   const moreNote = (shown: number, total: number) =>
     total > shown ? (
@@ -157,8 +184,15 @@ export default async function ApprovalsPage() {
   }
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
-  const totalPending =
-    changeRequestTotal + sessionRequestTotal + reservationTotal + bookingTotal + accountClaims.length;
+  const totalPending = counts.total;
+  const tabCounts: Record<ApprovalsTab, number> = {
+    all: counts.total,
+    classRequests: counts.classRequests,
+    sessionRequests: counts.sessionRequests,
+    enrolments: counts.enrolments,
+    bookings: counts.bookings,
+    accountClaims: counts.accountClaims,
+  };
 
   // A NEW_CLASS request from someone with no local `Membership` is a teacher
   // asking to work at this branch at all (M15's centre directory), not an
@@ -175,7 +209,20 @@ export default async function ApprovalsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle", { count: totalPending })} />
 
-      {totalPending === 0 ? (
+      <QueueTabs
+        tabs={APPROVALS_TABS.map((key) => ({
+          key,
+          label: t(`tabs.${key}`),
+          count: tabCounts[key],
+        }))}
+        active={tab}
+        basePath={ROUTES.centerApprovals}
+        label={t("tabsLabel")}
+        selectLabel={t("tabsSelectLabel")}
+      />
+
+      <ResultsRegion>
+      {tab === "all" && totalPending === 0 ? (
         <EmptyState
           icon={<ClipboardCheck />}
           tone="success"
@@ -187,12 +234,20 @@ export default async function ApprovalsPage() {
         />
       ) : (
         <div className="flex flex-col gap-8">
-          {accountClaims.length > 0 ? (
+          {(tab === "all" && accountClaims.length > 0) || tab === "accountClaims" ? (
             <section className="flex flex-col gap-3">
               <SectionHeader
                 title={t("accountClaims.title")}
                 description={t("accountClaims.description")}
               />
+              {accountClaims.length === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<ClipboardCheck />}
+                  title={t("accountClaims.empty")}
+                  description={t("accountClaims.emptyHint")}
+                />
+              ) : null}
               {accountClaims.map((claim) => (
                 <RequestCard
                   key={claim.id}
@@ -210,9 +265,11 @@ export default async function ApprovalsPage() {
                   actions={<AccountClaimActions id={claim.id} />}
                 />
               ))}
+              {moreNote(accountClaims.length, counts.accountClaims)}
             </section>
           ) : null}
 
+          {shows("classRequests") ? (
           <section className="flex flex-col gap-3">
             <SectionHeader
               title={t("changeRequests.title")}
@@ -282,9 +339,11 @@ export default async function ApprovalsPage() {
                 );
               })
             )}
-            {moreNote(changeRequests.length, changeRequestTotal)}
+            {moreNote(changeRequests.length, counts.classRequests)}
           </section>
+          ) : null}
 
+          {shows("sessionRequests") ? (
           <section className="flex flex-col gap-3">
             <SectionHeader
               title={t("sessionRequests.title")}
@@ -346,9 +405,11 @@ export default async function ApprovalsPage() {
                 );
               })
             )}
-            {moreNote(sessionRequests.length, sessionRequestTotal)}
+            {moreNote(sessionRequests.length, counts.sessionRequests)}
           </section>
+          ) : null}
 
+          {shows("enrolments") ? (
           <section className="flex flex-col gap-3">
             <SectionHeader
               title={t("reservations.title")}
@@ -396,9 +457,11 @@ export default async function ApprovalsPage() {
                 );
               })
             )}
-            {moreNote(reservations.length, reservationTotal)}
+            {moreNote(reservations.length, counts.enrolments)}
           </section>
+          ) : null}
 
+          {shows("bookings") ? (
           <section className="flex flex-col gap-3">
             <SectionHeader title={t("bookings.title")} description={t("bookings.description")} />
             {bookings.length === 0 ? (
@@ -448,10 +511,12 @@ export default async function ApprovalsPage() {
                 );
               })
             )}
-            {moreNote(bookings.length, bookingTotal)}
+            {moreNote(bookings.length, counts.bookings)}
           </section>
+          ) : null}
         </div>
       )}
+      </ResultsRegion>
     </div>
   );
 }

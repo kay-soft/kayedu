@@ -7,10 +7,12 @@ import {
   shellUser,
   type ShellFrame,
 } from "@/components/shell/from-context";
-import { navForExperience } from "@/components/shell/nav";
+import { navForExperience, withPendingCount } from "@/components/shell/nav";
 import { RollupNotice } from "@/components/shell/rollup-notice";
+import { getPendingApprovalCounts } from "@/lib/auth/approval-counts";
 import { ROUTES } from "@/lib/routes";
 import {
+  ctxCan,
   getOwnerOrgGroups,
   getUserCenterRelations,
   requireExperience,
@@ -36,10 +38,16 @@ export async function centerShell(): Promise<ShellFrame> {
   // for anyone who is not an Owner of a multi-branch organization. They feed
   // the header switcher (docs/04 §11.1) — the same set `/select-center`
   // already offers this user, resolved by the same helpers.
-  const [relations, orgGroups, defaultCollapsed] = await Promise.all([
+  // F7 — the Approvals badge: only for someone who can act on the queue, and
+  // never under "Whole Management", where Approvals is a disabled item with no
+  // roll-up meaning. Read fresh on every navigation (no polling, no cross-request
+  // cache), and shared with the Approvals page's tabs through `cache()`.
+  const showApprovalsBadge = !ctx.rollupOrganizationId && ctxCan(ctx, "approvals.manage");
+  const [relations, orgGroups, defaultCollapsed, approvalCounts] = await Promise.all([
     getUserCenterRelations(ctx.user.id),
     getOwnerOrgGroups(ctx.user.id),
     cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
+    showApprovalsBadge ? getPendingApprovalCounts(ctx) : null,
   ]);
 
   // "Whole Management": the shell names the organization, never the
@@ -52,7 +60,11 @@ export async function centerShell(): Promise<ShellFrame> {
   return {
     props: {
       experience: "center",
-      nav: navForExperience("center", ctx.role, ctx.grants),
+      nav: withPendingCount(
+        navForExperience("center", ctx.role, ctx.grants),
+        ROUTES.centerApprovals,
+        approvalCounts?.total,
+      ),
       brand: rollupGroup
         ? brandFromRollup(ctx, rollupGroup.organizationName)
         : brandFromContext(ctx),

@@ -105,7 +105,9 @@
     "rollupDisabledReason": "Pick a branch to use this",
     "rollupShowingBranch": "Showing {branch}. Pick a branch to change.",
     "skipToContent": "Skip to content",
-    "accountSettings": "Account settings"
+    "accountSettings": "Account settings",
+    "pendingNavLabel": "{label}, {count} pending",
+    "pendingCapped": "{max}+"
   },
   "NavGroups": {
     "frontDesk": "Front desk",
@@ -1470,6 +1472,16 @@
     "unknownActor": "someone"
   },
   "Approvals": {
+    "tabsLabel": "Request types",
+    "tabsSelectLabel": "Show requests of type",
+    "tabs": {
+      "all": "All",
+      "classRequests": "Class requests",
+      "sessionRequests": "Session requests",
+      "enrolments": "Enrolments",
+      "bookings": "Session bookings",
+      "accountClaims": "Account claims"
+    },
     "pageCapped": "Showing {shown} of {total}. Resolve some to see the rest.",
     "title": "Approvals",
     "subtitle": "{count, plural, =0 {Nothing pending} one {# pending request} other {# pending requests}}.",
@@ -1546,6 +1558,8 @@
     "accountClaims": {
       "title": "Account claims",
       "description": "Someone signed up with the email of a person this branch already has. Approve only when that person is in front of you.",
+      "empty": "No pending account claims.",
+      "emptyHint": "When someone signs up with the email of a person this branch already has, the claim waits here for you to approve in person.",
       "headline": {
         "student": "Wants to use their student record",
         "teacher": "Wants to use their teacher record",
@@ -2263,6 +2277,12 @@
     "emptyHint": "Classes a branch assigns to you appear here. You can also request a new one below."
   },
   "TeacherApprovals": {
+    "tabsLabel": "Request types",
+    "tabsSelectLabel": "Show requests of type",
+    "tabs": {
+      "enrolments": "Enrolments",
+      "bookings": "Session bookings"
+    },
     "title": "My approvals",
     "subtitle": "{count, plural, one {# student waiting} other {# students waiting}} to join your classes.",
     "listTitle": "Pending requests",

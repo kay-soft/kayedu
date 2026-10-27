@@ -7,8 +7,9 @@ import {
   shellUser,
   type ShellFrame,
 } from "@/components/shell/from-context";
-import { navForExperience } from "@/components/shell/nav";
-import { requireTeacherUser } from "@/lib/auth/tenant";
+import { navForExperience, withPendingCount } from "@/components/shell/nav";
+import { getPendingTeacherApprovalCounts } from "@/lib/auth/approval-counts";
+import { ctxCan, requireTeacherUser } from "@/lib/auth/tenant";
 import { ROUTES } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 
@@ -40,10 +41,18 @@ export async function teacherShell(): Promise<ShellFrame> {
   }
 
   const { ctx } = session;
+  // F7 — the teacher's own count: only their classes, only if they may act.
+  const approvalCounts = ctxCan(ctx, "reservation.manage.own")
+    ? await getPendingTeacherApprovalCounts(ctx)
+    : null;
   return {
     props: {
       experience: "teacher",
-      nav: navForExperience("teacher", ctx.role, ctx.grants),
+      nav: withPendingCount(
+        navForExperience("teacher", ctx.role, ctx.grants),
+        ROUTES.teacherApprovals,
+        approvalCounts?.total,
+      ),
       brand: brandFromContext(ctx),
       user: shellUser(ctx.user, ctx.role),
       scope: shellScope(session.relations, [], ctx.center.id),

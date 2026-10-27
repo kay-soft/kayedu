@@ -298,6 +298,16 @@
 
 ---
 
+## 30. A pending-approvals count that updates without navigating
+
+**What it is.** The sidebar Approvals badge and the Approvals tab counts (F7) refresh the moment a request is made, in a manager's or teacher's already-open tab, without them navigating or acting.
+
+**Why deferred.** F7 reads the counts on every navigation and after each approval action (the action's `revalidatePath` refreshes the page and the shell together) and deliberately does not poll: polling every open tab multiplies pooled-connection load for a number that is usually unchanged, and the pooler is the product's scarce resource (`02-architecture.md` §14). A request made while someone sits on another page therefore shows on their next click. Doing better needs a push channel, which the product does not have anywhere yet.
+
+**Depends on.** A realtime transport (Supabase Realtime or server-sent events) that carries only "a request landed for branch X" — never the rows — and re-reads `pendingApprovalCounts` on receipt, subscribed per branch so `center_id` stays the sole isolation key; a decision on the load it adds against the connection budget.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.
