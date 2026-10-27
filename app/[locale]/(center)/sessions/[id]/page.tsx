@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
 import { AddAttendeeSearch } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-search";
+import { BookedNotArrived, type BookedStudent } from "@/app/[locale]/(center)/sessions/[id]/booked-not-arrived";
 import { DeleteSessionButton } from "@/app/[locale]/(center)/sessions/[id]/delete-session-button";
 import { ActionBar } from "@/components/shared/action-bar";
 import { EndSessionButton } from "@/app/[locale]/(center)/sessions/[id]/end-session-button";
@@ -100,7 +101,7 @@ export default async function SessionDetailPage({
   // D-14 — the session's own frozen timezone (its lifecycle and its times).
   const timeZone = sessionTimeZone(session, centreTimeZone(ctx.settings));
   const canReschedule = ctxCan(ctx, "session.manage");
-  const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks, deleteBlockers] = await Promise.all([
+  const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks, deleteBlockers, confirmedBookings] = await Promise.all([
     // A one-time session (R5) has no class, so no enrolled roster: everyone is a drop-in.
     session.classGroupId ? db.enrollments.listForClass(session.classGroupId) : Promise.resolve([]),
     loadSessionReceiptView(ctx.center.id, session),
@@ -116,7 +117,21 @@ export default async function SessionDetailPage({
     // R5 — Delete is offered only for a manual/one-time session that passes
     // the data layer's own rule (it re-checks on submit regardless).
     canReschedule ? manualSessionDeleteState(prisma, ctx.center.id, session.id) : Promise.resolve(null),
+    // F6 — students who booked this one session online.
+    db.sessionBookings.listConfirmedForSession(session.id),
   ]);
+  // A booking names the global User; its branch profile exists from
+  // confirmation on (`ensureStudentProfile`).
+  const bookedProfiles =
+    confirmedBookings.length > 0
+      ? await db.students.search({
+          where: { userId: { in: confirmedBookings.map((booking) => booking.studentId) } },
+          take: confirmedBookings.length,
+        })
+      : [];
+  const bookedAttendeeIds = new Set(
+    confirmedBookings.flatMap((booking) => (booking.sessionAttendeeId ? [booking.sessionAttendeeId] : [])),
+  );
   // R3 — this session's own room set (primary + extras) and what it seats.
   const sessionRooms = session.room
     ? [session.room, ...session.extraRooms.map((extra) => extra.room)]
@@ -156,6 +171,7 @@ export default async function SessionDetailPage({
       name: fullName(localName(profile, profile.user)),
       studentCode: profile.studentCode,
       isDropIn: attendee?.isDropIn ?? false,
+      booked: attendee ? bookedAttendeeIds.has(attendee.id) : false,
       enrolled,
       photoUrl: null,
       status: attendee?.attendanceStatus ?? null,
@@ -183,6 +199,10 @@ export default async function SessionDetailPage({
   }
 
   const roster = [...rosterMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // F6 — "Booked — not arrived": a CONFIRMED booking with no roster row yet.
+  // A student who has since enrolled is on the roster already and not listed.
+  const notArrivedProfiles = bookedProfiles.filter((profile) => !rosterMap.has(profile.id));
 
   // An absence streak is per class; a one-time session (R5) belongs to none.
   // The streaks and the add-student search both need only the roster, so they
@@ -242,7 +262,8 @@ export default async function SessionDetailPage({
   const signPhoto = (path: string | null | undefined) =>
     path && storageConfigured() ? signedUrlFor(ctx.center.id, AVATARS_BUCKET, path) : Promise.resolve(null);
   const candidateRows = canCheckIn && !rosterReadOnly ? (candidateProfiles ?? []) : [];
-  const [, candidates] = await Promise.all([
+  const canCheckInHere = canCheckIn && !rosterReadOnly;
+  const [, candidates, bookedNotArrived] = await Promise.all([
     Promise.all(
       roster
         .filter((row) => canCheckIn && !rosterReadOnly && row.status === null)
@@ -257,6 +278,16 @@ export default async function SessionDetailPage({
           name: fullName(localName(profile, profile.user)),
           studentCode: profile.studentCode,
           photoUrl: await signPhoto(profile.photoUrl),
+        }),
+      ),
+    ),
+    Promise.all(
+      notArrivedProfiles.map(
+        async (profile): Promise<BookedStudent> => ({
+          studentProfileId: profile.id,
+          name: fullName(localName(profile, profile.user)),
+          studentCode: profile.studentCode,
+          photoUrl: canCheckInHere ? await signPhoto(profile.photoUrl) : null,
         }),
       ),
     ),
@@ -413,6 +444,7 @@ export default async function SessionDetailPage({
             priceLabel={session.priceSnapshot > 0 ? formatMoney(session.priceSnapshot, locale) : null}
             paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
             canRecordPayment={canRecordPayment}
+            bookedStudentIds={bookedProfiles.map((profile) => profile.id)}
           >
           <DetailCard title={t("roster.title")} description={t("roster.description")}>
             <SessionRoster
@@ -426,6 +458,8 @@ export default async function SessionDetailPage({
               paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
               readOnly={rosterReadOnly}
             />
+
+            <BookedNotArrived students={bookedNotArrived} canCheckIn={canCheckInHere} />
 
             {rosterReadOnly ? null : (
               <div className="border-t border-border pt-4">

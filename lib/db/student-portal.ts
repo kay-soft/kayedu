@@ -88,28 +88,41 @@ export async function listReservationsForStudent(db: Db, studentUserId: string) 
     orderBy: { requestedAt: "desc" },
     include: {
       center: { select: { id: true, name: true, logoPath: true, themeColor: true } },
-      classGroup: {
-        select: {
-          id: true,
-          centerId: true,
-          subjectId: true,
-          gradeId: true,
-          subject: { select: { nameAr: true, nameEn: true } },
-          grade: { select: { nameAr: true, nameEn: true } },
-        },
-      },
+      classGroup: { select: CROSS_CENTRE_CLASS_LABEL_SELECT },
     },
   });
+  const labelled = await withCentreCatalogNames(db, rows.map((row) => row.classGroup));
+  return rows.map((row, index) => ({ ...row, classGroup: labelled[index] }));
+}
 
+/** A class's catalog labels as an identity-scoped (cross-centre) read selects them. */
+const CROSS_CENTRE_CLASS_LABEL_SELECT = {
+  id: true,
+  centerId: true,
+  subjectId: true,
+  gradeId: true,
+  subject: { select: { nameAr: true, nameEn: true } },
+  grade: { select: { nameAr: true, nameEn: true } },
+} satisfies Prisma.ClassGroupSelect;
+
+type CrossCentreClassLabel = Prisma.ClassGroupGetPayload<{ select: typeof CROSS_CENTRE_CLASS_LABEL_SELECT }>;
+
+/**
+ * The centre-local display names for classes read across centres (M13): one
+ * batched query over the distinct (centre, catalog id) pairs present, attached
+ * as a `selections` array in the shape a single-centre nested include has, so
+ * `lib/catalog.ts`'s `catalogLabelWithSelection` reads it back identically.
+ */
+async function withCentreCatalogNames(db: Db, classes: CrossCentreClassLabel[]) {
   type Pair = { kind: "SUBJECT" | "GRADE"; centerId: string; catalogId: string };
   const pairsByKey = new Map<string, Pair>();
-  for (const row of rows) {
-    if (row.classGroup.subjectId) {
-      const pair: Pair = { kind: "SUBJECT", centerId: row.classGroup.centerId, catalogId: row.classGroup.subjectId };
+  for (const row of classes) {
+    if (row.subjectId) {
+      const pair: Pair = { kind: "SUBJECT", centerId: row.centerId, catalogId: row.subjectId };
       pairsByKey.set(`${pair.kind}:${pair.centerId}:${pair.catalogId}`, pair);
     }
-    if (row.classGroup.gradeId) {
-      const pair: Pair = { kind: "GRADE", centerId: row.classGroup.centerId, catalogId: row.classGroup.gradeId };
+    if (row.gradeId) {
+      const pair: Pair = { kind: "GRADE", centerId: row.centerId, catalogId: row.gradeId };
       pairsByKey.set(`${pair.kind}:${pair.centerId}:${pair.catalogId}`, pair);
     }
   }
@@ -148,22 +161,60 @@ export async function listReservationsForStudent(db: Db, studentUserId: string) 
     return [override ?? { displayNameAr: null, displayNameEn: null }];
   };
 
+  return classes.map((row) => ({
+    ...row,
+    subject: row.subject
+      ? { ...row.subject, selections: withDisplayName("SUBJECT", row.centerId, row.subjectId) }
+      : null,
+    grade: row.grade
+      ? { ...row.grade, selections: withDisplayName("GRADE", row.centerId, row.gradeId) }
+      : null,
+  }));
+}
+
+/**
+ * "My requests → Session bookings" (F6): every single-session booking this
+ * student has made, across every branch — read by their own `studentId`,
+ * like the reservations above. Carries the replacement session's date for one
+ * a reschedule cancelled ("moved to <date> — book again").
+ */
+export async function listBookingsForStudent(db: Db, studentUserId: string) {
+  const rows = await db.sessionBooking.findMany({
+    where: { studentId: studentUserId },
+    orderBy: { requestedAt: "desc" },
+    take: 100,
+    select: {
+      id: true,
+      centerId: true,
+      status: true,
+      cancelReason: true,
+      requestedAt: true,
+      sessionAttendeeId: true,
+      center: { select: { id: true, name: true, nameEn: true } },
+      session: {
+        select: {
+          id: true,
+          classGroupId: true,
+          status: true,
+          closedAt: true,
+          rescheduledToId: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          timezone: true,
+          rescheduledTo: { select: { date: true, startTime: true } },
+          classGroup: { select: CROSS_CENTRE_CLASS_LABEL_SELECT },
+        },
+      },
+    },
+  });
+  const classes = rows.flatMap((row) => (row.session.classGroup ? [row.session.classGroup] : []));
+  const labelled = new Map((await withCentreCatalogNames(db, classes)).map((row) => [row.id, row]));
   return rows.map((row) => ({
     ...row,
-    classGroup: {
-      ...row.classGroup,
-      subject: row.classGroup.subject
-        ? {
-            ...row.classGroup.subject,
-            selections: withDisplayName("SUBJECT", row.classGroup.centerId, row.classGroup.subjectId),
-          }
-        : null,
-      grade: row.classGroup.grade
-        ? {
-            ...row.classGroup.grade,
-            selections: withDisplayName("GRADE", row.classGroup.centerId, row.classGroup.gradeId),
-          }
-        : null,
+    session: {
+      ...row.session,
+      classGroup: row.session.classGroup ? labelled.get(row.session.classGroup.id)! : null,
     },
   }));
 }

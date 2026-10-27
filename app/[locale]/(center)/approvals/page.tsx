@@ -5,6 +5,8 @@ import { AccountClaimActions } from "@/app/[locale]/(center)/approvals/account-c
 import { ChangeRequestActions } from "@/app/[locale]/(center)/approvals/change-request-actions";
 import { ReservationActions } from "@/app/[locale]/(center)/approvals/reservation-actions";
 import { SessionRequestActions } from "@/app/[locale]/(center)/approvals/session-request-actions";
+import { approveBookingAction, declineBookingAction } from "@/app/[locale]/(center)/approvals/actions";
+import { BookingActions } from "@/components/center/booking-actions";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
@@ -86,6 +88,7 @@ export default async function ApprovalsPage() {
     changeRequestTotal,
     sessionRequestTotal,
     reservationTotal,
+    allBookings,
   ] = await Promise.all([
     db.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }, page),
     db.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }, page),
@@ -97,7 +100,11 @@ export default async function ApprovalsPage() {
     db.changeRequests.count({ status: "PENDING", type: "NEW_CLASS" }),
     db.changeRequests.count({ status: "PENDING", type: "NEW_SESSION" }),
     db.reservations.countPending(),
+    // F6 — pending single-session bookings; an expired one is left out.
+    db.sessionBookings.listPending(),
   ]);
+  const bookings = allBookings.slice(0, APPROVALS_PAGE_SIZE);
+  const bookingTotal = allBookings.length;
   // SEC-25: each queue shows one page; the rest wait behind it, counted.
   const moreNote = (shown: number, total: number) =>
     total > shown ? (
@@ -151,7 +158,7 @@ export default async function ApprovalsPage() {
   const classGroupById = new Map(classGroups.map((classGroup) => [classGroup.id, classGroup]));
 
   const totalPending =
-    changeRequestTotal + sessionRequestTotal + reservationTotal + accountClaims.length;
+    changeRequestTotal + sessionRequestTotal + reservationTotal + bookingTotal + accountClaims.length;
 
   // A NEW_CLASS request from someone with no local `Membership` is a teacher
   // asking to work at this branch at all (M15's centre directory), not an
@@ -390,6 +397,58 @@ export default async function ApprovalsPage() {
               })
             )}
             {moreNote(reservations.length, reservationTotal)}
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <SectionHeader title={t("bookings.title")} description={t("bookings.description")} />
+            {bookings.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<ClipboardCheck />}
+                title={t("bookings.empty")}
+                description={t("bookings.emptyHint")}
+              />
+            ) : (
+              bookings.map((booking) => {
+                const classGroup = booking.session.classGroup;
+                const classLabel =
+                  [
+                    classGroup?.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+                    classGroup?.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || tCommon("none");
+                return (
+                  <RequestCard
+                    key={booking.id}
+                    kind="booking"
+                    kindLabel={t("kinds.booking")}
+                    requesterName={fullName(booking.student)}
+                    headline={[t("bookings.headline"), classLabel].join(" — ")}
+                    requestedOn={t("reservations.requestedOn", {
+                      date: formatDate(booking.requestedAt, locale),
+                    })}
+                    details={[
+                      { label: t("sessionRequests.fields.date"), value: formatDate(booking.session.date, locale) },
+                      {
+                        label: t("changeRequests.fields.time"),
+                        value: timeRange(booking.session.startTime, booking.session.endTime),
+                        ltr: true,
+                      },
+                      { label: t("reservations.priceLabel"), value: formatMoney(booking.session.priceSnapshot, locale) },
+                    ]}
+                    actions={
+                      <BookingActions
+                        id={booking.id}
+                        approveAction={approveBookingAction}
+                        declineAction={declineBookingAction}
+                      />
+                    }
+                  />
+                );
+              })
+            )}
+            {moreNote(bookings.length, bookingTotal)}
           </section>
         </div>
       )}

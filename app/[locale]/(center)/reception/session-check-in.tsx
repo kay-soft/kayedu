@@ -273,6 +273,7 @@ export function SessionCheckIn({
           sessionId={sessionId}
           student={panel.ready.student}
           enrolled={panel.ready.enrolled}
+          booked={panel.ready.booked}
           priceLabel={priceLabel}
           paymentMethods={paymentMethods}
           defaultMethodId={lastMethodId}

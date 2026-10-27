@@ -128,7 +128,7 @@
     "staff": "Users & roles",
     "schedule": "My schedule",
     "discover": "Discover",
-    "reservations": "My reservations",
+    "reservations": "My requests",
     "centers": "Branches",
     "platform": "Platform",
     "catalog": "Catalog",
@@ -728,7 +728,21 @@
       "seatsValue": "{enrolled} of {seats}",
       "seatsUnlimited": "{enrolled} · no seat limit",
       "centerCutPercent": "{value}% of each payment",
-      "centerCutFixed": "{amount} per payment"
+      "centerCutFixed": "{amount} per payment",
+      "enrolmentMode": "Enrolment",
+      "enrolmentModeHint": "When a student enrols from Discover. Enrolments you add yourself are always immediate.",
+      "modeInstant": "Instant",
+      "modeApproval": "Needs approval",
+      "sessionBookingMode": "Single-session attendance online",
+      "sessionBookingModeHint": "Lets a student who is not enrolled book one session. They pay at the desk when they arrive.",
+      "bookingOff": "Off",
+      "maxBookingSeats": "Max single-session seats per session",
+      "maxBookingSeatsHint": "Leave empty for no extra limit — the seat limit still applies.",
+      "seatLimit": "Seat limit",
+      "seatLimitValue": "{count} seats",
+      "seatLimitUnlimited": "No limit — a room has no capacity set",
+      "seatLimitNoRoom": "Choose a room first",
+      "seatLimitHint": "From the rooms above. Enrolled students and confirmed bookings share it."
     },
     "context": {
       "title": "Key facts",
@@ -805,7 +819,8 @@
       "rescheduled": "{count, plural, one {# rescheduled session} other {# rescheduled sessions}}",
       "enrollments": "{count, plural, one {# student enrolment} other {# student enrolments}}",
       "reservations": "{count, plural, one {# enrolment request} other {# enrolment requests}}",
-      "deactivateHint": "Deactivate it instead: its upcoming sessions are removed and its history is kept."
+      "deactivateHint": "Deactivate it instead: its upcoming sessions are removed and its history is kept.",
+      "bookings": "{count, plural, one {# single-session booking} other {# single-session bookings}}"
     },
     "holidays": {
       "title": "Holiday calendar",
@@ -881,7 +896,10 @@
       "slotsRequired": "Add at least one weekly time slot.",
       "slotOverlap": "This row overlaps another row on the same day.",
       "tooManySlots": "That is too many weekly rows.",
-      "fixedAbovePrice": "A fixed centre cut can't be more than the price — lower the cut or raise the price."
+      "fixedAbovePrice": "A fixed centre cut can't be more than the price — lower the cut or raise the price.",
+      "invalidBookingMode": "Choose how single sessions can be booked.",
+      "invalidBookingSeats": "Enter a whole number from 1 to 1000, or leave it empty.",
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet. Choose a bigger room, or wait until that session has passed."
     },
     "emptyHint": "A class pairs a teacher, a subject, a period and a weekly schedule. Add the first one and its sessions are created for the whole period.",
     "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
@@ -896,7 +914,9 @@
       "schedule": "Weekly schedule",
       "scheduleHint": "Each row creates a session every week of the class period. A clash with the teacher or a room shows right here.",
       "pricing": "Pricing & branch cut",
-      "attendance": "Attendance & enrollment"
+      "attendance": "Attendance",
+      "joining": "Joining",
+      "joiningHint": "How students join this class online: enrolling in the whole class, or attending one session. Walk-ins at the desk are not affected."
     },
     "newTeacher": {
       "modeLabel": "Teacher",
@@ -1012,7 +1032,8 @@
         "confirm": "Mark absent and void payment",
         "cancel": "Keep as is"
       },
-      "paidAbsentNote": "Paid — switching to Absent voids the payment."
+      "paidAbsentNote": "Paid — switching to Absent voids the payment.",
+      "booked": "Booked"
     },
     "addAttendee": {
       "title": "Add a student",
@@ -1226,7 +1247,12 @@
       "confirm": "Delete session",
       "cancel": "Keep it"
     },
-    "zeroPriced": "Free session"
+    "zeroPriced": "Free session",
+    "booked": {
+      "notArrived": "{count, plural, one {Booked — not arrived (#)} other {Booked — not arrived (#)}}",
+      "badge": "Booked",
+      "checkIn": "Check in"
+    }
   },
   "Reception": {
     "title": "Reception Desk",
@@ -1306,7 +1332,8 @@
       "sessionUnavailable": "That session is no longer open for check-in, so session mode was closed.",
       "failed": "Something went wrong. Try again.",
       "ready": "Ready to scan — the next card goes into this session.",
-      "checkedInCount": "{count} checked in"
+      "checkedInCount": "{count} checked in",
+      "booked": "Booked this session online"
     },
     "recent": {
       "title": "Recent check-ins",
@@ -1500,7 +1527,8 @@
       "alreadyResolved": "That claim has already been decided.",
       "alreadyLinked": "That record or that account is already connected to a login.",
       "pastDate": "That date has passed — a session can't be added in the past. Decline the request instead.",
-      "invalidDate": "The requested date isn't a valid date."
+      "invalidDate": "The requested date isn't a valid date.",
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet."
     },
     "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
     "kinds": {
@@ -1508,7 +1536,8 @@
       "session": "New session",
       "reservation": "Joining a class",
       "onboarding": "New teacher",
-      "accountClaim": "Account claim"
+      "accountClaim": "Account claim",
+      "booking": "One session"
     },
     "onboarding": {
       "headline": "Wants to teach at this branch",
@@ -1530,6 +1559,31 @@
     "declineConfirm": {
       "title": "Decline this request?",
       "body": "This cannot be undone — the request leaves the queue as declined."
+    },
+    "bookings": {
+      "title": "Session bookings",
+      "description": "Students asking to attend one session of a class that needs approval. Approving takes a seat for that session; they pay at the desk.",
+      "empty": "No pending session bookings.",
+      "emptyHint": "Bookings for a class set to “Needs approval” appear here until their session starts.",
+      "headline": "Wants to attend one session",
+      "approved": "Approved",
+      "declined": "Declined",
+      "declineConfirm": {
+        "title": "Decline this booking?",
+        "body": "The student sees it declined. They can book again."
+      },
+      "errors": {
+        "forbidden": "You are not allowed to do this.",
+        "notFound": "That booking no longer exists, or is not for one of these classes.",
+        "notPending": "That booking has already been decided.",
+        "expired": "This session has already started, so the booking has expired and can't be confirmed.",
+        "studentBlocked": "This student cannot join this class.",
+        "alreadyEnrolled": "This student is enrolled in the class now — they don't need a booking.",
+        "alreadyCheckedIn": "This student is already checked in to the session.",
+        "sessionFull": "This session is full — every seat is taken by enrolled students, bookings or walk-ins.",
+        "bookingSeatsFull": "All the seats this class keeps for single-session bookings are taken for this session.",
+        "failed": "Something went wrong. Try again."
+      }
     }
   },
   "Refunds": {
@@ -2224,7 +2278,8 @@
       "notFound": "That request no longer exists, or is not for one of your classes.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it."
+      "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it.",
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet."
     },
     "emptyHint": "When a student asks to join one of your classes, the request appears here with their name and the class.",
     "headline": "Wants to join your class",
@@ -2232,7 +2287,14 @@
     "declineConfirm": {
       "title": "Decline this request?",
       "body": "This cannot be undone — the request leaves your queue as declined."
-    }
+    },
+    "bookingsTitle": "Session bookings",
+    "bookingsDescription": "Students asking to attend one session of your classes.",
+    "bookingsEmpty": "No pending session bookings.",
+    "bookingKindLabel": "One session",
+    "bookingHeadline": "Wants to attend one session",
+    "bookingDate": "Date",
+    "bookingTime": "Time"
   },
   "TeacherCenters": {
     "title": "Find a centre to teach at",
@@ -2321,9 +2383,37 @@
       "alreadyEnrolled": "You are already enrolled in this class.",
       "alreadyRequested": "You already have a pending request for this class.",
       "classFull": "This class is full — every seat is taken.",
-      "coolingOff": "Your last request for this class was declined. You can request it again from {date}."
+      "coolingOff": "Your last request for this class was declined. You can request it again from {date}.",
+      "sessionFull": "The session on {date} is fully booked, so you can't enrol in the whole class yet. You can still book other single sessions."
     },
-    "emptyHint": "No published class matches these filters. Clear one to see more."
+    "emptyHint": "No published class matches these filters. Clear one to see more.",
+    "sessions": {
+      "title": "Upcoming sessions",
+      "empty": "No upcoming sessions to book.",
+      "enrolledNote": "You are enrolled — every session of this class is yours.",
+      "offNote": "This class can't be booked one session at a time online. Enrol in the class, or ask the branch.",
+      "instantNote": "Attend just one session: your seat is booked at once. You pay at the desk.",
+      "approvalNote": "Attend just one session: the branch confirms your booking. You pay at the desk.",
+      "attendOnly": "Attend this session only",
+      "booked": "Booked",
+      "requested": "Requested",
+      "errors": {
+        "forbidden": "You need to sign in to book a session.",
+        "rateLimited": "Too many attempts. Try again in a little while.",
+        "notFound": "That session is no longer available.",
+        "notAcceptingStudents": "This class is not accepting new students right now.",
+        "bookingOff": "This class does not take single-session bookings.",
+        "sessionUnavailable": "This session can no longer be booked — it has started, ended, moved or been cancelled.",
+        "studentBlocked": "You cannot join this class.",
+        "alreadyEnrolled": "You are enrolled in this class, so every session is already yours.",
+        "alreadyCheckedIn": "You are already checked in to this session.",
+        "alreadyBooked": "You already booked this session.",
+        "bookingLimit": "You have 10 open session bookings — the most allowed. Cancel one or wait until one has happened.",
+        "sessionFull": "This session is full.",
+        "bookingSeatsFull": "All the seats this class keeps for single-session bookings are taken for this session.",
+        "failed": "Something went wrong. Try again."
+      }
+    }
   },
   "StudentProfile": {
     "title": "Complete your profile",
@@ -2331,7 +2421,7 @@
     "submit": "Save and continue"
   },
   "StudentReservations": {
-    "title": "My reservations",
+    "title": "My requests",
     "subtitle": "{count, plural, one {# request} other {# requests}}, across every branch.",
     "empty": "You haven't requested to join any classes yet.",
     "cancel": "Cancel request",
@@ -2346,7 +2436,32 @@
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved."
     },
-    "emptyHint": "Request to join a class from Discover and the request appears here with its status."
+    "emptyHint": "Request to join a class from Discover and the request appears here with its status.",
+    "tabsLabel": "Request type",
+    "tabs": {
+      "enrolments": "Class enrolments",
+      "bookings": "Session bookings"
+    },
+    "bookingsEmpty": "You haven't booked a single session yet.",
+    "bookingsEmptyHint": "On a class page, “Attend this session only” books one session; it appears here with its status.",
+    "movedTo": "This session moved to {date} — book again.",
+    "bookAgain": "Book again",
+    "bookingStatus": {
+      "PENDING": "Pending",
+      "CONFIRMED": "Booked",
+      "ATTENDED": "Attended",
+      "EXPIRED": "Expired",
+      "REJECTED": "Declined",
+      "CANCELLED": "Cancelled",
+      "MOVED": "Moved"
+    },
+    "bookingErrors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That booking no longer exists.",
+      "notOpen": "That booking can no longer be cancelled.",
+      "tooLate": "This session has started — the booking can't be cancelled now.",
+      "failed": "Something went wrong. Try again."
+    }
   },
   "RatingPopup": {
     "title": "Rate your sessions",
@@ -3212,6 +3327,13 @@
       "signIn": "Sign in",
       "register": "Create account",
       "dashboard": "Go to my dashboard"
+    },
+    "sessions": {
+      "title": "Attend one session",
+      "instantNote": "This class lets you book a single session online. You pay at the desk.",
+      "approvalNote": "This class lets you request a single session online; the branch confirms it. You pay at the desk.",
+      "see": "See upcoming sessions",
+      "signIn": "Sign in to book a session"
     }
   }
 }

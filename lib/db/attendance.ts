@@ -159,19 +159,36 @@ export async function createAttendance(
   // so nothing slips in after a close. No interactive transaction: a rush of
   // check-ins holds a pooled connection for one statement each
   // (docs/02 §14, `npm run check:performance`).
+  //
+  // F6: the same statement links the student's CONFIRMED booking for this
+  // session, if they have one (`SessionBooking.sessionAttendeeId`) — a
+  // data-modifying CTE, so the roster row and the link commit together or not
+  // at all, still in one round trip. A booking changes nothing else: the row
+  // is a drop-in exactly as before, at the same price.
   const openOnly = options.historicalBackfill ? Prisma.empty : Prisma.sql`AND s."closedAt" IS NULL`;
   const inserted = await db.$queryRaw<SessionAttendee[]>`
-    INSERT INTO "SessionAttendee"
-      ("id", "centerId", "sessionId", "studentProfileId", "enrollmentId",
-       "attendanceStatus", "isDropIn", "recordedBy", "recordedAt", "updatedAt")
-    SELECT gen_random_uuid()::text, s."centerId", s."id", ${params.studentProfileId},
-       ${params.enrollmentId}, ${status}::"AttendanceStatus", ${params.isDropIn},
-       ${params.recordedBy}, now(), now()
-    FROM "Session" s
-    WHERE s."id" = ${params.sessionId} AND s."centerId" = ${params.centerId}
-      AND s."status" <> 'CANCELLED' AND s."rescheduledToId" IS NULL ${openOnly}
-    FOR SHARE OF s
-    RETURNING *`;
+    WITH ins AS (
+      INSERT INTO "SessionAttendee"
+        ("id", "centerId", "sessionId", "studentProfileId", "enrollmentId",
+         "attendanceStatus", "isDropIn", "recordedBy", "recordedAt", "updatedAt")
+      SELECT gen_random_uuid()::text, s."centerId", s."id", ${params.studentProfileId},
+         ${params.enrollmentId}, ${status}::"AttendanceStatus", ${params.isDropIn},
+         ${params.recordedBy}, now(), now()
+      FROM "Session" s
+      WHERE s."id" = ${params.sessionId} AND s."centerId" = ${params.centerId}
+        AND s."status" <> 'CANCELLED' AND s."rescheduledToId" IS NULL ${openOnly}
+      FOR SHARE OF s
+      RETURNING *
+    ), linked AS (
+      UPDATE "SessionBooking" b
+      SET "sessionAttendeeId" = ins."id"
+      FROM ins JOIN "StudentProfile" sp ON sp."id" = ins."studentProfileId"
+      WHERE b."centerId" = ins."centerId" AND b."sessionId" = ins."sessionId"
+        AND b."studentId" = sp."userId" AND b."status" = 'CONFIRMED'
+        AND b."sessionAttendeeId" IS NULL
+      RETURNING b."id"
+    )
+    SELECT * FROM ins`;
   if (inserted[0]) return inserted[0];
 
   // Lost a race with a cancel, reschedule or close between the read above

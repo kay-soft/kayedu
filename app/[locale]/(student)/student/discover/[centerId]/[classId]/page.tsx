@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { DiscoverAction } from "@/app/[locale]/(student)/student/discover/discover-action";
 import { DISCOVER_STATUS_BADGE, discoverCardStatus } from "@/app/[locale]/(student)/student/discover/card-status";
+import { UpcomingSessions } from "@/app/[locale]/(student)/student/discover/upcoming-sessions";
 import { ClassDetail } from "@/components/explore/class-detail";
 import { PageHeader } from "@/components/shared/page-header";
 import { requireStudentUser } from "@/lib/auth/tenant";
@@ -13,6 +14,7 @@ import { prisma } from "@/lib/db/client";
 import { discoverCenter, discoverClassById, teacherDisplayNames } from "@/lib/db/discover";
 import { teacherRatingAverage } from "@/lib/db/ratings";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
+import { studentBookingsBySession, upcomingBookableSessions } from "@/lib/db/session-bookings";
 import {
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
@@ -40,13 +42,21 @@ export default async function StudentDiscoverClassPage({
   const row = await discoverClassById(prisma, center.id, classId);
   if (!row) notFound();
 
-  const [blockedByCenter, reservationByClass, enrolledClassIds, names, rating] = await Promise.all([
+  const [blockedByCenter, reservationByClass, enrolledClassIds, names, rating, upcoming] = await Promise.all([
     studentBlockedRefsByCenter(prisma, session.user.id),
     studentReservationStatusByClass(prisma, session.user.id),
     studentActiveEnrollmentClassIds(prisma, session.user.id),
     teacherDisplayNames(prisma, center.id, [row.teacherId]),
     teacherRatingAverage(prisma, row.teacherId),
+    // F6 — the next sessions still open for booking, seats as a status.
+    upcomingBookableSessions(prisma, center.id, row),
   ]);
+  const myBookings = await studentBookingsBySession(
+    prisma,
+    center.id,
+    session.user.id,
+    upcoming.map((item) => item.id),
+  );
 
   const blocked = blockedByCenter.get(center.id);
   if (blocked?.teacherIds.has(row.teacherId) || blocked?.classGroupIds.has(row.id)) notFound();
@@ -92,6 +102,14 @@ export default async function StudentDiscoverClassPage({
             labels={{ enrolled: t("card.enrolled"), pending: t("card.pending"), full: t("card.full") }}
           />
         }
+      />
+
+      <UpcomingSessions
+        centerId={center.id}
+        sessions={upcoming}
+        mode={row.sessionBookingMode}
+        enrolled={isEnrolled}
+        myBookings={myBookings}
       />
     </div>
   );

@@ -283,6 +283,8 @@ export function NewClassDialogContent({
             lateThresholdMinutes: String(defaults.lateThresholdMinutes),
             acceptsNewStudents: true,
             requiresConfirmation: false,
+            sessionBookingMode: "OFF",
+            maxBookingSeats: "",
             startDate: "",
             endDate: "",
           }}

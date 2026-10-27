@@ -50,6 +50,8 @@ export type RosterRowData = {
   name: string;
   studentCode: string;
   isDropIn: boolean;
+  /** F6 — this drop-in's check-in fulfilled an online booking: "Booked" instead of Drop-in. */
+  booked?: boolean;
   /** On the class's active enrolments — what the confirm panel's Enrolled / Drop-in badge shows. */
   enrolled: boolean;
   /** A short-lived signed URL for the confirm panel; only an unmarked row carries one. */
@@ -210,7 +212,7 @@ function AttendeeRow({
           <p className="flex items-center gap-2 text-xs text-text-secondary">
             <Ltr>{row.studentCode}</Ltr>
             {row.isDropIn ? (
-              <Badge variant="info">{t("dropIn")}</Badge>
+              <Badge variant="info">{row.booked ? t("booked") : t("dropIn")}</Badge>
             ) : null}
           </p>
         </div>

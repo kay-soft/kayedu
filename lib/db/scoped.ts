@@ -4,6 +4,7 @@ import type {
   PrismaClient,
   ReservationStatus,
   Role,
+  SessionBookingStatus,
   SessionStatus,
 } from "@prisma/client";
 // Relative imports and an injected client (SYS): `npm run check:visibility`
@@ -41,6 +42,8 @@ import { listSessionAttendanceChanges } from "./session-lifecycle.ts";
 import { loadRoomLinks } from "./room-sets.ts";
 import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { listCenterTerms } from "./terms.ts";
+import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
+import { addDays, startOfUtcDay } from "../scheduling.ts";
 
 /**
  * What a scoped data layer needs of the request's tenant context — a real
@@ -61,6 +64,8 @@ const ACTIVE_ENROLLMENT: EnrollmentStatus = "ACTIVE";
 const EXISTING_ENROLLMENT_STATUSES: EnrollmentStatus[] = ["ACTIVE", "BLOCKED"];
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
 const PENDING_RESERVATION: ReservationStatus = "PENDING";
+const PENDING_BOOKING: SessionBookingStatus = "PENDING";
+const CONFIRMED_BOOKING: SessionBookingStatus = "CONFIRMED";
 
 /**
  * Tenant-scoped data access (docs/02-architecture.md §5).
@@ -1246,6 +1251,71 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         }),
 
       findById: (id: string) => scopedFindById(prisma.reservation, centerId, id),
+    },
+
+    /**
+     * Single-session bookings (F6, `lib/db/session-bookings.ts` — the only
+     * writer). Read-only here, like `reservations` above: the approvals
+     * queues and the session page's "Booked" state.
+     */
+    sessionBookings: {
+      /**
+       * The branch's `/approvals` section: PENDING bookings whose session can
+       * still be booked. One whose session has started reads as expired and is
+       * left out — nothing is written for it (and it can no longer be
+       * confirmed). `teacherId` narrows it to the classes that teacher
+       * teaches (the teacher's own queue).
+       */
+      listPending: async (options: { teacherId?: string; now?: Date } = {}) => {
+        const now = options.now ?? new Date();
+        const rows = await prisma.sessionBooking.findMany({
+          where: scopedWhere(centerId, {
+            status: PENDING_BOOKING,
+            session: {
+              ...BOOKABLE_SESSION,
+              date: { gte: addDays(startOfUtcDay(now), -1) },
+              classGroup: { active: true, ...(options.teacherId ? { teacherId: options.teacherId } : {}) },
+            },
+          }),
+          orderBy: { requestedAt: "asc" },
+          take: 500,
+          select: {
+            id: true,
+            requestedAt: true,
+            // SEC-72: the requester's name only — never a whole `User` row.
+            student: { select: { id: true, firstName: true, lastName: true } },
+            session: {
+              select: {
+                id: true,
+                classGroupId: true,
+                status: true,
+                closedAt: true,
+                rescheduledToId: true,
+                date: true,
+                startTime: true,
+                endTime: true,
+                timezone: true,
+                priceSnapshot: true,
+                classGroup: {
+                  select: {
+                    subject: { include: { selections: { where: { centerId } } } },
+                    grade: { include: { selections: { where: { centerId } } } },
+                  },
+                },
+              },
+            },
+          },
+        });
+        return rows.filter((row) => isBookableNow(row.session, now));
+      },
+
+      /** A session's CONFIRMED bookings — the desk's "Booked" and "not arrived". */
+      listConfirmedForSession: (sessionId: string) =>
+        prisma.sessionBooking.findMany({
+          where: scopedWhere(centerId, { sessionId, status: CONFIRMED_BOOKING }),
+          orderBy: { requestedAt: "asc" },
+          select: { id: true, studentId: true, sessionAttendeeId: true },
+        }),
     },
   };
 }

@@ -1,4 +1,4 @@
-import type { CenterLifecycleState, Prisma, PrismaClient, Role } from "@prisma/client";
+import type { CenterLifecycleState, Prisma, PrismaClient, Role, SessionBookingMode } from "@prisma/client";
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same as lib/db/discover.ts).
 import { fullName, localName } from "../identity.ts";
@@ -141,6 +141,8 @@ function publicClassSelect(centerId: string) {
     teacherId: true,
     price: true,
     requiresConfirmation: true,
+    // F6 — a join option: whether one session can be booked online.
+    sessionBookingMode: true,
     startDate: true,
     endDate: true,
     subject: {
@@ -190,6 +192,8 @@ export type PublicClass = {
   /** Piastres per session. */
   price: number;
   requiresConfirmation: boolean;
+  /** F6 — OFF / INSTANT / APPROVAL; sessions themselves are read signed-in only. */
+  sessionBookingMode: SessionBookingMode;
   seats: SeatStatus;
 };
 
@@ -245,6 +249,7 @@ function toPublicClasses(
         endDate: row.endDate,
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
+        sessionBookingMode: row.sessionBookingMode,
         seats: seatStatus(row._count.enrollments, enrollmentCap(effectiveCapacity(rooms))),
       };
     });

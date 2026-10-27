@@ -2,6 +2,11 @@ import { ClipboardCheck } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeacherReservationActions } from "@/app/[locale]/(teacher)/teacher/approvals/reservation-actions";
+import {
+  approveOwnBookingAction,
+  declineOwnBookingAction,
+} from "@/app/[locale]/(teacher)/teacher/approvals/actions";
+import { BookingActions } from "@/components/center/booking-actions";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { RequestCard } from "@/components/shared/request-card";
@@ -9,7 +14,7 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatTimeRange } from "@/lib/format";
 import { fullName } from "@/lib/identity";
 
 /**
@@ -32,11 +37,18 @@ export default async function TeacherApprovalsPage() {
   const t = await getTranslations("TeacherApprovals");
   const locale = await getLocale();
 
-  const reservations = await db.reservations.listPendingForTeacher(ctx.user.id);
+  const [reservations, bookings] = await Promise.all([
+    db.reservations.listPendingForTeacher(ctx.user.id),
+    // F6 — pinned to the classes this teacher teaches, like reservations.
+    db.sessionBookings.listPending({ teacherId: ctx.user.id }),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} description={t("subtitle", { count: reservations.length })} />
+      <PageHeader
+        title={t("title")}
+        description={t("subtitle", { count: reservations.length + bookings.length })}
+      />
 
       <section className="flex flex-col gap-3">
         <SectionHeader title={t("listTitle")} description={t("listDescription")} />
@@ -72,6 +84,48 @@ export default async function TeacherApprovalsPage() {
                   date: formatDate(reservation.requestedAt, locale),
                 })}
                 actions={<TeacherReservationActions id={reservation.id} />}
+              />
+            );
+          })
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <SectionHeader title={t("bookingsTitle")} description={t("bookingsDescription")} />
+        {bookings.length === 0 ? (
+          <EmptyState compact icon={<ClipboardCheck />} title={t("bookingsEmpty")} />
+        ) : (
+          bookings.map((booking) => {
+            const classGroup = booking.session.classGroup;
+            const classLabel = [
+              classGroup?.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+              classGroup?.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return (
+              <RequestCard
+                key={booking.id}
+                kind="booking"
+                kindLabel={t("bookingKindLabel")}
+                requesterName={fullName(booking.student)}
+                headline={[t("bookingHeadline"), classLabel].filter(Boolean).join(" — ")}
+                requestedOn={t("requestedOn", { date: formatDate(booking.requestedAt, locale) })}
+                details={[
+                  { label: t("bookingDate"), value: formatDate(booking.session.date, locale) },
+                  {
+                    label: t("bookingTime"),
+                    value: formatTimeRange(booking.session.startTime, booking.session.endTime, locale),
+                    ltr: true,
+                  },
+                ]}
+                actions={
+                  <BookingActions
+                    id={booking.id}
+                    approveAction={approveOwnBookingAction}
+                    declineAction={declineOwnBookingAction}
+                  />
+                }
               />
             );
           })

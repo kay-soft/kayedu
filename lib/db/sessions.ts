@@ -31,6 +31,7 @@ import {
 } from "./session-lifecycle.ts";
 import { resolveRoomSet, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
 import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
+import { cancelSessionBookings } from "./session-bookings.ts";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 
 /**
@@ -152,6 +153,8 @@ export async function cancelSession(
       where: { id: sessionId },
       data: { status: CANCELLED_ENUM },
     });
+    // F6: its open bookings are cancelled with it, in this transaction.
+    await cancelSessionBookings(tx, centerId, sessionId, "SESSION_CANCELLED", options.now);
     return { ok: true, session: updated };
   });
 }
@@ -399,6 +402,9 @@ export async function rescheduleSession(
         where: { id: sessionId },
         data: { rescheduledToId: created.id },
       });
+      // F6: a booking is for one dated session — the student books the
+      // replacement again ("This session moved to <date> — book again").
+      await cancelSessionBookings(tx, centerId, sessionId, "SESSION_RESCHEDULED", options.now);
       if (options.confirmConflicts) {
         await writeConfirmedConflictAudit(tx, {
           centerId,

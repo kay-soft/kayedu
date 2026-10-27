@@ -65,6 +65,23 @@ const moneyEgp = z
 
 export const MAX_LATE_THRESHOLD_MINUTES = 240;
 
+/** F6 — the largest per-session booking cap a class may set. */
+export const MAX_BOOKING_SEATS = 1000;
+
+/** F6 — single-session attendance online: Off / Instant / Needs approval. */
+const sessionBookingMode = z.enum(["OFF", "INSTANT", "APPROVAL"], { error: "invalidBookingMode" }).default("OFF");
+
+/** F6 — optional extra cap on CONFIRMED bookings per session; blank = none. */
+const maxBookingSeats = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value ? Number(value) : null))
+  .refine(
+    (value) => value === null || (Number.isInteger(value) && value >= 1 && value <= MAX_BOOKING_SEATS),
+    "invalidBookingSeats",
+  );
+
 /**
  * R3: every new or edited class must have a primary room — its seat limit
  * is the room set's capacity, so a class without one would be silently
@@ -94,6 +111,8 @@ const classGroupFields = {
   lateThresholdMinutes: wholeNumber(MAX_LATE_THRESHOLD_MINUTES),
   acceptsNewStudents: checkbox,
   requiresConfirmation: checkbox,
+  sessionBookingMode,
+  maxBookingSeats,
   // R4 — the class's period, required on every new and edited class. A term
   // preset only fills these two; nothing about the term is posted.
   startDate: dateOnlyField,
@@ -143,6 +162,8 @@ export const classGroupSchema = z
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      sessionBookingMode: value.sessionBookingMode,
+      maxBookingSeats: value.maxBookingSeats,
       startDate: value.startDate,
       endDate: value.endDate,
       confirmConflicts: value.confirmConflicts,
@@ -170,6 +191,8 @@ export const classGroupUpdateSchema = z
       lateThresholdMinutes: value.lateThresholdMinutes,
       acceptsNewStudents: value.acceptsNewStudents,
       requiresConfirmation: value.requiresConfirmation,
+      sessionBookingMode: value.sessionBookingMode,
+      maxBookingSeats: value.maxBookingSeats,
       startDate: value.startDate,
       endDate: value.endDate,
       confirmConflicts: value.confirmConflicts,
@@ -344,6 +367,8 @@ export type ClassActionState = SlotConflictState & {
   error?: string;
   /** ICU values for `error` (e.g. how many classes still use a room). */
   errorValues?: Record<string, number>;
+  /** F6 — a formatted date for `error` ("sessionFull": the first full session). */
+  errorDate?: string;
   fieldErrors?: Record<string, string>;
   status?: "created" | "saved" | "deleted" | "matchFound";
   /** R6 — field errors of the new teacher's own fields (keys under `People.errors`). */

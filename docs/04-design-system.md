@@ -263,6 +263,7 @@ Marketplace-style grid for browsing published classes. Filter bar: grade / subje
 - Instant enroll (`requiresConfirmation = false`) → solid brand-blue button, label "Enroll."
 - Needs approval (`requiresConfirmation = true`) → outlined brand-blue button, label "Request to Join."
 - After a request is sent, the button is replaced by a `Pending` badge (amber) in the same position — no button shown.
+- **F6 — the class page adds "Upcoming sessions"** under the class facts, each session with "Attend this session only" when the class allows it — §11.25.
 
 **One card, two surfaces (F5).** The card is `ClassCard` (`components/explore/class-card.tsx`), shared by the signed-in Discover and the public Explore pages — each caller supplies the badge and the action slot. The subject name links to the class page (§11.24); the price reads "… / session".
 
@@ -315,7 +316,8 @@ Same card queue as the centre `/approvals` screen — deliberately, since a teac
 - `kind` is a *category, not a status*, so it takes no semantic colour (§2 reserves those). The icon and the label carry it; the badge stays neutral.
 - **Onboarding is derived, not stored**: a `NEW_CLASS` request from a requester with no local `Membership` is a teacher asking to work here, which is the same database row but a different decision. It gets its own kind and an info note saying so — approving is a decision about the class, not about hiring.
 - Requester, requested-on, note and the two actions are identical across kinds on purpose: those parts of the decision genuinely are the same and should not have to be re-learned per queue.
-- Below `lg` the actions move under the card, full-width; from `lg` they pin to the card's end edge. **The two actions are an equal-width pair** (a two-column grid of `w-full` buttons, 256px wide from `lg`) on all four queues, so a long "Decline" is never a different size from "Approve" (R10a).
+- Below `lg` the actions move under the card, full-width; from `lg` they pin to the card's end edge.
+- **F6 — a fifth kind, `booking`** ("One session", `CalendarCheck` icon): a student asking to attend one session; its details are the session's date, time and price. Its buttons are `components/center/booking-actions.tsx`, the same two-button shape, taking each queue's own Server Actions. **The two actions are an equal-width pair** (a two-column grid of `w-full` buttons, 256px wide from `lg`) on all four queues, so a long "Decline" is never a different size from "Approve" (R10a).
 - **The empty queue** (`success` tone) names the absence, says what would land here, and links to Teachers — where class and session requests originate.
 
 ### 11.4 Parent portal (M16)
@@ -476,6 +478,8 @@ R6 re-laid out the class and session dialogs around one shell and a handful of s
 - **Student-first picker.** Each option reads "name · teacher" with the start time at the end edge (44px, `aria-pressed`); only open sessions are offered; with no preselection the submit is disabled. After a check-in the form is replaced by the success message and **Next student**, and the keyboard returns to the search input with its text selected.
 - **Receipt dialog.** The shared `DialogShell` (narrow): a full-screen sheet below `md`. Title "Receipt — *session*", the teacher and time as the description, R2's receipt card as the body, **Close** and **Print** (opens the A4 print route in a new tab) in the footer.
 
+- **Booked (F6).** A student who booked the session online reads **Booked** (`info` — upcoming blue) instead of Drop-in (`warning`) in the confirm panel; enrolled stays `success`. The price line and the payment block are unchanged.
+
 ### 11.18 Bilingual fields & the catalog screens (R8)
 
 - **The bilingual field pattern.** Wherever one record carries a name in **both** languages (the global catalog; a centre's own rename of a catalog entry) the two inputs sit **side by side** in a two-column grid from `sm`, one column below, each in its own language *and* direction regardless of the page: **English** `dir="ltr" lang="en"`, **Arabic** `dir="rtl" lang="ar"`. Each has its own label ("English name" / "Arabic name" — never "Name" twice), `maxLength` 80, and a placeholder that is a real example in that language ("e.g. Mathematics" / "مثال: الرياضيات"). The English field is first in source order, so on a phone the stack reads English, then Arabic, in either UI language. **Person names do not use this pattern** — one name per relationship, never a locale variant.
@@ -607,6 +611,14 @@ All strings live under `AdminOrganizations.*`, `AdminCenters.create.*`, `Setting
 All strings live under `Family.*` (plus `Toasts.family*`, `ParentPortal.*`, `Auth.selectCenter.*`) in both locales; only logical properties.
 
 ---
+
+### 11.25 Joining options, Upcoming sessions, Booked, My requests (F6)
+
+- **Class dialog — Joining.** A wide `FormSection` ("Joining", `LogIn` icon) after Attendance (which now holds only the late threshold). Top: the **Accept new students** toggle row. Below, a 2-column grid (1 column under `sm`): **Enrolment** select (Instant / Needs approval — posts `requiresConfirmation`), **Single-session attendance online** select (Off / Instant / Needs approval), **Max single-session seats per session** (number, optional, disabled while Off — the stored value is kept), and **Seat limit** — read-only, a `min-h-11` `surface-subtle` box that follows the room picker live ("N seats" / "No limit…" / "Choose a room first") with a hint that enrolled students and confirmed bookings share it.
+- **Class page — Upcoming sessions.** A card under `ClassDetail` on the signed-in Discover class page: one row per bookable session (up to 10) — date, the time range (LTR) and the seat badge (Open `info` / Few seats left `warning` / Full `neutral`, the F5 statuses, never a number) — and at the end edge either **"Attend this session only"** (outlined brand button, `h-11`, full width below `sm`), the student's own **Booked** (`info`) / **Requested** (`warning`) badge, or nothing (enrolled, Off, or full). The card description says which applies (enrolled / Off / instant / needs approval). Rows stack below `sm`.
+- **Public class page.** No session list (the public catalog reads no session): when the class takes bookings, an "Attend one session" card with one outlined button — "See upcoming sessions" signed in, "Sign in to book a session" signed out (`?next=` to the Discover class page).
+- **Session page — Booked.** A booked drop-in's roster badge reads **Booked** (same `info` badge as Drop-in). Under the roster, **"Booked — not arrived (n)"**: a hairline-separated list of row cards (name, code LTR, a Booked badge, and a full-width-on-phone `h-11` **Check in** that opens the same confirm panel — nothing written until confirm).
+- **My requests.** `/student/reservations` is titled "My requests"; under the header, two pill tabs (the §11.7 / audit-page `SoftLink` pills, `min-h-11`, `aria-current`) — **Class enrolments** and **Session bookings**, each with its count; the tab is `?tab=` (T4). A booking row: class label, branch · date · time, a status badge — Pending `warning`, Booked `info`, Attended `success`, Declined `danger`, Cancelled / Expired / Moved `neutral` — Cancel (until the session starts), and for a rescheduled one the line "This session moved to <date> — book again" with a **Book again** button.
 
 ## 14. The professional pass (DES)
 

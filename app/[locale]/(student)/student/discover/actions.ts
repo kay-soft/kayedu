@@ -58,6 +58,10 @@ export async function reserveClassAction(
     if (result.error === "coolingOff") {
       return { error: result.error, errorDate: formatDate(result.cooldownUntil, locale) };
     }
+    // F6: a future session is full of single-session bookings — say which day.
+    if (result.error === "sessionFull") {
+      return { error: result.error, errorDate: formatDate(result.date, locale) };
+    }
     return { error: result.error };
   }
 

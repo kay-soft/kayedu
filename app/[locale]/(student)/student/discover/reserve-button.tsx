@@ -78,9 +78,8 @@ export function ReserveButton({
       <input type="hidden" name="classGroupId" value={classGroupId} />
       {state.error ? (
         <p className="text-xs text-danger-fg">
-          {state.error === "coolingOff" && state.errorDate
-            ? tErrors("coolingOff", { date: state.errorDate })
-            : tErrors(state.error)}
+          {/* coolingOff and sessionFull (F6) both name a date. */}
+          {state.errorDate ? tErrors(state.error, { date: state.errorDate }) : tErrors(state.error)}
         </p>
       ) : null}
       <SubmitAction

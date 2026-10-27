@@ -5,6 +5,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { ClassDetail } from "@/components/explore/class-detail";
 import { EnrolAction, seatBadge } from "@/components/explore/enrol-action";
+import { SessionBookingLink } from "@/components/explore/session-booking-link";
 import { PageHeader } from "@/components/shared/page-header";
 import { getCurrentUser } from "@/lib/auth/session";
 import { branchName } from "@/lib/branch-name";
@@ -89,6 +90,13 @@ export default async function ExploreClassPage({ params }: Params) {
             returnPath={here}
           />
         }
+      />
+
+      <SessionBookingLink
+        mode={item.sessionBookingMode}
+        signedIn={Boolean(user)}
+        centerId={branch.id}
+        classId={item.id}
       />
     </div>
   );

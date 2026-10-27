@@ -51,6 +51,7 @@ export function CheckInConfirmPanel({
   sessionId,
   student,
   enrolled,
+  booked = false,
   priceLabel,
   paymentMethods,
   recordPayment = true,
@@ -64,6 +65,8 @@ export function CheckInConfirmPanel({
   student: CheckInConfirmStudent;
   /** Actively enrolled in the session's class; otherwise a drop-in. */
   enrolled: boolean;
+  /** F6 — a drop-in who booked this session online: shown "Booked". Price and payment are unchanged. */
+  booked?: boolean;
   /** The session's price, formatted on the server; null for a free session (no price line). */
   priceLabel: string | null;
   paymentMethods: PaymentMethodOption[];
@@ -146,8 +149,8 @@ export function CheckInConfirmPanel({
           codeLabel={t("sessionMode.code")}
           photoUrl={student.photoUrl}
           badge={
-            <Badge variant={enrolled ? "success" : "warning"}>
-              {enrolled ? t("sessionMode.enrolled") : t("sessionMode.dropIn")}
+            <Badge variant={enrolled ? "success" : booked ? "info" : "warning"}>
+              {enrolled ? t("sessionMode.enrolled") : booked ? t("sessionMode.booked") : t("sessionMode.dropIn")}
             </Badge>
           }
         />

@@ -125,6 +125,8 @@ export type ReceptionResolution =
       student: { id: string; name: string; code: string; photoUrl: string | null };
       /** Actively enrolled in the session's class; otherwise a drop-in. */
       enrolled: boolean;
+      /** F6 — booked this session online: "Booked" instead of Drop-in. */
+      booked: boolean;
     }
   | { kind: "candidates"; students: { id: string; name: string; code: string }[] }
   | { kind: "already"; name: string; time: string; status: "PRESENT" | "LATE" | "ABSENT" }
@@ -169,6 +171,7 @@ async function describeStudent(
     kind: "ready",
     student: { id: student.id, name: student.name, code: student.code, photoUrl },
     enrolled: state.enrolled,
+    booked: state.booked,
   };
 }
 

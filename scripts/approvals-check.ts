@@ -22,6 +22,9 @@ import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.
 import { resolveChangeRequest, resolveSessionRequest } from "../lib/db/approvals.ts";
 import { confirmReservation, rejectReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { can } from "../lib/auth/permissions.ts";
+import { confirmBooking, rejectBooking, requestBooking } from "../lib/db/session-bookings.ts";
+import { scopedWith } from "../lib/db/scoped.ts";
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { addDays, dateKey, todayInTimezone } from "../lib/scheduling.ts";
 
 const prisma = await gatePrisma();
@@ -421,6 +424,113 @@ async function main() {
       !can("TEACHER", "reservation.manage.own") &&
       !can("STUDENT", "reservation.manage.own"),
   );
+
+  await checkBookingQueues(centerA.id, centerB.id, teacherA.id, managerA.id);
+}
+
+/**
+ * F6 — single-session bookings in the two approvals queues, through the REAL
+ * `scopedWith(...).sessionBookings.listPending` and `confirmBooking` /
+ * `rejectBooking`: an APPROVAL booking waits in the branch's queue AND the
+ * class teacher's own, an INSTANT one in neither; the teacher queue lists
+ * only classes that teacher teaches, and its pinned resolve refuses another
+ * teacher's booking; another branch's queue never lists it; reject is audited.
+ */
+async function checkBookingQueues(centerId: string, otherCenterId: string, teacherId: string, managerId: string) {
+  console.log("\nF6 — session bookings in both approvals queues");
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const d = new Date(Date.now() + 3 * DAY);
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const otherTeacher = await makeTeacher(centerId, "f6-other-teacher");
+  const classFor = (teacher: string, mode: "INSTANT" | "APPROVAL") =>
+    prisma.classGroup.create({
+      data: scopedData(centerId, {
+        startDate: new Date("2026-01-01"),
+        endDate: new Date("2027-12-31"),
+        teacherId: teacher,
+        price: 10_000,
+        sessionBookingMode: mode,
+      }),
+    });
+  const sessionFor = (classGroupId: string, teacher: string) =>
+    prisma.session.create({
+      data: scopedData(centerId, { classGroupId, teacherId: teacher, date, startTime: "17:00", endTime: "18:00", priceSnapshot: 10_000 }),
+    });
+
+  const mine = await classFor(teacherId, "APPROVAL");
+  const theirs = await classFor(otherTeacher.id, "APPROVAL");
+  const instant = await classFor(teacherId, "INSTANT");
+  const mineSession = await sessionFor(mine.id, teacherId);
+  const theirsSession = await sessionFor(theirs.id, otherTeacher.id);
+  const instantSession = await sessionFor(instant.id, teacherId);
+  const book = async (sessionId: string, tag: string) =>
+    prisma.$transaction(async (tx) =>
+      requestBooking(tx, { centerId, sessionId, studentUserId: (await makeStudentUser(tag)).id }),
+    );
+  const myBooking = await book(mineSession.id, "f6-mine");
+  const theirBooking = await book(theirsSession.id, "f6-theirs");
+  const instantBooking = await book(instantSession.id, "f6-instant");
+  check(
+    "APPROVAL bookings are PENDING, an INSTANT one is CONFIRMED",
+    myBooking.ok && myBooking.kind === "pending" && theirBooking.ok && theirBooking.kind === "pending" &&
+      instantBooking.ok && instantBooking.kind === "confirmed",
+  );
+
+  const ctx = (id: string, role: string) => ({
+    center: { id },
+    user: { locale: "en" },
+    role,
+    isPlatformAdmin: false,
+    settings: null,
+  });
+  const branchQueue = await scopedWith(prisma, ctx(centerId, "MANAGER")).sessionBookings.listPending();
+  const teacherQueue = await scopedWith(prisma, ctx(centerId, "TEACHER")).sessionBookings.listPending({ teacherId });
+  const otherBranchQueue = await scopedWith(prisma, ctx(otherCenterId, "MANAGER")).sessionBookings.listPending();
+  const ids = (rows: { id: string }[]) => new Set(rows.map((row) => row.id));
+  const myId = myBooking.ok ? myBooking.booking.id : "";
+  const theirId = theirBooking.ok ? theirBooking.booking.id : "";
+  const instantId = instantBooking.ok ? instantBooking.booking.id : "";
+  check(
+    "The branch queue lists every pending booking, never an INSTANT (confirmed) one",
+    ids(branchQueue).has(myId) && ids(branchQueue).has(theirId) && !ids(branchQueue).has(instantId),
+  );
+  check(
+    "The teacher queue lists only bookings on classes that teacher teaches",
+    ids(teacherQueue).has(myId) && !ids(teacherQueue).has(theirId),
+  );
+  check("Another branch's queue never lists this branch's bookings", !ids(otherBranchQueue).has(myId) && !ids(otherBranchQueue).has(theirId));
+
+  const pinned = await prisma.$transaction((tx) =>
+    confirmBooking(tx, centerId, theirId, teacherId, { teacherId, via: "teacher" }),
+  );
+  check(
+    "A teacher's pinned confirm refuses another teacher's booking at the same branch (notFound)",
+    !pinned.ok && pinned.error === "notFound",
+  );
+  const otherBranch = await prisma.$transaction((tx) => rejectBooking(tx, otherCenterId, myId, managerId));
+  check("Another branch cannot reject this branch's booking (notFound)", !otherBranch.ok && otherBranch.error === "notFound");
+
+  const ownConfirm = await prisma.$transaction((tx) =>
+    confirmBooking(tx, centerId, myId, teacherId, { teacherId, via: "teacher" }),
+  );
+  const declined = await prisma.$transaction((tx) => rejectBooking(tx, centerId, theirId, managerId));
+  const audits = await prisma.auditLog.findMany({
+    where: { centerId, entityType: "SessionBooking", entityId: { in: [myId, theirId] } },
+    select: { action: true, after: true },
+  });
+  check(
+    "The teacher confirms their own; the branch declines the other; each writes one audit row",
+    ownConfirm.ok && ownConfirm.booking.status === "CONFIRMED" &&
+      declined.ok && declined.booking.status === "REJECTED" &&
+      audits.filter((row) => row.action === "sessionBooking.confirm").length === 1 &&
+      audits.filter((row) => row.action === "sessionBooking.reject").length === 1,
+    JSON.stringify(audits),
+  );
+  const queueAfter = await scopedWith(prisma, ctx(centerId, "MANAGER")).sessionBookings.listPending();
+  check("Resolved bookings leave the queue", !ids(queueAfter).has(myId) && !ids(queueAfter).has(theirId));
+
+  await deleteAuditRows(prisma, { centerId: { in: [centerId, otherCenterId] } });
 }
 
 main()

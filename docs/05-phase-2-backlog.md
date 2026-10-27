@@ -288,6 +288,16 @@
 
 ---
 
+## 29. Booking a one-time session (no class) online
+
+**What it is.** Let a student book a one-time session (R5 — `Session.classGroupId` null: its own title, price and cut) from the student portal, the way F6 lets them book one session of a class.
+
+**Why deferred.** F6's booking rules all hang off a class: whether booking is on and whether it needs approval (`ClassGroup.sessionBookingMode`), the optional cap (`maxBookingSeats`), the seat limit (the class's room set), the teacher queue (the class's teacher) and where a student finds the session at all (a class page on Discover / Explore). A one-time session has none of these — no setting to say it is bookable, no page that lists it, no seat limit defined independently of a class, and no class teacher to route an approval to. Answering each is a product decision, not a configuration of what F6 built, so F6 refuses them (`requestBooking` needs a class session) rather than guessing.
+
+**Depends on.** Booking settings on a one-time session (mode and cap, probably on the New session form); a seat limit for it (its own room set's capacity); a place a student discovers one-time sessions (Discover / Explore list classes only); who approves (the session's teacher, or the branch only).
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

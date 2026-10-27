@@ -33,6 +33,7 @@ import {
   type WeeklySlotsError,
 } from "@/lib/scheduling";
 import { redirect } from "@/lib/i18n/navigation";
+import { formatDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { blockRemoveSchema, teacherCreateSchema } from "@/lib/validation/people";
@@ -311,6 +312,8 @@ export async function createClassAction(
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
+    sessionBookingMode,
+    maxBookingSeats,
     startDate,
     endDate,
     confirmConflicts,
@@ -344,6 +347,8 @@ export async function createClassAction(
       lateThresholdMinutes,
       acceptsNewStudents,
       requiresConfirmation,
+      sessionBookingMode,
+      maxBookingSeats,
       startDate,
       endDate,
       slots: parsed.slots,
@@ -414,6 +419,8 @@ export async function createClassWithNewTeacherAction(
         lateThresholdMinutes: classData.lateThresholdMinutes,
         acceptsNewStudents: classData.acceptsNewStudents,
         requiresConfirmation: classData.requiresConfirmation,
+        sessionBookingMode: classData.sessionBookingMode,
+        maxBookingSeats: classData.maxBookingSeats,
         startDate: classData.startDate,
         endDate: classData.endDate,
       },
@@ -473,6 +480,8 @@ export async function updateClassAction(
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
+    sessionBookingMode,
+    maxBookingSeats,
     startDate,
     endDate,
     confirmConflicts,
@@ -519,6 +528,8 @@ export async function updateClassAction(
       lateThresholdMinutes,
       acceptsNewStudents,
       requiresConfirmation,
+      sessionBookingMode,
+      maxBookingSeats,
       startDate,
       endDate,
     },
@@ -754,7 +765,10 @@ export async function enrollStudentAction(
   const seat = await runInTransaction(prisma, (tx) =>
     claimClassSeat(tx, scope.ctx.center.id, classGroupId, studentProfileId),
   );
-  if (!seat.ok) return seat.error === "classFull" ? { error: "classFull" } : NOT_FOUND;
+  if (!seat.ok) {
+    if (seat.error === "sessionFull") return { error: "sessionFull", errorDate: formatDate(seat.date, locale) };
+    return seat.error === "classFull" ? { error: "classFull" } : NOT_FOUND;
+  }
 
   revalidateClassDetail(locale, classGroupId);
   revalidateStudentDetail(locale, studentProfileId);

@@ -3,6 +3,7 @@ import type {
   Prisma,
   PrismaClient,
   Role,
+  SessionBookingMode,
   SessionStatus,
   ShareType,
 } from "@prisma/client";
@@ -124,6 +125,8 @@ export type SessionDisqualifier =
   | "payments"
   | "settlement"
   | "ratings"
+  /** F6 — a student holds a PENDING or CONFIRMED booking on it. */
+  | "bookings"
   | "shareOverride"
   | "description"
   | "rescheduled"
@@ -204,7 +207,15 @@ const SESSION_STATE_SELECT = {
   extraRooms: { select: { roomId: true } },
   // D-14 — "has it started" is the session's own frozen timezone.
   timezone: true,
-  _count: { select: { attendees: true, payments: true, settlements: true, ratings: true } },
+  _count: {
+    select: {
+      attendees: true,
+      payments: true,
+      settlements: true,
+      ratings: true,
+      bookings: { where: { status: { in: ["PENDING", "CONFIRMED"] } } },
+    },
+  },
 } satisfies Prisma.SessionSelect;
 
 type SessionState = Prisma.SessionGetPayload<{ select: typeof SESSION_STATE_SELECT }>;
@@ -225,8 +236,10 @@ function sessionRoomIds(session: SessionState): string[] {
  * SCHEDULED, not closed, no attendees, no payments, no settlement, no
  * ratings, no per-session share override, no description, not rescheduled
  * from or to, its teacher and room set still equal `baseline` (the class's
- * values before the edit), and — R5 — not created by hand (`isManual`). The
- * one definition every caller shares.
+ * values before the edit), and — R5 — not created by hand (`isManual`) and —
+ * F6 — no open (PENDING/CONFIRMED) booking, so a booked session is cancelled
+ * (its bookings with it) rather than silently deleted. The one definition
+ * every caller shares.
  */
 export function sessionDisqualifiers(
   session: {
@@ -240,7 +253,8 @@ export function sessionDisqualifiers(
     description: string | null;
     rescheduledToId: string | null;
     rescheduledFrom: { id: string } | null;
-    _count: { attendees: number; payments: number; settlements: number; ratings: number };
+    /** `bookings` optional so a fixture predating F6 can omit it (= 0). */
+    _count: { attendees: number; payments: number; settlements: number; ratings: number; bookings?: number };
   },
   roomIds: readonly string[],
   baseline: Baseline,
@@ -252,6 +266,7 @@ export function sessionDisqualifiers(
   if (session._count.payments > 0) reasons.push("payments");
   if (session._count.settlements > 0) reasons.push("settlement");
   if (session._count.ratings > 0) reasons.push("ratings");
+  if ((session._count.bookings ?? 0) > 0) reasons.push("bookings");
   if (session.centerShareType !== null || session.centerShareValue !== null) reasons.push("shareOverride");
   if (session.description !== null && session.description.trim() !== "") reasons.push("description");
   if (session.rescheduledToId || session.rescheduledFrom) reasons.push("rescheduled");
@@ -264,7 +279,8 @@ export function sessionDisqualifiers(
 /**
  * Nothing has happened on this session — the part of "pristine" every
  * delete shares (R5: including `deleteManualSession`): still SCHEDULED, not
- * closed, no attendee, payment, settlement or rating, no reschedule link.
+ * closed, no attendee, payment, settlement or rating, no open booking (F6),
+ * no reschedule link.
  * A closed session can therefore never match any session delete.
  */
 const UNTOUCHED = {
@@ -276,6 +292,7 @@ const UNTOUCHED = {
   payments: { none: {} },
   settlements: { none: {} },
   ratings: { none: {} },
+  bookings: { none: { status: { in: ["PENDING", "CONFIRMED"] } } },
 } satisfies Prisma.SessionWhereInput;
 
 /** `UNTOUCHED`, and no per-session centre-cut override. */
@@ -721,6 +738,10 @@ export type ClassInput = {
   lateThresholdMinutes: number;
   acceptsNewStudents: boolean;
   requiresConfirmation: boolean;
+  /** F6 — omitted keeps the stored value (a new class: OFF). */
+  sessionBookingMode?: SessionBookingMode;
+  /** F6 — null = no extra cap; omitted keeps the stored value. */
+  maxBookingSeats?: number | null;
   startDate: Date;
   endDate: Date;
 };
@@ -799,6 +820,8 @@ async function writeClassWithSessions(
       extraRoomIds,
       startDate: dateKey(input.startDate),
       endDate: dateKey(input.endDate),
+      sessionBookingMode: input.sessionBookingMode ?? "OFF",
+      maxBookingSeats: input.maxBookingSeats ?? null,
       sessions: reportJson(report),
     },
   });
@@ -1171,6 +1194,8 @@ export async function updateClassWithSessions(
         extraRoomIds,
         startDate: dateKey(input.startDate),
         endDate: dateKey(input.endDate),
+        ...(input.sessionBookingMode !== undefined ? { sessionBookingMode: input.sessionBookingMode } : {}),
+        ...(input.maxBookingSeats !== undefined ? { maxBookingSeats: input.maxBookingSeats } : {}),
         ...(report ? { sessions: reportJson(report) } : {}),
         ...(reprice ? { reprice } : {}),
       },
@@ -1374,13 +1399,16 @@ export type ClassDeleteBlockers = {
   rescheduled: number;
   enrollments: number;
   reservations: number;
+  /** F6 — single-session bookings on any of its sessions, any status. */
+  bookings: number;
 };
 
 /**
  * What keeps a class from being deleted (R4): a class may be deleted only if
  * it never ran — no session started or closed, none with attendees,
  * payments, a settlement, ratings or a reschedule link, and no enrolments or
- * reservations at all. Anything else can only be deactivated.
+ * reservations or session bookings at all. Anything else can only be
+ * deactivated.
  */
 export async function classDeleteBlockers(
   db: Db,
@@ -1391,7 +1419,7 @@ export async function classDeleteBlockers(
   const { timeZone } = await centreScheduling(db, centerId);
   const clock = centreClock(now, timeZone);
   const inClass = { classGroupId };
-  const [sessions, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations] =
+  const [sessions, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations, bookings] =
     await Promise.all([
       db.session.findMany({
         where: scopedWhere(centerId, { ...inClass, date: { lte: clock.today } }),
@@ -1409,13 +1437,14 @@ export async function classDeleteBlockers(
       }),
       db.enrollment.count({ where: scopedWhere(centerId, inClass) }),
       db.reservation.count({ where: scopedWhere(centerId, inClass) }),
+      db.sessionBooking.count({ where: scopedWhere(centerId, { session: inClass }) }),
     ]);
   const started = sessions.filter(
     (session) =>
       session.closedAt !== null ||
       (session.status !== CANCELLED && !session.rescheduledToId && hasStarted(session, clock)),
   ).length;
-  return { started, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations };
+  return { started, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations, bookings };
 }
 
 export function hasDeleteBlockers(blockers: ClassDeleteBlockers): boolean {

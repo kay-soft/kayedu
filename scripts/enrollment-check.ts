@@ -636,6 +636,125 @@ async function main() {
     "Approving it does not create a Membership — staff still add the teacher through the ordinary flow (spec §4.1 item 9's decision record, unchanged by onboarding)",
     (await prisma.membership.count({ where: { userId: wanderingTeacher.id } })) === 0,
   );
+
+  await checkBookingSeats(centerId, teacher.id, managerId);
+}
+
+/**
+ * F6 — bookings and the seat rule, through the REAL production functions:
+ * an enrolment takes a seat in every future session, so it is refused
+ * (`sessionFull`, naming the first full date) when a future session is full
+ * of CONFIRMED bookings — at instant enrol (`reserveOrEnroll`) and at confirm
+ * (`confirmReservation`) — and allowed when a seat is left; and cancelling or
+ * rescheduling a session cancels its open bookings in the same transaction
+ * (`SESSION_CANCELLED` / `SESSION_RESCHEDULED`), leaving a checked-in one as
+ * history. Dated relative to the real clock: the seat rule reads "now".
+ */
+async function checkBookingSeats(centerId: string, teacherId: string, managerId: string): Promise<void> {
+  console.log("\nF6 — bookings take seats; session cancel / reschedule cancels bookings");
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const utcDay = (offset: number) => {
+    const d = new Date(Date.now() + offset * DAY);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  };
+  const room = await prisma.room.create({ data: scopedData(centerId, { name: "F6 two-seat room", capacity: 2 }) });
+  const bookedUp = await prisma.classGroup.update({
+    where: { id: (await makeClass(centerId, teacherId, { roomId: room.id })).id },
+    data: { sessionBookingMode: "INSTANT" },
+  });
+  const soon = await makeSession(centerId, bookedUp.id, teacherId, room.id, utcDay(3), "16:00", "18:00");
+  const later = await makeSession(centerId, bookedUp.id, teacherId, room.id, utcDay(10), "16:00", "18:00");
+  const confirmBookingRow = async (sessionId: string, tag: string) =>
+    prisma.sessionBooking.create({
+      data: scopedData(centerId, {
+        sessionId,
+        studentId: (await makeStudentUser(tag)).id,
+        status: "CONFIRMED",
+        resolvedAt: new Date(),
+      }),
+    });
+
+  // One confirmed booking on the later session: 0 enrolled + 1 + 1 = 2 seats — fits.
+  await confirmBookingRow(later.id, "f6-seat-1");
+  const fits = await prisma.$transaction(async (tx) =>
+    reserveOrEnroll(tx, { centerId, classGroupId: bookedUp.id, studentUserId: (await makeStudentUser("f6-enrol-1")).id }),
+  );
+  check("An enrolment that still fits every future session (with its bookings) succeeds", fits.ok && fits.kind === "enrolled");
+
+  // Now the later session has 1 enrolled + 1 booked = 2 of 2: one more enrolment overflows it.
+  const refused = await prisma.$transaction(async (tx) =>
+    reserveOrEnroll(tx, { centerId, classGroupId: bookedUp.id, studentUserId: (await makeStudentUser("f6-enrol-2")).id }),
+  );
+  check(
+    "Instant enrolment is refused when a future session is full of bookings, naming its date (sessionFull)",
+    // The earlier session has seats left; the refusal names the later one.
+    !refused.ok && refused.error === "sessionFull" && "date" in refused &&
+      refused.date.getTime() === later.date.getTime() && refused.date.getTime() !== soon.date.getTime(),
+    JSON.stringify(refused),
+  );
+  check(
+    "…and no StudentProfile was made for the refused enrolment",
+    (await prisma.studentProfile.count({ where: { centerId, user: { email: "enrollment-check-f6-enrol-2@kayedu.test" } } })) === 0,
+  );
+
+  // The same rule at confirm.
+  const approvalClass = await makeClass(centerId, teacherId, { roomId: room.id, requiresConfirmation: true });
+  const approvalSession = await makeSession(centerId, approvalClass.id, teacherId, room.id, utcDay(4), "09:00", "10:00");
+  await confirmBookingRow(approvalSession.id, "f6-seat-2");
+  await confirmBookingRow(approvalSession.id, "f6-seat-3");
+  const request = await prisma.$transaction(async (tx) =>
+    reserveOrEnroll(tx, { centerId, classGroupId: approvalClass.id, studentUserId: (await makeStudentUser("f6-request")).id }),
+  );
+  const confirm =
+    request.ok && request.kind === "pending"
+      ? await prisma.$transaction((tx) => confirmReservation(tx, centerId, request.reservationId, managerId))
+      : null;
+  check(
+    "Confirming a reservation is refused when a future session is full of bookings (sessionFull)",
+    confirm?.ok === false && confirm.error === "sessionFull",
+    JSON.stringify(confirm),
+  );
+
+  // Cancelling a session cancels its open bookings — a checked-in one stays.
+  const cancelClass = await makeClass(centerId, teacherId);
+  const toCancel = await makeSession(centerId, cancelClass.id, teacherId, null, utcDay(5), "12:00", "13:00");
+  const pendingOne = await prisma.sessionBooking.create({
+    data: scopedData(centerId, { sessionId: toCancel.id, studentId: (await makeStudentUser("f6-cancel-p")).id }),
+  });
+  const confirmedOne = await confirmBookingRow(toCancel.id, "f6-cancel-c");
+  const cancelled = await cancelSession(prisma, centerId, toCancel.id);
+  const afterCancel = await prisma.sessionBooking.findMany({ where: { id: { in: [pendingOne.id, confirmedOne.id] } } });
+  check(
+    "Cancelling a session cancels its pending and confirmed bookings (SESSION_CANCELLED), in the same transaction",
+    cancelled.ok &&
+      afterCancel.length === 2 &&
+      afterCancel.every((row) => row.status === "CANCELLED" && row.cancelReason === "SESSION_CANCELLED" && row.cancelledAt !== null),
+    JSON.stringify(afterCancel.map((row) => [row.status, row.cancelReason])),
+  );
+
+  // Rescheduling cancels them too (SESSION_RESCHEDULED); the replacement starts with none.
+  const moveClass = await makeClass(centerId, teacherId);
+  const toMove = await makeSession(centerId, moveClass.id, teacherId, null, utcDay(6), "12:00", "13:00");
+  const movedBooking = await confirmBookingRow(toMove.id, "f6-move");
+  const moved = await rescheduleSession(
+    prisma,
+    centerId,
+    toMove.id,
+    { date: utcDay(7), startTime: "12:00", endTime: "13:00" },
+    "WARN",
+    "en",
+    { confirmConflicts: true },
+  );
+  const afterMove = await prisma.sessionBooking.findUniqueOrThrow({ where: { id: movedBooking.id } });
+  check(
+    "Rescheduling a session cancels its bookings (SESSION_RESCHEDULED); the replacement carries none",
+    moved.ok &&
+      afterMove.status === "CANCELLED" &&
+      afterMove.cancelReason === "SESSION_RESCHEDULED" &&
+      (await prisma.sessionBooking.count({ where: { sessionId: moved.ok ? moved.session.id : "" } })) === 0,
+    JSON.stringify({ moved: moved.ok, status: afterMove.status, reason: afterMove.cancelReason }),
+  );
 }
 
 main()

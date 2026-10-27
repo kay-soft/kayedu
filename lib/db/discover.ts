@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient, Role } from "@prisma/client";
+import type { Prisma, PrismaClient, Role, SessionBookingMode } from "@prisma/client";
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts).
@@ -143,10 +143,25 @@ export function discoverClassById(
   db: PrismaClient,
   centerId: string,
   classGroupId: string,
-): Promise<(DiscoverClassRow & { startDate: Date; endDate: Date }) | null> {
+): Promise<
+  | (DiscoverClassRow & {
+      startDate: Date;
+      endDate: Date;
+      sessionBookingMode: SessionBookingMode;
+      maxBookingSeats: number | null;
+    })
+  | null
+> {
   return db.classGroup.findFirst({
     where: scopedWhere(centerId, { id: classGroupId, active: true, acceptsNewStudents: true }),
-    select: { ...discoverClassSelect(centerId), startDate: true, endDate: true },
+    // F6 — the page's "Upcoming sessions" needs the booking settings too.
+    select: {
+      ...discoverClassSelect(centerId),
+      startDate: true,
+      endDate: true,
+      sessionBookingMode: true,
+      maxBookingSeats: true,
+    },
   });
 }
 

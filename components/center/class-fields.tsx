@@ -1,9 +1,9 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
-import { Banknote, CalendarClock, DoorOpen, Layers, UserRound, UsersRound } from "lucide-react";
+import { Banknote, CalendarClock, DoorOpen, Layers, LogIn, UserRound, UsersRound } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ShareType } from "@prisma/client";
+import type { SessionBookingMode, ShareType } from "@prisma/client";
 
 import {
   ClassPeriodFields,
@@ -15,10 +15,10 @@ import { FormSection } from "@/components/shared/dialog-shell";
 import { ToggleRow } from "@/components/settings/toggle-row";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { formatMoney } from "@/lib/format";
-import { MAX_LATE_THRESHOLD_MINUTES } from "@/lib/validation/classes";
+import { formatMoney, formatNumber } from "@/lib/format";
+import { MAX_BOOKING_SEATS, MAX_LATE_THRESHOLD_MINUTES } from "@/lib/validation/classes";
 import { MAX_PRICE_PIASTRES, centerCutError, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
-import type { RoomLinkPair } from "@/lib/rooms";
+import { effectiveCapacity, type RoomLinkPair } from "@/lib/rooms";
 
 export type SelectOption = { value: string; label: string };
 
@@ -36,6 +36,10 @@ export type ClassFieldsValues = {
   lateThresholdMinutes: string;
   acceptsNewStudents: boolean;
   requiresConfirmation: boolean;
+  /** F6 — single-session attendance online. */
+  sessionBookingMode: SessionBookingMode;
+  /** F6 — the per-session booking cap as typed ("" = none). */
+  maxBookingSeats: string;
   /** R4 — the class's period, "YYYY-MM-DD" ("" on a new class). */
   startDate: string;
   endDate: string;
@@ -66,7 +70,10 @@ export type ClassPlacementInputs = {
  * - **Weekly schedule** — the caller's rows and the conflict notice that
  *   concerns them (new classes only; an existing class edits its slots on its
  *   own page);
- * - **Pricing & centre cut** and **Attendance & enrolment**.
+ * - **Pricing & centre cut**, **Attendance** (the late threshold) and
+ *   **Joining** (F6 — accept new students, how enrolment is confirmed,
+ *   single-session booking and its optional cap, and the seat limit the room
+ *   set gives, read-only).
  *
  * Two columns from `lg`, one below. Shared between the New class dialog and
  * the Edit class dialog, exactly like `student-fields.tsx` is shared between
@@ -136,10 +143,20 @@ export function ClassFields({
     startDate: values.startDate,
     endDate: values.endDate,
   });
+  // F6 — the seat limit shown read-only in Joining follows the room picker.
+  const [roomSet, setRoomSet] = useState({ roomId: values.roomId || null, extraRoomIds: values.extraRoomIds });
+  const [bookingMode, setBookingMode] = useState<SessionBookingMode>(values.sessionBookingMode);
   function changePlacement(patch: Partial<ClassPlacementInputs>) {
     placement.current = { ...placement.current, ...patch };
+    if (patch.roomId !== undefined || patch.extraRoomIds !== undefined) {
+      setRoomSet({ roomId: placement.current.roomId, extraRoomIds: placement.current.extraRoomIds });
+    }
     onPlacementChange?.(placement.current);
   }
+  const chosenRooms = roomSet.roomId
+    ? rooms.filter((room) => room.id === roomSet.roomId || roomSet.extraRoomIds.includes(room.id))
+    : [];
+  const seatLimit = effectiveCapacity(chosenRooms);
   // Once the person types into shareValue themselves, the FIXED-default
   // auto-fill below stops touching it — an explicit edit always wins.
   const shareValueTouched = useRef(false);
@@ -387,6 +404,9 @@ export function ClassFields({
           />
         </Field>
 
+      </FormSection>
+
+      <FormSection title={tSections("joining")} description={tSections("joiningHint")} icon={<LogIn />} wide>
         <ToggleRow
           name="acceptsNewStudents"
           label={t("acceptsNewStudents")}
@@ -394,12 +414,78 @@ export function ClassFields({
           defaultChecked={values.acceptsNewStudents}
         />
 
-        <ToggleRow
-          name="requiresConfirmation"
-          label={t("requiresConfirmation")}
-          description={t("requiresConfirmationHint")}
-          defaultChecked={values.requiresConfirmation}
-        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            id={`${idPrefix}-requiresConfirmation`}
+            label={t("enrolmentMode")}
+            hint={t("enrolmentModeHint")}
+          >
+            <Select
+              id={`${idPrefix}-requiresConfirmation`}
+              name="requiresConfirmation"
+              defaultValue={values.requiresConfirmation ? "true" : "false"}
+            >
+              <option value="false">{t("modeInstant")}</option>
+              <option value="true">{t("modeApproval")}</option>
+            </Select>
+          </Field>
+
+          <Field
+            id={`${idPrefix}-sessionBookingMode`}
+            label={t("sessionBookingMode")}
+            hint={t("sessionBookingModeHint")}
+            error={error("sessionBookingMode")}
+          >
+            <Select
+              id={`${idPrefix}-sessionBookingMode`}
+              name="sessionBookingMode"
+              value={bookingMode}
+              onValueChange={(next) => setBookingMode(next as SessionBookingMode)}
+            >
+              <option value="OFF">{t("bookingOff")}</option>
+              <option value="INSTANT">{t("modeInstant")}</option>
+              <option value="APPROVAL">{t("modeApproval")}</option>
+            </Select>
+          </Field>
+
+          <Field
+            id={`${idPrefix}-maxBookingSeats`}
+            label={t("maxBookingSeats")}
+            hint={t("maxBookingSeatsHint")}
+            optional
+            error={error("maxBookingSeats")}
+          >
+            <Input
+              id={`${idPrefix}-maxBookingSeats`}
+              name="maxBookingSeats"
+              type="number"
+              dir="ltr"
+              inputMode="numeric"
+              min={1}
+              max={MAX_BOOKING_SEATS}
+              step={1}
+              defaultValue={values.maxBookingSeats}
+              disabled={bookingMode === "OFF"}
+              aria-invalid={fieldErrors?.maxBookingSeats ? true : undefined}
+            />
+          </Field>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-text-primary">{t("seatLimit")}</span>
+            <p className="flex min-h-11 items-center rounded-lg bg-surface-subtle px-3 text-sm tabular-nums text-text-primary">
+              {roomSet.roomId
+                ? seatLimit > 0
+                  ? t("seatLimitValue", { count: formatNumber(seatLimit, locale) })
+                  : t("seatLimitUnlimited")
+                : t("seatLimitNoRoom")}
+            </p>
+            <p className="text-xs text-text-muted">{t("seatLimitHint")}</p>
+          </div>
+        </div>
+        {/* A disabled input posts nothing; keep the stored cap while booking is off. */}
+        {bookingMode === "OFF" ? (
+          <input type="hidden" name="maxBookingSeats" value={values.maxBookingSeats} />
+        ) : null}
       </FormSection>
     </div>
   );

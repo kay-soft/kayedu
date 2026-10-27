@@ -934,6 +934,39 @@ async function main() {
     (await recentCheckIns(prisma, { centerId: B, sessionId: S_live.id })).length === 0,
   );
 
+  // ── 6b. A booked student at the desk (F6) ──────────────────────────────
+  console.log("\n6b. A single-session booking at the desk (F6)");
+  const sBooked = await makeStudent(A, "booked", "Basma", "Booked");
+  const sWalkIn = await makeStudent(A, "walkin", "Walid", "WalkIn");
+  const booking = await prisma.sessionBooking.create({
+    data: scopedData(A, { sessionId: S_live.id, studentId: sBooked.profile.userId, status: "CONFIRMED", resolvedAt: NOW }),
+  });
+  const bookedState = await state(liveRef, sBooked);
+  const walkInState = await state(liveRef, sWalkIn);
+  check(
+    "A student with a CONFIRMED booking is ready as Booked (not enrolled); one without is a plain drop-in",
+    bookedState.outcome === "ready" && !bookedState.enrolled && bookedState.booked &&
+      walkInState.outcome === "ready" && !walkInState.booked,
+    JSON.stringify({ bookedState, walkInState }),
+  );
+  const paymentsBefore = await prisma.payment.count({ where: { sessionId: S_live.id } });
+  const bookedRow = await checkIn(A, S_live.id, sBooked.profile.id, at("11:20"));
+  const linked = await prisma.sessionBooking.findUniqueOrThrow({ where: { id: booking.id } });
+  check(
+    "Check-in links the booking to the roster row in the same statement, and the row is an ordinary drop-in",
+    linked.sessionAttendeeId === bookedRow.id && bookedRow.isDropIn && bookedRow.enrollmentId === null,
+    JSON.stringify({ linked: linked.sessionAttendeeId, row: bookedRow.id }),
+  );
+  check(
+    "A booking records no money: the check-in alone writes no payment",
+    (await prisma.payment.count({ where: { sessionId: S_live.id } })) === paymentsBefore,
+  );
+  const walkInRow = await checkIn(A, S_live.id, sWalkIn.profile.id, at("11:21"));
+  check(
+    "A walk-in with no booking links nothing",
+    (await prisma.sessionBooking.count({ where: { sessionAttendeeId: walkInRow.id } })) === 0,
+  );
+
   // ── 7. End session from reception ────────────────────────────────────────
   console.log("\n7. End session (R2's closeSession, reached from a card)");
   const early = await closeSession(prisma, A, S_up.id, { closedBy: staff.id, now: NOW });

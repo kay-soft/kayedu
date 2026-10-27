@@ -22,6 +22,14 @@ import {
   reserveOrEnroll,
 } from "../lib/db/reservations.ts";
 import { resolveCenterRelations } from "../lib/auth/relations.ts";
+import {
+  BOOKING_CAPS,
+  cancelBookingByStudent,
+  confirmBooking,
+  rejectBooking,
+  requestBooking,
+  upcomingBookableSessions,
+} from "../lib/db/session-bookings.ts";
 import { generateFamilyCode, hashFamilyCode } from "../lib/db/parents.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import {
@@ -383,6 +391,7 @@ async function main() {
 
   await checkAccountSeeding(centerA, centerB, teacherA, teacherB);
   await checkPublicCatalog();
+  await checkSessionBookings(centerA, centerB, teacherA);
 }
 
 /**
@@ -668,6 +677,247 @@ async function checkAccountSeeding(
       relations.length === 0 && reads.every((count) => count === 0),
     );
   }
+  await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });
+}
+
+/**
+ * F6 — single-session booking, through the REAL `lib/db/session-bookings.ts`:
+ * OFF refuses; INSTANT confirms at once (and only then makes the profile);
+ * APPROVAL waits and confirm makes the profile; the last seat cannot be taken
+ * twice by two concurrent requests; `maxBookingSeats` caps confirmed
+ * bookings; both blocks refuse at request and at confirm; the per-account
+ * cap of 10 open bookings; a started session takes no booking and a pending
+ * one expires (nothing written); a student cancels only until start; seats
+ * leave as a status; and another branch cannot resolve this branch's booking.
+ */
+async function checkSessionBookings(
+  centerA: { id: string },
+  centerB: { id: string },
+  teacherA: { id: string },
+): Promise<void> {
+  console.log("\nF6 — single-session booking");
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const utcDay = (offset: number) => {
+    const d = new Date(Date.now() + offset * DAY);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  };
+  let slot = 0;
+  const session = (classGroupId: string, dayOffset = 3) =>
+    prisma.session.create({
+      data: scopedData(centerA.id, {
+        classGroupId,
+        teacherId: teacherA.id,
+        date: utcDay(dayOffset),
+        // Distinct start times keep the (class, date, start) unique happy.
+        startTime: `${String(8 + (slot % 12)).padStart(2, "0")}:${String((slot++ * 5) % 60).padStart(2, "0")}`,
+        endTime: "22:00",
+        priceSnapshot: 10_000,
+      }),
+    });
+  const bookingClass = async (
+    mode: "OFF" | "INSTANT" | "APPROVAL",
+    opts: { capacity?: number; maxBookingSeats?: number } = {},
+  ) => {
+    const row = await makeClass(centerA.id, teacherA.id, { capacity: opts.capacity });
+    return prisma.classGroup.update({
+      where: { id: row.id },
+      data: { sessionBookingMode: mode, maxBookingSeats: opts.maxBookingSeats ?? null },
+    });
+  };
+  const book = (sessionId: string, studentUserId: string, centerId = centerA.id) =>
+    prisma.$transaction((tx) => requestBooking(tx, { centerId, sessionId, studentUserId }));
+
+  // OFF — every pre-F6 class.
+  const off = await bookingClass("OFF");
+  const offSession = await session(off.id);
+  const s1 = await makeStudentUser("f6-s1");
+  const offResult = await book(offSession.id, s1.id);
+  check("A class with booking OFF refuses a booking (bookingOff)", !offResult.ok && offResult.error === "bookingOff");
+
+  // INSTANT — confirmed at once; the profile is made then.
+  const instant = await bookingClass("INSTANT");
+  const instantSession = await session(instant.id);
+  const instantResult = await book(instantSession.id, s1.id);
+  const s1Profile = await prisma.studentProfile.findFirst({ where: { centerId: centerA.id, userId: s1.id } });
+  check(
+    "INSTANT: the booking is CONFIRMED at once and the StudentProfile is created then",
+    instantResult.ok && instantResult.kind === "confirmed" && instantResult.booking.status === "CONFIRMED" && s1Profile !== null,
+    JSON.stringify(instantResult),
+  );
+  const again = await book(instantSession.id, s1.id);
+  check("A second booking of the same session is alreadyBooked", !again.ok && again.error === "alreadyBooked");
+
+  // APPROVAL — pending, no profile until confirmed.
+  const approval = await bookingClass("APPROVAL");
+  const approvalSession = await session(approval.id);
+  const s2 = await makeStudentUser("f6-s2");
+  const pending = await book(approvalSession.id, s2.id);
+  const s2ProfileBefore = await prisma.studentProfile.count({ where: { centerId: centerA.id, userId: s2.id } });
+  check(
+    "APPROVAL: the booking is PENDING and no StudentProfile exists yet",
+    pending.ok && pending.kind === "pending" && s2ProfileBefore === 0,
+  );
+  const crossCentre = pending.ok
+    ? await prisma.$transaction((tx) => confirmBooking(tx, centerB.id, pending.booking.id, teacherA.id))
+    : null;
+  check("Another branch cannot confirm this branch's booking (notFound)", crossCentre?.ok === false && crossCentre.error === "notFound");
+  const confirmed = pending.ok
+    ? await prisma.$transaction((tx) => confirmBooking(tx, centerA.id, pending.booking.id, teacherA.id))
+    : null;
+  const s2ProfileAfter = await prisma.studentProfile.count({ where: { centerId: centerA.id, userId: s2.id } });
+  const confirmAudit = pending.ok
+    ? await prisma.auditLog.count({ where: { centerId: centerA.id, action: "sessionBooking.confirm", entityId: pending.booking.id } })
+    : 0;
+  check(
+    "Confirming makes it CONFIRMED, creates the profile, and writes one sessionBooking.confirm audit row",
+    confirmed?.ok === true && confirmed.booking.status === "CONFIRMED" && s2ProfileAfter === 1 && confirmAudit === 1,
+  );
+  const reconfirm = pending.ok
+    ? await prisma.$transaction((tx) => confirmBooking(tx, centerA.id, pending.booking.id, teacherA.id))
+    : null;
+  check("A resolved booking cannot be resolved again (notPending)", reconfirm?.ok === false && reconfirm.error === "notPending");
+
+  // Enrolled students do not book.
+  const enrolledUser = await makeStudentUser("f6-enrolled");
+  await prisma.$transaction((tx) =>
+    reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: instant.id, studentUserId: enrolledUser.id }),
+  );
+  const enrolledBook = await book(instantSession.id, enrolledUser.id);
+  check(
+    "A student enrolled in the class cannot book one of its sessions (alreadyEnrolled)",
+    !enrolledBook.ok && enrolledBook.error === "alreadyEnrolled",
+  );
+
+  // The last seat, two concurrent requests → exactly one.
+  const tiny = await bookingClass("INSTANT", { capacity: 1 });
+  const tinySession = await session(tiny.id);
+  const racerA = await makeStudentUser("f6-race-a");
+  const racerB = await makeStudentUser("f6-race-b");
+  const race = await Promise.all([book(tinySession.id, racerA.id), book(tinySession.id, racerB.id)]);
+  const winners = race.filter((result) => result.ok).length;
+  const losers = race.filter((result) => !result.ok && result.error === "sessionFull").length;
+  const confirmedTiny = await prisma.sessionBooking.count({ where: { sessionId: tinySession.id, status: "CONFIRMED" } });
+  check(
+    "Two concurrent requests for the last seat: exactly one wins, the other is sessionFull",
+    winners === 1 && losers === 1 && confirmedTiny === 1,
+    JSON.stringify(race.map((result) => (result.ok ? "ok" : result.error))),
+  );
+  const tinyRoom = tiny.roomId
+    ? await prisma.room.findFirst({ where: { id: tiny.roomId }, select: { id: true, name: true, capacity: true } })
+    : null;
+  const tinySeats = await upcomingBookableSessions(prisma, centerA.id, { ...tiny, room: tinyRoom, extraRooms: [] });
+  check(
+    "The class page shows the full session as a status, never a count",
+    tinySeats.find((row) => row.id === tinySession.id)?.seats === "full" &&
+      tinySeats.every((row) => Object.keys(row).sort().join(",") === "date,endTime,id,seats,startTime"),
+  );
+
+  // maxBookingSeats caps CONFIRMED bookings under a roomy seat limit.
+  const capped = await bookingClass("INSTANT", { capacity: 10, maxBookingSeats: 1 });
+  const cappedSession = await session(capped.id);
+  const c1 = await book(cappedSession.id, (await makeStudentUser("f6-cap-1")).id);
+  const c2 = await book(cappedSession.id, (await makeStudentUser("f6-cap-2")).id);
+  check(
+    "maxBookingSeats: the first booking fits, the next is bookingSeatsFull",
+    c1.ok && !c2.ok && c2.error === "bookingSeatsFull",
+  );
+
+  // Both blocks, at request and at confirm.
+  const blockClass = await bookingClass("APPROVAL");
+  const blockSession = await session(blockClass.id);
+  const teacherBlocked = await makeStudentUser("f6-block-teacher");
+  await prisma.studentBlock.create({
+    data: scopedData(centerA.id, { scope: TEACHER_SCOPE, refId: teacherA.id, blockedUserId: teacherBlocked.id }),
+  });
+  const atRequest = await book(blockSession.id, teacherBlocked.id);
+  check(
+    "A TEACHER-scope block refuses the booking at request (studentBlocked)",
+    !atRequest.ok && atRequest.error === "studentBlocked",
+  );
+  const lateBlocked = await makeStudentUser("f6-block-class");
+  const waiting = await book(blockSession.id, lateBlocked.id);
+  await prisma.studentBlock.create({
+    data: scopedData(centerA.id, { scope: CLASS_SCOPE, refId: blockClass.id, blockedUserId: lateBlocked.id }),
+  });
+  const atConfirm = waiting.ok
+    ? await prisma.$transaction((tx) => confirmBooking(tx, centerA.id, waiting.booking.id, teacherA.id))
+    : null;
+  check(
+    "A CLASS-scope block placed after the request refuses the confirm (studentBlocked)",
+    waiting.ok && atConfirm?.ok === false && atConfirm.error === "studentBlocked",
+  );
+
+  // The per-account cap: 10 open bookings, the 11th refused.
+  const many = await bookingClass("INSTANT");
+  const manySessions = [];
+  for (let i = 0; i < BOOKING_CAPS.openBookings + 1; i += 1) manySessions.push(await session(many.id, 4 + i));
+  const heavy = await makeStudentUser("f6-cap-account");
+  const manyResults = [];
+  for (const row of manySessions) manyResults.push(await book(row.id, heavy.id));
+  const last = manyResults.at(-1)!;
+  check(
+    `One account holds at most ${BOOKING_CAPS.openBookings} open bookings; the next is bookingLimit`,
+    BOOKING_CAPS.openBookings === 10 &&
+      manyResults.slice(0, -1).every((result) => result.ok) &&
+      !last.ok && last.error === "bookingLimit",
+  );
+
+  // A started session takes no booking; a pending one expires and cannot be confirmed.
+  const past = await session(instant.id, -1);
+  const lateBook = await book(past.id, (await makeStudentUser("f6-late")).id);
+  check(
+    "A session that has started takes no booking (sessionUnavailable)",
+    !lateBook.ok && lateBook.error === "sessionUnavailable",
+  );
+  const expiring = await session(approval.id, 2);
+  const expiringBooking = await book(expiring.id, (await makeStudentUser("f6-expiring")).id);
+  const afterStart = new Date(Date.now() + 4 * DAY);
+  const expiredConfirm = expiringBooking.ok
+    ? await prisma.$transaction((tx) =>
+        confirmBooking(tx, centerA.id, expiringBooking.booking.id, teacherA.id, { now: afterStart }),
+      )
+    : null;
+  const expiredReject = expiringBooking.ok
+    ? await prisma.$transaction((tx) =>
+        rejectBooking(tx, centerA.id, expiringBooking.booking.id, teacherA.id, { now: afterStart }),
+      )
+    : null;
+  const stillPending = expiringBooking.ok
+    ? await prisma.sessionBooking.findUniqueOrThrow({ where: { id: expiringBooking.booking.id } })
+    : null;
+  check(
+    "A pending booking whose session started is expired: confirm and reject are refused, nothing is written",
+    expiredConfirm?.ok === false && expiredConfirm.error === "expired" &&
+      expiredReject?.ok === false && expiredReject.error === "expired" &&
+      stillPending?.status === "PENDING" && stillPending.resolvedAt === null,
+  );
+
+  // The student cancels their own booking, until the session starts.
+  const cancellable = await session(instant.id, 5);
+  const canceller = await makeStudentUser("f6-canceller");
+  const toCancel = await book(cancellable.id, canceller.id);
+  const someoneElse = toCancel.ok
+    ? await cancelBookingByStudent(prisma, centerA.id, toCancel.booking.id, s1.id)
+    : null;
+  check("Another student cannot cancel this booking (notFound)", someoneElse?.ok === false && someoneElse.error === "notFound");
+  const tooLate = toCancel.ok
+    ? await cancelBookingByStudent(prisma, centerA.id, toCancel.booking.id, canceller.id, new Date(Date.now() + 6 * DAY))
+    : null;
+  check("After the session starts, a booking can no longer be cancelled (tooLate)", tooLate?.ok === false && tooLate.error === "tooLate");
+  const cancelled = toCancel.ok
+    ? await cancelBookingByStudent(prisma, centerA.id, toCancel.booking.id, canceller.id)
+    : null;
+  check(
+    "Before the start, the student cancels it (CANCELLED, reason STUDENT)",
+    cancelled?.ok === true && cancelled.booking.status === "CANCELLED" && cancelled.booking.cancelReason === "STUDENT",
+  );
+  const rebook = await book(cancellable.id, canceller.id);
+  check(
+    "A cancelled booking can be booked again (the same row is reused)",
+    rebook.ok && toCancel.ok && rebook.booking.id === toCancel.booking.id,
+  );
+
   await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });
 }
 

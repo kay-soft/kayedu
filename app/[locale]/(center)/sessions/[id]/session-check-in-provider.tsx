@@ -47,6 +47,7 @@ export function SessionCheckInProvider({
   priceLabel,
   paymentMethods,
   canRecordPayment,
+  bookedStudentIds = [],
   children,
 }: {
   sessionId: string;
@@ -55,6 +56,8 @@ export function SessionCheckInProvider({
   paymentMethods: PaymentMethodOption[];
   /** `payment.record` — without it the panel checks in and records no payment. */
   canRecordPayment: boolean;
+  /** F6 — students (profile ids) holding a CONFIRMED booking: the panel says "Booked". */
+  bookedStudentIds?: string[];
   children: React.ReactNode;
 }) {
   const t = useTranslations("Reception");
@@ -110,6 +113,7 @@ export function SessionCheckInProvider({
               sessionId={sessionId}
               student={target}
               enrolled={target.enrolled}
+              booked={!target.enrolled && bookedStudentIds.includes(target.id)}
               priceLabel={priceLabel}
               paymentMethods={paymentMethods}
               recordPayment={canRecordPayment}

@@ -25,6 +25,8 @@ export const approveSessionRequestSchema = approvalIdSchema.extend({
 
 export type ApprovalsActionState = SlotConflictState & {
   error?: string;
+  /** F6 — a formatted date for `error` ("sessionFull": the first full session). */
+  errorDate?: string;
   status?: "approved" | "declined";
 };
 

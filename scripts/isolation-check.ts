@@ -26,13 +26,16 @@ import { grantMembershipBranch, loadPermissionGrants } from "../lib/db/permissio
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
 import { confirmGradePromotion, promotionPreview, undoGradePromotion } from "../lib/db/promotion.ts";
 import { addTeacherMembership } from "../lib/db/teacher-membership.ts";
+import { cancelBookingByStudent, confirmBooking, rejectBooking, requestBooking } from "../lib/db/session-bookings.ts";
 import {
   MissingCenterScopeError,
   TenantScopeError,
   requireScopedById,
+  scopedData,
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
+import { scopedWith } from "../lib/db/scoped.ts";
 
 const prisma = await gatePrisma();
 
@@ -73,7 +76,14 @@ async function cleanup() {
   await prisma.user.deleteMany({
     where: {
       email: {
-        in: ["isolation-a@kayedu.test", "isolation-b@kayedu.test", "isolation-manager@kayedu.test", "isolation-teacher@kayedu.test"],
+        in: [
+          "isolation-a@kayedu.test",
+          "isolation-b@kayedu.test",
+          "isolation-manager@kayedu.test",
+          "isolation-teacher@kayedu.test",
+          // F6 — after the centres: its booking (RESTRICT on the User) went with them.
+          "isolation-f6-booker@kayedu.test",
+        ],
       },
     },
   });
@@ -174,6 +184,63 @@ async function main() {
   await checkBranchTargetedAdds(centerA.id, centerB.id, userA.id);
   await checkFamilyLinks(centerA.id, centerB.id, userA.id, userB.id);
   await checkGradePromotionIsolation(centerA.id, centerB.id, userA.id);
+  await checkSessionBookingIsolation(centerA.id, centerB.id, userA.id, userB.id);
+}
+
+// ── 9. F6: a single-session booking belongs to one branch ──────────────────
+// `SessionBooking` carries `centerId`; every read and every resolve is scoped
+// by it. From another branch, the row does not resolve by id, cannot be
+// confirmed, rejected or cancelled, and never appears in that branch's queue.
+async function checkSessionBookingIsolation(centerAId: string, centerBId: string, actorAId: string, actorBId: string) {
+  console.log("\nF6 — a session booking is one branch's");
+  const DAY = 24 * 60 * 60 * 1000;
+  const d = new Date(Date.now() + 3 * DAY);
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const classA = await prisma.classGroup.create({
+    data: scopedData(centerAId, {
+      startDate: new Date("2026-01-01"),
+      endDate: new Date("2027-12-31"),
+      teacherId: actorAId,
+      price: 10_000,
+      sessionBookingMode: "APPROVAL",
+    }),
+  });
+  const sessionA = await prisma.session.create({
+    data: scopedData(centerAId, { classGroupId: classA.id, teacherId: actorAId, date, startTime: "15:00", endTime: "16:00", priceSnapshot: 10_000 }),
+  });
+  const student = await prisma.user.create({
+    data: { email: "isolation-f6-booker@kayedu.test", firstName: "Booker", lastName: "F6" },
+  });
+  const requested = await prisma.$transaction((tx) =>
+    requestBooking(tx, { centerId: centerAId, sessionId: sessionA.id, studentUserId: student.id }),
+  );
+  check("The booking is written at its own branch", requested.ok && requested.booking.centerId === centerAId);
+  const bookingId = requested.ok ? requested.booking.id : "";
+
+  check("Branch B cannot read Branch A's booking by id", (await scopedFindById(prisma.sessionBooking, centerBId, bookingId)) === null);
+  const confirmFromB = await prisma.$transaction((tx) => confirmBooking(tx, centerBId, bookingId, actorBId));
+  const rejectFromB = await prisma.$transaction((tx) => rejectBooking(tx, centerBId, bookingId, actorBId));
+  const cancelFromB = await cancelBookingByStudent(prisma, centerBId, bookingId, student.id);
+  check(
+    "Branch B cannot confirm, reject or cancel it (notFound each time)",
+    !confirmFromB.ok && confirmFromB.error === "notFound" &&
+      !rejectFromB.ok && rejectFromB.error === "notFound" &&
+      !cancelFromB.ok && cancelFromB.error === "notFound",
+  );
+  const bookFromB = await prisma.$transaction((tx) =>
+    requestBooking(tx, { centerId: centerBId, sessionId: sessionA.id, studentUserId: student.id }),
+  );
+  check("A booking request naming Branch B for Branch A's session is notFound", !bookFromB.ok && bookFromB.error === "notFound");
+  const queueB = await scopedWith(prisma, {
+    center: { id: centerBId },
+    user: { locale: "en" },
+    role: "OWNER",
+    isPlatformAdmin: false,
+    settings: null,
+  }).sessionBookings.listPending();
+  check("Branch B's approvals queue never lists it", !queueB.some((row) => row.id === bookingId));
+  const untouched = await prisma.sessionBooking.findUniqueOrThrow({ where: { id: bookingId } });
+  check("…and it is still PENDING, untouched", untouched.status === "PENDING" && untouched.resolvedAt === null);
 }
 
 // ── 8. F4: a promotion batch belongs to one branch, and only to it ─────────

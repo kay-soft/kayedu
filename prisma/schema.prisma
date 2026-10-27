@@ -85,6 +85,34 @@ enum ReservationStatus {
   CANCELLED
 }
 
+// F6 — whether a class's single sessions can be booked online by a student
+// who is not enrolled. OFF (the default, and every class that predates F6):
+// no booking, exactly as before. INSTANT: a booking is CONFIRMED at once.
+// APPROVAL: a booking waits PENDING in the branch's and the teacher's
+// approvals queues. Walk-in drop-ins at the desk are unaffected by all three.
+enum SessionBookingMode {
+  OFF
+  INSTANT
+  APPROVAL
+}
+
+enum SessionBookingStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+}
+
+// Why a booking was cancelled (F6). STUDENT: they withdrew it. The session
+// was cancelled, or rescheduled (the student books the replacement again).
+// STAFF: reserved for a staff-side cancel; nothing writes it yet.
+enum SessionBookingCancelReason {
+  STUDENT
+  SESSION_CANCELLED
+  SESSION_RESCHEDULED
+  STAFF
+}
+
 enum ChangeRequestType {
   NEW_CLASS
   NEW_SESSION
@@ -241,6 +269,8 @@ model User {
   taughtClasses        ClassGroup[]        @relation("ClassTeacher")
   taughtSessions       Session[]           @relation("SessionTeacher")
   reservations         Reservation[]
+  // F6 — this User's own single-session bookings, as a STUDENT.
+  sessionBookings      SessionBooking[]
   auditLogs            AuditLog[]
   // M14 — this user's own payout history, as a TEACHER. Named distinctly
   // from `taughtSessions`/`taughtClasses` since a Settlement references the
@@ -374,6 +404,7 @@ model Center {
   expenseCategories ExpenseCategory[]
   expenses          Expense[]
   reservations      Reservation[]
+  sessionBookings   SessionBooking[]
   changeRequests    ChangeRequest[]
   studentBlocks     StudentBlock[]
   holidays          Holiday[]
@@ -765,6 +796,12 @@ model ClassGroup {
   lateThresholdMinutes Int                     @default(10)
   acceptsNewStudents   Boolean                 @default(true)
   requiresConfirmation Boolean                 @default(false)
+  // F6 — single-session attendance online (see the enum). OFF by default, so
+  // every existing class behaves exactly as before.
+  sessionBookingMode   SessionBookingMode      @default(OFF)
+  // F6 — at most this many CONFIRMED bookings per session, on top of the
+  // seat limit (the room set). Null = no extra cap.
+  maxBookingSeats      Int?
   // R4 — the class's period, inclusive at both ends. Date-only, stored as a
   // UTC-midnight day marker exactly like Session.date / Holiday.date. Either
   // typed by hand or COPIED from a CenterTerm preset — there is no FK to the
@@ -1054,6 +1091,8 @@ model Session {
   // session actually attended, at the teacher who actually taught it.
   ratings           SessionRating[]
   ratingSkips       SessionRatingSkip[]
+  // F6 — students who booked this one session online without enrolling.
+  bookings          SessionBooking[]
 
   // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
   // lib/db/class-sessions.ts): materializing a class's range is a
@@ -1082,6 +1121,9 @@ model SessionAttendee {
   recordedAt       DateTime         @default(now())
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+
+  // F6 — the booking this check-in fulfilled, when the student had booked.
+  booking          SessionBooking?
 
   // A history, not a slot: a voided payment is never deleted, so a corrected
   // re-payment for the same roster row needs a second Payment row here — see
@@ -1458,6 +1500,42 @@ model Reservation {
   @@unique([classGroupId, studentId])
   @@index([centerId])
   // SYS: the student portal reads a student's own reservations.
+  @@index([studentId])
+}
+
+/**
+ * A student's request to attend ONE session of a class without enrolling (F6,
+ * docs/01-data-model.md "Workflow layer"). The `Reservation` shape, per
+ * session: `studentId` is the global `User` (a PENDING booking can exist
+ * before the student has any record at this branch); the `StudentProfile` is
+ * created only when the booking is CONFIRMED (`ensureStudentProfile`). Unique
+ * on (sessionId, studentId), so a re-booking after a cancel or rejection reuses
+ * the same row. A CONFIRMED booking takes one of the session's seats
+ * (lib/db/session-bookings.ts — the one writer). It records **no money**: the
+ * student pays at the desk, where check-in links `sessionAttendeeId` in the
+ * same statement as the roster row. A booked no-show writes nothing.
+ */
+model SessionBooking {
+  id                String                      @id @default(uuid())
+  centerId          String
+  center            Center                      @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  sessionId         String
+  session           Session                     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId         String
+  student           User                        @relation(fields: [studentId], references: [id])
+  status            SessionBookingStatus        @default(PENDING)
+  requestedAt       DateTime                    @default(now())
+  resolvedAt        DateTime?
+  resolvedBy        String?
+  cancelledAt       DateTime?
+  cancelReason      SessionBookingCancelReason?
+  // Set by check-in (lib/db/attendance.ts's `createAttendance`) when this
+  // booked student arrives; the roster row it became.
+  sessionAttendeeId String?                     @unique
+  sessionAttendee   SessionAttendee?            @relation(fields: [sessionAttendeeId], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, studentId])
+  @@index([centerId])
   @@index([studentId])
 }
 

@@ -42,6 +42,7 @@ const BLOCKER_KEYS = [
   "rescheduled",
   "enrollments",
   "reservations",
+  "bookings",
 ] as const;
 
 /** Errors the conflict notice already explains — never shown twice. */

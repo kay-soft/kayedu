@@ -271,6 +271,8 @@ export default async function ClassDetailPage({
                 lateThresholdMinutes: String(classGroup.lateThresholdMinutes),
                 acceptsNewStudents: classGroup.acceptsNewStudents,
                 requiresConfirmation: classGroup.requiresConfirmation,
+                sessionBookingMode: classGroup.sessionBookingMode,
+                maxBookingSeats: classGroup.maxBookingSeats === null ? "" : String(classGroup.maxBookingSeats),
                 startDate: dateKey(classGroup.startDate),
                 endDate: dateKey(classGroup.endDate),
               }}
