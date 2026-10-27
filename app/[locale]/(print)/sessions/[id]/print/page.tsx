@@ -4,6 +4,8 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { PrintToolbar } from "@/components/shared/print-toolbar";
 import { SessionPrintSheet } from "@/components/shared/session-print-sheet";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
@@ -32,6 +34,7 @@ export default async function SessionPrintPage({
   params: Promise<{ id: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <div className="mx-auto w-full max-w-2xl p-4 sm:p-8"><PickBranchScreen ctx={ctx} /></div>;
   await requirePermission(ctx, "session.view");
   const { id } = await params;
 

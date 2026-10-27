@@ -63,6 +63,11 @@ export const signUpSchema = z
 export const selectCenterSchema = z.object({
   selectionId: z.string().uuid("invalidCenter"),
   locale: localeSchema,
+  /**
+   * T6: the page a branch was picked from (the pick-a-branch screen), so the
+   * pick lands back there. Untrusted — only ever read through `safeNextPath`.
+   */
+  next: z.string().max(512).optional(),
 });
 
 /**

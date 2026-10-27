@@ -24,6 +24,8 @@ import {
 } from "@/components/settings/entity-manager";
 import type { EntityField } from "@/components/settings/entity-fields";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { expenseTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
@@ -59,6 +61,7 @@ export default async function ExpensesPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "expense.manage");
 
   const rawParams = await searchParams;

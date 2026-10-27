@@ -3,6 +3,7 @@
 import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import {
   changeAttendanceStatus,
@@ -97,8 +98,9 @@ const NOT_FOUND: SessionActionState = { error: "notFound" };
 
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
-async function sessionScope(): Promise<Scope> {
+async function sessionScope(): Promise<Scope | PickBranch> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   return { ctx, db: scoped(ctx) };
 }
 
@@ -115,7 +117,9 @@ export async function searchAddAttendeeCandidatesAction(
   sessionId: string,
   query: string,
 ): Promise<TypeAheadResult[]> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return [];
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "attendance.record")) return [];
   const args = parseActionArgs(boundSearchArgs, [sessionId, query]);
   if (!args) return [];
@@ -246,7 +250,9 @@ export async function setAttendanceAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "attendance.correct")) return FORBIDDEN;
 
   const parsed = setAttendanceSchema.safeParse(Object.fromEntries(formData));
@@ -304,7 +310,9 @@ export async function addNewAttendeeAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "attendance.record") || !ctxCan(ctx, "student.manage")) {
     return FORBIDDEN;
   }
@@ -434,7 +442,9 @@ export async function recordPaymentAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "payment.record")) return FORBIDDEN;
 
   const parsed = recordPaymentSchema.safeParse(Object.fromEntries(formData));
@@ -461,7 +471,9 @@ export async function voidPaymentAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "payment.void")) return FORBIDDEN;
 
   const parsed = voidPaymentSchema.safeParse(Object.fromEntries(formData));
@@ -508,7 +520,9 @@ export async function refundPaymentAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "payment.refund")) return FORBIDDEN;
 
   const parsed = refundPaymentSchema.safeParse(Object.fromEntries(formData));
@@ -562,7 +576,9 @@ export async function cancelSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.cancel")) return FORBIDDEN;
 
   const parsed = cancelSessionSchema.safeParse(Object.fromEntries(formData));
@@ -600,7 +616,9 @@ export async function endSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.close")) return FORBIDDEN;
 
   const parsed = endSessionSchema.safeParse(Object.fromEntries(formData));
@@ -672,7 +690,9 @@ export async function rescheduleSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = rescheduleSessionSchema.safeParse(Object.fromEntries(formData));
@@ -745,7 +765,9 @@ export async function updateSessionRoomsAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = sessionRoomsSchema.safeParse(Object.fromEntries(formData));
@@ -812,7 +834,9 @@ export async function updateSessionShareOverrideAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = sessionShareOverrideSchema.safeParse(Object.fromEntries(formData));
@@ -875,7 +899,9 @@ export async function createSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const raw = Object.fromEntries(formData);
@@ -966,7 +992,9 @@ export async function deleteSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = deleteSessionSchema.safeParse(Object.fromEntries(formData));

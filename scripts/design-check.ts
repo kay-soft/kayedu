@@ -44,6 +44,14 @@
  *      that turns a submitted form into the next query string is asserted by
  *      running it (`lib/ui/url-filter-params.ts`).
  *
+ * 13. (T6) Whole Management is analytics-only: every `"use server"` file
+ *      under `(center)` calls `requireBranchScope` straight after each
+ *      `getTenantContext(` (an allowlist, with a reason per entry, is the only
+ *      way out); every centre page — and every centre print page — except
+ *      Analytics returns `PickBranchScreen` straight after its context (the
+ *      Dashboard redirects to Analytics); the T1 `RollupNotice` is gone; and
+ *      the guard itself is asserted by running it (`lib/auth/branch-scope.ts`).
+ *
  * Pure static analysis — no database needed. (The "no change under prisma/,
  * lib/db/, lib/money.ts, lib/auth/" constraint is reported with
  * `git diff --stat` in the R10a summary rather than gated here.)
@@ -51,6 +59,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope } from "../lib/auth/branch-scope.ts";
 import { centerInitial, nameInitial, personInitials } from "../lib/initials.ts";
 import { mergeFilterParams } from "../lib/ui/url-filter-params.ts";
 
@@ -808,6 +817,133 @@ function checkSoftUrlState() {
   );
 }
 
+// ── 13. Whole Management is analytics-only (T6) ─────────────────────────────
+
+/**
+ * `"use server"` files under `(center)` that may skip the branch-scope guard,
+ * each with its reason. Empty: every centre action reads or writes one
+ * branch. (selectCenterAction, sign-out and Account actions are not centre
+ * data and live outside `(center)`.)
+ */
+const BRANCH_GUARD_ACTION_ALLOWLIST: Record<string, string> = {};
+
+/** Centre pages that may render under a roll-up, each with its reason. */
+const BRANCH_GUARD_PAGE_ALLOWLIST: Record<string, string> = {
+  "app/[locale]/(center)/analytics/page.tsx":
+    "sums the organization — a union of per-branch scoped queries (docs/02 §4)",
+  "app/[locale]/(center)/dashboard/page.tsx":
+    "redirects to Analytics under a roll-up (asserted on its own below)",
+};
+
+/** Indexes of every line of `source` that calls `getTenantContext(`. */
+function contextLines(lines: string[]): number[] {
+  return lines.flatMap((line, index) => (/\bgetTenantContext\(/.test(line) ? [index] : []));
+}
+
+/** The guard follows within `window` non-blank lines of the context call. */
+function guardedAfter(lines: string[], index: number, pattern: RegExp, window = 3): boolean {
+  const following = lines.slice(index + 1).filter((line) => line.trim() !== "").slice(0, window);
+  return following.some((line) => pattern.test(line));
+}
+
+function checkBranchScopeGuard() {
+  const rollup = { rollupOrganizationId: "00000000-0000-4000-8000-000000000001" };
+  const branch = { rollupOrganizationId: null };
+  check(
+    "requireBranchScope refuses a roll-up context with pickBranch, passes a branch context",
+    requireBranchScope(rollup) === PICK_BRANCH &&
+      PICK_BRANCH.error === "pickBranch" &&
+      requireBranchScope(branch) === null &&
+      isPickBranch(requireBranchScope(rollup)) &&
+      !isPickBranch({ error: "pickBranch" }),
+  );
+
+  const actionFiles = FILES.filter(
+    (file) =>
+      file.startsWith("app/[locale]/(center)/") &&
+      /\.tsx?$/.test(file) &&
+      /^\s*["']use server["']/.test(read(file)),
+  );
+  const unguarded: string[] = [];
+  for (const file of actionFiles) {
+    if (file in BRANCH_GUARD_ACTION_ALLOWLIST) continue;
+    const lines = stripComments(read(file)).split(/\r?\n/);
+    const calls = contextLines(lines);
+    if (calls.length === 0) unguarded.push(`${file} (no getTenantContext — allowlist it with a reason)`);
+    for (const index of calls) {
+      if (!guardedAfter(lines, index, /\brequireBranchScope\(/)) unguarded.push(`${file}:${index + 1}`);
+    }
+  }
+  check(
+    `Every centre Server Action calls requireBranchScope after getTenantContext (${actionFiles.length} files)`,
+    actionFiles.length > 0 && unguarded.length === 0,
+    unguarded.join(", "),
+  );
+  const staleActions = Object.keys(BRANCH_GUARD_ACTION_ALLOWLIST).filter((file) => !actionFiles.includes(file));
+  check("The action-guard allowlist names only real centre action files", staleActions.length === 0, staleActions.join(", "));
+
+  // Centre pages, and the print pages that resolve a centre context.
+  const pages = FILES.filter(
+    (file) =>
+      /\/page\.tsx$/.test(file) &&
+      (file.startsWith("app/[locale]/(center)/") ||
+        (file.startsWith("app/[locale]/(print)/") && /getTenantContext\("center"\)/.test(read(file)))),
+  );
+  const unscreened: string[] = [];
+  for (const file of pages) {
+    if (file in BRANCH_GUARD_PAGE_ALLOWLIST) continue;
+    const lines = stripComments(read(file)).split(/\r?\n/);
+    const first = contextLines(lines)[0];
+    if (
+      first === undefined ||
+      !guardedAfter(lines, first, /if \(requireBranchScope\(ctx\)\) return [^;]*<PickBranchScreen ctx=\{ctx\} \/>/, 1)
+    ) {
+      unscreened.push(file);
+    }
+  }
+  check(
+    `Every centre page but Analytics returns PickBranchScreen straight after its context (${pages.length} pages)`,
+    pages.length > 0 && unscreened.length === 0,
+    unscreened.join(", "),
+  );
+  const stalePages = Object.keys(BRANCH_GUARD_PAGE_ALLOWLIST).filter((file) => !pages.includes(file));
+  check("The page-guard allowlist names only real centre pages", stalePages.length === 0, stalePages.join(", "));
+
+  const dashboard = stripComments(read("app/[locale]/(center)/dashboard/page.tsx")).split(/\r?\n/);
+  const dashboardCtx = contextLines(dashboard)[0];
+  check(
+    "The Dashboard redirects to Analytics under a roll-up, before any read",
+    dashboardCtx !== undefined &&
+      guardedAfter(
+        dashboard,
+        dashboardCtx,
+        /if \(requireBranchScope\(ctx\)\) redirect\(\{ href: ROUTES\.centerAnalytics\b/,
+        1,
+      ),
+  );
+
+  const settingsLayout = stripComments(read("app/[locale]/(center)/settings/layout.tsx")).split(/\r?\n/);
+  const settingsCtx = contextLines(settingsLayout)[0];
+  check(
+    "The settings layout renders only the page under a roll-up (no branch's settings chrome)",
+    settingsCtx !== undefined &&
+      guardedAfter(settingsLayout, settingsCtx, /if \(requireBranchScope\(ctx\)\) return children;/, 1),
+  );
+
+  const shell = stripComments(read("app/[locale]/(center)/center-shell.tsx"));
+  check(
+    "The T1 RollupNotice is gone (component, shell use and message)",
+    !existsSync(join(ROOT, "components/shell/rollup-notice.tsx")) &&
+      !/RollupNotice/.test(shell) &&
+      !/rollupShowingBranch/.test(read("messages/en.json")) &&
+      !/rollupShowingBranch/.test(read("messages/ar.json")),
+  );
+  check(
+    "Under a roll-up every centre nav item except Analytics is disabled",
+    /disabledHrefs:\s*rollupGroup\s*\?\s*nav\.filter\(\(item\) => item\.href !== ROUTES\.centerAnalytics\)/.test(shell),
+  );
+}
+
 checkLocaleToggle();
 checkNav();
 checkNativeSelect();
@@ -827,6 +963,8 @@ checkActionsReturnResults();
 checkNoSilentCatches();
 console.log("\nSoft URL state (T4)");
 checkSoftUrlState();
+console.log("\nWhole Management is analytics-only (T6)");
+checkBranchScopeGuard();
 
 if (failures > 0) {
   console.error(`\n${failures} design check(s) failed.`);

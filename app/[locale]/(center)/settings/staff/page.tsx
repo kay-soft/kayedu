@@ -23,6 +23,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { branchesWithPermission, ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { isBranchGrantableRole } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/db/client";
@@ -34,6 +36,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 
 export default async function StaffSettingsPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "staff.invite");
 
   const db = scoped(ctx);

@@ -3,6 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
@@ -41,8 +42,9 @@ const NOT_FOUND: ActionState = { error: "notFound" };
 
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
-async function editorScope(): Promise<Scope | null> {
+async function editorScope(): Promise<Scope | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "expense.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -64,6 +66,7 @@ export async function createExpenseCategoryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = expenseCategorySchema.safeParse(Object.fromEntries(formData));
@@ -92,6 +95,7 @@ export async function updateExpenseCategoryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = expenseCategoryUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -120,6 +124,7 @@ export async function toggleExpenseCategoryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = expenseCategoryToggleSchema.safeParse(Object.fromEntries(formData));
@@ -147,6 +152,7 @@ export async function deleteExpenseCategoryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = expenseCategoryDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -189,6 +195,7 @@ export async function createExpenseAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = expenseCreateSchema.safeParse(Object.fromEntries(formData));
@@ -240,6 +247,7 @@ export async function voidExpenseAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = expenseVoidSchema.safeParse(Object.fromEntries(formData));

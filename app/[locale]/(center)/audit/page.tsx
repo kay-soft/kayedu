@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/shared/page-header";
 import { SoftLink } from "@/components/shared/soft-link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { AUDIT_FILTERS, loadAuditFeed, loadUnpaidCheckIns, type AuditFilter } from "@/lib/db/audit-feed";
 import { prisma } from "@/lib/db/client";
@@ -57,6 +59,7 @@ export default async function AuditPage({
   searchParams: Promise<{ kind?: string; page?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "audit.view");
 
   const params = await searchParams;

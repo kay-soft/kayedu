@@ -26,6 +26,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import {
@@ -80,6 +82,7 @@ export default async function ReceptionPage({
   }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "reception.use");
 
   const { q, studentId, session: sessionParam, receipt: receiptParam, notice } = await searchParams;

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { writeAuditLog } from "@/lib/db/audit";
 import { scoped } from "@/lib/db/scoped";
+import { PICK_BRANCH, requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, getTenantContextForBranch } from "@/lib/auth/tenant";
 import { fieldErrorsFrom, type ActionState } from "@/lib/validation/form";
 import {
@@ -41,6 +42,7 @@ export async function createInvitationAction(
   formData: FormData,
 ): Promise<InviteFormState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   // Inviting someone assigns them a role, so this is an OWNER-only action
   // (docs/00-master-product-spec.md §3: "the only role that may grant roles
   // or permissions") — `membership.role.assign` is ceiling-forced to OWNER
@@ -116,6 +118,7 @@ export async function revokeInvitationAction(
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   // D-22 (a): revoking an invitation is OWNER-only, exactly like creating one
   // (SEC-42) — `membership.role.assign` is ceiling-forced to OWNER.
   if (!ctxCan(ctx, "membership.role.assign")) return { error: "forbidden" };

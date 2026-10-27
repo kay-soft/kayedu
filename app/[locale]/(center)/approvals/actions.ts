@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { approveAccountClaim, rejectAccountClaim } from "@/lib/db/account-claims";
 import { resolveChangeRequest, resolveSessionRequest } from "@/lib/db/approvals";
@@ -34,8 +35,9 @@ import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 const FORBIDDEN: ApprovalsActionState = { error: "forbidden" };
 
-async function approvalsScope(): Promise<TenantContext | null> {
+async function approvalsScope(): Promise<TenantContext | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "approvals.manage")) return null;
   return ctx;
 }
@@ -49,6 +51,7 @@ export async function approveChangeRequestAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -77,6 +80,7 @@ export async function declineChangeRequestAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -105,6 +109,7 @@ export async function approveReservationAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -138,6 +143,7 @@ export async function declineReservationAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -173,6 +179,7 @@ export async function approveBookingAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -191,6 +198,7 @@ export async function declineBookingAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -215,6 +223,7 @@ export async function approveSessionRequestAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approveSessionRequestSchema.safeParse(Object.fromEntries(formData));
@@ -264,6 +273,7 @@ export async function declineSessionRequestAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -307,6 +317,7 @@ export async function approveAccountClaimAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
@@ -329,6 +340,7 @@ export async function declineAccountClaimAction(
   formData: FormData,
 ): Promise<ApprovalsActionState> {
   const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));

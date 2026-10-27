@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { addBranchAsOwner } from "@/lib/db/branches";
 import { prisma } from "@/lib/db/client";
@@ -33,6 +34,7 @@ export async function addBranchAction(
   formData: FormData,
 ): Promise<AddBranchState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "organization.branch.create")) return { error: "forbidden" };
 
   const parsed = addBranchSchema.safeParse(Object.fromEntries(formData));

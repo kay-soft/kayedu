@@ -19,6 +19,8 @@ import { DetailRow } from "@/components/shared/field";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { manualSessionDeleteState } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
@@ -76,6 +78,7 @@ export default async function SessionDetailPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "session.view");
 
   const { id } = await params;

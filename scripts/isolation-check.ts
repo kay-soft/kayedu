@@ -441,6 +441,17 @@ async function checkBranchTargetedAdds(centerAId: string, centerBId: string, own
       /ctxCan\(ctx, "teacher\.manage"\)/.test(teacherActions) &&
       /createTeacherMembership\(\s*prisma,\s*scope\.ctx\.center\.id/.test(teacherActions),
   );
+
+  // T6: "Whole Management" is refused above the data layer (the branch-scope
+  // guard in every centre action and page); the scoping primitives never see
+  // a roll-up, so `centerId` stays the sole isolation key.
+  const scopedSource = readFileSync(join(ROOT, "lib", "db", "scoped.ts"), "utf8");
+  const tenantScopeSource = readFileSync(join(ROOT, "lib", "db", "tenant-scope.ts"), "utf8");
+  check(
+    "The scoped data layer never reads rollupOrganizationId or the branch-scope guard (static)",
+    !/rollupOrganizationId|branch-scope|requireBranchScope/.test(scopedSource) &&
+      !/rollupOrganizationId|branch-scope|requireBranchScope/.test(tenantScopeSource),
+  );
 }
 
 main()

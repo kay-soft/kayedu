@@ -6,6 +6,7 @@ import {
   SettingsNav,
   type SettingsNavItem,
 } from "@/components/settings/settings-nav";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
@@ -22,6 +23,9 @@ export default async function SettingsLayout({
   children: ReactNode;
 }) {
   const ctx = await getTenantContext("center");
+  // T6: under "Whole Management" every settings page is the pick-a-branch
+  // screen, with no branch's settings header or sub-navigation around it.
+  if (requireBranchScope(ctx)) return children;
   const t = await getTranslations("Settings");
 
   const items: SettingsNavItem[] = [];

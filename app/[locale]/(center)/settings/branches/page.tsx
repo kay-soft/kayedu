@@ -13,6 +13,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, getUserCenterRelations, requirePermission } from "@/lib/auth/tenant";
 import { CENTER_TIMEZONES } from "@/lib/branch-setup";
 import { organizationBranchUsage } from "@/lib/db/branches";
@@ -28,6 +30,7 @@ import { formatNumber } from "@/lib/format";
  */
 export default async function BranchesSettingsPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "organization.branch.create");
 
   const locale = await getLocale();

@@ -5,6 +5,8 @@ import { IdCardPreview } from "@/components/center/id-card-preview";
 import { PrintToolbar } from "@/components/shared/print-toolbar";
 import { DetailRow } from "@/components/shared/field";
 import { Ltr } from "@/components/shared/ltr";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { studentCardSvg } from "@/lib/db/id-cards";
@@ -25,6 +27,7 @@ export default async function StudentPaperPrintPage({
   params: Promise<{ id: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <div className="mx-auto w-full max-w-2xl p-4 sm:p-8"><PickBranchScreen ctx={ctx} /></div>;
   await requirePermission(ctx, "student.manage");
 
   const { id } = await params;

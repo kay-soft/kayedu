@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { previewClassSessions, previewManualSession, previewNewClassSessions } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
@@ -126,6 +127,7 @@ export async function checkSlotConflictsAction(
   const value = parsed.data;
 
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return NONE;
   const permission = value.kind === "session" || value.kind === "newSession" ? "session.manage" : "class.manage";
   if (!ctxCan(ctx, permission)) return NONE;
 

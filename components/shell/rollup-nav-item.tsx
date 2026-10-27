@@ -3,11 +3,13 @@ import type { ShellNavItem } from "@/components/shell/nav";
 import { cn } from "@/lib/utils";
 
 /**
- * An operational nav item under "Whole Management" (docs/04 §11.1): Reception,
- * Sessions and Approvals have no roll-up meaning, so they stay in the nav —
- * not a link — with a one-line reason. An item that vanished would read as a
- * permission problem. This is not a "Soon" placeholder: it exists only while
- * a roll-up is the active scope, and `NavItem` itself stays a real link.
+ * A branch-scoped nav item under "Whole Management" (docs/04 §11.1, T6):
+ * every item except Analytics, which is the only page with a roll-up
+ * meaning. It stays in the nav — not a link — with a one-line reason. An item
+ * that vanished would read as a permission problem. This is not a "Soon"
+ * placeholder: it exists only while a roll-up is the active scope, and
+ * `NavItem` itself stays a real link. A direct URL still reaches the page,
+ * which renders the pick-a-branch screen (`PickBranchScreen`).
  */
 export function RollupNavItem({
   item,

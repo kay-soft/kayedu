@@ -8,7 +8,6 @@ import {
   type ShellFrame,
 } from "@/components/shell/from-context";
 import { navForExperience, withPendingCount } from "@/components/shell/nav";
-import { RollupNotice } from "@/components/shell/rollup-notice";
 import { getPendingApprovalCounts } from "@/lib/auth/approval-counts";
 import { ROUTES } from "@/lib/routes";
 import {
@@ -18,13 +17,6 @@ import {
   requireExperience,
 } from "@/lib/auth/tenant";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
-
-/** Operational pages with no roll-up meaning: disabled in the nav under "Whole Management". */
-const ROLLUP_DISABLED_ROUTES = [
-  ROUTES.centerReception,
-  ROUTES.centerSessions,
-  ROUTES.centerApprovals,
-];
 
 /**
  * The center ERP's shell (F2: shared by `(center)/layout.tsx` and Account
@@ -57,27 +49,27 @@ export async function centerShell(): Promise<ShellFrame> {
     ? orgGroups.find((group) => group.organizationId === ctx.rollupOrganizationId)
     : undefined;
 
+  const nav = withPendingCount(
+    navForExperience("center", ctx.role, ctx.grants),
+    ROUTES.centerApprovals,
+    approvalCounts?.total,
+  );
+
   return {
     props: {
       experience: "center",
-      nav: withPendingCount(
-        navForExperience("center", ctx.role, ctx.grants),
-        ROUTES.centerApprovals,
-        approvalCounts?.total,
-      ),
+      nav,
       brand: rollupGroup
         ? brandFromRollup(ctx, rollupGroup.organizationName)
         : brandFromContext(ctx),
-      disabledHrefs: rollupGroup ? [...ROLLUP_DISABLED_ROUTES] : undefined,
+      // T6: Analytics is the only page with a roll-up meaning; every other
+      // item is branch-scoped and stays visible but disabled, with a reason.
+      disabledHrefs: rollupGroup
+        ? nav.filter((item) => item.href !== ROUTES.centerAnalytics).map((item) => item.href)
+        : undefined,
       user: shellUser(ctx.user, ctx.role),
       scope: shellScope(relations, orgGroups, ctx.rollupOrganizationId ?? ctx.center.id),
       defaultCollapsed,
     },
-    lead: rollupGroup ? (
-      <RollupNotice
-        branchName={ctx.center.name}
-        analyticsHref={ROUTES.centerAnalytics}
-      />
-    ) : null,
   };
 }

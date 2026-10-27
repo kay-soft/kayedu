@@ -40,6 +40,7 @@ import { join } from "node:path";
 
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
+import { PICK_BRANCH, requireBranchScope } from "../lib/auth/branch-scope.ts";
 import { PERMISSIONS, can } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations } from "../lib/auth/relations.ts";
 import { BRANCH_COPY_KEYS } from "../lib/branch-setup.ts";
@@ -313,7 +314,58 @@ async function main() {
   const ownPayment = await scopedFindById(prisma.payment, branchA.id, paymentA.id);
   check("Branch A still reads its own Payment by id", ownPayment?.id === paymentA.id);
 
+  await checkRollupRefusesBranchWork(organization.id, branchIds);
+
   await checkOwnerAddBranch();
+}
+
+// ── 3b. T6: roll-up mode refuses a write and reads nothing ───────────────────
+//
+// A roll-up context still holds one representative branch, so a centre
+// action that skipped the guard would write there. Every centre action calls
+// `requireBranchScope(ctx)` straight after `getTenantContext("center")` —
+// `check:design` asserts each call site statically. This pass asserts the
+// guard's answer for the real organization, and that an action shaped that
+// way (guard → read → write, the docs/02 §7 order) touches no row at either
+// branch under a roll-up, while the same action at a branch does write.
+async function checkRollupRefusesBranchWork(organizationId: string, branchIds: string[]) {
+  const rollupCtx = { rollupOrganizationId: organizationId, centerId: branchIds[0] };
+  const branchCtx = { rollupOrganizationId: null, centerId: branchIds[0] };
+  check(
+    "requireBranchScope answers pickBranch for the organization's roll-up, nothing for a branch",
+    requireBranchScope(rollupCtx) === PICK_BRANCH && requireBranchScope(branchCtx) === null,
+  );
+
+  let reads = 0;
+  async function guardedExpenseAction(ctx: typeof rollupCtx | typeof branchCtx) {
+    if (requireBranchScope(ctx)) return PICK_BRANCH;
+    reads += 1;
+    await prisma.expense.count({ where: { centerId: ctx.centerId } });
+    await prisma.expense.create({
+      data: scopedData(ctx.centerId, { amount: 1_00, date: new Date("2026-02-03T00:00:00Z"), recordedBy: "t6" }),
+    });
+    return { status: "saved" as const };
+  }
+
+  const countAt = () =>
+    Promise.all(branchIds.map((id) => prisma.expense.count({ where: { centerId: id } })));
+  const before = await countAt();
+  const refused = await guardedExpenseAction(rollupCtx);
+  const afterRefusal = await countAt();
+  check(
+    "Under a roll-up the action returns pickBranch, reads nothing and writes no row at any branch",
+    refused === PICK_BRANCH && reads === 0 && JSON.stringify(before) === JSON.stringify(afterRefusal),
+    JSON.stringify({ refused, reads, before, afterRefusal }),
+  );
+
+  const saved = await guardedExpenseAction(branchCtx);
+  const afterBranch = await countAt();
+  check(
+    "At a picked branch the same action writes there and only there",
+    "status" in saved && afterBranch[0] === before[0] + 1 && afterBranch[1] === before[1],
+    JSON.stringify({ before, afterBranch }),
+  );
+  await prisma.expense.deleteMany({ where: { centerId: branchIds[0], recordedBy: "t6" } });
 }
 
 // ── 4. F1: an Owner's Add branch, within the organization's limit ────────────

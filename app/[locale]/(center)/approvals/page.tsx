@@ -16,6 +16,8 @@ import { RequestCard } from "@/components/shared/request-card";
 import { ResultsRegion } from "@/components/shared/results-region";
 import { SectionHeader } from "@/components/shared/section-header";
 import { getPendingApprovalCounts } from "@/lib/auth/approval-counts";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { pendingClaimsForCenter } from "@/lib/db/account-claims";
@@ -85,6 +87,7 @@ export default async function ApprovalsPage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "approvals.manage");
   const db = scoped(ctx);
 

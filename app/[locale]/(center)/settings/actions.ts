@@ -3,6 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { MATRIX_ROLES, PERMISSIONS, editableActionsFor } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/db/audit";
@@ -75,8 +76,9 @@ const NOT_FOUND: ActionState = { error: "notFound" };
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
 /** Resolves the context and enforces `center.settings.edit`. */
-async function editorScope(): Promise<Scope | null> {
+async function editorScope(): Promise<Scope | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "center.settings.edit")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -111,6 +113,7 @@ async function roomInCombinationRefusal(
 
 async function toggleRoomRecord(formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
@@ -131,6 +134,7 @@ async function toggleRoomRecord(formData: FormData): Promise<ActionState> {
 
 async function deleteRoomRecord(formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -190,6 +194,7 @@ export async function selectCatalogEntryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogSelectSchema.safeParse(Object.fromEntries(formData));
@@ -219,6 +224,7 @@ export async function updateCatalogSelectionAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogSelectionUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -261,6 +267,7 @@ export async function toggleCatalogSelectionAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogSelectionToggleSchema.safeParse(Object.fromEntries(formData));
@@ -280,6 +287,7 @@ export async function deselectCatalogEntryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogDeselectSchema.safeParse(Object.fromEntries(formData));
@@ -322,6 +330,7 @@ export async function createRoomAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = roomSchema.safeParse(Object.fromEntries(formData));
@@ -342,6 +351,7 @@ export async function updateRoomAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = roomUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -455,6 +465,7 @@ export async function createPaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = paymentMethodSchema.safeParse(Object.fromEntries(formData));
@@ -482,6 +493,7 @@ export async function updatePaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = paymentMethodUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -515,6 +527,7 @@ export async function togglePaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
@@ -545,6 +558,7 @@ export async function deletePaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -595,6 +609,7 @@ export async function createTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = termSchema.safeParse(Object.fromEntries(formData));
@@ -624,6 +639,7 @@ export async function updateTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = termUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -655,6 +671,7 @@ export async function toggleTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
@@ -685,6 +702,7 @@ export async function deleteTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -714,6 +732,7 @@ export async function saveGeneralSettingsAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = generalSettingsSchema.safeParse(Object.fromEntries(formData));
@@ -793,6 +812,7 @@ export async function saveCardLayoutAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = cardLayoutSchema.safeParse(Object.fromEntries(formData));
@@ -826,6 +846,7 @@ export async function savePermissionMatrixAction(
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "permission.manage")) return FORBIDDEN;
 
   const parsed = permissionMatrixSchema.safeParse({
@@ -881,6 +902,7 @@ export async function savePermissionMatrixAction(
  */
 export async function updateCenterLogoAction(_state: ActionState, formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const file = formData.get("logo");
@@ -917,6 +939,7 @@ export async function updateCenterLogoAction(_state: ActionState, formData: Form
 /** Remove the branch logo (the mark falls back to the initial). Audited `center.logo.remove`. */
 export async function removeCenterLogoAction(_state: ActionState, formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const centerId = scope.ctx.center.id;

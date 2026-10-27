@@ -65,9 +65,11 @@ export type TenantContext = {
   /**
    * Set when the active-selection cookie named an Organization rather than a
    * branch — an Owner's "Whole Management" choice (M11). `center` above is
-   * still one real, resolved branch (a representative one) that every
-   * operational query scopes on unchanged; only a consumer that wants the
-   * roll-up (Analytics) reads this field. `null` for every other request.
+   * still one real, resolved branch (a representative one), so nothing may
+   * read or write it under a roll-up: Analytics sums the organization, and
+   * every other centre page and Server Action refuses through
+   * `requireBranchScope` (`lib/auth/branch-scope.ts`, T6). `null` for every
+   * other request.
    */
   rollupOrganizationId: string | null;
 };

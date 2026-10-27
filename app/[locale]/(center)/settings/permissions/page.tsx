@@ -9,6 +9,8 @@ import {
   editableActionsFor,
   type Permission,
 } from "@/lib/auth/permissions";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { listPermissionGrants } from "@/lib/db/permissions";
@@ -22,6 +24,7 @@ import { listPermissionGrants } from "@/lib/db/permissions";
  */
 export default async function PermissionsPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "permission.manage");
 
   const rows = await listPermissionGrants(prisma, ctx.center.id);

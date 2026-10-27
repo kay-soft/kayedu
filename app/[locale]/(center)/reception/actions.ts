@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import {
   createAttendance,
@@ -100,6 +101,7 @@ export async function searchStudentsForReceptionAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return [];
   if (!ctxCan(ctx, "reception.use")) return [];
   const args = parseActionArgs(searchArgs, [query]);
   if (!args) return [];
@@ -180,7 +182,9 @@ async function describeStudent(
 
 async function sessionModeScope(sessionId: string) {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "reception.use") || !ctxCan(ctx, "attendance.record")) {
+  // T6: a read under "Whole Management" resolves nothing — the page itself
+  // shows the pick-a-branch screen, so there is no session to resolve against.
+  if (requireBranchScope(ctx) || !ctxCan(ctx, "reception.use") || !ctxCan(ctx, "attendance.record")) {
     return { ok: false as const, resolution: { kind: "forbidden" } satisfies ReceptionResolution };
   }
   // Re-validated on EVERY request: the id in the URL is untrusted input.
@@ -269,6 +273,7 @@ export async function checkInAction(
   formData: FormData,
 ): Promise<SessionActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "reception.use")) return FORBIDDEN;
   const db = scoped(ctx);
   const centerId = ctx.center.id;

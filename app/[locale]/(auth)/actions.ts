@@ -260,7 +260,9 @@ export async function selectCenterAction(formData: FormData): Promise<void> {
   );
   if (relation) {
     await setActiveCenterId(relation.center.id);
-    redirect({ href: homePathForRole(primaryRole(relation)), locale });
+    // T6: a pick from the pick-a-branch screen returns to the page it was on;
+    // that page still runs its own gate at the chosen branch.
+    redirect({ href: safeNextPath(parsed.data.next) ?? homePathForRole(primaryRole(relation)), locale });
     return;
   }
 

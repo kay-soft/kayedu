@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Role } from "@prisma/client";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { isBranchGrantableRole } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/db/audit";
@@ -40,8 +41,9 @@ function staffPath(locale: string): string {
   return `/${locale}${ROUTES.centerStaff}`;
 }
 
-async function staffScope(): Promise<{ ctx: TenantContext; db: ScopedDb } | null> {
+async function staffScope(): Promise<{ ctx: TenantContext; db: ScopedDb } | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "staff.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -115,6 +117,7 @@ export async function changeMemberRoleAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await staffScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
   // Changing a role is granting a role (docs/00-master-product-spec.md §3):
   // OWNER only, by UI and by direct call. `membership.role.assign` is
@@ -175,6 +178,7 @@ export async function setMemberActiveAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await staffScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = memberActiveSchema.safeParse(Object.fromEntries(formData));
@@ -230,6 +234,7 @@ export async function grantMembershipBranchAction(
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "membership.branch.grant")) return FORBIDDEN;
 
   const parsed = membershipBranchGrantSchema.safeParse(Object.fromEntries(formData));
@@ -268,6 +273,7 @@ export async function revokeMembershipBranchAction(
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "membership.branch.grant")) return FORBIDDEN;
 
   const parsed = membershipBranchGrantSchema.safeParse(Object.fromEntries(formData));

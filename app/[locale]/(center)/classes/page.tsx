@@ -20,6 +20,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { classSessionCounts } from "@/lib/db/class-sessions";
 import { classListWhere } from "@/lib/db/classes";
@@ -53,6 +55,7 @@ export default async function ClassesPage({
   }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "class.manage");
 
   const { teacherId, subjectId, gradeId, page: pageParam } = await searchParams;

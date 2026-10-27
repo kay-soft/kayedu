@@ -103,7 +103,12 @@
     "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
     "wholeManagementLabel": "Whole Management",
     "rollupDisabledReason": "Pick a branch to use this",
-    "rollupShowingBranch": "Showing {branch}. Pick a branch to change.",
+    "pickBranch": {
+      "title": "Pick a branch to open this page",
+      "description": "Whole Management for {organization} shows Analytics only. Everything else works on one branch at a time.",
+      "branchesLabel": "Branches of {organization}",
+      "backToAnalytics": "Back to Analytics"
+    },
     "skipToContent": "Skip to content",
     "accountSettings": "Account settings",
     "pendingNavLabel": "{label}, {count} pending",
@@ -300,6 +305,7 @@
     "copied": "Copied",
     "errors": {
       "forbidden": "You are not allowed to invite people to this branch.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "alreadyMember": "That person already has this role at this branch.",
       "ownerOnly": "Only an owner can invite another owner.",
       "required": "This field is required.",
@@ -386,6 +392,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
@@ -865,6 +872,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
@@ -1134,6 +1142,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
@@ -1461,6 +1470,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to manage expenses.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "invalidAmount": "Enter a valid amount in EGP.",
       "invalidDate": "Enter a valid date.",
@@ -1537,6 +1547,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
@@ -1597,6 +1608,7 @@
       },
       "errors": {
         "forbidden": "You are not allowed to do this.",
+        "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
         "notFound": "That booking no longer exists, or is not for one of these classes.",
         "notPending": "That booking has already been decided.",
         "expired": "This session has already started, so the booking has expired and can't be confirmed.",
@@ -1652,6 +1664,7 @@
     "teacherEmpty": "No settlements recorded for you yet.",
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That settlement no longer exists.",
       "sessionNotFound": "That session no longer exists in this branch.",
       "sessionAlreadySettled": "This session's teacher share has already been settled.",
@@ -1723,6 +1736,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to change this branch's configuration.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "inUse": "Something still uses this record, so it cannot be deleted. Deactivate it instead.",
       "duplicateName": "That name is already used here.",
@@ -2054,6 +2068,7 @@
       "neverCopied": "Never copied: rooms, classes, sessions, staff, teachers, students, money, the ID-card layout and the logo.",
       "errors": {
         "forbidden": "Only an owner can add a branch.",
+        "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
         "branchLimitReached": "Your center has reached its branch limit. Ask KayEdu to raise it.",
         "sourceNotFound": "Choose a branch of this center to copy from.",
         "tryAgain": "Something changed while the branch was being created. Nothing was saved — try again.",
@@ -2076,6 +2091,7 @@
       },
       "errors": {
         "forbidden": "You are not allowed to do this.",
+        "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
         "logoMissing": "Choose a logo first.",
         "photoType": "The logo must be a PNG, JPEG or WebP image.",
         "photoTooLarge": "The logo is larger than 512 KB.",
@@ -3316,6 +3332,7 @@
       "notAStudent": "Only a student's own account can invite a parent.",
       "notFound": "That is no longer available. Refresh the page.",
       "forbidden": "You don't have permission to do that.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "signInRequired": "Sign in first.",
       "reasonRequired": "Give a reason — it is kept on the record.",
       "required": "This field is required.",

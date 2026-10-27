@@ -13,6 +13,8 @@ import { PageHeader } from "@/components/shared/page-header";
 import { ResultsRegion } from "@/components/shared/results-region";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { catalogGradeById } from "@/lib/db/account-study";
@@ -39,6 +41,7 @@ export default async function PromoteStudentsPage({
   searchParams: Promise<{ from?: string; to?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "student.promote");
 
   const { from: fromParam, to: toParam } = await searchParams;

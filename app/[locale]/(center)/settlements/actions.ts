@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
@@ -41,8 +42,9 @@ import {
 
 const FORBIDDEN: SettlementActionState = { error: "forbidden" };
 
-async function settlementScope(): Promise<TenantContext | null> {
+async function settlementScope(): Promise<TenantContext | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "settlement.manage")) return null;
   return ctx;
 }
@@ -67,6 +69,7 @@ export async function createSessionSettlementAction(
   formData: FormData,
 ): Promise<SettlementActionState> {
   const ctx = await settlementScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = createSessionSettlementSchema.safeParse(Object.fromEntries(formData));
@@ -114,6 +117,7 @@ export async function createPeriodSettlementAction(
   formData: FormData,
 ): Promise<SettlementActionState> {
   const ctx = await settlementScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = createPeriodSettlementSchema.safeParse(Object.fromEntries(formData));
@@ -172,6 +176,7 @@ export async function approveSettlementAction(
   formData: FormData,
 ): Promise<SettlementActionState> {
   const ctx = await settlementScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = settlementIdSchema.safeParse(Object.fromEntries(formData));
@@ -207,6 +212,7 @@ export async function paySettlementAction(
   formData: FormData,
 ): Promise<SettlementActionState> {
   const ctx = await settlementScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = settlementIdSchema.safeParse(Object.fromEntries(formData));
@@ -243,6 +249,7 @@ export async function cancelSettlementAction(
   formData: FormData,
 ): Promise<SettlementActionState> {
   const ctx = await settlementScope();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return FORBIDDEN;
 
   const parsed = settlementIdSchema.safeParse(Object.fromEntries(formData));

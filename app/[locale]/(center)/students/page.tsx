@@ -23,6 +23,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { formatDate } from "@/lib/format";
@@ -47,6 +49,7 @@ export default async function StudentsPage({
   searchParams: Promise<{ q?: string; page?: string; gradeDiffers?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "student.manage");
 
   const { q, page: pageParam, gradeDiffers: gradeDiffersParam } = await searchParams;

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { applyAccountGrade } from "@/lib/db/account-study";
 import { confirmGradePromotion, undoGradePromotion } from "@/lib/db/promotion";
@@ -80,8 +81,9 @@ const NOT_FOUND: PeopleActionState = { error: "notFound" };
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
 /** Receptionists register students; only Manager/Owner delete them (spec §3). */
-async function studentScope(): Promise<Scope | null> {
+async function studentScope(): Promise<Scope | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -134,6 +136,7 @@ export async function searchStudentsTypeAheadAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return [];
   if (!scope) return [];
   const args = parseActionArgs(searchArgs, [query]);
   if (!args) return [];
@@ -167,6 +170,7 @@ export async function lookupPersonByPhoneAction(
   phone: string,
 ): Promise<PhoneLookupResult> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return { status: "notFound" };
   if (!scope) return { status: "notFound" };
   const args = parseActionArgs(phoneLookupArgs, [phone]);
   if (!args) return { status: "notFound" };
@@ -194,6 +198,7 @@ export async function createStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentCreateSchema.safeParse(Object.fromEntries(formData));
@@ -326,6 +331,7 @@ export async function updateStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -382,6 +388,7 @@ export async function setStudentActiveAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentActiveSchema.safeParse(Object.fromEntries(formData));
@@ -407,6 +414,7 @@ export async function deleteStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   // Delete is a Manager/Owner action, never a receptionist's (spec §3).
   if (!ctxCan(ctx, "student.delete")) return FORBIDDEN;
   const db = scoped(ctx);
@@ -494,6 +502,7 @@ export async function confirmPromotionAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
 
   const parsed = gradePromotionConfirmSchema.safeParse({
@@ -527,6 +536,7 @@ export async function undoPromotionAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
 
   const parsed = gradePromotionUndoSchema.safeParse(Object.fromEntries(formData));
@@ -551,6 +561,7 @@ export async function setStudentGradeAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
   const db = scoped(ctx);
 
@@ -593,6 +604,7 @@ export async function applyAccountGradeAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentActionSchema.safeParse(Object.fromEntries(formData));
@@ -618,6 +630,7 @@ export async function uploadStudentPhotoAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentPhotoSchema.safeParse({
@@ -669,6 +682,7 @@ export async function removeStudentPhotoAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentActionSchema.safeParse(Object.fromEntries(formData));
@@ -711,6 +725,7 @@ export async function generateIdCardAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentActionSchema.safeParse(Object.fromEntries(formData));
@@ -753,6 +768,7 @@ export async function generateIdCardAction(
  */
 async function parentAccessContext() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   return ctxCan(ctx, "parent.link.manage") ? ctx : null;
 }
 
@@ -762,6 +778,7 @@ export async function generateParentCodeAction(
   formData: FormData,
 ): Promise<FamilyActionState> {
   const ctx = await parentAccessContext();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return { error: "forbidden" };
   const parsed = branchCodeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "notFound" };
@@ -782,6 +799,7 @@ export async function cancelParentCodeAction(
   formData: FormData,
 ): Promise<FamilyActionState> {
   const ctx = await parentAccessContext();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return { error: "forbidden" };
   const parsed = branchCodeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "notFound" };
@@ -802,6 +820,7 @@ export async function revokeParentLinkAction(
   formData: FormData,
 ): Promise<FamilyActionState> {
   const ctx = await parentAccessContext();
+  if (isPickBranch(ctx)) return ctx;
   if (!ctx) return { error: "forbidden" };
   const parsed = branchRevokeLinkSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
