@@ -147,9 +147,9 @@ export async function signUpAction(
   ]);
   if (!allowed) return { error: "rateLimited" };
 
-  // No "phone in use" answer any more (SEC-40, D-02): a phone is never an
-  // identity key, so a self-typed phone is not stored on the global `User`
-  // and cannot clash with anyone — nor tell a stranger who holds a number.
+  // No phone is collected here (SEC-40, D-02): a phone is never an identity
+  // key, so there is nothing to clash and nothing that tells a stranger who
+  // holds a number. A contact phone lives only in Account settings.
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -186,10 +186,9 @@ export async function signUpAction(
       : { error: "signUpFailed" };
   }
 
-  // F3 (OD-6 decided): a sign-up never originates parent access. A phone
-  // match grants nothing and creates nothing — a parent links with a
-  // one-time code (`/family/join`, lib/db/parents.ts's `acceptFamilyCode`).
-  // The optional phone on the form is not stored either (D-02).
+  // F3 (OD-6 decided): a sign-up never originates parent access — a parent
+  // links with a one-time code (`/family/join`, lib/db/parents.ts's
+  // `acceptFamilyCode`).
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(identity.user));
 

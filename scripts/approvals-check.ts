@@ -22,7 +22,7 @@ import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.
 import { resolveChangeRequest, resolveSessionRequest } from "../lib/db/approvals.ts";
 import { confirmReservation, rejectReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { can } from "../lib/auth/permissions.ts";
-import { confirmBooking, rejectBooking, requestBooking } from "../lib/db/session-bookings.ts";
+import { cancelBookingByStaff, confirmBooking, rejectBooking, requestBooking } from "../lib/db/session-bookings.ts";
 import { scopedWith } from "../lib/db/scoped.ts";
 import { pendingClaimsForCenter } from "../lib/db/account-claims.ts";
 import { pendingApprovalCounts, pendingTeacherApprovalCounts } from "../lib/db/approval-counts.ts";
@@ -727,6 +727,34 @@ async function checkBookingQueues(centerId: string, otherCenterId: string, teach
   );
   const queueAfter = await scopedWith(prisma, ctx(centerId, "MANAGER")).sessionBookings.listPending();
   check("Resolved bookings leave the queue", !ids(queueAfter).has(myId) && !ids(queueAfter).has(theirId));
+
+  // T7 — the session page's "Booked — not arrived" list: staff cancel, with the
+  // teacher pinned to their own classes. The confirmed booking `myId` is on it.
+  const booked = (id: string) => scopedWith(prisma, ctx(centerId, "MANAGER")).sessionBookings.listConfirmedForSession(id);
+  check("The confirmed booking is on its session's booked list", (await booked(mineSession.id)).some((row) => row.id === myId));
+  const cancelByOther = await prisma.$transaction((tx) =>
+    cancelBookingByStaff(tx, centerId, myId, otherTeacher.id, { teacherId: otherTeacher.id, via: "teacher" }),
+  );
+  check(
+    "A teacher cannot cancel a booking on another teacher's class (notFound); it stays on the list",
+    !cancelByOther.ok && cancelByOther.error === "notFound" && (await booked(mineSession.id)).some((row) => row.id === myId),
+  );
+  const cancelByOwner = await prisma.$transaction((tx) =>
+    cancelBookingByStaff(tx, centerId, myId, teacherId, { teacherId, via: "teacher" }),
+  );
+  const cancelAudit = await prisma.auditLog.findMany({
+    where: { centerId, entityType: "SessionBooking", entityId: myId, action: "sessionBooking.cancel" },
+    select: { actorUserId: true, after: true },
+  });
+  check(
+    "The class's own teacher cancels it: reason STAFF, one audit row naming the teacher, off the booked list",
+    cancelByOwner.ok &&
+      cancelByOwner.booking.cancelReason === "STAFF" &&
+      cancelAudit.length === 1 &&
+      cancelAudit[0].actorUserId === teacherId &&
+      !(await booked(mineSession.id)).some((row) => row.id === myId),
+    JSON.stringify(cancelAudit),
+  );
 
   await deleteAuditRows(prisma, { centerId: { in: [centerId, otherCenterId] } });
 }

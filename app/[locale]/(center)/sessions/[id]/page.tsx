@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Clock, DoorOpen, Lock, Printer } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { cancelBookingAction } from "@/app/[locale]/(center)/approvals/actions";
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
 import { AddAttendeeSearch } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-search";
 import { BookedNotArrived, type BookedStudent } from "@/app/[locale]/(center)/sessions/[id]/booked-not-arrived";
@@ -133,6 +134,7 @@ export default async function SessionDetailPage({
           take: confirmedBookings.length,
         })
       : [];
+  const bookingIdByUserId = new Map(confirmedBookings.map((booking) => [booking.studentId, booking.id]));
   const bookedAttendeeIds = new Set(
     confirmedBookings.flatMap((booking) => (booking.sessionAttendeeId ? [booking.sessionAttendeeId] : [])),
   );
@@ -276,6 +278,8 @@ export default async function SessionDetailPage({
     path && storageConfigured() ? signedUrlFor(ctx.center.id, AVATARS_BUCKET, path) : Promise.resolve(null);
   const candidateRows = canCheckIn && !rosterReadOnly ? (candidateProfiles ?? []) : [];
   const canCheckInHere = canCheckIn && !rosterReadOnly;
+  // T7 — cancelling a booked no-show is the same gate as confirming it.
+  const canCancelBooking = ctxCan(ctx, "approvals.manage") && !rosterReadOnly;
   const [, candidates, bookedNotArrived] = await Promise.all([
     Promise.all(
       roster
@@ -298,6 +302,7 @@ export default async function SessionDetailPage({
     Promise.all(
       notArrivedProfiles.map(
         async (profile): Promise<BookedStudent> => ({
+          bookingId: bookingIdByUserId.get(profile.userId)!,
           studentProfileId: profile.id,
           name: fullName(localName(profile, profile.user)),
           studentCode: profile.studentCode,
@@ -473,7 +478,11 @@ export default async function SessionDetailPage({
               readOnly={rosterReadOnly}
             />
 
-            <BookedNotArrived students={bookedNotArrived} canCheckIn={canCheckInHere} />
+            <BookedNotArrived
+              students={bookedNotArrived}
+              canCheckIn={canCheckInHere}
+              cancelAction={canCancelBooking ? cancelBookingAction : undefined}
+            />
 
             {rosterReadOnly ? null : (
               <div className="border-t border-border pt-4">

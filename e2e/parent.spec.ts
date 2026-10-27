@@ -6,8 +6,8 @@ import { field, openDialog } from "./support/ui";
 /**
  * Journey 8 — the parent (SYS Part A, F3): the child selector and the
  * read-only mirror; and onboarding a new parent with a one-time code (OD-6
- * decided). A phone match grants nothing: a sign-up carrying a student's
- * parent phone sees "No child linked yet". The branch prints a code; the
+ * decided). A Parent sign-up (F4) carries no phone and links nothing: it sees
+ * "No child linked yet" until it uses a code. The branch prints a code; the
  * parent links with it at /family/join (the code in the URL fragment) and
  * lands in the portal; then unlinks from Account → Family, which frees the
  * slot so the journey can run again.
@@ -35,16 +35,17 @@ test("a parent whose one child studies at two branches sees both", async ({ as, 
   await expectHealthy(page, appLocale);
 });
 
-test("@write a phone match grants nothing; a new parent links with the branch's printed code, then unlinks", async ({ page, as, appLocale, msg }, testInfo) => {
+test("@write a new parent sign-up links nothing; it links with the branch's printed code, then unlinks", async ({ page, as, appLocale, msg }, testInfo) => {
   signUpProjectOnly(testInfo);
-  // A seeded student's parent phone, read the way staff see it.
+  // A seeded student's page, where the branch prints the code.
   const manager = await as("manager");
   await manager.goto(`/${appLocale}/students`);
   await manager.locator('main a[href*="/students/"]').first().click();
-  const parentPhone = await manager.getByLabel(field(msg("Students.fields.parentPhone"))).inputValue();
 
   const tag = uniqueTag("e2e").toLowerCase();
-  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Parent ${tag}`, email: `${tag}-parent@example.com`, phone: parentPhone || undefined });
+  // F4: a Parent sign-up lands on the parent portal's "Link your child".
+  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Parent ${tag}`, email: `${tag}-parent@example.com` }, "PARENT");
+  await expect(page).toHaveURL(new RegExp(`/${appLocale}/parent`));
   await page.goto(`/${appLocale}/parent`);
   await expectHealthy(page, appLocale);
   await expect(page.getByText(msg("ParentPortal.noChildren"))).toBeVisible();

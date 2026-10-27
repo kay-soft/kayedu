@@ -233,7 +233,7 @@ function staticChecks() {
       /event\.key === "Enter" && activeIndex >= 0/.test(typeAhead),
   );
   check(
-    "Without session mode the search stays a plain GET form (no JavaScript needed to scan)",
+    "Only session mode (onSubmitValue) intercepts the submit; otherwise it is a real GET form (in-place for filters, a full-page GET for the scan field — T4)",
     /if \(onSubmitValue\) \{\s*event\.preventDefault\(\);/.test(typeAhead),
   );
 

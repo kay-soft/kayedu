@@ -39,6 +39,7 @@ import {
   listActivePaymentMethods,
 } from "../lib/db/payment-methods.ts";
 import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
+import { cancelBookingByStaff } from "../lib/db/session-bookings.ts";
 import { resolveChangeRequest } from "../lib/db/approvals.ts";
 
 const prisma = await gatePrisma();
@@ -676,7 +677,7 @@ async function checkBookingSeats(centerId: string, teacherId: string, managerId:
     });
 
   // One confirmed booking on the later session: 0 enrolled + 1 + 1 = 2 seats — fits.
-  await confirmBookingRow(later.id, "f6-seat-1");
+  const laterBooking = await confirmBookingRow(later.id, "f6-seat-1");
   const fits = await prisma.$transaction(async (tx) =>
     reserveOrEnroll(tx, { centerId, classGroupId: bookedUp.id, studentUserId: (await makeStudentUser("f6-enrol-1")).id }),
   );
@@ -696,6 +697,17 @@ async function checkBookingSeats(centerId: string, teacherId: string, managerId:
   check(
     "…and no StudentProfile was made for the refused enrolment",
     (await prisma.studentProfile.count({ where: { centerId, user: { email: "enrollment-check-f6-enrol-2@kayedu.test" } } })) === 0,
+  );
+
+  // T7: a staff cancel frees the booked seat, so the same enrolment now fits.
+  const staffCancel = await prisma.$transaction((tx) => cancelBookingByStaff(tx, centerId, laterBooking.id, managerId));
+  const refit = await prisma.$transaction(async (tx) =>
+    reserveOrEnroll(tx, { centerId, classGroupId: bookedUp.id, studentUserId: (await makeStudentUser("f6-enrol-3")).id }),
+  );
+  check(
+    "A staff-cancelled booking frees its seat: the enrolment that was sessionFull now succeeds",
+    staffCancel.ok && staffCancel.booking.cancelReason === "STAFF" && refit.ok && refit.kind === "enrolled",
+    JSON.stringify({ staffCancel, refit }),
   );
 
   // The same rule at confirm.

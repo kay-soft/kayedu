@@ -7,7 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getStudentContexts, requireStudentUser } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
-import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
+import {
+  studentBookedUpcoming,
+  studentPastAttendance,
+  studentUpcomingSessions,
+  type BookedUpcomingSession,
+} from "@/lib/db/student-portal";
 import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
 import { centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 import { ScheduleDateFilter } from "./schedule-date-filter";
@@ -33,6 +38,8 @@ type UpcomingRow = {
   gradeName: string | null;
   roomName: string | null;
   teacherName: string;
+  /** F6: set on a single-session booking — "Booked" (CONFIRMED) or "Requested" (PENDING). */
+  bookingStatus?: "PENDING" | "CONFIRMED";
 };
 
 type PastRow = {
@@ -102,6 +109,42 @@ async function loadCenterSchedule(
 }
 
 /**
+ * The single sessions this student booked or requested (F6 follow-up), as the
+ * same rows an enrolled session draws — read-only, one `centerId`-scoped
+ * teacher-name lookup per branch.
+ */
+async function loadBookedRows(booked: BookedUpcomingSession[], locale: string): Promise<UpcomingRow[]> {
+  const centerIds = [...new Set(booked.map((entry) => entry.centerId))];
+  const namesByCenter = new Map(
+    await Promise.all(
+      centerIds.map(
+        async (centerId) =>
+          [
+            centerId,
+            await teacherDisplayNames(
+              prisma,
+              centerId,
+              booked.filter((entry) => entry.centerId === centerId).map((entry) => entry.session.teacherId),
+            ),
+          ] as const,
+      ),
+    ),
+  );
+  return booked.map(({ centerId, centerName, bookingStatus, session: row }) => ({
+    centerId,
+    centerName,
+    sessionId: row.id,
+    date: row.date,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    ...sessionLabelParts(locale, row),
+    roomName: row.room?.name ?? row.classGroup?.room?.name ?? null,
+    teacherName: namesByCenter.get(centerId)?.get(row.teacherId) ?? "—",
+    bookingStatus,
+  }));
+}
+
+/**
  * Student schedule — past + future sessions (spec §4.3 item 1), read-only:
  * a student never marks their own attendance/payment (that stays a
  * center-staff action, CLAUDE.md). Unions each connected center's own
@@ -126,20 +169,25 @@ export default async function StudentSchedulePage({
 
   const now = new Date();
 
-  const perCenter = await Promise.all(
-    contexts
-      .filter((ctx) => ctx.studentProfile)
-      .map((ctx) =>
-        loadCenterSchedule(
-          ctx.center.id,
-          ctx.center.name,
-          ctx.studentProfile!.id,
-          centreTimeZone(ctx.settings),
-          now,
-          locale,
+  const [perCenter, bookedRows] = await Promise.all([
+    Promise.all(
+      contexts
+        .filter((ctx) => ctx.studentProfile)
+        .map((ctx) =>
+          loadCenterSchedule(
+            ctx.center.id,
+            ctx.center.name,
+            ctx.studentProfile!.id,
+            centreTimeZone(ctx.settings),
+            now,
+            locale,
+          ),
         ),
-      ),
-  );
+    ),
+    // F6: single sessions booked or requested. Identity-scoped like My
+    // requests, because a PENDING booking can sit at a branch with no profile yet.
+    studentBookedUpcoming(prisma, session.user.id, now).then((booked) => loadBookedRows(booked, locale)),
+  ]);
 
   // The date picker's "today" marker is the one combined value on this page.
   // Rule (`commonTimeZone`): the zone all this student's centres share, else
@@ -154,8 +202,12 @@ export default async function StudentSchedulePage({
     ),
   );
 
-  const upcoming = perCenter
-    .flatMap((entry) => entry.upcoming)
+  // An enrolled session wins: a student who enrolled after booking sees it once.
+  const enrolledSessionIds = new Set(perCenter.flatMap((entry) => entry.upcoming.map((row) => row.sessionId)));
+  const upcoming = [
+    ...perCenter.flatMap((entry) => entry.upcoming),
+    ...bookedRows.filter((row) => !enrolledSessionIds.has(row.sessionId)),
+  ]
     .sort((a, b) => a.date.getTime() - b.date.getTime() || a.startTime.localeCompare(b.startTime));
   const past = perCenter
     .flatMap((entry) => entry.past)
@@ -203,7 +255,13 @@ export default async function StudentSchedulePage({
                       {row.roomName ? <span>{row.roomName}</span> : null}
                     </p>
                   </div>
-                  <Badge variant="info">{t("upcomingBadge")}</Badge>
+                  <Badge variant={row.bookingStatus === "PENDING" ? "warning" : "info"}>
+                    {row.bookingStatus === "CONFIRMED"
+                      ? t("bookedBadge")
+                      : row.bookingStatus === "PENDING"
+                        ? t("requestedBadge")
+                        : t("upcomingBadge")}
+                  </Badge>
                 </div>
                 )}
               />

@@ -397,8 +397,9 @@ function inUseRefusal(
 /**
  * The one write behind Add room and Edit room: the room's fields and its
  * "Can be combined with" set in a single transaction (a refusal changes
- * nothing), then one `AuditLog` row per link added or removed. Returns the
- * refusal, or null when saved. `roomId` null = create.
+ * nothing), with one `AuditLog` row per link added or removed written on that
+ * same transaction (rule 7 — `saveRoomWithLinks`). Returns the refusal, or null
+ * when saved. `roomId` null = create.
  */
 async function saveRoom(
   scope: Scope,
@@ -415,26 +416,11 @@ async function saveRoom(
     linkedRoomIds,
     centreClock(scope.ctx),
     locale,
+    scope.ctx.user.id,
   );
   if (!result.ok) {
     if (result.error === "combinationInUse") return inUseRefusal(result, locale);
     return { error: result.error === "roomNotFound" ? "notFound" : result.error };
-  }
-
-  for (const [action, ids] of [
-    ["room.link", result.added],
-    ["room.unlink", result.removed],
-  ] as const) {
-    for (const otherRoomId of ids) {
-      await writeAuditLog({
-        centerId: scope.ctx.center.id,
-        actorUserId: scope.ctx.user.id,
-        action,
-        entityType: "Room",
-        entityId: result.roomId,
-        after: { roomId: result.roomId, otherRoomId },
-      });
-    }
   }
   return null;
 }

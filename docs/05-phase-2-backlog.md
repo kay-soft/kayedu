@@ -308,6 +308,16 @@
 
 ---
 
+## 31. A note on a staff-cancelled booking
+
+**What it is.** When staff cancel a student's confirmed single-session booking (T7), an optional one-line note — "the room is closed that day", "duplicate booking" — that the student sees beside **Cancelled by the branch** in My requests.
+
+**Why deferred.** T7 was an explicitly no-schema-change session. `SessionBooking` has no text column, and an `AuditLog` row may not carry free text (D-20 — ids, amounts, statuses only), so there is nowhere to put the note without a migration. The cancel itself (reason `STAFF`, seat freed, audited with ids) is delivered without it.
+
+**Depends on.** A nullable note column on `SessionBooking` (length-capped, cleared with the booking like the rest of the row), an optional textarea in the Cancel booking confirm dialog, and a line in My requests. The audit row stays free of the text — it lives on the record, like `Payment.voidReason`.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

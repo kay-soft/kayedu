@@ -151,14 +151,21 @@ function checkLocaleToggle() {
     "components/shell/app-shell.tsx",
     "app/[locale]/(auth)/layout.tsx",
     "components/shared/public-header.tsx",
+    "components/explore/public-shell.tsx",
   ];
   for (const file of renderers) {
     check(`${file} renders <LocaleToggle />`, /<LocaleToggle\b/.test(read(file)));
   }
   // DES: every screen outside a shell carries the public header (mark + toggle).
-  for (const file of ["app/[locale]/not-found.tsx", "app/[locale]/error.tsx", "app/[locale]/page.tsx"]) {
+  for (const file of ["app/[locale]/not-found.tsx", "app/[locale]/error.tsx"]) {
     check(`${file} renders <PublicHeader />`, /<PublicHeader\b/.test(read(file)));
   }
+  // F5: a signed-out `/` is not a screen of its own — it redirects to Explore,
+  // whose public shell carries the mark and the toggle (check:public asserts both).
+  check(
+    "app/[locale]/page.tsx sends a signed-out visitor to Explore (the public shell renders the toggle)",
+    /if \(!identity\) redirect\(\{ href: ROUTES\.explore, locale \}\)/.test(stripComments(read("app/[locale]/page.tsx"))),
+  );
 
   // Every experience layout is a shell, and a shell is `AppShell`.
   for (const group of ["(center)", "(teacher)", "(student)", "(parent)", "(admin)"]) {
@@ -208,9 +215,6 @@ function checkNativeSelect() {
 const HEX_ALLOWLIST: Record<string, string> = {
   "app/[locale]/(admin)/admin/centers/create-center-form.tsx":
     "the new-centre form's default theme colour — the same value as the --brand token, stored as data",
-  "app/[locale]/(admin)/layout.tsx": "the platform-admin shell's default brand — the --brand token's value, passed as data",
-  "app/[locale]/(parent)/layout.tsx": "the parent shell's default brand — the --brand token's value, passed as data",
-  "app/[locale]/(teacher)/layout.tsx": "the zero-centre teacher shell's default brand — the --brand token's value, passed as data",
   "app/[locale]/(center)/settings/card/card-style-controls.tsx":
     "ID-card colour swatches and fallbacks — a centre's own card colours are user content, not UI chrome",
   "app/[locale]/layout.tsx":
@@ -277,7 +281,7 @@ function checkNoDecorativeAccents() {
 /** Pages that are not "a page with a title": signed-out, print, or redirect-only. */
 const PAGEHEADER_EXEMPT: Record<string, string> = {
   "app/[locale]/page.tsx":
-    "entry point — redirects a signed-in visitor home; signed out it is the public landing, whose h1 is the product name (DES)",
+    "entry point — redirect-only: a signed-in visitor goes home, a signed-out one to Explore (F5), which renders its own heading",
   "app/[locale]/[...rest]/page.tsx": "unknown-path catch-all — calls notFound(), renders nothing (DES)",
   "app/[locale]/(student)/student/profile/page.tsx": "redirect-only (the layout renders the profile form)",
   "app/[locale]/(auth)/login/page.tsx": "signed-out screen — AuthCard carries the heading",

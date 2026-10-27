@@ -1,9 +1,12 @@
-import type { EnrollmentStatus, Prisma, PrismaClient, SessionStatus } from "@prisma/client";
+import type { EnrollmentStatus, Prisma, PrismaClient, SessionBookingStatus, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/discover.ts).
 import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts";
+import { DEFAULT_TIMEZONE, addDays, startOfUtcDay, todayInTimezone } from "../scheduling.ts";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
@@ -261,6 +264,108 @@ export function studentUpcomingSessions(
     orderBy: [{ date: "asc" }, { startTime: "asc" }],
     take: 100,
   });
+}
+
+/** A booking that still holds (or asks for) a seat — the only ones a schedule shows. */
+const SCHEDULE_BOOKING_STATUSES: SessionBookingStatus[] = ["PENDING", "CONFIRMED"];
+
+export type BookedUpcomingSession = {
+  bookingId: string;
+  /** CONFIRMED reads "Booked", PENDING reads "Requested". */
+  bookingStatus: "PENDING" | "CONFIRMED";
+  centerId: string;
+  centerName: string;
+  session: Prisma.SessionGetPayload<{ include: ReturnType<typeof studentUpcomingSessionInclude> }>;
+};
+
+/**
+ * F6 follow-up (T7): the upcoming sessions a student has **booked** (single
+ * session, not enrolled) — read-only, no write path. A CONFIRMED booking is
+ * "Booked"; a PENDING one is "Requested" for as long as its session can still
+ * be booked (once it has started it reads as expired and drops out, as on My
+ * requests). Cancelled, rejected, expired, moved (rescheduled) and cancelled
+ * sessions never appear, and neither does a closed session.
+ *
+ * `bookingWhere` is the one place a caller scopes the read: the student's own
+ * id (identity-scoped, like `listBookingsForStudent` — a PENDING booking can
+ * sit at a branch where no `StudentProfile` exists yet) or one branch's child
+ * (`childBookedUpcoming`). Each branch's session rows are then fetched with
+ * that branch's own `centerId` filter and its own catalog renames.
+ */
+async function bookedUpcoming(
+  db: Db,
+  bookingWhere: Prisma.SessionBookingWhereInput,
+  now: Date,
+): Promise<BookedUpcomingSession[]> {
+  const rows = await db.sessionBooking.findMany({
+    where: {
+      ...bookingWhere,
+      status: { in: SCHEDULE_BOOKING_STATUSES },
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      session: { ...BOOKABLE_SESSION, date: { gte: addDays(startOfUtcDay(now), -1) } },
+    },
+    orderBy: [{ session: { date: "asc" } }, { session: { startTime: "asc" } }],
+    take: 100,
+    select: {
+      id: true,
+      centerId: true,
+      status: true,
+      center: { select: { name: true } },
+      session: {
+        select: {
+          id: true,
+          classGroupId: true,
+          status: true,
+          closedAt: true,
+          rescheduledToId: true,
+          date: true,
+          startTime: true,
+          timezone: true,
+        },
+      },
+    },
+  });
+
+  const shown = rows.filter((row) =>
+    row.status === "PENDING"
+      ? isBookableNow(row.session, now)
+      : row.session.date.getTime() >= todayInTimezone(row.session.timezone ?? DEFAULT_TIMEZONE, now).getTime(),
+  );
+
+  const idsByCenter = new Map<string, string[]>();
+  for (const row of shown) idsByCenter.set(row.centerId, [...(idsByCenter.get(row.centerId) ?? []), row.session.id]);
+  const sessions = new Map<string, Awaited<ReturnType<typeof loadBookedSessions>>[number]>();
+  for (const [centerId, ids] of idsByCenter) {
+    for (const session of await loadBookedSessions(db, centerId, ids)) sessions.set(session.id, session);
+  }
+
+  return shown.flatMap((row) => {
+    const session = sessions.get(row.session.id);
+    return session
+      ? [{ bookingId: row.id, bookingStatus: row.status as "PENDING" | "CONFIRMED", centerId: row.centerId, centerName: row.center.name, session }]
+      : [];
+  });
+}
+
+function loadBookedSessions(db: Db, centerId: string, sessionIds: string[]) {
+  return db.session.findMany({
+    where: scopedWhere(centerId, { id: { in: sessionIds } }),
+    include: studentUpcomingSessionInclude(centerId),
+  });
+}
+
+/** Every upcoming session this student has booked or requested, across every branch. */
+export function studentBookedUpcoming(db: Db, studentUserId: string, now: Date = new Date()) {
+  return bookedUpcoming(db, { studentId: studentUserId }, now);
+}
+
+/** The same read for one child at one branch — the parent portal's mirror. */
+export function childBookedUpcoming(db: Db, centerId: string, studentProfileId: string, now: Date = new Date()) {
+  return bookedUpcoming(
+    db,
+    scopedWhere(centerId, { student: { studentProfiles: { some: { id: studentProfileId, centerId } } } }),
+    now,
+  );
 }
 
 /**

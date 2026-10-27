@@ -55,6 +55,7 @@ Own `Card` with `p-2 sm:p-4` plus `CardHeader` — heading was 20px, spacing dif
 ### `app/[locale]/(auth)/register/page.tsx`
 Same as login; two password fields with no visibility toggle. **R10a:** `AuthCard`, `PasswordField` ×2.
 **F4:** the form opens with **I'm joining as** — three radio cards (Student / Parent / Teacher, required; Parent pre-ticked from a join link) — above the name fields; one column on a phone, three from `sm` (docs/04 §11.23).
+**T7:** the optional **Phone** field is gone (it was stored nowhere and matched nowhere since F3); the form is intent, name, email, password, confirm password. A contact phone lives only in Account settings.
 
 ### `app/[locale]/(auth)/invite/[token]/page.tsx`
 Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on `AuthCard`.
@@ -170,6 +171,7 @@ New. OWNER only (`organization.branch.create`). A usage card ("2 of 3 branches u
 
 ### `app/[locale]/(center)/sessions/[id]/page.tsx` — **R10b**
 *Wrong now (at `ea7f645`):* the session's verbs (Reschedule · Edit rooms · Cancel · Delete) are in an `ActionBar` **at the bottom of the side column's facts card** — below the date/time/room/seats/price rows, far from the title and, on a phone, below the entire roster. The header's own action slot holds only badges and the "All sessions" link, in a loose row. End session is a separate strip between header and body, with its hint left and the button right, in its own bordered box. The two columns are `3fr/2fr` from `xl` only; the receipt card moves above/below the facts card depending on `closed`, so the side column's order changes with state. The roster card is tall while the side stack has no matching rhythm (facts card is short, receipt card is long) — the columns end at unrelated heights. The closed banner is correct (R2) and stays.
+**T7:** the "Booked — not arrived (n)" list gains an outlined **Cancel booking** beside Check in (`approvals.manage`; asks first; full width below `sm`; docs/04 §11.25).
 **R10b:** all five verbs (End session, Reschedule, Edit rooms, Cancel, Delete) are one `ActionBar inHeader` under the title, each behind the same condition as before (none once closed/cancelled/rescheduled, none without the permission — and no empty bar then); the End-session and Delete hints are muted text under the header; badges, time and rooms are the header's `meta`; the roster is `main`, the details and receipt are a sticky `side` (receipt first once closed, as R2 had it).
 
 **SEC-2b (D-06, D-13, D-26, SEC-19):** the receipt adds a "Payments" count, "Refunded (n) −amount", a red "Voided — not counted (n)" row and an amber "Present or late without a payment" row, then named sections — present-but-unpaid students, voided payments (amount, who, when, why, on a red tint), refunds — each absent when empty; the same receipt prints and shows on the teacher's session page and in the reception dialog. A session priced at 0 gets an amber "Free session" badge in the header and on the receipt. The roster's "Mark absent and void payment" dialog now requires its reason (field marked required, the server's refusal shown under it). The New session dialog, at a price of 0, shows an amber tick box "I understand this session is free" that the server requires.
@@ -220,6 +222,7 @@ Decline/Approve buttons unequal. **R10a:** equal-width pair (shared pattern with
 
 ### `app/[locale]/(teacher)/teacher/sessions/[id]/page.tsx` — **R10b**
 Teacher session detail. Marked R10b but not among the four centre detail pages this pass covered — not touched.
+**T7:** a "Booked — not arrived (n)" card appears under the roster when students booked this session online and have not arrived (name, code LTR, Booked badge, and for `reservation.manage.own` the same **Cancel booking** button as the centre page, pinned to the teacher's own classes); nothing else on the page changed.
 
 ### `app/[locale]/(teacher)/teacher/students/[id]/page.tsx` — **R10b**
 Teacher view of a student. Marked R10b but not among the four centre detail pages this pass covered — not touched.
@@ -230,6 +233,7 @@ Teacher view of a student. Marked R10b but not among the four centre detail page
 
 ### `app/[locale]/(student)/student/schedule/page.tsx`
 Consistent. No change.
+**T7:** booked single sessions join the upcoming list with a **Booked** (`info`) or **Requested** (`warning`) badge in place of "Upcoming"; the header description says so (docs/04 §11.25).
 
 **DES:** upcoming sessions show eight, then "Show N more" (`CappedList`, docs/04 §14.9).
 
@@ -258,6 +262,7 @@ Redirect only. No change.
 ## Parent experience (route group `(parent)`)
 
 ### `app/[locale]/(parent)/parent/page.tsx`
+**T7:** the selected child's booked and requested single sessions appear in Upcoming with the same Booked / Requested badges (read-only, through the same reads as the student schedule).
 "No children linked" was a bare muted sentence in a padded card. **R10a:** `EmptyState`.
 **F3:** zero linked children → a card with the info `EmptyState` "No child linked yet" whose action is a code field + **Continue** (it writes nothing — it carries the code to `/family/join` in the URL fragment) and the "where to get a code" line under it. Linked children at no branch yet → an info `EmptyState` naming them. Otherwise as before, with a ghost **Link another child** (to Account → Family) as the header action and an info line naming any linked child who has not joined a branch.
 

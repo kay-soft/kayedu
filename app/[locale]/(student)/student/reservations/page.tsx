@@ -36,6 +36,7 @@ const BOOKING_BADGE: Record<BookingDisplayStatus, "warning" | "info" | "success"
   EXPIRED: "neutral",
   REJECTED: "danger",
   CANCELLED: "neutral",
+  CANCELLED_BY_BRANCH: "neutral",
   MOVED: "neutral",
 };
 

@@ -2,9 +2,11 @@ import { notFound } from "next/navigation";
 import { Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { cancelOwnBookingAction } from "@/app/[locale]/(teacher)/teacher/approvals/actions";
 import { SessionDescriptionForm } from "@/app/[locale]/(teacher)/teacher/sessions/[id]/description-form";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
+import { CancelBookingButton } from "@/components/center/cancel-booking-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
@@ -114,6 +116,33 @@ export default async function TeacherSessionDetailPage({
     new Date(),
     timeZone,
   );
+  // T7 (F6): students who booked this one session online and have not arrived.
+  // A booking names the global User; its branch profile exists from confirmation on.
+  const tBooked = await getTranslations("Sessions.booked");
+  const confirmedBookings = await db.sessionBookings.listConfirmedForSession(session.id);
+  const bookedProfiles =
+    confirmedBookings.length > 0
+      ? await db.students.search({
+          where: { userId: { in: confirmedBookings.map((booking) => booking.studentId) } },
+          take: confirmedBookings.length,
+        })
+      : [];
+  const arrivedProfileIds = new Set(session.attendees.map((attendee) => attendee.studentProfileId));
+  const bookingIdByUserId = new Map(confirmedBookings.map((booking) => [booking.studentId, booking.id]));
+  const bookedNotArrived = bookedProfiles
+    .filter((profile) => !arrivedProfileIds.has(profile.id))
+    .map((profile) => ({
+      bookingId: bookingIdByUserId.get(profile.userId)!,
+      name: fullName(localName(profile, profile.user)),
+      studentCode: profile.studentCode,
+    }));
+  // Cancelling is the same gate as confirming (`reservation.manage.own`); the
+  // action pins the booking to a class this teacher teaches.
+  const canCancelBooking =
+    ctxCan(ctx, "reservation.manage.own") &&
+    !closed &&
+    displayStatus !== "CANCELLED" &&
+    displayStatus !== "RESCHEDULED";
   const className = sessionDisplayName(locale, session);
   // A class session's grade is its class's; a one-time session's is its own (R5).
   const grade = session.classGroup ? session.classGroup.grade : session.grade;
@@ -185,6 +214,37 @@ export default async function TeacherSessionDetailPage({
               )}
             </CardContent>
           </Card>
+
+          {bookedNotArrived.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>{tBooked("notArrived", { count: bookedNotArrived.length })}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="flex flex-col gap-2">
+                  {bookedNotArrived.map((student) => (
+                    <li
+                      key={student.bookingId}
+                      className="flex flex-col gap-2 rounded-xl border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-text-primary">{student.name}</p>
+                          <p className="text-xs text-text-muted" dir="ltr">
+                            {student.studentCode}
+                          </p>
+                        </div>
+                        <Badge variant="info">{tBooked("badge")}</Badge>
+                      </div>
+                      {canCancelBooking ? (
+                        <CancelBookingButton id={student.bookingId} action={cancelOwnBookingAction} />
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>

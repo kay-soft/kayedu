@@ -13,6 +13,7 @@ import {
 } from "../rooms.ts";
 import { todayInTimezone } from "../scheduling.ts";
 import { sessionDisplayName, sessionLabelSelect } from "../session-label.ts";
+import { writeAuditRow } from "./audit-row.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -215,8 +216,9 @@ export async function setRoomLinks(
   linkedRoomIds: readonly string[],
   clock: { now: Date; timeZone: string },
   locale = "en",
+  actorUserId: string | null = null,
 ): Promise<SetRoomLinksResult> {
-  return saveRoomWithLinks(db, centerId, roomId, null, linkedRoomIds, clock, locale);
+  return saveRoomWithLinks(db, centerId, roomId, null, linkedRoomIds, clock, locale, actorUserId);
 }
 
 /**
@@ -225,6 +227,10 @@ export async function setRoomLinks(
  * otherwise `fields` (when given) updates it. The link diff is planned and
  * refused first, so a refused save changes nothing — not the name, not the
  * capacity, not a link. Every room id resolves inside `centerId`.
+ *
+ * Rule 7: the `room.link` / `room.unlink` audit rows (one per pair, ids only)
+ * are written on this same transaction, so a link can never commit without its
+ * row — nor a row without its link. `actorUserId` is the signed-in user.
  */
 export async function saveRoomWithLinks(
   db: PrismaClient,
@@ -234,6 +240,7 @@ export async function saveRoomWithLinks(
   linkedRoomIds: readonly string[],
   clock: { now: Date; timeZone: string },
   locale = "en",
+  actorUserId: string | null = null,
 ): Promise<SetRoomLinksResult> {
   return db.$transaction(async (tx): Promise<SetRoomLinksResult> => {
     if (roomId) {
@@ -252,6 +259,21 @@ export async function saveRoomWithLinks(
     }
 
     await writeRoomLinkDiff(tx, centerId, savedId, planned.plan);
+    for (const [action, otherRoomIds] of [
+      ["room.link", planned.plan.added],
+      ["room.unlink", planned.plan.removed],
+    ] as const) {
+      for (const otherRoomId of otherRoomIds) {
+        await writeAuditRow(tx, {
+          centerId,
+          actorUserId,
+          action,
+          entityType: "Room",
+          entityId: savedId,
+          after: { roomId: savedId, otherRoomId },
+        });
+      }
+    }
     return { ok: true, roomId: savedId, added: planned.plan.added, removed: planned.plan.removed };
   }).catch((error: unknown) => {
     if (error instanceof RoomLinkWriteError) return { ok: false as const, error: error.reason };

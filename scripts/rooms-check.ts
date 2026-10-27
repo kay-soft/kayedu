@@ -1011,6 +1011,85 @@ async function main() {
       (await prisma.roomLink.count({ where: { centerId: A } })) === aLinksBefore,
     JSON.stringify(crossEditForeign),
   );
+
+  // ── 8b. The link audit rows commit with the link diff (T7, rule 7) ───────
+  // `saveRoomWithLinks` writes `room.link` / `room.unlink` on the same
+  // transaction as the diff — not the Server Action afterwards.
+  const aud1 = await makeRoom(A, "Audit 1", 10);
+  const aud2 = await makeRoom(A, "Audit 2", 10);
+  const aud3 = await makeRoom(A, "Audit 3", 10);
+  const auditRows = (entityId: string, action: string) =>
+    prisma.auditLog.findMany({ where: { centerId: A, entityId, action } });
+  const auditCount = () =>
+    prisma.auditLog.count({
+      where: { centerId: A, action: { in: ["room.link", "room.unlink"] }, entityId: { in: [aud1.id, aud2.id, aud3.id] } },
+    });
+
+  const auditLink = await saveRoomWithLinks(prisma, A, aud1.id, null, [aud2.id], clock, "en", teacher1.id);
+  const linkAudit = await auditRows(aud1.id, "room.link");
+  check(
+    "Audit: linking writes one room.link row (ids only), attributed to the actor",
+    auditLink.ok &&
+      linkAudit.length === 1 &&
+      linkAudit[0].actorUserId === teacher1.id &&
+      JSON.stringify(linkAudit[0].after) === JSON.stringify({ roomId: aud1.id, otherRoomId: aud2.id }),
+    JSON.stringify(linkAudit),
+  );
+  const auditNoop = await saveRoomWithLinks(prisma, A, aud1.id, null, [aud2.id], clock, "en", teacher1.id);
+  check("Audit: a no-op save writes no row", auditNoop.ok && (await auditCount()) === 1);
+  const auditSwap = await saveRoomWithLinks(prisma, A, aud1.id, null, [aud3.id], clock, "en", teacher1.id);
+  check(
+    "Audit: swapping a link writes one room.unlink and one room.link",
+    auditSwap.ok &&
+      (await auditRows(aud1.id, "room.unlink")).length === 1 &&
+      (await auditRows(aud1.id, "room.link")).length === 2,
+  );
+
+  // The proof of "same transaction": roll the whole transaction back after the
+  // callback has finished. Link rows and audit rows must disappear together;
+  // an audit row written afterwards (outside it) would survive.
+  class RollBackAfterCallback extends Error {}
+  const rollingBack = {
+    $transaction: (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+      prisma.$transaction(async (tx) => {
+        await callback(tx);
+        throw new RollBackAfterCallback();
+      }),
+  } as unknown as typeof prisma;
+  const auditLinksBefore = await linksOf(aud2.id);
+  const auditBefore = await auditCount();
+  const rolled = await saveRoomWithLinks(rollingBack, A, aud2.id, null, [aud3.id], clock, "en", teacher1.id).then(
+    () => "committed",
+    (error: unknown) => (error instanceof RollBackAfterCallback ? "rolled back" : "failed"),
+  );
+  check(
+    "Audit: the rows are written in the link transaction — a rollback after the diff leaves neither a link nor an audit row",
+    rolled === "rolled back" &&
+      JSON.stringify(await linksOf(aud2.id)) === JSON.stringify(auditLinksBefore) &&
+      (await auditCount()) === auditBefore,
+    `${rolled}`,
+  );
+
+  // A refused save (a link in use) writes nothing — no link and no audit row.
+  const auditClass = await makeClass(A, teacher1.id, aud1.id, [aud3.id]);
+  const auditRefused = await saveRoomWithLinks(prisma, A, aud1.id, null, [], clock, "en", teacher1.id);
+  check(
+    "Audit: an in-use removal is refused and writes no room.unlink row",
+    !auditRefused.ok && auditRefused.error === "combinationInUse" && (await auditRows(aud1.id, "room.unlink")).length === 1,
+    JSON.stringify(auditRefused),
+  );
+  await prisma.classGroup.update({ where: { id: auditClass.id }, data: { active: false } });
+
+  // Static: the data layer owns the audit rows; the action no longer writes them.
+  const roomSetsSource = readFileSync(join(process.cwd(), "lib/db/room-sets.ts"), "utf8");
+  const settingsActions = readFileSync(join(process.cwd(), "app/[locale]/(center)/settings/actions.ts"), "utf8");
+  check(
+    "Audit (static): saveRoomWithLinks writes room.link / room.unlink with writeAuditRow(tx, …) and the settings action writes neither",
+    /writeAuditRow\(tx,\s*\{[\s\S]*?action,[\s\S]*?\}\)/.test(roomSetsSource) &&
+      roomSetsSource.includes('"room.link"') &&
+      roomSetsSource.includes('"room.unlink"') &&
+      !/["']room\.(un)?link["']/.test(settingsActions),
+  );
 }
 
 main()

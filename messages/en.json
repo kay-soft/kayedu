@@ -160,7 +160,6 @@
       "hidePassword": "Hide password",
       "firstName": "First name",
       "lastName": "Last name",
-      "phone": "Phone",
       "optional": "optional",
       "firstNamePlaceholder": "e.g. Mona",
       "lastNamePlaceholder": "e.g. Kamel"
@@ -1271,7 +1270,21 @@
     "booked": {
       "notArrived": "{count, plural, one {Booked — not arrived (#)} other {Booked — not arrived (#)}}",
       "badge": "Booked",
-      "checkIn": "Check in"
+      "checkIn": "Check in",
+      "cancel": {
+        "label": "Cancel booking",
+        "title": "Cancel this booking?",
+        "body": "The seat is freed at once and the student sees “Cancelled by the branch”.",
+        "done": "Cancelled",
+        "errors": {
+          "forbidden": "You are not allowed to do this.",
+          "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
+          "notFound": "That booking no longer exists, or is not for one of your classes.",
+          "notOpen": "That booking can no longer be cancelled — the student may already be checked in.",
+          "sessionClosed": "This session is closed, so its bookings can't be changed.",
+          "failed": "Something went wrong. Try again."
+        }
+      }
     }
   },
   "Reception": {
@@ -1617,6 +1630,7 @@
         "alreadyCheckedIn": "This student is already checked in to the session.",
         "sessionFull": "This session is full — every seat is taken by enrolled students, bookings or walk-ins.",
         "bookingSeatsFull": "All the seats this class keeps for single-session bookings are taken for this session.",
+        "bookingOff": "Booking is closed for this class.",
         "failed": "Something went wrong. Try again."
       }
     }
@@ -2401,11 +2415,13 @@
   },
   "StudentSchedule": {
     "title": "My schedule",
-    "subtitle": "Every class you're enrolled in, across every branch you've joined.",
+    "subtitle": "Every class you're enrolled in and every single session you've booked, across every branch.",
     "filterDate": "Filter by date",
     "upcomingTitle": "Upcoming",
     "upcomingEmpty": "No upcoming sessions.",
     "upcomingBadge": "Upcoming",
+    "bookedBadge": "Booked",
+    "requestedBadge": "Requested",
     "pastTitle": "Past",
     "pastEmpty": "No past sessions yet.",
     "dropIn": "Drop-in",
@@ -2520,6 +2536,7 @@
       "EXPIRED": "Expired",
       "REJECTED": "Declined",
       "CANCELLED": "Cancelled",
+      "CANCELLED_BY_BRANCH": "Cancelled by the branch",
       "MOVED": "Moved"
     },
     "bookingErrors": {
@@ -2554,6 +2571,8 @@
     "upcomingTitle": "Upcoming",
     "upcomingEmpty": "No upcoming sessions.",
     "upcomingBadge": "Upcoming",
+    "bookedBadge": "Booked",
+    "requestedBadge": "Requested",
     "pastTitle": "Past",
     "pastEmpty": "No past sessions yet.",
     "dropIn": "Drop-in",

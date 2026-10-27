@@ -27,7 +27,8 @@ import { scopedData, scopedWhere } from "./tenant-scope.ts";
 /**
  * Single-session booking (F6, docs/00-master-product-spec.md §5.1
  * "Single-session booking"): a student who is not enrolled asks to attend one
- * session of a class. The **only** writer of `SessionBooking` rows.
+ * session of a class. The **only** writer of `SessionBooking` rows (request,
+ * confirm, reject, student cancel, staff cancel, cancel-with-session).
  *
  * - **Which classes:** `ClassGroup.sessionBookingMode` — OFF (no booking, the
  *   default and every pre-F6 class), INSTANT (CONFIRMED at once) or APPROVAL
@@ -46,6 +47,9 @@ import { scopedData, scopedWhere } from "./tenant-scope.ts";
  *   confirm, not enrolled, not already booked; at most
  *   `BOOKING_CAPS.openBookings` open bookings per account (serialized per
  *   account, D-18); no cooling-off.
+ * - **Closing booking:** setting a class's mode to OFF stops new requests and
+ *   the confirming of pending ones (`bookingOff`); bookings already CONFIRMED
+ *   stand, and a pending one can still be rejected.
  * - **No money.** A booking records nothing financial; the student pays at
  *   the desk, where check-in links `sessionAttendeeId` (`createAttendance`).
  *   A booked no-show writes nothing.
@@ -281,6 +285,7 @@ export type ResolveBookingError =
   | "notFound"
   | "notPending"
   | "expired"
+  | "bookingOff"
   | "studentBlocked"
   | "alreadyEnrolled"
   | "alreadyCheckedIn"
@@ -324,7 +329,8 @@ async function loadPendingForResolve(
 /**
  * Confirms a PENDING booking — the branch's `/approvals` (approvals.manage)
  * or the class teacher's own queue (reservation.manage.own, pinned by
- * `teacherId`). Re-checks both blocks, enrolment, and the seats under the
+ * `teacherId`). Refuses when the class's `sessionBookingMode` is OFF now
+ * (`bookingOff`). Re-checks both blocks, enrolment, and the seats under the
  * locks; makes the `StudentProfile` only now. Audited `sessionBooking.confirm`
  * in the same transaction.
  */
@@ -339,6 +345,11 @@ export async function confirmBooking(
   if (!loaded.ok) return loaded;
   const { booking, session } = loaded;
   const classGroup = session.classGroup!;
+
+  // The branch closed single-session booking after this one was requested: a
+  // pending booking can no longer be confirmed (it can still be rejected), and
+  // already-CONFIRMED ones are untouched — this only guards the PENDING → CONFIRMED step.
+  if (classGroup.sessionBookingMode === "OFF") return { ok: false, error: "bookingOff" };
 
   if (await isBlockedFromClass(tx, centerId, classGroup, booking.studentId)) {
     return { ok: false, error: "studentBlocked" };
@@ -455,6 +466,69 @@ export async function cancelBookingByStudent(
   return { ok: true, booking: await db.sessionBooking.findUniqueOrThrow({ where: { id: booking.id } }) };
 }
 
+export type StaffCancelBookingResult =
+  | { ok: true; booking: SessionBooking }
+  | { ok: false; error: "notFound" | "notOpen" | "sessionClosed" };
+
+/**
+ * Staff cancelling a CONFIRMED booking that has not arrived — the session
+ * page's "Booked — not arrived" list (T7). `cancelReason` STAFF; the seat is
+ * freed by the same write (seats are derived from CONFIRMED bookings,
+ * `lib/capacity.ts`), and the `sessionBooking.cancel` audit row (ids and
+ * statuses only — D-20) commits in the caller's transaction.
+ *
+ * Gate: the caller checks `approvals.manage`, or — for a teacher —
+ * `reservation.manage.own` and passes `teacherId`, which pins the booking to a
+ * class that teacher teaches (another teacher's booking at the same branch is
+ * "not found", exactly as on the approvals queues). A PENDING booking is
+ * rejected, not cancelled; a booking already checked in, or on a closed
+ * session, is history and refused. Unlike the student's own cancel there is no
+ * "until the session starts" limit: a booked no-show can be cleared mid-session.
+ */
+export async function cancelBookingByStaff(
+  tx: Prisma.TransactionClient,
+  centerId: string,
+  bookingId: string,
+  cancelledBy: string,
+  options: { teacherId?: string; via?: "teacher"; now?: Date } = {},
+): Promise<StaffCancelBookingResult> {
+  const booking = await tx.sessionBooking.findFirst({
+    where: scopedWhere(centerId, {
+      id: bookingId,
+      ...(options.teacherId ? { session: { classGroup: { teacherId: options.teacherId } } } : {}),
+    }),
+    include: { session: { select: { closedAt: true } } },
+  });
+  if (!booking) return { ok: false, error: "notFound" };
+  if (booking.status !== CONFIRMED || booking.sessionAttendeeId) return { ok: false, error: "notOpen" };
+  if (booking.session.closedAt) return { ok: false, error: "sessionClosed" };
+
+  const now = options.now ?? new Date();
+  // Conditional on still CONFIRMED and not arrived: a check-in that links the
+  // booking first wins, and this becomes "not open".
+  const updated = await tx.sessionBooking.updateMany({
+    where: scopedWhere(centerId, { id: booking.id, status: CONFIRMED, sessionAttendeeId: null }),
+    data: { status: "CANCELLED", cancelledAt: now, cancelReason: "STAFF" },
+  });
+  if (updated.count === 0) return { ok: false, error: "notOpen" };
+
+  await writeAuditRow(tx, {
+    centerId,
+    actorUserId: cancelledBy,
+    action: "sessionBooking.cancel",
+    entityType: "SessionBooking",
+    entityId: booking.id,
+    before: { status: CONFIRMED },
+    after: {
+      status: "CANCELLED",
+      cancelReason: "STAFF",
+      sessionId: booking.sessionId,
+      ...(options.via ? { via: options.via } : {}),
+    },
+  });
+  return { ok: true, booking: await tx.sessionBooking.findUniqueOrThrow({ where: { id: booking.id } }) };
+}
+
 /**
  * Cancelling or rescheduling a session cancels its open bookings, in the
  * caller's transaction (`cancelSession`, `rescheduleSession`). A booking the
@@ -549,7 +623,15 @@ export async function studentBookingsBySession(
 }
 
 /** What a student-facing booking row reads as, given the clock. */
-export type BookingDisplayStatus = "PENDING" | "CONFIRMED" | "ATTENDED" | "EXPIRED" | "REJECTED" | "CANCELLED" | "MOVED";
+export type BookingDisplayStatus =
+  | "PENDING"
+  | "CONFIRMED"
+  | "ATTENDED"
+  | "EXPIRED"
+  | "REJECTED"
+  | "CANCELLED"
+  | "CANCELLED_BY_BRANCH"
+  | "MOVED";
 
 export function bookingDisplayStatus(
   booking: {
@@ -561,7 +643,10 @@ export function bookingDisplayStatus(
   now: Date,
 ): BookingDisplayStatus {
   if (booking.sessionAttendeeId) return "ATTENDED";
-  if (booking.status === "CANCELLED") return booking.cancelReason === "SESSION_RESCHEDULED" ? "MOVED" : "CANCELLED";
+  if (booking.status === "CANCELLED") {
+    if (booking.cancelReason === "SESSION_RESCHEDULED") return "MOVED";
+    return booking.cancelReason === "STAFF" ? "CANCELLED_BY_BRANCH" : "CANCELLED";
+  }
   if (booking.status === "REJECTED") return "REJECTED";
   // An open booking whose session started: a pending one expired; a
   // confirmed one simply happened (a no-show writes nothing).

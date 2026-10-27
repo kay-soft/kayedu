@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { optionalPhone } from "./phone-schema.ts";
-
 export const localeSchema = z.enum(["ar", "en"]);
 
 export const email = z
@@ -42,7 +40,6 @@ export const signUpSchema = z
     firstName: personName,
     lastName: personName,
     email,
-    phone: optionalPhone,
     password,
     confirmPassword: z.string().max(72, "tooLong"),
     locale: localeSchema,

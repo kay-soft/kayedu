@@ -24,6 +24,8 @@ import {
 import { resolveCenterRelations } from "../lib/auth/relations.ts";
 import {
   BOOKING_CAPS,
+  bookingDisplayStatus,
+  cancelBookingByStaff,
   cancelBookingByStudent,
   confirmBooking,
   rejectBooking,
@@ -33,8 +35,10 @@ import {
 import { generateFamilyCode, hashFamilyCode } from "../lib/db/parents.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import {
+  childBookedUpcoming,
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
+  studentBookedUpcoming,
   studentReservationStatusByClass,
 } from "../lib/db/student-portal.ts";
 import {
@@ -916,6 +920,213 @@ async function checkSessionBookings(
   check(
     "A cancelled booking can be booked again (the same row is reused)",
     rebook.ok && toCancel.ok && rebook.booking.id === toCancel.booking.id,
+  );
+
+  // ── T7 — bookings on the schedule, staff cancel, confirm after OFF ────────
+  console.log("\nT7 — bookings on the schedule, staff cancel, confirm after OFF");
+
+  // (a) The schedule shows confirmed and pending bookings, nothing else.
+  const t7Class = await bookingClass("APPROVAL", { capacity: 6 });
+  const t7Session = await session(t7Class.id, 6);
+  const t7Confirmed = await makeStudentUser("t7-confirmed");
+  const t7Pending = await makeStudentUser("t7-pending");
+  const t7Rejected = await makeStudentUser("t7-rejected");
+  const t7Withdrew = await makeStudentUser("t7-withdrew");
+  const t7Bookings = {
+    confirmed: await book(t7Session.id, t7Confirmed.id),
+    pending: await book(t7Session.id, t7Pending.id),
+    rejected: await book(t7Session.id, t7Rejected.id),
+    withdrew: await book(t7Session.id, t7Withdrew.id),
+  };
+  const t7Ids = Object.fromEntries(
+    Object.entries(t7Bookings).map(([key, result]) => [key, result.ok ? result.booking.id : ""]),
+  ) as Record<keyof typeof t7Bookings, string>;
+  await prisma.$transaction((tx) => confirmBooking(tx, centerA.id, t7Ids.confirmed, teacherA.id));
+  await prisma.$transaction((tx) => rejectBooking(tx, centerA.id, t7Ids.rejected, teacherA.id));
+  await cancelBookingByStudent(prisma, centerA.id, t7Ids.withdrew, t7Withdrew.id);
+
+  const scheduleOf = (userId: string, now?: Date) => studentBookedUpcoming(prisma, userId, now);
+  const confirmedRows = await scheduleOf(t7Confirmed.id);
+  check(
+    "A CONFIRMED booking is on the student schedule as Booked, with its branch",
+    confirmedRows.length === 1 &&
+      confirmedRows[0].bookingStatus === "CONFIRMED" &&
+      confirmedRows[0].session.id === t7Session.id &&
+      confirmedRows[0].centerId === centerA.id,
+  );
+  const pendingRows = await scheduleOf(t7Pending.id);
+  const pendingProfiles = await prisma.studentProfile.count({ where: { centerId: centerA.id, userId: t7Pending.id } });
+  check(
+    "A PENDING booking is on the schedule as Requested, even before any StudentProfile exists",
+    pendingRows.length === 1 && pendingRows[0].bookingStatus === "PENDING" && pendingProfiles === 0,
+  );
+  check(
+    "A rejected booking and a cancelled one are not on the schedule",
+    (await scheduleOf(t7Rejected.id)).length === 0 && (await scheduleOf(t7Withdrew.id)).length === 0,
+  );
+  check(
+    "A pending booking whose session has started is expired and drops off the schedule",
+    (await scheduleOf(t7Pending.id, new Date(Date.now() + 10 * DAY))).length === 0,
+  );
+  check(
+    "A schedule never carries another student booking",
+    confirmedRows.every((row) => row.session.id === t7Session.id) &&
+      (await scheduleOf((await makeStudentUser("t7-nobody")).id)).length === 0,
+  );
+  const t7Profile = await prisma.studentProfile.findFirstOrThrow({ where: { centerId: centerA.id, userId: t7Confirmed.id } });
+  const childRows = await childBookedUpcoming(prisma, centerA.id, t7Profile.id);
+  const childFromB = await childBookedUpcoming(prisma, centerB.id, t7Profile.id);
+  check(
+    "The parent portal reads the same bookings for that child at that branch, and nothing through another branch",
+    childRows.length === 1 && childRows[0].bookingStatus === "CONFIRMED" && childFromB.length === 0,
+  );
+
+  // (b) Staff cancel frees the seat and is audited (ids only, same transaction).
+  const t7Tiny = await bookingClass("INSTANT", { capacity: 1 });
+  const t7TinySession = await session(t7Tiny.id, 7);
+  const holder = await makeStudentUser("t7-holder");
+  const waiter = await makeStudentUser("t7-waiter");
+  const held = await book(t7TinySession.id, holder.id);
+  const fullNow = await book(t7TinySession.id, waiter.id);
+  check("Setup: the only seat is taken (sessionFull)", held.ok && !fullNow.ok && fullNow.error === "sessionFull");
+  const heldId = held.ok ? held.booking.id : "";
+
+  const rolledBack = await prisma
+    .$transaction(async (tx) => {
+      await cancelBookingByStaff(tx, centerA.id, heldId, teacherA.id);
+      throw new Error("force rollback");
+    })
+    .catch(() => "rolled back");
+  const afterRollback = await prisma.sessionBooking.findUniqueOrThrow({ where: { id: heldId } });
+  const rollbackAudit = await prisma.auditLog.count({
+    where: { centerId: centerA.id, action: "sessionBooking.cancel", entityId: heldId },
+  });
+  check(
+    "The cancel and its audit row are one transaction: a rolled-back cancel leaves the booking CONFIRMED and writes no row",
+    rolledBack === "rolled back" && afterRollback.status === "CONFIRMED" && rollbackAudit === 0,
+  );
+
+  const fromB = await prisma.$transaction((tx) => cancelBookingByStaff(tx, centerB.id, heldId, teacherA.id));
+  check("Another branch cannot cancel this branch booking (notFound)", !fromB.ok && fromB.error === "notFound");
+
+  const staffCancelled = await prisma.$transaction((tx) => cancelBookingByStaff(tx, centerA.id, heldId, teacherA.id));
+  check(
+    "Staff cancel: CANCELLED with reason STAFF",
+    staffCancelled.ok && staffCancelled.booking.status === "CANCELLED" && staffCancelled.booking.cancelReason === "STAFF",
+  );
+  const freed = await book(t7TinySession.id, waiter.id);
+  check("...and the seat is free at once: the waiting student now books it", freed.ok && freed.kind === "confirmed");
+  const cancelAudit = await prisma.auditLog.findMany({
+    where: { centerId: centerA.id, action: "sessionBooking.cancel", entityId: heldId },
+  });
+  const auditPayload = JSON.stringify(cancelAudit[0] ?? {});
+  check(
+    "...and exactly one sessionBooking.cancel audit row, attributed to the actor, with ids and statuses only",
+    cancelAudit.length === 1 &&
+      cancelAudit[0].actorUserId === teacherA.id &&
+      auditPayload.includes('"cancelReason":"STAFF"') &&
+      !/"(name|firstName|lastName|email|phone|reason|note)"/.test(auditPayload),
+    auditPayload,
+  );
+  const heldRow = await prisma.sessionBooking.findFirstOrThrow({
+    where: { id: heldId },
+    include: {
+      session: {
+        select: {
+          classGroupId: true,
+          status: true,
+          closedAt: true,
+          rescheduledToId: true,
+          date: true,
+          startTime: true,
+          timezone: true,
+        },
+      },
+    },
+  });
+  check(
+    "The student sees it as Cancelled by the branch (its own display status, not the student own cancel)",
+    bookingDisplayStatus(heldRow, new Date()) === "CANCELLED_BY_BRANCH" &&
+      bookingDisplayStatus({ ...heldRow, cancelReason: "STUDENT" }, new Date()) === "CANCELLED",
+  );
+  const cancelAgain = await prisma.$transaction((tx) => cancelBookingByStaff(tx, centerA.id, heldId, teacherA.id));
+  check("A cancelled booking cannot be cancelled again (notOpen)", !cancelAgain.ok && cancelAgain.error === "notOpen");
+  const pendingCancel = await prisma.$transaction((tx) => cancelBookingByStaff(tx, centerA.id, t7Ids.pending, teacherA.id));
+  check("A PENDING booking is rejected, not cancelled (notOpen)", !pendingCancel.ok && pendingCancel.error === "notOpen");
+  const closedSession = await session(t7Class.id, 8);
+  const closedBooking = await book(closedSession.id, (await makeStudentUser("t7-closed")).id);
+  if (closedBooking.ok) {
+    await prisma.$transaction((tx) => confirmBooking(tx, centerA.id, closedBooking.booking.id, teacherA.id));
+  }
+  await prisma.session.update({ where: { id: closedSession.id }, data: { closedAt: new Date() } });
+  const onClosed = closedBooking.ok
+    ? await prisma.$transaction((tx) => cancelBookingByStaff(tx, centerA.id, closedBooking.booking.id, teacherA.id))
+    : null;
+  check(
+    "A booking on a closed session cannot be cancelled (sessionClosed)",
+    onClosed?.ok === false && onClosed.error === "sessionClosed",
+  );
+
+  // A teacher cancels only bookings on their own classes.
+  const otherTeacher = await makeTeacher(centerA.id, "t7-other-teacher");
+  const pinnedClass = await bookingClass("INSTANT", { capacity: 4 });
+  const pinnedSession = await session(pinnedClass.id, 9);
+  const pinnedBooking = await book(pinnedSession.id, (await makeStudentUser("t7-pinned")).id);
+  const pinnedId = pinnedBooking.ok ? pinnedBooking.booking.id : "";
+  const byOther = await prisma.$transaction((tx) =>
+    cancelBookingByStaff(tx, centerA.id, pinnedId, otherTeacher.id, { teacherId: otherTeacher.id, via: "teacher" }),
+  );
+  const stillConfirmed = await prisma.sessionBooking.findUniqueOrThrow({ where: { id: pinnedId } });
+  check(
+    "A teacher cannot cancel a booking on another teacher class (notFound, nothing written)",
+    !byOther.ok &&
+      byOther.error === "notFound" &&
+      stillConfirmed.status === "CONFIRMED" &&
+      (await prisma.auditLog.count({ where: { centerId: centerA.id, action: "sessionBooking.cancel", entityId: pinnedId } })) === 0,
+  );
+  const byOwner = await prisma.$transaction((tx) =>
+    cancelBookingByStaff(tx, centerA.id, pinnedId, teacherA.id, { teacherId: teacherA.id, via: "teacher" }),
+  );
+  const ownerAudit = await prisma.auditLog.findFirst({
+    where: { centerId: centerA.id, action: "sessionBooking.cancel", entityId: pinnedId },
+  });
+  check(
+    "...while the class own teacher can, and the audit row records it was a teacher",
+    byOwner.ok &&
+      byOwner.booking.cancelReason === "STAFF" &&
+      JSON.stringify(ownerAudit?.after ?? {}).includes('"via":"teacher"'),
+  );
+
+  // (c) Confirm is refused once the class booking mode is OFF; confirmed ones stand.
+  const offLater = await bookingClass("APPROVAL", { capacity: 6 });
+  const offLaterSession = await session(offLater.id, 10);
+  const waitingUser = await makeStudentUser("t7-waiting");
+  const standingUser = await makeStudentUser("t7-standing");
+  const waitingBooking = await book(offLaterSession.id, waitingUser.id);
+  const standingBooking = await book(offLaterSession.id, standingUser.id);
+  if (standingBooking.ok) {
+    await prisma.$transaction((tx) => confirmBooking(tx, centerA.id, standingBooking.booking.id, teacherA.id));
+  }
+  await prisma.classGroup.update({ where: { id: offLater.id }, data: { sessionBookingMode: "OFF" } });
+  const waitingId = waitingBooking.ok ? waitingBooking.booking.id : "";
+  const refusedWhenOff = await prisma.$transaction((tx) => confirmBooking(tx, centerA.id, waitingId, teacherA.id));
+  const waitingAfter = await prisma.sessionBooking.findUniqueOrThrow({ where: { id: waitingId } });
+  check(
+    "Confirm after the class booking is switched OFF is refused (bookingOff); the booking stays PENDING, with no profile and no audit row",
+    !refusedWhenOff.ok &&
+      refusedWhenOff.error === "bookingOff" &&
+      waitingAfter.status === "PENDING" &&
+      (await prisma.studentProfile.count({ where: { centerId: centerA.id, userId: waitingUser.id } })) === 0 &&
+      (await prisma.auditLog.count({ where: { centerId: centerA.id, action: "sessionBooking.confirm", entityId: waitingId } })) === 0,
+  );
+  const rejectedWhenOff = await prisma.$transaction((tx) => rejectBooking(tx, centerA.id, waitingId, teacherA.id));
+  check("...a pending booking can still be rejected while the class is OFF", rejectedWhenOff.ok);
+  const standing = standingBooking.ok
+    ? await prisma.sessionBooking.findUniqueOrThrow({ where: { id: standingBooking.booking.id } })
+    : null;
+  check(
+    "...and a booking confirmed before the switch is unaffected (still CONFIRMED, still on the schedule)",
+    standing?.status === "CONFIRMED" && (await scheduleOf(standingUser.id)).length === 1,
   );
 
   await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });

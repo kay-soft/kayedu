@@ -60,6 +60,8 @@ export async function claimStudentCode(
 export function studentListSelect(centerId: string) {
   return {
     id: true,
+    // T7: the session page matches a profile to its booking (a booking names the global User).
+    userId: true,
     studentCode: true,
     active: true,
     firstName: true,

@@ -9,7 +9,7 @@ import { resolveChangeRequest, resolveSessionRequest } from "@/lib/db/approvals"
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { confirmReservation, rejectReservation } from "@/lib/db/reservations";
-import { confirmBooking, rejectBooking } from "@/lib/db/session-bookings";
+import { cancelBookingByStaff, confirmBooking, rejectBooking } from "@/lib/db/session-bookings";
 import { formatDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { describeConflicts } from "@/lib/db/slot-conflicts";
@@ -210,6 +210,33 @@ export async function declineBookingAction(
 
   revalidateApprovals(locale);
   return { status: "declined" };
+}
+
+/**
+ * Staff cancel of a CONFIRMED booking — the session page's "Booked — not
+ * arrived" list (T7). The same gate as confirming it (`approvals.manage`);
+ * `cancelBookingByStaff` frees the seat and writes the `sessionBooking.cancel`
+ * audit row in this one transaction. The session page and the approvals queue
+ * are both revalidated.
+ */
+export async function cancelBookingAction(
+  _state: ApprovalsActionState,
+  formData: FormData,
+): Promise<ApprovalsActionState> {
+  const ctx = await approvalsScope();
+  if (isPickBranch(ctx)) return ctx;
+  if (!ctx) return FORBIDDEN;
+
+  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+  const { locale, id } = parsed.data;
+
+  const result = await runInTransaction(prisma, (tx) => cancelBookingByStaff(tx, ctx.center.id, id, ctx.user.id));
+  if (!result.ok) return { error: result.error };
+
+  revalidateApprovals(locale);
+  revalidatePath(`/${locale}${ROUTES.centerSession(result.booking.sessionId)}`);
+  return { status: "cancelled" };
 }
 
 // ── ChangeRequest type NEW_SESSION (M10) ────────────────────────────────────

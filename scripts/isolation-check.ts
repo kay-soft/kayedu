@@ -26,7 +26,13 @@ import { grantMembershipBranch, loadPermissionGrants } from "../lib/db/permissio
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
 import { confirmGradePromotion, promotionPreview, undoGradePromotion } from "../lib/db/promotion.ts";
 import { addTeacherMembership } from "../lib/db/teacher-membership.ts";
-import { cancelBookingByStudent, confirmBooking, rejectBooking, requestBooking } from "../lib/db/session-bookings.ts";
+import {
+  cancelBookingByStaff,
+  cancelBookingByStudent,
+  confirmBooking,
+  rejectBooking,
+  requestBooking,
+} from "../lib/db/session-bookings.ts";
 import {
   MissingCenterScopeError,
   TenantScopeError,
@@ -226,6 +232,14 @@ async function checkSessionBookingIsolation(centerAId: string, centerBId: string
     !confirmFromB.ok && confirmFromB.error === "notFound" &&
       !rejectFromB.ok && rejectFromB.error === "notFound" &&
       !cancelFromB.ok && cancelFromB.error === "notFound",
+  );
+  // T7 — the staff cancel resolves the booking inside the caller's branch first.
+  const staffCancelFromB = await prisma.$transaction((tx) => cancelBookingByStaff(tx, centerBId, bookingId, actorBId));
+  check(
+    "Branch B cannot staff-cancel it either (notFound), and no cancel audit row exists",
+    !staffCancelFromB.ok &&
+      staffCancelFromB.error === "notFound" &&
+      (await prisma.auditLog.count({ where: { action: "sessionBooking.cancel", entityId: bookingId } })) === 0,
   );
   const bookFromB = await prisma.$transaction((tx) =>
     requestBooking(tx, { centerId: centerBId, sessionId: sessionA.id, studentUserId: student.id }),

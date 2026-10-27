@@ -113,24 +113,6 @@ export function RegisterForm({
       </Field>
 
       <Field
-        id="phone"
-        label={t("fields.phone")}
-        optional
-        error={state.fieldErrors?.phone ? tErrors(state.fieldErrors.phone) : undefined}
-      >
-        <Input
-          id="phone"
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          dir="ltr"
-          placeholder="01012345678"
-          aria-invalid={state.fieldErrors?.phone ? true : undefined}
-        />
-      </Field>
-
-      <Field
         id="password"
         label={t("fields.password")}
         hint={state.fieldErrors?.password ? undefined : t("register.passwordHint")}

@@ -27,7 +27,8 @@ export type ApprovalsActionState = SlotConflictState & {
   error?: string;
   /** F6 — a formatted date for `error` ("sessionFull": the first full session). */
   errorDate?: string;
-  status?: "approved" | "declined";
+  /** `cancelled` — a staff cancel of a confirmed booking (T7). */
+  status?: "approved" | "declined" | "cancelled";
 };
 
 export const IDLE_APPROVALS_STATE: ApprovalsActionState = {};

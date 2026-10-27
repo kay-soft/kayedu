@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireParentUser } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
-import { studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
+import { childBookedUpcoming, studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
 import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
 import { centerTimeZone } from "@/lib/db/session-lifecycle";
 import { dateKey, todayInTimezone } from "@/lib/scheduling";
@@ -37,6 +37,8 @@ type UpcomingRow = {
   gradeName: string | null;
   roomName: string | null;
   teacherName: string;
+  /** F6: set on a single-session booking — "Booked" (CONFIRMED) or "Requested" (PENDING). */
+  bookingStatus?: "PENDING" | "CONFIRMED";
 };
 
 type PastRow = {
@@ -52,8 +54,9 @@ type PastRow = {
 };
 
 /**
- * The one selected child's schedule — exactly the same two reads the student
- * schedule page uses (`lib/db/student-portal.ts`), against that child's own
+ * The one selected child's schedule — exactly the same reads the student
+ * schedule page uses (`lib/db/student-portal.ts`: enrolled sessions, booked or
+ * requested single sessions, past attendance), against that child's own
  * `centerId`/`studentProfileId`. This is what makes "never a superset of
  * what the child can see" true by construction: a parent never sees anything
  * this module doesn't already expose to the student themselves.
@@ -64,20 +67,25 @@ async function loadChildSchedule(
   today: Date,
   locale: string,
 ): Promise<{ upcoming: UpcomingRow[]; past: PastRow[] }> {
-  const [futureSessions, history] = await Promise.all([
+  const [futureSessions, history, booked] = await Promise.all([
     studentUpcomingSessions(prisma, centerId, studentProfileId, today),
     studentPastAttendance(prisma, centerId, studentProfileId, today),
+    childBookedUpcoming(prisma, centerId, studentProfileId),
   ]);
+  // An enrolled session wins: a child who enrolled after booking shows it once.
+  const enrolledIds = new Set(futureSessions.map((row) => row.id));
+  const bookedSessions = booked.filter((entry) => !enrolledIds.has(entry.session.id));
 
   const teacherIds = [
     ...new Set([
       ...futureSessions.map((row) => row.teacherId),
+      ...bookedSessions.map((entry) => entry.session.teacherId),
       ...history.map((row) => row.session.teacherId),
     ]),
   ];
   const names = await teacherDisplayNames(prisma, centerId, teacherIds);
 
-  const upcoming = futureSessions.map((row) => ({
+  const toUpcoming = (row: (typeof futureSessions)[number], bookingStatus?: "PENDING" | "CONFIRMED"): UpcomingRow => ({
     sessionId: row.id,
     date: row.date,
     startTime: row.startTime,
@@ -85,7 +93,12 @@ async function loadChildSchedule(
     ...sessionLabelParts(locale, row),
     roomName: row.room?.name ?? row.classGroup?.room?.name ?? null,
     teacherName: names.get(row.teacherId) ?? "—",
-  }));
+    bookingStatus,
+  });
+  const upcoming = [
+    ...futureSessions.map((row) => toUpcoming(row)),
+    ...bookedSessions.map((entry) => toUpcoming(entry.session, entry.bookingStatus)),
+  ].sort((a, b) => a.date.getTime() - b.date.getTime() || a.startTime.localeCompare(b.startTime));
 
   const past = history.map((row) => ({
     attendeeId: row.id,
@@ -255,7 +268,13 @@ export default async function ParentPage({
                       {row.roomName ? <span>{row.roomName}</span> : null}
                     </p>
                   </div>
-                  <Badge variant="info">{t("upcomingBadge")}</Badge>
+                  <Badge variant={row.bookingStatus === "PENDING" ? "warning" : "info"}>
+                    {row.bookingStatus === "CONFIRMED"
+                      ? t("bookedBadge")
+                      : row.bookingStatus === "PENDING"
+                        ? t("requestedBadge")
+                        : t("upcomingBadge")}
+                  </Badge>
                 </div>
                 )}
               />

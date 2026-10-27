@@ -105,7 +105,8 @@ enum SessionBookingStatus {
 
 // Why a booking was cancelled (F6). STUDENT: they withdrew it. The session
 // was cancelled, or rescheduled (the student books the replacement again).
-// STAFF: reserved for a staff-side cancel; nothing writes it yet.
+// STAFF: a staff-side cancel from the session page's "Booked — not arrived"
+// list (T7, `cancelBookingByStaff`).
 enum SessionBookingCancelReason {
   STUDENT
   SESSION_CANCELLED
