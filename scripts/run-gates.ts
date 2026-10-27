@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 
 import { PrismaClient } from "@prisma/client";
 
+import { assertSafeToWrite } from "./lib/env.ts";
 import { describeUserLeak, recordUserBaseline, verifyUserBaseline } from "./lib/gate-users.ts";
 
 const TIMEOUT_MS = Number(process.env.GATE_TIMEOUT_MIN ?? 20) * 60_000;
@@ -44,6 +45,7 @@ function runGate(name: string): Promise<{ code: number; ms: number; timedOut: bo
 }
 
 async function main() {
+  assertSafeToWrite("npm run check:all");
   const gates = gatesFromCi();
   const prisma = new PrismaClient();
   const baseline = await recordUserBaseline(prisma);

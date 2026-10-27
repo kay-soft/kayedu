@@ -104,6 +104,7 @@ import { mapWithConcurrency } from "../lib/concurrency.ts";
 import { resolveCardLayout } from "../lib/id-card.ts";
 import { likeSearchToken } from "../lib/like.ts";
 import { studentSearchWhere } from "../lib/db/students.ts";
+import { writeRefusal } from "./lib/env.ts";
 import { boundSearchArgs, parseActionArgs, SEARCH_QUERY_MAX, searchArgs } from "../lib/validation/action-args.ts";
 
 const prisma = await gatePrisma();
@@ -1227,6 +1228,23 @@ async function main() {
     ["an ordinary dev environment is not", productionTargetReason({}) === null],
     ["the seed, the wipe and the preflight all ask", /productionTargetReason\(\)/.test(read("prisma/seed.ts")) && /productionTargetReason\(\)/.test(read("scripts/wipe-dev-data.ts")) && /productionTargetReason\(\)/.test(read("prisma/seed-data/auth.ts"))],
   ]);
+
+  await assertSec("S1", "gates and e2e write only to staging or a local database, never the dev project", () => {
+    const pool = (ref: string) => `postgresql://postgres.${ref}:pw@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`;
+    const dev = { DATABASE_URL: pool("devref"), DIRECT_URL: pool("devref") };
+    const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string>; prisma: { seed: string } };
+    return [
+      ["dev's own environment is refused", writeRefusal({ ...dev }, dev) !== null],
+      ["a staging run on another project is allowed (same-region pooler host)", writeRefusal({ KAYEDU_ENV: "staging", DATABASE_URL: pool("stgref"), DIRECT_URL: pool("stgref") }, dev) === null],
+      ["a staging run pointed at dev is refused", writeRefusal({ KAYEDU_ENV: "staging", DATABASE_URL: pool("devref"), DIRECT_URL: pool("stgref") }, dev) !== null],
+      ["a local database is allowed", writeRefusal({ DATABASE_URL: "postgresql://u:p@localhost:5433/t" }, dev) === null],
+      ["the production marker is refused even on localhost", writeRefusal({ KAYEDU_ENV: "production", DATABASE_URL: "postgresql://u:p@localhost:5433/t" }, dev) !== null],
+      ["the gate client, check:all, gates:users and e2e all ask the guard", /assertSafeToWrite\(/.test(read("scripts/lib/gate-db.ts")) && /assertSafeToWrite\(/.test(read("scripts/run-gates.ts")) && /assertSafeToWrite\(/.test(read("scripts/gate-users.ts")) && /assertSafeToWrite\(/.test(read("playwright.config.ts"))],
+      ["no package script loads .env on its own (one loader)", !Object.values(pkg.scripts).some((script) => /--env-file/.test(script)) && !/--env-file/.test(pkg.prisma.seed)],
+      ["db:deploy:staging is migrate deploy through the staging loader", /with-env\.ts --staging --exec prisma migrate deploy$/.test(pkg.scripts["db:deploy:staging"] ?? "")],
+      [".env.staging is git-ignored and its example is committed", /^\.env\.\*$/m.test(read(".gitignore")) && /^!\.env\.staging\.example$/m.test(read(".gitignore")) && existsSync(join(ROOT, ".env.staging.example"))],
+    ];
+  });
 
   // Not a finding of its own: the production guard must never fire off-production.
   await enforceProductionAuthSettings({ REQUIRE_EMAIL_CONFIRMATION: "false" });

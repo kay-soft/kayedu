@@ -29,12 +29,18 @@
  *    always carries a relation or a login, so a concurrent real user is never
  *    swept. This closes the "no email, no phone, never deleted" leak.
  *
+ * 4. **The write fence (S1).** Before it connects, `gatePrisma` refuses unless
+ *    the run is `KAYEDU_ENV=staging` or on a local database, and never against
+ *    the dev project of `.env` (`scripts/lib/env.ts`, `docs/staging.md`).
+ *
  * Shared dev database rules still hold (CLAUDE.md rule 7): nothing here
  * resets, truncates or touches a row the run did not create.
  */
 import { basename } from "node:path";
 
 import { Prisma, PrismaClient } from "@prisma/client";
+
+import { assertSafeToWrite } from "./env.ts";
 
 /** A gate transaction never waits longer than this for a lock. */
 export const GATE_LOCK_TIMEOUT = "15s";
@@ -57,6 +63,8 @@ type GateOptions = {
   /** Sweep this run's orphaned users on `$disconnect` (default true). A second client in the same gate (a race's "other desk") passes false. */
   sweepUsers?: boolean;
   log?: Prisma.PrismaClientOptions["log"];
+  /** A gate that only reads catalogs (check:rls) may run against any database; every other gate is refused off staging/local (S1). */
+  readOnly?: boolean;
 };
 
 /**
@@ -135,6 +143,7 @@ function recordCreatedUsers(operation: string, args: unknown, result: unknown, i
 }
 
 export async function gatePrisma(options: GateOptions = {}): Promise<PrismaClient> {
+  if (!options.readOnly) assertSafeToWrite(`npm run check:${gateName.replace(/-check$/, "")}`);
   const base = new PrismaClient(options.log ? { log: options.log } : undefined);
   const [{ now: startedAt }] = await base.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
 

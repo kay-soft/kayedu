@@ -7,6 +7,7 @@
 - **The dev database holds seeded demo data** (~23 `@example.com` accounts sharing one password — `docs/dev-accounts.md`). Pointing a deployment at it puts those logins on the public internet.
 - **Sign-up is open** (`/register`). Anyone who finds the URL can create an account. Rate limits exist (Postgres-backed, SEC-67) but there is **no CAPTCHA yet** (M20).
 - Supabase *Confirm email* is **off** on dev. A **production** Vercel deployment refuses to start in that state unless you set the demo override (below). A **preview** deployment does not run the guard at all.
+- Staging for the database gates and the e2e suite (a separate project from this deployment's, though it may be the same one) is set up in `docs/staging.md` (S1): `.env.staging`, `KAYEDU_ENV=staging`, `npm run db:deploy:staging`.
 - So a demo deploy is: a throw-away/staging Supabase project, seeded, shared only with people you trust. **Never** point a deployment at the shared dev project for real users, and never at a database holding real data without finishing M20.
 
 ## 1. Environment variables
@@ -26,7 +27,7 @@ Set them in Vercel → Project → Settings → Environment Variables, per envir
 | `REQUIRE_EMAIL_CONFIRMATION` | **`true` in production** | server | A literal `true`. Needs Supabase *Confirm email* on **and** working SMTP. |
 | `ALLOW_AUTO_CONFIRM_DEMO` | No — **demo only** | server | `yes` only for a demo deployment with *Confirm email* off. See §4. Ignored if `REQUIRE_EMAIL_CONFIRMATION=true`. |
 | `ALLOW_UNVERIFIED_EMAIL_CHANGE` | No — **demo only** | server | `yes` lets Account settings change a person's email without a confirmation link, until SMTP exists. Off → the email field is read-only. See §4. Ignored if `REQUIRE_EMAIL_CONFIRMATION=true` — and production **refuses to start** with both set. |
-| `KAYEDU_ENV` | Only off-Vercel | server | `production` marks a non-Vercel production host. Vercel sets `VERCEL_ENV` itself — don't set either by hand on Vercel. |
+| `KAYEDU_ENV` | Only off-Vercel | server | `production` marks a non-Vercel production host. Vercel sets `VERCEL_ENV` itself — don't set either by hand on Vercel. The value `staging` (S1) is for your **machine and CI**, not a deployment: it points the scripts and e2e at `.env.staging` and lets the write-guard allow them (`docs/staging.md`). It is not "production" to the start-up guard. |
 
 `NODE_ENV` and `NEXT_RUNTIME` are set by Next/Vercel.
 
@@ -52,6 +53,7 @@ Set them in Vercel → Project → Settings → Environment Variables, per envir
   ```
   (`DIRECT_URL` in your local env pointing at the target.) Never `migrate reset`, `db push --force-reset` or a shadow-database diff against a real URL (CLAUDE.md rule 7). After the first `migrate deploy` on a new project, run `npm run check:rls` against it before any data goes in.
 - **First-time data:** a new project is empty. Loading the demo seed is a separate, deliberate local step (`npm run db:seed` with the project's own `DEV_PROJECT_REF`); it is not part of the deployment.
+- **Staging project:** migrations go in with `npm run db:deploy:staging` (reads `.env.staging`); the whole sequence — migrate, seed, verify, `check:all`, e2e, reset — is `docs/staging.md`.
 
 ## 3. Supabase Auth settings
 
