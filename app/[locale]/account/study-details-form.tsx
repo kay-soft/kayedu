@@ -2,15 +2,13 @@
 
 import { useLocale, useTranslations } from "next-intl";
 
-import {
-  IDLE_STUDY_STATE,
-  saveStudyDetailsAction,
-} from "@/app/[locale]/account/study-actions";
+import { saveStudyDetailsAction } from "@/app/[locale]/account/study-actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { GradePicker } from "@/components/student/grade-picker";
 import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 import type { GradePickerData } from "@/lib/student-grade-options";
+import { IDLE_STUDY_STATE } from "@/lib/validation/account";
 
 /**
  * Account → Study details (F4, docs/04 §11.23): the student's own grade. It is

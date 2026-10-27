@@ -1,13 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import type { TestOptions } from "./e2e/support/fixtures";
+import { assertSafeToWrite, loadEnv } from "./scripts/lib/env";
 
 /**
  * The end-to-end smoke suite (SYS, docs/02 §15, docs/08). `npm run e2e`
- * runs it headless against the LOCAL dev server and the seeded dev database
+ * runs it headless against the LOCAL dev server and a seeded database
  * (`npm run db:seed`), signing in as the seed accounts of
  * `docs/dev-accounts.md` with `SEED_PASSWORD` / `SEED_ADMIN_PASSWORD` from
- * `.env`. Not in CI yet: it needs a seeded staging database (M20).
+ * `.env` — or, with `KAYEDU_ENV=staging`, from `.env.staging` against the staging
+ * project, which is the only place it may run (docs/staging.md). Not in CI yet (M20).
  *
  * Four projects = the two locales × the two widths the design system
  * guarantees (docs/04 §6: 1280 desktop, 375 the floor). Every spec's
@@ -16,11 +18,11 @@ import type { TestOptions } from "./e2e/support/fixtures";
  * widths, without writing the same data four times. Writes use their own
  * uniquely named data and clean up what they can; nothing is ever wiped.
  */
-try {
-  process.loadEnvFile(".env");
-} catch {
-  // No .env — the run fails fast in e2e/auth.setup.ts with a clear message.
-}
+// The same loader as every script (KAYEDU_ENV=staging reads .env.staging), then the
+// write fence: the suite signs in and writes, so it only runs against staging or a
+// local database, never the dev project (S1, docs/staging.md).
+loadEnv();
+assertSafeToWrite("npm run e2e");
 
 const PORT = Number(process.env.E2E_PORT ?? 3000);
 const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;

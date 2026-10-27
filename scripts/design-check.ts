@@ -52,12 +52,20 @@
  *      Dashboard redirects to Analytics); the T1 `RollupNotice` is gone; and
  *      the guard itself is asserted by running it (`lib/auth/branch-scope.ts`).
  *
+ * 14. (E1) A `"use server"` file exports only async functions (and types). Next
+ *      turns each export into a server-action reference and throws on any
+ *      other value — a constant, an object, an initial form state — and the
+ *      failing page then shows "This screen didn't load". Such values live in
+ *      a normal module (`lib/validation/*`, `action-state.ts`).
+ *
  * Pure static analysis — no database needed. (The "no change under prisma/,
  * lib/db/, lib/money.ts, lib/auth/" constraint is reported with
  * `git diff --stat` in the R10a summary rather than gated here.)
  */
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
+
+import ts from "typescript";
 
 import { PICK_BRANCH, isPickBranch, requireBranchScope } from "../lib/auth/branch-scope.ts";
 import { centerInitial, nameInitial, personInitials } from "../lib/initials.ts";
@@ -948,6 +956,108 @@ function checkBranchScopeGuard() {
   );
 }
 
+// ── 14. A "use server" file exports only async functions ───────────────────
+
+/**
+ * What a `"use server"` module exports that is not an async function (types
+ * and interfaces are erased and are fine). Parsed with the TypeScript compiler
+ * so `export { x }`, `export *`, `export default`, enums and classes are seen
+ * as well as `export const`. Returns one description per offending export, or
+ * `null` when the file is not a `"use server"` module.
+ */
+export function nonFunctionServerExports(source: string): string[] | null {
+  const file = ts.createSourceFile("action.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const first = file.statements[0];
+  const isServerFile =
+    first !== undefined &&
+    ts.isExpressionStatement(first) &&
+    ts.isStringLiteral(first.expression) &&
+    first.expression.text === "use server";
+  if (!isServerFile) return null;
+
+  const offenders: string[] = [];
+  const exported = (node: ts.Node) =>
+    ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+  const isAsync = (node: ts.Node) =>
+    ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+
+  for (const node of file.statements) {
+    if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) continue;
+    if (ts.isFunctionDeclaration(node)) {
+      if (exported(node) && !isAsync(node)) offenders.push(`function ${node.name?.text ?? "default"} is not async`);
+    } else if (ts.isVariableStatement(node)) {
+      if (!exported(node)) continue;
+      for (const decl of node.declarationList.declarations) {
+        const init = decl.initializer;
+        const asyncFn =
+          init !== undefined && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && isAsync(init);
+        if (!asyncFn) offenders.push(`const ${decl.name.getText(file)}`);
+      }
+    } else if (ts.isClassDeclaration(node) || ts.isEnumDeclaration(node)) {
+      if (exported(node)) offenders.push(`${ts.isClassDeclaration(node) ? "class" : "enum"} ${node.name?.text ?? "default"}`);
+    } else if (ts.isExportAssignment(node)) {
+      offenders.push("export default <expression>");
+    } else if (ts.isExportDeclaration(node)) {
+      if (node.isTypeOnly) continue;
+      if (!node.exportClause) offenders.push("export * from");
+      else if (ts.isNamedExports(node.exportClause)) {
+        for (const spec of node.exportClause.elements) {
+          if (!spec.isTypeOnly) offenders.push(`export { ${spec.name.text} }`);
+        }
+      } else offenders.push("export * as");
+    }
+  }
+  return offenders;
+}
+
+function checkUseServerExports() {
+  const files = [...walk(join(ROOT, "app")), ...walk(join(ROOT, "components")), ...walk(join(ROOT, "lib"))]
+    .filter((file) => /\.(tsx|ts)$/.test(file))
+    .map((file) => norm(relative(ROOT, file)));
+  const offenders: string[] = [];
+  let serverFiles = 0;
+  for (const file of files) {
+    const source = readFileSync(join(ROOT, file), "utf8");
+    if (!/["']use server["']/.test(source)) continue;
+    const found = nonFunctionServerExports(source);
+    if (found === null) continue;
+    serverFiles += 1;
+    for (const item of found) offenders.push(`${file}: ${item}`);
+  }
+  check(
+    `Every "use server" file exports only async functions and types (${serverFiles} files)`,
+    serverFiles > 0 && offenders.length === 0,
+    offenders.join("; "),
+  );
+  // The detector is asserted by running it, so it cannot go quiet.
+  const bad = [
+    'export const IDLE = {};',
+    'export function plain() { return 1; }',
+    'export class Box {}',
+    'export enum Kind { A }',
+    'const x = 1; export { x };',
+    'export * from "./other";',
+    'export default {};',
+  ];
+  const serverModule = (...lines: string[]) => ['"use server";', ...lines, ""].join("\n");
+  const missed = bad.filter((body) => (nonFunctionServerExports(serverModule(body)) ?? []).length === 0);
+  const fine = nonFunctionServerExports(
+    serverModule(
+      "export type S = {}; export interface I {}",
+      "export async function a() {}",
+      "export const b = async () => {};",
+      "export type { S as T };",
+      "const k = 1; void k;",
+    ),
+  );
+  const clientFile = nonFunctionServerExports(['"use client";', "export const IDLE = {};", ""].join("\n"));
+  check(
+    'The "use server" export check flags constants/classes/enums/re-exports and passes async functions and types',
+    missed.length === 0 && fine?.length === 0 && clientFile === null,
+    `missed: ${missed.join(" | ")}; false positives: ${(fine ?? []).join(", ")}`,
+  );
+}
+
 checkLocaleToggle();
 checkNav();
 checkNativeSelect();
@@ -969,6 +1079,8 @@ console.log("\nSoft URL state (T4)");
 checkSoftUrlState();
 console.log("\nWhole Management is analytics-only (T6)");
 checkBranchScopeGuard();
+console.log("\nServer actions export only functions (E1)");
+checkUseServerExports();
 
 if (failures > 0) {
   console.error(`\n${failures} design check(s) failed.`);

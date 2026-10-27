@@ -5,8 +5,10 @@
  */
 import { PrismaClient } from "@prisma/client";
 
+import { assertSafeToWrite } from "./lib/env.ts";
 import { describeUserLeak, recordUserBaseline, verifyUserBaseline, BASELINE_FILE } from "./lib/gate-users.ts";
 
+assertSafeToWrite("npm run gates:users");
 const prisma = new PrismaClient();
 const mode = process.argv[2];
 

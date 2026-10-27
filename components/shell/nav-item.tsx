@@ -27,7 +27,8 @@ const BADGE_CAP = 9;
  * `item.pendingCount` (F7) draws the amber count badge — at the end of the
  * row, or on the icon's corner on the rail. The badge is decoration: the
  * link's accessible name carries the full, uncapped count ("Approvals, 12
- * pending").
+ * pending"). Each badge carries `data-nav-badge`, the stable hook the e2e
+ * navigation spec strips from a link's text and reads on its own.
  */
 export function NavItem({
   item,
@@ -76,6 +77,7 @@ export function NavItem({
         {pending && collapsed ? (
           <span
             aria-hidden
+            data-nav-badge
             dir="ltr"
             className="absolute -top-2 -end-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning-bg px-1 text-xs leading-none font-semibold text-warning-fg tabular-nums"
           >
@@ -87,6 +89,7 @@ export function NavItem({
       {pending && !collapsed ? (
         <span
           aria-hidden
+          data-nav-badge
           dir="ltr"
           className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-warning-bg px-1.5 text-xs leading-none font-semibold text-warning-fg tabular-nums"
         >

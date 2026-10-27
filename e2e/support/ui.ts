@@ -25,6 +25,23 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * The first record's detail link on a list page: `${list}/<uuid>`. A list header can carry verbs
+ * under the same prefix (Students → `/students/promote`), so `a[href*="/students/"]` is not a
+ * detail link — this matches a record's id only.
+ */
+export async function firstDetailLink(page: Page, list: string): Promise<Locator> {
+  const detailHref = new RegExp(`${list}/[0-9a-f-]{36}(\\?.*)?$`);
+  // Retried: the list may still be rendering when this is called.
+  let href = "";
+  await expect(async () => {
+    const hrefs = await page.locator("main a[href]").evaluateAll((anchors) => anchors.map((a) => a.getAttribute("href") ?? ""));
+    href = hrefs.find((candidate) => detailHref.test(candidate)) ?? "";
+    expect(href, `${list} lists at least one record with a detail link`).not.toBe("");
+  }).toPass();
+  return page.locator(`main a[href="${href}"]`).first();
+}
+
 /** Chooses `option` in the shared Select / Combobox labelled `label` (both open a listbox). */
 export async function choose(scope: Page | Locator, label: string | RegExp, option: string | RegExp) {
   const page = "page" in scope ? scope.page() : scope;

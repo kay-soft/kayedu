@@ -606,6 +606,19 @@ export function todayInTimezone(timeZone: string, now: Date = new Date()): Date 
 }
 
 /**
+ * The earliest calendar day that is still "today" somewhere (UTC−12). A read
+ * spanning sessions frozen in different timezones (D-14) — one account's
+ * bookings across branches, a class's booked sessions inside the enrolment
+ * transaction — cannot compare each row with its own zone in SQL, so it bounds
+ * by this day and then judges every row exactly in that row's zone
+ * (`hasSessionStarted`, `todayInTimezone(session.timezone)`). A SQL floor
+ * only — never a "today" to show or to filter a centre's own lists by.
+ */
+export function earliestTodayAnywhere(now: Date = new Date()): Date {
+  return todayInTimezone("Etc/GMT+12", now);
+}
+
+/**
  * The instant a session's day begins at the centre — local midnight of its
  * date. The mirror of `endOfSessionDay`; what "N hours into the session day"
  * (the teacher edit deadline) is measured from.

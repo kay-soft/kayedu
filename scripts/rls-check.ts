@@ -21,7 +21,7 @@
 import { gatePrisma } from "./lib/gate-db.ts";
 import { auditRls, rlsProblems } from "./lib/rls-audit.ts";
 
-const prisma = await gatePrisma();
+const prisma = await gatePrisma({ readOnly: true });
 
 async function main(): Promise<number> {
   const result = await auditRls(prisma);

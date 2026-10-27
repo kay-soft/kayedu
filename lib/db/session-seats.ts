@@ -1,8 +1,8 @@
-import type { AttendanceStatus, EnrollmentStatus, Prisma, PrismaClient, SessionBookingStatus } from "@prisma/client";
+import { Prisma, type AttendanceStatus, type EnrollmentStatus, type PrismaClient, type SessionBookingStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:enrollment` and
 // `check:student-portal` exercise this module directly, outside Next.
 import { enrolmentOverflowsSession, type SessionSeatUsage } from "../capacity.ts";
-import { DEFAULT_TIMEZONE, addDays, hasSessionStarted, startOfUtcDay } from "../scheduling.ts";
+import { DEFAULT_TIMEZONE, earliestTodayAnywhere, hasSessionStarted } from "../scheduling.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -67,6 +67,23 @@ export async function lockSessionRow(
   return locked.length > 0;
 }
 
+/**
+ * `lockSessionRow` for several sessions in one statement (`FOR UPDATE`,
+ * centre-scoped, in id order) — the enrolment's future-session check (F6),
+ * whose statement count must not grow with the class's term.
+ */
+export async function lockSessionRows(
+  tx: Prisma.TransactionClient,
+  centerId: string,
+  sessionIds: string[],
+): Promise<void> {
+  if (sessionIds.length === 0) return;
+  await tx.$queryRaw`
+    SELECT "id" FROM "Session"
+    WHERE "id" IN (${Prisma.join(sessionIds)}) AND "centerId" = ${centerId}
+    ORDER BY "id" FOR UPDATE`;
+}
+
 /** Walk-ins: drop-ins checked in Present/Late with no booking behind them. */
 function walkInWhere(centerId: string, sessionIds: string[]): Prisma.SessionAttendeeWhereInput {
   return scopedWhere(centerId, {
@@ -129,9 +146,13 @@ export async function sessionsSeatUsage(
  * active enrolments and **that session's** CONFIRMED bookings — or null.
  * The enrolling student's own bookings are not counted against them (their
  * seat is already one of those). Only sessions holding a confirmed booking can
- * overflow beyond the class's own cap, so only those are read. Each one found
- * is re-read under its row lock before it refuses, so a booking racing the
- * enrolment is seen.
+ * overflow beyond the class's own cap, so only those are read.
+ *
+ * Set-based (G1): one read of the candidate sessions, one statement locking
+ * them all, one grouped count of their bookings after the locks — three
+ * statements however long the term, where it used to be two per booked
+ * session. The caller already holds the class row lock (`claimClassSeat`), so
+ * the order stays class → sessions, the order every booking takes them.
  */
 export async function firstOverflowingSession(
   tx: Prisma.TransactionClient,
@@ -152,8 +173,8 @@ export async function firstOverflowingSession(
     where: scopedWhere(centerId, {
       ...BOOKABLE_SESSION,
       classGroupId,
-      // A day of slack either side of UTC; the clock rule below is exact.
-      date: { gte: addDays(startOfUtcDay(now), -1) },
+      // A SQL floor safe in any frozen zone; "not started" below is exact, per session.
+      date: { gte: earliestTodayAnywhere(now) },
       bookings: { some: { status: CONFIRMED } },
     }),
     select: {
@@ -168,16 +189,18 @@ export async function firstOverflowingSession(
     },
     orderBy: [{ date: "asc" }, { startTime: "asc" }],
   });
+  const upcoming = sessions.filter((session) => isBookableNow(session, now));
+  if (upcoming.length === 0) return null;
 
-  for (const session of sessions) {
-    if (!isBookableNow(session, now)) continue;
-    await lockSessionRow(tx, centerId, session.id);
-    const others = await tx.sessionBooking.count({
-      where: scopedWhere(centerId, { sessionId: session.id, status: CONFIRMED, studentId: { not: studentUserId } }),
-    });
-    if (enrolmentOverflowsSession(activeEnrollments, others, cap)) {
-      return { sessionId: session.id, date: session.date };
-    }
-  }
-  return null;
+  const ids = upcoming.map((session) => session.id);
+  await lockSessionRows(tx, centerId, ids);
+  const others = await tx.sessionBooking.groupBy({
+    by: ["sessionId"],
+    where: scopedWhere(centerId, { sessionId: { in: ids }, status: CONFIRMED, studentId: { not: studentUserId } }),
+    _count: { _all: true },
+  });
+  const othersBy = new Map(others.map((row) => [row.sessionId, row._count._all]));
+  // Date order, so the refusal names the first full day.
+  const full = upcoming.find((session) => enrolmentOverflowsSession(activeEnrollments, othersBy.get(session.id) ?? 0, cap));
+  return full ? { sessionId: full.id, date: full.date } : null;
 }

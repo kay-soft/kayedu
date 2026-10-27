@@ -14,6 +14,9 @@ on:
   pull_request:
 
 env:
+  # S1: the gates and e2e refuse to write unless this is a staging run; CI's
+  # DATABASE_URL/DIRECT_URL secrets are a dedicated staging project (scripts/lib/env.ts).
+  KAYEDU_ENV: staging
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
   DIRECT_URL: ${{ secrets.DIRECT_URL }}
 

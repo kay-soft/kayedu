@@ -83,8 +83,26 @@ for (const role of ROLES) {
 
     const nav = await primaryNav(page, appLocale);
     const links = nav.getByRole("link");
-    const names = (await links.allInnerTexts()).map((text) => text.trim()).filter(Boolean);
+    // A pending-count badge (F7) is decoration inside the link: read the label with the
+    // badge element removed (`data-nav-badge`), and the badge on its own.
+    const items = await links.evaluateAll((anchors) =>
+      anchors.map((a) => {
+        const copy = a.cloneNode(true) as HTMLElement;
+        const badges = [...copy.querySelectorAll("[data-nav-badge]")].map((b) => (b.textContent ?? "").trim());
+        copy.querySelectorAll("[data-nav-badge]").forEach((b) => b.remove());
+        return { name: (copy.textContent ?? "").trim(), badges };
+      }),
+    );
+    const names = items.map((item) => item.name).filter(Boolean);
     expect(names, "the sidebar lists exactly the role's items").toEqual(role.nav.map((key) => t(appLocale, `Nav.${key}`)));
+    // A badge, when present, is a number (Arabic-Indic digits in Arabic) or the capped "9+".
+    const digits = appLocale === "ar" ? "[٠-٩]+" : "[0-9]+";
+    const capped = t(appLocale, "Shell.pendingCapped", { max: appLocale === "ar" ? "٩" : "9" });
+    for (const badge of items.flatMap((item) => item.badges)) {
+      expect(badge, "a nav badge is a count or the capped count").toMatch(
+        new RegExp(`^(${digits}|${capped.replace(/[+]/g, "\\+")})$`),
+      );
+    }
     const hrefs = await links.evaluateAll((anchors) => anchors.map((a) => a.getAttribute("href") ?? ""));
 
     for (const href of hrefs) {

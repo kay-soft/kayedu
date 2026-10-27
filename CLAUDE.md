@@ -31,7 +31,7 @@ If the docs are silent on something that touches **money, permissions, or tenant
 
 **7. Never reset a database.** Never run `prisma migrate reset`, `prisma migrate diff` with a `--shadow-database-url`, `prisma db push --force-reset`, or any other command that can drop or reset a schema, against **any** URL taken from `.env` (that is the shared dev Supabase database — a shadow-DB diff against it wiped it once, in R4). Schema comparison uses a throwaway local shadow database, or none: a read-only `prisma migrate diff --from-url <.env URL> --to-schema-datamodel prisma/schema.prisma --script` is fine, and so is `prisma migrate deploy` (it only applies pending migrations). Anything destructive needs the user's explicit approval first.
 
-**8. Run only the gates the change needs.** After a change, run the gates relevant to the touched area, plus `npx tsc --noEmit` and `npx eslint .`. Run the full `npm run check:all` and `npm run e2e` **only when the user asks, or before a deployment — and then only against a staging database**. Never run `e2e`, or any gate that writes data (most `check:*` gates create and clean up rows), against the shared dev project as routine verification.
+**8. Run only the gates the change needs.** After a change, run the gates relevant to the touched area, plus `npx tsc --noEmit` and `npx eslint .`. Run the full `npm run check:all` and `npm run e2e` **only when the user asks, or before a deployment — and then only against a staging database**. Never run `e2e`, or any gate that writes data (most `check:*` gates create and clean up rows), against the shared dev project as routine verification. Since S1 this is enforced in code: a database-writing gate, `check:all`, `gates:users` and `e2e` refuse to run unless `KAYEDU_ENV=staging` or the database is on localhost, and refuse the dev project of `.env` (no override flag). Staging's runbook is `docs/staging.md`; `db:seed`, `db:wipe-dev` and `seed:verify` keep their own fences.
 
 ---
 
@@ -80,6 +80,7 @@ If the docs are silent on something that touches **money, permissions, or tenant
 - Server Components + Server Actions by default; client components only where interactivity demands
 - Data access lives in `lib/db/` behind tenant-scoped functions — components never call Prisma directly
 - `zod` validation on every Server Action input
+- **A `"use server"` file exports only async functions (and types).** Next throws at runtime — dev and production — on any other export (a constant, an initial form state, a class), and the page that imports it shows "This screen didn't load". Keep initial states and shared values in a normal module (`lib/validation/*`, `action-state.ts`); `check:design` fails on a violation
 - Every action: `getTenantContext()` → permission check → validate → scoped write → audit if sensitive → `revalidatePath`
 - One product, configured. Never fork behavior per center — differences are settings + theming
 

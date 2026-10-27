@@ -5,10 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { inviteParentAction } from "@/app/[locale]/account/family-actions";
 import { WhatsAppShare } from "@/app/[locale]/account/family-controls";
-import {
-  IDLE_STUDY_STATE,
-  saveStudyDetailsAction,
-} from "@/app/[locale]/account/study-actions";
+import { saveStudyDetailsAction } from "@/app/[locale]/account/study-actions";
 import { FamilyCodeReveal } from "@/components/family/family-code-reveal";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
@@ -21,6 +18,7 @@ import { useRouter } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import type { GradePickerData } from "@/lib/student-grade-options";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
+import { IDLE_STUDY_STATE } from "@/lib/validation/account";
 import { IDLE_FAMILY_STATE } from "@/lib/validation/parents";
 
 /**

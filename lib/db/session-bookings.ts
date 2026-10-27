@@ -10,7 +10,7 @@ import type {
 // `check:approvals` and `check:enrollment` exercise this module directly,
 // outside the Next.js runtime (same reasoning as lib/db/reservations.ts).
 import { bookingSeatError, bookingSeatStatus, enrollmentCap, type SeatStatus } from "../capacity.ts";
-import { addDays, startOfUtcDay } from "../scheduling.ts";
+import { centreTimeZone, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 import { ensureStudentProfile, isBlockedFromClass, lockClassRow, lockSelfService } from "./reservations.ts";
@@ -98,6 +98,8 @@ const SESSION_FOR_BOOKING = {
 } satisfies Prisma.SessionSelect;
 
 type SessionForBooking = Prisma.SessionGetPayload<{ select: typeof SESSION_FOR_BOOKING }>;
+/** A booking's class — present on every bookable session; a one-time session has none and is never bookable. */
+type ClassForBooking = NonNullable<SessionForBooking["classGroup"]>;
 
 function loadSession(db: Db, centerId: string, sessionId: string, accessibleOnly: boolean) {
   return db.session.findFirst({
@@ -148,7 +150,9 @@ export async function openBookingCount(db: Db, studentUserId: string, now: Date)
       studentId: studentUserId,
       status: { in: OPEN_STATUSES },
       sessionAttendeeId: null,
-      session: { ...BOOKABLE_SESSION, date: { gte: addDays(startOfUtcDay(now), -1) } },
+      // Across every branch, so no one centre's day: a floor safe in any
+      // frozen zone, then each row is judged exactly in its own.
+      session: { ...BOOKABLE_SESSION, date: { gte: earliestTodayAnywhere(now) } },
     },
     select: {
       session: {
@@ -178,8 +182,8 @@ async function lockAndCheckSeat(
   tx: Prisma.TransactionClient,
   centerId: string,
   session: SessionForBooking,
+  classGroup: ClassForBooking,
 ): Promise<SeatCheck> {
-  const classGroup = session.classGroup!;
   await lockClassRow(tx, centerId, classGroup.id);
   await lockSessionRow(tx, centerId, session.id);
   const usage = await sessionSeatUsage(tx, centerId, session.id, classGroup.id);
@@ -255,7 +259,7 @@ export async function requestBooking(
 
   const instant = classGroup.sessionBookingMode === "INSTANT";
   if (instant) {
-    const seat = await lockAndCheckSeat(tx, centerId, session);
+    const seat = await lockAndCheckSeat(tx, centerId, session, classGroup);
     if (seat) return { ok: false, error: seat };
     const user = await tx.user.findUniqueOrThrow({ where: { id: studentUserId } });
     await ensureStudentProfile(tx, centerId, user);
@@ -319,11 +323,13 @@ async function loadPendingForResolve(
   if (!booking) return { ok: false as const, error: "notFound" as const };
   if (booking.status !== PENDING) return { ok: false as const, error: "notPending" as const };
   const session = await loadSession(tx, centerId, booking.sessionId, false);
-  if (!session?.classGroup || !session.classGroup.active) return { ok: false as const, error: "notFound" as const };
+  // A one-time session has no class and is never bookable (F6): "not found", never a crash.
+  const classGroup = session?.classGroup;
+  if (!session || !classGroup || !classGroup.active) return { ok: false as const, error: "notFound" as const };
   // Booking closes at start: a pending one is expired from then on, and
   // nothing is written for it — not even a rejection.
   if (!isBookableNow(session, options.now ?? new Date())) return { ok: false as const, error: "expired" as const };
-  return { ok: true as const, booking, session };
+  return { ok: true as const, booking, session, classGroup };
 }
 
 /**
@@ -343,8 +349,7 @@ export async function confirmBooking(
 ): Promise<ResolveBookingResult> {
   const loaded = await loadPendingForResolve(tx, centerId, bookingId, options);
   if (!loaded.ok) return loaded;
-  const { booking, session } = loaded;
-  const classGroup = session.classGroup!;
+  const { booking, session, classGroup } = loaded;
 
   // The branch closed single-session booking after this one was requested: a
   // pending booking can no longer be confirmed (it can still be rejected), and
@@ -364,7 +369,7 @@ export async function confirmBooking(
     if (already) return { ok: false, error: already };
   }
 
-  const seat = await lockAndCheckSeat(tx, centerId, session);
+  const seat = await lockAndCheckSeat(tx, centerId, session, classGroup);
   if (seat) return { ok: false, error: seat };
 
   const user = await tx.user.findUniqueOrThrow({ where: { id: booking.studentId } });
@@ -561,7 +566,8 @@ export type UpcomingSession = {
 /**
  * A class page's "Upcoming sessions": the next sessions that can still be
  * booked (not started, in each session's own timezone), each with its seats
- * as a status — never a count. Scoped to one branch.
+ * as a status — never a count. Scoped to one branch. The read starts at the
+ * branch's own today, so already-past days never use up the page's rows.
  */
 export async function upcomingBookableSessions(
   db: Db,
@@ -575,11 +581,12 @@ export async function upcomingBookableSessions(
   },
   now: Date = new Date(),
 ): Promise<UpcomingSession[]> {
+  const settings = await db.centerSettings.findUnique({ where: { centerId }, select: { timezone: true } });
   const rows = await db.session.findMany({
     where: scopedWhere(centerId, {
       ...BOOKABLE_SESSION,
       classGroupId: classGroup.id,
-      date: { gte: addDays(startOfUtcDay(now), -1) },
+      date: { gte: todayInTimezone(centreTimeZone(settings), now) },
     }),
     select: {
       id: true,
