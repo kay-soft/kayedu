@@ -187,8 +187,7 @@ export async function signUpAction(
   }
 
   // F3 (OD-6 decided): a sign-up never originates parent access — a parent
-  // links with a one-time code (`/family/join`, lib/db/parents.ts's
-  // `acceptFamilyCode`).
+  // links with a one-time code at `/family/join` (lib/db/parents.ts).
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(identity.user));
 

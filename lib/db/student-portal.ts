@@ -4,7 +4,7 @@ import type { EnrollmentStatus, Prisma, PrismaClient, SessionBookingStatus, Sess
 // lib/db/teacher-portal.ts and lib/db/discover.ts).
 import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts";
-import { DEFAULT_TIMEZONE, addDays, startOfUtcDay, todayInTimezone } from "../scheduling.ts";
+import { DEFAULT_TIMEZONE, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
 import { scopedWhere } from "./tenant-scope.ts";
@@ -302,7 +302,9 @@ async function bookedUpcoming(
       ...bookingWhere,
       status: { in: SCHEDULE_BOOKING_STATUSES },
       center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
-      session: { ...BOOKABLE_SESSION, date: { gte: addDays(startOfUtcDay(now), -1) } },
+      // Bookings across branches: a floor safe in any frozen zone; each row
+      // is then judged in its own session's zone below.
+      session: { ...BOOKABLE_SESSION, date: { gte: earliestTodayAnywhere(now) } },
     },
     orderBy: [{ session: { date: "asc" } }, { session: { startTime: "asc" } }],
     take: 100,

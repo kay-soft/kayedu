@@ -171,8 +171,7 @@ export async function lookupPersonByPhoneAction(
   const args = parseActionArgs(branchPhoneLookupArgs, [phone, branchId]);
   if (!args) return { status: "notFound" };
   const scope = await teacherScope(args[1]);
-  if (isPickBranch(scope)) return { status: "notFound" };
-  if (!scope) return { status: "notFound" };
+  if (!scope || isPickBranch(scope)) return { status: "notFound" };
 
   const normalized = normalizePhone(args[0]);
   if (!normalized) return { status: "notFound" };

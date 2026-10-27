@@ -34,6 +34,7 @@ import {
 } from "../lib/db/session-bookings.ts";
 import { generateFamilyCode, hashFamilyCode } from "../lib/db/parents.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
+import { dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
 import {
   childBookedUpcoming,
   studentActiveEnrollmentClassIds,
@@ -1127,6 +1128,41 @@ async function checkSessionBookings(
   check(
     "...and a booking confirmed before the switch is unaffected (still CONFIRMED, still on the schedule)",
     standing?.status === "CONFIRMED" && (await scheduleOf(standingUser.id)).length === 1,
+  );
+
+  // ── G1 — "today" is the centre's day, not the UTC day ─────────────────────
+  // At 00:30 Cairo the UTC clock still reads yesterday. A session later the
+  // same Cairo day has not started: it takes a booking, is on the class page's
+  // upcoming list, and is on the student's schedule.
+  console.log(`
+G1 — the centre's day at 00:30 Cairo`);
+  const g1Day = "2027-01-14";
+  const g1Now = zonedDateTimeToUtc(g1Day, 30, "Africa/Cairo");
+  const g1Class = await bookingClass("INSTANT", { capacity: 6 });
+  const g1Session = await prisma.session.create({
+    data: scopedData(centerA.id, {
+      classGroupId: g1Class.id,
+      teacherId: teacherA.id,
+      date: dayMarker(g1Day),
+      startTime: "18:00",
+      endTime: "19:30",
+      timezone: "Africa/Cairo",
+      priceSnapshot: 10_000,
+    }),
+  });
+  const g1Student = await makeStudentUser("g1-midnight");
+  const g1Upcoming = await upcomingBookableSessions(prisma, centerA.id, { ...g1Class, room: null, extraRooms: [] }, g1Now);
+  const g1Booked = await prisma.$transaction((tx) =>
+    requestBooking(tx, { centerId: centerA.id, sessionId: g1Session.id, studentUserId: g1Student.id, now: g1Now }),
+  );
+  const g1Schedule = await scheduleOf(g1Student.id, g1Now);
+  check(
+    "At 00:30 Cairo, today's later session is bookable and shows as upcoming (class page and student schedule)",
+    g1Now.toISOString() === "2027-01-13T22:30:00.000Z" &&
+      g1Upcoming.some((row) => row.id === g1Session.id) &&
+      g1Booked.ok && g1Booked.kind === "confirmed" &&
+      g1Schedule.some((row) => row.session.id === g1Session.id),
+    JSON.stringify({ upcoming: g1Upcoming.length, booked: g1Booked.ok || g1Booked.error, schedule: g1Schedule.length }),
   );
 
   await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });

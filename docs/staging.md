@@ -69,7 +69,7 @@ npm run check:all                    # every gate, in CI's order; also checks th
 npm run e2e                          # run it ALONE: no gates, no edits at the same time
 ```
 
-A single gate is `npm run check:payments`, etc. The e2e notes of `e2e-run-conditions` still apply (alone, heap-raised dev server, a lone `/login` bounce is session expiry). Close the window, or `Remove-Item Env:KAYEDU_ENV`, when you are done — an unset `KAYEDU_ENV` means the dev `.env` again, and the guard will refuse a gate there.
+A single gate is `npm run check:payments`, etc. `$env:GATE_TX_TRACE = "1"` makes a gate print each transaction that failed or took over a second, with its statement count and time (G1). The e2e notes of `e2e-run-conditions` still apply (alone, heap-raised dev server, a lone `/login` bounce is session expiry). Close the window, or `Remove-Item Env:KAYEDU_ENV`, when you are done — an unset `KAYEDU_ENV` means the dev `.env` again, and the guard will refuse a gate there.
 
 **What a refusal looks like** (a gate with dev's `.env`, `KAYEDU_ENV` unset):
 

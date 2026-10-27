@@ -29,17 +29,29 @@
  *    always carries a relation or a login, so a concurrent real user is never
  *    swept. This closes the "no email, no phone, never deleted" leak.
  *
- * 4. **The write fence (S1).** Before it connects, `gatePrisma` refuses unless
+ * 4. **The app's transaction budget (G1).** Every interactive transaction a
+ *    gate opens without options gets `WRITE_TRANSACTION_OPTIONS` (maxWait
+ *    10 s, timeout 20 s) — the budget the app's own enrolment, booking and
+ *    money writes run under (`runInTransaction`) — not Prisma's 2 s / 5 s
+ *    default, which no real caller of those functions uses. A gate runs from a
+ *    developer machine to Frankfurt at ~150–320 ms per statement (measured,
+ *    G1), so a 20-statement enrolment takes 3–6 s there, where production
+ *    (co-located) takes well under a second. Lock waits stay bounded by
+ *    `GATE_LOCK_TIMEOUT` either way.
+ *
+ * 5. **The write fence (S1).** Before it connects, `gatePrisma` refuses unless
  *    the run is `KAYEDU_ENV=staging` or on a local database, and never against
  *    the dev project of `.env` (`scripts/lib/env.ts`, `docs/staging.md`).
  *
  * Shared dev database rules still hold (CLAUDE.md rule 7): nothing here
  * resets, truncates or touches a row the run did not create.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { basename } from "node:path";
 
 import { Prisma, PrismaClient } from "@prisma/client";
 
+import { WRITE_TRANSACTION_OPTIONS } from "../../lib/db/session-lifecycle.ts";
 import { assertSafeToWrite } from "./env.ts";
 
 /** A gate transaction never waits longer than this for a lock. */
@@ -49,6 +61,16 @@ export const GATE_STATEMENT_TIMEOUT = "60s";
 /** An in-flight query older than this fails the gate (outside a transaction). */
 export const GATE_STALL_MS = 45_000;
 const POLL_MS = 5_000;
+/**
+ * `GATE_TX_TRACE=1` prints, for every interactive gate transaction that
+ * failed or ran ≥ `GATE_TX_TRACE_MS` (default 1000), its statement count and
+ * elapsed time — how G1 measured the P2028 "Transaction not found" in
+ * check:student-portal. Off by default.
+ */
+const TX_TRACE = process.env.GATE_TX_TRACE === "1";
+const TX_TRACE_MS = Number(process.env.GATE_TX_TRACE_MS ?? 1000);
+type TxTrace = { statements: number; labels: string[] };
+const txTrace = new AsyncLocalStorage<TxTrace>();
 
 const gateName = basename(process.argv[1] ?? "gate").replace(/\.[cm]?ts$/, "");
 
@@ -144,7 +166,10 @@ function recordCreatedUsers(operation: string, args: unknown, result: unknown, i
 
 export async function gatePrisma(options: GateOptions = {}): Promise<PrismaClient> {
   if (!options.readOnly) assertSafeToWrite(`npm run check:${gateName.replace(/-check$/, "")}`);
-  const base = new PrismaClient(options.log ? { log: options.log } : undefined);
+  const base = new PrismaClient({
+    transactionOptions: WRITE_TRANSACTION_OPTIONS,
+    ...(options.log ? { log: options.log } : {}),
+  });
   const [{ now: startedAt }] = await base.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
 
   const inFlight = new Map<number, { label: string; at: number }>();
@@ -155,6 +180,11 @@ export async function gatePrisma(options: GateOptions = {}): Promise<PrismaClien
       async $allOperations({ model, operation, args, query }) {
         const id = ++sequence;
         inFlight.set(id, { label: `${model ?? "raw"}.${operation}`, at: Date.now() });
+        const trace = txTrace.getStore();
+        if (trace) {
+          trace.statements += 1;
+          trace.labels.push(`${model ?? "raw"}.${operation}`);
+        }
         try {
           const result = await query(args);
           if (model === "User") recordCreatedUsers(operation, args, result, createdUserIds);
@@ -202,13 +232,32 @@ export async function gatePrisma(options: GateOptions = {}): Promise<PrismaClien
         return (arg: unknown, transactionOptions?: unknown) => {
           const run = target.$transaction as (...args: unknown[]) => Promise<unknown>;
           if (typeof arg === "function") {
-            return run.call(
-              target,
-              async (tx: Prisma.TransactionClient) => {
-                await tx.$executeRaw(transactionSettings());
-                return (arg as (tx: Prisma.TransactionClient) => Promise<unknown>)(tx);
+            const body = () =>
+              run.call(
+                target,
+                async (tx: Prisma.TransactionClient) => {
+                  await tx.$executeRaw(transactionSettings());
+                  return (arg as (tx: Prisma.TransactionClient) => Promise<unknown>)(tx);
+                },
+                transactionOptions,
+              );
+            if (!TX_TRACE) return body();
+            const trace: TxTrace = { statements: 0, labels: [] };
+            const startedAt = Date.now();
+            const report = (outcome: string) => {
+              const ms = Date.now() - startedAt;
+              if (outcome === "ok" && ms < TX_TRACE_MS) return;
+              console.log(
+                `[gate-db] tx ${outcome}: ${trace.statements} statements (settings included) in ${ms}ms` +
+                  ` (~${Math.round(ms / Math.max(trace.statements, 1))}ms each): ${trace.labels.join(", ")}`,
+              );
+            };
+            return txTrace.run(trace, body).then(
+              (result) => (report("ok"), result),
+              (error: unknown) => {
+                report("FAILED");
+                throw error;
               },
-              transactionOptions,
             );
           }
           return run

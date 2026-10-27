@@ -45,7 +45,7 @@ import { loadRoomLinks } from "./room-sets.ts";
 import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { listCenterTerms } from "./terms.ts";
 import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
-import { addDays, startOfUtcDay } from "../scheduling.ts";
+import { centreTimeZone, todayInTimezone } from "../scheduling.ts";
 
 /**
  * What a scoped data layer needs of the request's tenant context — a real
@@ -77,6 +77,7 @@ const CONFIRMED_BOOKING: SessionBookingStatus = "CONFIRMED";
  */
 function pendingBookingWhere(
   centerId: string,
+  timeZone: string,
   teacherId: string | undefined,
   now: Date,
 ): Prisma.SessionBookingWhereInput {
@@ -84,7 +85,8 @@ function pendingBookingWhere(
     status: PENDING_BOOKING,
     session: {
       ...BOOKABLE_SESSION,
-      date: { gte: addDays(startOfUtcDay(now), -1) },
+      // The branch's own today; "not started" is then exact, per session.
+      date: { gte: todayInTimezone(timeZone, now) },
       classGroup: { active: true, ...(teacherId ? { teacherId } : {}) },
     },
   });
@@ -1318,7 +1320,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       listPending: async (options: { teacherId?: string; now?: Date } = {}) => {
         const now = options.now ?? new Date();
         const rows = await prisma.sessionBooking.findMany({
-          where: pendingBookingWhere(centerId, options.teacherId, now),
+          where: pendingBookingWhere(centerId, centreTimeZone(ctx.settings), options.teacherId, now),
           orderBy: { requestedAt: "asc" },
           take: 500,
           select: {
@@ -1361,7 +1363,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       countPending: async (options: { teacherId?: string; now?: Date } = {}) => {
         const now = options.now ?? new Date();
         const rows = await prisma.sessionBooking.findMany({
-          where: pendingBookingWhere(centerId, options.teacherId, now),
+          where: pendingBookingWhere(centerId, centreTimeZone(ctx.settings), options.teacherId, now),
           orderBy: { requestedAt: "asc" },
           take: 500,
           select: {
