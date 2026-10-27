@@ -268,6 +268,16 @@
 
 ---
 
+## 27. A real order for catalog grades (a "next grade" in promotion)
+
+**What it is.** A sequence on the global academic catalog's grades within an education system (Grade 9 → Grade 10 → …), so that Promote students (F4) can **pre-select the next grade** as the To grade, and a future "promote a whole year" or report can reason about "this grade's successor".
+
+**Why deferred.** `CatalogGrade` has no order — only a name, an education system and an active flag — and grades are free-text bilingual names a platform admin adds (R8). F4's promotion therefore asks the admin to pick the To grade and **invents no order** (sorting by name would put "Grade 10" before "Grade 2" and promote students the wrong way). A sequence is a modelling decision across every education system the platform carries (some have two terms, some skip a year, some end), best made with the platform admin who owns the catalog.
+
+**Depends on.** A `sortOrder` (or a successor link) on `CatalogGrade`, editable at `/admin/catalog` (R8), backfilled by the platform admin for the systems in use; entry 11 (academic terms) if promotion is ever to be automatic.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

@@ -21,6 +21,9 @@ import {
   rejectReservation,
   reserveOrEnroll,
 } from "../lib/db/reservations.ts";
+import { resolveCenterRelations } from "../lib/auth/relations.ts";
+import { generateFamilyCode, hashFamilyCode } from "../lib/db/parents.ts";
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import {
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
@@ -49,6 +52,8 @@ function check(name: string, passed: boolean, detail = "") {
 async function cleanup() {
   await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: "student-portal-check-" } } });
+  // F4 fixture grades are global catalog rows — they do not cascade away with the centres.
+  await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "Student-Portal-Check" } } });
 }
 
 async function makeTeacher(centerId: string, tag: string) {
@@ -356,6 +361,129 @@ async function main() {
     "A centerId-scoped Reservation query returns only that center's rows",
     centerAReservations.every((row) => row.centerId === centerA.id),
   );
+
+  await checkAccountSeeding(centerA, centerB, teacherA, teacherB);
+}
+
+/**
+ * F4 — a NEW branch profile is seeded from the student's own account (the
+ * grade they say they are in, when the branch offers it, and the parent they
+ * declared); an existing profile is never overwritten; and a sign-up intent
+ * grants nothing. Runs the REAL `ensureStudentProfile` (through
+ * `reserveOrEnroll`).
+ */
+async function checkAccountSeeding(
+  centerA: { id: string },
+  centerB: { id: string },
+  teacherA: { id: string },
+  teacherB: { id: string },
+): Promise<void> {
+  console.log("\nF4 - account grade and declared parent seed a new branch profile");
+
+  const gSeed = await prisma.catalogGrade.create({ data: { nameAr: "Student-Portal-Check Seed", nameEn: "Student-Portal-Check Seed" } });
+  const gOther = await prisma.catalogGrade.create({ data: { nameAr: "Student-Portal-Check Other", nameEn: "Student-Portal-Check Other" } });
+  const gNotOffered = await prisma.catalogGrade.create({ data: { nameAr: "Student-Portal-Check Unoffered", nameEn: "Student-Portal-Check Unoffered" } });
+  for (const centerId of [centerA.id, centerB.id]) {
+    for (const grade of [gSeed, gOther]) {
+      await prisma.centerCatalogSelection.create({ data: { centerId, kind: "GRADE", gradeId: grade.id } });
+    }
+  }
+
+  const user = (tag: string, data: { gradeId?: string; signupIntent?: "STUDENT" | "PARENT" | "TEACHER" } = {}) =>
+    prisma.user.create({
+      data: { firstName: "F4", lastName: tag, email: `student-portal-check-f4-${tag}@kayedu.test`, locale: "en", ...data },
+    });
+  const invite = (studentUserId: string, phone: string, status: "PENDING" | "ACCEPTED" | "REVOKED", createdAt: Date, first = "Pat") =>
+    prisma.familyInvitation.create({
+      data: {
+        studentUserId,
+        codeHash: hashFamilyCode(generateFamilyCode()),
+        codeHint: "ab",
+        source: "STUDENT_INVITE",
+        createdBy: studentUserId,
+        declaredParentFirstName: first,
+        declaredParentLastName: "Parent",
+        declaredParentPhone: phone,
+        status,
+        createdAt,
+      },
+    });
+  const classA = await makeClass(centerA.id, teacherA.id);
+  const classA2 = await makeClass(centerA.id, teacherA.id);
+  const classB = await makeClass(centerB.id, teacherB.id);
+  const join = (centerId: string, classGroupId: string, studentUserId: string) =>
+    prisma.$transaction((tx) => reserveOrEnroll(tx, { centerId, classGroupId, studentUserId }));
+  const profileAt = (centerId: string, userId: string) => prisma.studentProfile.findFirst({ where: { centerId, userId } });
+  const day = 24 * 60 * 60 * 1000;
+
+  // a. grade + declared parent -> seeded, and whole: no second form.
+  const u1 = await user("whole", { gradeId: gSeed.id });
+  await invite(u1.id, "01000000001", "ACCEPTED", new Date(Date.now() - 2 * day), "Older");
+  await invite(u1.id, "01000000002", "PENDING", new Date(Date.now() - day), "Newer");
+  await join(centerA.id, classA.id, u1.id);
+  const whole = await profileAt(centerA.id, u1.id);
+  check(
+    "A new profile takes the account grade and the latest declared parent, and is stamped complete",
+    whole?.gradeId === gSeed.id && whole.parentPhone === "01000000002" && whole.parentFirstName === "Newer" &&
+      whole.parentLastName === "Parent" && whole.profileCompletedAt !== null,
+    JSON.stringify(whole),
+  );
+
+  // b. grade only -> the form stays.
+  const u2 = await user("grade-only", { gradeId: gSeed.id });
+  await join(centerA.id, classA.id, u2.id);
+  const gradeOnly = await profileAt(centerA.id, u2.id);
+  check("Grade without a parent: seeded, but the one-time form still stands", gradeOnly?.gradeId === gSeed.id && gradeOnly.parentPhone === null && gradeOnly.profileCompletedAt === null);
+
+  // c. parent only -> the form stays.
+  const u3 = await user("parent-only");
+  await invite(u3.id, "01000000003", "PENDING", new Date());
+  await join(centerA.id, classA.id, u3.id);
+  const parentOnly = await profileAt(centerA.id, u3.id);
+  check("Parent without a grade: seeded, but the one-time form still stands", parentOnly?.gradeId === null && parentOnly.parentPhone === "01000000003" && parentOnly.profileCompletedAt === null);
+
+  // d. a grade this branch does not offer is not seeded (SEC-49).
+  const u4 = await user("unoffered", { gradeId: gNotOffered.id });
+  await invite(u4.id, "01000000004", "PENDING", new Date());
+  await join(centerA.id, classA.id, u4.id);
+  const unoffered = await profileAt(centerA.id, u4.id);
+  check("A grade the branch does not offer is left empty, so the form stays", unoffered?.gradeId === null && unoffered.profileCompletedAt === null);
+
+  // e. a cancelled invitation declares nobody.
+  const u5 = await user("cancelled", { gradeId: gSeed.id });
+  await invite(u5.id, "01000000005", "REVOKED", new Date());
+  await join(centerA.id, classA.id, u5.id);
+  const cancelled = await profileAt(centerA.id, u5.id);
+  check("A cancelled invitation seeds no parent", cancelled?.parentPhone === null && cancelled.profileCompletedAt === null);
+
+  // f. an existing profile is never overwritten; the account never reaches into a branch.
+  const before = await profileAt(centerA.id, u1.id);
+  await prisma.user.update({ where: { id: u1.id }, data: { gradeId: gOther.id } });
+  await join(centerA.id, classA2.id, u1.id);
+  const after = await profileAt(centerA.id, u1.id);
+  check(
+    "Changing the account grade changes no existing branch record (and joining a second class re-seeds nothing)",
+    before !== null && after !== null && after.gradeId === gSeed.id && after.updatedAt.getTime() === before.updatedAt.getTime(),
+  );
+  await join(centerB.id, classB.id, u1.id);
+  const atB = await profileAt(centerB.id, u1.id);
+  check("A second branch seeds from the account as it is now, independently of the first", atB?.gradeId === gOther.id && atB.parentPhone === "01000000002");
+
+  // g. a sign-up intent grants nothing.
+  for (const intent of ["STUDENT", "PARENT", "TEACHER"] as const) {
+    const declared = await user(`intent-${intent.toLowerCase()}`, { signupIntent: intent });
+    const relations = await resolveCenterRelations(prisma, declared.id);
+    const reads = await Promise.all([
+      prisma.membership.count({ where: { userId: declared.id } }),
+      prisma.studentProfile.count({ where: { userId: declared.id } }),
+      prisma.familyLink.count({ where: { OR: [{ parentUserId: declared.id }, { studentUserId: declared.id }] } }),
+    ]);
+    check(
+      `A ${intent} sign-up intent creates and grants nothing: no relation, membership, profile or family link`,
+      relations.length === 0 && reads.every((count) => count === 0),
+    );
+  }
+  await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });
 }
 
 main()

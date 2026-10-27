@@ -171,7 +171,22 @@
       "submit": "إنشاء الحساب",
       "haveAccount": "لديك حساب بالفعل؟",
       "loginLink": "تسجيل الدخول",
-      "passwordHint": "٨ أحرف على الأقل."
+      "passwordHint": "٨ أحرف على الأقل.",
+      "intent": {
+        "legend": "أنضم بصفتي",
+        "STUDENT": {
+          "label": "طالب",
+          "hint": "ابحث عن حصص وتابع جدولك."
+        },
+        "PARENT": {
+          "label": "ولي أمر",
+          "hint": "تابع جدول ابنك وحضوره."
+        },
+        "TEACHER": {
+          "label": "مدرّس",
+          "hint": "درّس في فرع أو أكثر."
+        }
+      }
     },
     "selectCenter": {
       "title": "اختر الفرع",
@@ -219,7 +234,8 @@
       "invalidCenter": "فرع غير معروف.",
       "invalidInvitation": "دعوة غير معروفة.",
       "rateLimited": "محاولات كثيرة جدًا — انتظر بضع دقائق ثم حاول مرة أخرى.",
-      "emailNotConfirmed": "أكّد بريدك الإلكتروني أولًا، ثم اقبل الدعوة."
+      "emailNotConfirmed": "أكّد بريدك الإلكتروني أولًا، ثم اقبل الدعوة.",
+      "intentRequired": "اختر صفتك في الانضمام."
     },
     "shell": {
       "headline": "أدِر المركز بالكامل من شاشة واحدة.",
@@ -394,7 +410,13 @@
       "rateLimited": "عمليات بحث كثيرة جدًا عن جهات الاتصال — انتظر دقيقة ثم حاول مرة أخرى.",
       "alreadyCompleted": "ملفك الشخصي مكتمل بالفعل. اطلب من الفرع تعديل هذه البيانات.",
       "verificationUnavailable": "التحقق من أولياء الأمور متوقف حتى تُعتمد طريقة تحقق آمنة.",
-      "branchNotAllowed": "لا يمكنك إضافة مدرّسين في هذا الفرع."
+      "branchNotAllowed": "لا يمكنك إضافة مدرّسين في هذا الفرع.",
+      "generic": "حدث خطأ ما. حاول مرة أخرى.",
+      "promotionNotLatest": "لا يمكن التراجع إلا عن آخر ترقية.",
+      "promotionExpired": "انتهت مدة التراجع عن هذه الترقية.",
+      "promotionAlreadyUndone": "تم التراجع عن هذه الترقية من قبل.",
+      "tooManyStudents": "هذا عدد طلاب أكبر مما تتحمله ترقية واحدة.",
+      "accountGradeNotOffered": "هذا الفرع لا يقدّم الصف المسجَّل في حساب الطالب."
     }
   },
   "Teachers": {
@@ -525,14 +547,51 @@
       "otherCenters": "فروع أخرى"
     },
     "promote": {
-      "title": "ترقية صف",
-      "description": "في نهاية الترم، انقل كل طالب نشط في صف إلى الصف التالي.",
+      "title": "ترقية الطلاب",
+      "description": "انقل الطلاب من صف إلى الصف التالي. ترى من سينتقل قبل أن يتغيّر أي شيء، ويمكنك استثناء من تشاء، ويمكنك التراجع خلال {days} يومًا.",
+      "open": "ترقية الطلاب",
+      "backToStudents": "العودة إلى الطلاب",
+      "chooseTitle": "اختر الصفوف",
+      "chooseDescription": "اختر الصف الذي فيه الطلاب الآن والصف الذي سينتقلون إليه.",
       "from": "من صف",
       "to": "إلى صف",
-      "warning": "سينقل هذا كل طالب نشط في الصف المختار، ويُسجَّل التغيير في سجل التدقيق.",
-      "submit": "ترقية الطلاب",
-      "done": "تمت ترقية الطلاب.",
-      "needsGrades": "أضف صفّين على الأقل في الإعدادات قبل الترقية."
+      "chooseGrade": "اختر صفًا",
+      "preview": "معاينة",
+      "needsGrades": "أضف صفّين على الأقل في الإعدادات قبل الترقية.",
+      "sameGrade": "اختر صفًا مختلفًا للترقية إليه.",
+      "previewTitle": "الانتقال من {from} إلى {to}",
+      "previewDescription": "كل طالب نشط في صف «من» محدَّد. ألغِ تحديد من سيبقى في صفّه.",
+      "noStudents": "لا يوجد طلاب نشطون في {from}.",
+      "searchLabel": "ابحث في هؤلاء الطلاب",
+      "searchPlaceholder": "الاسم أو الكود",
+      "noSearchMatches": "لا يوجد طالب هنا يطابق هذا البحث.",
+      "selectAll": "تحديد الكل",
+      "selectNone": "إلغاء التحديد",
+      "selectedCount": "تم تحديد {selected} من {total}",
+      "tick": "ترقية {name}",
+      "accountSays": "الحساب يقول: {grade}",
+      "enrollments": "{count, plural, one {تسجيل نشط واحد في حصة} two {تسجيلان نشطان في حصتين} few {{count, number, arab} تسجيلات نشطة في حصص} many {{count, number, arab} تسجيلًا نشطًا في حصص} other {{count, number, arab} تسجيل نشط في حصص}} في هذا الصف",
+      "noEnrollments": "لا توجد تسجيلات نشطة في حصص هذا الصف",
+      "enrollmentKept": "التسجيل يبقى كما هو",
+      "confirm": "ترقية {count, plural, one {طالب واحد} two {طالبين} few {{count, number, arab} طلاب} many {{count, number, arab} طالبًا} other {{count, number, arab} طالب}} إلى {to}",
+      "confirmNote": "يتغيّر فقط الصف المسجَّل في سجلّ هذا الفرع. الحصص والتسجيلات والجلسات والمدفوعات والفروع الأخرى وصفوف حسابات الطلاب أنفسهم تبقى كما هي. يمكنك التراجع خلال {days} يومًا.",
+      "done": "{count, plural, one {تمت ترقية طالب واحد} two {تمت ترقية طالبين} few {تمت ترقية {count, number, arab} طلاب} many {تمت ترقية {count, number, arab} طالبًا} other {تمت ترقية {count, number, arab} طالب}}. يمكنك التراجع خلال {days} يومًا.",
+      "doneSkipped": "تُرك {skipped, plural, one {طالب واحد} two {طالبان} few {{skipped, number, arab} طلاب} many {{skipped, number, arab} طالبًا} other {{skipped, number, arab} طالب}} كما هم لأن حالتهم تغيّرت بعد المعاينة.",
+      "historyTitle": "سجلّ الترقيات",
+      "historyDescription": "آخر الترقيات في هذا الفرع. يمكن التراجع عن الأحدث خلال {days} يومًا.",
+      "historyEmpty": "لا توجد ترقيات بعد.",
+      "historyEmptyHint": "عند ترقية الطلاب تظهر كل دفعة هنا.",
+      "historyRoute": "{from} ← {to}",
+      "historyMeta": "{date} · {count, plural, one {طالب واحد} two {طالبان} few {{count, number, arab} طلاب} many {{count, number, arab} طالبًا} other {{count, number, arab} طالب}} · بواسطة {by}",
+      "historyUndone": "تم التراجع في {date} بواسطة {by}",
+      "statusUndone": "تم التراجع",
+      "undo": "تراجع",
+      "undoTitle": "التراجع عن هذه الترقية؟",
+      "undoDescription": "الطلاب الذين ما زالوا في {to} يعودون إلى {from}. من تغيّر صفّه بعد ذلك يبقى كما هو.",
+      "undoConfirm": "تراجع عن الترقية",
+      "undoDone": "{reverted, plural, one {أُعيد طالب واحد} two {أُعيد طالبان} few {أُعيد {reverted, number, arab} طلاب} many {أُعيد {reverted, number, arab} طالبًا} other {أُعيد {reverted, number, arab} طالب}}. {skipped, plural, =0 {} one {وتُرك واحد كما هو.} other {وتُرك {skipped, number, arab} كما هم.}}",
+      "bannerTitle": "ترقية بتاريخ {date}: {from} ← {to}، {count, plural, one {طالب واحد} two {طالبان} few {{count, number, arab} طلاب} many {{count, number, arab} طالبًا} other {{count, number, arab} طالب}}",
+      "bannerHint": "يمكنك التراجع عنها حتى {date}."
     },
     "photo": {
       "title": "الصورة",
@@ -603,6 +662,13 @@
     "deactivateConfirm": {
       "title": "إيقاف {name}؟",
       "body": "يخرج من القوائم النشطة في هذا الفرع. يُحتفظ بسجله، ويمكنك تفعيله مرة أخرى."
+    },
+    "filtersLabel": "التصفية",
+    "gradeDiffersChip": "الصف يختلف عن الحساب",
+    "accountGrade": {
+      "says": "الحساب يقول: {grade}",
+      "use": "استخدم صف الحساب",
+      "notOffered": "هذا الفرع لا يقدّم ذلك الصف."
     }
   },
   "Classes": {
@@ -2815,7 +2881,8 @@
     "familyUnlinked": "تم إلغاء ربط الابن",
     "familyInvitationCancelled": "تم إلغاء الدعوة",
     "familyCodeCancelled": "تم إلغاء الرمز",
-    "familyAccessRemoved": "تمت إزالة وصول وليّ الأمر"
+    "familyAccessRemoved": "تمت إزالة وصول وليّ الأمر",
+    "studentAccountGradeUsed": "تم تحديث الصف من حساب الطالب."
   },
   "Account": {
     "title": "إعدادات الحساب",
@@ -2888,6 +2955,24 @@
       "emailChangeDisabled": "تغيير البريد يحتاج إلى تأكيد البريد الإلكتروني — قريبًا.",
       "rateLimited": "محاولات كثيرة جدًا — انتظر بضع دقائق ثم حاول مرة أخرى.",
       "failed": "حدث خطأ ما. حاول مرة أخرى."
+    },
+    "study": {
+      "title": "بيانات الدراسة",
+      "description": "بياناتك الخاصة كطالب.",
+      "cardTitle": "صفّك الدراسي",
+      "cardDescription": "الصف الذي أنت فيه الآن. يحدّد تلقائيًا فلتر الصف في «اكتشف»، ويُملأ به صفّك عند انضمامك إلى فرع جديد.",
+      "branchNote": "تغيير هذا لا يغيّر ما هو مسجَّل عنك في أي فرع. كل فرع يحتفظ بسجلّه الخاص، والفرع وحده هو من يغيّره.",
+      "save": "حفظ",
+      "saving": "جارٍ الحفظ…",
+      "saved": "تم حفظ صفّك.",
+      "picker": {
+        "system": "النظام التعليمي",
+        "systemPlaceholder": "اختر النظام التعليمي",
+        "grade": "الصف",
+        "gradePlaceholder": "اختر الصف",
+        "none": "غير محدد",
+        "noSystem": "صفوف أخرى"
+      }
     }
   },
   "AdminOrganizations": {
@@ -3054,6 +3139,21 @@
       "required": "هذا الحقل مطلوب.",
       "tooLong": "هذه القيمة طويلة جدًا.",
       "invalidPhone": "أدخل رقم هاتف محمول مصري صحيحًا."
+    }
+  },
+  "Onboarding": {
+    "student": {
+      "title": "دراستك",
+      "description": "أخبرنا بصفّك الدراسي لنعرض لك الحصص المناسبة.",
+      "step": "الخطوة {current} من {total}",
+      "gradeTitle": "نظامك التعليمي وصفّك",
+      "gradeDescription": "اختر النظام الذي تدرس به ثم صفّك. يمكنك تغييره في أي وقت من إعدادات الحساب.",
+      "continue": "متابعة",
+      "saving": "جارٍ الحفظ…",
+      "parentTitle": "ادعُ ولي أمرك",
+      "parentDescription": "اختياري. أعطنا بيانات ولي أمرك لتحصل على رمز لمرة واحدة ترسله إليه. ولي الأمر يرى جدولك وحضورك فقط. يمكنك التخطي والقيام بذلك لاحقًا من إعدادات الحساب.",
+      "skip": "تخطَّ الآن",
+      "toDiscover": "ابحث عن حصص"
     }
   }
 }

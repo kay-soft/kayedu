@@ -8,14 +8,18 @@ import {
   RegenerateInvitationButton,
   UnlinkChildButton,
 } from "@/app/[locale]/account/family-controls";
+import { StudyDetailsForm } from "@/app/[locale]/account/study-details-form";
 import { JoinFamilyForm } from "@/components/family/join-family-form";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Ltr } from "@/components/shared/ltr";
 import { LinkButton } from "@/components/shared/link-button";
 import { PageSection } from "@/components/shared/page-section";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { showsStudyDetails } from "@/lib/db/account-study";
+import { listCatalogGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { FAMILY_LIMITS, familyForAccount } from "@/lib/db/parents";
+import { gradePickerData } from "@/lib/student-grade-options";
 import { formatDate } from "@/lib/format";
 import { fullName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -24,8 +28,8 @@ import { ROUTES } from "@/lib/routes";
  * Account settings' two named extension points (F2). Each renders **nothing**
  * until the prompt that owns it fills it in — no heading, no empty card:
  *
- * - `StudyDetailsSection` — a student's own study details (F4: account grade
- *   and onboarding);
+ * - `StudyDetailsSection` — a student's own study details (F4, filled: the
+ *   account grade);
  * - `FamilySection` — family links (F3, filled: parent onboarding, OD-6).
  *
  * They take the signed-in `User` and live on the page between Profile and
@@ -33,9 +37,40 @@ import { ROUTES } from "@/lib/routes";
  */
 export type AccountSectionProps = { user: User };
 
-export async function StudyDetailsSection(props: AccountSectionProps) {
-  void props; // F4 reads the student's own records from `props.user`.
-  return null;
+/**
+ * Account → Study details (F4, docs/04 §11.23): the student's own grade, for an
+ * account that signed up as a student or holds a profile at any branch —
+ * nothing for anyone else. It says plainly that it never changes a branch's
+ * record: each branch keeps its own grade on file.
+ */
+export async function StudyDetailsSection({ user }: AccountSectionProps) {
+  if (!(await showsStudyDetails(prisma, user))) return null;
+
+  const [t, tPicker, tCommon, locale, grades] = await Promise.all([
+    getTranslations("Account.study"),
+    getTranslations("Account.study.picker"),
+    getTranslations("Settings.common"),
+    getLocale(),
+    listCatalogGrades(prisma, undefined, false),
+  ]);
+  const data = gradePickerData(locale, grades, user.gradeId, {
+    noSystem: tPicker("noSystem"),
+    inactive: tCommon("inactive"),
+  });
+
+  return (
+    <PageSection title={t("title")} description={t("description")}>
+      <Card>
+        <CardHeader>
+          <CardTitle as="h3">{t("cardTitle")}</CardTitle>
+          <CardDescription>{t("cardDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StudyDetailsForm data={data} gradeId={user.gradeId ?? ""} />
+        </CardContent>
+      </Card>
+    </PageSection>
+  );
 }
 
 /**

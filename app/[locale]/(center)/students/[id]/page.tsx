@@ -3,6 +3,7 @@ import { IdCard, Printer, ShieldOff, Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { IdCardPanel } from "@/app/[locale]/(center)/students/[id]/id-card-panel";
+import { AccountGradeMismatch } from "@/app/[locale]/(center)/students/[id]/account-grade-mismatch";
 import { PhotoForm } from "@/app/[locale]/(center)/students/[id]/photo-form";
 import { StudentProfileForm } from "@/app/[locale]/(center)/students/[id]/student-profile-form";
 import {
@@ -25,7 +26,8 @@ import { PageHeader } from "@/components/shared/page-header";
 import { PersonAvatar } from "@/components/shared/person-avatar";
 import { Badge } from "@/components/ui/badge";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
-import { catalogLabelWithSelection } from "@/lib/catalog";
+import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
+import { catalogGradeById } from "@/lib/db/account-study";
 import { prisma } from "@/lib/db/client";
 import { countOtherCenterRelations } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
@@ -163,6 +165,17 @@ export default async function StudentDetailPage({
         grade.active && grade.catalogActive ? grade.name : `${grade.name} · ${tCommon("inactive")}`,
     }));
 
+  // F4: the student's own account grade, when it names a different grade from
+  // the one this branch has on file. This branch's rename when it offers that
+  // grade; the catalog name when it does not (then it cannot be adopted here).
+  const accountGradeId = student.user.gradeId;
+  const accountDiffers = Boolean(accountGradeId && accountGradeId !== student.gradeId);
+  const offeredAccountGrade = accountDiffers ? grades.find((grade) => grade.id === accountGradeId) : undefined;
+  const accountGradeName = offeredAccountGrade?.name ?? null;
+  const globalAccountGrade =
+    accountDiffers && !offeredAccountGrade && accountGradeId ? await catalogGradeById(prisma, accountGradeId) : null;
+  const accountGradeLabel = accountGradeName ?? (globalAccountGrade ? catalogLabel(locale, globalAccountGrade) : null);
+
   const personName = fullName(localName(student, student.user));
   const gradeLabel = gradeOptions.find((option) => option.value === student.gradeId)?.label ?? null;
   const parentName = [student.parentFirstName, student.parentLastName].filter(Boolean).join(" ");
@@ -184,6 +197,13 @@ export default async function StudentDetailPage({
               {student.active ? tCommon("active") : tCommon("inactive")}
             </Badge>
             {gradeLabel ? <span>{gradeLabel}</span> : null}
+            {accountDiffers && accountGradeLabel ? (
+              <AccountGradeMismatch
+                studentProfileId={student.id}
+                accountGrade={accountGradeLabel}
+                canAdopt={Boolean(offeredAccountGrade && offeredAccountGrade.catalogActive)}
+              />
+            ) : null}
           </>
         }
         action={

@@ -30,6 +30,8 @@ export const ROUTES = {
   centerTeacher: (id: string) => `/teachers/${id}`,
   centerStudents: "/students",
   centerStudent: (id: string) => `/students/${id}`,
+  // F4: the previewable, undoable bulk grade promotion (`student.promote`).
+  centerStudentsPromote: "/students/promote",
   centerStudentCard: (id: string) => `/students/${id}/card`,
   centerStudentPaper: (id: string) => `/students/${id}/paper`,
   // Classes, schedules & enrollment (M4).
@@ -75,6 +77,8 @@ export const ROUTES = {
   studentDiscover: "/student/discover",
   studentReservations: "/student/reservations",
   studentProfile: "/student/profile",
+  // F4: "Your studies" — a new student's grade, then an optional parent invite.
+  studentOnboarding: "/student/onboarding",
   parentHome: "/parent",
   adminCenters: "/admin/centers",
   adminCenter: (id: string) => `/admin/centers/${id}`,

@@ -29,7 +29,7 @@ import { IDLE_FAMILY_STATE } from "@/lib/validation/parents";
  */
 
 /** The student's "Share on WhatsApp": the join link (code in its fragment) in a prefilled message. */
-function WhatsAppShare({ code, studentName }: { code: string; studentName: string }) {
+export function WhatsAppShare({ code, studentName }: { code: string; studentName: string }) {
   const t = useTranslations("Family.code");
   const locale = useLocale() === "en" ? "en" : "ar";
   const display = formatFamilyCodeForDisplay(code);

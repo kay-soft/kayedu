@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient, User } from "@prisma/client";
+import type { Prisma, PrismaClient, SignupIntent, User } from "@prisma/client";
 import { z } from "zod";
 
 // Relative imports only: this is the pure half of `lib/auth/session.ts` —
@@ -57,28 +57,33 @@ const metadataSchema = z.object({
   last_name: capped(60).optional(),
   full_name: capped(121).optional(),
   locale: z.enum(["ar", "en"]).catch("ar").optional(),
+  // F4: client-controlled like the rest — anything but one of the three
+  // values is dropped. It routes onboarding and authorises nothing.
+  signup_intent: z.enum(["STUDENT", "PARENT", "TEACHER"]).optional().catch(undefined),
 });
 
 export function profileFromMetadata(identity: AuthIdentity): {
   firstName: string;
   lastName: string;
   locale: "ar" | "en";
+  signupIntent: SignupIntent | null;
 } {
   const parsed = metadataSchema.safeParse(identity.user_metadata ?? {});
   const meta = parsed.success ? parsed.data : {};
   const locale = meta.locale ?? "ar";
+  const signupIntent = meta.signup_intent ?? null;
   const first = meta.first_name ?? "";
   const last = meta.last_name ?? "";
-  if (first || last) return { firstName: first || "-", lastName: last || "-", locale };
+  if (first || last) return { firstName: first || "-", lastName: last || "-", locale, signupIntent };
 
   const full = meta.full_name ?? "";
   if (full) {
     const [head, ...rest] = full.split(/\s+/);
-    return { firstName: head.slice(0, 60), lastName: rest.join(" ").slice(0, 60) || "-", locale };
+    return { firstName: head.slice(0, 60), lastName: rest.join(" ").slice(0, 60) || "-", locale, signupIntent };
   }
 
   const local = (identity.email?.split("@")[0] ?? "user").slice(0, 60);
-  return { firstName: local || "user", lastName: "-", locale };
+  return { firstName: local || "user", lastName: "-", locale, signupIntent };
 }
 
 function confirmedAt(identity: AuthIdentity): Date | null {
@@ -150,6 +155,7 @@ export async function resolveAppIdentity(
         firstName: profile.firstName,
         lastName: profile.lastName,
         locale: profile.locale,
+        signupIntent: profile.signupIntent,
       },
     });
     return { kind: "user", user };

@@ -5,6 +5,7 @@ import { z } from "zod";
 // exercise the real schemas (same reasoning as ./settings.ts).
 import { localeSchema } from "./auth.ts";
 import { normalizeEmail } from "../identity.ts";
+import { MAX_PROMOTION_STUDENTS } from "../promotion.ts";
 import { optionalPhone } from "./phone-schema.ts";
 
 /**
@@ -183,6 +184,32 @@ export const gradePromotionSchema = z
     message: "samePromotionGrade",
   });
 
+/**
+ * F4 — the confirm of a previewed promotion: the grades plus exactly the
+ * students left ticked. (`gradePromotionSchema` above is the From/To pair the
+ * preview step reads and is unchanged.)
+ */
+export const gradePromotionConfirmSchema = z
+  .object({
+    ...base,
+    fromGradeId: recordId,
+    toGradeId: recordId,
+    studentIds: z
+      .array(recordId)
+      .min(1, "noStudentsToPromote")
+      .max(MAX_PROMOTION_STUDENTS, "tooManyStudents"),
+  })
+  .refine((value) => value.fromGradeId !== value.toGradeId, {
+    path: ["toGradeId"],
+    message: "samePromotionGrade",
+  });
+
+/** F4 — undo the latest promotion batch. */
+export const gradePromotionUndoSchema = z.object({
+  ...base,
+  batchId: recordId,
+});
+
 /** Per-student: move one student to a grade (or clear it). */
 export const studentGradeSchema = z.object({
   ...base,
@@ -277,6 +304,10 @@ export type PeopleActionState = {
   downloadUrl?: string;
   /** F1: set when the row landed at a branch other than the active one — the confirmation names it. */
   branchName?: string;
+  /** F4: a promotion's students moved (or, for an undo, put back) … */
+  count?: number;
+  /** … and those left exactly as they were (changed since the preview / since the batch). */
+  skipped?: number;
 };
 
 export const IDLE_PEOPLE_STATE: PeopleActionState = {};

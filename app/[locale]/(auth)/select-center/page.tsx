@@ -1,3 +1,4 @@
+import type { SignupIntent } from "@prisma/client";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Building2, Check, ChevronLeft, Users } from "lucide-react";
 
@@ -20,6 +21,11 @@ import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 import { cn } from "@/lib/utils";
+
+/** The student's own start: onboarding while their grade is unset, else Discover (F4). */
+function onboardingStart(user: { signupIntent: SignupIntent | null; gradeId: string | null }): string {
+  return user.signupIntent === "STUDENT" && !user.gradeId ? ROUTES.studentOnboarding : ROUTES.studentDiscover;
+}
 
 export default async function SelectCenterPage({
   searchParams,
@@ -56,6 +62,20 @@ export default async function SelectCenterPage({
     redirect({ href: homePathForRole(primaryRole(relations[0])), locale });
   }
 
+  // F4: the three starting points, the person's declared sign-up intent first
+  // (and highlighted). A null intent keeps today's order and emphasis. All three
+  // stay offered — the intent routes, it never restricts.
+  const startActions = [
+    { intent: "STUDENT", href: `/${locale}${onboardingStart(user!)}`, label: t("browseClasses") },
+    { intent: "TEACHER", href: `/${locale}${ROUTES.teacherCenters}`, label: t("findCenterToTeach") },
+    { intent: "PARENT", href: `/${locale}${ROUTES.familyJoin}`, label: t("linkMyChild") },
+  ] as const;
+  const orderedStart = user!.signupIntent
+    ? [...startActions].sort(
+        (a, b) => Number(b.intent === user!.signupIntent) - Number(a.intent === user!.signupIntent),
+      )
+    : startActions;
+
   return (
     <div className="flex flex-col gap-4">
       <AuthCard
@@ -79,19 +99,16 @@ export default async function SelectCenterPage({
                    sign-up's intent (student, teacher or parent) isn't known
                    yet. F3: a parent links a child with a code. */
                 <div className="grid w-full gap-2 sm:flex sm:flex-wrap">
-                  <AnchorButton
-                    href={`/${locale}${ROUTES.studentDiscover}`}
-                    variant="default"
-                    className="w-full sm:w-auto"
-                  >
-                    {t("browseClasses")}
-                  </AnchorButton>
-                  <AnchorButton href={`/${locale}${ROUTES.teacherCenters}`} className="w-full sm:w-auto">
-                    {t("findCenterToTeach")}
-                  </AnchorButton>
-                  <AnchorButton href={`/${locale}${ROUTES.familyJoin}`} className="w-full sm:w-auto">
-                    {t("linkMyChild")}
-                  </AnchorButton>
+                  {orderedStart.map((action, index) => (
+                    <AnchorButton
+                      key={action.intent}
+                      href={action.href}
+                      variant={index === 0 ? "default" : undefined}
+                      className="w-full sm:w-auto"
+                    >
+                      {action.label}
+                    </AnchorButton>
+                  ))}
                 </div>
               }
             />

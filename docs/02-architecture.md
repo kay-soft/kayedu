@@ -66,10 +66,12 @@ app/
       actions.ts                # submit/skip rating actions, identity-scoped (delivered M17)
       rating-popup.tsx          # the pop-up itself — closing it persists nothing; Skip does (M17)
       student/                  # /student/schedule, /student/discover, /student/reservations (M8)
+                                #   + /student/onboarding — "Your studies": account grade, then an optional parent invite (F4)
     (parent)/parent/            # child selector + per-child mirror of the student portal (M16) — no Server Action;
                                 #   "Link your child" only carries a code to /family/join (F3)
     (auth)/family/join/         # a parent accepts a one-time code — read from the URL fragment, guests too (F3)
     account/                    # Account settings for every signed-in role (F2) — no route group: the page
+                                #   + Study details (F4): study-actions.ts (the account grade, User.gradeId only)
                                 #   renders the frame of the shell it was opened from (`(group)/*-shell.ts(x)`)
                                 #   + Family (F3): family-actions.ts (invite / new code / cancel / accept / unlink)
     (admin)/admin/              # /admin/centers, /admin/centers/[id], /admin/platform (M9)
@@ -165,6 +167,11 @@ lib/
     refunds.ts                    # the ONLY Refund writes — original Payment row never touched (M14)
     ratings.ts                    # SessionRating writes + the average-only aggregate; never exposes a rater (delivered M17)
     parents.ts                    # family links (F3): codes issued/accepted/revoked, hash-only, slots, the only
+    account-study.ts              # the student's own study details (F4): setAccountGrade (User.gradeId only), the declared
+                                  #   parent, seedFromAccount (what ensureStudentProfile seeds a NEW profile with),
+                                  #   applyAccountGrade (the one audited staff write, student.grade.account)
+    promotion.ts                  # bulk grade promotion (F4): preview, confirmGradePromotion, undoGradePromotion — one
+                                  #   transaction each, batch + items + audit; touches StudentProfile.gradeId only
                                   #   parent-portal read (activeChildLinks); ParentLink is deprecated, never read
     visibility.ts                 # the data-visibility window bound + its Settlement/AuditLog carve-outs (M19)
   storage/                      # the storage seam (SYS, §10): provider.ts (the interface), supabase.ts (the
@@ -177,6 +184,8 @@ lib/
   digits.ts                     # Arabic-Indic → ASCII digit folding, shared by phone search, the time parser
                                 #   and the parent-code normalizer (R6, F3)
   family-code.ts                # the parent code's alphabet, normalizer and display form — pure, browser-safe (F3)
+  promotion.ts                  # the promotion rules, pure: the 14-day undo window, the per-confirm cap (F4)
+  student-grade-options.ts      # the education-system → grade picker's data, from the catalog; no invented order (F4)
   like.ts                       # typed text vs (I)LIKE (SEC-2c, SEC-61): likeSearchToken strips `% _ \` from search tokens
                                 #   (Prisma cannot escape them); nameClashes — duplicate names compared in memory by catalogNameKey
   concurrency.ts                # mapWithConcurrency — a bounded fan-out (Discover loads 5 centres at a time, SEC-32)
@@ -271,6 +280,8 @@ docs/
 4. **Role gate:** each route group's layout checks the membership role for the active center and redirects if not allowed.
 
 **Account settings (delivered F2).** `/[locale]/account` serves every signed-in role. Each experience's shell is a **frame builder** (`centerShell()`, `teacherShell()`, `studentShell()`, `parentShell()`, `adminShell()` in `app/[locale]/(group)/*-shell.ts(x)`) that runs the group's gate and returns `AppShell`'s props; the group's layout renders it, and so does the account page — one shell selection, never a copy. The page picks the frame from the user menu's `?from=` hint via `resolveAccountExperience` (`lib/auth/tenant.ts`): honoured when the person may be there (a `center` hint only while the active branch grants a staff role), otherwise the experience sign-in lands them in. The hint only picks chrome — the page reads and writes nothing but the caller's own `User`. The student frame is taken with `interruptions: false` (no completion gate, no rating pop-up).
+
+**Sign-up intent and onboarding routing (delivered F4).** The register form posts `signupIntent` (required: `STUDENT | PARENT | TEACHER`). `signUpAction` puts it in the Supabase sign-up **metadata** (`signup_intent`) — so it survives the confirm-email round trip, which ends at `/` and the same routing — and `resolveAppIdentity` stores it on the new `User` (parsed like every metadata field: anything but the three values becomes null). Routing is one pure function, `lib/auth/onboarding.ts`'s `onboardingPath({ signupIntent, gradeId })`, reached through `landingWithoutBranch` (`lib/auth/tenant.ts`), which the sign-in/sign-up landing and `/` call **only when the person has no branch relation**: the admin console and a parent's linked children still win; then STUDENT with no account grade → `/student/onboarding`, PARENT → `/parent` ("Link your child"), TEACHER → `/teacher/centers`; no intent → the hub exactly as before. `homeWithoutBranch` is deliberately unchanged — Account settings asks it which *experience* to render, and an intent is not an experience. The intent is read by nothing else that decides access: not `permissions.ts`, `relations.ts`, `lib/db/permissions.ts`, `scoped.ts` or `tenant-scope.ts` (`check:account` greps for it).
 
 - **Credential changes live in `lib/auth/account.ts`** (relative imports, so `check:security` runs the real flows against a fake Supabase): every change that needs the current password is rate-limited per account and per IP (`accountVerifyPerUser`/`accountVerifyPerIp`) **before** Supabase is asked, then checked by a password sign-in on a throwaway client whose session is revoked straight away — the request's own session cookies are never replaced. A password change uses the session's `updateUser`, then `signOut({ scope: "others" })` when "Sign out other devices" is ticked; audited `account.password.change` (centre-less, ids only). An email change checks the password **before** it looks at who holds the address (no oracle), refuses an address held by another login or app user, and refuses a staff-created person's address without opening a claim (D-01).
 - **How an email change lands — `emailChangeMode()` (`lib/auth/auth-config.ts`):** `confirm` when `REQUIRE_EMAIL_CONFIRMATION=true` — `updateUser({ email })` makes Supabase mail a link to the new address (it lands on `/[locale]/auth/confirm`, which already accepts `email_change`); `direct` when `ALLOW_UNVERIFIED_EMAIL_CHANGE=yes` and confirmation is not required — the admin API sets the address **confirmed**; `off` otherwise — read-only. In both live modes `User.email` changes in exactly one place, `resolveAppIdentity` → `syncLinkedUser`, which now writes `account.email.change` in the same transaction; the direct path calls it straight after the admin update (and puts the login back if the sync could not take the address). The override logs a loud start-up warning, and a production start-up refuses it beside `REQUIRE_EMAIL_CONFIRMATION=true` (`productionAuthProblems`). Removing it is on the M20 checklist.

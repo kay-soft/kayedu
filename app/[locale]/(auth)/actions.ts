@@ -13,7 +13,7 @@ import {
 import {
   getOwnerOrgGroups,
   getUserCenterRelations,
-  homeWithoutBranch,
+  landingWithoutBranch,
   primaryRole,
   type CenterRelation,
 } from "@/lib/auth/tenant";
@@ -73,8 +73,9 @@ async function resolveLandingPath(user: User): Promise<string> {
     return homePathForRole(primaryRole(relation));
   }
 
-  // No branch: the admin console, the parent portal (verified children), or the hub (SYS).
-  if (relations.length === 0) return homeWithoutBranch(user);
+  // No branch: the admin console, the parent portal (verified children), the
+  // person's own onboarding when they declared a sign-up intent (F4), or the hub (SYS).
+  if (relations.length === 0) return landingWithoutBranch(user);
 
   return ROUTES.selectCenter;
 }
@@ -138,7 +139,7 @@ export async function signUpAction(
   if (!parsed.success) {
     return { fieldErrors: fieldErrorsFrom(parsed.error) };
   }
-  const { firstName, lastName, email, password, locale, next } = parsed.data;
+  const { firstName, lastName, email, password, locale, next, signupIntent } = parsed.data;
 
   const allowed = await checkRateLimits([
     { name: "signUpPerIp", key: await clientIp() },
@@ -155,7 +156,10 @@ export async function signUpAction(
     password,
     options: {
       emailRedirectTo: authConfirmUrl(locale),
-      data: { first_name: firstName, last_name: lastName, locale },
+      // `signup_intent` (F4) rides in the metadata so it survives the
+      // confirm-email round trip; `resolveAppIdentity` stores it on the new
+      // User. It routes onboarding and authorises nothing.
+      data: { first_name: firstName, last_name: lastName, locale, signup_intent: signupIntent },
     },
   });
 

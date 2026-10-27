@@ -14,9 +14,13 @@
  * The behaviour against a database (wrong password, collisions, a
  * staff-created email, the flag off) is `check:security`'s F2 block.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import { profileFromMetadata } from "../lib/auth/identity-link.ts";
+import { onboardingPath } from "../lib/auth/onboarding.ts";
+import { PROMOTION_UNDO_DAYS, isWithinUndoWindow, undoDeadline } from "../lib/promotion.ts";
+import { gradePickerData } from "../lib/student-grade-options.ts";
 import {
   allowUnverifiedEmailChange,
   emailChangeMode,
@@ -173,6 +177,123 @@ check(
     /<AppShell \{\.\.\.frame\.props\}>/.test(page),
 );
 check("the account page keeps both named extension points", /<StudyDetailsSection\b/.test(page) && /<FamilySection\b/.test(page));
+
+// ── F4: sign-up intent, account grade, promotion — the static shape ─────────
+console.log("\nF4 - sign-up intent routes, never authorises");
+const walkSources = (dir: string): string[] =>
+  readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) return entry.name === "node_modules" || entry.name === ".next" ? [] : walkSources(rel);
+    return /\.(ts|tsx)$/.test(entry.name) ? [rel] : [];
+  });
+const sources = ["app", "lib", "components"].flatMap(walkSources);
+
+check(
+  "onboardingPath: STUDENT without a grade -> Your studies; with one -> the hub; PARENT -> the parent portal; TEACHER -> the directory; none -> today's behaviour",
+  onboardingPath({ signupIntent: "STUDENT", gradeId: null }) === "/student/onboarding" &&
+    onboardingPath({ signupIntent: "STUDENT", gradeId: "g" }) === null &&
+    onboardingPath({ signupIntent: "PARENT", gradeId: null }) === "/parent" &&
+    onboardingPath({ signupIntent: "TEACHER", gradeId: null }) === "/teacher/centers" &&
+    onboardingPath({ signupIntent: null, gradeId: null }) === null,
+);
+check(
+  "sign-up metadata: only STUDENT / PARENT / TEACHER survive; anything else is dropped to null (never stored)",
+  profileFromMetadata({ id: "x", email: "a@b.c", user_metadata: { signup_intent: "TEACHER" } }).signupIntent === "TEACHER" &&
+    profileFromMetadata({ id: "x", email: "a@b.c", user_metadata: { signup_intent: "OWNER" } }).signupIntent === null &&
+    profileFromMetadata({ id: "x", email: "a@b.c", user_metadata: { signup_intent: 7 } }).signupIntent === null &&
+    profileFromMetadata({ id: "x", email: "a@b.c", user_metadata: {} }).signupIntent === null,
+);
+const intentReaders = sources.filter((file) => /\bsignupIntent\b/.test(code(file))).sort();
+const NEVER_READ_INTENT = [
+  "lib/auth/permissions.ts",
+  "lib/auth/relations.ts",
+  "lib/db/permissions.ts",
+  "lib/db/scoped.ts",
+  "lib/db/tenant-scope.ts",
+];
+check(
+  "no permission, relation-resolution or scoping module reads signupIntent — it grants nothing and is checked by no permission",
+  NEVER_READ_INTENT.every((file) => !intentReaders.includes(file)) && !intentReaders.some((file) => /\/actions\.ts$/.test(file) && file.includes("(center)")),
+  intentReaders.join(", "),
+);
+check(
+  "the only readers of signupIntent are sign-up, routing, onboarding display, the account study gate and the student-account refusal",
+  intentReaders.every((file) =>
+    [
+      "app/[locale]/(auth)/actions.ts",
+      "app/[locale]/(auth)/register/intent-cards.tsx",
+      "app/[locale]/(auth)/register/register-form.tsx",
+      "app/[locale]/(auth)/select-center/page.tsx",
+      "lib/auth/identity-link.ts",
+      "lib/auth/onboarding.ts",
+      "lib/auth/tenant.ts",
+      "lib/db/account-study.ts",
+      "lib/db/parents.ts",
+      "lib/validation/auth.ts",
+    ].includes(file),
+  ),
+  intentReaders.join(", "),
+);
+const signUpAction = exportedBody("app/[locale]/(auth)/actions.ts", "signUpAction");
+check(
+  "signUpAction carries the intent in the auth metadata and writes no User row itself",
+  /signup_intent:\s*signupIntent/.test(signUpAction) && !/prisma\.user\./.test(signUpAction),
+);
+check("the register form requires an intent (a required radio group)", /name="signupIntent"[\s\S]*required/.test(code("app/[locale]/(auth)/register/intent-cards.tsx")));
+
+console.log("\nF4 - the account grade never reaches a branch record");
+const study = code("lib/db/account-study.ts");
+const setGrade = functionBody("lib/db/account-study.ts", "setAccountGrade");
+check("setAccountGrade writes User.gradeId and nothing else", /user\.update\(/.test(setGrade) && !/studentProfile|enrollment|payment/i.test(setGrade));
+check(
+  "the only branch write in account-study is the explicit, audited applyAccountGrade (student.grade.account), scoped by centerId",
+  (study.match(/studentProfile\.(update|updateMany|create|delete)\w*\(/g) ?? []).length === 1 &&
+    /"student\.grade\.account"/.test(study) && /centerId: input\.centerId/.test(study),
+);
+const ensure = functionBody("lib/db/reservations.ts", "ensureStudentProfile");
+check(
+  "ensureStudentProfile returns an existing profile untouched, and seeds only a new one from the account",
+  ensure.indexOf("if (existing) return existing;") > 0 && ensure.indexOf("if (existing) return existing;") < ensure.indexOf("seedFromAccount("),
+);
+check("setting the account grade is a session-user action, never a form-supplied user id", !/userId/.test(code("app/[locale]/account/study-actions.ts").replace(/user\.id/g, "")));
+
+console.log("\nF4 - promotion is a branch-record change only");
+const promotion = code("lib/db/promotion.ts");
+check(
+  "lib/db/promotion.ts never writes an enrolment, class, session, payment, user or another table's grade",
+  !/\b(enrollment|classGroup|session|payment|refund|settlement|user)\.(update|updateMany|create|createMany|delete|deleteMany|upsert)\(/.test(promotion),
+);
+check(
+  "the batch, its items and the audit row are written on the same transaction as the grade change",
+  /\$transaction\(async \(tx\)/.test(promotion) && /tx\.gradePromotionBatch\.create/.test(promotion) && /tx\.gradePromotionItem\.createMany/.test(promotion) && /writeAuditRow\(tx,/.test(promotion),
+);
+check("both audit actions exist: student.grade.promote and student.grade.promote.undo", /"student\.grade\.promote"/.test(promotion) && /"student\.grade\.promote\.undo"/.test(promotion));
+const scopedModels = [...promotion.matchAll(/(?:studentProfile|gradePromotionBatch|enrollment)\.(?:findMany|findFirst|updateMany|groupBy)\(\{\s*where:\s*(\w+)/g)];
+check(
+  "every studentProfile / batch / enrolment query in promotion.ts is scopedWhere(centerId, ...), and each raw lock names the centre",
+  scopedModels.length >= 5 && scopedModels.every((match) => match[1] === "scopedWhere") && (promotion.match(/"centerId" = \$\{centerId\}/g) ?? []).length >= 3,
+  String(scopedModels.length),
+);
+const students = code("app/[locale]/(center)/students/actions.ts");
+check(
+  "confirm and undo are gated on student.promote and the old one-click promoteGradeAction is gone",
+  /export async function confirmPromotionAction[\s\S]*?ctxCan\(ctx, "student\.promote"\)/.test(students) &&
+    /export async function undoPromotionAction[\s\S]*?ctxCan\(ctx, "student\.promote"\)/.test(students) &&
+    !/promoteGradeAction/.test(students),
+);
+check("the promote page is gated on student.promote", /requirePermission\(ctx, "student\.promote"\)/.test(code("app/[locale]/(center)/students/promote/page.tsx")));
+check(
+  "undo window: 14 days, open at exactly 14 days and closed a second later",
+  PROMOTION_UNDO_DAYS === 14 &&
+    isWithinUndoWindow(new Date(0), undoDeadline(new Date(0))) &&
+    !isWithinUndoWindow(new Date(0), new Date(undoDeadline(new Date(0)).getTime() + 1000)),
+);
+const catalogGrade = { id: "a", nameAr: "ا", nameEn: "A", active: true, educationSystemId: null, educationSystem: null };
+check(
+  "the grade picker invents no order: grades are listed by name, never a guessed 'next grade'",
+  !/next(Grade)?\b/i.test(code("lib/student-grade-options.ts")) &&
+    gradePickerData("en", [catalogGrade], null, { noSystem: "Other", inactive: "Off" }).systems[0].value === "none",
+);
 
 if (failures > 0) {
   console.error(`\n${failures} account check(s) failed.`);

@@ -338,6 +338,23 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
           where: scopedWhere(centerId, { userId }),
         }),
 
+      /**
+       * F4 — the students whose own account grade is set and differs from the
+       * grade this branch has on file (the "Grade differs from account" chip).
+       * A raw join because Prisma cannot compare a column to another table's;
+       * `centerId` is bound in the statement itself, so it can only ever name
+       * this branch's profiles.
+       */
+      idsGradeDiffersFromAccount: async (): Promise<string[]> => {
+        const rows = await prisma.$queryRaw<{ id: string }[]>`
+          SELECT sp."id" FROM "StudentProfile" sp
+          JOIN "User" u ON u."id" = sp."userId"
+          WHERE sp."centerId" = ${centerId}
+            AND u."gradeId" IS NOT NULL
+            AND (sp."gradeId" IS NULL OR sp."gradeId" <> u."gradeId")`;
+        return rows.map((row) => row.id);
+      },
+
       /** The exact-match lookup a scanned ID-card QR resolves through (M5). */
       findByCode: (studentCode: string) =>
         prisma.studentProfile.findFirst({
@@ -365,15 +382,37 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         prisma.studentProfile.deleteMany({
           where: scopedWhere(centerId, { id }),
         }),
+    },
 
-      /**
-       * End-of-term grade promotion. A scoped updateMany, so a grade id from
-       * another center matches zero students rather than the wrong ones.
-       */
-      promoteGrade: (fromGradeId: string, toGradeId: string) =>
-        prisma.studentProfile.updateMany({
-          where: scopedWhere(centerId, { gradeId: fromGradeId, active: true }),
-          data: { gradeId: toGradeId },
+    /**
+     * F4 — this branch's bulk grade promotions (reads). The writes are
+     * `lib/db/promotion.ts`'s `confirmGradePromotion` / `undoGradePromotion`,
+     * which take this same `centerId` and run in one transaction; the old
+     * one-click `promoteGrade` that lived here is gone.
+     */
+    gradePromotions: {
+      recent: (take = 10) =>
+        prisma.gradePromotionBatch.findMany({
+          where: scopedWhere(centerId),
+          orderBy: { createdAt: "desc" },
+          take,
+          include: {
+            _count: { select: { items: true } },
+            fromGrade: { include: { selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 } } },
+            toGrade: { include: { selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 } } },
+          },
+        }),
+
+      /** The one batch an Undo may touch: the latest not yet undone. */
+      latestOpen: () =>
+        prisma.gradePromotionBatch.findFirst({
+          where: scopedWhere(centerId, { undoneAt: null }),
+          orderBy: { createdAt: "desc" },
+          include: {
+            _count: { select: { items: true } },
+            fromGrade: { include: { selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 } } },
+            toGrade: { include: { selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 } } },
+          },
         }),
     },
 

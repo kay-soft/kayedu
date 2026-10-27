@@ -23,6 +23,7 @@ import {
   type CenterRelation,
   type Experience,
 } from "@/lib/auth/relations";
+import { onboardingPath } from "@/lib/auth/onboarding";
 import { loadPermissionGrants } from "@/lib/db/permissions";
 import { activeChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
@@ -467,6 +468,22 @@ export async function homeWithoutBranch(user: Pick<User, "id" | "isPlatformAdmin
   if (user.isPlatformAdmin) return ROUTES.adminCenters;
   const children = await getParentChildren(user.id);
   return children.linked.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
+}
+
+/**
+ * Where a sign-in or sign-up with no branch lands (F4): the same answer as
+ * `homeWithoutBranch`, except that a person who declared a sign-up intent and
+ * would otherwise reach the empty hub goes to their own onboarding instead.
+ * The admin console and a parent's linked children are never overridden.
+ * Account settings keeps asking `homeWithoutBranch` — an intent is not an
+ * experience.
+ */
+export async function landingWithoutBranch(
+  user: Pick<User, "id" | "isPlatformAdmin" | "signupIntent" | "gradeId">,
+): Promise<string> {
+  const home = await homeWithoutBranch(user);
+  if (home !== ROUTES.selectCenter) return home;
+  return onboardingPath(user) ?? home;
 }
 
 export type ParentSession = {

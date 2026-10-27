@@ -171,7 +171,22 @@
       "submit": "Create account",
       "haveAccount": "Already have an account?",
       "loginLink": "Sign in",
-      "passwordHint": "At least 8 characters."
+      "passwordHint": "At least 8 characters.",
+      "intent": {
+        "legend": "I'm joining as",
+        "STUDENT": {
+          "label": "Student",
+          "hint": "Find classes and follow your schedule."
+        },
+        "PARENT": {
+          "label": "Parent",
+          "hint": "Follow your child's schedule and attendance."
+        },
+        "TEACHER": {
+          "label": "Teacher",
+          "hint": "Teach at one or more branches."
+        }
+      }
     },
     "selectCenter": {
       "title": "Choose a branch",
@@ -219,7 +234,8 @@
       "invalidCenter": "Unknown branch.",
       "invalidInvitation": "Unknown invitation.",
       "rateLimited": "Too many attempts — wait a few minutes and try again.",
-      "emailNotConfirmed": "Confirm your email address first, then accept the invitation."
+      "emailNotConfirmed": "Confirm your email address first, then accept the invitation.",
+      "intentRequired": "Choose how you are joining."
     },
     "shell": {
       "headline": "Run the whole centre from one screen.",
@@ -394,7 +410,13 @@
       "rateLimited": "Too many contact lookups — wait a minute and try again.",
       "alreadyCompleted": "Your profile is already complete. Ask the branch to change these details.",
       "verificationUnavailable": "Parent verification is turned off until a safe verification method is decided.",
-      "branchNotAllowed": "You can't add teachers at that branch."
+      "branchNotAllowed": "You can't add teachers at that branch.",
+      "generic": "Something went wrong. Try again.",
+      "promotionNotLatest": "Only the latest promotion can be undone.",
+      "promotionExpired": "This promotion is past its undo period.",
+      "promotionAlreadyUndone": "This promotion was already undone.",
+      "tooManyStudents": "That is more students than one promotion can carry.",
+      "accountGradeNotOffered": "This branch does not offer the grade on the student's account."
     }
   },
   "Teachers": {
@@ -525,14 +547,51 @@
       "otherCenters": "Other branches"
     },
     "promote": {
-      "title": "Promote a grade",
-      "description": "At the end of a term, move every active student in one grade to the next.",
+      "title": "Promote students",
+      "description": "Move students from one grade to the next. You see who moves before anything changes, you can leave students out, and you can undo it for {days} days.",
+      "open": "Promote students",
+      "backToStudents": "Back to students",
+      "chooseTitle": "Choose the grades",
+      "chooseDescription": "Pick the grade students are in now and the grade they move to.",
       "from": "From grade",
       "to": "To grade",
-      "warning": "This moves every active student in the chosen grade. The change is recorded in the audit log.",
-      "submit": "Promote students",
-      "done": "Students promoted.",
-      "needsGrades": "Add at least two grades in settings before promoting."
+      "chooseGrade": "Choose a grade",
+      "preview": "Preview",
+      "needsGrades": "Add at least two grades in settings before promoting.",
+      "sameGrade": "Choose a different grade to promote to.",
+      "previewTitle": "Moving from {from} to {to}",
+      "previewDescription": "Every active student in the From grade is ticked. Untick anyone who stays where they are.",
+      "noStudents": "No active students are in {from}.",
+      "searchLabel": "Search these students",
+      "searchPlaceholder": "Name or code",
+      "noSearchMatches": "No student here matches that search.",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "selectedCount": "{selected} of {total} selected",
+      "tick": "Promote {name}",
+      "accountSays": "Account says: {grade}",
+      "enrollments": "{count, plural, one {# active class enrolment} other {# active class enrolments}} in this grade",
+      "noEnrollments": "No active class enrolments in this grade",
+      "enrollmentKept": "Enrolment is kept",
+      "confirm": "Promote {count, plural, one {# student} other {# students}} to {to}",
+      "confirmNote": "Only the grade on this branch's record changes. Classes, enrolments, sessions, payments, other branches and students' own account grades stay as they are. You can undo this for {days} days.",
+      "done": "{count, plural, one {# student promoted} other {# students promoted}}. You can undo this for {days} days.",
+      "doneSkipped": "{skipped, plural, one {# was} other {# were}} left as they are because they changed after the preview.",
+      "historyTitle": "Promotion history",
+      "historyDescription": "Recent promotions at this branch. The latest one can be undone for {days} days.",
+      "historyEmpty": "No promotions yet.",
+      "historyEmptyHint": "When you promote students, each batch is listed here.",
+      "historyRoute": "{from} → {to}",
+      "historyMeta": "{date} · {count, plural, one {# student} other {# students}} · by {by}",
+      "historyUndone": "Undone on {date} by {by}",
+      "statusUndone": "Undone",
+      "undo": "Undo",
+      "undoTitle": "Undo this promotion?",
+      "undoDescription": "Students still in {to} go back to {from}. Anyone whose grade has changed since stays where they are.",
+      "undoConfirm": "Undo promotion",
+      "undoDone": "{reverted, plural, one {# student put back} other {# students put back}}. {skipped, plural, =0 {} one {# was left as it is.} other {# were left as they are.}}",
+      "bannerTitle": "Promotion on {date}: {from} → {to}, {count, plural, one {# student} other {# students}}",
+      "bannerHint": "You can undo it until {date}."
     },
     "photo": {
       "title": "Photo",
@@ -603,6 +662,13 @@
     "deactivateConfirm": {
       "title": "Deactivate {name}?",
       "body": "They leave this branch’s active lists. Their history is kept, and you can activate them again."
+    },
+    "filtersLabel": "Filters",
+    "gradeDiffersChip": "Grade differs from account",
+    "accountGrade": {
+      "says": "Account says: {grade}",
+      "use": "Use account grade",
+      "notOffered": "This branch does not offer that grade."
     }
   },
   "Classes": {
@@ -2815,7 +2881,8 @@
     "familyUnlinked": "Child unlinked",
     "familyInvitationCancelled": "Invitation cancelled",
     "familyCodeCancelled": "Code cancelled",
-    "familyAccessRemoved": "Parent access removed"
+    "familyAccessRemoved": "Parent access removed",
+    "studentAccountGradeUsed": "Grade updated from the student's account."
   },
   "Account": {
     "title": "Account settings",
@@ -2888,6 +2955,24 @@
       "emailChangeDisabled": "Changing email needs email confirmation — coming soon.",
       "rateLimited": "Too many attempts — wait a few minutes, then try again.",
       "failed": "Something went wrong. Try again."
+    },
+    "study": {
+      "title": "Study details",
+      "description": "Your own details as a student.",
+      "cardTitle": "Your grade",
+      "cardDescription": "The grade you are in now. It pre-selects Discover's grade filter and fills in your grade when you join a new branch.",
+      "branchNote": "Changing this never changes what a branch has on file for you. Each branch keeps its own record, and only the branch can change it.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Your grade was saved.",
+      "picker": {
+        "system": "Education system",
+        "systemPlaceholder": "Choose an education system",
+        "grade": "Grade",
+        "gradePlaceholder": "Choose a grade",
+        "none": "Not set",
+        "noSystem": "Other grades"
+      }
     }
   },
   "AdminOrganizations": {
@@ -3054,6 +3139,21 @@
       "required": "This field is required.",
       "tooLong": "This value is too long.",
       "invalidPhone": "Enter a valid Egyptian mobile number."
+    }
+  },
+  "Onboarding": {
+    "student": {
+      "title": "Your studies",
+      "description": "Tell us your grade so we can show you the right classes.",
+      "step": "Step {current} of {total}",
+      "gradeTitle": "Your education system and grade",
+      "gradeDescription": "Pick the system you study in, then your grade. You can change it any time in Account settings.",
+      "continue": "Continue",
+      "saving": "Saving…",
+      "parentTitle": "Invite a parent",
+      "parentDescription": "Optional. Give us your parent's details and you get a one-time code to send them. A parent only sees your schedule and attendance. You can skip this and do it later in Account settings.",
+      "skip": "Skip for now",
+      "toDiscover": "Find classes"
     }
   }
 }

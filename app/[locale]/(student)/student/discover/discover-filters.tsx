@@ -20,6 +20,7 @@ export type DiscoverFilterOption = { value: string; label: string };
 export function DiscoverFilters({
   subject,
   grade,
+  allGradesValue = "",
   day,
   subjects,
   grades,
@@ -28,6 +29,12 @@ export function DiscoverFilters({
 }: {
   subject: string;
   grade: string;
+  /**
+   * What the grade filter's "All" posts. Empty — unless the student's account
+   * grade pre-selects one (F4): an empty value drops the param, which would
+   * read as "use my grade" again, so "All" is the explicit `all`.
+   */
+  allGradesValue?: string;
   day: string;
   subjects: DiscoverFilterOption[];
   grades: DiscoverFilterOption[];
@@ -63,7 +70,7 @@ export function DiscoverFilters({
           className="rounded-full"
           submitOnChange
         >
-          <option value="">{allLabel}</option>
+          <option value={allGradesValue}>{allLabel}</option>
           {grades.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}

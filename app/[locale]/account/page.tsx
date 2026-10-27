@@ -105,7 +105,7 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
           )}
         </PageSection>
 
-        {/* Extension points — render nothing until F4 / F3 fill them. */}
+        {/* Extension points (F4 Study details, F3 Family) — each renders nothing for an account it does not apply to. */}
         <StudyDetailsSection user={user} />
         <FamilySection user={user} />
 

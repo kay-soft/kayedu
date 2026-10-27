@@ -73,7 +73,11 @@ export default async function StudentDiscoverPage({
   const session = await requireStudentUser();
   const rawParams = await searchParams;
   const subjectFilter = rawParams.subject?.trim() || "";
-  const gradeFilter = rawParams.grade?.trim() || "";
+  // F4: the student's own account grade pre-selects the grade filter until they
+  // choose otherwise. An empty param can never mean "all" (the URL helper drops
+  // empty values), so choosing "All grades" is the explicit `grade=all`.
+  const gradeParam = rawParams.grade?.trim() || "";
+  const accountGradeId = session.user.gradeId;
   const dayFilter = rawParams.day?.trim() || "";
 
   const t = await getTranslations("StudentDiscover");
@@ -93,6 +97,11 @@ export default async function StudentDiscoverPage({
       listCatalogSubjects(prisma),
       listCatalogGrades(prisma),
     ]);
+
+  // F4: only an active grade can pre-select (it is also what the picker lists).
+  const accountGradeActive = accountGradeId !== null && allGrades.some((grade) => grade.id === accountGradeId);
+  const gradeFilter =
+    gradeParam === "all" ? "" : gradeParam || (accountGradeActive ? accountGradeId : "");
 
   // Global catalog ids (M13) mean the same thing at every centre, so the
   // subject/grade filter is a real scoped `where` per centre now — never the
@@ -185,7 +194,7 @@ export default async function StudentDiscoverPage({
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();
     if (subjectFilter) params.set("subject", subjectFilter);
-    if (gradeFilter) params.set("grade", gradeFilter);
+    if (gradeParam) params.set("grade", gradeParam);
     if (dayFilter) params.set("day", dayFilter);
     if (targetPage > 1) params.set("page", String(targetPage));
     const qs = params.toString();
@@ -198,7 +207,8 @@ export default async function StudentDiscoverPage({
 
       <DiscoverFilters
         subject={subjectFilter}
-        grade={gradeFilter}
+        grade={gradeParam === "all" ? "all" : gradeFilter}
+        allGradesValue={accountGradeActive ? "all" : ""}
         day={dayFilter}
         subjects={subjectOptions}
         grades={gradeOptions}

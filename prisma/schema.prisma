@@ -175,6 +175,15 @@ enum ParentLinkStatus {
   REVOKED
 }
 
+// F4: what a person said they were joining as at sign-up. It routes onboarding
+// and nothing else — not a role, it grants nothing and no permission check
+// reads it. Null for every account that existed before F4 (no backfill).
+enum SignupIntent {
+  STUDENT
+  PARENT
+  TEACHER
+}
+
 // A self-registered account's claim on a staff-created person (SEC-2a, D-01).
 // A sign-up whose email equals an unlinked, staff-created `User` never links
 // on its own: it opens a PENDING claim that centre staff approve in person.
@@ -215,6 +224,15 @@ model User {
   // The preferred language: where sign-in lands (F2), editable on Account settings.
   locale          String    @default("ar") // "ar" | "en"
   isPlatformAdmin Boolean   @default(false)
+  // F4: what the person said they were joining as at sign-up — onboarding
+  // routing only (see `SignupIntent`). Never a role; nothing authorises on it.
+  signupIntent    SignupIntent?
+  // F4: the student's own statement of their current grade (a platform
+  // catalog grade, so no `centerId`). Editable any time on Account → Study
+  // details; pre-selects Discover's grade filter and seeds a *new* branch's
+  // profile (`ensureStudentProfile`) — and never changes a branch record.
+  gradeId         String?
+  grade           CatalogGrade? @relation("UserGrade", fields: [gradeId], references: [id])
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -369,6 +387,8 @@ model Center {
   parentLinks       ParentLink[]
   // F3 — parent codes this branch printed (`FamilyInvitation.issuingCenterId`).
   familyInvitations FamilyInvitation[]
+  // F4 — this branch's bulk grade promotions (and their undo ledger).
+  gradePromotions   GradePromotionBatch[]
 
   @@index([organizationId])
 }
@@ -557,6 +577,11 @@ model CatalogGrade {
   classGroups     ClassGroup[]
   studentProfiles StudentProfile[]
   sessions        Session[] // R5 — one-time sessions
+  // F4 — accounts that named this as their own grade, and the promotion
+  // batches that moved students out of / into it.
+  accountUsers    User[]                @relation("UserGrade")
+  promotionsFrom  GradePromotionBatch[] @relation("PromotionFrom")
+  promotionsTo    GradePromotionBatch[] @relation("PromotionTo")
 
   @@index([educationSystemId])
 }
@@ -821,11 +846,65 @@ model StudentProfile {
   // M16 — every parent account that has matched (or been verified) against
   // this child, via `parentPhone`/`parentAltPhone` above.
   parentLinks       ParentLink[]
+  // F4 — the promotion batches that moved this student (undo reads these).
+  promotionItems    GradePromotionItem[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
   @@index([centerId])
   @@index([centerId, active])
+}
+
+/**
+ * One confirmed bulk grade promotion at one branch (F4, docs/00 §4.1 item 4).
+ * Written in the same transaction as the `StudentProfile.gradeId` updates it
+ * describes, with one `GradePromotionItem` per student actually moved — so the
+ * batch is both the audit anchor (`student.grade.promote`: batch id + count)
+ * and the undo ledger. Tenant-scoped: `centerId` is the sole key (CLAUDE.md
+ * rule 1), reached only through `scoped(ctx).gradePromotions`.
+ *
+ * It touches a branch's own `StudentProfile.gradeId` and nothing else —
+ * never an enrolment, class, session, money row, another branch, or
+ * `User.gradeId`. `undoneAt`/`undoneBy` are both set or both null (CHECK in
+ * the migration); the latest not-yet-undone batch may be undone for
+ * `PROMOTION_UNDO_DAYS` (`lib/promotion.ts`). `createdBy`/`undoneBy` are
+ * plain user ids, no FK: a batch outlives a deleted account.
+ */
+model GradePromotionBatch {
+  id          String       @id @default(uuid())
+  centerId    String
+  center      Center       @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  fromGradeId String
+  fromGrade   CatalogGrade @relation("PromotionFrom", fields: [fromGradeId], references: [id])
+  toGradeId   String
+  toGrade     CatalogGrade @relation("PromotionTo", fields: [toGradeId], references: [id])
+  createdBy   String
+  createdAt   DateTime     @default(now())
+  undoneAt    DateTime?
+  undoneBy    String?
+
+  items GradePromotionItem[]
+
+  @@index([centerId, createdAt])
+}
+
+/**
+ * One student moved by a `GradePromotionBatch`. `previousGradeId` is the grade
+ * the student held when the batch ran (always the batch's `fromGradeId` —
+ * only students in that grade are moved), kept per row so undo does not
+ * depend on the batch's header alone. A plain id, not a relation: the batch's
+ * own `fromGradeId` FK already protects the catalog row.
+ */
+model GradePromotionItem {
+  id               String              @id @default(uuid())
+  batchId          String
+  batch            GradePromotionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile      @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  previousGradeId  String
+
+  @@unique([batchId, studentProfileId])
+  @@index([studentProfileId])
 }
 
 /**

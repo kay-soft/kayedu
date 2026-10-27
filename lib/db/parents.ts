@@ -104,15 +104,19 @@ export async function familySlotsInUse(db: Db, studentUserId: string): Promise<n
  * the child (an accepted code always made one). Such an account can never
  * accept a code (a parent needs their own parent account). A cancelled
  * invitation does not count, so a parent who pressed "Invite a parent" by
- * mistake can undo it. F4's sign-up intent joins this list when it exists.
+ * mistake can undo it. **F4:** an account that said it was signing up as a
+ * STUDENT counts too — before it has any profile, a "student" must not be
+ * able to accept a classmate's code. That is a refusal, never a grant: the
+ * intent opens no door anywhere else.
  */
 export async function isStudentAccount(db: Db, userId: string): Promise<boolean> {
-  const [profile, invitation, asChild] = await Promise.all([
+  const [profile, invitation, asChild, declared] = await Promise.all([
     db.studentProfile.findFirst({ where: { userId }, select: { id: true } }),
     db.familyInvitation.findFirst({ where: { studentUserId: userId, status: PENDING }, select: { id: true } }),
     db.familyLink.findFirst({ where: { studentUserId: userId }, select: { id: true } }),
+    db.user.findFirst({ where: { id: userId, signupIntent: "STUDENT" }, select: { id: true } }),
   ]);
-  return Boolean(profile || invitation || asChild);
+  return Boolean(profile || invitation || asChild || declared);
 }
 
 /** A parent account (one active child or more) cannot invite parents of its own. */

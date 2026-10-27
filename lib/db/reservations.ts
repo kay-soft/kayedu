@@ -11,6 +11,7 @@ import type {
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/payments.ts).
+import { seedFromAccount } from "./account-study.ts";
 import { claimStudentCode } from "./students.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
@@ -58,11 +59,18 @@ type Db = PrismaClient | Prisma.TransactionClient;
  * the person *is* the authenticated caller, so their own `User` row seeds the
  * local record directly, exactly once, then it is independently editable at
  * that center like any other (docs/01-data-model.md §6).
+ *
+ * **F4 — two-layer grade.** A *new* profile is also seeded from the student's
+ * own account: `User.gradeId` (when this branch offers that grade) and the
+ * parent they declared in F3's "Invite a parent". With both a grade and a
+ * parent phone the profile is stamped complete and the one-time form is
+ * skipped (D-11 unchanged — staff edits stay allowed). An existing profile is
+ * returned untouched: the account never overwrites a branch's record.
  */
 export async function ensureStudentProfile(
   tx: Prisma.TransactionClient,
   centerId: string,
-  user: Pick<User, "id" | "firstName" | "lastName" | "email" | "phone" | "altPhone">,
+  user: Pick<User, "id" | "firstName" | "lastName" | "email" | "phone" | "altPhone" | "gradeId">,
 ) {
   const existing = await tx.studentProfile.findFirst({
     where: { userId: user.id, centerId },
@@ -70,6 +78,7 @@ export async function ensureStudentProfile(
   if (existing) return existing;
 
   const studentCode = await claimStudentCode(tx, centerId);
+  const seeded = await seedFromAccount(tx, centerId, user);
   return tx.studentProfile.create({
     data: scopedData(centerId, {
       userId: user.id,
@@ -79,6 +88,7 @@ export async function ensureStudentProfile(
       email: user.email,
       phone: user.phone,
       altPhone: user.altPhone,
+      ...seeded,
     }),
   });
 }

@@ -54,6 +54,7 @@ Own `Card` with `p-2 sm:p-4` plus `CardHeader` — heading was 20px, spacing dif
 
 ### `app/[locale]/(auth)/register/page.tsx`
 Same as login; two password fields with no visibility toggle. **R10a:** `AuthCard`, `PasswordField` ×2.
+**F4:** the form opens with **I'm joining as** — three radio cards (Student / Parent / Teacher, required; Parent pre-ticked from a join link) — above the name fields; one column on a phone, three from `sm` (docs/04 §11.23).
 
 ### `app/[locale]/(auth)/invite/[token]/page.tsx`
 Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on `AuthCard`.
@@ -67,6 +68,7 @@ Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on
 ### `app/[locale]/(auth)/select-center/page.tsx`
 Branch cards had hover but **no selected state** — the branch you are already in looked like the others — and the "Whole Management" card was always brand-tinted, even when not selected. **R10a:** `AuthCard`; the active branch/roll-up gets a brand outline, tint and a check (not colour alone); idle cards share one hover state.
 **F3:** the empty state gains a third start, **I'm a parent: link my child** (to `/family/join`); a staff member or teacher who is also a parent gets a ghost **Your children (parent view)** link under their branches.
+**F4:** the three starts are ordered by the person's sign-up intent (theirs first and highlighted); no intent keeps the old order and emphasis.
 
 ---
 
@@ -74,6 +76,8 @@ Branch cards had hover but **no selected state** — the branch you are already 
 
 ### `app/[locale]/account/page.tsx`
 **F2 (new).** Account settings, reached from the user menu (and the branch hub) by every signed-in role, rendered inside the shell of the experience it was opened from (`?from=`). `PageHeader`, then two `PageSection`s: **Profile** — one card (first/last name side by side from `sm`, contact phone LTR with its hint, preferred-language `Select`) and, below it, one read-only card per branch record ("How {branch} has you on file": role, local name, phone, "Ask the branch to update this"), two columns from `md`; **Sign-in & security** — Email and Password cards, side by side from `lg`, stacked below. Email shows the current address LTR and is read-only with an info notice until the override or confirmation is on. Password uses `PasswordField` ×3 and a `Checkbox` "Sign out other devices", ticked by default, in a 44px label row. Two named extension points between the sections render nothing until F3/F4 fill them.
+
+**F4 (new section):** Account → **Study details** (a `PageSection` between Profile and Family, only for a student account): one card with the education-system → grade picker, a muted note that a branch's record is never changed, and **Save**.
 
 ---
 
@@ -90,6 +94,11 @@ Empty state: icon + title + hint but **no action**; Approve/Decline buttons were
 
 ### `app/[locale]/(center)/students/page.tsx`
 Header, filter, list and empty states already on the shared parts; hand-copied list-header row. **R10a:** `ListHeader`.
+
+**F4:** the Promote card is gone — a **Promote students** button joins Add student in the header (stacked on a phone); an amber **undo banner** names the latest promotion while it can be undone; a **Grade differs from account** pill filter sits beside the search (`SoftLink`, 44px).
+
+### `app/[locale]/(center)/students/promote/page.tsx`
+**F4 (new).** Promote students (docs/04 §11.23): `PageHeader` with a back link; **Choose the grades** (From, To and Preview in one `FilterBar`; nothing pre-selected for To); **Preview** (search, Select all / none, a ≥56px checkbox row per student with the code, name, an amber "Account says" badge and "Enrolment is kept", one confirm button that names the count); **Promotion history** (a bordered row per batch with an **Undo** on the latest open one). Stacked below `md`.
 
 ### `app/[locale]/(center)/teachers/page.tsx`
 As students. **R10a:** `ListHeader`.
@@ -171,6 +180,8 @@ New. OWNER only (`organization.branch.create`). A usage card ("2 of 3 branches u
 **R10b:** header with the photo (a signed URL) or first letter, code, Active and grade, and **Print ID card / Print paper form** as its action bar; `main` is the record (person · grade · parent contact, one Save), enrolments with the absence-streak alerts, and "blocked by"; `side` is the ID card (preview and the stored-card control), photo, parent summary and parent links (with the placeholder verify, behind `parent.link.manage`); Delete is a danger zone at the foot. The columns now end within a card of each other at 1280px. Not added: attendance/payment history (no data on the page today).
 **F3:** the "Parent accounts" card (pending phone matches and a disabled Verify) is replaced by **Parent access** (docs/04 §11.22): one bordered row per active parent account — account name, a neutral "how linked" badge, the date, and the parent the student declared when there is one — with **Remove access** (an inline reason panel) per row; the slot count; an info notice for this branch's waiting code (its hint in an LTR run); **Generate parent code** / **Replace the code** and **Cancel code**. Without `parent.link.manage` the list shows with a muted "ask a manager" line and no controls.
 
+**F4:** when the student's own account names a different grade, the header meta gains an amber **Account says: {grade}** badge with a **Use account grade** button (hidden, with a note, when the branch does not offer that grade).
+
 **DES (Phase 3):** removing the photo confirms first (it deletes the file); photo save/remove toast.
 
 ### Add student and Add teacher dialogs (`students/add-student-dialog.tsx`, `teachers/add-teacher-dialog.tsx`) — **R10b**
@@ -221,11 +232,15 @@ Consistent. No change.
 
 ### `app/[locale]/(student)/student/discover/page.tsx`
 Filter labels hand-built (in `discover-filters.tsx`). **R10a:** `FilterField`. The class card's subject-accent top border is the documented rotating subject palette (docs/04 §2), not a status colour.
+**F4:** the grade filter is pre-selected from the student's account grade; its "All" option posts the explicit `all` when a grade is pre-selected.
 
 **DES:** "Request to join" is the outlined brand button with a spinner. Still one long column on a phone — capping a browse surface is a product call — **OD-13** (docs/00 §2.2), not guessed.
 
 ### `app/[locale]/(student)/student/reservations/page.tsx`
 `CardContent … pt-6` double padding. **R10a:** removed.
+
+### `app/[locale]/(student)/student/onboarding/page.tsx`
+**F4 (new).** Your studies (docs/04 §11.23): `PageHeader`, then one `max-w-xl` card per step — the grade picker and **Continue**, then (where a parent slot is free) the Invite a parent form with **Skip for now**, then the one-time code reveal and **Find classes**. Part of the student portal; the sidebar stays; nothing is gated behind it.
 
 ### `app/[locale]/(student)/student/profile/page.tsx`
 Redirect only. No change.

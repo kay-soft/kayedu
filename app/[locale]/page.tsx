@@ -5,7 +5,7 @@ import { PublicHeader } from "@/components/shared/public-header";
 
 import { getAppIdentity } from "@/lib/auth/session";
 import { getActiveCenterId } from "@/lib/auth/active-center";
-import { getUserCenterRelations, homeWithoutBranch, primaryRole } from "@/lib/auth/tenant";
+import { getUserCenterRelations, landingWithoutBranch, primaryRole } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 
@@ -29,8 +29,9 @@ export default async function HomePage() {
 
   const relations = await getUserCenterRelations(user!.id);
 
-  // No branch: the admin console, the parent portal (verified children), or the hub.
-  if (relations.length === 0) redirect({ href: await homeWithoutBranch(user!), locale });
+  // No branch: the admin console, the parent portal (verified children), the
+  // person's own onboarding (F4 sign-up intent), or the hub.
+  if (relations.length === 0) redirect({ href: await landingWithoutBranch(user!), locale });
 
   const activeCenterId = await getActiveCenterId();
   const relation =

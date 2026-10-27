@@ -42,3 +42,18 @@ export const changeEmailSchema = z.object({
   currentPassword,
   locale: localeSchema,
 });
+
+/**
+ * Account → Study details and onboarding's "Your studies" (F4): the student's
+ * own grade — a platform catalog grade id, or empty to clear it. Resolved
+ * against the catalog server-side (`lib/db/account-study.ts`).
+ */
+export const studyDetailsSchema = z.object({
+  locale: localeSchema,
+  gradeId: z
+    .string()
+    .trim()
+    .max(64, "tooLong")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+});

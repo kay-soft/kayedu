@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import { applyAccountGrade } from "@/lib/db/account-study";
+import { confirmGradePromotion, undoGradePromotion } from "@/lib/db/promotion";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import {
@@ -40,7 +42,8 @@ import {
 } from "@/lib/storage-paths";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
-  gradePromotionSchema,
+  gradePromotionConfirmSchema,
+  gradePromotionUndoSchema,
   studentActionSchema,
   studentActiveSchema,
   studentCreateSchema,
@@ -468,46 +471,78 @@ export async function deleteStudentAction(
   return { status: "deleted" };
 }
 
-// ── Grade promotion (end of term) ──────────────────────────────────────────
+// ── Grade promotion (F4: preview → confirm → undo) ─────────────────────────
+//
+// The preview is a page (`/students/promote?from=&to=`) that reads; these two
+// actions write. Both gate on `student.promote` (MANAGER baseline; OWNER
+// always), re-check everything on the server, and call `lib/db/promotion.ts`,
+// which writes the grade changes, the batch and its audit row in one
+// transaction. The old one-click "promote everyone in a grade" is gone.
 
-export async function promoteGradeAction(
+const PROMOTION_ERRORS = {
+  notFound: "notFound",
+  samePromotionGrade: "samePromotionGrade",
+  noStudentsToPromote: "noStudentsToPromote",
+  tooMany: "tooManyStudents",
+  notLatest: "promotionNotLatest",
+  expired: "promotionExpired",
+  alreadyUndone: "promotionAlreadyUndone",
+} as const;
+
+export async function confirmPromotionAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
-  const db = scoped(ctx);
 
-  const parsed = gradePromotionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const parsed = gradePromotionConfirmSchema.safeParse({
+    ...Object.fromEntries(formData),
+    studentIds: formData.getAll("studentIds"),
+  });
+  if (!parsed.success) {
+    const fieldErrors = fieldErrorsFrom(parsed.error);
+    // A bare "nothing ticked" is a form-level message, not a field's.
+    if (fieldErrors.studentIds) return { error: fieldErrors.studentIds };
+    return { fieldErrors };
+  }
 
-  const { fromGradeId, toGradeId, locale } = parsed.data;
-
-  // Both grades are re-resolved here — a grade id from another center is not a
-  // grade at all as far as this center is concerned.
-  const [from, to] = await Promise.all([
-    db.grades.findById(fromGradeId),
-    db.grades.findById(toGradeId),
-  ]);
-  if (!from || !to) return { fieldErrors: { fromGradeId: "notFound" } };
-  // Students may be moved *out of* a grade the platform has deactivated, never into one (R8).
-  if (!to.catalogActive) return { fieldErrors: { toGradeId: "notFound" } };
-
-  const result = await db.students.promoteGrade(from.id, to.id);
-  if (result.count === 0) return { error: "noStudentsToPromote" };
-
-  await writeAuditLog({
+  const { fromGradeId, toGradeId, studentIds, locale } = parsed.data;
+  const result = await confirmGradePromotion(prisma, {
     centerId: ctx.center.id,
     actorUserId: ctx.user.id,
-    action: "student.promote",
-    entityType: "Grade",
-    entityId: from.id,
-    before: { gradeId: from.id },
-    after: { gradeId: to.id, students: result.count },
+    fromGradeId,
+    toGradeId,
+    studentIds,
   });
+  if (!result.ok) return { error: PROMOTION_ERRORS[result.error] };
 
   revalidateStudentList(locale);
-  return { status: "saved" };
+  revalidatePath(`/${locale}${ROUTES.centerStudentsPromote}`);
+  return { status: "saved", count: result.count, skipped: result.skipped };
+}
+
+export async function undoPromotionAction(
+  _state: PeopleActionState,
+  formData: FormData,
+): Promise<PeopleActionState> {
+  const ctx = await getTenantContext("center");
+  if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
+
+  const parsed = gradePromotionUndoSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const result = await undoGradePromotion(prisma, {
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    batchId: parsed.data.batchId,
+  });
+  if (!result.ok) return { error: PROMOTION_ERRORS[result.error] };
+
+  const { locale } = parsed.data;
+  revalidateStudentList(locale);
+  revalidatePath(`/${locale}${ROUTES.centerStudentsPromote}`);
+  return { status: "saved", count: result.reverted, skipped: result.skipped };
 }
 
 /** Move one student — the same action, one row at a time. */
@@ -544,6 +579,35 @@ export async function setStudentGradeAction(
 
   revalidateStudentList(locale);
   revalidateStudentDetail(locale, student.id);
+  return { status: "saved" };
+}
+
+/**
+ * "Use account grade" (F4): this branch adopts the student's own account grade
+ * as its record. The existing student-edit permission (`student.manage`, the
+ * one `updateStudentAction` needs); audited `student.grade.account`. Writes
+ * this branch's `StudentProfile.gradeId` and nothing else.
+ */
+export async function applyAccountGradeAction(
+  _state: PeopleActionState,
+  formData: FormData,
+): Promise<PeopleActionState> {
+  const scope = await studentScope();
+  if (!scope) return FORBIDDEN;
+
+  const parsed = studentActionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+  const { studentProfileId, locale } = parsed.data;
+
+  const result = await applyAccountGrade(prisma, {
+    centerId: scope.ctx.center.id,
+    studentProfileId,
+    actorUserId: scope.ctx.user.id,
+  });
+  if (!result.ok) return result.error === "gradeNotOffered" ? { error: "accountGradeNotOffered" } : NOT_FOUND;
+
+  revalidateStudentList(locale);
+  revalidateStudentDetail(locale, studentProfileId);
   return { status: "saved" };
 }
 

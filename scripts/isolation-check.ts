@@ -24,6 +24,7 @@ import { canInContext, type Permission } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { grantMembershipBranch, loadPermissionGrants } from "../lib/db/permissions.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
+import { confirmGradePromotion, promotionPreview, undoGradePromotion } from "../lib/db/promotion.ts";
 import { addTeacherMembership } from "../lib/db/teacher-membership.ts";
 import {
   MissingCenterScopeError,
@@ -67,6 +68,8 @@ async function cleanup() {
   await prisma.organization.deleteMany({
     where: { id: { in: orgs.map((row) => row.organizationId) }, centers: { none: {} } },
   });
+  // F4: promotion fixtures — catalog grades are global and do not cascade with the centres.
+  await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "Isolation-Check" } } });
   await prisma.user.deleteMany({
     where: {
       email: {
@@ -170,6 +173,55 @@ async function main() {
 
   await checkBranchTargetedAdds(centerA.id, centerB.id, userA.id);
   await checkFamilyLinks(centerA.id, centerB.id, userA.id, userB.id);
+  await checkGradePromotionIsolation(centerA.id, centerB.id, userA.id);
+}
+
+// ── 8. F4: a promotion batch belongs to one branch, and only to it ─────────
+// `GradePromotionBatch` carries `centerId`; every read and write is scoped by
+// it. The preview, the confirm and the undo are asserted from another
+// customer's branch AND from a sibling branch of the same organization —
+// centerId is the sole key, so a sibling gets no more than a stranger.
+
+async function checkGradePromotionIsolation(centerAId: string, centerBId: string, actorId: string) {
+  console.log("\nF4 - grade promotion across branches");
+  const sibling = await prisma.center.findUniqueOrThrow({ where: { slug: SLUG_A2 } });
+  const gFrom = await prisma.catalogGrade.create({ data: { nameAr: "Isolation-Check From", nameEn: "Isolation-Check From" } });
+  const gTo = await prisma.catalogGrade.create({ data: { nameAr: "Isolation-Check To", nameEn: "Isolation-Check To" } });
+  for (const centerId of [centerAId, centerBId, sibling.id]) {
+    for (const grade of [gFrom, gTo]) {
+      await prisma.centerCatalogSelection.create({ data: { centerId, kind: "GRADE", gradeId: grade.id } });
+    }
+  }
+  // One person, a profile at A and another at the sibling branch, both in the From grade.
+  const person = await prisma.user.create({ data: { email: "isolation-family-promoted@kayedu.test", firstName: "Promo", lastName: "Ted" } });
+  const atA = await prisma.studentProfile.create({ data: { userId: person.id, centerId: centerAId, studentCode: "ISO-P1", gradeId: gFrom.id } });
+  const atSibling = await prisma.studentProfile.create({ data: { userId: person.id, centerId: sibling.id, studentCode: "ISO-P2", gradeId: gFrom.id } });
+  const gradeOf = async (id: string) => (await prisma.studentProfile.findUniqueOrThrow({ where: { id } })).gradeId;
+
+  check(
+    "A branch's promotion preview lists only its own students (another customer's and a sibling's see none of them)",
+    (await promotionPreview(prisma, centerAId, gFrom.id)).map((row) => row.id).join() === atA.id &&
+      (await promotionPreview(prisma, centerBId, gFrom.id)).length === 0,
+  );
+
+  const done = await confirmGradePromotion(prisma, { centerId: centerAId, actorUserId: actorId, fromGradeId: gFrom.id, toGradeId: gTo.id, studentIds: [atA.id, atSibling.id] });
+  check(
+    "Promoting at A moves A's profile and ignores a sibling branch's profile of the same person, named by id",
+    done.ok && done.count === 1 && done.skipped === 1 && (await gradeOf(atA.id)) === gTo.id && (await gradeOf(atSibling.id)) === gFrom.id,
+    JSON.stringify(done),
+  );
+  const strangerMove = await confirmGradePromotion(prisma, { centerId: centerBId, actorUserId: actorId, fromGradeId: gTo.id, toGradeId: gFrom.id, studentIds: [atA.id] });
+  check("Another customer's branch cannot move A's student by naming its id", !strangerMove.ok && (await gradeOf(atA.id)) === gTo.id);
+  const siblingMove = await confirmGradePromotion(prisma, { centerId: sibling.id, actorUserId: actorId, fromGradeId: gTo.id, toGradeId: gFrom.id, studentIds: [atA.id] });
+  check("A sibling branch of the same organization cannot either", !siblingMove.ok && (await gradeOf(atA.id)) === gTo.id);
+
+  for (const [label, centerId] of [["Another customer's branch", centerBId], ["A sibling branch", sibling.id]] as const) {
+    const undo = done.ok ? await undoGradePromotion(prisma, { centerId, actorUserId: actorId, batchId: done.batchId }) : null;
+    check(`${label} cannot undo A's batch (notFound), and sees no batch of A's`, undo !== null && !undo.ok && undo.error === "notFound" && (await prisma.gradePromotionBatch.count({ where: scopedWhere(centerId) })) === 0);
+  }
+  check("…and A's student is still in the To grade", (await gradeOf(atA.id)) === gTo.id);
+  const own = done.ok ? await undoGradePromotion(prisma, { centerId: centerAId, actorUserId: actorId, batchId: done.batchId }) : null;
+  check("A's own undo works, and touches only A's profile", own?.ok === true && (await gradeOf(atA.id)) === gFrom.id && (await gradeOf(atSibling.id)) === gFrom.id);
 }
 
 // ── 7. F3: family links are global, their reads and writes are not ─────────

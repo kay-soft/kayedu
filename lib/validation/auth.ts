@@ -31,8 +31,14 @@ export const resendConfirmationSchema = z.object({
   locale: localeSchema,
 });
 
+/** F4: who the person says they are joining as — required, three values. */
+export const signupIntentSchema = z.enum(["STUDENT", "PARENT", "TEACHER"], {
+  error: "intentRequired",
+});
+
 export const signUpSchema = z
   .object({
+    signupIntent: signupIntentSchema,
     firstName: personName,
     lastName: personName,
     email,
