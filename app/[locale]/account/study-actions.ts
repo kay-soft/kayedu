@@ -6,17 +6,8 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { setAccountGrade } from "@/lib/db/account-study";
 import { prisma } from "@/lib/db/client";
 import { ROUTES } from "@/lib/routes";
-import { studyDetailsSchema } from "@/lib/validation/account";
+import { studyDetailsSchema, type StudyDetailsState } from "@/lib/validation/account";
 import { fieldErrorsFrom } from "@/lib/validation/form";
-
-/** `error` and the `fieldErrors` values are keys under `Account.errors`. */
-export type StudyDetailsState = {
-  error?: string;
-  fieldErrors?: Record<string, string>;
-  status?: "saved";
-};
-
-export const IDLE_STUDY_STATE: StudyDetailsState = {};
 
 /**
  * Sets the caller's own account grade (F4) — from onboarding's "Your studies"

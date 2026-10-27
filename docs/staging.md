@@ -69,6 +69,16 @@ npm run check:all                    # every gate, in CI's order; also checks th
 npm run e2e                          # run it ALONE: no gates, no edits at the same time
 ```
 
+**Running part of the suite (E1).** Everything after `--` goes to Playwright, so a spec, a line, a project and a title filter all work, through the same loader and the same write-guard (it still refuses without `KAYEDU_ENV=staging`):
+
+```powershell
+$env:KAYEDU_ENV = "staging"
+npm run e2e -- e2e/parent.spec.ts:38 --project=en-1280                     # one test, one project
+npm run e2e -- e2e/navigation.spec.ts -g "owner: lands home" --project=en-1280
+```
+
+Projects are `en-1280`, `ar-1280`, `en-375`, `ar-375` (`setup` runs first on its own — its sessions are reused when still valid). Start with one project; widen only to confirm a fix. The account-creating journeys (`signUpProjectOnly`) run in `en-1280` only — sign-up is limited to 10 an hour per IP — so they skip in the other three. Each `npm run e2e` starts a fresh dev server (compile cold), so the first test to reach a route can be slow; a one-off timeout on a cold route is worth one re-run alone before it is treated as a bug.
+
 **What `check:all` prints (G2).**
 
 - **At the top**, the `connection_limit` each client uses: a gate's main client (`DATABASE_URL`'s, 10 in `.env.staging.example`), a race's "other desk" (3 — it never runs more than three operations at once), and the runner's own readiness probe (1). A gate with two desks asks the pooler for at most 10 + 3 + 3 connections instead of 30; Supabase's default pooler pool is 15. This is a precaution, not a diagnosed cause of G1's fast failures.

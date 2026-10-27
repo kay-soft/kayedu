@@ -4,7 +4,7 @@ import { uniqueTag } from "./support/accounts";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import type { AppLocale } from "./support/i18n";
 import { t } from "./support/i18n";
-import { choose, dayFromToday, field, isoDayFromToday, openDialog, pickDate, submitConfirmingConflicts } from "./support/ui";
+import { choose, dayFromToday, field, firstDetailLink, isoDayFromToday, openDialog, pickDate, submitConfirmingConflicts } from "./support/ui";
 
 /**
  * Journey 3 — the manager (SYS Part A): classes, sessions (one-time,
@@ -17,7 +17,7 @@ import { choose, dayFromToday, field, isoDayFromToday, openDialog, pickDate, sub
 async function openFirstDetailAndBack(page: Page, locale: AppLocale, list: string, back: string, query = "") {
   await page.goto(`/${locale}${list}${query}`);
   await expectHealthy(page, locale);
-  const detail = page.locator(`main a[href*="${list}/"]`).first();
+  const detail = await firstDetailLink(page, list);
   await expect(detail).toBeVisible();
   await detail.click();
   await expect(page).toHaveURL(new RegExp(`${list}/[^/]+$`));

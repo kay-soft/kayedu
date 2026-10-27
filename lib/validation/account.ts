@@ -57,3 +57,17 @@ export const studyDetailsSchema = z.object({
     .optional()
     .transform((value) => (value && value.length > 0 ? value : null)),
 });
+
+/**
+ * The study-details form state (F4). Lives here, not in `study-actions.ts`: a
+ * `"use server"` file may export only async functions, so a constant exported
+ * from it breaks the server-actions manifest. `error` and the `fieldErrors`
+ * values are keys under `Account.errors`.
+ */
+export type StudyDetailsState = {
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  status?: "saved";
+};
+
+export const IDLE_STUDY_STATE: StudyDetailsState = {};

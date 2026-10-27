@@ -1,7 +1,7 @@
 import { uniqueTag } from "./support/accounts";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import { signUp, signUpProjectOnly } from "./support/signup";
-import { field, openDialog } from "./support/ui";
+import { field, firstDetailLink, openDialog } from "./support/ui";
 
 /**
  * Journey 8 — the parent (SYS Part A, F3): the child selector and the
@@ -40,7 +40,7 @@ test("@write a new parent sign-up links nothing; it links with the branch's prin
   // A seeded student's page, where the branch prints the code.
   const manager = await as("manager");
   await manager.goto(`/${appLocale}/students`);
-  await manager.locator('main a[href*="/students/"]').first().click();
+  await (await firstDetailLink(manager, "/students")).click();
 
   const tag = uniqueTag("e2e").toLowerCase();
   // F4: a Parent sign-up lands on the parent portal's "Link your child".
@@ -52,6 +52,11 @@ test("@write a new parent sign-up links nothing; it links with the branch's prin
 
   // The branch prints a code (shown once, in the dialog).
   const generate = manager.getByRole("button", { name: new RegExp(`^(${msg("Family.branch.generate")}|${msg("Family.branch.regenerate")})$`) });
+  // The card first (so a count of zero means "not rendered", not "not rendered yet"); a missing
+  // button is a failure with a name, never a 30 s wait inside isDisabled; a disabled one is the
+  // only skip.
+  await expect(manager.getByText(msg("Family.branch.title"), { exact: true }).first()).toBeVisible();
+  expect(await generate.count(), "the student page's Parent access card offers Generate / Replace the code").toBeGreaterThan(0);
   test.skip(await generate.isDisabled(), "this student's three parent slots are in use");
   await generate.click();
   const dialog = openDialog(manager);
@@ -76,6 +81,9 @@ test("@write a new parent sign-up links nothing; it links with the branch's prin
   await page.goto(`/${appLocale}/account?from=parent`);
   await page.getByRole("button", { name: msg("Family.parent.unlink") }).first().click();
   await openDialog(page).getByRole("button", { name: msg("Family.parent.unlink") }).click();
+  // Wait for the outcome (the child's row gives way to the empty card): navigating at once can
+  // abort the request in flight. (Not the toast: the button that owns it unmounts with its row.)
+  await expect(page.getByText(msg("Family.parent.noChildren"))).toBeVisible();
   await page.goto(`/${appLocale}/parent`);
   await expect(page.getByText(msg("ParentPortal.noChildren"))).toBeVisible();
 });

@@ -80,6 +80,7 @@ If the docs are silent on something that touches **money, permissions, or tenant
 - Server Components + Server Actions by default; client components only where interactivity demands
 - Data access lives in `lib/db/` behind tenant-scoped functions — components never call Prisma directly
 - `zod` validation on every Server Action input
+- **A `"use server"` file exports only async functions (and types).** Next throws at runtime — dev and production — on any other export (a constant, an initial form state, a class), and the page that imports it shows "This screen didn't load". Keep initial states and shared values in a normal module (`lib/validation/*`, `action-state.ts`); `check:design` fails on a violation
 - Every action: `getTenantContext()` → permission check → validate → scoped write → audit if sensitive → `revalidatePath`
 - One product, configured. Never fork behavior per center — differences are settings + theming
 
