@@ -1,5 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
-import { CalendarClock, History, Users } from "lucide-react";
+import { CalendarClock, History, Link2, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,10 @@ import { CappedList } from "@/components/shared/capped-list";
 import { EmptyState } from "@/components/shared/empty-state";
 import { sessionLabelParts } from "@/lib/session-label";
 import { ResultsRegion } from "@/components/shared/results-region";
+import { LinkChildPrompt } from "@/components/family/link-child-prompt";
+import { FormMessage } from "@/components/shared/form-message";
+import { LinkButton } from "@/components/shared/link-button";
+import { accountPath } from "@/lib/routes";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
@@ -103,9 +107,11 @@ async function loadChildSchedule(
  * mirror of the student schedule, for one selected child at a time — never
  * every child unioned together, since these are separate people's records,
  * not one person's cross-centre view. `requireParentUser()` already narrows
- * `session.children` to VERIFIED links, so an unverified (or someone else's)
- * child can never be selected, by URL or otherwise: the `?child=` param is
- * re-checked against that list below, never trusted directly.
+ * `session.children` to ACTIVE family links and each child's active profiles
+ * at accessible branches (F3), so a pending code's (or someone else's) child
+ * can never be selected, by URL or otherwise: the `?child=` param is
+ * re-checked against that list below, never trusted directly. A child linked
+ * but at no branch yet is named, with nothing to read.
  */
 export default async function ParentPage({
   searchParams,
@@ -118,11 +124,48 @@ export default async function ParentPage({
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  if (session.children.length === 0) {
+  const tErrors = await getTranslations("Family.errors");
+  const withoutBranch = session.linkedChildren.filter((child) => child.branchCount === 0);
+  const linkAnother = (
+    <LinkButton href={accountPath("parent")} variant="ghost" className="w-full text-brand sm:w-fit">
+      <Link2 className="size-4" aria-hidden />
+      {t("linkAnother")}
+    </LinkButton>
+  );
+
+  // F3: no linked child yet — "Link your child" (a code field that hands the
+  // code to /family/join; nothing here writes).
+  if (session.linkedChildren.length === 0) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title={t("title")} description={t("subtitle")} />
-        <EmptyState icon={<Users />} tone="info" title={t("noChildren")} />
+        <Card>
+          <CardContent className="flex flex-col gap-4">
+            <EmptyState
+              icon={<Users />}
+              tone="info"
+              title={t("noChildren")}
+              description={t("linkDescription")}
+              action={<LinkChildPrompt label={t("codeLabel")} continueLabel={t("continue")} invalidLabel={tErrors("invalidCode")} />}
+            />
+            <p className="text-center text-xs text-text-muted">{t("howToGet")}</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Linked, but no child is at a branch yet: nothing to read until they join one.
+  if (session.children.length === 0) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title={t("title")} description={t("subtitle")} action={linkAnother} />
+        <EmptyState
+          icon={<Users />}
+          tone="info"
+          title={t("noBranchTitle")}
+          description={t("noBranch", { names: withoutBranch.map((child) => child.childName).join(locale === "ar" ? "، " : ", ") })}
+        />
       </div>
     );
   }
@@ -149,7 +192,13 @@ export default async function ParentPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} description={t("subtitle")} />
+      <PageHeader title={t("title")} description={t("subtitle")} action={linkAnother} />
+
+      {withoutBranch.length > 0 ? (
+        <FormMessage tone="info">
+          {t("noBranch", { names: withoutBranch.map((child) => child.childName).join(locale === "ar" ? "، " : ", ") })}
+        </FormMessage>
+      ) : null}
 
       <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         {session.children.length > 1 ? (

@@ -5,7 +5,11 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { IdCardPanel } from "@/app/[locale]/(center)/students/[id]/id-card-panel";
 import { PhotoForm } from "@/app/[locale]/(center)/students/[id]/photo-form";
 import { StudentProfileForm } from "@/app/[locale]/(center)/students/[id]/student-profile-form";
-import { VerifyParentLinkButton } from "@/app/[locale]/(center)/students/[id]/verify-parent-link-button";
+import {
+  CancelParentCodeButton,
+  GenerateParentCodeButton,
+  RevokeParentLinkButton,
+} from "@/app/[locale]/(center)/students/[id]/parent-access";
 import { deleteStudentAction } from "@/app/[locale]/(center)/students/actions";
 import { DeleteRecordCard } from "@/components/center/delete-record-card";
 import { IdCardPreview } from "@/components/center/id-card-preview";
@@ -13,6 +17,8 @@ import { ActionBar } from "@/components/shared/action-bar";
 import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { DetailRow } from "@/components/shared/field";
+import type { SlipTexts } from "@/components/family/parent-code-slip";
+import { Ltr } from "@/components/shared/ltr";
 import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
@@ -23,7 +29,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { countOtherCenterRelations } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
-import { parentLinksForStudent } from "@/lib/db/parents";
+import { FAMILY_LIMITS, familyAccessForStudent, type BranchFamilyAccess } from "@/lib/db/parents";
 import { scoped } from "@/lib/db/scoped";
 import { idCardGeneratedAt, signedUrlFor } from "@/lib/db/storage";
 import { formatDate, formatNumber } from "@/lib/format";
@@ -64,20 +70,21 @@ export default async function StudentDetailPage({
   const t = await getTranslations("Students");
   const tCommon = await getTranslations("Settings.common");
   const tTeachers = await getTranslations("Teachers");
+  const tFamily = await getTranslations("Family.branch");
 
   const hasStorage = storageConfigured();
 
   // Everything that needs only the student row goes out together — the card,
   // the photo URL and the lists — rather than one stage after another
   // (docs/08 §4.6.2).
-  const [grades, enrollments, blocks, otherRelations, cardStamp, parentLinks, cardSvg, photoUrl] =
+  const [grades, enrollments, blocks, otherRelations, cardStamp, familyAccess, cardSvg, photoUrl, slipAr, slipEn] =
     await Promise.all([
       db.grades.list(),
       db.enrollments.listForStudent(student.id),
       db.studentBlocks.list({ blockedUserId: student.userId }),
       countOtherCenterRelations(student.userId, ctx.center.id),
       hasStorage ? idCardGeneratedAt(ctx.center.id, student.id) : null,
-      parentLinksForStudent(prisma, ctx.center.id, student.id),
+      familyAccessForStudent(prisma, ctx.center.id, student.id),
       studentCardSvg(ctx, student, {
         dir: locale === "ar" ? "rtl" : "ltr",
         codeLabel: t("card.codeLabel"),
@@ -87,6 +94,9 @@ export default async function StudentDetailPage({
       hasStorage && student.photoUrl
         ? signedUrlFor(ctx.center.id, AVATARS_BUCKET, student.photoUrl)
         : null,
+      // F3: the printable parent-code slip is bilingual whatever the page's language.
+      getTranslations({ locale: "ar", namespace: "Family.slip" }),
+      getTranslations({ locale: "en", namespace: "Family.slip" }),
     ]);
 
   // A TEACHER block names the teacher by their User id; a CLASS block names
@@ -359,50 +369,19 @@ export default async function StudentDetailPage({
               <DetailRow label={t("fields.otherCenters")} value={formatNumber(otherRelations, locale)} />
             </DetailCard>
 
-            <DetailCard title={t("parentLinks.title")} description={t("parentLinks.description")}>
-              {parentLinks.length === 0 ? (
-                <EmptyState
-                  compact
-                  icon={<Users />}
-                  title={t("parentLinks.empty")}
-                  description={t("parentLinks.emptyHint")}
-                />
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {parentLinks.map((link) => (
-                    <li
-                      key={link.id}
-                      className="flex flex-col gap-2 rounded-xl border border-border p-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-text-primary">
-                          {fullName(link.parentUser)}
-                        </p>
-                        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-                          <span dir="ltr">{link.matchedPhone}</span>
-                          <span>{formatDate(link.createdAt, locale)}</span>
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                          variant={
-                            link.status === "VERIFIED"
-                              ? "success"
-                              : link.status === "REVOKED"
-                                ? "danger"
-                                : "warning"
-                          }
-                        >
-                          {t(`parentLinks.status.${link.status}`)}
-                        </Badge>
-                        {link.status === "PENDING" && ctxCan(ctx, "parent.link.manage") ? (
-                          <VerifyParentLinkButton parentLinkId={link.id} />
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <DetailCard title={tFamily("title")} description={tFamily("description")}>
+              <ParentAccessCard
+                access={familyAccess}
+                canManage={ctxCan(ctx, "parent.link.manage")}
+                studentProfileId={student.id}
+                locale={locale}
+                slip={{
+                  branchName: ctx.center.name,
+                  studentName: personName,
+                  ar: slipTexts(slipAr),
+                  en: slipTexts(slipEn),
+                }}
+              />
             </DetailCard>
           </>
         }
@@ -419,6 +398,109 @@ export default async function StudentDetailPage({
           ) : null
         }
       />
+    </div>
+  );
+}
+
+type SlipTranslator = Awaited<ReturnType<typeof getTranslations<"Family.slip">>>;
+
+function slipTexts(tSlip: SlipTranslator): SlipTexts {
+  return {
+    title: tSlip("title"),
+    branch: tSlip("branch"),
+    student: tSlip("student"),
+    code: tSlip("code"),
+    link: tSlip("link"),
+    handOver: tSlip("handOver"),
+    steps: tSlip("steps"),
+  };
+}
+
+/**
+ * "Parent access" (F3, docs/04 §11.22): every ACTIVE parent account of this
+ * student — account name, how they were linked, the date, and the parent the
+ * student declared when there is one, so a mismatch stands out. No parent
+ * email or phone is shown. Generating, cancelling and revoking need
+ * `parent.link.manage`; every action re-checks it on the server.
+ */
+async function ParentAccessCard({
+  access,
+  canManage,
+  studentProfileId,
+  locale,
+  slip,
+}: {
+  access: BranchFamilyAccess | null;
+  canManage: boolean;
+  studentProfileId: string;
+  locale: string;
+  slip: { branchName: string; studentName: string; ar: SlipTexts; en: SlipTexts };
+}) {
+  const t = await getTranslations("Family.branch");
+  if (!access) return null;
+  const slotsFull = access.slotsUsed >= FAMILY_LIMITS.slotsPerStudent;
+  // Replacing this branch's own waiting code frees its slot first.
+  const blocked = slotsFull && !access.pendingCode;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {access.links.length === 0 ? (
+        <EmptyState compact icon={<Users />} title={t("empty")} description={t("emptyHint")} />
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {access.links.map((link) => {
+            const parentName = fullName({ firstName: link.parentFirstName, lastName: link.parentLastName });
+            return (
+              <li key={link.id} className="flex flex-col gap-3 rounded-xl border border-border p-3">
+                <div className="flex min-w-0 flex-col gap-1">
+                  <p className="text-sm font-medium break-words text-text-primary">{parentName}</p>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
+                    <Badge variant="neutral">{t(`origin.${link.origin}`)}</Badge>
+                    <span>{t("since", { date: formatDate(link.since, locale) })}</span>
+                  </div>
+                  {link.declaredParentName ? (
+                    <p className="text-xs break-words text-text-secondary">
+                      {t("declared", { name: link.declaredParentName })}
+                    </p>
+                  ) : null}
+                </div>
+                {canManage ? (
+                  <RevokeParentLinkButton studentProfileId={studentProfileId} linkId={link.id} parentName={parentName} />
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <p className="text-xs text-text-secondary">
+        {t("slots", { used: access.slotsUsed, max: FAMILY_LIMITS.slotsPerStudent })}
+      </p>
+
+      {access.pendingCode ? (
+        <FormMessage tone="info">
+          {t.rich("pending", {
+            hint: access.pendingCode.hint,
+            date: formatDate(access.pendingCode.createdAt, locale),
+            code: (chunks) => <Ltr className="font-mono">{chunks}</Ltr>,
+          })}
+        </FormMessage>
+      ) : null}
+
+      {canManage ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
+          <GenerateParentCodeButton
+            studentProfileId={studentProfileId}
+            replacing={Boolean(access.pendingCode)}
+            disabled={blocked}
+            disabledReason={t("slotsFullHint")}
+            slip={slip}
+          />
+          {access.pendingCode ? <CancelParentCodeButton studentProfileId={studentProfileId} /> : null}
+        </div>
+      ) : (
+        <p className="text-xs text-text-muted">{t("noPermission")}</p>
+      )}
     </div>
   );
 }

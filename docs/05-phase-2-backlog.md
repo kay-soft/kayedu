@@ -128,7 +128,7 @@
 
 **Why deferred.** Supabase Auth owns credentials and email/password is what Phase 1 wires (`02-architecture.md` §3). SMS OTP has a real per-message cost and needs a provider contract — the same one the deferred notification layer needs — and MFA is a hardening step that belongs after there is production data worth protecting.
 
-**Depends on.** An SMS provider (M20 provisions the account; the *feature* is this entry); and the parent-account mechanism (M16), which keys on a phone number and would be markedly stronger with OTP as its verification step — see the parent↔child verification open decision in `00-master-product-spec.md` §2.2.
+**Depends on.** An SMS provider (M20 provisions the account; the *feature* is this entry). **F3 note:** parent access no longer keys on a phone (OD-6 decided — a one-time code from the student or the branch, `00-master-product-spec.md` §5.1 "Parent role & portal"). An OTP to the parent phone the student declared stays a possible **extra factor** on accepting a code — it would narrow the residual risk recorded there (a student handing a code to a non-student adult) — and needs OD-2's answer on minors' data before it is built.
 
 ---
 
@@ -240,11 +240,31 @@
 
 ## 24. Identity merge: one person recorded as two `User` rows
 
-**What it is.** A platform-admin tool to merge two global `User` rows that turn out to be the same person (registered twice before the duplicate-match caught it, or a sign-up whose account claim was declined and who is later proven to be the staff-created person): move every `Membership`, `StudentProfile`, `ParentLink`, rating and claim from one `User` to the other, in one audited transaction, and retire the loser.
+**What it is.** A platform-admin tool to merge two global `User` rows that turn out to be the same person (registered twice before the duplicate-match caught it, or a sign-up whose account claim was declined and who is later proven to be the staff-created person): move every `Membership`, `StudentProfile`, `FamilyLink` (both sides) and `FamilyInvitation`, rating and claim from one `User` to the other, in one audited transaction, and retire the loser.
 
 **Why deferred.** Earlier docs described "merge is a manual, audited admin action" as if it existed; the SYS audit found no such tool (`docs/08-system-audit.md`). The match workflow (M3, SEC-2a) already prevents most duplicates by refusing to create a second `User` for a known global email, and an `AccountClaim` (D-01) covers the sign-up case without a merge. A merge touches money-bearing history across centres (`Payment.studentProfileId`, `Settlement.teacherId`, `Payment.teacherId`) and the identity rules of CLAUDE.md rule 4, so it needs its own design — including what happens when both rows hold a profile at the same centre.
 
 **Depends on.** A decision on conflict rules (two profiles at one centre; two Supabase logins), the verified-phone/OTP work (entry 12) for proving the merge is wanted, and the retention/erasure rule (OD-2) for the retired row.
+
+---
+
+## 25. Drop `ParentLink` after the pilot
+
+**What it is.** A migration that drops the deprecated `ParentLink` table, its `ParentLinkStatus` enum and the three relations to it (`User.parentLinks`, `StudentProfile.parentLinks`, `Center.parentLinks`), plus `gate-db`'s orphan filter on it.
+
+**Why deferred.** F3 replaced it with `FamilyLink` and copied its VERIFIED rows across (`LEGACY_VERIFIED`), and nothing reads or writes it any more — but every migration in the F3 batch is additive, so the live build and the dev database can be migrated in either order. Dropping a table is the one change that is not; it waits until the pilot has run on family links and nobody needs to look back at the old rows.
+
+**Depends on.** The pilot (M20 → first centre live) having run on F3's family links; a backup taken before the drop (M20's tested restore).
+
+---
+
+## 26. A platform-admin screen to find and revoke a family link
+
+**What it is.** A small `/admin` tool: look up a family link by either person's account, see how it was made, and revoke it with a reason — the screen for `revokeFamilyLink({ by: "admin" })`, which F3 built and gates (`lib/db/parents.ts`, asserted in `check:parent`).
+
+**Why deferred.** F3's revocation paths that a centre operates — the branch (from the student's page) and the parent (Account → Family) — cover the cases a pilot will meet; a platform admin is the escalation path for a link no branch can see (a child at no branch yet), which needs a support process before it needs a screen. Building a cross-tenant people lookup for the admin is a privacy surface of its own.
+
+**Depends on.** A support process (backlog entry 9's support tickets, or the pilot's own escalation route); OD-2 for what an admin may see of a minor's family.
 
 ---
 

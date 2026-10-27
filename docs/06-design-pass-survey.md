@@ -61,8 +61,12 @@ Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on
 ### `app/[locale]/(auth)/account-pending/page.tsx`
 **SEC-2a (new).** Where a login with no app user yet lands — a pending account claim, an unconfirmed email, or an email held by another account. Built on `AuthCard` like its siblings: the heading and description name the reason, an amber notice says what to do next, and a full-width-on-phone outline Sign out button. Nothing on it names the matched record.
 
+### `app/[locale]/(auth)/family/join/page.tsx`
+**F3 (new).** Where a parent accepts a code; open to guests. `AuthCard` (title "Link your child", one-line description), then "Signed in as {name}" when signed in, the code field (LTR, monospaced, upper-case, `one-time-code` autofill, hint "Capitals and the dash don't matter") and **Link my child** (full width on a phone, `w-fit` from `sm`). A guest gets an info notice and **Sign in** / **Create a parent account** instead of the submit, both returning here with the code kept in the tab. A signed-in student account gets the refusal up front, with Sign out. A refusal is a `FormMessage` above the field; success toasts and lands on the parent portal.
+
 ### `app/[locale]/(auth)/select-center/page.tsx`
 Branch cards had hover but **no selected state** — the branch you are already in looked like the others — and the "Whole Management" card was always brand-tinted, even when not selected. **R10a:** `AuthCard`; the active branch/roll-up gets a brand outline, tint and a check (not colour alone); idle cards share one hover state.
+**F3:** the empty state gains a third start, **I'm a parent: link my child** (to `/family/join`); a staff member or teacher who is also a parent gets a ghost **Your children (parent view)** link under their branches.
 
 ---
 
@@ -165,6 +169,7 @@ New. OWNER only (`organization.branch.create`). A usage card ("2 of 3 branches u
 ### `app/[locale]/(center)/students/[id]/page.tsx` — **R10b**
 *Wrong now (at `ea7f645`):* the header mixes the student code, the Active badge and a back link in one row, with no photo or initial (the photo lives in its own card two screens down). The left column is one tall edit-form card (person, contact, grade, four parent fields, Save and — beside it — Delete); the right column is **four** stacked cards (ID card, photo, parent summary, parent links) that are much taller than the form, so the form card ends and the left column is blank for hundreds of pixels. Enrolments and "blocked by" are a separate two-up row below, at `lg`, while the rest is `xl` — two different breakpoints for one page. The parent summary card repeats the parent fields the form above it already edits. The ID-card actions are three differently-shaped buttons in a wrapping row. There is no attendance or payment history on the page today.
 **R10b:** header with the photo (a signed URL) or first letter, code, Active and grade, and **Print ID card / Print paper form** as its action bar; `main` is the record (person · grade · parent contact, one Save), enrolments with the absence-streak alerts, and "blocked by"; `side` is the ID card (preview and the stored-card control), photo, parent summary and parent links (with the placeholder verify, behind `parent.link.manage`); Delete is a danger zone at the foot. The columns now end within a card of each other at 1280px. Not added: attendance/payment history (no data on the page today).
+**F3:** the "Parent accounts" card (pending phone matches and a disabled Verify) is replaced by **Parent access** (docs/04 §11.22): one bordered row per active parent account — account name, a neutral "how linked" badge, the date, and the parent the student declared when there is one — with **Remove access** (an inline reason panel) per row; the slot count; an info notice for this branch's waiting code (its hint in an LTR run); **Generate parent code** / **Replace the code** and **Cancel code**. Without `parent.link.manage` the list shows with a muted "ask a manager" line and no controls.
 
 **DES (Phase 3):** removing the photo confirms first (it deletes the file); photo save/remove toast.
 
@@ -231,6 +236,7 @@ Redirect only. No change.
 
 ### `app/[locale]/(parent)/parent/page.tsx`
 "No children linked" was a bare muted sentence in a padded card. **R10a:** `EmptyState`.
+**F3:** zero linked children → a card with the info `EmptyState` "No child linked yet" whose action is a code field + **Continue** (it writes nothing — it carries the code to `/family/join` in the URL fragment) and the "where to get a code" line under it. Linked children at no branch yet → an info `EmptyState` naming them. Otherwise as before, with a ghost **Link another child** (to Account → Family) as the header action and an info line naming any linked child who has not joined a branch.
 
 ---
 

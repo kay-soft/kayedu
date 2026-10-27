@@ -183,7 +183,9 @@
       "platformAdminLink": "Go to the platform admin",
       "wholeManagement": "Whole Management — {organization}",
       "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
-      "emptyTitle": "You’re not in a branch yet"
+      "emptyTitle": "You’re not in a branch yet",
+      "linkMyChild": "I'm a parent: link my child",
+      "parentViewLink": "Your children (parent view)"
     },
     "invite": {
       "title": "Staff invitation",
@@ -571,20 +573,6 @@
       "empty": "No teacher or class has blocked this student.",
       "unknownClass": "Former class",
       "emptyHint": "No teacher has blocked this student from a class."
-    },
-    "parentLinks": {
-      "title": "Parent accounts",
-      "description": "Accounts that matched this student’s parent phone. A match alone grants no access. A link is revoked automatically when the parent phone changes.",
-      "empty": "No parent account has matched this student's parent phone yet.",
-      "status": {
-        "PENDING": "Pending",
-        "VERIFIED": "Verified",
-        "REVOKED": "Revoked"
-      },
-      "verify": "Verify",
-      "verified": "Verified.",
-      "emptyHint": "A parent who signs up with this student's parent phone appears here as pending. Verifying them is turned off until a safe method is decided.",
-      "verifyUnavailable": "Verification is turned off until a safe method is decided."
     },
     "print": {
       "print": "Print",
@@ -2308,7 +2296,7 @@
   "ParentPortal": {
     "title": "My children",
     "subtitle": "A read-only mirror of your child's own schedule — nothing here can be changed from this account.",
-    "noChildren": "No verified children yet. Once a branch verifies your account against your child's record, their schedule will appear here.",
+    "noChildren": "No child linked yet",
     "childSelectorLabel": "Child",
     "filterDate": "Filter by date",
     "upcomingTitle": "Upcoming",
@@ -2319,7 +2307,14 @@
     "dropIn": "Drop-in",
     "upcomingEmptyHint": "Sessions scheduled for this child will appear here.",
     "pastEmptyHint": "Attendance is listed here once a session has been marked.",
-    "showMoreUpcoming": "{count, plural, one {Show # more upcoming session} other {Show # more upcoming sessions}}"
+    "showMoreUpcoming": "{count, plural, one {Show # more upcoming session} other {Show # more upcoming sessions}}",
+    "linkDescription": "Enter the code your child or their branch gave you to see their classes here.",
+    "codeLabel": "Parent code",
+    "continue": "Continue",
+    "howToGet": "Where to get a code: your child opens Account → Family → Invite a parent, or the branch's reception prints one for you.",
+    "noBranchTitle": "Not at a branch yet",
+    "noBranch": "{names} — classes appear here once they join a branch.",
+    "linkAnother": "Link another child"
   },
   "AdminCenters": {
     "title": "Branches",
@@ -2815,7 +2810,12 @@
     "catalogAdded": "Added to this branch.",
     "catalogRemoved": "Removed from this branch.",
     "expenseAdded": "Expense added.",
-    "expenseVoided": "Expense voided. It stays in the list, struck through."
+    "expenseVoided": "Expense voided. It stays in the list, struck through.",
+    "familyLinked": "Child linked",
+    "familyUnlinked": "Child unlinked",
+    "familyInvitationCancelled": "Invitation cancelled",
+    "familyCodeCancelled": "Code cancelled",
+    "familyAccessRemoved": "Parent access removed"
   },
   "Account": {
     "title": "Account settings",
@@ -2913,6 +2913,147 @@
       "branchesTitle": "Branches",
       "branchesDescription": "Open a branch for its lifecycle, visibility window and recent activity.",
       "noBranches": "This center has no branches."
+    }
+  },
+  "Family": {
+    "section": {
+      "title": "Family",
+      "description": "Who can follow a student's classes — read-only, and only with a one-time code."
+    },
+    "code": {
+      "label": "Parent code",
+      "onceWarning": "This code is shown only once. Copy or share it now — it can't be shown again.",
+      "rules": "It has no expiry, and it works once.",
+      "copy": "Copy code",
+      "copied": "Copied",
+      "copyFailed": "The browser didn't allow copying. Select the code and copy it by hand.",
+      "whatsapp": "Share on WhatsApp",
+      "shareText": "{student} invited you to follow their classes on KayEdu. Open {url} and enter the code {code}."
+    },
+    "student": {
+      "title": "Your parents",
+      "description": "A linked parent sees your schedule and attendance. They can't change anything.",
+      "slots": "{used} of {max} parent slots used",
+      "invite": "Invite a parent",
+      "slotsFull": "All {max} parent slots are in use. Cancel an invitation you no longer need first.",
+      "noParents": "No parent is linked yet.",
+      "noParentsHint": "Invite a parent, then send them the code.",
+      "since": "Linked {date}",
+      "cannotRemove": "Only your branch or the parent can remove a linked parent.",
+      "pendingTitle": "Waiting to be used",
+      "pendingFor": "For {name}",
+      "pendingBranch": "Printed by {branch}",
+      "pendingMeta": "Code ending <code>{hint}</code> · {date}",
+      "newCode": "New code",
+      "newCodeTitle": "Make a new code?",
+      "newCodeDescription": "The old code stops working at once. The new one is shown only once.",
+      "cancel": "Cancel invitation",
+      "cancelTitle": "Cancel this invitation?",
+      "cancelDescription": "The code stops working. You can invite again later."
+    },
+    "invite": {
+      "title": "Invite a parent",
+      "description": "Say who you're inviting. Your branch sees this name beside the account that uses the code.",
+      "firstName": "Parent's first name",
+      "lastName": "Parent's last name",
+      "phone": "Parent's phone",
+      "phoneHint": "For your branch's records. It is never used to sign in or to link.",
+      "submit": "Create code",
+      "cancel": "Cancel",
+      "done": "Done",
+      "issuedTitle": "Send this code to your parent",
+      "issuedDescription": "They open the link, sign in or create their own parent account, and enter the code."
+    },
+    "parent": {
+      "title": "Your children",
+      "description": "Children whose classes you can follow, read-only.",
+      "noChildren": "No child is linked yet.",
+      "noChildrenHint": "Enter the code your child or their branch gave you.",
+      "since": "Linked {date}",
+      "noBranch": "Not at a branch yet",
+      "unlink": "Unlink",
+      "unlinkTitle": "Unlink {name}?",
+      "unlinkDescription": "You stop seeing {name}'s classes at once. Linking again needs a new code.",
+      "openPortal": "Open the parent view",
+      "linkAnother": "Link another child",
+      "linkFirst": "Link your child",
+      "howToGet": "Where to get a code: your child opens Account → Family → Invite a parent, or the branch's reception prints one for you."
+    },
+    "join": {
+      "title": "Link your child",
+      "description": "Enter the 8-character code your child or their branch gave you.",
+      "codeLabel": "Parent code",
+      "codeHint": "Letters and numbers, like ABCD-2345. Capitals and the dash don't matter.",
+      "submit": "Link my child",
+      "submitting": "Linking…",
+      "signInFirst": "Sign in or create a parent account to use this code. It stays filled in while you do.",
+      "signIn": "Sign in",
+      "register": "Create a parent account",
+      "signedInAs": "Signed in as {name}",
+      "studentAccount": "You're signed in with a student account. A parent needs their own parent account, not a student account.",
+      "backToAccount": "Account settings"
+    },
+    "branch": {
+      "title": "Parent access",
+      "description": "Parent accounts that can see this student's schedule and attendance, read-only.",
+      "empty": "No parent account is linked.",
+      "emptyHint": "Generate a code and hand it to the parent in person.",
+      "generate": "Generate parent code",
+      "regenerate": "Replace the code",
+      "regenerateHint": "The code waiting now stops working.",
+      "pending": "A code from this branch is waiting (ending <code>{hint}</code>, {date}).",
+      "cancelCode": "Cancel code",
+      "cancelCodeTitle": "Cancel this branch's code?",
+      "cancelCodeDescription": "The printed code stops working. You can generate a new one any time.",
+      "slots": "{used} of {max} parent slots used",
+      "since": "Linked {date}",
+      "declared": "The student named: {name}",
+      "origin": {
+        "childInvite": "Student's invitation",
+        "thisBranch": "This branch's code",
+        "otherBranch": "Another branch's code",
+        "legacy": "Linked before codes"
+      },
+      "noPermission": "Ask a manager to generate a parent code or remove access.",
+      "revoke": "Remove access",
+      "revokeTitle": "Remove {name}'s access?",
+      "revokeDescription": "They stop seeing this student at once, at every branch. Linking again needs a new code.",
+      "reason": "Reason",
+      "reasonHint": "Kept on the record for staff. Required.",
+      "keep": "Keep access",
+      "dialogTitle": "Parent code for {student}",
+      "dialogDescription": "Print the slip and hand it to the parent in person. This is the only time the code is shown.",
+      "print": "Print slip",
+      "done": "Done",
+      "slotsFullHint": "All 3 parent slots are in use. The student can cancel an unused invitation, or remove a parent's access first."
+    },
+    "slip": {
+      "title": "Parent access code",
+      "branch": "Branch",
+      "student": "Student",
+      "code": "Code",
+      "link": "Link",
+      "handOver": "Hand this to the parent in person.",
+      "steps": "Open the link, sign in or create a parent account, and enter the code. It works once."
+    },
+    "errors": {
+      "invalidCode": "This code is invalid or has already been used.",
+      "ownCode": "This is your own code. Give it to your parent — they need their own parent account.",
+      "studentAccount": "A parent needs their own parent account, not a student account.",
+      "platformAdmin": "A platform administrator account can't be linked as a parent.",
+      "alreadyLinked": "You're already linked to this child.",
+      "parentLimit": "This child already has 3 parents linked.",
+      "childLimit": "You already have 10 children linked — the most one account can hold.",
+      "rateLimited": "Too many attempts. Try again in an hour.",
+      "slotsFull": "All 3 parent slots are in use. Cancel an unused invitation or remove a parent first.",
+      "notAStudent": "Only a student's own account can invite a parent.",
+      "notFound": "That is no longer available. Refresh the page.",
+      "forbidden": "You don't have permission to do that.",
+      "signInRequired": "Sign in first.",
+      "reasonRequired": "Give a reason — it is kept on the record.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidPhone": "Enter a valid Egyptian mobile number."
     }
   }
 }

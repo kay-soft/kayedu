@@ -24,7 +24,7 @@ import {
   type Experience,
 } from "@/lib/auth/relations";
 import { loadPermissionGrants } from "@/lib/db/permissions";
-import { verifiedChildLinks } from "@/lib/db/parents";
+import { activeChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, SHELL_EXPERIENCES, homePathForRole, type ShellExperience } from "@/lib/routes";
@@ -411,60 +411,84 @@ export type ParentChildOption = {
   childName: string;
 };
 
+/** One linked child, whether or not they are at a branch yet. */
+export type ParentLinkedChild = {
+  linkId: string;
+  /** The child's account name. */
+  childName: string;
+  /** Active profiles at accessible branches — 0 before the child joins one. */
+  branchCount: number;
+};
+
+export type ParentChildren = {
+  /** One option per (child, active branch profile) — what the selector offers. */
+  options: ParentChildOption[];
+  /** Every ACTIVE link, including a child who has joined no branch yet. */
+  linked: ParentLinkedChild[];
+};
+
 /**
  * A parent's readable children — the **only** child list any parent-portal
- * page may build on (M16, `lib/db/parents.ts`'s `verifiedChildLinks`, which
- * is itself already filtered to VERIFIED). A PENDING link contributes
- * nothing here, which is what makes "inert until verified" true for the
- * child selector too, not just for the schedule read underneath it.
+ * page may build on (F3, `lib/db/parents.ts`'s `activeChildLinks`: ACTIVE
+ * family links, and per child only the active profiles at accessible
+ * branches). A pending invitation is not a link and contributes nothing; a
+ * revoked link is gone from the next request.
  */
-export const getVerifiedParentChildren = cache(
-  async (parentUserId: string): Promise<ParentChildOption[]> => {
-    const links = await verifiedChildLinks(prisma, parentUserId);
-    return links.map((link) => ({
+export const getParentChildren = cache(async (parentUserId: string): Promise<ParentChildren> => {
+  const links = await activeChildLinks(prisma, parentUserId);
+  return {
+    options: links.flatMap((link) =>
+      link.studentUser.studentProfiles.map((profile) => ({
+        linkId: link.id,
+        centerId: profile.center.id,
+        centerName: profile.center.name,
+        centerLogoUrl: centerLogoSrc(profile.center),
+        centerThemeColor: profile.center.themeColor,
+        studentProfileId: profile.id,
+        childName: fullName(localName(profile, link.studentUser)),
+      })),
+    ),
+    linked: links.map((link) => ({
       linkId: link.id,
-      centerId: link.center.id,
-      centerName: link.center.name,
-      centerLogoUrl: centerLogoSrc(link.center),
-      centerThemeColor: link.center.themeColor,
-      studentProfileId: link.studentProfileId,
-      childName: fullName(localName(link.studentProfile, link.studentProfile.user)),
-    }));
-  },
-);
+      childName: fullName(link.studentUser),
+      branchCount: link.studentUser.studentProfiles.length,
+    })),
+  };
+});
 
 /**
  * Where a signed-in user with NO centre relation belongs (SYS): the platform
- * admin's console, the parent portal when they hold a verified child link
- * (a `ParentLink` is not a centre relation, so the hub would otherwise tell a
- * parent "not connected to a branch" with no way to their children), else the
+ * admin's console, the parent portal when they hold an active family link
+ * (a link is not a centre relation, so the hub would otherwise tell a parent
+ * "not connected to a branch" with no way to their children), else the
  * hub's empty state.
  */
 export async function homeWithoutBranch(user: Pick<User, "id" | "isPlatformAdmin">): Promise<string> {
   if (user.isPlatformAdmin) return ROUTES.adminCenters;
-  const children = await getVerifiedParentChildren(user.id);
-  return children.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
+  const children = await getParentChildren(user.id);
+  return children.linked.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
 }
 
 export type ParentSession = {
   user: User;
-  /** Verified children only — see `getVerifiedParentChildren`'s doc comment. */
+  /** Selectable (child, branch) pairs — see `getParentChildren`. */
   children: ParentChildOption[];
+  /** Every linked child, including one at no branch yet. */
+  linkedChildren: ParentLinkedChild[];
 };
 
 /**
- * The (parent) route group's gate (M16, spec §4.5 "Parent portal"). Any
- * signed-in `User` — a brand-new parent account has zero VERIFIED children
- * until OD-6's still-open verification step happens, and the page itself
- * renders that as an empty state rather than a redirect (mirroring
+ * The (parent) route group's gate (M16, F3; spec §4.5 "Parent portal"). Any
+ * signed-in `User` — a parent with no linked child yet sees "Link your
+ * child", rendered by the page rather than a redirect (mirroring
  * `requireStudentUser`'s "zero relations is a valid state to render" shape).
  */
 export async function requireParentUser(): Promise<ParentSession> {
   const user = await getCurrentUser();
   if (!user) return redirectTo(ROUTES.login);
 
-  const children = await getVerifiedParentChildren(user.id);
-  return { user, children };
+  const children = await getParentChildren(user.id);
+  return { user, children: children.options, linkedChildren: children.linked };
 }
 
 export function hasExperience(ctx: TenantContext, experience: Experience): boolean {

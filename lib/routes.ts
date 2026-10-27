@@ -17,6 +17,12 @@ export const ROUTES = {
   /** Where Supabase's confirmation link lands (SEC-66). */
   authConfirm: "/auth/confirm",
   selectCenter: "/select-center",
+  /**
+   * F3: a parent accepts a code here. The code travels in the URL fragment
+   * (`#XXXXXXXX`, `familyJoinUrl`) — read client-side and posted, never a
+   * query parameter, so it never reaches a server or proxy log.
+   */
+  familyJoin: "/family/join",
   invite: (token: string) => `/invite/${token}`,
   centerDashboard: "/dashboard",
   // People (M3). The print views live under the student they belong to.
@@ -87,6 +93,14 @@ export const ROUTES = {
 export function authConfirmUrl(locale: "ar" | "en"): string | undefined {
   const origin = process.env.NEXT_PUBLIC_APP_URL;
   return origin ? `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.authConfirm}` : undefined;
+}
+
+/**
+ * The join link a code is shared with (F3): `<origin>/<locale>/family/join#CODE`.
+ * The fragment never leaves the browser; the page reads it and posts it.
+ */
+export function familyJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
+  return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.familyJoin}#${code}`;
 }
 
 /** The signed-in experiences, each with its own shell (docs/02 §2). */

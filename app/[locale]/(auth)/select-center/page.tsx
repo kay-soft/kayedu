@@ -1,5 +1,5 @@
 import { getLocale, getTranslations } from "next-intl/server";
-import { Building2, Check, ChevronLeft } from "lucide-react";
+import { Building2, Check, ChevronLeft, Users } from "lucide-react";
 
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { SignOutButton } from "@/components/shell/sign-out-button";
@@ -13,7 +13,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import {
   getOwnerOrgGroups,
   getUserCenterRelations,
-  getVerifiedParentChildren,
+  getParentChildren,
   primaryRole,
 } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
@@ -39,12 +39,12 @@ export default async function SelectCenterPage({
     getUserCenterRelations(user!.id),
     getOwnerOrgGroups(user!.id),
     getActiveCenterId(),
-    getVerifiedParentChildren(user!.id),
+    getParentChildren(user!.id),
   ]);
 
   // SYS: a parent with no branch relation belongs in the parent portal — the
   // hub's "not connected to a branch" state was a dead end for them.
-  if (relations.length === 0 && children.length > 0) {
+  if (relations.length === 0 && children.linked.length > 0) {
     redirect({ href: ROUTES.parentHome, locale });
   }
 
@@ -76,8 +76,9 @@ export default async function SelectCenterPage({
                 /* A teacher with zero centres gets the directory, never only
                    the student Discover link (M15, spec §5.1 "Teacher
                    onboarding") — both stay offered here since a brand-new
-                   sign-up's intent (student or teacher) isn't known yet. */
-                <div className="grid w-full gap-2 sm:flex">
+                   sign-up's intent (student, teacher or parent) isn't known
+                   yet. F3: a parent links a child with a code. */
+                <div className="grid w-full gap-2 sm:flex sm:flex-wrap">
                   <AnchorButton
                     href={`/${locale}${ROUTES.studentDiscover}`}
                     variant="default"
@@ -87,6 +88,9 @@ export default async function SelectCenterPage({
                   </AnchorButton>
                   <AnchorButton href={`/${locale}${ROUTES.teacherCenters}`} className="w-full sm:w-auto">
                     {t("findCenterToTeach")}
+                  </AnchorButton>
+                  <AnchorButton href={`/${locale}${ROUTES.familyJoin}`} className="w-full sm:w-auto">
+                    {t("linkMyChild")}
                   </AnchorButton>
                 </div>
               }
@@ -171,6 +175,19 @@ export default async function SelectCenterPage({
               </form>
             );
           })}
+
+          {/* F3: staff and teachers may be parents too — their children are
+              one tap away from the hub. */}
+          {relations.length > 0 && children.linked.length > 0 ? (
+            <AnchorButton
+              href={`/${locale}${ROUTES.parentHome}`}
+              variant="ghost"
+              className="w-full justify-start text-brand"
+            >
+              <Users className="size-4" aria-hidden />
+              {t("parentViewLink")}
+            </AnchorButton>
+          ) : null}
 
           {user!.isPlatformAdmin ? (
             <AnchorButton

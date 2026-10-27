@@ -345,3 +345,20 @@
     break-inside: avoid;
   }
 }
+
+/* The branch's parent-code slip (F3, docs/04 §11.22). Mounted into <body>
+   only while the code dialog is open, never shown on screen; for the one
+   print that `printParentCodeSlip()` flags, everything else on the page —
+   the dialog included — is hidden, so the slip is all that comes out. */
+.family-slip {
+  display: none;
+}
+@media print {
+  html[data-print-slip] body > :not(.family-slip) {
+    display: none !important;
+  }
+  html[data-print-slip] .family-slip {
+    display: block;
+    padding: 1cm;
+  }
+}

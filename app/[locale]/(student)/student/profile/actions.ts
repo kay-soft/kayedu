@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth/session";
 import { centerGradeById } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
-import { revokeStaleParentLinks } from "@/lib/db/parents";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { scopedWhere } from "@/lib/db/tenant-scope";
 import { ROUTES } from "@/lib/routes";
@@ -98,13 +97,8 @@ export async function completeStudentProfileAction(
       profileCompletedAt: new Date(),
     },
   });
-  // D-04 (a): any link standing on a parent phone no longer on the record
-  // is revoked (normally none — this is the profile's first completion).
-  await revokeStaleParentLinks(prisma, {
-    centerId,
-    studentProfileId: profile.id,
-    actorUserId: user.id,
-  });
+  // F3: the parent contact here is this branch's record only — it creates,
+  // matches and ends no family link (a link needs a code; docs/00 §5.1).
 
   revalidatePath(`/${locale}${ROUTES.studentProfile}`);
   revalidatePath(`/${locale}${ROUTES.studentSchedule}`);

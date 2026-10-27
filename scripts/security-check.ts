@@ -53,10 +53,11 @@ import {
 } from "../lib/db/identity.ts";
 import { revenueTotalsRollup } from "../lib/db/organizations.ts";
 import {
-  originateParentLinks,
-  revokeStaleParentLinks,
-  verifiedChildLinks,
-  verifyParentLinkPlaceholder,
+  acceptFamilyCode,
+  activeChildLinks,
+  hashFamilyCode,
+  issueBranchCode,
+  revokeFamilyLink,
 } from "../lib/db/parents.ts";
 import { loadPermissionGrants } from "../lib/db/permissions.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
@@ -207,6 +208,14 @@ async function cleanup() {
   if (rateLimitKeys.size > 0) {
     await prisma.rateLimitBucket.deleteMany({ where: { key: { in: [...rateLimitKeys] } } });
   }
+}
+
+/** A fresh client address for one family-code accept; both of its limiter keys are cleaned up (F3). */
+function familyJoinIp(userId: string): string {
+  const ip = `${PREFIX}${randomUUID()}`;
+  rateLimitKeys.add(`familyJoinPerIp:${ip}`);
+  rateLimitKeys.add(`familyJoinPerUser:${userId}`);
+  return ip;
 }
 
 async function makeCenter(tag: string, organizationId?: string, lifecycleState: "ACTIVE" | "SUSPENDED" = "ACTIVE") {
@@ -547,63 +556,51 @@ async function main() {
     ];
   });
 
-  await assertSec("SEC-03", "a phone match never becomes parent access by one staff click (D-03 (d))", async () => {
+  await assertSec("SEC-03", "a phone match never becomes parent access — access needs a one-time code (F3, OD-6)", async () => {
     const parentPhone = await freePhone();
     const child = await makeUser("child3");
     const profile = await makeStudent(orgCenter.id, child, { parentPhone });
-    const stranger = await makeUser("stranger3");
-    const origin = await originateParentLinks(prisma, { parentUserId: stranger.id, phone: parentPhone });
-    const link = await prisma.parentLink.findFirst({ where: { parentUserId: stranger.id, studentProfileId: profile.id } });
-    const verify = await verifyParentLinkPlaceholder(prisma, {
-      parentLinkId: link?.id ?? "",
-      centerId: orgCenter.id,
-      verifiedByUserId: manager.id,
-    });
-    const after = await prisma.parentLink.findUnique({ where: { id: link?.id ?? "" } });
+    const stranger = await makeUser("stranger3", { phone: parentPhone });
+    const classmate = await makeUser("classmate3");
+    await makeStudent(siblingCenter.id, classmate);
+    const issued = await issueBranchCode(prisma, { centerId: orgCenter.id, studentProfileId: profile.id, actorUserId: manager.id });
+    const code = issued.ok ? issued.code : "";
+    const byClassmate = await acceptFamilyCode(prisma, { acceptorUserId: classmate.id, code, ip: familyJoinIp(classmate.id) });
+    const row = issued.ok ? await prisma.familyInvitation.findUnique({ where: { id: issued.invitationId } }) : null;
+    const signUp = exportedBody("app/[locale]/(auth)/actions.ts", "signUpAction");
     return [
-      ["origination still writes only a PENDING link", origin.ok && !origin.refused && origin.createdLinkIds.length === 1],
-      ["the staff Verify stand-in refuses", !verify.ok && verify.error === "verificationUnavailable"],
-      ["the link stays PENDING", after?.status === "PENDING"],
-      ["the stranger reads no child", (await verifiedChildLinks(prisma, stranger.id)).length === 0],
-      ["the Verify button is disabled in the UI", /SubmitButton variant="outline" disabled/.test(read("app/[locale]/(center)/students/[id]/verify-parent-link-button.tsx"))],
+      ["sign-up originates nothing from a phone", !/originateParentLinks|acceptFamilyCode|familyLink|parentLink\./.test(signUp)],
+      ["a stranger whose phone is the parent phone has no link and reads no child", (await prisma.familyLink.count({ where: { parentUserId: stranger.id } })) === 0 && (await activeChildLinks(prisma, stranger.id)).length === 0],
+      ["a classmate (a student account) cannot accept the child's code", !byClassmate.ok && byClassmate.error === "studentAccount"],
+      ["the code is stored as its sha256 only", row !== null && row.codeHash === hashFamilyCode(code) && !JSON.stringify(row).includes(code)],
+      ["the staff Verify stand-in is gone", !existsSync(join(ROOT, "app/[locale]/(center)/students/[id]/verify-parent-link-button.tsx"))],
     ];
   });
 
-  await assertSec("SEC-04", "a verified parent link stops on deactivation and is revoked when the phone changes", async () => {
-    const oldPhone = await freePhone();
-    const newPhone = await freePhone();
+  await assertSec("SEC-04", "a parent link stops on deactivation and ends only by explicit, audited revocation", async () => {
     const child = await makeUser("child4");
-    const profile = await makeStudent(orgCenter.id, child, { parentPhone: oldPhone });
+    const profile = await makeStudent(orgCenter.id, child, { parentPhone: await freePhone() });
     const parent = await makeUser("parent4");
-    const link = await prisma.parentLink.create({
-      data: {
-        parentUserId: parent.id,
-        studentProfileId: profile.id,
-        centerId: orgCenter.id,
-        matchedPhone: oldPhone,
-        status: "VERIFIED",
-        verifiedAt: new Date(),
-      },
-    });
-    const before = (await verifiedChildLinks(prisma, parent.id)).length;
+    const issued = await issueBranchCode(prisma, { centerId: orgCenter.id, studentProfileId: profile.id, actorUserId: manager.id });
+    const accepted = await acceptFamilyCode(prisma, { acceptorUserId: parent.id, code: issued.ok ? issued.code : "", ip: familyJoinIp(parent.id) });
+    const reads = async () => (await activeChildLinks(prisma, parent.id)).flatMap((link) => link.studentUser.studentProfiles).length;
+    const before = await reads();
     await prisma.studentProfile.update({ where: { id: profile.id }, data: { active: false } });
-    const whileInactive = (await verifiedChildLinks(prisma, parent.id)).length;
-    await prisma.studentProfile.update({ where: { id: profile.id }, data: { active: true, parentPhone: newPhone } });
-    const beforeRevoke = (await verifiedChildLinks(prisma, parent.id)).length;
-    const revoked = await revokeStaleParentLinks(prisma, {
-      centerId: orgCenter.id,
-      studentProfileId: profile.id,
-      actorUserId: manager.id,
-    });
-    const row = await prisma.parentLink.findUniqueOrThrow({ where: { id: link.id } });
-    const audits = await prisma.auditLog.count({ where: { action: "parentLink.revoke", entityId: link.id } });
+    const whileInactive = await reads();
+    await prisma.studentProfile.update({ where: { id: profile.id }, data: { active: true, parentPhone: await freePhone() } });
+    const afterPhoneChange = await reads();
+    const linkId = accepted.ok ? accepted.linkId : "";
+    const revoked = await revokeFamilyLink(prisma, { by: "branch", linkId, actorUserId: manager.id, centerId: orgCenter.id, studentUserId: child.id, reason: "seccheck" });
+    const row = await prisma.familyLink.findUnique({ where: { id: linkId } });
+    const audits = await prisma.auditLog.count({ where: { action: "family.link.revoke", entityId: linkId } });
     return [
-      ["the verified link reads before anything changes", before === 1],
+      ["the linked parent reads before anything changes", accepted.ok && before === 1],
       ["a deactivated child disappears (D-10)", whileInactive === 0],
-      ["a changed parent phone reads as nothing even before revocation", beforeRevoke === 0],
-      ["the stale link is revoked", revoked === 1 && row.status === "REVOKED" && row.revokedAt !== null],
-      ["the revocation is audited (parentLink.revoke)", audits === 1],
-      ["staff editing the parent phone triggers the revocation", /revokeStaleParentLinks\(/.test(exportedBody("app/[locale]/(center)/students/actions.ts", "updateStudentAction"))],
+      ["a parent-phone change ends nothing (the phone is not the key)", afterPhoneChange === 1],
+      ["staff revoke the link: REVOKED, with the reason on the record", revoked.ok && row?.status === "REVOKED" && row.revokedReason === "seccheck"],
+      ["reads stop at once", (await reads()) === 0],
+      ["the revocation is audited (family.link.revoke)", audits === 1],
+      ["staff editing the parent phone revokes nothing", !/revoke/i.test(exportedBody("app/[locale]/(center)/students/actions.ts", "updateStudentAction"))],
     ];
   });
 
@@ -699,18 +696,16 @@ async function main() {
     const whileInactive = await prisma.$transaction((tx) =>
       reserveOrEnroll(tx, { centerId: orgCenter.id, classGroupId: openClass.id, studentUserId: student.id }),
     );
-    const phone = await freePhone();
     const child = await makeUser("child16");
-    const childProfile = await makeStudent(suspended.id, child, { parentPhone: phone });
+    await makeStudent(suspended.id, child);
     const parent = await makeUser("parent16");
-    await prisma.parentLink.create({
-      data: { parentUserId: parent.id, studentProfileId: childProfile.id, centerId: suspended.id, matchedPhone: phone, status: "VERIFIED", verifiedAt: new Date() },
-    });
+    // F3: a family link to the child's account; the child's only branch is SUSPENDED.
+    await prisma.familyLink.create({ data: { parentUserId: parent.id, studentUserId: child.id, source: "LEGACY_VERIFIED" } });
     const profileAction = exportedBody("app/[locale]/(student)/student/profile/actions.ts", "completeStudentProfileAction");
     return [
       ["reserving at a SUSPENDED centre → notFound", !atSuspended.ok && atSuspended.error === "notFound"],
       ["a deactivated student cannot self-enrol", !whileInactive.ok && whileInactive.error === "studentBlocked"],
-      ["a parent reads nothing at a SUSPENDED centre", (await verifiedChildLinks(prisma, parent.id)).length === 0],
+      ["a parent reads nothing at a SUSPENDED centre", (await activeChildLinks(prisma, parent.id)).every((link) => link.studentUser.studentProfiles.length === 0)],
       ["profile completion requires an active profile at an accessible centre", /active: true/.test(profileAction) && /ACCESSIBLE_LIFECYCLE_STATES/.test(profileAction)],
     ];
   });
@@ -719,7 +714,8 @@ async function main() {
     const body = exportedBody("app/[locale]/(student)/student/profile/actions.ts", "completeStudentProfileAction");
     return [
       ["a completed profile is refused (alreadyCompleted) before any write", /if \(profile\.profileCompletedAt\) return \{ error: "alreadyCompleted" \}/.test(body) && body.indexOf("alreadyCompleted") < body.indexOf("studentProfile.update")],
-      ["a parent-phone change there still revokes stale links", /revokeStaleParentLinks\(/.test(body)],
+      // F3 old → new: "a parent-phone change revokes the link" → "only explicit, audited revocation ends a link".
+      ["profile completion touches no family link (only explicit revocation ends one)", !/revoke|familyLink|parentLink/i.test(body)],
     ];
   });
 

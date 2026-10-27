@@ -12,6 +12,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { gatePrisma } from "./lib/gate-db.ts";
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
+import {
+  acceptFamilyCode,
+  activeChildLinks,
+  familyAccessForStudent,
+  issueBranchCode,
+  revokeFamilyLink,
+} from "../lib/db/parents.ts";
 import { canInContext, type Permission } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { grantMembershipBranch, loadPermissionGrants } from "../lib/db/permissions.ts";
@@ -45,6 +53,13 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 async function cleanup() {
+  // F3: the family section's audit rows (family.code.issue) name these centres.
+  const fixtureCenters = await prisma.center.findMany({ where: { slug: { in: [SLUG_A, SLUG_B, SLUG_A2] } }, select: { id: true } });
+  if (fixtureCenters.length > 0) {
+    await deleteAuditRows(prisma, { centerId: { in: fixtureCenters.map((center) => center.id) } });
+  }
+  await prisma.rateLimitBucket.deleteMany({ where: { key: { contains: "isolation-family-" } } });
+  await prisma.user.deleteMany({ where: { email: { startsWith: "isolation-family-" } } });
   // The sibling first (it shares Center A's organization), then the rest.
   await prisma.center.deleteMany({ where: { slug: SLUG_A2 } });
   const orgs = await prisma.center.findMany({ where: { slug: { in: [SLUG_A, SLUG_B] } }, select: { organizationId: true } });
@@ -154,6 +169,55 @@ async function main() {
   check("scopedWhere refuses to build an unscoped where", threwMissingScope);
 
   await checkBranchTargetedAdds(centerA.id, centerB.id, userA.id);
+  await checkFamilyLinks(centerA.id, centerB.id, userA.id, userB.id);
+}
+
+// ── 7. F3: family links are global, their reads and writes are not ─────────
+// A FamilyLink names two global Users (no centerId), but every staff read or
+// write of one goes through a StudentProfile at the acting branch, and the
+// parent reads only the child's own profiles. centerId stays the sole key:
+// a sibling branch of the same organization gets no more than a stranger.
+
+async function checkFamilyLinks(centerAId: string, centerBId: string, ownerAId: string, ownerBId: string) {
+  console.log("\nF3 — family links across branches");
+  const sibling = await prisma.center.findUniqueOrThrow({ where: { slug: SLUG_A2 } });
+  const person = (tag: string) =>
+    prisma.user.create({ data: { email: `isolation-family-${tag}@kayedu.test`, firstName: "Family", lastName: tag } });
+  const child = await person("child");
+  const profileA = await prisma.studentProfile.create({ data: { userId: child.id, centerId: centerAId, studentCode: "ISO-F1" } });
+  const strangerChild = await person("stranger-child");
+  await prisma.studentProfile.create({ data: { userId: strangerChild.id, centerId: centerBId, studentCode: "ISO-F2" } });
+  const parent = await person("parent");
+
+  const issued = await issueBranchCode(prisma, { centerId: centerAId, studentProfileId: profileA.id, actorUserId: ownerAId });
+  const linked = issued.ok
+    ? await acceptFamilyCode(prisma, { acceptorUserId: parent.id, code: issued.code, ip: "isolation-family-ip" })
+    : null;
+  check("Branch A issues a code for its own student and the parent links", issued.ok && linked?.ok === true);
+
+  const readable = (await activeChildLinks(prisma, parent.id)).flatMap((link) => link.studentUser.studentProfiles);
+  check(
+    "The parent reads only the linked child's own profile — never another branch's student",
+    readable.length === 1 && readable[0].id === profileA.id,
+  );
+  check(
+    "Another customer's branch reads nothing of Branch A's student's parent access",
+    (await familyAccessForStudent(prisma, centerBId, profileA.id)) === null,
+  );
+  check(
+    "A sibling branch of the same organization reads nothing either (centerId is the sole key)",
+    (await familyAccessForStudent(prisma, sibling.id, profileA.id)) === null,
+  );
+  const crossIssue = await issueBranchCode(prisma, { centerId: centerBId, studentProfileId: profileA.id, actorUserId: ownerBId });
+  check("Branch B cannot issue a code for Branch A's student by naming its profile id (notFound)", !crossIssue.ok && crossIssue.error === "notFound");
+  const crossRevoke = linked?.ok
+    ? await revokeFamilyLink(prisma, { by: "branch", linkId: linked.linkId, actorUserId: ownerBId, centerId: centerBId, studentUserId: child.id, reason: "isolation" })
+    : null;
+  check("Branch B cannot revoke a link of a student it has no record of (notFound)", crossRevoke !== null && !crossRevoke.ok && crossRevoke.error === "notFound");
+  check(
+    "…and the link is still ACTIVE",
+    linked?.ok === true && (await prisma.familyLink.findUniqueOrThrow({ where: { id: linked.linkId } })).status === "ACTIVE",
+  );
 }
 
 // ── 6. F1: a branch-targeted invite / Add teacher ──────────────────────────

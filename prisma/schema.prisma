@@ -129,6 +129,38 @@ enum SettlementStatus {
   CANCELLED
 }
 
+// F3 (OD-6 decided): a FamilyLink's lifecycle. ACTIVE is the only status any
+// parent-portal read trusts; REVOKED is final (relinking needs a new code).
+enum FamilyLinkStatus {
+  ACTIVE
+  REVOKED
+}
+
+// How a FamilyLink came to exist (F3). LEGACY_VERIFIED: migrated from a
+// VERIFIED ParentLink by `20261026110000_f3_family_links`.
+enum FamilyLinkSource {
+  STUDENT_INVITE
+  CENTER_CODE
+  LEGACY_VERIFIED
+}
+
+// Who issued a FamilyInvitation's code (F3): the student from Account →
+// Family, or a branch from the student's page.
+enum FamilyInvitationSource {
+  STUDENT_INVITE
+  CENTER_CODE
+}
+
+// A FamilyInvitation is single use: PENDING until one accept wins
+// (conditional update), or REVOKED by its student, a regenerate, or a branch.
+enum FamilyInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+// DEPRECATED (F3): ParentLink is no longer read or written anywhere — see the
+// note on the ParentLink model. Kept until it is dropped after the pilot.
 // A parent↔child link's lifecycle (M16, spec §5.1 "Parent role & portal").
 // A phone match alone only ever produces PENDING — it grants zero reads.
 // VERIFIED is the only status any parent-portal read trusts. There is no
@@ -157,12 +189,12 @@ enum AccountClaimStatus {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   // Links to Supabase auth.users.id; kept as the app-side profile.
-  authId          String?  @unique
+  authId          String?   @unique
   firstName       String
   lastName        String
-  email           String?  @unique
+  email           String?   @unique
   // SEC-2a (D-01): Supabase's `email_confirmed_at` for this login, mirrored on
   // every sync. Null for a staff-created person who has never signed in. When
   // REQUIRE_EMAIL_CONFIRMATION=true, an email-based link needs it set.
@@ -170,7 +202,7 @@ model User {
   // A staff-typed (never self-typed) contact, seeded once at creation. Phone
   // is never an identity key (SEC-2a, D-02): nothing links on it, and sign-up
   // never writes it.
-  phone           String?  @unique
+  phone           String?   @unique
   altPhone        String?
   // F2: the person's own self-declared phone, set on Account settings and
   // normalized through lib/phone.ts. NOT unique and never an identity key
@@ -181,34 +213,38 @@ model User {
   contactPhone    String?
   avatarUrl       String?
   // The preferred language: where sign-in lands (F2), editable on Account settings.
-  locale          String   @default("ar") // "ar" | "en"
-  isPlatformAdmin Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  locale          String    @default("ar") // "ar" | "en"
+  isPlatformAdmin Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  memberships        Membership[]
-  studentProfiles    StudentProfile[]
-  taughtClasses      ClassGroup[]        @relation("ClassTeacher")
-  taughtSessions     Session[]           @relation("SessionTeacher")
-  reservations       Reservation[]
-  auditLogs          AuditLog[]
+  memberships          Membership[]
+  studentProfiles      StudentProfile[]
+  taughtClasses        ClassGroup[]        @relation("ClassTeacher")
+  taughtSessions       Session[]           @relation("SessionTeacher")
+  reservations         Reservation[]
+  auditLogs            AuditLog[]
   // M14 — this user's own payout history, as a TEACHER. Named distinctly
   // from `taughtSessions`/`taughtClasses` since a Settlement references the
   // teacher, not a class or session.
-  settlements        Settlement[]        @relation("SettlementTeacher")
-  // M16 — the children this User reads as a PARENT (inert until VERIFIED).
-  // Named distinctly from every relation above because this one isn't a
-  // Membership or a StudentProfile of their own — it's read access into
-  // someone else's.
-  parentLinks        ParentLink[]        @relation("ParentLinkParent")
+  settlements          Settlement[]        @relation("SettlementTeacher")
+  // M16 — DEPRECATED at F3 (never read or written; see the ParentLink model).
+  parentLinks          ParentLink[]        @relation("ParentLinkParent")
+  // F3 — family links. As a parent: the children this User may read (ACTIVE
+  // only). As a student: the parents who may read this User's records.
+  // Named distinctly because neither is a Membership or a StudentProfile.
+  familyLinksAsParent  FamilyLink[]        @relation("FamilyLinkParent")
+  familyLinksAsStudent FamilyLink[]        @relation("FamilyLinkStudent")
+  // F3 — parent codes issued for this User as the student (by them or a branch).
+  familyInvitations    FamilyInvitation[]  @relation("FamilyInvitationStudent")
   // M17 — this User's own ratings and skips, as a STUDENT rating sessions
   // they attended. Named off the global User (not a StudentProfile) because
   // rating is the student's own act, the same identity the login pop-up
   // authenticates against — see the note on SessionRating below.
-  sessionRatings     SessionRating[]     @relation("SessionRatingStudent")
-  sessionRatingSkips SessionRatingSkip[] @relation("SessionRatingSkipStudent")
+  sessionRatings       SessionRating[]     @relation("SessionRatingStudent")
+  sessionRatingSkips   SessionRatingSkip[] @relation("SessionRatingSkipStudent")
   // SEC-2a (D-01) — sign-ups claiming this staff-created person.
-  accountClaims      AccountClaim[]      @relation("AccountClaimTarget")
+  accountClaims        AccountClaim[]      @relation("AccountClaimTarget")
 }
 
 /**
@@ -301,36 +337,38 @@ model Center {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  settings           CenterSettings?
-  memberships        Membership[]
-  invitations        Invitation[]
-  catalogSelections  CenterCatalogSelection[]
-  rooms              Room[]
-  roomLinks          RoomLink[]
-  classGroupRooms    ClassGroupRoom[]
-  sessionRooms       SessionRoom[]
-  classGroups        ClassGroup[]
-  studentProfiles    StudentProfile[]
-  enrollments        Enrollment[]
-  sessions           Session[]
-  attendees          SessionAttendee[]
-  attendanceChanges  SessionAttendanceChange[]
-  payments           Payment[]
-  paymentMethods     CenterPaymentMethod[]
-  expenseCategories  ExpenseCategory[]
-  expenses           Expense[]
-  reservations       Reservation[]
-  changeRequests     ChangeRequest[]
-  studentBlocks      StudentBlock[]
-  holidays           Holiday[]
-  terms              CenterTerm[]
-  auditLogs          AuditLog[]
-  permissionGrants   PermissionGrant[]
-  branchGrants       MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
-  refunds            Refund[]
-  settlements        Settlement[]
-  settlementClaims   SettlementClaim[]
-  parentLinks        ParentLink[]
+  settings          CenterSettings?
+  memberships       Membership[]
+  invitations       Invitation[]
+  catalogSelections CenterCatalogSelection[]
+  rooms             Room[]
+  roomLinks         RoomLink[]
+  classGroupRooms   ClassGroupRoom[]
+  sessionRooms      SessionRoom[]
+  classGroups       ClassGroup[]
+  studentProfiles   StudentProfile[]
+  enrollments       Enrollment[]
+  sessions          Session[]
+  attendees         SessionAttendee[]
+  attendanceChanges SessionAttendanceChange[]
+  payments          Payment[]
+  paymentMethods    CenterPaymentMethod[]
+  expenseCategories ExpenseCategory[]
+  expenses          Expense[]
+  reservations      Reservation[]
+  changeRequests    ChangeRequest[]
+  studentBlocks     StudentBlock[]
+  holidays          Holiday[]
+  terms             CenterTerm[]
+  auditLogs         AuditLog[]
+  permissionGrants  PermissionGrant[]
+  branchGrants      MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
+  refunds           Refund[]
+  settlements       Settlement[]
+  settlementClaims  SettlementClaim[]
+  parentLinks       ParentLink[]
+  // F3 — parent codes this branch printed (`FamilyInvitation.issuingCenterId`).
+  familyInvitations FamilyInvitation[]
 
   @@index([organizationId])
 }
@@ -1356,10 +1394,90 @@ model ChangeRequest {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PARENT (M16)
+// PARENT (M16) → FAMILY (F3)
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * A parent ↔ child relation between two global `User`s (F3, OD-6 decided —
+ * docs/00-master-product-spec.md §5.1 "Parent role & portal",
+ * docs/01-data-model.md "FamilyLink"). It carries **no `centerId`**: like
+ * `SessionRating`, it is a cross-cutting identity relation, so it can exist
+ * before the child joins any branch. It grants no tenant read by itself —
+ * the parent portal reads each child's data through that child's own active
+ * `StudentProfile`s at accessible centres, with the student portal's own
+ * centre-scoped reads (`lib/db/parents.ts`'s `activeChildProfiles`).
+ * A link is only ever created by accepting a code (`FamilyInvitation`) —
+ * never by a phone match. Revocation is explicit and audited, by the branch,
+ * the parent or a platform admin (never by the student) and final for that
+ * code: relinking needs a new one, which re-activates this same row (the
+ * unique pair) and leaves the earlier revocation in the audit trail.
+ */
+model FamilyLink {
+  id            String            @id @default(uuid())
+  parentUserId  String
+  parentUser    User              @relation("FamilyLinkParent", fields: [parentUserId], references: [id], onDelete: Cascade)
+  studentUserId String
+  studentUser   User              @relation("FamilyLinkStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  status        FamilyLinkStatus  @default(ACTIVE)
+  source        FamilyLinkSource
+  // The accepted code this link stands on (null for LEGACY_VERIFIED).
+  invitationId  String?           @unique
+  invitation    FamilyInvitation? @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+  revokedAt     DateTime?
+  revokedBy     String?
+  // Typed by staff when a branch revokes (required there) — on the record,
+  // never in the audit row (D-20).
+  revokedReason String?
+
+  @@unique([parentUserId, studentUserId])
+  @@index([parentUserId, status])
+  @@index([studentUserId, status])
+}
+
+/**
+ * A one-time parent code (F3). The code itself is **never stored** — only its
+ * sha256 (`codeHash`) and its last two characters (`codeHint`, so a list can
+ * tell two pending codes apart). It is shown in full once, at creation. No
+ * time limit (founder's decision); single use (a conditional PENDING →
+ * ACCEPTED update, so two accepts cannot both win); revocable.
+ * `STUDENT_INVITE`: issued by the student from Account → Family, carrying the
+ * parent the student **declared** (name + phone, normalized by lib/phone.ts —
+ * shown to staff beside the account that accepted, never an identity key).
+ * `CENTER_CODE`: printed by a branch from `/students/[id]` (`issuingCenterId`);
+ * at most one PENDING per (student, branch) — a partial unique index in the
+ * migration — so regenerating revokes the previous one.
+ */
+model FamilyInvitation {
+  id                      String                 @id @default(uuid())
+  studentUserId           String
+  studentUser             User                   @relation("FamilyInvitationStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  codeHash                String                 @unique
+  codeHint                String
+  source                  FamilyInvitationSource
+  issuingCenterId         String?
+  issuingCenter           Center?                @relation(fields: [issuingCenterId], references: [id], onDelete: SetNull)
+  createdBy               String
+  createdAt               DateTime               @default(now())
+  declaredParentFirstName String?
+  declaredParentLastName  String?
+  declaredParentPhone     String?
+  status                  FamilyInvitationStatus @default(PENDING)
+  acceptedBy              String?
+  acceptedAt              DateTime?
+  revokedAt               DateTime?
+
+  link FamilyLink?
+
+  @@index([studentUserId, status])
+  @@index([issuingCenterId])
+}
+
+/**
+ * DEPRECATED (F3). Not read or written anywhere since OD-6 was decided: its
+ * VERIFIED rows were copied into `FamilyLink` (source LEGACY_VERIFIED) by the
+ * F3 migration and PENDING rows were not migrated. Kept in place, untouched,
+ * until it is dropped after the pilot (docs/05-phase-2-backlog.md).
  * A parent↔child link (docs/01-data-model.md §2 "People layer, continued",
  * docs/00-master-product-spec.md §5.1 "Parent role & portal"). Every row
  * names exactly one `StudentProfile`, so a parent's read stays a tenant read

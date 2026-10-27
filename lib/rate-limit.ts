@@ -90,6 +90,10 @@ export const RATE_LIMITS = {
   // a stolen session cannot be used to guess its own password.
   accountVerifyPerUser: { limit: 5, windowMs: 15 * 60_000 },
   accountVerifyPerIp: { limit: 30, windowMs: 15 * 60_000 },
+  // F3: accepting a parent code (/family/join, Account → Family) — every
+  // attempt counts, valid or not, before any code is looked up.
+  familyJoinPerUser: { limit: 10, windowMs: 60 * 60_000 },
+  familyJoinPerIp: { limit: 10, windowMs: 60 * 60_000 },
 } as const;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

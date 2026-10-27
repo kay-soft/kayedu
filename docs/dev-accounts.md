@@ -30,8 +30,8 @@
 | `student.both@example.com` | Farida Salah | Student (studies at both organizations) | Center 60 — Downtown + Al Nokhba Academy |
 | `student.nasrcity@example.com` | Mariam Ibrahim | Student | Center 60 — Nasr City |
 | `student.new@example.com` | Omar Metwally | Student (no centre — has a pending reservation) | — |
-| `parent.family@example.com` | Hanan Kamel | Parent (2 verified children + 1 pending) | Center 60 — Downtown + Nasr City |
-| `parent.nokhba@example.com` | Ashraf Salah | Parent (child at Al Nokhba; Center 60 link pending) | Al Nokhba Academy |
+| `parent.family@example.com` | Hanan Kamel | Parent (2 linked children) | Center 60 — Downtown + Nasr City |
+| `parent.nokhba@example.com` | Ashraf Salah | Parent (one child at two branches) | Al Nokhba Academy + Center 60 — Downtown |
 <!-- accounts:end -->
 
 ## What each should see
@@ -48,7 +48,7 @@ Navigation is gated on the stored permission matrix (`PermissionGrant`), with ea
 | Parent | Schedule |
 | Platform admin | Centers · Platform · Catalog |
 
-`owner.suspended@example.com` resolves no centre at all and is sent to the select-centre screen's empty state; `owner.onboarding@example.com` signs in normally. A parent with a verified child lands on `/parent` (SYS — the select-centre hub used to tell them they were not connected to a branch); `teacher.new@example.com` lands on the hub, whose "Find a branch to teach at" leads to the directory, and any `/teacher/*` URL sends them there directly. `npm run e2e` (SYS) signs in as these accounts and checks each row of this table.
+`owner.suspended@example.com` resolves no centre at all and is sent to the select-centre screen's empty state; `owner.onboarding@example.com` signs in normally. A parent with a linked child lands on `/parent` (SYS — the select-centre hub used to tell them they were not connected to a branch); `teacher.new@example.com` lands on the hub, whose "Find a branch to teach at" leads to the directory, and any `/teacher/*` URL sends them there directly. `npm run e2e` (SYS) signs in as these accounts and checks each row of this table.
 
 ## The world behind them
 
@@ -61,6 +61,20 @@ Navigation is gated on the stored permission matrix (`PermissionGrant`), with ea
 - **Money and workflow** — settlements (one PAID, one APPROVED, one DRAFT per Center 60 branch), expenses in Rent / Salaries / Utilities / Supplies / Marketing, ratings inside the last seven days (the three signed-in students' own sessions are left unrated so the pop-up appears), reservations (pending, confirmed, and rejected inside the 7-day cooldown) and teacher change requests (NEW_CLASS, NEW_SESSION, and a zero-centre teacher's request to teach).
 - **Not signed-in people** — about 110 students, parents' phone numbers and the other teachers are real rows with no login. Their emails are `@example.com` too and mean nothing.
 - **Phones** are canonical `01XXXXXXXXX` (010 / 011 / 012 / 015), produced through `lib/phone.ts`; no photos exist (`photoUrl` is empty).
+
+## Family links and the two dev parent codes (F3)
+
+Parents are linked to children by one-time codes (`docs/00-master-product-spec.md` §5.1 "Parent role & portal"). The seed links them through the real code paths, and leaves **two waiting codes** with fixed, **dev-only** plaintexts so a tester can link a parent by hand. Every other code is random, shown once and stored only as its hash — these two are known only because this file prints them.
+
+| Code | What it is | Use it to test |
+|---|---|---|
+| `SEED-PRNT` | **Farida Salah's** (`student.both@…`) own invitation for a second parent, "Nadia Salah" (a student invitation) | Sign up a new account (not a student), open `/en/family/join#SEEDPRNT` and link — Farida then appears at both her branches. Farida's Account → Family shows it as waiting until then. |
+| `SEED-BRCH` | **Center 60 — Downtown's** printed code for **Mazen Kamel**, who has no login (a branch code) | The same, at `/en/family/join#SEEDBRCH` — a code for a student with no account. Downtown's student page for Mazen shows it waiting ("ending CH"). |
+
+- **`parent.family@…`** (Hanan Kamel) — two linked children: **Yara** (Downtown, by Yara's own invitation) and **Ziad** (Nasr City, by Nasr City's printed code). Mazen's code is the waiting one above.
+- **`parent.nokhba@…`** (Ashraf Salah) — one child, **Farida**, linked by Al Nokhba's printed code; she studies at Al Nokhba **and** Downtown, so both appear in the child selector.
+- On a database that had the old verified `ParentLink`s, the F3 migration already copied them into family links (shown as "Linked before codes"); the seed then leaves those links as they are.
+- Each code works **once**. After one is used, re-running the seed reports it as `ACCEPTED`; to test again, use the student or branch screens to make a fresh code. **Never** seed these codes into a production project (the seed refuses one anyway).
 
 ## Running it
 

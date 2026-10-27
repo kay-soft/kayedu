@@ -347,7 +347,7 @@ async function main() {
   const studentUser = await prisma.user.create({
     data: { firstName: "Student", lastName: "Check", email: "catalog-check-student@kayedu.test", locale: "en" },
   });
-  const studentProfile0 = await prisma.studentProfile.create({
+  await prisma.studentProfile.create({
     data: scopedData(centerA.id, {
       userId: studentUser.id,
       studentCode: "9201",
@@ -359,13 +359,9 @@ async function main() {
   const parentUser = await prisma.user.create({
     data: { firstName: "Parent", lastName: "Check", email: "catalog-check-parent@kayedu.test", locale: "en" },
   });
-  await prisma.parentLink.create({
-    data: {
-      parentUserId: parentUser.id,
-      studentProfileId: studentProfile0.id,
-      centerId: centerA.id,
-      matchedPhone: "+201000000001",
-    },
+  // F3: a parent is a FamilyLink to the student's account (ParentLink is no longer read).
+  await prisma.familyLink.create({
+    data: { parentUserId: parentUser.id, studentUserId: studentUser.id, source: "LEGACY_VERIFIED" },
   });
   actors.push({ label: "PARENT", id: parentUser.id });
   const plainUser = await prisma.user.create({

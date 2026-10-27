@@ -276,6 +276,7 @@ const PAGEHEADER_EXEMPT: Record<string, string> = {
   "app/[locale]/(auth)/invite/[token]/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/select-center/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/account-pending/page.tsx": "signed-out screen — AuthCard carries the heading",
+  "app/[locale]/(auth)/family/join/page.tsx": "auth screen (F3, guests too) — AuthCard carries the heading",
   "app/[locale]/(print)/sessions/[id]/print/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/card/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/paper/page.tsx": "print sheet — no app chrome",
@@ -617,6 +618,8 @@ const SILENT_CATCH_ALLOWLIST: Record<string, string> = {
     "an advisory preview — the server's own conflict check still answers on submit",
   "app/[locale]/(center)/settings/card/card-form.tsx":
     "getBBox() throws while the card is display:none; there is nothing to measure, not a failure",
+  "components/family/join-family-form.tsx":
+    "sessionStorage can be blocked (a private window); the parent code then has to be typed again — nothing failed (F3)",
 };
 
 function checkNoSilentCatches() {

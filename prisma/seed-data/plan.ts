@@ -144,10 +144,22 @@ export const ZERO_CENTRE_TEACHER: PersonDef = {
 
 // ── Parents ────────────────────────────────────────────────────────────────
 
+/**
+ * The two waiting parent codes the demo ships with (F3) — dev-only, printed
+ * by the seed and listed in docs/dev-accounts.md so a tester can link a parent
+ * by hand. Stored hashed like any other; only these plaintexts are fixed.
+ */
+export const DEV_FAMILY_CODES = {
+  /** Farida (student.both) invited a second parent — a STUDENT_INVITE. */
+  studentInvite: "SEEDPRNT",
+  /** Downtown printed a code for Mazen, who has no login — a CENTER_CODE. */
+  branchCode: "SEEDBRCH",
+} as const;
+
 export const PARENTS = {
-  /** 2 VERIFIED children (one per Center 60 branch) + 1 PENDING. */
+  /** 2 linked children (one per Center 60 branch); a third (Mazen) has a waiting branch code. */
   family: { key: "parent-family", first: "Hanan", last: "Kamel", email: mail("parent.family"), locale: "ar" as Locale },
-  /** One child, who studies at Al Nokhba (and, pending, at Center 60 Downtown too). */
+  /** One child, Farida, who studies at Al Nokhba and Center 60 Downtown — both show (F3). */
   nokhba: { key: "parent-nokhba", first: "Ashraf", last: "Salah", email: mail("parent.nokhba"), locale: "en" as Locale },
 };
 
@@ -440,7 +452,7 @@ export function seedAccounts(): SeedAccount[] {
     }
   }
   add(DISCOVER_STUDENT, "Student (no centre — has a pending reservation)", "—");
-  add(PARENTS.family, "Parent (2 verified children + 1 pending)", "Center 60 — Downtown + Nasr City");
-  add(PARENTS.nokhba, "Parent (child at Al Nokhba; Center 60 link pending)", "Al Nokhba Academy");
+  add(PARENTS.family, "Parent (2 linked children)", "Center 60 — Downtown + Nasr City");
+  add(PARENTS.nokhba, "Parent (one child at two branches)", "Al Nokhba Academy + Center 60 — Downtown");
   return out;
 }

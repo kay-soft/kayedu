@@ -6,7 +6,6 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUser, syncUserFromAuth } from "@/lib/auth/session";
 import { requireEmailConfirmation } from "@/lib/auth/auth-config";
 import { clientIp } from "@/lib/auth/request-ip";
-import { originateParentLinks } from "@/lib/db/parents";
 import {
   clearActiveCenterId,
   setActiveCenterId,
@@ -139,7 +138,7 @@ export async function signUpAction(
   if (!parsed.success) {
     return { fieldErrors: fieldErrorsFrom(parsed.error) };
   }
-  const { firstName, lastName, email, phone, password, locale, next } = parsed.data;
+  const { firstName, lastName, email, password, locale, next } = parsed.data;
 
   const allowed = await checkRateLimits([
     { name: "signUpPerIp", key: await clientIp() },
@@ -183,17 +182,10 @@ export async function signUpAction(
       : { error: "signUpFailed" };
   }
 
-  // Parent account origination (M16, spec §4.5 item 0 / §5.1 "Parent role &
-  // portal"): if this phone appears as a parent phone on some student's
-  // record, this creates PENDING ParentLink row(s) — never a read, never for
-  // a privileged phone (`lib/db/parents.ts`'s `originateParentLinks`). A
-  // PENDING link grants nothing, and staff verification is disabled until
-  // OD-6 is decided (D-03 (d)). The phone itself is not stored (D-02).
-  // Best-effort: a person registering as themselves must never be blocked by
-  // an unrelated parent-matching failure.
-  await originateParentLinks(prisma, { parentUserId: identity.user.id, phone }).catch(
-    logBestEffort("sign-up parent-link origination"),
-  );
+  // F3 (OD-6 decided): a sign-up never originates parent access. A phone
+  // match grants nothing and creates nothing — a parent links with a
+  // one-time code (`/family/join`, lib/db/parents.ts's `acceptFamilyCode`).
+  // The optional phone on the form is not stored either (D-02).
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(identity.user));
 

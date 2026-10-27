@@ -14,7 +14,7 @@ import {
   seedLocalName,
 } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
-import { revokeStaleParentLinks, verifyParentLinkPlaceholder } from "@/lib/db/parents";
+import { issueBranchCode, revokeBranchCode, revokeFamilyLink } from "@/lib/db/parents";
 import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
 import {
   claimStudentCode,
@@ -50,7 +50,7 @@ import {
   type PeopleActionState,
   type PhoneLookupResult,
 } from "@/lib/validation/people";
-import { verifyParentLinkSchema } from "@/lib/validation/parents";
+import { branchCodeSchema, branchRevokeLinkSchema, type FamilyActionState } from "@/lib/validation/parents";
 import { parseActionArgs, phoneLookupArgs, searchArgs } from "@/lib/validation/action-args";
 import { logBestEffort } from "@/lib/log";
 
@@ -365,18 +365,8 @@ export async function updateStudentAction(
     parentAltPhone,
   });
 
-  // D-04 (a), SEC-04: a parent phone that is no longer on the record takes
-  // every link it produced with it — revoked and audited, never left to read.
-  if (
-    normalizePhone(parentPhone) !== normalizePhone(student.parentPhone) ||
-    normalizePhone(parentAltPhone) !== normalizePhone(student.parentAltPhone)
-  ) {
-    await revokeStaleParentLinks(prisma, {
-      centerId: scope.ctx.center.id,
-      studentProfileId: student.id,
-      actorUserId: scope.ctx.user.id,
-    });
-  }
+  // F3: the parent phone on this record is contact data only — changing it
+  // touches no family link (only explicit, audited revocation ends one).
 
   revalidateStudentDetail(locale, student.id);
   revalidateStudentPrintables(locale, student.id);
@@ -687,46 +677,84 @@ export async function generateIdCardAction(
     : { error: "storage" };
 }
 
-// ── Parent links (M16) ──────────────────────────────────────────────────────
+// ── Parent access (F3) ──────────────────────────────────────────────────────
 
 /**
- * ─────────────────────────────── OD-6 PLACEHOLDER ───────────────────────────
- * See `lib/db/parents.ts`'s `verifyParentLinkPlaceholder` — this Server
- * Action is the manual, staff-facing, audited seam it describes, NOT OD-6's
- * real verification mechanism. `parent.link.manage` is a MANAGER_BASELINE
- * permission (OWNER/MANAGER by default, configurable like any other post-M12
- * action) — a Receptionist cannot flip this by direct call any more than by
- * a hidden button.
- * ─────────────────────────────────────────────────────────────────────────
+ * The "Parent access" card on `/students/[id]` (F3, OD-6 decided). Every
+ * action needs `parent.link.manage` (MANAGER_BASELINE — OWNER/MANAGER by
+ * default, configurable like any other post-M12 action) on a non-denied
+ * centre context, and resolves the student through `ctx.center.id` inside
+ * `lib/db/parents.ts`, so another branch's student id is `notFound`. The
+ * data layer writes the audit row in the same transaction.
  */
-export async function verifyParentLinkAction(
-  _state: PeopleActionState,
-  formData: FormData,
-): Promise<PeopleActionState> {
+async function parentAccessContext() {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "parent.link.manage")) return FORBIDDEN;
+  return ctxCan(ctx, "parent.link.manage") ? ctx : null;
+}
 
-  const parsed = verifyParentLinkSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
+/** "Generate parent code": the code comes back once, in this answer only. */
+export async function generateParentCodeAction(
+  _state: FamilyActionState,
+  formData: FormData,
+): Promise<FamilyActionState> {
+  const ctx = await parentAccessContext();
+  if (!ctx) return { error: "forbidden" };
+  const parsed = branchCodeSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
 
-  const { parentLinkId, locale } = parsed.data;
-  const result = await verifyParentLinkPlaceholder(prisma, {
-    parentLinkId,
+  const result = await issueBranchCode(prisma, {
     centerId: ctx.center.id,
-    verifiedByUserId: ctx.user.id,
+    studentProfileId: parsed.data.studentProfileId,
+    actorUserId: ctx.user.id,
   });
   if (!result.ok) return { error: result.error };
+  revalidateStudentDetail(parsed.data.locale, parsed.data.studentProfileId);
+  return { status: "issued", code: result.code };
+}
 
-  await writeAuditLog({
+/** Cancels this branch's waiting code for the student. */
+export async function cancelParentCodeAction(
+  _state: FamilyActionState,
+  formData: FormData,
+): Promise<FamilyActionState> {
+  const ctx = await parentAccessContext();
+  if (!ctx) return { error: "forbidden" };
+  const parsed = branchCodeSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+
+  const result = await revokeBranchCode(prisma, {
     centerId: ctx.center.id,
+    studentProfileId: parsed.data.studentProfileId,
     actorUserId: ctx.user.id,
-    action: "parentLink.verify",
-    entityType: "ParentLink",
-    entityId: result.linkId,
-    before: { status: "PENDING" },
-    after: { status: "VERIFIED" },
   });
+  if (!result.ok) return { error: result.error };
+  revalidateStudentDetail(parsed.data.locale, parsed.data.studentProfileId);
+  return { status: "revoked" };
+}
 
-  revalidateStudentDetail(locale, result.studentProfileId);
-  return { status: "saved" };
+/** "Remove access": ends one parent's link, with a reason kept on the link. */
+export async function revokeParentLinkAction(
+  _state: FamilyActionState,
+  formData: FormData,
+): Promise<FamilyActionState> {
+  const ctx = await parentAccessContext();
+  if (!ctx) return { error: "forbidden" };
+  const parsed = branchRevokeLinkSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  // The link must belong to a student who is on this branch's books.
+  const profile = await scoped(ctx).students.findById(parsed.data.studentProfileId);
+  if (!profile) return { error: "notFound" };
+
+  const result = await revokeFamilyLink(prisma, {
+    by: "branch",
+    linkId: parsed.data.linkId,
+    actorUserId: ctx.user.id,
+    centerId: ctx.center.id,
+    studentUserId: profile.userId,
+    reason: parsed.data.reason,
+  });
+  if (!result.ok) return { error: result.error };
+  revalidateStudentDetail(parsed.data.locale, profile.id);
+  return { status: "revoked" };
 }
