@@ -45,6 +45,8 @@ npm run check:rls            # read-only: Data API closed, four private buckets,
 
 Re-run `db:deploy:staging` after every schema change. The Vercel build never runs migrations.
 
+**Known `check:rls` finding on a stock project.** The first run on a fresh Supabase project reported `anon`/`authenticated` with USAGE on schema `public` (it came from the schema's PUBLIC entry, which the SEC-2a migration did not revoke — fixed by `20261028090000_s1_public_schema_usage_lockdown`) and Supabase's `supabase_admin` default privileges still listing them. The latter cannot be changed by the `postgres` role the migrations run as, and it only applies to objects `supabase_admin` itself creates, never to Prisma's tables — so `check:rls` now audits only the default privileges owned by the connecting role (the one that creates our tables), which must list no `anon`/`authenticated`.
+
 ## 4. Seed
 
 ```powershell

@@ -76,12 +76,18 @@ export async function auditRls(prisma: PrismaClient): Promise<RlsAuditResult> {
     });
   }
 
+  const [{ currentUser }] = await prisma.$queryRaw<{ currentUser: string }[]>`SELECT current_user::text AS "currentUser"`;
   const defaultAcls = await prisma.$queryRaw<{ owner: string; objtype: string; acl: string }[]>`
     SELECT pg_get_userbyid(d.defaclrole) AS owner, d.defaclobjtype::text AS objtype, d.defaclacl::text AS acl
     FROM pg_default_acl d
     LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
     WHERE n.nspname = 'public'`;
+  // Only the connecting role's defaults matter: they decide the grants on tables
+  // our migrations create (they run as this role). Supabase's stock defaults owned
+  // by `supabase_admin` list anon/authenticated and cannot be changed by `postgres`,
+  // but they apply only to objects supabase_admin itself creates (S1, docs/staging.md §3).
   const defaultAclGrants = defaultAcls
+    .filter((row) => row.owner === currentUser)
     .filter((row) => /(^|[{,])(anon|authenticated)=/.test(row.acl))
     .map((row) => `${row.owner}:${row.objtype}:${row.acl}`);
 
