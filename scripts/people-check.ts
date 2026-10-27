@@ -182,6 +182,15 @@ function checkSingleNormalizer(): void {
   );
 }
 
+/** The body of `export async function <name>(` up to the next top-level export (as in check:security). */
+function exportedBody(path: string, name: string): string {
+  const source = readFileSync(path, "utf8");
+  const start = source.search(new RegExp(`export (async )?function ${name}\\(`));
+  if (start < 0) throw new Error(`${name} not found in ${path}`);
+  const next = source.indexOf("\nexport ", start + 10);
+  return source.slice(start, next < 0 ? undefined : next);
+}
+
 /**
  * M18's receptionist-phone-lookup shape assertion (spec §5.1): "reuses M3's
  * duplicate-match panel — not a raw phone-to-record endpoint... minimum
@@ -197,19 +206,18 @@ async function checkPhoneLookupShape(): Promise<void> {
   ];
 
   for (const file of files) {
-    const contents = readFileSync(file, "utf8");
-    const start = contents.indexOf("lookupPersonByPhoneAction");
-    const body = contents.slice(start, start + 800);
+    // G2 (OD-14): the whole action, not a fixed 800-character window — the call
+    // sat at character 790 and any added line moved it out of the window.
+    const body = exportedBody(file, "lookupPersonByPhoneAction");
     // SEC-11 (SEC-2a): the limit moved inside `resolveContact` itself, so it
     // covers every path that can reveal a match, not just this one.
     check(
       `${relative(root, file)}'s lookupPersonByPhoneAction resolves through the rate-limited resolveContact`,
-      start !== -1 && /resolveContact\(/.test(body) && /rateLimited/.test(body),
+      /resolveContact\(/.test(body) && /rateLimited/.test(body),
     );
     check(
       `${relative(root, file)}'s lookupPersonByPhoneAction reuses describeMatch (never a raw record fetch)`,
-      start !== -1 &&
-        /describeMatch\(/.test(body) &&
+      /describeMatch\(/.test(body) &&
         !/\.findMany\(/.test(body) &&
         !/prisma\.user\.findUnique/.test(body),
     );

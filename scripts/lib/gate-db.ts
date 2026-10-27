@@ -43,6 +43,10 @@
  *    the run is `KAYEDU_ENV=staging` or on a local database, and never against
  *    the dev project of `.env` (`scripts/lib/env.ts`, `docs/staging.md`).
  *
+ * 6. **Pool size of a race's other desk (G2).** A second client
+ *    (`sweepUsers: false`) is capped at `GATE_DESK_CONNECTION_LIMIT`
+ *    connections; the main client keeps `DATABASE_URL`'s `connection_limit`.
+ *
  * Shared dev database rules still hold (CLAUDE.md rule 7): nothing here
  * resets, truncates or touches a row the run did not create.
  */
@@ -52,6 +56,7 @@ import { basename } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 
 import { WRITE_TRANSACTION_OPTIONS } from "../../lib/db/session-lifecycle.ts";
+import { GATE_DESK_CONNECTION_LIMIT, lowerConnectionLimit } from "./connection-limit.ts";
 import { assertSafeToWrite } from "./env.ts";
 
 /** A gate transaction never waits longer than this for a lock. */
@@ -166,7 +171,14 @@ function recordCreatedUsers(operation: string, args: unknown, result: unknown, i
 
 export async function gatePrisma(options: GateOptions = {}): Promise<PrismaClient> {
   if (!options.readOnly) assertSafeToWrite(`npm run check:${gateName.replace(/-check$/, "")}`);
+  // G2: a race's other desk (`sweepUsers: false`) never runs more than three
+  // operations at once, so it gets GATE_DESK_CONNECTION_LIMIT connections, not
+  // DATABASE_URL's 10 — one gate with two desks asks the pooler for at most
+  // 10 + 3 + 3 = 16 connections instead of 30. The main client and the app keep
+  // DATABASE_URL's limit.
+  const deskUrl = options.sweepUsers === false ? lowerConnectionLimit(process.env.DATABASE_URL, GATE_DESK_CONNECTION_LIMIT) : null;
   const base = new PrismaClient({
+    ...(deskUrl ? { datasources: { db: { url: deskUrl } } } : {}),
     transactionOptions: WRITE_TRANSACTION_OPTIONS,
     ...(options.log ? { log: options.log } : {}),
   });

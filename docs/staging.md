@@ -69,6 +69,14 @@ npm run check:all                    # every gate, in CI's order; also checks th
 npm run e2e                          # run it ALONE: no gates, no edits at the same time
 ```
 
+**What `check:all` prints (G2).**
+
+- **At the top**, the `connection_limit` each client uses: a gate's main client (`DATABASE_URL`'s, 10 in `.env.staging.example`), a race's "other desk" (3 — it never runs more than three operations at once), and the runner's own readiness probe (1). A gate with two desks asks the pooler for at most 10 + 3 + 3 connections instead of 30; Supabase's default pooler pool is 15. This is a precaution, not a diagnosed cause of G1's fast failures.
+- **Before each database-backed gate** (one whose script opens a `gatePrisma()`/`PrismaClient`; `check:rtl`, `check:filters` and `check:timezone` do not) the runner waits for the database: `SELECT 1` on a fresh one-connection client, retried every 2 s for up to 60 s. If it answers late the run says so (`the database answered after N attempts`) and the gate starts.
+- **If it never answers**, the gate is **not started** and its summary row reads **`DB UNREACHABLE`** (not `FAIL`), with the last error under it; the run's last line counts these separately — `N gate(s) FAILED, M not run: DB UNREACHABLE` — and the exit code is still non-zero. A `DB UNREACHABLE` row means "the database did not answer", never "the gate's assertions failed".
+- **A gate that fails in under 5 seconds** (it died on startup) has the first error line of its output printed under its summary row, with any connection-string password masked: `↳ failed in 0.7s: PrismaClientInitializationError: Can't reach database server …`.
+- The user-leak check is unchanged, and the runner still deletes nothing: leaks come from gates that exit before their own cleanup and disappear when the gates pass.
+
 A single gate is `npm run check:payments`, etc. `$env:GATE_TX_TRACE = "1"` makes a gate print each transaction that failed or took over a second, with its statement count and time (G1). The e2e notes of `e2e-run-conditions` still apply (alone, heap-raised dev server, a lone `/login` bounce is session expiry). Close the window, or `Remove-Item Env:KAYEDU_ENV`, when you are done — an unset `KAYEDU_ENV` means the dev `.env` again, and the guard will refuse a gate there.
 
 **What a refusal looks like** (a gate with dev's `.env`, `KAYEDU_ENV` unset):

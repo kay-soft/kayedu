@@ -1155,9 +1155,16 @@ async function main() {
     const importsAdmin = files.filter((file) => /from\s+["']@\/lib\/supabase\/admin["']/.test(read(file)));
     const importsAdapter = files.filter((file) => /from\s+["']@\/lib\/storage\/supabase["']/.test(read(file)));
     const facade = read("lib/db/storage.ts");
+    // G2 (OD-14): the one extra importer. F2's ALLOW_UNVERIFIED_EMAIL_CHANGE path
+    // sets an email through the admin API; remove it together with the flag in M20.
+    const extraAdminImporter = "app/[locale]/account/actions.ts";
+    const unexpectedAdminImporters = importsAdmin.filter((file) => file !== "lib/storage/supabase.ts" && file !== extraAdminImporter);
     return [
       [`only lib/storage/supabase.ts calls the Storage API (${callsStorageApi.join(", ") || "none"})`, callsStorageApi.length === 1 && callsStorageApi[0] === "lib/storage/supabase.ts"],
-      [`only the adapter imports the service-role client (${importsAdmin.join(", ") || "none"})`, importsAdmin.length === 1 && importsAdmin[0] === "lib/storage/supabase.ts"],
+      [
+        `only the adapter and ${extraAdminImporter} (ALLOW_UNVERIFIED_EMAIL_CHANGE path; remove together with the flag in M20) import the service-role client (${importsAdmin.join(", ") || "none"})`,
+        importsAdmin.includes("lib/storage/supabase.ts") && unexpectedAdminImporters.length === 0,
+      ],
       ["only lib/storage/index.ts picks the adapter", importsAdapter.length === 1 && importsAdapter[0] === "lib/storage/index.ts"],
       ["the tenant-scoped API reaches the provider only through storage()", /from "@\/lib\/storage"/.test(facade) && !/supabase/i.test(facade.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ""))],
       ["a browser gets a file only as a short-lived signed URL", /SIGNED_URL_TTL_SECONDS = 60 \* 10/.test(facade) && !/getPublicUrl/.test(files.map(read).join("\n"))],
@@ -1931,11 +1938,39 @@ async function sec2cAssertions() {
     const action = exportedBody("app/[locale]/(teacher)/teacher/centers/actions.ts", "requestToTeachAction");
     const page = read("app/[locale]/(center)/approvals/page.tsx");
     const scopedSource = read("lib/db/scoped.ts");
+    // G2 (OD-14): F7 moved every Approvals count into lib/db/approval-counts.ts.
+    const countsSource = read("lib/db/approval-counts.ts");
+    const pendingBody = countsSource.slice(countsSource.indexOf("export async function pendingApprovalCounts("), countsSource.indexOf("export type PendingTeacherApprovalCounts"));
+    const bookingCountStart = scopedSource.indexOf("countPending: async (options");
+    const bookingCountBody = scopedSource.slice(bookingCountStart, scopedSource.indexOf("listConfirmedForSession", bookingCountStart));
+    const changeRequestLists = page.match(/changeRequests\.list\(/g) ?? [];
     return [
       ["a requester who already teaches somewhere is refused on the server (alreadyTeaching)", /roles\.includes\("TEACHER"\)/.test(action) && /alreadyTeaching/.test(action)],
       ["per-account and per-IP limits in the shared store", /teachRequestPerUser/.test(action) && /teachRequestPerIp/.test(action) && "teachRequestPerUser" in RATE_LIMITS && "teachRequestPerIp" in RATE_LIMITS],
       ["one PENDING request per (requester, centre), serialized per pair (alreadyRequested)", /pg_advisory_xact_lock/.test(action) && /status: "PENDING"/.test(action) && /alreadyRequested/.test(action)],
-      ["each Approvals queue loads one page and counts the rest", /take: APPROVALS_PAGE_SIZE/.test(page) && (page.match(/, page\)|listPending\(page\)/g) ?? []).length === 3 && /changeRequests\.count\(/.test(page) && /reservations\.countPending\(\)/.test(page) && /options\?\.take \? \{ take: options\.take \}/.test(scopedSource)],
+      [
+        "each Approvals list read is capped at one page (the two change-request lists, the enrolment list; bookings are sliced to a page)",
+        /const page = \{ take: APPROVALS_PAGE_SIZE \}/.test(page) &&
+          /const oldestFirst = \{ \.\.\.page, order: "asc"/.test(page) &&
+          changeRequestLists.length === 2 &&
+          (page.match(/changeRequests\.list\([^)]*oldestFirst\)/g) ?? []).length === 2 &&
+          /reservations\.listPending\(page\)/.test(page) &&
+          /allBookings\.slice\(0, APPROVALS_PAGE_SIZE\)/.test(page) &&
+          /options\?\.take \? \{ take: options\.take \}/.test(scopedSource),
+      ],
+      [
+        "the counts are grouped counts in pendingApprovalCounts, one read each, and no list is loaded to count",
+        /countPendingByType\(\)/.test(pendingBody) &&
+          /reservations\.countPending\(\)/.test(pendingBody) &&
+          /sessionBookings\.countPending\(/.test(pendingBody) &&
+          !/\.list\(|\.listPending\(|findMany\(/.test(pendingBody) &&
+          /prisma\.changeRequest\.groupBy\(/.test(scopedSource) &&
+          /getPendingApprovalCounts\(ctx\)/.test(page),
+      ],
+      [
+        "the booking count's lean read keeps its explicit take cap",
+        bookingCountStart > 0 && /prisma\.sessionBooking\.findMany\(/.test(bookingCountBody) && /take: 500/.test(bookingCountBody),
+      ],
     ];
   });
 
@@ -2020,7 +2055,8 @@ async function sec2cAssertions() {
     const unselected = await prisma.catalogGrade.create({ data: { nameAr: `${PREFIX}grade`, nameEn: `${PREFIX}grade` } });
     try {
       const action = exportedBody("app/[locale]/(student)/student/profile/actions.ts", "completeStudentProfileAction");
-      const layout = read("app/[locale]/(student)/layout.tsx");
+      // G2 (OD-14): F2 moved the layout's body, and the grade picker, into student-shell.tsx.
+      const layout = read("app/[locale]/(student)/student-shell.tsx");
       return [
         ["an unselected catalog grade does not resolve at this centre", (await centerGradeById(prisma, center.id, unselected.id)) === null],
         ["the action resolves through centerGradeById, never a raw catalog row", /centerGradeById\(prisma, centerId, gradeId\)/.test(action) && !/catalogGrade\.find/.test(action)],

@@ -521,8 +521,9 @@ async function checkPublicCatalog() {
   check("an uncapped class shows Open", seatsOf(open.id) === "open", String(seatsOf(open.id)));
 
   const ALLOWED_CLASS_KEYS = [
+    // G2 (OD-14): F6's sessionBookingMode (OFF / INSTANT / APPROVAL) is the one booking field a public class carries (docs/02).
     "endDate", "grade", "id", "price", "requiresConfirmation", "schedules", "seats",
-    "startDate", "subject", "teacherName", "teacherRating", "teacherUserId",
+    "sessionBookingMode", "startDate", "subject", "teacherName", "teacherRating", "teacherUserId",
   ].join(",");
   check(
     "a public class carries exactly the allowlisted fields (no count, room, student, or money but price)",
