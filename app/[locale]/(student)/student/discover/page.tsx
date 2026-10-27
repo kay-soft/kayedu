@@ -2,10 +2,15 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { SearchX } from "lucide-react";
 
 import { DiscoverFilters } from "@/app/[locale]/(student)/student/discover/discover-filters";
-import { ReserveButton } from "@/app/[locale]/(student)/student/discover/reserve-button";
+import { DiscoverAction } from "@/app/[locale]/(student)/student/discover/discover-action";
 import { Pagination } from "@/components/center/pagination";
 import { PageHeader } from "@/components/shared/page-header";
-import { Badge } from "@/components/ui/badge";
+import { ClassCard, ClassCardGrid } from "@/components/explore/class-card";
+import {
+  DISCOVER_STATUS_BADGE,
+  discoverCardStatus,
+  type DiscoverCardStatus,
+} from "@/app/[locale]/(student)/student/discover/card-status";
 import { requireStudentUser } from "@/lib/auth/tenant";
 import { listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
@@ -20,25 +25,19 @@ import {
   studentBlockedRefsByCenter,
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
-import { formatMoney, formatRating, formatTimeRange } from "@/lib/format";
-import { nameInitial } from "@/lib/initials";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
-import { subjectAccentColor } from "@/lib/subject-accent";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { ROUTES } from "@/lib/routes";
-import { centerLogoSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
 import { listAccessibleCenters } from "@/lib/db/platform";
-
-type CardStatus = "enrolled" | "pending" | "full" | "open" | "requiresApproval";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 type CardViewModel = {
   centerId: string;
   centerName: string;
-  centerLogoUrl: string | null;
   classGroupId: string;
   subjectName: string | null;
   gradeName: string | null;
@@ -46,19 +45,10 @@ type CardViewModel = {
   /** Average out of 5, platform-wide, across every centre this teacher works
    * at (M17) — never a count alongside it (spec §5 "Teacher ratings"). */
   teacherRating: number | null;
-  roomName: string | null;
   price: number;
   requiresConfirmation: boolean;
   schedules: DiscoverClassRow["schedules"];
-  status: CardStatus;
-};
-
-const STATUS_BADGE: Record<CardStatus, "success" | "warning" | "neutral" | "info"> = {
-  enrolled: "success",
-  pending: "warning",
-  full: "neutral",
-  open: "info",
-  requiresApproval: "warning",
+  status: DiscoverCardStatus;
 };
 
 /** Centres whose classes load in parallel on one Discover page load (SEC-32). */
@@ -72,7 +62,11 @@ export default async function StudentDiscoverPage({
   const session = await requireStudentUser();
   const rawParams = await searchParams;
   const subjectFilter = rawParams.subject?.trim() || "";
-  const gradeFilter = rawParams.grade?.trim() || "";
+  // F4: the student's own account grade pre-selects the grade filter until they
+  // choose otherwise. An empty param can never mean "all" (the URL helper drops
+  // empty values), so choosing "All grades" is the explicit `grade=all`.
+  const gradeParam = rawParams.grade?.trim() || "";
+  const accountGradeId = session.user.gradeId;
   const dayFilter = rawParams.day?.trim() || "";
 
   const t = await getTranslations("StudentDiscover");
@@ -92,6 +86,11 @@ export default async function StudentDiscoverPage({
       listCatalogSubjects(prisma),
       listCatalogGrades(prisma),
     ]);
+
+  // F4: only an active grade can pre-select (it is also what the picker lists).
+  const accountGradeActive = accountGradeId !== null && allGrades.some((grade) => grade.id === accountGradeId);
+  const gradeFilter =
+    gradeParam === "all" ? "" : gradeParam || (accountGradeActive ? accountGradeId : "");
 
   // Global catalog ids (M13) mean the same thing at every centre, so the
   // subject/grade filter is a real scoped `where` per centre now — never the
@@ -134,22 +133,21 @@ export default async function StudentDiscoverPage({
         !row.requiresConfirmation &&
         isAtCapacity(row._count.enrollments, enrollmentCap(classRoomSetFrom(row).capacity));
 
-      let status: CardStatus;
-      if (isEnrolled) status = "enrolled";
-      else if (reservationStatus === "PENDING") status = "pending";
-      else if (isFull) status = "full";
-      else status = row.requiresConfirmation ? "requiresApproval" : "open";
+      const status = discoverCardStatus({
+        isEnrolled,
+        reservationStatus,
+        isFull,
+        requiresConfirmation: row.requiresConfirmation,
+      });
 
       cards.push({
         centerId: center.id,
         centerName: center.name,
-        centerLogoUrl: centerLogoSrc(center),
         classGroupId: row.id,
         subjectName: catalogLabelWithSelection(locale, row.subject),
         gradeName: catalogLabelWithSelection(locale, row.grade),
         teacherName: teacherNames.get(row.teacherId) ?? "—",
         teacherRating: teacherRatings.get(row.teacherId) ?? null,
-        roomName: classRoomSetFrom(row).rooms.map((room) => room.name).join(" + ") || null,
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
         schedules: row.schedules,
@@ -184,7 +182,7 @@ export default async function StudentDiscoverPage({
   const buildHref = (targetPage: number) => {
     const params = new URLSearchParams();
     if (subjectFilter) params.set("subject", subjectFilter);
-    if (gradeFilter) params.set("grade", gradeFilter);
+    if (gradeParam) params.set("grade", gradeParam);
     if (dayFilter) params.set("day", dayFilter);
     if (targetPage > 1) params.set("page", String(targetPage));
     const qs = params.toString();
@@ -197,7 +195,8 @@ export default async function StudentDiscoverPage({
 
       <DiscoverFilters
         subject={subjectFilter}
-        grade={gradeFilter}
+        grade={gradeParam === "all" ? "all" : gradeFilter}
+        allGradesValue={accountGradeActive ? "all" : ""}
         day={dayFilter}
         subjects={subjectOptions}
         grades={gradeOptions}
@@ -205,93 +204,39 @@ export default async function StudentDiscoverPage({
         allLabel={t("filters.all")}
       />
 
-      {pageEntries.length === 0 ? (
-        <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {pageEntries.map((card) => (
-            <div
-              key={`${card.centerId}:${card.classGroupId}`}
-              className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover"
-            >
-              <div
-                aria-hidden
-                className="absolute inset-x-0 top-0 h-1"
-                style={{ backgroundColor: subjectAccentColor(card.subjectName) }}
-              />
-
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-text-primary">
-                    {card.subjectName ?? tClasses("columns.untitled")}
-                  </p>
-                  <p className="truncate text-xs text-text-muted">{card.centerName}</p>
-                </div>
-                <Badge variant={STATUS_BADGE[card.status]}>{t(`status.${card.status}`)}</Badge>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span
-                  aria-hidden
-                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                  style={{ backgroundColor: subjectAccentColor(card.subjectName) }}
-                >
-                  {nameInitial(card.teacherName)}
-                </span>
-                <span className="min-w-0 truncate text-sm text-text-secondary">{card.teacherName}</span>
-                {card.teacherRating !== null ? (
-                  <span className="ms-auto shrink-0 text-xs font-medium text-text-muted">
-                    {t("card.rating", { value: formatRating(card.teacherRating, locale) })}
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                {card.gradeName ? (
-                  <span className="rounded-full border border-border px-2 py-0.5">{card.gradeName}</span>
-                ) : null}
-                {card.schedules.length > 0 ? (
-                  <span>
-                    {card.schedules
-                      .map(
-                        (slot) =>
-                          `${dayNames[slot.dayOfWeek]} ${formatTimeRange(slot.startTime, slot.endTime, locale)}`,
-                      )
-                      .join(" · ")}
-                  </span>
-                ) : (
-                  <span>{t("card.noSchedule")}</span>
-                )}
-              </div>
-
-              <p className="text-sm font-semibold text-text-primary">{formatMoney(card.price, locale)}</p>
-
-              <div className="mt-auto">
-                {card.status === "enrolled" || card.status === "pending" ? (
-                  <Badge
-                    variant={card.status === "enrolled" ? "success" : "warning"}
-                    className="w-full justify-center py-2"
-                  >
-                    {t(`card.${card.status}`)}
-                  </Badge>
-                ) : card.status === "full" ? (
-                  <Badge variant="neutral" className="w-full justify-center py-2">
-                    {t("card.full")}
-                  </Badge>
-                ) : (
-                  <ReserveButton
+      <ResultsRegion className="flex flex-col gap-6">
+        {pageEntries.length === 0 ? (
+          <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
+        ) : (
+          <ClassCardGrid>
+            {pageEntries.map((card) => (
+              <ClassCard
+                key={`${card.centerId}:${card.classGroupId}`}
+                href={ROUTES.studentDiscoverClass(card.centerId, card.classGroupId)}
+                subjectName={card.subjectName}
+                branchName={card.centerName}
+                teacherName={card.teacherName}
+                teacherRating={card.teacherRating}
+                gradeName={card.gradeName}
+                schedules={card.schedules}
+                price={card.price}
+                badge={{ variant: DISCOVER_STATUS_BADGE[card.status], label: t(`status.${card.status}`) }}
+                action={
+                  <DiscoverAction
+                    status={card.status}
                     centerId={card.centerId}
                     classGroupId={card.classGroupId}
                     requiresConfirmation={card.requiresConfirmation}
+                    labels={{ enrolled: t("card.enrolled"), pending: t("card.pending"), full: t("card.full") }}
                   />
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+                }
+              />
+            ))}
+          </ClassCardGrid>
+        )}
 
-      <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+        <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+      </ResultsRegion>
     </div>
   );
 }

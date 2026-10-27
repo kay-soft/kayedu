@@ -6,6 +6,7 @@ import type { Center, CenterLifecycleState, Prisma, PrismaClient, Role } from "@
 import { provisionCenterBaseline } from "./provision.ts";
 import { runInTransaction } from "./session-lifecycle.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { MAX_BRANCH_LIMIT } from "../branch-setup.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -128,22 +129,79 @@ export type CreateCenterInput = {
    * one — the normal invite screen requires already being a member.
    */
   invite: CenterInvite;
+  /**
+   * The new organization this branch founds (F1). Its name defaults to the
+   * branch's own and its branch limit to 1 — the shape every caller had
+   * before F1, and what a caller that passes no organization still gets.
+   */
+  organization?: { name: string; nameEn?: string | null; maxBranches?: number };
 };
 
 export type CreateCenterResult =
   | { ok: true; center: Center }
   | { ok: false; error: "slugTaken" };
 
+/** The branch columns every way of creating one takes (F1). */
+type BranchRowInput = {
+  organizationId: string;
+  name: string;
+  nameEn: string | null;
+  slug: string;
+  themeColor: string;
+  lifecycleState: CenterLifecycleState;
+  /** Only the founding branch of a new organization carries one. */
+  founderInvite?: CenterInvite;
+};
+
+/**
+ * **The one way a branch row is born** (F1): the `Center` row, then
+ * `provisionCenterBaseline` (`lib/db/provision.ts`) for everything it needs to
+ * work — its CenterSettings row, the baseline permission matrix and the
+ * default payment methods. Super Admin's "New organization" and "Add to an
+ * existing organization" and an Owner's own Add branch (`lib/db/branches.ts`)
+ * all call this on the caller's transaction; none re-lists the baseline (P1:
+ * the demo seed once had its own copy of "create a centre" that forgot the
+ * grants, and its Owner saw only the Dashboard).
+ */
+export async function provisionBranch(
+  tx: Prisma.TransactionClient,
+  input: BranchRowInput,
+): Promise<Center> {
+  const invite = input.founderInvite;
+  const created = await tx.center.create({
+    data: {
+      name: input.name,
+      nameEn: input.nameEn,
+      slug: input.slug,
+      themeColor: input.themeColor,
+      lifecycleState: input.lifecycleState,
+      organizationId: input.organizationId,
+      ...(invite
+        ? {
+            invitations: {
+              create: {
+                email: invite.email,
+                role: "OWNER",
+                token: invite.token,
+                invitedBy: invite.invitedBy,
+                expiresAt: invite.expiresAt,
+              },
+            },
+          }
+        : {}),
+    },
+  });
+  await provisionCenterBaseline(tx, created.id);
+  return created;
+}
+
 /**
  * Creates a Center + its organization + the founding Owner invitation, then
- * hands the centre to `provisionCenterBaseline` (`lib/db/provision.ts`) for
- * everything it needs to actually work — its CenterSettings row, the baseline
- * permission matrix and the default payment methods — all in one transaction.
- * The M9 equivalent of how `configureCenter` (M2's gate) provisions a fresh
- * center's config in one call, no per-center branching. The baseline is owned
- * by that one function, not re-listed here (P1: the demo seed had its own copy
- * of "create a centre" that forgot the grants, and its Owner saw only the
- * Dashboard).
+ * hands the centre to `provisionBranch` — all in one transaction. The M9
+ * equivalent of how `configureCenter` (M2's gate) provisions a fresh center's
+ * config in one call, no per-center branching. Adding a branch to an
+ * organization that already exists is `addBranchToOrganization` below (F1,
+ * OD-12 (a)); an Owner's own Add branch is `lib/db/branches.ts` (OD-12 (b)).
  */
 export async function createCenterWithSettings(
   db: Db,
@@ -153,47 +211,186 @@ export async function createCenterWithSettings(
   if (existing) return { ok: false, error: "slugTaken" };
 
   const center = await runInTransaction(db, async (tx) => {
-    const created = await tx.center.create({
+    // A platform-created center founds its own organization (M11) — the
+    // same shape the M11 migration's backfill gave every pre-existing center.
+    const organization = await tx.organization.create({
       data: {
-        name: input.name,
-        nameEn: input.nameEn ?? null,
-        slug: input.slug,
-        themeColor: input.themeColor,
-        // A freshly admin-provisioned center hasn't done anything yet — no
-        // staff signed in, no config touched — so it starts ONBOARDING rather
-        // than ACTIVE (docs/00 §5.1 "Centre lifecycle"). ONBOARDING already
-        // permits sign-in (`ACCESSIBLE_LIFECYCLE_STATES` above), so the invited
-        // Owner can still accept the invite below and set the center up; moving
-        // it to ACTIVE once setup is real is a deliberate lifecycle transition
-        // an admin makes from `/admin/centers/[id]`, not an automatic flip.
-        lifecycleState: "ONBOARDING",
-        // A platform-created center starts as its own single-branch
-        // organization (M11) — the same shape the M11 migration's backfill
-        // gave every pre-existing center. Nothing yet adds a branch to an
-        // existing organization — how that should work is OD-12
-        // (docs/00 §2.2), not something this provisioning step decides.
-        organization: {
-          create: {
-            name: input.name,
-            nameEn: input.nameEn ?? null,
-          },
-        },
-        invitations: {
-          create: {
-            email: input.invite.email,
-            role: "OWNER",
-            token: input.invite.token,
-            invitedBy: input.invite.invitedBy,
-            expiresAt: input.invite.expiresAt,
-          },
-        },
+        name: input.organization?.name ?? input.name,
+        nameEn: input.organization ? (input.organization.nameEn ?? null) : (input.nameEn ?? null),
+        maxBranches: input.organization?.maxBranches ?? 1,
       },
     });
-    await provisionCenterBaseline(tx, created.id);
-    return created;
+    return provisionBranch(tx, {
+      organizationId: organization.id,
+      name: input.name,
+      nameEn: input.nameEn ?? null,
+      slug: input.slug,
+      themeColor: input.themeColor,
+      // A freshly admin-provisioned center hasn't done anything yet — no
+      // staff signed in, no config touched — so it starts ONBOARDING rather
+      // than ACTIVE (docs/00 §5.1 "Centre lifecycle"). ONBOARDING already
+      // permits sign-in (`ACCESSIBLE_LIFECYCLE_STATES` above), so the invited
+      // Owner can still accept the invite and set the center up; moving it to
+      // ACTIVE once setup is real is a deliberate lifecycle transition an
+      // admin makes from `/admin/centers/[id]`, not an automatic flip.
+      lifecycleState: "ONBOARDING",
+      founderInvite: input.invite,
+    });
   });
 
   return { ok: true, center };
+}
+
+// ── Organizations and their branch limit (F1, OD-12 (a)+(b)) ────────────
+
+/** Branches that count against `Organization.maxBranches`: every non-ARCHIVED centre. */
+export const COUNTED_BRANCHES = {
+  lifecycleState: { not: "ARCHIVED" },
+} satisfies Prisma.CenterWhereInput;
+
+export type BranchLimitLock = { maxBranches: number; used: number };
+
+/**
+ * Locks the organization's row (`SELECT … FOR UPDATE`) and then counts its
+ * branches **in a second statement**, so the count is taken after the lock
+ * is held and sees a branch a concurrent add has just committed (under READ
+ * COMMITTED a statement's snapshot is taken before it blocks — docs/07 §2.5).
+ * Two adds racing for the last slot therefore serialize here: the second
+ * waits, recounts, and is refused. `null` when the organization is gone.
+ */
+export async function lockOrganizationBranches(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+): Promise<BranchLimitLock | null> {
+  const rows = await tx.$queryRaw<{ maxBranches: number }[]>`
+    SELECT "maxBranches" FROM "Organization" WHERE "id" = ${organizationId} FOR UPDATE`;
+  if (rows.length === 0) return null;
+  const used = await tx.center.count({ where: { organizationId, ...COUNTED_BRANCHES } });
+  return { maxBranches: rows[0].maxBranches, used };
+}
+
+export type AddBranchInput = {
+  organizationId: string;
+  name: string;
+  nameEn?: string | null;
+  slug: string;
+  themeColor: string;
+};
+
+export type AddBranchResult =
+  | { ok: true; center: Center }
+  | { ok: false; error: "slugTaken" | "organizationNotFound" | "branchLimitReached" };
+
+/**
+ * Super Admin's "Add to an existing organization" (F1, OD-12 (a)). Respects
+ * the limit — refused with `branchLimitReached` until the admin raises it —
+ * and creates no Owner invitation: the organization's Owner already resolves
+ * every branch under it through the read-time widening (docs/02 §4).
+ */
+export async function addBranchToOrganization(
+  db: Db,
+  input: AddBranchInput,
+): Promise<AddBranchResult> {
+  const existing = await db.center.findUnique({ where: { slug: input.slug } });
+  if (existing) return { ok: false, error: "slugTaken" };
+
+  return runInTransaction(db, async (tx): Promise<AddBranchResult> => {
+    const lock = await lockOrganizationBranches(tx, input.organizationId);
+    if (!lock) return { ok: false, error: "organizationNotFound" };
+    if (lock.used >= lock.maxBranches) return { ok: false, error: "branchLimitReached" };
+    const center = await provisionBranch(tx, {
+      organizationId: input.organizationId,
+      name: input.name,
+      nameEn: input.nameEn ?? null,
+      slug: input.slug,
+      themeColor: input.themeColor,
+      lifecycleState: "ONBOARDING",
+    });
+    return { ok: true, center };
+  });
+}
+
+export type BranchLimitUpdateResult =
+  | { ok: true; before: number; after: number }
+  | { ok: false; error: "notFound" | "invalidLimit" };
+
+/**
+ * The admin's branch-limit editor (F1). Platform admin only — the caller has
+ * run `requirePlatformAdmin()`. Audited `platform.organization.limit.update`
+ * on the same transaction, with no centre (the organization sits above the
+ * tenant) and before/after numbers only. Lowering it below the current count
+ * is allowed and only blocks new branches — nothing existing is touched.
+ */
+export async function updateOrganizationBranchLimit(
+  db: Db,
+  input: { organizationId: string; maxBranches: number; actorUserId: string },
+): Promise<BranchLimitUpdateResult> {
+  if (
+    !Number.isInteger(input.maxBranches) ||
+    input.maxBranches < 1 ||
+    input.maxBranches > MAX_BRANCH_LIMIT
+  ) {
+    return { ok: false, error: "invalidLimit" };
+  }
+  return runInTransaction(db, async (tx): Promise<BranchLimitUpdateResult> => {
+    const lock = await lockOrganizationBranches(tx, input.organizationId);
+    if (!lock) return { ok: false, error: "notFound" };
+    await tx.organization.update({
+      where: { id: input.organizationId },
+      data: { maxBranches: input.maxBranches },
+    });
+    await writeAuditRow(tx, {
+      centerId: null,
+      actorUserId: input.actorUserId,
+      action: "platform.organization.limit.update",
+      entityType: "Organization",
+      entityId: input.organizationId,
+      before: { maxBranches: lock.maxBranches },
+      after: { maxBranches: input.maxBranches },
+    });
+    return { ok: true, before: lock.maxBranches, after: input.maxBranches };
+  });
+}
+
+export type PlatformOrganizationRow = {
+  id: string;
+  name: string;
+  nameEn: string | null;
+  maxBranches: number;
+  /** Non-ARCHIVED branches — what the limit counts. */
+  usedBranches: number;
+  /** Every branch, archived included. */
+  totalBranches: number;
+  createdAt: Date;
+};
+
+/** Every organization with its branch usage — `/admin/organizations` and the create form's picker. */
+export async function platformOrganizationList(db: Db): Promise<PlatformOrganizationRow[]> {
+  const [organizations, grouped] = await Promise.all([
+    db.organization.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, nameEn: true, maxBranches: true, createdAt: true },
+    }),
+    db.center.groupBy({ by: ["organizationId", "lifecycleState"], _count: { _all: true } }),
+  ]);
+  const used = new Map<string, number>();
+  const total = new Map<string, number>();
+  for (const row of grouped) {
+    total.set(row.organizationId, (total.get(row.organizationId) ?? 0) + row._count._all);
+    if (row.lifecycleState !== "ARCHIVED") {
+      used.set(row.organizationId, (used.get(row.organizationId) ?? 0) + row._count._all);
+    }
+  }
+  return organizations.map((organization) => ({
+    ...organization,
+    usedBranches: used.get(organization.id) ?? 0,
+    totalBranches: total.get(organization.id) ?? 0,
+  }));
+}
+
+/** One organization row — `/admin/organizations/[id]`. */
+export function platformOrganizationById(db: Db, id: string) {
+  return db.organization.findUnique({ where: { id } });
 }
 
 // ── Center list (the /admin/centers table) ──────────────────────────────
@@ -218,9 +415,15 @@ export type PlatformCenterRow = {
  * `_count.select` can only count a whole relation, not a role subset of it
  * (the same reasoning as `lib/db/analytics.ts`'s `revenueByTeacher`).
  */
-export async function platformCenterList(db: Db): Promise<PlatformCenterRow[]> {
+export async function platformCenterList(
+  db: Db,
+  /** F1: one organization's branches only — `/admin/organizations/[id]`. */
+  organizationId?: string,
+): Promise<PlatformCenterRow[]> {
+  const inOrganization = organizationId ? { center: { organizationId } } : {};
   const [centers, membershipCounts, studentCounts] = await Promise.all([
     db.center.findMany({
+      where: organizationId ? { organizationId } : undefined,
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -233,12 +436,12 @@ export async function platformCenterList(db: Db): Promise<PlatformCenterRow[]> {
     }),
     db.membership.groupBy({
       by: ["centerId", "role"],
-      where: { active: true },
+      where: { active: true, ...inOrganization },
       _count: { _all: true },
     }),
     db.studentProfile.groupBy({
       by: ["centerId"],
-      where: { active: true },
+      where: { active: true, ...inOrganization },
       _count: { _all: true },
     }),
   ]);
@@ -432,6 +635,11 @@ export function centerNamesByIds(db: Db, ids: string[]) {
 /** A centre's stored logo key, for the signing route (`/api/logos/[centerId]`). */
 export function centerLogoPath(db: Db, centerId: string) {
   return db.center.findUnique({ where: { id: centerId }, select: { id: true, logoPath: true } });
+}
+
+/** Sets (or clears) a centre's logo key — the branch's own Branding page (F8). */
+export function setCenterLogoPath(db: Db, centerId: string, logoPath: string | null) {
+  return db.center.update({ where: { id: centerId }, data: { logoPath }, select: { id: true } });
 }
 
 /** An invitation by its token, with its centre — the accept page (the token is the only link). */

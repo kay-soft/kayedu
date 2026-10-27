@@ -39,6 +39,53 @@ export function allowAutoConfirmDemo(env: Env = process.env): boolean {
   return env.ALLOW_AUTO_CONFIRM_DEMO === "yes" && !requireEmailConfirmation(env);
 }
 
+/**
+ * Search engines are kept off every page (F5) while the demo override is
+ * *set* — `ALLOW_AUTO_CONFIRM_DEMO=yes` means the site is showing seeded demo
+ * data, which must not be indexed as if it were real branches and teachers.
+ * Keyed on the variable being set, not on `allowAutoConfirmDemo()`, so a
+ * demo with email confirmation also on is still kept out of search.
+ * Removing it (and so the `noindex`) is on the M20 checklist.
+ */
+export function noIndexDemo(env: Env = process.env): boolean {
+  return env.ALLOW_AUTO_CONFIRM_DEMO === "yes";
+}
+
+/** The value the email-change override must be set to, exactly. */
+export function unverifiedEmailChangeRequested(env: Env = process.env): boolean {
+  return env.ALLOW_UNVERIFIED_EMAIL_CHANGE === "yes";
+}
+
+/**
+ * The email-change override (F2): `ALLOW_UNVERIFIED_EMAIL_CHANGE=yes` lets a
+ * signed-in person change their own email on Account settings **without** a
+ * confirmation link — the Supabase admin API sets it, already confirmed —
+ * until SMTP exists (M20). Same shape as `allowAutoConfirmDemo`: off by
+ * default, and it **never applies when `REQUIRE_EMAIL_CONFIRMATION=true`**
+ * (then Supabase's own email-change flow runs, and production refuses to
+ * start with both set — `productionAuthProblems`). Removing it is on the M20
+ * checklist (docs/03-build-order.md).
+ */
+export function allowUnverifiedEmailChange(env: Env = process.env): boolean {
+  return unverifiedEmailChangeRequested(env) && !requireEmailConfirmation(env);
+}
+
+/**
+ * How Account settings may change an email (F2):
+ * - `confirm` — REQUIRE_EMAIL_CONFIRMATION=true: Supabase mails a link to the
+ *   new address; `User.email` changes only once `syncUserFromAuth` sees it
+ *   confirmed;
+ * - `direct` — ALLOW_UNVERIFIED_EMAIL_CHANGE=yes: set at once, unproven;
+ * - `off` — neither: the field is read-only.
+ */
+export type EmailChangeMode = "confirm" | "direct" | "off";
+
+export function emailChangeMode(env: Env = process.env): EmailChangeMode {
+  if (requireEmailConfirmation(env)) return "confirm";
+  if (allowUnverifiedEmailChange(env)) return "direct";
+  return "off";
+}
+
 export class AuthMisconfiguredError extends Error {
   constructor(message: string) {
     super(`KayEdu auth is misconfigured for production: ${message}`);
@@ -57,6 +104,11 @@ export function productionAuthProblems(
   settings: { mailer_autoconfirm?: unknown } | null,
 ): string[] {
   if (!isProductionDeployment(env)) return [];
+  // F2: an unproven email change contradicts a deployment that requires
+  // proven emails — refuse the combination rather than silently ignore one.
+  if (unverifiedEmailChangeRequested(env) && requireEmailConfirmation(env)) {
+    return ['ALLOW_UNVERIFIED_EMAIL_CHANGE=yes is set while REQUIRE_EMAIL_CONFIRMATION="true" (unset the override)'];
+  }
   if (allowAutoConfirmDemo(env)) return [];
   const problems: string[] = [];
   if (!requireEmailConfirmation(env)) {

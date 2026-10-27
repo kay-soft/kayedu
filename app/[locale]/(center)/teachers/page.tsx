@@ -20,12 +20,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
+import { branchesWithPermission, ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { teacherSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
  * Teachers (spec §4.1 item 2) — a dashboard first: search and a paginated
@@ -40,6 +43,7 @@ export default async function TeachersPage({
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "teacher.manage");
 
   const { q, page: pageParam } = await searchParams;
@@ -53,14 +57,17 @@ export default async function TeachersPage({
 
   const where = query.length > 0 ? teacherSearchWhere(query) : undefined;
 
-  const [teachers, total] = await Promise.all([
+  const [teachers, total, addBranches] = await Promise.all([
     db.teachers.search({
       where,
       take: pageSize,
       skip: (page - 1) * pageSize,
     }),
     db.teachers.count(where),
+    // F1: every branch where this actor may add a teacher.
+    branchesWithPermission("teacher.manage"),
   ]);
+  const addTeacher = <AddTeacherDialog branches={addBranches} activeBranchId={ctx.center.id} />;
 
   // Block counts only for the teachers on this page — never the whole table.
   const blockCounts = await db.studentBlocks.countByRef(
@@ -92,7 +99,7 @@ export default async function TeachersPage({
       <PageHeader
         title={t("title")}
         description={t("subtitle")}
-        action={<AddTeacherDialog />}
+        action={addTeacher}
       />
 
       <Card>
@@ -109,55 +116,57 @@ export default async function TeachersPage({
             search={searchTeachersTypeAheadAction}
           />
 
-          {rows.length === 0 ? (
-            query.length > 0 ? (
-              <EmptyState
-                icon={<SearchX />}
-                tone="warning"
-                title={t("noMatches")}
-                description={t("noMatchesHint")}
-                action={
-                  <LinkButton href={ROUTES.centerTeachers} size="sm">
-                    {t("clearSearch")}
-                  </LinkButton>
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={<GraduationCap />}
-                title={t("empty")}
-                description={t("emptyHint")}
-                action={<AddTeacherDialog />}
-              />
-            )
-          ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                <span className="min-w-0 flex-1">{t("columns.name")}</span>
-                <span className="min-w-0 flex-1">{t("columns.contact")}</span>
-                <span className="min-w-0 flex-1">{t("columns.blocked")}</span>
-                <span className="w-24 shrink-0">{tCommon("status")}</span>
-                <span className="w-36 shrink-0 text-end">
-                  {tCommon("actions")}
-                </span>
-              </ListHeader>
-
-              {rows.map((teacher) => (
-                <TeacherRow
-                  key={teacher.membershipId}
-                  teacher={teacher}
-                  canManage={canManage}
+          <ResultsRegion className="flex flex-col gap-4">
+            {rows.length === 0 ? (
+              query.length > 0 ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  tone="warning"
+                  title={t("noMatches")}
+                  description={t("noMatchesHint")}
+                  action={
+                    <LinkButton href={ROUTES.centerTeachers} size="sm" soft>
+                      {t("clearSearch")}
+                    </LinkButton>
+                  }
                 />
-              ))}
-            </ul>
-          )}
+              ) : (
+                <EmptyState
+                  icon={<GraduationCap />}
+                  title={t("empty")}
+                  description={t("emptyHint")}
+                  action={addTeacher}
+                />
+              )
+            ) : (
+              <ul className="flex flex-col gap-3 md:gap-0">
+                <ListHeader>
+                  <span className="min-w-0 flex-1">{t("columns.name")}</span>
+                  <span className="min-w-0 flex-1">{t("columns.contact")}</span>
+                  <span className="min-w-0 flex-1">{t("columns.blocked")}</span>
+                  <span className="w-24 shrink-0">{tCommon("status")}</span>
+                  <span className="w-36 shrink-0 text-end">
+                    {tCommon("actions")}
+                  </span>
+                </ListHeader>
 
-          <Pagination
-            page={page}
-            pageSize={pageSize}
-            total={total}
-            buildHref={buildHref}
-          />
+                {rows.map((teacher) => (
+                  <TeacherRow
+                    key={teacher.membershipId}
+                    teacher={teacher}
+                    canManage={canManage}
+                  />
+                ))}
+              </ul>
+            )}
+
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              buildHref={buildHref}
+            />
+          </ResultsRegion>
         </CardContent>
       </Card>
     </div>

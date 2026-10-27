@@ -11,10 +11,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
-import { platformCenterList } from "@/lib/db/platform";
+import { platformCenterList, platformOrganizationList } from "@/lib/db/platform";
 import { formatNumber } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
-import { Building2 } from "lucide-react";
+import { Building2, Network } from "lucide-react";
 import { ROUTES } from "@/lib/routes";
 
 /**
@@ -34,13 +34,34 @@ export default async function AdminCentersPage() {
   const locale = await getLocale();
   const t = await getTranslations("AdminCenters");
 
-  const centers = await platformCenterList(prisma);
+  const [centers, organizations] = await Promise.all([
+    platformCenterList(prisma),
+    platformOrganizationList(prisma),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} description={t("subtitle")} />
+      <PageHeader
+        title={t("title")}
+        description={t("subtitle")}
+        action={
+          // F1: organizations are reached from here, not from the sidebar.
+          <LinkButton href={ROUTES.adminOrganizations} variant="outline">
+            <Network className="size-4" />
+            {t("organizationsLink")}
+          </LinkButton>
+        }
+      />
 
-      <CreateCenterForm />
+      <CreateCenterForm
+        organizations={organizations.map((organization) => ({
+          id: organization.id,
+          name: organization.name,
+          nameEn: organization.nameEn,
+          usedBranches: organization.usedBranches,
+          maxBranches: organization.maxBranches,
+        }))}
+      />
 
       <SectionHeader title={t("listTitle")} />
       {centers.length === 0 ? (

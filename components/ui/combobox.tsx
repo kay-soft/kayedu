@@ -138,7 +138,7 @@ export function Combobox({
             <ComboboxPrimitive.Empty className="px-3 py-4 text-sm text-text-muted empty:hidden">
               {emptyLabel}
             </ComboboxPrimitive.Empty>
-            <ComboboxPrimitive.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto overscroll-contain p-1 outline-none data-[empty]:p-0">
+            <ComboboxPrimitive.List className="scrollbar-neutral max-h-[min(18rem,var(--available-height))] overflow-y-auto overscroll-contain p-1 outline-none data-[empty]:p-0">
               {(option: ComboboxOption) => (
                 <ComboboxPrimitive.Item
                   key={option.value}

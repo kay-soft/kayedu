@@ -1,10 +1,11 @@
-import type { Prisma, PrismaClient, Role } from "@prisma/client";
+import type { Prisma, PrismaClient, Role, SessionBookingMode } from "@prisma/client";
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts).
 import { fullName, localName } from "../identity.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 
 /**
  * Discover/Browse read helpers (M8, docs/04-design-system.md §10). A class
@@ -131,4 +132,43 @@ export async function teacherDisplayNames(
   return new Map(
     rows.map((row) => [row.userId, fullName(localName(row, row.user))]),
   );
+}
+
+/**
+ * One Discover class (F5's class page, on the same component Explore uses):
+ * Discover's own rule — active and `acceptsNewStudents`, at an accessible
+ * centre (checked by the caller with `discoverCenter`) — scoped to `centerId`.
+ */
+export function discoverClassById(
+  db: PrismaClient,
+  centerId: string,
+  classGroupId: string,
+): Promise<
+  | (DiscoverClassRow & {
+      startDate: Date;
+      endDate: Date;
+      sessionBookingMode: SessionBookingMode;
+      maxBookingSeats: number | null;
+    })
+  | null
+> {
+  return db.classGroup.findFirst({
+    where: scopedWhere(centerId, { id: classGroupId, active: true, acceptsNewStudents: true }),
+    // F6 — the page's "Upcoming sessions" needs the booking settings too.
+    select: {
+      ...discoverClassSelect(centerId),
+      startDate: true,
+      endDate: true,
+      sessionBookingMode: true,
+      maxBookingSeats: true,
+    },
+  });
+}
+
+/** A centre Discover may show (the same lifecycle rule as `listAccessibleCenters`), or null. */
+export function discoverCenter(db: PrismaClient, centerId: string) {
+  return db.center.findFirst({
+    where: { id: centerId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    select: { id: true, name: true, nameEn: true, logoPath: true, themeColor: true },
+  });
 }

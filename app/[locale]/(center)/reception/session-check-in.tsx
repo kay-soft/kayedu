@@ -1,46 +1,44 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
-  checkInAction,
   resolveReceptionInputAction,
   resolveReceptionStudentAction,
   searchStudentsForReceptionAction,
   type ReceptionResolution,
 } from "@/app/[locale]/(center)/reception/actions";
 import {
-  PaymentMethodSelector,
-  type PaymentMethodOption,
-} from "@/components/center/payment-method-selector";
+  CheckInConfirmPanel,
+  type CheckInConfirmHandle,
+} from "@/components/center/check-in-confirm-panel";
+import type { PaymentMethodOption } from "@/components/center/payment-method-selector";
 import {
   TypeAheadSearch,
   type TypeAheadHandle,
 } from "@/components/center/type-ahead-search";
-import { StudentConfirmHeader } from "@/components/center/student-confirm-header";
 import { FormMessage } from "@/components/shared/form-message";
 import { Ltr } from "@/components/shared/ltr";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { RECEPTION_SEARCH_INPUT_ID } from "@/app/[locale]/(center)/reception/constants";
-import { IDLE_SESSION_STATE } from "@/lib/validation/sessions";
+import type { SessionActionState } from "@/lib/validation/sessions";
 
 type ReadyResolution = Extract<ReceptionResolution, { kind: "ready" }>;
 
 type Panel =
   | { kind: "idle" }
   | { kind: "busy" }
-  | { kind: "ready"; ready: ReadyResolution; error?: string }
+  | { kind: "ready"; ready: ReadyResolution }
   | { kind: "candidates"; students: { id: string; name: string; code: string }[] }
   | { kind: "notice"; tone: "info" | "warning" | "error"; message: string }
   | { kind: "done"; message: string };
 
 /**
  * Session mode (R7): the selected session is fixed, so a scan or a typed
- * student goes straight to a **confirm panel** — photo, name, code, whether
- * they are enrolled, the session's price, a payment method — and one Enter or
+ * student goes straight to the shared **confirm panel**
+ * (`components/center/check-in-confirm-panel.tsx` — photo, name, code, whether
+ * they are enrolled, the session's price, a payment method) and one Enter or
  * tap records the check-in through the existing `checkInAction`. A scan alone
  * writes nothing: it only resolves who the card belongs to
  * (`resolveReceptionInputAction`), which is also where a duplicate, a blocked
@@ -52,6 +50,11 @@ type Panel =
  * can be scanned while the answer is still coming back. A newer scan always
  * replaces an older answer (`latest` token) and removes an open confirm panel
  * immediately — an Enter in the gap can never confirm the previous student.
+ *
+ * Once something is on the desk (a confirm panel, a candidate list, a notice) a
+ * clear (X) control and Escape put it back to its default state; the session
+ * is in this component's props, never the URL, so "keeping ?session=" is
+ * simply not navigating.
  */
 export function SessionCheckIn({
   sessionId,
@@ -69,12 +72,10 @@ export function SessionCheckIn({
   const locale = useLocale();
 
   const controlRef = useRef<TypeAheadHandle>(null);
-  const formRef = useRef<HTMLFormElement>(null);
+  const panelRef = useRef<CheckInConfirmHandle>(null);
   const latest = useRef(0);
-  const confirming = useRef(false);
   const [panel, setPanel] = useState<Panel>({ kind: "idle" });
   const [lastMethodId, setLastMethodId] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
 
   // The brief confirmation fades on its own; the next scan replaces it anyway.
   useEffect(() => {
@@ -83,17 +84,39 @@ export function SessionCheckIn({
     return () => clearTimeout(timer);
   }, [panel]);
 
-  // Escape abandons an open confirm panel and hands the keyboard back to the input.
+  /** Back to the default desk: drop whatever is showing and any answer still in flight. */
+  const clearDesk = useCallback(() => {
+    latest.current += 1;
+    setPanel({ kind: "idle" });
+  }, []);
+
+  // The confirm panel owns its own Escape; a candidate list or a notice has no
+  // focus of its own to carry one, so Escape clears those from here.
   useEffect(() => {
-    if (panel.kind !== "ready") return;
+    if (panel.kind !== "candidates" && panel.kind !== "notice") return;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setPanel({ kind: "idle" });
-      controlRef.current?.focus();
+      if (event.key === "Escape" && !event.defaultPrevented) clearDesk();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [panel.kind]);
+  }, [panel.kind, clearDesk]);
+
+  const cancelConfirm = useCallback(() => {
+    setPanel({ kind: "idle" });
+    controlRef.current?.focus();
+  }, []);
+
+  function saved(result: SessionActionState, methodId: string, name: string) {
+    if (methodId) setLastMethodId(methodId);
+    const status = tAttendance(result.attendanceStatus ?? "PRESENT");
+    setPanel({
+      kind: "done",
+      message: result.alreadyCheckedIn
+        ? t("sessionMode.alreadyCheckedInShort", { name })
+        : t("sessionMode.checkedInAs", { name, status }),
+    });
+    controlRef.current?.clear();
+  }
 
   function apply(resolution: ReceptionResolution) {
     switch (resolution.kind) {
@@ -169,42 +192,10 @@ export function SessionCheckIn({
     const trimmed = value.trim();
     if (trimmed.length === 0) {
       // An empty Enter is the confirm key — only when a student is waiting.
-      if (panel.kind === "ready" && !confirming.current) formRef.current?.requestSubmit();
+      if (panel.kind === "ready") panelRef.current?.submit();
       return;
     }
     resolveWith(() => resolveReceptionInputAction(sessionId, trimmed, locale));
-  }
-
-  function confirm(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (panel.kind !== "ready" || confirming.current) return;
-    confirming.current = true;
-    const formData = new FormData(event.currentTarget);
-    const methodId = String(formData.get("paymentMethodId") ?? "");
-    const { ready } = panel;
-
-    startTransition(async () => {
-      try {
-        const result = await checkInAction(IDLE_SESSION_STATE, formData);
-        if (result.error) {
-          setPanel({ kind: "ready", ready, error: result.error });
-          return;
-        }
-        if (methodId) setLastMethodId(methodId);
-        const status = tAttendance(result.attendanceStatus ?? "PRESENT");
-        setPanel({
-          kind: "done",
-          message: result.alreadyCheckedIn
-            ? t("sessionMode.alreadyCheckedInShort", { name: ready.student.name })
-            : t("sessionMode.checkedInAs", { name: ready.student.name, status }),
-        });
-        controlRef.current?.clear();
-      } catch {
-        setPanel({ kind: "ready", ready, error: "failed" });
-      } finally {
-        confirming.current = false;
-      }
-    });
   }
 
   return (
@@ -223,6 +214,11 @@ export function SessionCheckIn({
         onSubmitValue={onSubmitValue}
         onSelect={(result) =>
           resolveWith(() => resolveReceptionStudentAction(sessionId, result.id, locale))
+        }
+        onClear={
+          panel.kind === "ready" || panel.kind === "candidates" || panel.kind === "notice" || panel.kind === "busy"
+            ? clearDesk
+            : undefined
         }
       />
 
@@ -270,66 +266,20 @@ export function SessionCheckIn({
       </div>
 
       {panel.kind === "ready" ? (
-        <form
-          ref={formRef}
-          onSubmit={confirm}
-          className="flex flex-col gap-4 rounded-xl border border-brand/30 bg-brand/5 p-4"
-        >
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="sessionId" value={sessionId} />
-          <input type="hidden" name="studentProfileId" value={panel.ready.student.id} />
-
-          <StudentConfirmHeader
-            name={panel.ready.student.name}
-            code={panel.ready.student.code}
-            codeLabel={t("sessionMode.code")}
-            photoUrl={panel.ready.student.photoUrl}
-            badge={
-              <Badge variant={panel.ready.enrolled ? "success" : "warning"}>
-                {panel.ready.enrolled ? t("sessionMode.enrolled") : t("sessionMode.dropIn")}
-              </Badge>
-            }
-          />
-
-          {priceLabel ? (
-            <p className="flex items-baseline justify-between gap-3 rounded-lg bg-surface px-3 py-2 text-sm">
-              <span className="text-text-secondary">{t("sessionMode.price")}</span>
-              <span className="font-semibold tabular-nums text-text-primary">{priceLabel}</span>
-            </p>
-          ) : null}
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-text-secondary">{t("methodLabel")}</span>
-            <PaymentMethodSelector methods={paymentMethods} defaultMethodId={lastMethodId} />
-            <p className="text-xs text-text-muted">{t("statusAuto")}</p>
-          </div>
-
-          {panel.error ? (
-            <FormMessage>
-              {panel.error === "failed" ? t("sessionMode.failed") : tErrors(panel.error)}
-            </FormMessage>
-          ) : null}
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-            {/* A phone has no Enter key (docs/04 §14.5). */}
-            <p className="hidden text-xs text-text-secondary sm:me-auto sm:block">{t("sessionMode.enterHint")}</p>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 w-full px-5 sm:w-auto"
-              onClick={() => {
-                setPanel({ kind: "idle" });
-                controlRef.current?.focus();
-              }}
-            >
-              {t("sessionMode.cancel")}
-            </Button>
-            <Button type="submit" disabled={pending} className="h-11 w-full px-5 sm:w-auto">
-              {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              {t("submit")}
-            </Button>
-          </div>
-        </form>
+        <CheckInConfirmPanel
+          // A different student is a different panel (fresh method selection, no stale error).
+          key={panel.ready.student.id}
+          controlRef={panelRef}
+          sessionId={sessionId}
+          student={panel.ready.student}
+          enrolled={panel.ready.enrolled}
+          booked={panel.ready.booked}
+          priceLabel={priceLabel}
+          paymentMethods={paymentMethods}
+          defaultMethodId={lastMethodId}
+          onSaved={(result, methodId) => saved(result, methodId, panel.ready.student.name)}
+          onCancel={cancelConfirm}
+        />
       ) : null}
     </div>
   );

@@ -208,7 +208,9 @@ export async function loadUnpaidCheckIns(
     centerId,
     attendanceStatus: { in: ["PRESENT", "LATE"] },
     studentProfileId: { not: null },
-    payments: { none: { voided: false } },
+    // T5 — "standing" = neither voided nor refunded: a refund resets the
+    // student on a live session, so one re-checked-in and not yet re-paid is unpaid.
+    payments: { none: { voided: false, refunded: false } },
     ...(floor ? { session: { date: { gte: floor } } } : {}),
   };
   const [rows, total] = await Promise.all([

@@ -85,6 +85,35 @@ enum ReservationStatus {
   CANCELLED
 }
 
+// F6 — whether a class's single sessions can be booked online by a student
+// who is not enrolled. OFF (the default, and every class that predates F6):
+// no booking, exactly as before. INSTANT: a booking is CONFIRMED at once.
+// APPROVAL: a booking waits PENDING in the branch's and the teacher's
+// approvals queues. Walk-in drop-ins at the desk are unaffected by all three.
+enum SessionBookingMode {
+  OFF
+  INSTANT
+  APPROVAL
+}
+
+enum SessionBookingStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+}
+
+// Why a booking was cancelled (F6). STUDENT: they withdrew it. The session
+// was cancelled, or rescheduled (the student books the replacement again).
+// STAFF: a staff-side cancel from the session page's "Booked — not arrived"
+// list (T7, `cancelBookingByStaff`).
+enum SessionBookingCancelReason {
+  STUDENT
+  SESSION_CANCELLED
+  SESSION_RESCHEDULED
+  STAFF
+}
+
 enum ChangeRequestType {
   NEW_CLASS
   NEW_SESSION
@@ -129,6 +158,38 @@ enum SettlementStatus {
   CANCELLED
 }
 
+// F3 (OD-6 decided): a FamilyLink's lifecycle. ACTIVE is the only status any
+// parent-portal read trusts; REVOKED is final (relinking needs a new code).
+enum FamilyLinkStatus {
+  ACTIVE
+  REVOKED
+}
+
+// How a FamilyLink came to exist (F3). LEGACY_VERIFIED: migrated from a
+// VERIFIED ParentLink by `20261026110000_f3_family_links`.
+enum FamilyLinkSource {
+  STUDENT_INVITE
+  CENTER_CODE
+  LEGACY_VERIFIED
+}
+
+// Who issued a FamilyInvitation's code (F3): the student from Account →
+// Family, or a branch from the student's page.
+enum FamilyInvitationSource {
+  STUDENT_INVITE
+  CENTER_CODE
+}
+
+// A FamilyInvitation is single use: PENDING until one accept wins
+// (conditional update), or REVOKED by its student, a regenerate, or a branch.
+enum FamilyInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+// DEPRECATED (F3): ParentLink is no longer read or written anywhere — see the
+// note on the ParentLink model. Kept until it is dropped after the pilot.
 // A parent↔child link's lifecycle (M16, spec §5.1 "Parent role & portal").
 // A phone match alone only ever produces PENDING — it grants zero reads.
 // VERIFIED is the only status any parent-portal read trusts. There is no
@@ -141,6 +202,15 @@ enum ParentLinkStatus {
   PENDING
   VERIFIED
   REVOKED
+}
+
+// F4: what a person said they were joining as at sign-up. It routes onboarding
+// and nothing else — not a role, it grants nothing and no permission check
+// reads it. Null for every account that existed before F4 (no backfill).
+enum SignupIntent {
+  STUDENT
+  PARENT
+  TEACHER
 }
 
 // A self-registered account's claim on a staff-created person (SEC-2a, D-01).
@@ -157,12 +227,12 @@ enum AccountClaimStatus {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   // Links to Supabase auth.users.id; kept as the app-side profile.
-  authId          String?  @unique
+  authId          String?   @unique
   firstName       String
   lastName        String
-  email           String?  @unique
+  email           String?   @unique
   // SEC-2a (D-01): Supabase's `email_confirmed_at` for this login, mirrored on
   // every sync. Null for a staff-created person who has never signed in. When
   // REQUIRE_EMAIL_CONFIRMATION=true, an email-based link needs it set.
@@ -170,37 +240,60 @@ model User {
   // A staff-typed (never self-typed) contact, seeded once at creation. Phone
   // is never an identity key (SEC-2a, D-02): nothing links on it, and sign-up
   // never writes it.
-  phone           String?  @unique
+  phone           String?   @unique
   altPhone        String?
+  // F2: the person's own self-declared phone, set on Account settings and
+  // normalized through lib/phone.ts. NOT unique and never an identity key
+  // (D-02 (a)): nothing matches, links, originates or refuses on it — only
+  // the account page reads it. Distinct from `phone` above, which is
+  // staff-typed and unique; a self-typed value there would let anyone squat
+  // a number (`check:account` asserts the identity modules never read this).
+  contactPhone    String?
   avatarUrl       String?
-  locale          String   @default("ar") // "ar" | "en"
-  isPlatformAdmin Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  // The preferred language: where sign-in lands (F2), editable on Account settings.
+  locale          String    @default("ar") // "ar" | "en"
+  isPlatformAdmin Boolean   @default(false)
+  // F4: what the person said they were joining as at sign-up — onboarding
+  // routing only (see `SignupIntent`). Never a role; nothing authorises on it.
+  signupIntent    SignupIntent?
+  // F4: the student's own statement of their current grade (a platform
+  // catalog grade, so no `centerId`). Editable any time on Account → Study
+  // details; pre-selects Discover's grade filter and seeds a *new* branch's
+  // profile (`ensureStudentProfile`) — and never changes a branch record.
+  gradeId         String?
+  grade           CatalogGrade? @relation("UserGrade", fields: [gradeId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  memberships        Membership[]
-  studentProfiles    StudentProfile[]
-  taughtClasses      ClassGroup[]        @relation("ClassTeacher")
-  taughtSessions     Session[]           @relation("SessionTeacher")
-  reservations       Reservation[]
-  auditLogs          AuditLog[]
+  memberships          Membership[]
+  studentProfiles      StudentProfile[]
+  taughtClasses        ClassGroup[]        @relation("ClassTeacher")
+  taughtSessions       Session[]           @relation("SessionTeacher")
+  reservations         Reservation[]
+  // F6 — this User's own single-session bookings, as a STUDENT.
+  sessionBookings      SessionBooking[]
+  auditLogs            AuditLog[]
   // M14 — this user's own payout history, as a TEACHER. Named distinctly
   // from `taughtSessions`/`taughtClasses` since a Settlement references the
   // teacher, not a class or session.
-  settlements        Settlement[]        @relation("SettlementTeacher")
-  // M16 — the children this User reads as a PARENT (inert until VERIFIED).
-  // Named distinctly from every relation above because this one isn't a
-  // Membership or a StudentProfile of their own — it's read access into
-  // someone else's.
-  parentLinks        ParentLink[]        @relation("ParentLinkParent")
+  settlements          Settlement[]        @relation("SettlementTeacher")
+  // M16 — DEPRECATED at F3 (never read or written; see the ParentLink model).
+  parentLinks          ParentLink[]        @relation("ParentLinkParent")
+  // F3 — family links. As a parent: the children this User may read (ACTIVE
+  // only). As a student: the parents who may read this User's records.
+  // Named distinctly because neither is a Membership or a StudentProfile.
+  familyLinksAsParent  FamilyLink[]        @relation("FamilyLinkParent")
+  familyLinksAsStudent FamilyLink[]        @relation("FamilyLinkStudent")
+  // F3 — parent codes issued for this User as the student (by them or a branch).
+  familyInvitations    FamilyInvitation[]  @relation("FamilyInvitationStudent")
   // M17 — this User's own ratings and skips, as a STUDENT rating sessions
   // they attended. Named off the global User (not a StudentProfile) because
   // rating is the student's own act, the same identity the login pop-up
   // authenticates against — see the note on SessionRating below.
-  sessionRatings     SessionRating[]     @relation("SessionRatingStudent")
-  sessionRatingSkips SessionRatingSkip[] @relation("SessionRatingSkipStudent")
+  sessionRatings       SessionRating[]     @relation("SessionRatingStudent")
+  sessionRatingSkips   SessionRatingSkip[] @relation("SessionRatingSkipStudent")
   // SEC-2a (D-01) — sign-ups claiming this staff-created person.
-  accountClaims      AccountClaim[]      @relation("AccountClaimTarget")
+  accountClaims        AccountClaim[]      @relation("AccountClaimTarget")
 }
 
 /**
@@ -258,12 +351,18 @@ model RateLimitBucket {
  * and the screen label differ on purpose (docs/02-architecture.md §8).
  */
 model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  nameEn    String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String
+  nameEn      String?
+  active      Boolean  @default(true)
+  // F1: how many branches this organization may have, set by a platform
+  // admin only (audited `platform.organization.limit.update`). Counted
+  // branches are the non-ARCHIVED centres. Lowering it below the current
+  // count only blocks new branches — nothing existing is touched. >= 1 is a
+  // CHECK constraint in the migration (`20261026100000_f1_branch_limits`).
+  maxBranches Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   centers Center[]
 }
@@ -287,36 +386,41 @@ model Center {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  settings           CenterSettings?
-  memberships        Membership[]
-  invitations        Invitation[]
-  catalogSelections  CenterCatalogSelection[]
-  rooms              Room[]
-  roomLinks          RoomLink[]
-  classGroupRooms    ClassGroupRoom[]
-  sessionRooms       SessionRoom[]
-  classGroups        ClassGroup[]
-  studentProfiles    StudentProfile[]
-  enrollments        Enrollment[]
-  sessions           Session[]
-  attendees          SessionAttendee[]
-  attendanceChanges  SessionAttendanceChange[]
-  payments           Payment[]
-  paymentMethods     CenterPaymentMethod[]
-  expenseCategories  ExpenseCategory[]
-  expenses           Expense[]
-  reservations       Reservation[]
-  changeRequests     ChangeRequest[]
-  studentBlocks      StudentBlock[]
-  holidays           Holiday[]
-  terms              CenterTerm[]
-  auditLogs          AuditLog[]
-  permissionGrants   PermissionGrant[]
-  branchGrants       MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
-  refunds            Refund[]
-  settlements        Settlement[]
-  settlementClaims   SettlementClaim[]
-  parentLinks        ParentLink[]
+  settings          CenterSettings?
+  memberships       Membership[]
+  invitations       Invitation[]
+  catalogSelections CenterCatalogSelection[]
+  rooms             Room[]
+  roomLinks         RoomLink[]
+  classGroupRooms   ClassGroupRoom[]
+  sessionRooms      SessionRoom[]
+  classGroups       ClassGroup[]
+  studentProfiles   StudentProfile[]
+  enrollments       Enrollment[]
+  sessions          Session[]
+  attendees         SessionAttendee[]
+  attendanceChanges SessionAttendanceChange[]
+  payments          Payment[]
+  paymentMethods    CenterPaymentMethod[]
+  expenseCategories ExpenseCategory[]
+  expenses          Expense[]
+  reservations      Reservation[]
+  sessionBookings   SessionBooking[]
+  changeRequests    ChangeRequest[]
+  studentBlocks     StudentBlock[]
+  holidays          Holiday[]
+  terms             CenterTerm[]
+  auditLogs         AuditLog[]
+  permissionGrants  PermissionGrant[]
+  branchGrants      MembershipBranchGrant[]   @relation("MembershipBranchGrantCenter")
+  refunds           Refund[]
+  settlements       Settlement[]
+  settlementClaims  SettlementClaim[]
+  parentLinks       ParentLink[]
+  // F3 — parent codes this branch printed (`FamilyInvitation.issuingCenterId`).
+  familyInvitations FamilyInvitation[]
+  // F4 — this branch's bulk grade promotions (and their undo ledger).
+  gradePromotions   GradePromotionBatch[]
 
   @@index([organizationId])
 }
@@ -345,6 +449,10 @@ model CenterSettings {
   // §7). Platform admin bypasses this entirely; Settlement/payout and
   // AuditLog reads are carved out and never consult it (lib/db/visibility.ts).
   dataVisibilityDays       Int            @default(30)
+  // F5: whether this branch appears on the public Explore pages (guests, no
+  // sign-in). Only ACTIVE/GRACE branches are ever listed, whatever this says
+  // (lib/db/public-catalog.ts). It never affects the signed-in student Discover.
+  publicListing            Boolean        @default(true)
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt
 }
@@ -505,6 +613,11 @@ model CatalogGrade {
   classGroups     ClassGroup[]
   studentProfiles StudentProfile[]
   sessions        Session[] // R5 — one-time sessions
+  // F4 — accounts that named this as their own grade, and the promotion
+  // batches that moved students out of / into it.
+  accountUsers    User[]                @relation("UserGrade")
+  promotionsFrom  GradePromotionBatch[] @relation("PromotionFrom")
+  promotionsTo    GradePromotionBatch[] @relation("PromotionTo")
 
   @@index([educationSystemId])
 }
@@ -684,6 +797,12 @@ model ClassGroup {
   lateThresholdMinutes Int                     @default(10)
   acceptsNewStudents   Boolean                 @default(true)
   requiresConfirmation Boolean                 @default(false)
+  // F6 — single-session attendance online (see the enum). OFF by default, so
+  // every existing class behaves exactly as before.
+  sessionBookingMode   SessionBookingMode      @default(OFF)
+  // F6 — at most this many CONFIRMED bookings per session, on top of the
+  // seat limit (the room set). Null = no extra cap.
+  maxBookingSeats      Int?
   // R4 — the class's period, inclusive at both ends. Date-only, stored as a
   // UTC-midnight day marker exactly like Session.date / Holiday.date. Either
   // typed by hand or COPIED from a CenterTerm preset — there is no FK to the
@@ -769,11 +888,65 @@ model StudentProfile {
   // M16 — every parent account that has matched (or been verified) against
   // this child, via `parentPhone`/`parentAltPhone` above.
   parentLinks       ParentLink[]
+  // F4 — the promotion batches that moved this student (undo reads these).
+  promotionItems    GradePromotionItem[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
   @@index([centerId])
   @@index([centerId, active])
+}
+
+/**
+ * One confirmed bulk grade promotion at one branch (F4, docs/00 §4.1 item 4).
+ * Written in the same transaction as the `StudentProfile.gradeId` updates it
+ * describes, with one `GradePromotionItem` per student actually moved — so the
+ * batch is both the audit anchor (`student.grade.promote`: batch id + count)
+ * and the undo ledger. Tenant-scoped: `centerId` is the sole key (CLAUDE.md
+ * rule 1), reached only through `scoped(ctx).gradePromotions`.
+ *
+ * It touches a branch's own `StudentProfile.gradeId` and nothing else —
+ * never an enrolment, class, session, money row, another branch, or
+ * `User.gradeId`. `undoneAt`/`undoneBy` are both set or both null (CHECK in
+ * the migration); the latest not-yet-undone batch may be undone for
+ * `PROMOTION_UNDO_DAYS` (`lib/promotion.ts`). `createdBy`/`undoneBy` are
+ * plain user ids, no FK: a batch outlives a deleted account.
+ */
+model GradePromotionBatch {
+  id          String       @id @default(uuid())
+  centerId    String
+  center      Center       @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  fromGradeId String
+  fromGrade   CatalogGrade @relation("PromotionFrom", fields: [fromGradeId], references: [id])
+  toGradeId   String
+  toGrade     CatalogGrade @relation("PromotionTo", fields: [toGradeId], references: [id])
+  createdBy   String
+  createdAt   DateTime     @default(now())
+  undoneAt    DateTime?
+  undoneBy    String?
+
+  items GradePromotionItem[]
+
+  @@index([centerId, createdAt])
+}
+
+/**
+ * One student moved by a `GradePromotionBatch`. `previousGradeId` is the grade
+ * the student held when the batch ran (always the batch's `fromGradeId` —
+ * only students in that grade are moved), kept per row so undo does not
+ * depend on the batch's header alone. A plain id, not a relation: the batch's
+ * own `fromGradeId` FK already protects the catalog row.
+ */
+model GradePromotionItem {
+  id               String              @id @default(uuid())
+  batchId          String
+  batch            GradePromotionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile      @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  previousGradeId  String
+
+  @@unique([batchId, studentProfileId])
+  @@index([studentProfileId])
 }
 
 /**
@@ -919,6 +1092,8 @@ model Session {
   // session actually attended, at the teacher who actually taught it.
   ratings           SessionRating[]
   ratingSkips       SessionRatingSkip[]
+  // F6 — students who booked this one session online without enrolling.
+  bookings          SessionBooking[]
 
   // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
   // lib/db/class-sessions.ts): materializing a class's range is a
@@ -947,6 +1122,9 @@ model SessionAttendee {
   recordedAt       DateTime         @default(now())
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+
+  // F6 — the booking this check-in fulfilled, when the student had booked.
+  booking          SessionBooking?
 
   // A history, not a slot: a voided payment is never deleted, so a corrected
   // re-payment for the same roster row needs a second Payment row here — see
@@ -983,7 +1161,12 @@ model SessionAttendanceChange {
   fromStatus       AttendanceStatus
   toStatus         AttendanceStatus
   voidedPaymentId  String?
-  voidedPayment    Payment?         @relation(fields: [voidedPaymentId], references: [id], onDelete: SetNull)
+  voidedPayment    Payment?         @relation("AttendanceChangeVoidedPayment", fields: [voidedPaymentId], references: [id], onDelete: SetNull)
+  // T5 — a refund on a live session resets the student to not checked in;
+  // this is the refunded payment that caused it, so the change log reads as a
+  // refund and not as a void. Null on every other change.
+  refundedPaymentId String?
+  refundedPayment  Payment?         @relation("AttendanceChangeRefundedPayment", fields: [refundedPaymentId], references: [id], onDelete: SetNull)
   reason           String?
   changedBy        String
   changedAt        DateTime         @default(now())
@@ -1008,9 +1191,10 @@ model Payment {
   // Not a plain @unique (revised at M5): a void never deletes its row
   // (CLAUDE.md rule 2), and a correction writes a *new* Payment for the same
   // roster row — so one SessionAttendee can carry several Payments over its
-  // history. "At most one non-voided Payment per attendee" is a **partial
-  // unique index** since SEC-2b (`Payment_one_active_per_attendee`, WHERE
-  // voided = false — raw SQL in the migration, Prisma cannot express it), and
+  // history. "At most one active Payment per attendee" is a **partial
+  // unique index** since SEC-2b (`Payment_one_active_per_attendee` — since T5
+  // WHERE voided = false AND refunded = false, so a refund frees the slot;
+  // raw SQL in the migration, Prisma cannot express it), and
   // `recordPayment` inserts with ON CONFLICT against it (SEC-05). A CHECK
   // (`Payment_not_voided_and_refunded`) keeps void and refund exclusive.
   // See docs/01-data-model.md §3.
@@ -1043,8 +1227,11 @@ model Payment {
   refunded             Boolean                   @default(false)
   refund               Refund?
   // R2 — the live attendance change (PRESENT/LATE → ABSENT) that voided this
-  // payment, when that is how it was voided.
-  attendanceChanges    SessionAttendanceChange[]
+  // payment, when that is how it was voided — or (T5) the reset its own void
+  // wrote on a live session.
+  attendanceChanges    SessionAttendanceChange[] @relation("AttendanceChangeVoidedPayment")
+  // T5 — the reset a refund of this payment wrote on a live session.
+  refundAttendanceChanges SessionAttendanceChange[] @relation("AttendanceChangeRefundedPayment")
   // SEC-2b (D-05) — the settlements that claimed this payment's teacher share.
   // At most one claim is live (not released) at a time — a partial unique
   // index in the migration.
@@ -1326,6 +1513,42 @@ model Reservation {
   @@index([studentId])
 }
 
+/**
+ * A student's request to attend ONE session of a class without enrolling (F6,
+ * docs/01-data-model.md "Workflow layer"). The `Reservation` shape, per
+ * session: `studentId` is the global `User` (a PENDING booking can exist
+ * before the student has any record at this branch); the `StudentProfile` is
+ * created only when the booking is CONFIRMED (`ensureStudentProfile`). Unique
+ * on (sessionId, studentId), so a re-booking after a cancel or rejection reuses
+ * the same row. A CONFIRMED booking takes one of the session's seats
+ * (lib/db/session-bookings.ts — the one writer). It records **no money**: the
+ * student pays at the desk, where check-in links `sessionAttendeeId` in the
+ * same statement as the roster row. A booked no-show writes nothing.
+ */
+model SessionBooking {
+  id                String                      @id @default(uuid())
+  centerId          String
+  center            Center                      @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  sessionId         String
+  session           Session                     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId         String
+  student           User                        @relation(fields: [studentId], references: [id])
+  status            SessionBookingStatus        @default(PENDING)
+  requestedAt       DateTime                    @default(now())
+  resolvedAt        DateTime?
+  resolvedBy        String?
+  cancelledAt       DateTime?
+  cancelReason      SessionBookingCancelReason?
+  // Set by check-in (lib/db/attendance.ts's `createAttendance`) when this
+  // booked student arrives; the roster row it became.
+  sessionAttendeeId String?                     @unique
+  sessionAttendee   SessionAttendee?            @relation(fields: [sessionAttendeeId], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, studentId])
+  @@index([centerId])
+  @@index([studentId])
+}
+
 model ChangeRequest {
   id          String              @id @default(uuid())
   centerId    String
@@ -1342,10 +1565,90 @@ model ChangeRequest {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PARENT (M16)
+// PARENT (M16) → FAMILY (F3)
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * A parent ↔ child relation between two global `User`s (F3, OD-6 decided —
+ * docs/00-master-product-spec.md §5.1 "Parent role & portal",
+ * docs/01-data-model.md "FamilyLink"). It carries **no `centerId`**: like
+ * `SessionRating`, it is a cross-cutting identity relation, so it can exist
+ * before the child joins any branch. It grants no tenant read by itself —
+ * the parent portal reads each child's data through that child's own active
+ * `StudentProfile`s at accessible centres, with the student portal's own
+ * centre-scoped reads (`lib/db/parents.ts`'s `activeChildProfiles`).
+ * A link is only ever created by accepting a code (`FamilyInvitation`) —
+ * never by a phone match. Revocation is explicit and audited, by the branch,
+ * the parent or a platform admin (never by the student) and final for that
+ * code: relinking needs a new one, which re-activates this same row (the
+ * unique pair) and leaves the earlier revocation in the audit trail.
+ */
+model FamilyLink {
+  id            String            @id @default(uuid())
+  parentUserId  String
+  parentUser    User              @relation("FamilyLinkParent", fields: [parentUserId], references: [id], onDelete: Cascade)
+  studentUserId String
+  studentUser   User              @relation("FamilyLinkStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  status        FamilyLinkStatus  @default(ACTIVE)
+  source        FamilyLinkSource
+  // The accepted code this link stands on (null for LEGACY_VERIFIED).
+  invitationId  String?           @unique
+  invitation    FamilyInvitation? @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+  revokedAt     DateTime?
+  revokedBy     String?
+  // Typed by staff when a branch revokes (required there) — on the record,
+  // never in the audit row (D-20).
+  revokedReason String?
+
+  @@unique([parentUserId, studentUserId])
+  @@index([parentUserId, status])
+  @@index([studentUserId, status])
+}
+
+/**
+ * A one-time parent code (F3). The code itself is **never stored** — only its
+ * sha256 (`codeHash`) and its last two characters (`codeHint`, so a list can
+ * tell two pending codes apart). It is shown in full once, at creation. No
+ * time limit (founder's decision); single use (a conditional PENDING →
+ * ACCEPTED update, so two accepts cannot both win); revocable.
+ * `STUDENT_INVITE`: issued by the student from Account → Family, carrying the
+ * parent the student **declared** (name + phone, normalized by lib/phone.ts —
+ * shown to staff beside the account that accepted, never an identity key).
+ * `CENTER_CODE`: printed by a branch from `/students/[id]` (`issuingCenterId`);
+ * at most one PENDING per (student, branch) — a partial unique index in the
+ * migration — so regenerating revokes the previous one.
+ */
+model FamilyInvitation {
+  id                      String                 @id @default(uuid())
+  studentUserId           String
+  studentUser             User                   @relation("FamilyInvitationStudent", fields: [studentUserId], references: [id], onDelete: Cascade)
+  codeHash                String                 @unique
+  codeHint                String
+  source                  FamilyInvitationSource
+  issuingCenterId         String?
+  issuingCenter           Center?                @relation(fields: [issuingCenterId], references: [id], onDelete: SetNull)
+  createdBy               String
+  createdAt               DateTime               @default(now())
+  declaredParentFirstName String?
+  declaredParentLastName  String?
+  declaredParentPhone     String?
+  status                  FamilyInvitationStatus @default(PENDING)
+  acceptedBy              String?
+  acceptedAt              DateTime?
+  revokedAt               DateTime?
+
+  link FamilyLink?
+
+  @@index([studentUserId, status])
+  @@index([issuingCenterId])
+}
+
+/**
+ * DEPRECATED (F3). Not read or written anywhere since OD-6 was decided: its
+ * VERIFIED rows were copied into `FamilyLink` (source LEGACY_VERIFIED) by the
+ * F3 migration and PENDING rows were not migrated. Kept in place, untouched,
+ * until it is dropped after the pilot (docs/05-phase-2-backlog.md).
  * A parent↔child link (docs/01-data-model.md §2 "People layer, continued",
  * docs/00-master-product-spec.md §5.1 "Parent role & portal"). Every row
  * names exactly one `StudentProfile`, so a parent's read stays a tenant read

@@ -19,6 +19,7 @@
  * It needs a reachable database and cleans up after itself.
  */
 import { gatePrisma } from "./lib/gate-db.ts";
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { type BlockScope, type Role } from "@prisma/client";
@@ -40,6 +41,9 @@ import {
 import { normalizePhone } from "../lib/phone.ts";
 import { checkRateLimit } from "../lib/rate-limit.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
+import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
+import { confirmGradePromotion, promotionPreview, undoGradePromotion } from "../lib/db/promotion.ts";
+import { PROMOTION_UNDO_DAYS, isWithinUndoWindow } from "../lib/promotion.ts";
 import {
   StoragePathError,
   assertPathInCenter,
@@ -79,6 +83,8 @@ const TEACHER_EMAIL = "people-check-teacher@kayedu.test";
 const LOCAL_ONLY_EMAIL = "people-check-local-only@kayedu.test";
 const LOCAL_EMAIL = "people-check-local@kayedu.test";
 const RACE_EMAIL_PREFIX = "people-check-race";
+const CONTACT_PHONE_EMAIL = "people-check-contact-phone@kayedu.test";
+const CONTACT_PHONE = "01544443322";
 
 let failures = 0;
 
@@ -260,13 +266,19 @@ async function cleanup() {
       where: { key: { in: [...createdCenterIds].map((id) => `identityLookupPerCenter:${id}`) } },
     });
   }
+  // F4: promotion batches write audit rows (append-only) naming these centres.
+  const fixtureCenters = await prisma.center.findMany({ where: { slug: { in: [SLUG_A, SLUG_B, SLUG_C] } }, select: { id: true } });
+  if (fixtureCenters.length > 0) {
+    await deleteAuditRows(prisma, { centerId: { in: fixtureCenters.map((center) => center.id) } });
+  }
   await prisma.center.deleteMany({
     where: { slug: { in: [SLUG_A, SLUG_B, SLUG_C] } },
   });
   await prisma.user.deleteMany({
     where: {
       OR: [
-        { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_ONLY_EMAIL, LOCAL_EMAIL] } },
+        { email: { startsWith: "people-check-f4-" } },
+        { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_ONLY_EMAIL, LOCAL_EMAIL, CONTACT_PHONE_EMAIL] } },
         { phone: SHARED_PHONE },
         { email: { startsWith: RACE_EMAIL_PREFIX } },
       ],
@@ -274,6 +286,182 @@ async function cleanup() {
   });
   // Global catalog rows (M13) don't cascade away with the centers above.
   await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "People-Check" } } });
+}
+
+/**
+ * F4 — bulk grade promotion is previewable, partial and undoable, and moves
+ * only this branch's grade on file. Runs the REAL `lib/db/promotion.ts`.
+ */
+async function checkGradePromotion(
+  centerA: { id: string },
+  centerB: { id: string },
+): Promise<void> {
+  console.log("\nF4 — grade promotion (preview, partial, undo, isolation)");
+
+  const gFrom = await prisma.catalogGrade.create({ data: { nameAr: "People-Check F4 From", nameEn: "People-Check F4 From" } });
+  const gTo = await prisma.catalogGrade.create({ data: { nameAr: "People-Check F4 To", nameEn: "People-Check F4 To" } });
+  const gOther = await prisma.catalogGrade.create({ data: { nameAr: "People-Check F4 Other", nameEn: "People-Check F4 Other" } });
+  const gUnoffered = await prisma.catalogGrade.create({ data: { nameAr: "People-Check F4 Unoffered", nameEn: "People-Check F4 Unoffered" } });
+  const gRetired = await prisma.catalogGrade.create({ data: { nameAr: "People-Check F4 Retired", nameEn: "People-Check F4 Retired", active: false } });
+  for (const centerId of [centerA.id, centerB.id]) {
+    for (const grade of [gFrom, gTo, gOther, gRetired]) {
+      await prisma.centerCatalogSelection.create({ data: { centerId, kind: "GRADE", gradeId: grade.id } });
+    }
+  }
+
+  const form = (n: number) => ({
+    locale: "en",
+    firstName: `F4Student${n}`,
+    lastName: "Check",
+    email: `people-check-f4-s${n}@kayedu.test`,
+    parentFirstName: "Parent",
+    parentPhone: "01166677788",
+  });
+  const s1 = await registerStudent(centerA.id, form(1));
+  const s2 = await registerStudent(centerA.id, form(2));
+  const s3 = await registerStudent(centerA.id, form(3));
+  const s4 = await registerStudent(centerA.id, form(4));
+  const sB = await registerStudent(centerB.id, form(5));
+  await prisma.studentProfile.updateMany({ where: { id: { in: [s1.profileId, s2.profileId, s3.profileId, s4.profileId] } }, data: { gradeId: gFrom.id } });
+  await prisma.studentProfile.update({ where: { id: s4.profileId }, data: { active: false } });
+  await prisma.studentProfile.update({ where: { id: sB.profileId }, data: { gradeId: gFrom.id } });
+  // s3's own account says a different grade; it must survive every promotion.
+  await prisma.user.update({ where: { id: s3.userId }, data: { gradeId: gOther.id } });
+
+  // An active enrolment in a class of the From grade — promotion must never touch it.
+  const teacher = await prisma.user.create({
+    data: { firstName: "F4", lastName: "Teacher", email: "people-check-f4-teacher@kayedu.test" },
+  });
+  const classGroup = await prisma.classGroup.create({
+    data: {
+      centerId: centerA.id,
+      teacherId: teacher.id,
+      gradeId: gFrom.id,
+      startDate: new Date("2026-09-01"),
+      endDate: new Date("2027-01-31"),
+    },
+  });
+  await prisma.enrollment.create({ data: { centerId: centerA.id, studentProfileId: s1.profileId, classGroupId: classGroup.id } });
+  const enrolmentsBefore = JSON.stringify(await prisma.enrollment.findMany({ where: { centerId: centerA.id }, orderBy: { id: "asc" } }));
+  const classBefore = JSON.stringify(await prisma.classGroup.findUnique({ where: { id: classGroup.id } }));
+  const gradeOf = async (profileId: string) =>
+    (await prisma.studentProfile.findUniqueOrThrow({ where: { id: profileId } })).gradeId;
+  const actor = teacher.id;
+
+  // ── Preview ────────────────────────────────────────────────────────────
+  const preview = await promotionPreview(prisma, centerA.id, gFrom.id);
+  check(
+    "The preview lists this branch's ACTIVE students in the From grade only (not the inactive one, not another branch's)",
+    preview.map((row) => row.id).sort().join() === [s1.profileId, s2.profileId, s3.profileId].sort().join(),
+  );
+  check(
+    "The preview shows a differing account grade and the active enrolments in the From grade",
+    preview.find((row) => row.id === s3.profileId)?.accountGradeId === gOther.id &&
+      preview.find((row) => row.id === s1.profileId)?.activeEnrollments === 1 &&
+      preview.find((row) => row.id === s2.profileId)?.activeEnrollments === 0,
+  );
+
+  // ── Refusals before anything is written ─────────────────────────────────
+  check("Promoting into the same grade is refused", (await confirmGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, fromGradeId: gFrom.id, toGradeId: gFrom.id, studentIds: [s1.profileId] })).ok === false);
+  const unoffered = await confirmGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, fromGradeId: gFrom.id, toGradeId: gUnoffered.id, studentIds: [s1.profileId] });
+  check("A To grade this branch never picked is refused (notFound)", !unoffered.ok && unoffered.error === "notFound");
+  const retired = await confirmGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, fromGradeId: gFrom.id, toGradeId: gRetired.id, studentIds: [s1.profileId] });
+  check("A To grade the platform has deactivated is refused", !retired.ok && retired.error === "notFound");
+  const none = await confirmGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, fromGradeId: gFrom.id, toGradeId: gTo.id, studentIds: [] });
+  check("Confirming with nobody ticked is refused", !none.ok && none.error === "noStudentsToPromote");
+  check("None of those refusals moved anyone", (await gradeOf(s1.profileId)) === gFrom.id);
+
+  // ── Partial promotion ───────────────────────────────────────────────────
+  // Ticked: s1, s3, the inactive s4 and ANOTHER BRANCH's student. s2 is unticked.
+  const first = await confirmGradePromotion(prisma, {
+    centerId: centerA.id,
+    actorUserId: actor,
+    fromGradeId: gFrom.id,
+    toGradeId: gTo.id,
+    studentIds: [s1.profileId, s3.profileId, s4.profileId, sB.profileId],
+  });
+  check("A partial promotion moves exactly the ticked, active, in-branch students", first.ok && first.count === 2 && first.skipped === 2, JSON.stringify(first));
+  check(
+    "Ticked students moved; the unticked and inactive ones did not",
+    (await gradeOf(s1.profileId)) === gTo.id &&
+      (await gradeOf(s3.profileId)) === gTo.id &&
+      (await gradeOf(s2.profileId)) === gFrom.id &&
+      (await gradeOf(s4.profileId)) === gFrom.id,
+  );
+  check("Another branch's student, ticked by id, did not move (cross-branch isolation)", (await gradeOf(sB.profileId)) === gFrom.id);
+  const batch1 = first.ok ? await prisma.gradePromotionBatch.findUnique({ where: { id: first.batchId }, include: { items: true } }) : null;
+  check(
+    "One batch with one item per student actually moved, recording the previous grade",
+    batch1 !== null && batch1.centerId === centerA.id && batch1.fromGradeId === gFrom.id && batch1.toGradeId === gTo.id &&
+      batch1.items.length === 2 && batch1.items.every((item) => item.previousGradeId === gFrom.id) && batch1.undoneAt === null,
+  );
+  const promoteAudit = first.ok ? await prisma.auditLog.findMany({ where: { centerId: centerA.id, action: "student.grade.promote", entityId: first.batchId } }) : [];
+  check(
+    "Exactly one audit row student.grade.promote: batch id and counts, no names (D-20)",
+    promoteAudit.length === 1 &&
+      forbiddenAuditKey(promoteAudit[0].after) === null &&
+      (promoteAudit[0].after as { count?: number } | null)?.count === 2,
+  );
+  check("User.gradeId is untouched by promotion", (await prisma.user.findUniqueOrThrow({ where: { id: s3.userId } })).gradeId === gOther.id);
+  check(
+    "Enrolments and the class are untouched (byte for byte, updatedAt included)",
+    JSON.stringify(await prisma.enrollment.findMany({ where: { centerId: centerA.id }, orderBy: { id: "asc" } })) === enrolmentsBefore &&
+      JSON.stringify(await prisma.classGroup.findUnique({ where: { id: classGroup.id } })) === classBefore,
+  );
+
+  // ── Cross-branch isolation of the batch itself ──────────────────────────
+  const bUndo = first.ok ? await undoGradePromotion(prisma, { centerId: centerB.id, actorUserId: actor, batchId: first.batchId }) : null;
+  check("Another branch cannot undo this branch's batch (notFound)", bUndo !== null && !bUndo.ok && bUndo.error === "notFound");
+  check("Another branch sees none of this branch's batches", (await prisma.gradePromotionBatch.count({ where: scopedWhere(centerB.id) })) === 0);
+  const bConfirm = await confirmGradePromotion(prisma, { centerId: centerB.id, actorUserId: actor, fromGradeId: gTo.id, toGradeId: gFrom.id, studentIds: [s1.profileId] });
+  check("Another branch cannot move this branch's student by id", !bConfirm.ok && (await gradeOf(s1.profileId)) === gTo.id);
+
+  // ── Undo: only the latest batch, only untouched rows ─────────────────────
+  const second = await confirmGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, fromGradeId: gFrom.id, toGradeId: gTo.id, studentIds: [s2.profileId] });
+  const notLatest = first.ok ? await undoGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, batchId: first.batchId }) : null;
+  check("Only the latest batch can be undone (the older one is refused while a newer is open)", second.ok && notLatest !== null && !notLatest.ok && notLatest.error === "notLatest");
+
+  // A manager moves s3 elsewhere after the batch; undo must leave it alone.
+  await prisma.studentProfile.update({ where: { id: s3.profileId }, data: { gradeId: gOther.id } });
+  const undoSecond = second.ok ? await undoGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, batchId: second.batchId }) : null;
+  check("Undoing the latest batch puts its student back", undoSecond?.ok === true && undoSecond.reverted === 1 && (await gradeOf(s2.profileId)) === gFrom.id);
+  const undoFirst = first.ok ? await undoGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, batchId: first.batchId }) : null;
+  check(
+    "Undo reverts only students whose grade still equals the batch's To grade",
+    undoFirst?.ok === true && undoFirst.reverted === 1 && undoFirst.skipped === 1 &&
+      (await gradeOf(s1.profileId)) === gFrom.id && (await gradeOf(s3.profileId)) === gOther.id,
+    JSON.stringify(undoFirst),
+  );
+  const again = first.ok ? await undoGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, batchId: first.batchId }) : null;
+  check("An undone batch cannot be undone twice", again !== null && !again.ok && again.error === "alreadyUndone");
+  const undone = first.ok ? await prisma.gradePromotionBatch.findUnique({ where: { id: first.batchId } }) : null;
+  check("The batch records who undid it and when", undone?.undoneAt != null && undone.undoneBy === actor);
+  const undoAudit = first.ok ? await prisma.auditLog.count({ where: { centerId: centerA.id, action: "student.grade.promote.undo", entityId: first.batchId } }) : 0;
+  check("The undo is audited as student.grade.promote.undo", undoAudit === 1);
+  check("User.gradeId and enrolments are still untouched after undo", (await prisma.user.findUniqueOrThrow({ where: { id: s3.userId } })).gradeId === gOther.id && JSON.stringify(await prisma.enrollment.findMany({ where: { centerId: centerA.id }, orderBy: { id: "asc" } })) === enrolmentsBefore);
+
+  // ── The 14-day limit ────────────────────────────────────────────────────
+  const third = await confirmGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, fromGradeId: gFrom.id, toGradeId: gTo.id, studentIds: [s1.profileId] });
+  const batch3 = third.ok ? await prisma.gradePromotionBatch.findUniqueOrThrow({ where: { id: third.batchId } }) : null;
+  const day = 24 * 60 * 60 * 1000;
+  check(
+    "The undo window is 14 days: open at 14 days, closed a second after",
+    batch3 !== null && PROMOTION_UNDO_DAYS === 14 &&
+      isWithinUndoWindow(batch3.createdAt, new Date(batch3.createdAt.getTime() + 14 * day)) &&
+      !isWithinUndoWindow(batch3.createdAt, new Date(batch3.createdAt.getTime() + 14 * day + 1000)),
+  );
+  const expired = third.ok && batch3 ? await undoGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, batchId: third.batchId, now: new Date(batch3.createdAt.getTime() + 14 * day + 1000) }) : null;
+  check("Past 14 days the undo is refused and moves nobody", expired !== null && !expired.ok && expired.error === "expired" && (await gradeOf(s1.profileId)) === gTo.id);
+  const inTime = third.ok && batch3 ? await undoGradePromotion(prisma, { centerId: centerA.id, actorUserId: actor, batchId: third.batchId, now: new Date(batch3.createdAt.getTime() + 13 * day) }) : null;
+  check("Inside the window the same undo succeeds", inTime?.ok === true && inTime.reverted === 1 && (await gradeOf(s1.profileId)) === gFrom.id);
+
+  // ── The old one-click path is gone ──────────────────────────────────────
+  const scopedSource = readFileSync(join(process.cwd(), "lib", "db", "scoped.ts"), "utf8");
+  check("scoped students has no one-click promoteGrade any more", !/promoteGrade\s*:/.test(scopedSource));
+
+  // The audit trail is append-only and a deleted centre only nulls its rows'
+  // centerId — so these rows are removed (maintenance path) while still findable.
+  await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });
 }
 
 /** The lookup context the centre's Add-student action passes (no actor: this gate is not a staff member). */
@@ -492,6 +680,18 @@ async function main() {
       others: "others" in matchedFromLocalOnly ? matchedFromLocalOnly.others.map((other) => other.user.id === inA.userId) : null,
     }),
   );
+  // F2 (D-02 (a)): a self-declared `User.contactPhone` is never an identity
+  // key — the same lookup a receptionist runs finds nobody by it.
+  const declarer = await prisma.user.create({
+    data: { email: CONTACT_PHONE_EMAIL, firstName: "Self", lastName: "Declared", contactPhone: CONTACT_PHONE },
+  });
+  const byContactPhone = await resolveContact(lookupAt(centerC.id), { email: null, phone: CONTACT_PHONE });
+  check(
+    "A User's self-declared contactPhone never matches, links or describes them (F2, D-02 (a))",
+    byContactPhone.kind === "none" &&
+      !("others" in byContactPhone && byContactPhone.others.some((other) => other.user.id === declarer.id)),
+    JSON.stringify({ kind: byContactPhone.kind }),
+  );
   await prisma.center.delete({ where: { id: centerC.id } });
 
   // ── 2. Student codes are system-assigned, per-center, race-free ────────
@@ -698,6 +898,9 @@ async function main() {
       toGradeId: gradeA1.id,
     }).success,
   );
+
+  // ── 5b. F4: previewable, partial, undoable promotion ───────────────────
+  await checkGradePromotion(centerA, centerB);
 
   // ── 6. Storage paths are the tenant boundary for files ─────────────────
   const photoPath = studentPhotoPath(centerA.id, inA.profileId, "png", "abc");

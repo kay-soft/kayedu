@@ -37,6 +37,21 @@
  *      what was typed on a refused submit, and put the duplicate-match panel
  *      under the phone field.
  *
+ * 12. (T4) URL state is soft: no GET filter form outside the shared
+ *      interceptor (`UrlFilterForm`; Reception's scan field is the one
+ *      allow-listed hard submit), every pager/tab link is a `SoftLink`, every
+ *      list/report page marks its results with `ResultsRegion`, and the merge
+ *      that turns a submitted form into the next query string is asserted by
+ *      running it (`lib/ui/url-filter-params.ts`).
+ *
+ * 13. (T6) Whole Management is analytics-only: every `"use server"` file
+ *      under `(center)` calls `requireBranchScope` straight after each
+ *      `getTenantContext(` (an allowlist, with a reason per entry, is the only
+ *      way out); every centre page — and every centre print page — except
+ *      Analytics returns `PickBranchScreen` straight after its context (the
+ *      Dashboard redirects to Analytics); the T1 `RollupNotice` is gone; and
+ *      the guard itself is asserted by running it (`lib/auth/branch-scope.ts`).
+ *
  * Pure static analysis — no database needed. (The "no change under prisma/,
  * lib/db/, lib/money.ts, lib/auth/" constraint is reported with
  * `git diff --stat` in the R10a summary rather than gated here.)
@@ -44,7 +59,9 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope } from "../lib/auth/branch-scope.ts";
 import { centerInitial, nameInitial, personInitials } from "../lib/initials.ts";
+import { mergeFilterParams } from "../lib/ui/url-filter-params.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -134,14 +151,21 @@ function checkLocaleToggle() {
     "components/shell/app-shell.tsx",
     "app/[locale]/(auth)/layout.tsx",
     "components/shared/public-header.tsx",
+    "components/explore/public-shell.tsx",
   ];
   for (const file of renderers) {
     check(`${file} renders <LocaleToggle />`, /<LocaleToggle\b/.test(read(file)));
   }
   // DES: every screen outside a shell carries the public header (mark + toggle).
-  for (const file of ["app/[locale]/not-found.tsx", "app/[locale]/error.tsx", "app/[locale]/page.tsx"]) {
+  for (const file of ["app/[locale]/not-found.tsx", "app/[locale]/error.tsx"]) {
     check(`${file} renders <PublicHeader />`, /<PublicHeader\b/.test(read(file)));
   }
+  // F5: a signed-out `/` is not a screen of its own — it redirects to Explore,
+  // whose public shell carries the mark and the toggle (check:public asserts both).
+  check(
+    "app/[locale]/page.tsx sends a signed-out visitor to Explore (the public shell renders the toggle)",
+    /if \(!identity\) redirect\(\{ href: ROUTES\.explore, locale \}\)/.test(stripComments(read("app/[locale]/page.tsx"))),
+  );
 
   // Every experience layout is a shell, and a shell is `AppShell`.
   for (const group of ["(center)", "(teacher)", "(student)", "(parent)", "(admin)"]) {
@@ -191,9 +215,6 @@ function checkNativeSelect() {
 const HEX_ALLOWLIST: Record<string, string> = {
   "app/[locale]/(admin)/admin/centers/create-center-form.tsx":
     "the new-centre form's default theme colour — the same value as the --brand token, stored as data",
-  "app/[locale]/(admin)/layout.tsx": "the platform-admin shell's default brand — the --brand token's value, passed as data",
-  "app/[locale]/(parent)/layout.tsx": "the parent shell's default brand — the --brand token's value, passed as data",
-  "app/[locale]/(teacher)/layout.tsx": "the zero-centre teacher shell's default brand — the --brand token's value, passed as data",
   "app/[locale]/(center)/settings/card/card-style-controls.tsx":
     "ID-card colour swatches and fallbacks — a centre's own card colours are user content, not UI chrome",
   "app/[locale]/layout.tsx":
@@ -260,7 +281,7 @@ function checkNoDecorativeAccents() {
 /** Pages that are not "a page with a title": signed-out, print, or redirect-only. */
 const PAGEHEADER_EXEMPT: Record<string, string> = {
   "app/[locale]/page.tsx":
-    "entry point — redirects a signed-in visitor home; signed out it is the public landing, whose h1 is the product name (DES)",
+    "entry point — redirect-only: a signed-in visitor goes home, a signed-out one to Explore (F5), which renders its own heading",
   "app/[locale]/[...rest]/page.tsx": "unknown-path catch-all — calls notFound(), renders nothing (DES)",
   "app/[locale]/(student)/student/profile/page.tsx": "redirect-only (the layout renders the profile form)",
   "app/[locale]/(auth)/login/page.tsx": "signed-out screen — AuthCard carries the heading",
@@ -268,6 +289,7 @@ const PAGEHEADER_EXEMPT: Record<string, string> = {
   "app/[locale]/(auth)/invite/[token]/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/select-center/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/account-pending/page.tsx": "signed-out screen — AuthCard carries the heading",
+  "app/[locale]/(auth)/family/join/page.tsx": "auth screen (F3, guests too) — AuthCard carries the heading",
   "app/[locale]/(print)/sessions/[id]/print/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/card/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/paper/page.tsx": "print sheet — no app chrome",
@@ -609,6 +631,8 @@ const SILENT_CATCH_ALLOWLIST: Record<string, string> = {
     "an advisory preview — the server's own conflict check still answers on submit",
   "app/[locale]/(center)/settings/card/card-form.tsx":
     "getBBox() throws while the card is display:none; there is nothing to measure, not a failure",
+  "components/family/join-family-form.tsx":
+    "sessionStorage can be blocked (a private window); the parent code then has to be typed again — nothing failed (F3)",
 };
 
 function checkNoSilentCatches() {
@@ -624,6 +648,303 @@ function checkNoSilentCatches() {
     "No empty or comment-only catch outside the allowlist (errors are never silent)",
     offenders.length === 0,
     offenders.join(", "),
+  );
+}
+
+// ── 12. URL state is soft navigation (T4, docs/02-architecture.md §14) ──────
+
+/** Every `<form …>` opening tag in a source file, comments blanked. */
+function formTags(source: string): string[] {
+  return [...stripComments(source).matchAll(/<form\b[^>]*>/g)].map((match) => match[0]);
+}
+
+/** The one hard (full-document) GET submit left, and why. */
+const HARD_GET_SUBMIT_ALLOWLIST: Record<string, string> = {
+  "app/[locale]/(center)/reception/reception-search.tsx":
+    "Reception's scan field: the barcode scanner's type-fast-then-Enter submit is verified against the full-page GET (docs/04 §11.8 Scanner contract)",
+};
+
+/** Controls that change URL state — a page rendering any of them must mark its results region. */
+const URL_STATE_CONTROLS = [
+  "<Pagination",
+  "<FilterBar",
+  "<ClassFilters",
+  "<SessionFilters",
+  "<TeacherSessionFilters",
+  "<DiscoverFilters",
+  "<ChildSelector",
+  "<ParentDateFilter",
+  "<ScheduleDateFilter",
+  "<TypeAheadSearch",
+  "<AddAttendeeSearch",
+  "<QueueTabs",
+];
+
+function checkSoftUrlState() {
+  // The merge, by running it.
+  const query = (current: string, fields: [string, string][]) =>
+    mergeFilterParams(new URLSearchParams(current), fields).toString();
+  check(
+    "mergeFilterParams: a field replaces what the URL held, an empty field removes the param",
+    query("status=LIVE&q=ali", [
+      ["status", ""],
+      ["teacherId", "t1"],
+    ]) === "q=ali&teacherId=t1",
+  );
+  check(
+    "mergeFilterParams: params the form does not own are kept",
+    query("child=c1&date=2026-10-01", [["date", "2026-10-02"]]) === "child=c1&date=2026-10-02",
+  );
+  check(
+    "mergeFilterParams: page resets when a filter changed",
+    !query("status=LIVE&page=3", [["status", "COMPLETED"]]).includes("page="),
+  );
+  check(
+    "mergeFilterParams: page survives re-submitting the same filters",
+    query("status=LIVE&page=3", [["status", "LIVE"]]).split("&").sort().join("&") === "page=3&status=LIVE",
+  );
+  check(
+    "mergeFilterParams: a whitespace-only value is not written to the URL",
+    query("q=ali", [["q", "   "]]) === "",
+  );
+
+  // The interceptor.
+  const filters = read("components/shared/url-filters.tsx");
+  check(
+    "The interceptor navigates inside a transition, with scroll: false, on next-intl's router",
+    /useTransition\(\)/.test(filters) &&
+      /startTransition\(/.test(filters) &&
+      /scroll:\s*false/.test(filters) &&
+      /from\s+"@\/lib\/i18n\/navigation"/.test(filters),
+  );
+  check(
+    "The interceptor is a form with no action (a plain GET without JavaScript) that only preventDefaults in onSubmit",
+    /<form\b[\s\S]*?onSubmit=/.test(filters) && !/\baction=/.test(stripComments(filters)),
+  );
+
+  // No bare GET form anywhere: a `<form>` with neither an action nor a handler
+  // reloads the document. The soft ones are the interceptor and its callers.
+  const bare: string[] = [];
+  for (const file of FILES) {
+    if (!file.endsWith(".tsx")) continue;
+    const source = read(file);
+    for (const tag of formTags(source)) {
+      const flat = tag.replace(/\s+/g, " ");
+      if (/\baction=/.test(flat) || /\bonSubmit=/.test(flat) || /\{\.\.\./.test(flat)) continue;
+      bare.push(file);
+    }
+    if (/\bmethod=["']get["']/i.test(stripComments(source))) bare.push(`${file} (method="get")`);
+  }
+  check(
+    'No GET filter form outside the shared interceptor (UrlFilterForm) — no bare <form>, no method="get"',
+    bare.length === 0,
+    bare.join(", "),
+  );
+
+  const filterBar = read("components/shared/filter-bar.tsx");
+  check(
+    "FilterBar renders the interceptor, not its own <form>",
+    /<UrlFilterForm\b/.test(filterBar) && !/<form\b/.test(stripComments(filterBar)),
+  );
+  for (const file of [
+    "app/[locale]/(center)/classes/class-filters.tsx",
+    "app/[locale]/(teacher)/teacher/sessions/session-filters.tsx",
+    "app/[locale]/(student)/student/discover/discover-filters.tsx",
+    "app/[locale]/(student)/student/schedule/schedule-date-filter.tsx",
+    "app/[locale]/(parent)/parent/parent-date-filter.tsx",
+    "app/[locale]/(parent)/parent/child-selector.tsx",
+  ]) {
+    check(`${file} filters through UrlFilterForm`, /<UrlFilterForm\b/.test(read(file)));
+  }
+
+  // The type-ahead's submit is soft except where it is allow-listed.
+  const typeAhead = stripComments(read("components/center/type-ahead-search.tsx"));
+  check(
+    "TypeAheadSearch submits through useUrlFilters unless softSubmit is false",
+    /useUrlFilters\(\)/.test(typeAhead) &&
+      /urlFilters\.submit\(/.test(typeAhead) &&
+      /softSubmit\s*=\s*true/.test(typeAhead),
+  );
+  const hard = FILES.filter((file) => /softSubmit=\{false\}/.test(stripComments(read(file))));
+  check(
+    "Only the allow-listed scan field opts out of the soft submit",
+    hard.length === Object.keys(HARD_GET_SUBMIT_ALLOWLIST).length &&
+      hard.every((file) => file in HARD_GET_SUBMIT_ALLOWLIST),
+    hard.join(", "),
+  );
+
+  // Pagers, tabs and resets are SoftLinks, not scrolling Links or bare anchors.
+  const pagination = stripComments(read("components/center/pagination.tsx"));
+  check("Pagination links are SoftLinks", /<SoftLink\b/.test(pagination) && !/<Link\b/.test(pagination));
+  const soft = stripComments(read("components/shared/soft-link.tsx"));
+  check(
+    "SoftLink keeps the scroll position (scroll={false}) and reports pending",
+    /scroll\s*=\s*false/.test(soft) && /useLinkStatus/.test(soft) && /useReportUrlPending/.test(soft),
+  );
+  const dateFilter = stripComments(read("components/shared/date-filter.tsx"));
+  check(
+    "The date filter's Reset is a SoftLink, not a reloading <a>",
+    /<SoftLink\b/.test(dateFilter) && !/<a\b/.test(dateFilter),
+  );
+  const audit = stripComments(read("app/[locale]/(center)/audit/page.tsx"));
+  check("The audit filter tabs are SoftLinks", /<SoftLink\b[\s\S]*?hrefFor\(kind\)/.test(audit));
+  // F7: the approvals type tabs — SoftLink pills from `sm`, a Select (moved
+  // through useUrlFilters) below it, and never a horizontally scrolling strip.
+  const queueTabs = stripComments(read("components/shared/queue-tabs.tsx"));
+  check(
+    "The approvals type tabs are SoftLinks from sm and a Select (useUrlFilters) below it, with no sideways scroll",
+    /<SoftLink\b/.test(queueTabs) &&
+      /useUrlFilters\(\)/.test(queueTabs) &&
+      /<Select\b/.test(queueTabs) &&
+      /hidden[^"]*sm:flex/.test(queueTabs) &&
+      /sm:hidden/.test(queueTabs) &&
+      !/overflow-x/.test(queueTabs),
+  );
+
+  // Results regions: every page with URL-state controls dims its results while pending.
+  const region = stripComments(read("components/shared/results-region.tsx"));
+  check(
+    "ResultsRegion marks aria-busy and dims with opacity only (no skeleton, no height change)",
+    /aria-busy=\{pending\}/.test(region) &&
+      /opacity-60/.test(region) &&
+      !/Skeleton|animate-pulse|min-h-|h-\[/.test(region),
+  );
+  const missingRegion = FILES.filter((file) => {
+    if (!/\/page\.tsx$/.test(file)) return false;
+    const source = stripComments(read(file));
+    return URL_STATE_CONTROLS.some((control) => source.includes(control)) && !source.includes("<ResultsRegion");
+  });
+  check(
+    "Every page with URL-state controls wraps its results in ResultsRegion",
+    missingRegion.length === 0,
+    missingRegion.join(", "),
+  );
+}
+
+// ── 13. Whole Management is analytics-only (T6) ─────────────────────────────
+
+/**
+ * `"use server"` files under `(center)` that may skip the branch-scope guard,
+ * each with its reason. Empty: every centre action reads or writes one
+ * branch. (selectCenterAction, sign-out and Account actions are not centre
+ * data and live outside `(center)`.)
+ */
+const BRANCH_GUARD_ACTION_ALLOWLIST: Record<string, string> = {};
+
+/** Centre pages that may render under a roll-up, each with its reason. */
+const BRANCH_GUARD_PAGE_ALLOWLIST: Record<string, string> = {
+  "app/[locale]/(center)/analytics/page.tsx":
+    "sums the organization — a union of per-branch scoped queries (docs/02 §4)",
+  "app/[locale]/(center)/dashboard/page.tsx":
+    "redirects to Analytics under a roll-up (asserted on its own below)",
+};
+
+/** Indexes of every line of `source` that calls `getTenantContext(`. */
+function contextLines(lines: string[]): number[] {
+  return lines.flatMap((line, index) => (/\bgetTenantContext\(/.test(line) ? [index] : []));
+}
+
+/** The guard follows within `window` non-blank lines of the context call. */
+function guardedAfter(lines: string[], index: number, pattern: RegExp, window = 3): boolean {
+  const following = lines.slice(index + 1).filter((line) => line.trim() !== "").slice(0, window);
+  return following.some((line) => pattern.test(line));
+}
+
+function checkBranchScopeGuard() {
+  const rollup = { rollupOrganizationId: "00000000-0000-4000-8000-000000000001" };
+  const branch = { rollupOrganizationId: null };
+  check(
+    "requireBranchScope refuses a roll-up context with pickBranch, passes a branch context",
+    requireBranchScope(rollup) === PICK_BRANCH &&
+      PICK_BRANCH.error === "pickBranch" &&
+      requireBranchScope(branch) === null &&
+      isPickBranch(requireBranchScope(rollup)) &&
+      !isPickBranch({ error: "pickBranch" }),
+  );
+
+  const actionFiles = FILES.filter(
+    (file) =>
+      file.startsWith("app/[locale]/(center)/") &&
+      /\.tsx?$/.test(file) &&
+      /^\s*["']use server["']/.test(read(file)),
+  );
+  const unguarded: string[] = [];
+  for (const file of actionFiles) {
+    if (file in BRANCH_GUARD_ACTION_ALLOWLIST) continue;
+    const lines = stripComments(read(file)).split(/\r?\n/);
+    const calls = contextLines(lines);
+    if (calls.length === 0) unguarded.push(`${file} (no getTenantContext — allowlist it with a reason)`);
+    for (const index of calls) {
+      if (!guardedAfter(lines, index, /\brequireBranchScope\(/)) unguarded.push(`${file}:${index + 1}`);
+    }
+  }
+  check(
+    `Every centre Server Action calls requireBranchScope after getTenantContext (${actionFiles.length} files)`,
+    actionFiles.length > 0 && unguarded.length === 0,
+    unguarded.join(", "),
+  );
+  const staleActions = Object.keys(BRANCH_GUARD_ACTION_ALLOWLIST).filter((file) => !actionFiles.includes(file));
+  check("The action-guard allowlist names only real centre action files", staleActions.length === 0, staleActions.join(", "));
+
+  // Centre pages, and the print pages that resolve a centre context.
+  const pages = FILES.filter(
+    (file) =>
+      /\/page\.tsx$/.test(file) &&
+      (file.startsWith("app/[locale]/(center)/") ||
+        (file.startsWith("app/[locale]/(print)/") && /getTenantContext\("center"\)/.test(read(file)))),
+  );
+  const unscreened: string[] = [];
+  for (const file of pages) {
+    if (file in BRANCH_GUARD_PAGE_ALLOWLIST) continue;
+    const lines = stripComments(read(file)).split(/\r?\n/);
+    const first = contextLines(lines)[0];
+    if (
+      first === undefined ||
+      !guardedAfter(lines, first, /if \(requireBranchScope\(ctx\)\) return [^;]*<PickBranchScreen ctx=\{ctx\} \/>/, 1)
+    ) {
+      unscreened.push(file);
+    }
+  }
+  check(
+    `Every centre page but Analytics returns PickBranchScreen straight after its context (${pages.length} pages)`,
+    pages.length > 0 && unscreened.length === 0,
+    unscreened.join(", "),
+  );
+  const stalePages = Object.keys(BRANCH_GUARD_PAGE_ALLOWLIST).filter((file) => !pages.includes(file));
+  check("The page-guard allowlist names only real centre pages", stalePages.length === 0, stalePages.join(", "));
+
+  const dashboard = stripComments(read("app/[locale]/(center)/dashboard/page.tsx")).split(/\r?\n/);
+  const dashboardCtx = contextLines(dashboard)[0];
+  check(
+    "The Dashboard redirects to Analytics under a roll-up, before any read",
+    dashboardCtx !== undefined &&
+      guardedAfter(
+        dashboard,
+        dashboardCtx,
+        /if \(requireBranchScope\(ctx\)\) redirect\(\{ href: ROUTES\.centerAnalytics\b/,
+        1,
+      ),
+  );
+
+  const settingsLayout = stripComments(read("app/[locale]/(center)/settings/layout.tsx")).split(/\r?\n/);
+  const settingsCtx = contextLines(settingsLayout)[0];
+  check(
+    "The settings layout renders only the page under a roll-up (no branch's settings chrome)",
+    settingsCtx !== undefined &&
+      guardedAfter(settingsLayout, settingsCtx, /if \(requireBranchScope\(ctx\)\) return children;/, 1),
+  );
+
+  const shell = stripComments(read("app/[locale]/(center)/center-shell.tsx"));
+  check(
+    "The T1 RollupNotice is gone (component, shell use and message)",
+    !existsSync(join(ROOT, "components/shell/rollup-notice.tsx")) &&
+      !/RollupNotice/.test(shell) &&
+      !/rollupShowingBranch/.test(read("messages/en.json")) &&
+      !/rollupShowingBranch/.test(read("messages/ar.json")),
+  );
+  check(
+    "Under a roll-up every centre nav item except Analytics is disabled",
+    /disabledHrefs:\s*rollupGroup\s*\?\s*nav\.filter\(\(item\) => item\.href !== ROUTES\.centerAnalytics\)/.test(shell),
   );
 }
 
@@ -644,6 +965,10 @@ checkRouteGroupBoundaries();
 checkActionsReport();
 checkActionsReturnResults();
 checkNoSilentCatches();
+console.log("\nSoft URL state (T4)");
+checkSoftUrlState();
+console.log("\nWhole Management is analytics-only (T6)");
+checkBranchScopeGuard();
 
 if (failures > 0) {
   console.error(`\n${failures} design check(s) failed.`);

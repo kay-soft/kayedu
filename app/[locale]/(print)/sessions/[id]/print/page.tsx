@@ -4,12 +4,15 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { PrintToolbar } from "@/components/shared/print-toolbar";
 import { SessionPrintSheet } from "@/components/shared/session-print-sheet";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { sessionDisplayName } from "@/lib/session-label";
+import { attendanceDisplay } from "@/lib/attendance-rules";
 import { formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -31,6 +34,7 @@ export default async function SessionPrintPage({
   params: Promise<{ id: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <div className="mx-auto w-full max-w-2xl p-4 sm:p-8"><PickBranchScreen ctx={ctx} /></div>;
   await requirePermission(ctx, "session.view");
   const { id } = await params;
 
@@ -55,7 +59,8 @@ export default async function SessionPrintPage({
       id: attendee.id,
       name: fullName(localName(attendee.studentProfile!, attendee.studentProfile!.user)),
       studentCode: attendee.studentProfile!.studentCode,
-      status: attendee.attendanceStatus,
+      // T5 — "Not arrived", never Absent, for a live ABSENT row or a drop-in's.
+      status: attendanceDisplay(attendee, session.closedAt !== null),
     }));
 
   const className = sessionDisplayName(locale, session);

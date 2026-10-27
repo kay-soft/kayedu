@@ -2,8 +2,11 @@
 import {
   AuthMisconfiguredError,
   allowAutoConfirmDemo,
+  allowUnverifiedEmailChange,
   isProductionDeployment,
   productionAuthProblems,
+  requireEmailConfirmation,
+  unverifiedEmailChangeRequested,
 } from "./auth-config.ts";
 
 type Env = Record<string, string | undefined>;
@@ -36,7 +39,18 @@ export async function fetchSupabaseAuthSettings(
  * (Confirm email stays off on dev until a domain exists).
  */
 export async function enforceProductionAuthSettings(env: Env = process.env): Promise<void> {
+  // F2: loud wherever it is on (not only production) — an email change on
+  // this deployment proves nothing about the new address.
+  if (allowUnverifiedEmailChange(env)) {
+    console.warn(
+      "\n!!! KayEdu: ALLOW_UNVERIFIED_EMAIL_CHANGE=yes — Account settings change emails WITHOUT a confirmation " +
+        "link (admin API, marked confirmed). DEMO ONLY until SMTP exists: remove it before a real centre (M20). !!!\n",
+    );
+  }
   if (!isProductionDeployment(env)) return;
+  if (unverifiedEmailChangeRequested(env) && requireEmailConfirmation(env)) {
+    throw new AuthMisconfiguredError(productionAuthProblems(env, null)[0]);
+  }
   if (allowAutoConfirmDemo(env)) {
     console.warn(
       "\n!!! KayEdu: ALLOW_AUTO_CONFIRM_DEMO=yes — the production email-confirmation guard is OFF. " +

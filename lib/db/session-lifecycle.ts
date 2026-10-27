@@ -297,7 +297,9 @@ async function lockAndLoadSession(
 
 /**
  * `SELECT … FOR UPDATE` on one roster row. Taken after the session's shared
- * lock by `changeAttendanceStatus` and `recordPayment`, so two writes on the
+ * lock by `changeAttendanceStatus`, `recordPayment`, `recheckInAttendee` and
+ * (T5) `voidPayment`/`refundPayment` — before their payment-row lock, so the
+ * order is always session → attendee → payment — so two writes on the
  * same student serialize (no payment slips in for a student being switched
  * to Absent; no second active payment) while different students in the same
  * session still proceed concurrently.
@@ -322,6 +324,7 @@ export async function lockAttendeeRow(
 ): Promise<{
   attendanceStatus: AttendanceStatus;
   studentProfileId: string | null;
+  /** A payment neither voided nor refunded (T5 — a refund frees the slot, like a void). */
   hasActivePayment: boolean;
   /**
    * The session's `priceSnapshot`, read by the same fresh statement — the
@@ -344,7 +347,8 @@ export async function lockAttendeeRow(
   const active = await tx.$queryRaw<{ hasActivePayment: boolean; sessionPrice: number }[]>`
     SELECT EXISTS (
       SELECT 1 FROM "Payment" p
-      WHERE p."sessionAttendeeId" = ${attendeeId} AND p."centerId" = ${centerId} AND p."voided" = false
+      WHERE p."sessionAttendeeId" = ${attendeeId} AND p."centerId" = ${centerId}
+        AND p."voided" = false AND p."refunded" = false
     ) AS "hasActivePayment",
     (SELECT s."priceSnapshot" FROM "SessionAttendee" a JOIN "Session" s ON s."id" = a."sessionId"
       WHERE a."id" = ${attendeeId} AND a."centerId" = ${centerId}) AS "sessionPrice"`;
@@ -684,25 +688,54 @@ export async function closeEndedSessions(
 
 // ── Receipt data (R2: closed time/mode + "Changes during session") ─────────
 
+type PersonName = { firstName: string; lastName: string };
+
 export type SessionAttendanceChangeRow = {
   id: string;
   studentProfileId: string;
-  studentName: { firstName: string; lastName: string };
+  studentName: PersonName;
   fromStatus: AttendanceStatus;
   toStatus: AttendanceStatus;
   changedAt: Date;
   changedBy: string;
-  changedByName: { firstName: string; lastName: string } | null;
+  changedByName: PersonName | null;
   reason: string | null;
   voidedPaymentId: string | null;
+  /** T5 — the refunded payment that caused this reset (a refund, not a void). */
+  refundedPaymentId: string | null;
 };
 
+/** Staff names at this centre: the local `Membership` name over the global one (CLAUDE.md rule 4). */
+async function staffNames(db: Db, centerId: string, userIds: string[]): Promise<Map<string, PersonName>> {
+  if (userIds.length === 0) return new Map();
+  const [users, memberships] = await Promise.all([
+    db.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }),
+    db.membership.findMany({
+      where: { centerId, userId: { in: userIds } },
+      select: { userId: true, firstName: true, lastName: true },
+    }),
+  ]);
+  const membershipByUserId = new Map(memberships.map((m) => [m.userId, m]));
+  return new Map(
+    users.map((user) => {
+      const membership = membershipByUserId.get(user.id);
+      return [
+        user.id,
+        { firstName: membership?.firstName ?? user.firstName, lastName: membership?.lastName ?? user.lastName },
+      ];
+    }),
+  );
+}
+
 /**
- * Every live-session status change on this session, oldest first — the
- * receipt's "Changes during session" section. Names resolve the same way
- * every other screen resolves them (CLAUDE.md rule 4): the student's
- * centre-local name over their global default, and the actor's centre-local
- * `Membership` name over theirs.
+ * Every live-session status change on this session, oldest first. Names
+ * resolve the same way every other screen resolves them (CLAUDE.md rule 4):
+ * the student's centre-local name over their global default, and the actor's
+ * centre-local `Membership` name over theirs. The receipt reads it through
+ * `sessionChangeLog` below.
  */
 export async function listSessionAttendanceChanges(
   db: Db,
@@ -716,42 +749,213 @@ export async function listSessionAttendanceChanges(
   });
   if (rows.length === 0) return [];
 
-  const actorIds = [...new Set(rows.map((row) => row.changedBy))];
-  const [users, memberships] = await Promise.all([
-    db.user.findMany({
-      where: { id: { in: actorIds } },
-      select: { id: true, firstName: true, lastName: true },
+  const names = await staffNames(db, centerId, [...new Set(rows.map((row) => row.changedBy))]);
+  return rows.map((row) => ({
+    id: row.id,
+    studentProfileId: row.studentProfileId,
+    studentName: {
+      firstName: row.studentProfile.firstName ?? row.studentProfile.user.firstName,
+      lastName: row.studentProfile.lastName ?? row.studentProfile.user.lastName,
+    },
+    fromStatus: row.fromStatus,
+    toStatus: row.toStatus,
+    changedAt: row.changedAt,
+    changedBy: row.changedBy,
+    changedByName: names.get(row.changedBy) ?? null,
+    reason: row.reason,
+    voidedPaymentId: row.voidedPaymentId,
+    refundedPaymentId: row.refundedPaymentId,
+  }));
+}
+
+// ── The change log (T5): one timeline per changed student ─────────────────
+
+/** One line of a student's "Changes during session" timeline. */
+export type ChangeLogEvent =
+  | { kind: "checkIn"; at: Date; status: AttendanceStatus }
+  | { kind: "payment"; at: Date; paymentId: string; amount: number; byName: PersonName | null }
+  | {
+      kind: "reversal";
+      at: Date;
+      reversal: "void" | "refund";
+      paymentId: string;
+      amount: number;
+      reason: string | null;
+      byName: PersonName | null;
+    }
+  | {
+      kind: "change";
+      at: Date;
+      changeId: string;
+      fromStatus: AttendanceStatus;
+      toStatus: AttendanceStatus;
+      /** Null when the reversal line just above already carries it. */
+      reason: string | null;
+      byName: PersonName | null;
+    };
+
+export type ChangeLogEntry = {
+  studentProfileId: string;
+  studentName: PersonName;
+  events: ChangeLogEvent[];
+};
+
+export type ChangeLogInput = {
+  checkedInAt: Date;
+  changes: {
+    id: string;
+    changedAt: Date;
+    fromStatus: AttendanceStatus;
+    toStatus: AttendanceStatus;
+    reason: string | null;
+    byName: PersonName | null;
+    cause: { reversal: "void" | "refund"; paymentId: string } | null;
+  }[];
+  payments: { id: string; recordedAt: Date; amount: number; byName: PersonName | null }[];
+};
+
+/**
+ * One student's timeline, in the order things happened: checked in → paid →
+ * payment voided/refunded (amount, reason) → reset to Not arrived → checked in
+ * again → paid again. Pure, so `check:session-lifecycle` runs it directly.
+ *
+ * Changes are stamped by the app's clock and payments by the database's, so
+ * the order is **causal**, not a plain sort by time: changes keep their own
+ * order; a payment that caused a change sits before that change; a payment
+ * recorded after one that was reversed sits after that reversal; and no
+ * payment ever sits where the student was not checked in — `recordPayment`
+ * refuses an ABSENT row, so every payment belongs to a Present/Late stretch.
+ */
+export function orderChangeLog(input: ChangeLogInput): ChangeLogEvent[] {
+  const changes = [...input.changes].sort((a, b) => a.changedAt.getTime() - b.changedAt.getTime());
+  const payments = [...input.payments].sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime());
+  // Stretch k = after the k-th change (0 = from the first check-in).
+  const stretchStatus = (k: number): AttendanceStatus =>
+    k === 0 ? (changes[0]?.fromStatus ?? "PRESENT") : changes[k - 1].toStatus;
+  const checkedIn = (k: number) => stretchStatus(k) !== "ABSENT";
+  const causeIndex = new Map(
+    changes.flatMap((change, index) => (change.cause ? [[change.cause.paymentId, index] as const] : [])),
+  );
+
+  const byStretch = new Map<number, typeof payments>();
+  // A payment recorded after a reversed one comes after that reversal.
+  let earliest = 0;
+  for (const payment of payments) {
+    const caused = causeIndex.get(payment.id);
+    let k: number;
+    if (caused !== undefined) {
+      // Recorded before the change it caused — in the last checked-in stretch before it.
+      k = caused;
+      while (k > 0 && !checkedIn(k)) k--;
+      earliest = Math.max(earliest, caused + 1);
+    } else {
+      k = Math.max(
+        earliest,
+        changes.filter((change) => change.changedAt.getTime() <= payment.recordedAt.getTime()).length,
+      );
+      let next = k;
+      while (next <= changes.length && !checkedIn(next)) next++;
+      k = next <= changes.length ? next : k;
+    }
+    byStretch.set(k, [...(byStretch.get(k) ?? []), payment]);
+  }
+
+  const amountOf = new Map(payments.map((payment) => [payment.id, payment.amount]));
+  const events: ChangeLogEvent[] = [{ kind: "checkIn", at: input.checkedInAt, status: stretchStatus(0) }];
+  for (let k = 0; k <= changes.length; k++) {
+    if (k > 0) {
+      const change = changes[k - 1];
+      if (change.cause) {
+        events.push({
+          kind: "reversal",
+          at: change.changedAt,
+          reversal: change.cause.reversal,
+          paymentId: change.cause.paymentId,
+          amount: amountOf.get(change.cause.paymentId) ?? 0,
+          reason: change.reason,
+          byName: change.byName,
+        });
+      }
+      events.push({
+        kind: "change",
+        at: change.changedAt,
+        changeId: change.id,
+        fromStatus: change.fromStatus,
+        toStatus: change.toStatus,
+        reason: change.cause ? null : change.reason,
+        byName: change.byName,
+      });
+    }
+    for (const payment of byStretch.get(k) ?? []) {
+      events.push({
+        kind: "payment",
+        at: payment.recordedAt,
+        paymentId: payment.id,
+        amount: payment.amount,
+        byName: payment.byName,
+      });
+    }
+  }
+  return events;
+}
+
+/**
+ * The receipt's "Changes during session" (R2, T5): for every student with at
+ * least one live status change, their timeline (`orderChangeLog`) — the first
+ * check-in (the roster row's `createdAt`, never rewritten), every payment on
+ * this session, each void/refund that reset them with its amount and reason
+ * (`voidedPaymentId`/`refundedPaymentId` on the change row), each change.
+ */
+export async function sessionChangeLog(
+  db: Db,
+  centerId: string,
+  sessionId: string,
+): Promise<ChangeLogEntry[]> {
+  const changes = await listSessionAttendanceChanges(db, centerId, sessionId);
+  if (changes.length === 0) return [];
+  const studentIds = [...new Set(changes.map((change) => change.studentProfileId))];
+  const [attendees, payments] = await Promise.all([
+    db.sessionAttendee.findMany({
+      where: { centerId, sessionId, studentProfileId: { in: studentIds } },
+      select: { studentProfileId: true, createdAt: true },
     }),
-    db.membership.findMany({
-      where: { centerId, userId: { in: actorIds } },
-      select: { userId: true, firstName: true, lastName: true },
+    db.payment.findMany({
+      where: { centerId, sessionId, studentProfileId: { in: studentIds } },
+      select: { id: true, studentProfileId: true, amount: true, recordedAt: true, recordedBy: true },
     }),
   ]);
-  const userById = new Map(users.map((user) => [user.id, user]));
-  const membershipByUserId = new Map(memberships.map((m) => [m.userId, m]));
+  const names = await staffNames(db, centerId, [...new Set(payments.map((payment) => payment.recordedBy))]);
+  const checkedInAt = new Map(attendees.map((row) => [row.studentProfileId, row.createdAt]));
 
-  return rows.map((row) => {
-    const user = userById.get(row.changedBy);
-    const membership = membershipByUserId.get(row.changedBy);
+  return studentIds.map((studentProfileId) => {
+    const own = changes.filter((change) => change.studentProfileId === studentProfileId);
     return {
-      id: row.id,
-      studentProfileId: row.studentProfileId,
-      studentName: {
-        firstName: row.studentProfile.firstName ?? row.studentProfile.user.firstName,
-        lastName: row.studentProfile.lastName ?? row.studentProfile.user.lastName,
-      },
-      fromStatus: row.fromStatus,
-      toStatus: row.toStatus,
-      changedAt: row.changedAt,
-      changedBy: row.changedBy,
-      changedByName: user
-        ? {
-            firstName: membership?.firstName ?? user.firstName,
-            lastName: membership?.lastName ?? user.lastName,
-          }
-        : null,
-      reason: row.reason,
-      voidedPaymentId: row.voidedPaymentId,
+      studentProfileId,
+      studentName: own[0].studentName,
+      events: orderChangeLog({
+        checkedInAt: checkedInAt.get(studentProfileId) ?? own[0].changedAt,
+        changes: own.map((change) => ({
+          id: change.id,
+          changedAt: change.changedAt,
+          fromStatus: change.fromStatus,
+          toStatus: change.toStatus,
+          reason: change.reason,
+          byName: change.changedByName,
+          cause: change.refundedPaymentId
+            ? { reversal: "refund" as const, paymentId: change.refundedPaymentId }
+            : change.voidedPaymentId
+              ? { reversal: "void" as const, paymentId: change.voidedPaymentId }
+              : null,
+        })),
+        payments: payments
+          .filter((payment) => payment.studentProfileId === studentProfileId)
+          .map((payment) => ({
+            id: payment.id,
+            recordedAt: payment.recordedAt,
+            amount: payment.amount,
+            byName: names.get(payment.recordedBy) ?? null,
+          })),
+      }),
     };
   });
 }

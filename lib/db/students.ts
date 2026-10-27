@@ -60,6 +60,8 @@ export async function claimStudentCode(
 export function studentListSelect(centerId: string) {
   return {
     id: true,
+    // T7: the session page matches a profile to its booking (a booking names the global User).
+    userId: true,
     studentCode: true,
     active: true,
     firstName: true,
@@ -68,6 +70,8 @@ export function studentListSelect(centerId: string) {
     phone: true,
     parentPhone: true,
     gradeId: true,
+    // A Storage path (not a URL): the session page signs it for the check-in confirm panel (T2).
+    photoUrl: true,
     user: { select: { firstName: true, lastName: true } },
     grade: {
       select: {

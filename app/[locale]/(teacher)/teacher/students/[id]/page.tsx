@@ -22,11 +22,14 @@ import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { LinkButton } from "@/components/shared/link-button";
+import { attendanceDisplay } from "@/lib/attendance-rules";
 
 const ATTENDANCE_BADGE = {
   PRESENT: "success",
   LATE: "warning",
   ABSENT: "danger",
+  // T5 — an ABSENT row on today's live session is "Not arrived".
+  NOT_ARRIVED: "neutral",
 } as const;
 
 /**
@@ -109,8 +112,8 @@ export default async function TeacherStudentDetailPage({
                         : ""}
                     </p>
                   </div>
-                  <Badge variant={ATTENDANCE_BADGE[attendee.attendanceStatus]}>
-                    {tAttendance(attendee.attendanceStatus)}
+                  <Badge variant={ATTENDANCE_BADGE[attendanceDisplay(attendee, attendee.session.closedAt !== null)]}>
+                    {tAttendance(attendanceDisplay(attendee, attendee.session.closedAt !== null))}
                   </Badge>
                 </li>
               ))}

@@ -3,6 +3,7 @@
 import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import {
   changeAttendanceStatus,
@@ -39,17 +40,18 @@ import {
 } from "@/lib/db/sessions";
 import { describeConflicts } from "@/lib/db/slot-conflicts";
 import { claimStudentCode, studentSearchWhere } from "@/lib/db/students";
+import { signedUrlFor } from "@/lib/db/storage";
 import { scopedData } from "@/lib/db/tenant-scope";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { AVATARS_BUCKET } from "@/lib/storage-paths";
+import { storageConfigured } from "@/lib/storage";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
-  addExistingAttendeeSchema,
   addNewAttendeeSchema,
   cancelSessionSchema,
-  checkInRosterSchema,
   deleteSessionSchema,
   endSessionSchema,
   newClassSessionSchema,
@@ -70,9 +72,12 @@ import { boundSearchArgs, parseActionArgs } from "@/lib/validation/action-args";
  * Every action follows docs/02 §7: getTenantContext() → permission check →
  * zod → scoped write → audit if sensitive → revalidate.
  *
- * Attendance: a first-time mark on a roster row is a check-in,
- * `attendance.record` (RECEPTIONIST's baseline), whose PRESENT/LATE status
- * the data layer decides from the clock (R2 — no status picker anywhere);
+ * Attendance: a first-time mark is a check-in, `attendance.record`
+ * (RECEPTIONIST's baseline), whose PRESENT/LATE status the data layer decides
+ * from the clock (R2 — no status picker anywhere). T2: an existing student's
+ * check-in is reception's `checkInAction`, reached from the session page's
+ * confirm panel — this file keeps only the new-student registration, which
+ * checks its person in as a drop-in itself;
  * changing an already-marked row is `attendance.correct` (Owner/Manager, or a
  * granted receptionist), allowed only while the session is live, and is
  * always audited (spec §5 "Attendance"). Switching a paid student to ABSENT
@@ -93,8 +98,9 @@ const NOT_FOUND: SessionActionState = { error: "notFound" };
 
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
-async function sessionScope(): Promise<Scope> {
+async function sessionScope(): Promise<Scope | PickBranch> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   return { ctx, db: scoped(ctx) };
 }
 
@@ -102,16 +108,18 @@ async function sessionScope(): Promise<Scope> {
 
 /**
  * Candidates for "add student to this session's roster" — a student not
- * already enrolled or already on the roster. Bound to `sessionId` via
- * `.bind(null, session.id)`. Selecting a result re-navigates to this same
- * session page with `?q=<exact student code>`, reusing the existing
- * candidate-rendering (`AddAttendeePanel`) unchanged.
+ * already enrolled or already on the roster. Selecting a result (T2) opens
+ * reception's confirm panel on the session page — `photoUrl` is the signed
+ * photo that panel shows (the anti-impersonation control, spec §5.1); `href`
+ * is only the no-JavaScript fallback (`?q=<exact student code>`).
  */
 export async function searchAddAttendeeCandidatesAction(
   sessionId: string,
   query: string,
 ): Promise<TypeAheadResult[]> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return [];
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "attendance.record")) return [];
   const args = parseActionArgs(boundSearchArgs, [sessionId, query]);
   if (!args) return [];
@@ -143,12 +151,18 @@ export async function searchAddAttendeeCandidatesAction(
     take: 8,
   });
 
-  return rows.map((row) => ({
-    id: row.id,
-    primary: fullName(localName(row, row.user)),
-    secondary: row.studentCode,
-    href: `${ROUTES.centerSession(sessionId)}?q=${encodeURIComponent(row.studentCode)}`,
-  }));
+  return Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      primary: fullName(localName(row, row.user)),
+      secondary: row.studentCode,
+      href: `${ROUTES.centerSession(sessionId)}?q=${encodeURIComponent(row.studentCode)}`,
+      photoUrl:
+        row.photoUrl && storageConfigured()
+          ? await signedUrlFor(ctx.center.id, AVATARS_BUCKET, row.photoUrl)
+          : null,
+    })),
+  );
 }
 
 function revalidateSessionDetail(locale: string, sessionId: string): void {
@@ -161,21 +175,6 @@ function revalidateSessionList(locale: string): void {
 
 function revalidateReceptionDesk(locale: string): void {
   revalidatePath(`/${locale}${ROUTES.centerReception}`);
-}
-
-/**
- * Active-enrollment lookup shared by every "add/mark" path below. A one-time
- * session (R5, no class) has no enrolment to find: everyone is a drop-in.
- */
-async function resolveEnrollment(
-  db: ScopedDb,
-  classGroupId: string | null,
-  studentProfileId: string,
-): Promise<{ enrollmentId: string | null; isDropIn: boolean }> {
-  if (!classGroupId) return { enrollmentId: null, isDropIn: true };
-  const enrollment = await db.enrollments.findExisting(classGroupId, studentProfileId);
-  const active = enrollment?.status === "ACTIVE";
-  return { enrollmentId: active ? enrollment!.id : null, isDropIn: !active };
 }
 
 /**
@@ -223,55 +222,15 @@ async function auditSettlementAdjustments(
   }
 }
 
-// ── Check in an enrolled roster row (first mark) ───────────────────────────
-
-/**
- * The roster's "Check in" button on an unmarked enrolled student — the same
- * `createAttendance` every check-in surface calls, which decides PRESENT vs
- * LATE itself (R2). There is no client-chosen status.
- */
-export async function checkInRosterAction(
-  _state: SessionActionState,
-  formData: FormData,
-): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
-  if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
-
-  const parsed = checkInRosterSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
-  const { locale, sessionId, studentProfileId } = parsed.data;
-
-  const session = await db.sessions.findById(sessionId);
-  if (!session) return NOT_FOUND;
-  const student = await db.students.findById(studentProfileId);
-  if (!student) return NOT_FOUND;
-
-  if (await findAttendee(prisma, ctx.center.id, sessionId, studentProfileId)) {
-    return { error: "alreadyOnRoster" };
-  }
-
-  const { enrollmentId, isDropIn } = await resolveEnrollment(
-    db,
-    session.classGroupId,
-    studentProfileId,
-  );
-  const result = await writeAttendance(() =>
-    createAttendance(prisma, {
-      centerId: ctx.center.id,
-      sessionId,
-      studentProfileId,
-      enrollmentId,
-      isDropIn,
-      recordedBy: ctx.user.id,
-    }),
-  );
-  if (!result.ok) return result.error;
-
-  revalidateSessionDetail(locale, sessionId);
-  revalidateSessionList(locale);
-  revalidateReceptionDesk(locale);
-  return { status: "saved" };
-}
+// ── First-time check-in ─────────────────────────────────────────────────────
+//
+// There is no check-in action in this file (T2). Every first-time mark — the
+// roster's Check in button, an existing student found by search — goes through
+// reception's `checkInAction` (`app/[locale]/(center)/reception/actions.ts`)
+// after the session page's confirm panel: one function writes the attendance
+// and the payment, and nothing is written before its confirm. The only first-
+// time mark made here is `addNewAttendeeAction` below, a registration form that
+// is its own confirm.
 
 // ── Correct attendance on an already-marked roster row (live only) ─────────
 
@@ -291,7 +250,9 @@ export async function setAttendanceAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "attendance.correct")) return FORBIDDEN;
 
   const parsed = setAttendanceSchema.safeParse(Object.fromEntries(formData));
@@ -337,53 +298,6 @@ export async function setAttendanceAction(
 
 // ── Add a student to the session's roster (spec §4.1 item 7) ───────────────
 
-/** An existing student, found by search — enrolled-but-unmarked or a drop-in. */
-export async function addExistingAttendeeAction(
-  _state: SessionActionState,
-  formData: FormData,
-): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
-  if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
-
-  const parsed = addExistingAttendeeSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
-  const { locale, sessionId, studentProfileId } = parsed.data;
-
-  const session = await db.sessions.findById(sessionId);
-  if (!session) return NOT_FOUND;
-  const student = await db.students.findById(studentProfileId);
-  if (!student) return NOT_FOUND;
-
-  if (await db.attendees.findExisting(sessionId, studentProfileId)) {
-    return { error: "alreadyOnRoster" };
-  }
-  if (await isStudentBlockedFromSession(prisma, ctx.center.id, session, student.userId)) {
-    return { error: "studentBlocked" };
-  }
-
-  const { enrollmentId, isDropIn } = await resolveEnrollment(
-    db,
-    session.classGroupId,
-    studentProfileId,
-  );
-  const result = await writeAttendance(() =>
-    createAttendance(prisma, {
-      centerId: ctx.center.id,
-      sessionId,
-      studentProfileId,
-      enrollmentId,
-      isDropIn,
-      recordedBy: ctx.user.id,
-    }),
-  );
-  if (!result.ok) return result.error;
-
-  revalidateSessionDetail(locale, sessionId);
-  revalidateSessionList(locale);
-  revalidateReceptionDesk(locale);
-  return { status: "created" };
-}
-
 /**
  * A brand-new student, added straight to this session as a drop-in — reusing
  * M3's duplicate-match flow exactly (`lib/db/identity.ts`): a contact that
@@ -396,7 +310,9 @@ export async function addNewAttendeeAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "attendance.record") || !ctxCan(ctx, "student.manage")) {
     return FORBIDDEN;
   }
@@ -526,7 +442,9 @@ export async function recordPaymentAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "payment.record")) return FORBIDDEN;
 
   const parsed = recordPaymentSchema.safeParse(Object.fromEntries(formData));
@@ -553,7 +471,9 @@ export async function voidPaymentAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "payment.void")) return FORBIDDEN;
 
   const parsed = voidPaymentSchema.safeParse(Object.fromEntries(formData));
@@ -600,7 +520,9 @@ export async function refundPaymentAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "payment.refund")) return FORBIDDEN;
 
   const parsed = refundPaymentSchema.safeParse(Object.fromEntries(formData));
@@ -654,7 +576,9 @@ export async function cancelSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.cancel")) return FORBIDDEN;
 
   const parsed = cancelSessionSchema.safeParse(Object.fromEntries(formData));
@@ -692,7 +616,9 @@ export async function endSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.close")) return FORBIDDEN;
 
   const parsed = endSessionSchema.safeParse(Object.fromEntries(formData));
@@ -764,7 +690,9 @@ export async function rescheduleSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = rescheduleSessionSchema.safeParse(Object.fromEntries(formData));
@@ -837,7 +765,9 @@ export async function updateSessionRoomsAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = sessionRoomsSchema.safeParse(Object.fromEntries(formData));
@@ -904,7 +834,9 @@ export async function updateSessionShareOverrideAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx, db } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx, db } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = sessionShareOverrideSchema.safeParse(Object.fromEntries(formData));
@@ -967,7 +899,9 @@ export async function createSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const raw = Object.fromEntries(formData);
@@ -1058,7 +992,9 @@ export async function deleteSessionAction(
   _state: SessionActionState,
   formData: FormData,
 ): Promise<SessionActionState> {
-  const { ctx } = await sessionScope();
+  const scope = await sessionScope();
+  if (isPickBranch(scope)) return scope;
+  const { ctx } = scope;
   if (!ctxCan(ctx, "session.manage")) return FORBIDDEN;
 
   const parsed = deleteSessionSchema.safeParse(Object.fromEntries(formData));

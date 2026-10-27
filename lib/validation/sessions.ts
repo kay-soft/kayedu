@@ -96,14 +96,6 @@ export const sessionListFilterSchema = dateFilterSchema.extend({
 
 // ── Attendance (check in / correct) ─────────────────────────────────────────
 
-/** First mark on an enrolled roster row — a check-in, status decided server-side (R2). */
-export const checkInRosterSchema = z.object({
-  ...base,
-  sessionId: recordId,
-  studentProfileId: recordId,
-  status: noClientStatus,
-});
-
 /**
  * A correction of an already-marked row, while the session is live (R2).
  * `confirmVoid` must be "true" when the change voids the student's payment
@@ -137,14 +129,6 @@ export const setAttendanceSchema = z
   });
 
 // ── Add student to a session's roster ───────────────────────────────────────
-
-/** An existing student found by search — enrolled or drop-in, decided server-side. */
-export const addExistingAttendeeSchema = z.object({
-  ...base,
-  sessionId: recordId,
-  studentProfileId: recordId,
-  status: noClientStatus,
-});
 
 /**
  * A brand-new student, added directly as a drop-in (spec §4.1 item 7). Kept

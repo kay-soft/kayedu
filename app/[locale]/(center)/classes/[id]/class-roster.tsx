@@ -90,7 +90,13 @@ export function ClassRoster({
 
   return (
     <div className="flex flex-col gap-6">
-      {error ? <FormMessage>{tErrors(error)}</FormMessage> : null}
+      {error ? (
+        <FormMessage>
+          {error === "sessionFull" && enrollState.errorDate
+            ? tErrors("sessionFull", { date: enrollState.errorDate })
+            : tErrors(error)}
+        </FormMessage>
+      ) : null}
 
       <div>
         <p className="mb-2 text-sm font-medium text-text-primary">

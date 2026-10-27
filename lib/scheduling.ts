@@ -649,6 +649,23 @@ export function isSessionDayOver(sessionDate: Date, now: Date, timeZone: string)
 }
 
 /**
+ * True once a session's start time has come in `timeZone` (the session's own
+ * frozen zone, D-14) — F6's "booking closes at start time": from this instant a
+ * session takes no booking, a pending one reads as expired, and a student can
+ * no longer cancel theirs.
+ */
+export function hasSessionStarted(
+  session: { date: Date; startTime: string },
+  now: Date,
+  timeZone: string,
+): boolean {
+  const clock = zonedClock(now, timeZone);
+  const key = dateKey(session.date);
+  if (key !== clock.dayKey) return key < clock.dayKey;
+  return parseTimeToMinutes(session.startTime) <= clock.minutes;
+}
+
+/**
  * The instant a session's day ends at the centre — local midnight after it.
  * This is what an automatic close stamps as `closedAt`: "closed at the end of
  * the day", whenever the next touch actually happened.

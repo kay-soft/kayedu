@@ -1,8 +1,11 @@
 import { getTranslations } from "next-intl/server";
 import { Ban, CircleAlert, Gift, Undo2 } from "lucide-react";
 
+import type { AttendanceStatus } from "@prisma/client";
+
 import type {
   ReceiptChange,
+  ReceiptChangeEvent,
   ReceiptClosure,
   ReceiptRefund,
   ReceiptUnpaid,
@@ -99,7 +102,12 @@ export async function SessionReceipt({
       <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border-subtle pt-4">
         <Count label={t("present")} value={totals.presentCount} tone="success" locale={locale} />
         <Count label={t("late")} value={totals.lateCount} tone="warning" locale={locale} />
-        <Count label={t("absent")} value={totals.absentCount} tone="danger" locale={locale} />
+        {/* T5 — on a live session an ABSENT row is "Not arrived", never an absence. */}
+        {totals.sessionClosed ? (
+          <Count label={t("absent")} value={totals.absentCount} tone="danger" locale={locale} />
+        ) : (
+          <Count label={t("notArrived")} value={totals.notArrivedCount} tone="neutral" locale={locale} />
+        )}
       </div>
 
       {closure ? (
@@ -197,37 +205,27 @@ export async function SessionReceipt({
         <section className="mt-4 border-t border-border-subtle pt-4">
           <h3 className="text-sm font-semibold text-text-primary">{t("changesTitle")}</h3>
           <ul className="mt-2 flex flex-col gap-2">
-            {changes.map((change) => (
+            {changes.map((entry) => (
               <li
-                key={change.id}
-                className="flex flex-col gap-1 rounded-lg bg-surface-subtle px-3 py-2 text-sm"
+                key={entry.studentProfileId}
+                className="flex flex-col gap-2 rounded-lg bg-surface-subtle px-3 py-2 text-sm"
               >
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <span className="min-w-0 font-medium text-text-primary">{change.studentName}</span>
-                  <span className="text-text-secondary">
-                    {t("changeStatus", {
-                      from: tAttendance(change.fromStatus),
-                      to: tAttendance(change.toStatus),
-                    })}
-                  </span>
-                </div>
-                <p className="text-xs text-text-muted">
-                  {t("changeMeta", {
-                    time: formatDateTime(change.changedAt, locale, timeZone),
-                    name: change.changedByName ?? t("unknownActor"),
-                  })}
-                </p>
-                {change.reason ? (
-                  <p className="text-xs text-text-secondary">
-                    {t("changeReason", { reason: change.reason })}
-                  </p>
-                ) : null}
-                {change.paymentVoided ? (
-                  <span className="inline-flex w-fit items-center gap-1 rounded-full bg-danger-bg px-2 py-0.5 text-xs font-medium text-danger-fg">
-                    <Ban className="size-3" aria-hidden />
-                    {t("paymentVoided")}
-                  </span>
-                ) : null}
+                <span className="min-w-0 font-medium text-text-primary">{entry.studentName}</span>
+                {/* T5 — the student's timeline, in order; a logical border, so it flips in RTL. */}
+                <ol className="flex flex-col gap-2 border-s border-border ps-3">
+                  {entry.events.map((event, index) => (
+                    <li key={index} className="flex flex-col gap-0.5">
+                      <ChangeLogLine
+                        event={event}
+                        afterReversal={entry.events[index - 1]?.kind === "reversal"}
+                        t={t}
+                        tAttendance={tAttendance}
+                        locale={locale}
+                        timeZone={timeZone}
+                      />
+                    </li>
+                  ))}
+                </ol>
               </li>
             ))}
           </ul>
@@ -264,7 +262,88 @@ const TONE_TEXT = {
   success: "text-success-fg",
   warning: "text-warning-fg",
   danger: "text-danger-fg",
+  neutral: "text-text-primary",
 } as const;
+
+type Translate = Awaited<ReturnType<typeof getTranslations>>;
+
+/** Every change happens while the session is live, where ABSENT reads "Not arrived" (T5). */
+function liveStatus(status: AttendanceStatus): AttendanceStatus | "NOT_ARRIVED" {
+  return status === "ABSENT" ? "NOT_ARRIVED" : status;
+}
+
+/**
+ * One line of a student's "Changes during session" timeline (T5): checked in
+ * → paid → payment voided/refunded (amount, reason) → reset to not checked in
+ * → checked in again → paid.
+ */
+function ChangeLogLine({
+  event,
+  afterReversal,
+  t,
+  tAttendance,
+  locale,
+  timeZone,
+}: {
+  event: ReceiptChangeEvent;
+  /** A reset whose cause — the void/refund line — is the line just above it. */
+  afterReversal: boolean;
+  t: Translate;
+  tAttendance: Translate;
+  locale: string;
+  timeZone: string;
+}) {
+  const time = formatDateTime(event.at, locale, timeZone);
+  const by = event.kind === "checkIn" ? null : (event.byName ?? t("unknownActor"));
+
+  let label: string;
+  let reason: string | null = null;
+  let tone = "text-text-primary";
+  switch (event.kind) {
+    case "checkIn":
+      label = t("logCheckedIn", { status: tAttendance(event.status) });
+      break;
+    case "payment":
+      label = t("logPaid", { amount: formatMoney(event.amount, locale) });
+      break;
+    case "reversal":
+      label = t(event.reversal === "void" ? "logVoided" : "logRefunded", {
+        amount: formatMoney(event.amount, locale),
+      });
+      reason = event.reason;
+      if (event.reversal === "void") tone = "text-danger-fg";
+      break;
+    case "change":
+      label =
+        event.toStatus === "ABSENT" && afterReversal
+          ? t("logReset")
+          : event.fromStatus === "ABSENT"
+            ? t("logCheckedInAgain", { status: tAttendance(event.toStatus) })
+            : t("changeStatus", {
+                from: tAttendance(liveStatus(event.fromStatus)),
+                to: tAttendance(liveStatus(event.toStatus)),
+              });
+      reason = event.reason;
+      break;
+  }
+
+  return (
+    <>
+      <span className={`inline-flex items-center gap-1 font-medium ${tone}`}>
+        {event.kind === "reversal" ? (
+          event.reversal === "void" ? (
+            <Ban className="size-3 shrink-0" aria-hidden />
+          ) : (
+            <Undo2 className="size-3 shrink-0" aria-hidden />
+          )
+        ) : null}
+        {label}
+      </span>
+      <span className="text-xs text-text-muted">{by ? t("changeMeta", { time, name: by }) : time}</span>
+      {reason ? <span className="text-xs text-text-secondary">{t("changeReason", { reason })}</span> : null}
+    </>
+  );
+}
 
 function Count({
   label,

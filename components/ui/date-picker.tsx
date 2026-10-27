@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/popover";
 import { formatDate } from "@/lib/format";
 import { deviceTodayKey } from "@/lib/scheduling";
+import { useUrlFilterSync } from "@/lib/ui/url-filter-sync";
 import { cn } from "@/lib/utils";
 
 /**
@@ -66,6 +67,14 @@ export function DatePicker({
   const t = useTranslations("Shared.calendar");
   const locale = useLocale();
   const [value, setValue] = React.useState(defaultValue);
+  // Inside a URL filter form the picker re-seeds from the server's value
+  // whenever the URL moves (Back, a reset) — see `lib/ui/url-filter-sync.ts`.
+  const urlSync = useUrlFilterSync();
+  const [seenUrlSync, setSeenUrlSync] = React.useState(urlSync);
+  if (urlSync !== seenUrlSync) {
+    setSeenUrlSync(urlSync);
+    setValue(defaultValue);
+  }
   const [fallbackToday] = React.useState(deviceTodayKey);
   const [open, setOpen] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement>(null);

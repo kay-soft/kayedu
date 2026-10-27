@@ -2,6 +2,7 @@
 
 import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
+import { UrlFilterForm } from "@/components/shared/url-filters";
 
 /**
  * Date filter for the parent schedule mirror (spec §4.5 item 2) — the same
@@ -22,7 +23,7 @@ export function ParentDateFilter({
   dateLabel: string;
 }) {
   return (
-    <form className="flex flex-col gap-1.5 sm:w-64">
+    <UrlFilterForm className="flex flex-col gap-1.5 sm:w-64">
       <input type="hidden" name="child" value={childId} />
       <Label htmlFor="parent-schedule-date">{dateLabel}</Label>
       <DatePicker
@@ -33,6 +34,6 @@ export function ParentDateFilter({
         clearable
         submitOnChange
       />
-    </form>
+    </UrlFilterForm>
   );
 }

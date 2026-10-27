@@ -5,12 +5,13 @@ import { useTranslations } from "next-intl";
 import { DatePicker } from "@/components/ui/date-picker";
 import { FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
+import { UrlFilterForm } from "@/components/shared/url-filters";
 
 export type SelectOption = { value: string; label: string };
 
 /**
  * Filters for the teacher's own session list (spec §4.2 item 2: "filter
- * date/status/grade"). A plain GET form — state lives in the URL, exactly
+ * date/status/grade"). A plain GET form (`UrlFilterForm`: a soft navigation with JavaScript, docs/02 §14) — state lives in the URL, exactly
  * like the center's `SessionFilters`.
  */
 export function TeacherSessionFilters({
@@ -37,7 +38,7 @@ export function TeacherSessionFilters({
   const tStatus = useTranslations("Sessions.status");
 
   return (
-    <form className="flex flex-col gap-3">
+    <UrlFilterForm className="flex flex-col gap-3">
       {/* Keeps the active student search when a filter control re-submits. */}
       {q ? <input type="hidden" name="q" value={q} /> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -96,6 +97,6 @@ export function TeacherSessionFilters({
           </Select>
         </FilterField>
       </div>
-    </form>
+    </UrlFilterForm>
   );
 }

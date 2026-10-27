@@ -30,6 +30,7 @@ import {
   effectiveCapacity,
   effectiveRoomIds,
   isValidCombination,
+  linkedRoomIds,
   normalizeRoomPair,
 } from "../lib/rooms.ts";
 import { enrollmentCap, isAtCapacity } from "../lib/capacity.ts";
@@ -40,8 +41,10 @@ import {
   loadRoomLinks,
   resolveRoomSet,
   roomCombinationUsage,
+  saveRoomWithLinks,
   setRoomLinks,
   unlinkRooms,
+  USAGE_LIST_LIMIT,
   writeClassExtraRooms,
   writeSessionExtraRooms,
 } from "../lib/db/room-sets.ts";
@@ -844,6 +847,248 @@ async function main() {
   check(
     "Centre B cannot unlink Centre A's pair",
     crossUnlink.ok && !crossUnlink.removed && (await prisma.roomLink.count({ where: { id: linkRow.id } })) === 1,
+  );
+
+  // ── 8. Linking from the Add / Edit room dialog (T3) ──────────────────────
+  // One save = the room's own fields + its "Can be combined with" set, as a
+  // diff, in one transaction; a link is one row seen from both rooms.
+  const dlg1 = await makeRoom(A, "Dialog 1", 10);
+  const dlg2 = await makeRoom(A, "Dialog 2", 10);
+  const dlg3 = await makeRoom(A, "Dialog 3", 10);
+  const linksOf = async (roomId: string) => [...linkedRoomIds(roomId, await loadRoomLinks(prisma, A))].sort();
+  const dlgRows = () =>
+    prisma.roomLink.count({
+      where: { centerId: A, OR: [{ roomAId: { in: [dlg1.id, dlg2.id, dlg3.id] } }, { roomBId: { in: [dlg1.id, dlg2.id, dlg3.id] } }] },
+    });
+
+  const linkFromOne = await saveRoomWithLinks(prisma, A, dlg1.id, null, [dlg2.id], clock);
+  check(
+    "Dialog: linking Room 1 -> Room 2 from Room 1's save adds one pair",
+    linkFromOne.ok && linkFromOne.added.length === 1 && linkFromOne.removed.length === 0 && (await dlgRows()) === 1,
+    JSON.stringify(linkFromOne),
+  );
+  const pairRow = await prisma.roomLink.findFirstOrThrow({
+    where: { centerId: A, OR: [{ roomAId: dlg1.id }, { roomBId: dlg1.id }] },
+  });
+  check(
+    "…stored once, normalized (roomAId < roomBId), with no second write for the other side",
+    pairRow.roomAId < pairRow.roomBId && (await dlgRows()) === 1,
+  );
+  check(
+    "…and Room 2's dialog lists Room 1 (symmetric visibility)",
+    JSON.stringify(await linksOf(dlg2.id)) === JSON.stringify([dlg1.id]) &&
+      JSON.stringify(await linksOf(dlg1.id)) === JSON.stringify([dlg2.id]),
+  );
+
+  const unchangedSave = await saveRoomWithLinks(prisma, A, dlg1.id, null, [dlg2.id], clock);
+  check(
+    "Saving an unchanged link set is a no-op diff",
+    unchangedSave.ok && unchangedSave.added.length === 0 && unchangedSave.removed.length === 0 && (await dlgRows()) === 1,
+    JSON.stringify(unchangedSave),
+  );
+  const swapped = await saveRoomWithLinks(prisma, A, dlg1.id, null, [dlg3.id], clock);
+  check(
+    "Diff: replacing Room 2 with Room 3 adds the new pair and drops the old one in one save",
+    swapped.ok &&
+      swapped.added.join() === dlg3.id &&
+      swapped.removed.join() === dlg2.id &&
+      JSON.stringify(await linksOf(dlg1.id)) === JSON.stringify([dlg3.id]) &&
+      (await linksOf(dlg2.id)).length === 0,
+    JSON.stringify(swapped),
+  );
+  const unlinkFromOtherSide = await saveRoomWithLinks(prisma, A, dlg3.id, null, [], clock);
+  check(
+    "Unlinking works from either side: Room 3's save removes the pair Room 1 created",
+    unlinkFromOtherSide.ok &&
+      unlinkFromOtherSide.removed.join() === dlg1.id &&
+      (await linksOf(dlg1.id)).length === 0 &&
+      (await dlgRows()) === 0,
+    JSON.stringify(unlinkFromOtherSide),
+  );
+
+  const created = await saveRoomWithLinks(prisma, A, null, { name: "Dialog new", capacity: 7 }, [dlg2.id], clock);
+  const createdRoom = created.ok ? await prisma.room.findFirst({ where: { id: created.roomId, centerId: A } }) : null;
+  check(
+    "Add room: the new room, its fields and its links are created together and show on the other room",
+    created.ok &&
+      createdRoom !== null &&
+      createdRoom.name === "Dialog new" &&
+      createdRoom.capacity === 7 &&
+      JSON.stringify(await linksOf(dlg2.id)) === JSON.stringify([created.roomId]),
+    JSON.stringify(created),
+  );
+
+  // The in-use refusal: lists what uses the pair, saves nothing.
+  const linksBefore = await prisma.roomLink.count({ where: { centerId: A } });
+  const roomBefore = await prisma.room.findFirstOrThrow({ where: { id: r1.id } });
+  const refusedFromOne = await saveRoomWithLinks(prisma, A, r1.id, { name: "Renamed", capacity: 99 }, [], clock, "en");
+  const roomAfter = await prisma.room.findFirstOrThrow({ where: { id: r1.id } });
+  check(
+    "In use: unlinking Room 1 + Room 2 is refused and names the active class(es) using it",
+    !refusedFromOne.ok &&
+      refusedFromOne.error === "combinationInUse" &&
+      refusedFromOne.classes >= 1 &&
+      refusedFromOne.classNames.length >= 1 &&
+      refusedFromOne.classNames.length <= USAGE_LIST_LIMIT &&
+      refusedFromOne.classNames.every((name) => name.length > 0),
+    JSON.stringify(refusedFromOne),
+  );
+  check(
+    "…and the future session(s) using it, by name, day and time",
+    !refusedFromOne.ok &&
+      refusedFromOne.error === "combinationInUse" &&
+      refusedFromOne.sessions >= 1 &&
+      refusedFromOne.sessionList.length >= 1 &&
+      refusedFromOne.sessionList.length <= USAGE_LIST_LIMIT &&
+      refusedFromOne.sessionList.every(
+        (row) => row.name.length > 0 && row.date instanceof Date && /^\d\d:\d\d$/.test(row.startTime) && /^\d\d:\d\d$/.test(row.endTime),
+      ),
+    JSON.stringify(refusedFromOne),
+  );
+  check(
+    "…and saves nothing: not the name, not the capacity, not a link",
+    roomAfter.name === roomBefore.name &&
+      roomAfter.capacity === roomBefore.capacity &&
+      (await prisma.roomLink.count({ where: { centerId: A } })) === linksBefore,
+  );
+  const refusedFromOtherSide = await saveRoomWithLinks(prisma, A, r2.id, null, [], clock, "en");
+  check(
+    "In use: the same refusal from Room 2's side",
+    !refusedFromOtherSide.ok && refusedFromOtherSide.error === "combinationInUse" && refusedFromOtherSide.classes >= 1,
+    JSON.stringify(refusedFromOtherSide),
+  );
+  const keptLink = await saveRoomWithLinks(prisma, A, r1.id, { name: roomBefore.name, capacity: roomBefore.capacity }, [r2.id], clock);
+  check("An in-use link that is kept saves fine (only a removal is refused)", keptLink.ok && keptLink.removed.length === 0, JSON.stringify(keptLink));
+
+  // Inactive rooms: not newly linkable, but an existing link survives a save and can be removed.
+  const dlgOff = await makeRoom(A, "Dialog off", 10);
+  await prisma.room.update({ where: { id: dlgOff.id }, data: { active: false } });
+  const toInactive = await saveRoomWithLinks(prisma, A, dlg2.id, null, [created.ok ? created.roomId : "", dlgOff.id], clock);
+  check("A new link to an inactive room is refused", !toInactive.ok && toInactive.error === "roomInactive", JSON.stringify(toInactive));
+  await linkRooms(prisma, A, dlg1.id, dlgOff.id);
+  const keepInactive = await saveRoomWithLinks(prisma, A, dlg1.id, null, [dlgOff.id], clock);
+  check(
+    "An existing link to an inactive room is kept when it is re-posted",
+    keepInactive.ok && keepInactive.added.length === 0 && keepInactive.removed.length === 0 && (await linksOf(dlg1.id)).includes(dlgOff.id),
+    JSON.stringify(keepInactive),
+  );
+  const dropInactive = await saveRoomWithLinks(prisma, A, dlg1.id, null, [], clock);
+  check(
+    "…and removed when the chip is removed",
+    dropInactive.ok && dropInactive.removed.join() === dlgOff.id && (await linksOf(dlg1.id)).length === 0,
+    JSON.stringify(dropInactive),
+  );
+  const selfSave = await saveRoomWithLinks(prisma, A, dlg1.id, null, [dlg1.id], clock);
+  check("A room cannot be linked to itself", !selfSave.ok && selfSave.error === "selfLink", JSON.stringify(selfSave));
+
+  // Cross-branch: a room id of another branch never resolves.
+  const bRoom = await makeRoom(centerB.id, "B Room", 5);
+  const bRoomsBefore = await prisma.room.count({ where: { centerId: centerB.id } });
+  const aLinksBefore = await prisma.roomLink.count({ where: { centerId: A } });
+  const crossLinkCreate = await saveRoomWithLinks(prisma, centerB.id, null, { name: "B new", capacity: 3 }, [r1.id], clock);
+  check(
+    "Cross-branch: Add room in Branch B cannot link a Branch A room, and creates nothing",
+    !crossLinkCreate.ok &&
+      crossLinkCreate.error === "roomNotFound" &&
+      (await prisma.room.count({ where: { centerId: centerB.id } })) === bRoomsBefore,
+    JSON.stringify(crossLinkCreate),
+  );
+  const crossLinkEdit = await saveRoomWithLinks(prisma, centerB.id, bRoom.id, { name: "B renamed", capacity: 9 }, [r1.id], clock);
+  check(
+    "Cross-branch: Edit room in Branch B cannot link a Branch A room, and saves nothing",
+    !crossLinkEdit.ok &&
+      crossLinkEdit.error === "roomNotFound" &&
+      (await prisma.room.findFirstOrThrow({ where: { id: bRoom.id } })).name === "B Room" &&
+      (await loadRoomLinks(prisma, centerB.id)).length === 0,
+    JSON.stringify(crossLinkEdit),
+  );
+  const crossEditForeign = await saveRoomWithLinks(prisma, centerB.id, r1.id, { name: "Hijacked", capacity: 1 }, [], clock);
+  check(
+    "Cross-branch: Branch B cannot edit or unlink Branch A's room at all",
+    !crossEditForeign.ok &&
+      crossEditForeign.error === "roomNotFound" &&
+      (await prisma.room.findFirstOrThrow({ where: { id: r1.id } })).name === roomBefore.name &&
+      (await prisma.roomLink.count({ where: { centerId: A } })) === aLinksBefore,
+    JSON.stringify(crossEditForeign),
+  );
+
+  // ── 8b. The link audit rows commit with the link diff (T7, rule 7) ───────
+  // `saveRoomWithLinks` writes `room.link` / `room.unlink` on the same
+  // transaction as the diff — not the Server Action afterwards.
+  const aud1 = await makeRoom(A, "Audit 1", 10);
+  const aud2 = await makeRoom(A, "Audit 2", 10);
+  const aud3 = await makeRoom(A, "Audit 3", 10);
+  const auditRows = (entityId: string, action: string) =>
+    prisma.auditLog.findMany({ where: { centerId: A, entityId, action } });
+  const auditCount = () =>
+    prisma.auditLog.count({
+      where: { centerId: A, action: { in: ["room.link", "room.unlink"] }, entityId: { in: [aud1.id, aud2.id, aud3.id] } },
+    });
+
+  const auditLink = await saveRoomWithLinks(prisma, A, aud1.id, null, [aud2.id], clock, "en", teacher1.id);
+  const linkAudit = await auditRows(aud1.id, "room.link");
+  check(
+    "Audit: linking writes one room.link row (ids only), attributed to the actor",
+    auditLink.ok &&
+      linkAudit.length === 1 &&
+      linkAudit[0].actorUserId === teacher1.id &&
+      JSON.stringify(linkAudit[0].after) === JSON.stringify({ roomId: aud1.id, otherRoomId: aud2.id }),
+    JSON.stringify(linkAudit),
+  );
+  const auditNoop = await saveRoomWithLinks(prisma, A, aud1.id, null, [aud2.id], clock, "en", teacher1.id);
+  check("Audit: a no-op save writes no row", auditNoop.ok && (await auditCount()) === 1);
+  const auditSwap = await saveRoomWithLinks(prisma, A, aud1.id, null, [aud3.id], clock, "en", teacher1.id);
+  check(
+    "Audit: swapping a link writes one room.unlink and one room.link",
+    auditSwap.ok &&
+      (await auditRows(aud1.id, "room.unlink")).length === 1 &&
+      (await auditRows(aud1.id, "room.link")).length === 2,
+  );
+
+  // The proof of "same transaction": roll the whole transaction back after the
+  // callback has finished. Link rows and audit rows must disappear together;
+  // an audit row written afterwards (outside it) would survive.
+  class RollBackAfterCallback extends Error {}
+  const rollingBack = {
+    $transaction: (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+      prisma.$transaction(async (tx) => {
+        await callback(tx);
+        throw new RollBackAfterCallback();
+      }),
+  } as unknown as typeof prisma;
+  const auditLinksBefore = await linksOf(aud2.id);
+  const auditBefore = await auditCount();
+  const rolled = await saveRoomWithLinks(rollingBack, A, aud2.id, null, [aud3.id], clock, "en", teacher1.id).then(
+    () => "committed",
+    (error: unknown) => (error instanceof RollBackAfterCallback ? "rolled back" : "failed"),
+  );
+  check(
+    "Audit: the rows are written in the link transaction — a rollback after the diff leaves neither a link nor an audit row",
+    rolled === "rolled back" &&
+      JSON.stringify(await linksOf(aud2.id)) === JSON.stringify(auditLinksBefore) &&
+      (await auditCount()) === auditBefore,
+    `${rolled}`,
+  );
+
+  // A refused save (a link in use) writes nothing — no link and no audit row.
+  const auditClass = await makeClass(A, teacher1.id, aud1.id, [aud3.id]);
+  const auditRefused = await saveRoomWithLinks(prisma, A, aud1.id, null, [], clock, "en", teacher1.id);
+  check(
+    "Audit: an in-use removal is refused and writes no room.unlink row",
+    !auditRefused.ok && auditRefused.error === "combinationInUse" && (await auditRows(aud1.id, "room.unlink")).length === 1,
+    JSON.stringify(auditRefused),
+  );
+  await prisma.classGroup.update({ where: { id: auditClass.id }, data: { active: false } });
+
+  // Static: the data layer owns the audit rows; the action no longer writes them.
+  const roomSetsSource = readFileSync(join(process.cwd(), "lib/db/room-sets.ts"), "utf8");
+  const settingsActions = readFileSync(join(process.cwd(), "app/[locale]/(center)/settings/actions.ts"), "utf8");
+  check(
+    "Audit (static): saveRoomWithLinks writes room.link / room.unlink with writeAuditRow(tx, …) and the settings action writes neither",
+    /writeAuditRow\(tx,\s*\{[\s\S]*?action,[\s\S]*?\}\)/.test(roomSetsSource) &&
+      roomSetsSource.includes('"room.link"') &&
+      roomSetsSource.includes('"room.unlink"') &&
+      !/["']room\.(un)?link["']/.test(settingsActions),
   );
 }
 

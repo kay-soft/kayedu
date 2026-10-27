@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import { applyAccountGrade } from "@/lib/db/account-study";
+import { confirmGradePromotion, undoGradePromotion } from "@/lib/db/promotion";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import {
@@ -14,7 +17,7 @@ import {
   seedLocalName,
 } from "@/lib/db/identity";
 import { studentCardSvg } from "@/lib/db/id-cards";
-import { revokeStaleParentLinks, verifyParentLinkPlaceholder } from "@/lib/db/parents";
+import { issueBranchCode, revokeBranchCode, revokeFamilyLink } from "@/lib/db/parents";
 import { scoped, scopedIgnoringVisibilityWindow, type ScopedDb } from "@/lib/db/scoped";
 import {
   claimStudentCode,
@@ -40,7 +43,8 @@ import {
 } from "@/lib/storage-paths";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
-  gradePromotionSchema,
+  gradePromotionConfirmSchema,
+  gradePromotionUndoSchema,
   studentActionSchema,
   studentActiveSchema,
   studentCreateSchema,
@@ -50,7 +54,7 @@ import {
   type PeopleActionState,
   type PhoneLookupResult,
 } from "@/lib/validation/people";
-import { verifyParentLinkSchema } from "@/lib/validation/parents";
+import { branchCodeSchema, branchRevokeLinkSchema, type FamilyActionState } from "@/lib/validation/parents";
 import { parseActionArgs, phoneLookupArgs, searchArgs } from "@/lib/validation/action-args";
 import { logBestEffort } from "@/lib/log";
 
@@ -77,8 +81,9 @@ const NOT_FOUND: PeopleActionState = { error: "notFound" };
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
 /** Receptionists register students; only Manager/Owner delete them (spec §3). */
-async function studentScope(): Promise<Scope | null> {
+async function studentScope(): Promise<Scope | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -131,6 +136,7 @@ export async function searchStudentsTypeAheadAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return [];
   if (!scope) return [];
   const args = parseActionArgs(searchArgs, [query]);
   if (!args) return [];
@@ -164,6 +170,7 @@ export async function lookupPersonByPhoneAction(
   phone: string,
 ): Promise<PhoneLookupResult> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return { status: "notFound" };
   if (!scope) return { status: "notFound" };
   const args = parseActionArgs(phoneLookupArgs, [phone]);
   if (!args) return { status: "notFound" };
@@ -191,6 +198,7 @@ export async function createStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentCreateSchema.safeParse(Object.fromEntries(formData));
@@ -323,6 +331,7 @@ export async function updateStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -365,18 +374,8 @@ export async function updateStudentAction(
     parentAltPhone,
   });
 
-  // D-04 (a), SEC-04: a parent phone that is no longer on the record takes
-  // every link it produced with it — revoked and audited, never left to read.
-  if (
-    normalizePhone(parentPhone) !== normalizePhone(student.parentPhone) ||
-    normalizePhone(parentAltPhone) !== normalizePhone(student.parentAltPhone)
-  ) {
-    await revokeStaleParentLinks(prisma, {
-      centerId: scope.ctx.center.id,
-      studentProfileId: student.id,
-      actorUserId: scope.ctx.user.id,
-    });
-  }
+  // F3: the parent phone on this record is contact data only — changing it
+  // touches no family link (only explicit, audited revocation ends one).
 
   revalidateStudentDetail(locale, student.id);
   revalidateStudentPrintables(locale, student.id);
@@ -389,6 +388,7 @@ export async function setStudentActiveAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentActiveSchema.safeParse(Object.fromEntries(formData));
@@ -414,6 +414,7 @@ export async function deleteStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   // Delete is a Manager/Owner action, never a receptionist's (spec §3).
   if (!ctxCan(ctx, "student.delete")) return FORBIDDEN;
   const db = scoped(ctx);
@@ -478,46 +479,80 @@ export async function deleteStudentAction(
   return { status: "deleted" };
 }
 
-// ── Grade promotion (end of term) ──────────────────────────────────────────
+// ── Grade promotion (F4: preview → confirm → undo) ─────────────────────────
+//
+// The preview is a page (`/students/promote?from=&to=`) that reads; these two
+// actions write. Both gate on `student.promote` (MANAGER baseline; OWNER
+// always), re-check everything on the server, and call `lib/db/promotion.ts`,
+// which writes the grade changes, the batch and its audit row in one
+// transaction. The old one-click "promote everyone in a grade" is gone.
 
-export async function promoteGradeAction(
+const PROMOTION_ERRORS = {
+  notFound: "notFound",
+  samePromotionGrade: "samePromotionGrade",
+  noStudentsToPromote: "noStudentsToPromote",
+  tooMany: "tooManyStudents",
+  notLatest: "promotionNotLatest",
+  expired: "promotionExpired",
+  alreadyUndone: "promotionAlreadyUndone",
+} as const;
+
+export async function confirmPromotionAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
-  const db = scoped(ctx);
 
-  const parsed = gradePromotionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const parsed = gradePromotionConfirmSchema.safeParse({
+    ...Object.fromEntries(formData),
+    studentIds: formData.getAll("studentIds"),
+  });
+  if (!parsed.success) {
+    const fieldErrors = fieldErrorsFrom(parsed.error);
+    // A bare "nothing ticked" is a form-level message, not a field's.
+    if (fieldErrors.studentIds) return { error: fieldErrors.studentIds };
+    return { fieldErrors };
+  }
 
-  const { fromGradeId, toGradeId, locale } = parsed.data;
-
-  // Both grades are re-resolved here — a grade id from another center is not a
-  // grade at all as far as this center is concerned.
-  const [from, to] = await Promise.all([
-    db.grades.findById(fromGradeId),
-    db.grades.findById(toGradeId),
-  ]);
-  if (!from || !to) return { fieldErrors: { fromGradeId: "notFound" } };
-  // Students may be moved *out of* a grade the platform has deactivated, never into one (R8).
-  if (!to.catalogActive) return { fieldErrors: { toGradeId: "notFound" } };
-
-  const result = await db.students.promoteGrade(from.id, to.id);
-  if (result.count === 0) return { error: "noStudentsToPromote" };
-
-  await writeAuditLog({
+  const { fromGradeId, toGradeId, studentIds, locale } = parsed.data;
+  const result = await confirmGradePromotion(prisma, {
     centerId: ctx.center.id,
     actorUserId: ctx.user.id,
-    action: "student.promote",
-    entityType: "Grade",
-    entityId: from.id,
-    before: { gradeId: from.id },
-    after: { gradeId: to.id, students: result.count },
+    fromGradeId,
+    toGradeId,
+    studentIds,
   });
+  if (!result.ok) return { error: PROMOTION_ERRORS[result.error] };
 
   revalidateStudentList(locale);
-  return { status: "saved" };
+  revalidatePath(`/${locale}${ROUTES.centerStudentsPromote}`);
+  return { status: "saved", count: result.count, skipped: result.skipped };
+}
+
+export async function undoPromotionAction(
+  _state: PeopleActionState,
+  formData: FormData,
+): Promise<PeopleActionState> {
+  const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
+  if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
+
+  const parsed = gradePromotionUndoSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+
+  const result = await undoGradePromotion(prisma, {
+    centerId: ctx.center.id,
+    actorUserId: ctx.user.id,
+    batchId: parsed.data.batchId,
+  });
+  if (!result.ok) return { error: PROMOTION_ERRORS[result.error] };
+
+  const { locale } = parsed.data;
+  revalidateStudentList(locale);
+  revalidatePath(`/${locale}${ROUTES.centerStudentsPromote}`);
+  return { status: "saved", count: result.reverted, skipped: result.skipped };
 }
 
 /** Move one student — the same action, one row at a time. */
@@ -526,6 +561,7 @@ export async function setStudentGradeAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.promote")) return FORBIDDEN;
   const db = scoped(ctx);
 
@@ -557,6 +593,36 @@ export async function setStudentGradeAction(
   return { status: "saved" };
 }
 
+/**
+ * "Use account grade" (F4): this branch adopts the student's own account grade
+ * as its record. The existing student-edit permission (`student.manage`, the
+ * one `updateStudentAction` needs); audited `student.grade.account`. Writes
+ * this branch's `StudentProfile.gradeId` and nothing else.
+ */
+export async function applyAccountGradeAction(
+  _state: PeopleActionState,
+  formData: FormData,
+): Promise<PeopleActionState> {
+  const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
+  if (!scope) return FORBIDDEN;
+
+  const parsed = studentActionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return NOT_FOUND;
+  const { studentProfileId, locale } = parsed.data;
+
+  const result = await applyAccountGrade(prisma, {
+    centerId: scope.ctx.center.id,
+    studentProfileId,
+    actorUserId: scope.ctx.user.id,
+  });
+  if (!result.ok) return result.error === "gradeNotOffered" ? { error: "accountGradeNotOffered" } : NOT_FOUND;
+
+  revalidateStudentList(locale);
+  revalidateStudentDetail(locale, studentProfileId);
+  return { status: "saved" };
+}
+
 // ── Photo (Supabase Storage) ───────────────────────────────────────────────
 
 export async function uploadStudentPhotoAction(
@@ -564,6 +630,7 @@ export async function uploadStudentPhotoAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentPhotoSchema.safeParse({
@@ -615,6 +682,7 @@ export async function removeStudentPhotoAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentActionSchema.safeParse(Object.fromEntries(formData));
@@ -657,6 +725,7 @@ export async function generateIdCardAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await studentScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = studentActionSchema.safeParse(Object.fromEntries(formData));
@@ -687,46 +756,88 @@ export async function generateIdCardAction(
     : { error: "storage" };
 }
 
-// ── Parent links (M16) ──────────────────────────────────────────────────────
+// ── Parent access (F3) ──────────────────────────────────────────────────────
 
 /**
- * ─────────────────────────────── OD-6 PLACEHOLDER ───────────────────────────
- * See `lib/db/parents.ts`'s `verifyParentLinkPlaceholder` — this Server
- * Action is the manual, staff-facing, audited seam it describes, NOT OD-6's
- * real verification mechanism. `parent.link.manage` is a MANAGER_BASELINE
- * permission (OWNER/MANAGER by default, configurable like any other post-M12
- * action) — a Receptionist cannot flip this by direct call any more than by
- * a hidden button.
- * ─────────────────────────────────────────────────────────────────────────
+ * The "Parent access" card on `/students/[id]` (F3, OD-6 decided). Every
+ * action needs `parent.link.manage` (MANAGER_BASELINE — OWNER/MANAGER by
+ * default, configurable like any other post-M12 action) on a non-denied
+ * centre context, and resolves the student through `ctx.center.id` inside
+ * `lib/db/parents.ts`, so another branch's student id is `notFound`. The
+ * data layer writes the audit row in the same transaction.
  */
-export async function verifyParentLinkAction(
-  _state: PeopleActionState,
-  formData: FormData,
-): Promise<PeopleActionState> {
+async function parentAccessContext() {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "parent.link.manage")) return FORBIDDEN;
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
+  return ctxCan(ctx, "parent.link.manage") ? ctx : null;
+}
 
-  const parsed = verifyParentLinkSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
+/** "Generate parent code": the code comes back once, in this answer only. */
+export async function generateParentCodeAction(
+  _state: FamilyActionState,
+  formData: FormData,
+): Promise<FamilyActionState> {
+  const ctx = await parentAccessContext();
+  if (isPickBranch(ctx)) return ctx;
+  if (!ctx) return { error: "forbidden" };
+  const parsed = branchCodeSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
 
-  const { parentLinkId, locale } = parsed.data;
-  const result = await verifyParentLinkPlaceholder(prisma, {
-    parentLinkId,
+  const result = await issueBranchCode(prisma, {
     centerId: ctx.center.id,
-    verifiedByUserId: ctx.user.id,
+    studentProfileId: parsed.data.studentProfileId,
+    actorUserId: ctx.user.id,
   });
   if (!result.ok) return { error: result.error };
+  revalidateStudentDetail(parsed.data.locale, parsed.data.studentProfileId);
+  return { status: "issued", code: result.code };
+}
 
-  await writeAuditLog({
+/** Cancels this branch's waiting code for the student. */
+export async function cancelParentCodeAction(
+  _state: FamilyActionState,
+  formData: FormData,
+): Promise<FamilyActionState> {
+  const ctx = await parentAccessContext();
+  if (isPickBranch(ctx)) return ctx;
+  if (!ctx) return { error: "forbidden" };
+  const parsed = branchCodeSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "notFound" };
+
+  const result = await revokeBranchCode(prisma, {
     centerId: ctx.center.id,
+    studentProfileId: parsed.data.studentProfileId,
     actorUserId: ctx.user.id,
-    action: "parentLink.verify",
-    entityType: "ParentLink",
-    entityId: result.linkId,
-    before: { status: "PENDING" },
-    after: { status: "VERIFIED" },
   });
+  if (!result.ok) return { error: result.error };
+  revalidateStudentDetail(parsed.data.locale, parsed.data.studentProfileId);
+  return { status: "revoked" };
+}
 
-  revalidateStudentDetail(locale, result.studentProfileId);
-  return { status: "saved" };
+/** "Remove access": ends one parent's link, with a reason kept on the link. */
+export async function revokeParentLinkAction(
+  _state: FamilyActionState,
+  formData: FormData,
+): Promise<FamilyActionState> {
+  const ctx = await parentAccessContext();
+  if (isPickBranch(ctx)) return ctx;
+  if (!ctx) return { error: "forbidden" };
+  const parsed = branchRevokeLinkSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  // The link must belong to a student who is on this branch's books.
+  const profile = await scoped(ctx).students.findById(parsed.data.studentProfileId);
+  if (!profile) return { error: "notFound" };
+
+  const result = await revokeFamilyLink(prisma, {
+    by: "branch",
+    linkId: parsed.data.linkId,
+    actorUserId: ctx.user.id,
+    centerId: ctx.center.id,
+    studentUserId: profile.userId,
+    reason: parsed.data.reason,
+  });
+  if (!result.ok) return { error: result.error };
+  revalidateStudentDetail(parsed.data.locale, profile.id);
+  return { status: "revoked" };
 }

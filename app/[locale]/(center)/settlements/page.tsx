@@ -13,6 +13,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
@@ -38,6 +40,7 @@ const STATUS_BADGE = {
  */
 export default async function SettlementsPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "settlement.manage");
   const db = scoped(ctx);
   const isOwner = ctx.roles.includes("OWNER");

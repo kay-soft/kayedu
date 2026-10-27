@@ -1,10 +1,11 @@
-import type { Prisma, PrismaClient, User } from "@prisma/client";
+import type { Prisma, PrismaClient, SignupIntent, User } from "@prisma/client";
 import { z } from "zod";
 
 // Relative imports only: this is the pure half of `lib/auth/session.ts` —
 // "which app `User` is this login?" — kept loadable outside Next so
 // `npm run check:security` runs the REAL linking rule, not a copy of it.
 import { normalizeEmail } from "../identity.ts";
+import { writeAuditRow } from "../db/audit-row.ts";
 import {
   AuthMisconfiguredError,
   allowAutoConfirmDemo,
@@ -56,28 +57,33 @@ const metadataSchema = z.object({
   last_name: capped(60).optional(),
   full_name: capped(121).optional(),
   locale: z.enum(["ar", "en"]).catch("ar").optional(),
+  // F4: client-controlled like the rest — anything but one of the three
+  // values is dropped. It routes onboarding and authorises nothing.
+  signup_intent: z.enum(["STUDENT", "PARENT", "TEACHER"]).optional().catch(undefined),
 });
 
 export function profileFromMetadata(identity: AuthIdentity): {
   firstName: string;
   lastName: string;
   locale: "ar" | "en";
+  signupIntent: SignupIntent | null;
 } {
   const parsed = metadataSchema.safeParse(identity.user_metadata ?? {});
   const meta = parsed.success ? parsed.data : {};
   const locale = meta.locale ?? "ar";
+  const signupIntent = meta.signup_intent ?? null;
   const first = meta.first_name ?? "";
   const last = meta.last_name ?? "";
-  if (first || last) return { firstName: first || "-", lastName: last || "-", locale };
+  if (first || last) return { firstName: first || "-", lastName: last || "-", locale, signupIntent };
 
   const full = meta.full_name ?? "";
   if (full) {
     const [head, ...rest] = full.split(/\s+/);
-    return { firstName: head.slice(0, 60), lastName: rest.join(" ").slice(0, 60) || "-", locale };
+    return { firstName: head.slice(0, 60), lastName: rest.join(" ").slice(0, 60) || "-", locale, signupIntent };
   }
 
   const local = (identity.email?.split("@")[0] ?? "user").slice(0, 60);
-  return { firstName: local || "user", lastName: "-", locale };
+  return { firstName: local || "user", lastName: "-", locale, signupIntent };
 }
 
 function confirmedAt(identity: AuthIdentity): Date | null {
@@ -96,7 +102,8 @@ function isUniqueViolation(error: unknown): boolean {
  * Linking rules — the only place they live:
  * 1. A login already linked (`User.authId`) is that user. Its email is synced
  *    only when (under REQUIRE_EMAIL_CONFIRMATION) the new email is confirmed
- *    and no other person holds it; `emailVerifiedAt` mirrors Supabase.
+ *    and no other person holds it; `emailVerifiedAt` mirrors Supabase. The
+ *    change is audited `account.email.change` (F2) in the same transaction.
  * 2. A login whose email equals a person a centre created (`authId` null) is
  *    **never** linked here — not by email, not by phone, confirmed or not
  *    (D-01). It opens a PENDING claim; staff approve it in person
@@ -148,6 +155,7 @@ export async function resolveAppIdentity(
         firstName: profile.firstName,
         lastName: profile.lastName,
         locale: profile.locale,
+        signupIntent: profile.signupIntent,
       },
     });
     return { kind: "user", user };
@@ -178,5 +186,22 @@ async function syncLinkedUser(
     if ((confirmed?.getTime() ?? null) !== current) data.emailVerifiedAt = confirmed;
   }
   if (Object.keys(data).length === 0) return user;
-  return db.user.update({ where: { id: user.id }, data });
+  if (!data.email) return db.user.update({ where: { id: user.id }, data });
+
+  // F2: an email change is audited with the write that makes it — whichever
+  // path changed the login's address (Account settings' direct override, or
+  // Supabase's confirmed email-change link). Ids only, never the address (D-20).
+  const write = async (tx: Prisma.TransactionClient) => {
+    const updated = await tx.user.update({ where: { id: user.id }, data });
+    await writeAuditRow(tx, {
+      centerId: null,
+      actorUserId: user.id,
+      action: "account.email.change",
+      entityType: "User",
+      entityId: user.id,
+      after: { verified: confirmed !== null },
+    });
+    return updated;
+  };
+  return "$transaction" in db ? db.$transaction(write) : write(db);
 }

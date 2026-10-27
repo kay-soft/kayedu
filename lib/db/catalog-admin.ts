@@ -171,7 +171,13 @@ export async function catalogEntryUsage(
     const [centres, classes, students, sessions, children] = await Promise.all([
       db.centerCatalogSelection.count({ where: { gradeId: id } }),
       db.classGroup.count({ where: { gradeId: id } }),
-      db.studentProfile.count({ where: { gradeId: id } }),
+      // "Students" also counts what F4 points at a grade: accounts naming it as
+      // their own grade and promotion batches that moved students into or out of it.
+      Promise.all([
+        db.studentProfile.count({ where: { gradeId: id } }),
+        db.user.count({ where: { gradeId: id } }),
+        db.gradePromotionBatch.count({ where: { OR: [{ fromGradeId: id }, { toGradeId: id }] } }),
+      ]).then((counts) => counts.reduce((sum, count) => sum + count, 0)),
       db.session.count({ where: { gradeId: id } }),
       db.catalogSubject.count({ where: { gradeId: id } }),
     ]);
@@ -459,7 +465,16 @@ export async function listCatalogAdminRows(
       include: {
         educationSystem: { select: { nameAr: true, nameEn: true } },
         _count: {
-          select: { selections: true, classGroups: true, studentProfiles: true, sessions: true, subjects: true },
+          select: {
+            selections: true,
+            classGroups: true,
+            studentProfiles: true,
+            accountUsers: true,
+            promotionsFrom: true,
+            promotionsTo: true,
+            sessions: true,
+            subjects: true,
+          },
         },
       },
       orderBy: [{ active: "desc" }, { nameEn: "asc" }],
@@ -477,7 +492,7 @@ export async function listCatalogAdminRows(
       usage: {
         centres: row._count.selections,
         classes: row._count.classGroups,
-        students: row._count.studentProfiles,
+        students: row._count.studentProfiles + row._count.accountUsers + row._count.promotionsFrom + row._count.promotionsTo,
         sessions: row._count.sessions,
         children: row._count.subjects,
       },

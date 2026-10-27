@@ -26,6 +26,8 @@ export const boundSearchArgs = z.tuple([recordId, searchQuery]);
 export const paramsSearchArgs = z.tuple([z.string().max(500), searchQuery]);
 /** `(phone)` — normalized afterwards by `lib/phone.ts`, the one normalizer. */
 export const phoneLookupArgs = z.tuple([z.string().max(40)]);
+/** `(phone, branchId?)` — F1: the Add teacher lookup, at the branch the form targets. */
+export const branchPhoneLookupArgs = z.tuple([z.string().max(40), recordId.optional()]);
 /** `(sessionId, typedOrScanned, locale)` — reception session mode. */
 export const receptionInputArgs = z.tuple([recordId, z.string().max(200), locale]);
 /** `(sessionId, studentProfileId, locale)` — reception session mode. */

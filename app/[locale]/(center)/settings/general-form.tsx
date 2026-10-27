@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { CENTER_TIMEZONES } from "@/lib/branch-setup";
 import { formatMoney } from "@/lib/format";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
@@ -30,7 +31,7 @@ import { useClientValidation } from "@/lib/ui/client-validation";
 const PREVIEW_AMOUNT = 12_000;
 
 /** IANA zones a center in the region plausibly runs on. */
-const TIMEZONES = ["Africa/Cairo", "Asia/Riyadh", "Asia/Dubai", "UTC"] as const;
+const TIMEZONES = CENTER_TIMEZONES;
 
 export type GeneralSettingsValues = {
   defaultShareType: ShareType;
@@ -41,6 +42,7 @@ export type GeneralSettingsValues = {
   scheduleConflictPolicy: ConflictPolicy;
   teacherEditDeadlineHours: number | null;
   dataVisibilityDays: number;
+  publicListing: boolean;
 };
 
 export function GeneralSettingsForm({
@@ -341,6 +343,21 @@ export function GeneralSettingsForm({
             label={t("denyConflictsLabel")}
             description={t("denyConflictsDescription")}
             defaultChecked={values.scheduleConflictPolicy === "DENY"}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("publicListingTitle")}</CardTitle>
+          <CardDescription>{t("publicListingDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ToggleRow
+            name="publicListing"
+            label={t("publicListingLabel")}
+            description={t("publicListingHint")}
+            defaultChecked={values.publicListing}
           />
         </CardContent>
       </Card>

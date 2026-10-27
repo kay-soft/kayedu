@@ -11,11 +11,13 @@ import type {
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/payments.ts).
+import { seedFromAccount } from "./account-study.ts";
 import { claimStudentCode } from "./students.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 import { cooldownUntil, enrollmentCap, isAtCapacity, isInCooldown } from "../capacity.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
+import { firstOverflowingSession } from "./session-seats.ts";
 
 /**
  * D-18 (SEC-2c, SEC-26): what one account may hold through the student
@@ -58,11 +60,18 @@ type Db = PrismaClient | Prisma.TransactionClient;
  * the person *is* the authenticated caller, so their own `User` row seeds the
  * local record directly, exactly once, then it is independently editable at
  * that center like any other (docs/01-data-model.md §6).
+ *
+ * **F4 — two-layer grade.** A *new* profile is also seeded from the student's
+ * own account: `User.gradeId` (when this branch offers that grade) and the
+ * parent they declared in F3's "Invite a parent". With both a grade and a
+ * parent phone the profile is stamped complete and the one-time form is
+ * skipped (D-11 unchanged — staff edits stay allowed). An existing profile is
+ * returned untouched: the account never overwrites a branch's record.
  */
 export async function ensureStudentProfile(
   tx: Prisma.TransactionClient,
   centerId: string,
-  user: Pick<User, "id" | "firstName" | "lastName" | "email" | "phone" | "altPhone">,
+  user: Pick<User, "id" | "firstName" | "lastName" | "email" | "phone" | "altPhone" | "gradeId">,
 ) {
   const existing = await tx.studentProfile.findFirst({
     where: { userId: user.id, centerId },
@@ -70,6 +79,7 @@ export async function ensureStudentProfile(
   if (existing) return existing;
 
   const studentCode = await claimStudentCode(tx, centerId);
+  const seeded = await seedFromAccount(tx, centerId, user);
   return tx.studentProfile.create({
     data: scopedData(centerId, {
       userId: user.id,
@@ -79,6 +89,7 @@ export async function ensureStudentProfile(
       email: user.email,
       phone: user.phone,
       altPhone: user.altPhone,
+      ...seeded,
     }),
   });
 }
@@ -96,7 +107,9 @@ export async function lockClassRow(
 
 export type ClaimSeatResult =
   | { ok: true; enrollment: Enrollment }
-  | { ok: false; error: "notFound" | "classFull" };
+  | { ok: false; error: "notFound" | "classFull" }
+  /** F6 — a future session is full of bookings; `date` is the first such day. */
+  | { ok: false; error: "sessionFull"; date: Date };
 
 /**
  * The ONE place a class seat is taken (SEC-2b, SEC-13) — instant enrol
@@ -108,6 +121,14 @@ export type ClaimSeatResult =
  * set's summed capacity, `lib/capacity.ts`) holds. A student who already has
  * this pair's enrolment row (removed earlier) gets it reactivated; otherwise
  * a new row is written. Blocking/duplicate checks stay with each caller.
+ *
+ * **F6 — an enrolment takes a seat in every future session.** After the
+ * class cap, it is refused (`sessionFull`, with the first full date) when any
+ * future open session of the class would exceed its seats once the active
+ * enrolments and that session's CONFIRMED bookings are counted
+ * (`firstOverflowingSession`, each such session re-read under its row lock).
+ * A class with no confirmed bookings — every class until it turns booking on
+ * — gets exactly the pre-F6 answer.
  */
 export async function claimClassSeat(
   tx: Prisma.TransactionClient,
@@ -128,6 +149,20 @@ export async function claimClassSeat(
   });
   if (isAtCapacity(active, cap)) return { ok: false, error: "classFull" };
 
+  const profile = await tx.studentProfile.findFirst({
+    where: scopedWhere(centerId, { id: studentProfileId }),
+    select: { userId: true },
+  });
+  if (!profile) return { ok: false, error: "notFound" };
+  const overflow = await firstOverflowingSession(tx, {
+    centerId,
+    classGroupId,
+    cap,
+    activeEnrollments: active,
+    studentUserId: profile.userId,
+  });
+  if (overflow) return { ok: false, error: "sessionFull", date: overflow.date };
+
   // @@unique([studentProfileId, classGroupId]): a removed enrolment still
   // owns this pair's row — reactivate it rather than insert a second one.
   const existing = await tx.enrollment.findFirst({
@@ -141,7 +176,7 @@ export async function claimClassSeat(
   return { ok: true, enrollment };
 }
 
-async function isBlockedFromClass(
+export async function isBlockedFromClass(
   tx: Db,
   centerId: string,
   classGroup: Pick<ClassGroup, "id" | "teacherId">,
@@ -181,10 +216,11 @@ export type ReserveOrEnrollResult =
         | "reservationLimit"
         | "enrollmentLimit";
     }
-  | { ok: false; error: "coolingOff"; cooldownUntil: Date };
+  | { ok: false; error: "coolingOff"; cooldownUntil: Date }
+  | { ok: false; error: "sessionFull"; date: Date };
 
 /** One account's self-service writes run one at a time (D-18), so a cap is exact. */
-async function lockSelfService(tx: Prisma.TransactionClient, studentUserId: string): Promise<void> {
+export async function lockSelfService(tx: Prisma.TransactionClient, studentUserId: string): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`self-service:${studentUserId}`}, 0))`;
 }
 
@@ -295,11 +331,21 @@ export async function reserveOrEnroll(
       where: scopedWhere(centerId, { classGroupId, status: ACTIVE_ENROLLMENT }),
     });
     if (isAtCapacity(peek, cap)) return { ok: false, error: "classFull" };
+    // F6: a future session full of bookings refuses too — peeked before the
+    // profile is made, for the same reason; `claimClassSeat` re-checks.
+    const full = await firstOverflowingSession(tx, {
+      centerId,
+      classGroupId,
+      cap,
+      activeEnrollments: peek,
+      studentUserId,
+    });
+    if (full) return { ok: false, error: "sessionFull", date: full.date };
 
     const user = await tx.user.findUniqueOrThrow({ where: { id: studentUserId } });
     const profile = existingProfile ?? (await ensureStudentProfile(tx, centerId, user));
     const seat = await claimClassSeat(tx, centerId, classGroupId, profile.id);
-    if (!seat.ok) return { ok: false, error: seat.error };
+    if (!seat.ok) return seat;
     return { ok: true, kind: "enrolled", enrollmentId: seat.enrollment.id };
   }
 
@@ -325,7 +371,8 @@ export async function reserveOrEnroll(
 
 export type ResolveReservationResult =
   | { ok: true; reservation: Reservation; enrollment?: Enrollment }
-  | { ok: false; error: "notFound" | "notPending" | "studentBlocked" | "classFull" };
+  | { ok: false; error: "notFound" | "notPending" | "studentBlocked" | "classFull" }
+  | { ok: false; error: "sessionFull"; date: Date };
 
 /**
  * Confirms a PENDING reservation into an ACTIVE enrollment. There is no
@@ -370,12 +417,20 @@ export async function confirmReservation(
     where: scopedWhere(centerId, { classGroupId: classGroup.id, status: ACTIVE_ENROLLMENT }),
   });
   if (isAtCapacity(active, cap)) return { ok: false, error: "classFull" };
+  const full = await firstOverflowingSession(tx, {
+    centerId,
+    classGroupId: classGroup.id,
+    cap,
+    activeEnrollments: active,
+    studentUserId: reservation.studentId,
+  });
+  if (full) return { ok: false, error: "sessionFull", date: full.date };
 
   const user = await tx.user.findUniqueOrThrow({ where: { id: reservation.studentId } });
   const profile = await ensureStudentProfile(tx, centerId, user);
 
   const seat = await claimClassSeat(tx, centerId, classGroup.id, profile.id);
-  if (!seat.ok) return { ok: false, error: seat.error };
+  if (!seat.ok) return seat;
   const enrollment = seat.enrollment;
 
   const updated = await tx.reservation.update({

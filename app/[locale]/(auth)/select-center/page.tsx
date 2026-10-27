@@ -1,5 +1,6 @@
+import type { SignupIntent } from "@prisma/client";
 import { getLocale, getTranslations } from "next-intl/server";
-import { Building2, Check, ChevronLeft } from "lucide-react";
+import { Building2, Check, ChevronLeft, Users } from "lucide-react";
 
 import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { SignOutButton } from "@/components/shell/sign-out-button";
@@ -13,13 +14,18 @@ import { getCurrentUser } from "@/lib/auth/session";
 import {
   getOwnerOrgGroups,
   getUserCenterRelations,
-  getVerifiedParentChildren,
+  getParentChildren,
   primaryRole,
 } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 import { cn } from "@/lib/utils";
+
+/** The student's own start: onboarding while their grade is unset, else Discover (F4). */
+function onboardingStart(user: { signupIntent: SignupIntent | null; gradeId: string | null }): string {
+  return user.signupIntent === "STUDENT" && !user.gradeId ? ROUTES.studentOnboarding : ROUTES.studentDiscover;
+}
 
 export default async function SelectCenterPage({
   searchParams,
@@ -32,18 +38,19 @@ export default async function SelectCenterPage({
 
   const t = await getTranslations("Auth.selectCenter");
   const tRoles = await getTranslations("Roles");
+  const tShell = await getTranslations("Shell");
 
   const { switch: switchMode } = await searchParams;
   const [relations, orgGroups, activeId, children] = await Promise.all([
     getUserCenterRelations(user!.id),
     getOwnerOrgGroups(user!.id),
     getActiveCenterId(),
-    getVerifiedParentChildren(user!.id),
+    getParentChildren(user!.id),
   ]);
 
   // SYS: a parent with no branch relation belongs in the parent portal — the
   // hub's "not connected to a branch" state was a dead end for them.
-  if (relations.length === 0 && children.length > 0) {
+  if (relations.length === 0 && children.linked.length > 0) {
     redirect({ href: ROUTES.parentHome, locale });
   }
 
@@ -54,6 +61,20 @@ export default async function SelectCenterPage({
   if (relations.length === 1 && orgGroups.length === 0 && switchMode !== "1") {
     redirect({ href: homePathForRole(primaryRole(relations[0])), locale });
   }
+
+  // F4: the three starting points, the person's declared sign-up intent first
+  // (and highlighted). A null intent keeps today's order and emphasis. All three
+  // stay offered — the intent routes, it never restricts.
+  const startActions = [
+    { intent: "STUDENT", href: `/${locale}${onboardingStart(user!)}`, label: t("browseClasses") },
+    { intent: "TEACHER", href: `/${locale}${ROUTES.teacherCenters}`, label: t("findCenterToTeach") },
+    { intent: "PARENT", href: `/${locale}${ROUTES.familyJoin}`, label: t("linkMyChild") },
+  ] as const;
+  const orderedStart = user!.signupIntent
+    ? [...startActions].sort(
+        (a, b) => Number(b.intent === user!.signupIntent) - Number(a.intent === user!.signupIntent),
+      )
+    : startActions;
 
   return (
     <div className="flex flex-col gap-4">
@@ -75,18 +96,19 @@ export default async function SelectCenterPage({
                 /* A teacher with zero centres gets the directory, never only
                    the student Discover link (M15, spec §5.1 "Teacher
                    onboarding") — both stay offered here since a brand-new
-                   sign-up's intent (student or teacher) isn't known yet. */
-                <div className="grid w-full gap-2 sm:flex">
-                  <AnchorButton
-                    href={`/${locale}${ROUTES.studentDiscover}`}
-                    variant="default"
-                    className="w-full sm:w-auto"
-                  >
-                    {t("browseClasses")}
-                  </AnchorButton>
-                  <AnchorButton href={`/${locale}${ROUTES.teacherCenters}`} className="w-full sm:w-auto">
-                    {t("findCenterToTeach")}
-                  </AnchorButton>
+                   sign-up's intent (student, teacher or parent) isn't known
+                   yet. F3: a parent links a child with a code. */
+                <div className="grid w-full gap-2 sm:flex sm:flex-wrap">
+                  {orderedStart.map((action, index) => (
+                    <AnchorButton
+                      key={action.intent}
+                      href={action.href}
+                      variant={index === 0 ? "default" : undefined}
+                      className="w-full sm:w-auto"
+                    >
+                      {action.label}
+                    </AnchorButton>
+                  ))}
                 </div>
               }
             />
@@ -171,6 +193,19 @@ export default async function SelectCenterPage({
             );
           })}
 
+          {/* F3: staff and teachers may be parents too — their children are
+              one tap away from the hub. */}
+          {relations.length > 0 && children.linked.length > 0 ? (
+            <AnchorButton
+              href={`/${locale}${ROUTES.parentHome}`}
+              variant="ghost"
+              className="w-full justify-start text-brand"
+            >
+              <Users className="size-4" aria-hidden />
+              {t("parentViewLink")}
+            </AnchorButton>
+          ) : null}
+
           {user!.isPlatformAdmin ? (
             <AnchorButton
               href={`/${locale}${ROUTES.adminCenters}`}
@@ -183,6 +218,15 @@ export default async function SelectCenterPage({
           ) : null}
         </div>
       </AuthCard>
+
+      {/* F2: the hub has no user menu, so its account link sits here. */}
+      <AnchorButton
+        href={`/${locale}${ROUTES.account}`}
+        variant="ghost"
+        className="w-full font-medium text-text-secondary hover:text-text-primary"
+      >
+        {tShell("accountSettings")}
+      </AnchorButton>
 
       {/* The light sign-out (docs/04 §14.3) — the navy slab it used to be was
           the heaviest thing on the screen. */}

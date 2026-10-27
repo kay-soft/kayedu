@@ -12,6 +12,8 @@ import {
   type EntityRecord,
 } from "@/components/settings/entity-manager";
 import { SectionHeader } from "@/components/shared/section-header";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
 import { formatDay } from "@/lib/format";
@@ -26,6 +28,7 @@ import { dateKey } from "@/lib/scheduling";
  */
 export default async function TermsPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "center.settings.edit");
 
   const locale = await getLocale();

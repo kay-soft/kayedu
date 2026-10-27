@@ -63,14 +63,16 @@ for (const outcome of ["approve", "decline"] as const) {
     // …and stays gone on a fresh load.
     await expect((await claimCard(manager, appLocale, email))).toHaveCount(0);
 
-    // Signing in again: approved → the student portal; declined → a new, separate person (no branch).
+    // Signing in again: approved → the student portal; declined → a new, separate
+    // person with no branch, who signed up as a Student (F4) and so lands on
+    // "Your studies" instead of the empty hub.
     await page.context().clearCookies();
     await signInWith(page, appLocale, email);
     if (outcome === "approve") {
       await expect(page).toHaveURL(/\/student\//);
     } else {
-      await expect(page).toHaveURL(/select-center/);
-      await expect(page.getByText(msg("Auth.selectCenter.emptySubtitle")).first()).toBeVisible();
+      await expect(page).toHaveURL(/\/student\/onboarding/);
+      await expect(page.getByRole("heading", { name: msg("Onboarding.student.title") })).toBeVisible();
     }
     await expectHealthy(page, appLocale);
     expect(E2E_PASSWORD.length).toBeGreaterThanOrEqual(8);

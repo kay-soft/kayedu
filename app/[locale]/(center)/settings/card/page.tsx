@@ -2,12 +2,15 @@ import { getTranslations } from "next-intl/server";
 
 import { CardLayoutForm } from "@/app/[locale]/(center)/settings/card/card-form";
 import { SectionHeader } from "@/components/shared/section-header";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { resolveCardLayout } from "@/lib/id-card";
 import { scoped } from "@/lib/db/scoped";
 
 export default async function CardCustomizationPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "center.settings.edit");
 
   const settings = await scoped(ctx).settings.get();

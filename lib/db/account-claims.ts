@@ -42,6 +42,17 @@ export type PendingAccountClaim = {
   relation: "student" | "teacher" | "staff";
 };
 
+/**
+ * How many claims `pendingClaimsForCenter` would list, without its page cap —
+ * the Approvals tab and the sidebar badge read this, so both agree with the
+ * queue by sharing its `where`.
+ */
+export function countPendingClaimsForCenter(db: Db, centerId: string): Promise<number> {
+  return db.accountClaim.count({
+    where: { status: "PENDING", targetUser: targetKnownHere(centerId) },
+  });
+}
+
 export async function pendingClaimsForCenter(
   db: Db,
   centerId: string,

@@ -52,6 +52,7 @@ import { analyticsFilterSchema } from "@/lib/validation/analytics";
 import { toSharedDateFilterInput } from "@/lib/validation/date-filter";
 import { ROUTES } from "@/lib/routes";
 import { centerSettingsFor } from "@/lib/db/platform";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
  * Analytics (M6, spec §4.1 item 5): the shared date filter (M18, day/week/
@@ -239,126 +240,128 @@ export default async function AnalyticsPage({
           count, so neither row can wrap into an orphan at any breakpoint. */}
       {/* The period in words under the heading (docs/04 §14.4) — a highlighted
           preset alone does not say which days are counted. */}
-      <PageSection title={t("revenue.title")} description={formatDayRange(from, to, locale)}>
-      <StatGrid count={showProfit ? 3 : 1}>
-        <StatCard
-          label={t("revenue.collected")}
-          value={formatMoney(revenue.collected, locale)}
-          icon={<Wallet className="size-4" />}
-          zero={noRevenue}
-          zeroLabel={t("zeroHint")}
-        />
-        {showProfit ? (
-          <>
-            <StatCard
-              label={t("revenue.centerShare")}
-              value={formatMoney(revenue.centerShare, locale)}
-              zero={noRevenue}
-              zeroLabel={t("zeroHint")}
-            />
-            <StatCard
-              label={t("revenue.teacherShare")}
-              value={formatMoney(revenue.teacherShare, locale)}
-              zero={noRevenue}
-              zeroLabel={t("zeroHint")}
-            />
-          </>
-        ) : null}
-      </StatGrid>
-
-      <StatGrid count={secondaryCount}>
-        {showProfit ? (
-          <>
-            {/* With a teacher selected, revenue narrows but expenses cannot —
-                they are not split by teacher — so the two cards say so. */}
-            <StatCard
-              label={t("revenue.expenses")}
-              value={formatMoney(expenses.total, locale)}
-              zero={expenses.total === 0}
-              zeroLabel={t("zeroHint")}
-              hint={filters.teacherId ? t("revenue.branchWide") : undefined}
-            />
-            <StatCard
-              label={t("revenue.net")}
-              value={formatMoney(net, locale)}
-              icon={net < 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
-              zero={noRevenue && expenses.total === 0}
-              zeroLabel={t("zeroHint")}
-              hint={filters.teacherId ? t("revenue.branchWide") : undefined}
-            />
-          </>
-        ) : null}
-        <StatCard
-          label={t("revenue.avgPerPayment")}
-          value={formatMoney(avgPerPayment, locale)}
-          icon={<Banknote className="size-4" />}
-          zero={noRevenue}
-          zeroLabel={t("zeroHint")}
-        />
-        {avgPerDay !== null ? (
+      <ResultsRegion className="flex flex-col gap-6">
+        <PageSection title={t("revenue.title")} description={formatDayRange(from, to, locale)}>
+        <StatGrid count={showProfit ? 3 : 1}>
           <StatCard
-            label={t("revenue.avgPerDay")}
-            value={formatMoney(avgPerDay, locale)}
+            label={t("revenue.collected")}
+            value={formatMoney(revenue.collected, locale)}
+            icon={<Wallet className="size-4" />}
             zero={noRevenue}
             zeroLabel={t("zeroHint")}
           />
+          {showProfit ? (
+            <>
+              <StatCard
+                label={t("revenue.centerShare")}
+                value={formatMoney(revenue.centerShare, locale)}
+                zero={noRevenue}
+                zeroLabel={t("zeroHint")}
+              />
+              <StatCard
+                label={t("revenue.teacherShare")}
+                value={formatMoney(revenue.teacherShare, locale)}
+                zero={noRevenue}
+                zeroLabel={t("zeroHint")}
+              />
+            </>
+          ) : null}
+        </StatGrid>
+
+        <StatGrid count={secondaryCount}>
+          {showProfit ? (
+            <>
+              {/* With a teacher selected, revenue narrows but expenses cannot —
+                  they are not split by teacher — so the two cards say so. */}
+              <StatCard
+                label={t("revenue.expenses")}
+                value={formatMoney(expenses.total, locale)}
+                zero={expenses.total === 0}
+                zeroLabel={t("zeroHint")}
+                hint={filters.teacherId ? t("revenue.branchWide") : undefined}
+              />
+              <StatCard
+                label={t("revenue.net")}
+                value={formatMoney(net, locale)}
+                icon={net < 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
+                zero={noRevenue && expenses.total === 0}
+                zeroLabel={t("zeroHint")}
+                hint={filters.teacherId ? t("revenue.branchWide") : undefined}
+              />
+            </>
+          ) : null}
+          <StatCard
+            label={t("revenue.avgPerPayment")}
+            value={formatMoney(avgPerPayment, locale)}
+            icon={<Banknote className="size-4" />}
+            zero={noRevenue}
+            zeroLabel={t("zeroHint")}
+          />
+          {avgPerDay !== null ? (
+            <StatCard
+              label={t("revenue.avgPerDay")}
+              value={formatMoney(avgPerDay, locale)}
+              zero={noRevenue}
+              zeroLabel={t("zeroHint")}
+            />
+          ) : null}
+        </StatGrid>
+        </PageSection>
+
+        {/* Two cards about students, three about teachers — five in one
+            four-wide grid stranded a single tile on its own row. */}
+        <PageSection title={t("users.title")}>
+        <StatGrid count={2} dense>
+          <StatCard
+            label={t("users.totalStudents")}
+            value={formatNumber(students.total, locale)}
+            icon={<Users className="size-4" />}
+          />
+          <StatCard
+            label={t("users.newStudents")}
+            value={formatNumber(students.new, locale)}
+            icon={<UserPlus className="size-4" />}
+            zero={students.new === 0}
+            zeroLabel={t("zeroHint")}
+          />
+        </StatGrid>
+        <StatGrid count={3} dense>
+          <StatCard
+            label={t("users.totalTeachers")}
+            value={formatNumber(teachers.total, locale)}
+            icon={<GraduationCap className="size-4" />}
+          />
+          <StatCard label={t("users.activeTeachers")} value={formatNumber(teachers.active, locale)} />
+          <StatCard
+            label={t("users.newTeachers")}
+            value={formatNumber(teachers.new, locale)}
+            zero={teachers.new === 0}
+            zeroLabel={t("zeroHint")}
+          />
+        </StatGrid>
+
+        </PageSection>
+
+        {orgGroup ? (
+          <PageSection title={t("byBranch.title")} description={t("byBranch.description")}>
+            <Card>
+              <CardContent>
+                <BranchRevenueTable rows={byBranch} showProfit={showProfit} locale={locale} />
+              </CardContent>
+            </Card>
+          </PageSection>
         ) : null}
-      </StatGrid>
-      </PageSection>
 
-      {/* Two cards about students, three about teachers — five in one
-          four-wide grid stranded a single tile on its own row. */}
-      <PageSection title={t("users.title")}>
-      <StatGrid count={2} dense>
-        <StatCard
-          label={t("users.totalStudents")}
-          value={formatNumber(students.total, locale)}
-          icon={<Users className="size-4" />}
-        />
-        <StatCard
-          label={t("users.newStudents")}
-          value={formatNumber(students.new, locale)}
-          icon={<UserPlus className="size-4" />}
-          zero={students.new === 0}
-          zeroLabel={t("zeroHint")}
-        />
-      </StatGrid>
-      <StatGrid count={3} dense>
-        <StatCard
-          label={t("users.totalTeachers")}
-          value={formatNumber(teachers.total, locale)}
-          icon={<GraduationCap className="size-4" />}
-        />
-        <StatCard label={t("users.activeTeachers")} value={formatNumber(teachers.active, locale)} />
-        <StatCard
-          label={t("users.newTeachers")}
-          value={formatNumber(teachers.new, locale)}
-          zero={teachers.new === 0}
-          zeroLabel={t("zeroHint")}
-        />
-      </StatGrid>
-
-      </PageSection>
-
-      {orgGroup ? (
-        <PageSection title={t("byBranch.title")} description={t("byBranch.description")}>
-          <Card>
-            <CardContent>
-              <BranchRevenueTable rows={byBranch} showProfit={showProfit} locale={locale} />
-            </CardContent>
-          </Card>
-        </PageSection>
-      ) : null}
-
-      {!filters.teacherId && !orgGroup ? (
-        <PageSection title={t("byTeacher.title")} description={t("byTeacher.description")}>
-          <Card>
-            <CardContent>
-              <TeacherRevenueTable rows={breakdownRows} showProfit={showProfit} locale={locale} />
-            </CardContent>
-          </Card>
-        </PageSection>
-      ) : null}
+        {!filters.teacherId && !orgGroup ? (
+          <PageSection title={t("byTeacher.title")} description={t("byTeacher.description")}>
+            <Card>
+              <CardContent>
+                <TeacherRevenueTable rows={breakdownRows} showProfit={showProfit} locale={locale} />
+              </CardContent>
+            </Card>
+          </PageSection>
+        ) : null}
+      </ResultsRegion>
     </div>
   );
 }

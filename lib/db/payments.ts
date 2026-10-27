@@ -1,8 +1,10 @@
-import type { Payment, Prisma, PrismaClient } from "@prisma/client";
+import type { Payment, Prisma, PrismaClient, SessionAttendanceChange } from "@prisma/client";
 // Relative imports on purpose — `npm run check:payments` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/sessions.ts and lib/validation/classes.ts).
+import { attendanceDisplay } from "../attendance-rules.ts";
 import { splitShare } from "../money.ts";
+import { resetAttendanceAfterReversal } from "./attendance-change.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { moneyNumber } from "./money-sums.ts";
 import { findActivePaymentMethod } from "./payment-methods.ts";
@@ -89,12 +91,17 @@ export type RecordPaymentResult =
  *   exactly like an override would be. If either is missing the payment is
  *   refused (`missingCut`) — money is never guessed at (CLAUDE.md rule 2).
  *   The split itself is still `lib/money.ts`'s, the only place it lives.
- * - **At most one active (non-voided) payment per attendee (SEC-05).** The
- *   roster row is locked and the fact re-read by a fresh statement
- *   (`lockAttendeeRow`); the database backs it with the partial unique index
- *   `Payment_one_active_per_attendee`, and the insert targets that index with
- *   `ON CONFLICT … DO NOTHING`, so even a path that skipped the lock gets
- *   `alreadyPaid`, never a second row and never a thrown error.
+ * - **At most one active payment per attendee (SEC-05)** — active = neither
+ *   voided nor refunded (T5: a refund frees the slot, as a void always did,
+ *   so a student reset by either can pay again). The roster row is locked
+ *   and the fact re-read by a fresh statement (`lockAttendeeRow`); the
+ *   database backs it with the partial unique index
+ *   `Payment_one_active_per_attendee` (WHERE voided = false AND refunded =
+ *   false), and the insert targets that index with `ON CONFLICT … DO
+ *   NOTHING` — **its predicate must match the index's exactly** or Postgres
+ *   rejects the statement (`check:security` asserts it against the
+ *   migration) — so even a path that skipped the lock gets `alreadyPaid`,
+ *   never a second row and never a thrown error.
  */
 export async function recordPayment(
   tx: Db,
@@ -168,7 +175,7 @@ export async function recordPayment(
       (gen_random_uuid()::text, ${centerId}, ${session.id}, ${session.teacherId}, ${attendeeId},
        ${roster.studentProfileId}, ${amount}, ${method.id}, ${method.name}, ${amount},
        ${split.centerShare}, ${split.teacherShare}, ${recordedBy}, now(), now(), now())
-    ON CONFLICT ("sessionAttendeeId") WHERE "voided" = false DO NOTHING
+    ON CONFLICT ("sessionAttendeeId") WHERE "voided" = false AND "refunded" = false DO NOTHING
     RETURNING *`;
   const payment = inserted[0];
   if (!payment) return { ok: false, error: "alreadyPaid" };
@@ -187,6 +194,14 @@ export type VoidPaymentResult =
        * closed sessions' payments, and a closed session refuses every void.
        */
       adjustedSettlements: AdjustedSettlement[];
+      /**
+       * T5 — the reset this void wrote on a live session (PRESENT/LATE →
+       * ABSENT, "Not arrived"), with its `attendance.correct` audit row
+       * already written. Null when the row was already ABSENT, for the
+       * void-on-absent path (`voidPaymentRow`, whose caller sets the status
+       * itself) and for a `historicalBackfill` script write.
+       */
+      attendanceChange: SessionAttendanceChange | null;
     }
   | {
       ok: false;
@@ -203,10 +218,22 @@ export type VoidPaymentResult =
 /**
  * Voids a payment — never an `UPDATE` of its money fields (CLAUDE.md rule 2).
  * The row stays exactly as recorded; only `voided`/`voidReason`/`voidedAt`/
- * `voidedBy` change. The caller writes the `AuditLog` row in the same
- * transaction (docs/01 §3, CLAUDE.md rule 7, SEC-60) and may then call
- * `recordPayment` again for the same attendee — now allowed, since no active
- * payment remains.
+ * `voidedBy` change. The caller writes the `payment.void` `AuditLog` row in
+ * the same transaction (docs/01 §3, CLAUDE.md rule 7, SEC-60).
+ *
+ * **T5 — on a live session the void also resets attendance**, in this same
+ * transaction: a PRESENT/LATE student goes back to ABSENT ("Not arrived" —
+ * the state before check-in), through the one attendance-change writer
+ * (`resetAttendanceAfterReversal`: one `SessionAttendanceChange` naming this
+ * payment, one `attendance.correct` audit row). They can then be checked in
+ * again (`recheckInAttendee`) and pay again through `recordPayment` — a NEW
+ * row with fresh snapshots; this one stays voided. A `historicalBackfill`
+ * script write states its history explicitly and skips the reset.
+ *
+ * Locks: session (shared, the closure guard) → **attendee row** → payment
+ * row — the order `changeAttendanceStatus` and `recordPayment` take — so two
+ * staff voiding the same payment, or a void racing a re-check-in or a second
+ * payment, serialize on the attendee and exactly one wins.
  *
  * - The reason is **required** (it lives on the payment row; the audit row
  *   carries ids and amounts only — D-20).
@@ -227,19 +254,32 @@ export async function voidPayment(
   options: SessionWriteOptions = {},
 ): Promise<VoidPaymentResult> {
   if (reason.trim().length === 0) return { ok: false, error: "reasonRequired" };
+  const now = options.now ?? new Date();
   const located = await tx.payment.findFirst({
     where: { centerId, id: paymentId },
-    select: { sessionId: true },
+    select: { sessionId: true, sessionAttendeeId: true },
   });
   if (!located) return { ok: false, error: "notFound" };
 
-  const gate = await ensureSessionOpenOrAutoClose(tx, located.sessionId, centerId, options.now, {
+  const gate = await ensureSessionOpenOrAutoClose(tx, located.sessionId, centerId, now, {
     historicalBackfill: options.historicalBackfill,
   });
   if (gate.status === "missing") return { ok: false, error: "notFound" };
   if (gate.status === "refused") return { ok: false, error: gate.reason };
 
-  return voidPaymentRow(tx, centerId, paymentId, reason.trim(), voidedBy);
+  await lockAttendeeRow(tx, located.sessionAttendeeId, centerId);
+  const voided = await voidPaymentRow(tx, centerId, paymentId, reason.trim(), voidedBy);
+  if (!voided.ok || options.historicalBackfill) return voided;
+
+  const attendanceChange = await resetAttendanceAfterReversal(tx, {
+    centerId,
+    attendeeId: located.sessionAttendeeId,
+    changedBy: voidedBy,
+    reason: reason.trim(),
+    cause: { voidedPaymentId: voided.payment.id },
+    now,
+  });
+  return { ...voided, attendanceChange };
 }
 
 /**
@@ -303,7 +343,7 @@ export async function voidPaymentRow(
     payment.teacherShareSnapshot,
   );
 
-  return { ok: true, payment: updated, adjustedSettlements };
+  return { ok: true, payment: updated, adjustedSettlements, attendanceChange: null };
 }
 
 /**
@@ -345,30 +385,34 @@ export type SessionReceiptTotals = {
   paidCount: number;
   presentCount: number;
   lateCount: number;
+  /**
+   * Genuine absences: an enrolled student's ABSENT row once the session is
+   * closed. T5 — never a drop-in's ABSENT row, and never a live session's
+   * (lib/attendance-rules.ts).
+   */
   absentCount: number;
+  /** T5 — ABSENT rows that read "Not arrived": every one on a live session, a drop-in's once closed. */
+  notArrivedCount: number;
+  /** `closedAt` is set — the receipt's third count is Absent, not Not arrived. */
+  sessionClosed: boolean;
   /** Refunds on this session's payments (SEC-19). */
   refundedCount: number;
   refundedAmount: number;
   /** Voided payments (SEC-07, D-06 (a)) — never counted, always shown. */
   voidedCount: number;
   voidedAmount: number;
-  /** PRESENT/LATE attendees holding no non-voided payment (SEC-07). */
+  /** PRESENT/LATE attendees holding no active (neither voided nor refunded) payment (SEC-07, T5). */
   unpaidCount: number;
   /** A session priced at 0 (D-26 (b)) — flagged on the receipt. */
   zeroPriced: boolean;
 };
 
-const EMPTY_STATUS_COUNTS = {
-  PRESENT: 0,
-  LATE: 0,
-  ABSENT: 0,
-} as const;
-
 /**
  * The money + attendance summary a session receipt shows (spec §4.1 item 7,
  * docs/04 §5 "Receipt / money summary"): what was collected, net of refunds,
  * the centre/teacher split (both net of the refunds' reversals), the
- * present/late/absent counts, and — so nothing that moved money off the books
+ * present/late/absent counts (T5: plus "Not arrived" — a live session's
+ * ABSENT rows and a drop-in's, never counted as absences), and — so nothing that moved money off the books
  * is invisible (SEC-07) — the voided payments and the present-but-unpaid
  * attendees. Every sum is a 64-bit SQL sum (D-17, lib/db/money-sums.ts).
  */
@@ -412,21 +456,25 @@ export async function sessionReceiptTotals(
       WHERE a."centerId" = ${centerId} AND a."sessionId" = ${sessionId}
         AND a."attendanceStatus" IN ('PRESENT', 'LATE')
         AND NOT EXISTS (
-          SELECT 1 FROM "Payment" p WHERE p."sessionAttendeeId" = a."id" AND NOT p."voided"
+          SELECT 1 FROM "Payment" p
+          WHERE p."sessionAttendeeId" = a."id" AND NOT p."voided" AND NOT p."refunded"
         )`,
     db.sessionAttendee.groupBy({
-      by: ["attendanceStatus"],
+      by: ["attendanceStatus", "isDropIn"],
       where: { centerId, sessionId },
       _count: { attendanceStatus: true },
     }),
-    db.session.findFirst({ where: { centerId, id: sessionId }, select: { priceSnapshot: true } }),
+    db.session.findFirst({
+      where: { centerId, id: sessionId },
+      select: { priceSnapshot: true, closedAt: true },
+    }),
   ]);
 
-  const counts: Record<keyof typeof EMPTY_STATUS_COUNTS, number> = {
-    ...EMPTY_STATUS_COUNTS,
-  };
+  // T5: one rule decides Absent vs "Not arrived" (lib/attendance-rules.ts).
+  const closed = Boolean(session?.closedAt);
+  const counts = { PRESENT: 0, LATE: 0, ABSENT: 0, NOT_ARRIVED: 0 };
   for (const group of statusGroups) {
-    counts[group.attendanceStatus] = group._count.attendanceStatus;
+    counts[attendanceDisplay(group, closed)] += group._count.attendanceStatus;
   }
   const paid = paymentRows[0];
   const refunds = refundRows[0];
@@ -439,6 +487,8 @@ export async function sessionReceiptTotals(
     presentCount: counts.PRESENT,
     lateCount: counts.LATE,
     absentCount: counts.ABSENT,
+    notArrivedCount: counts.NOT_ARRIVED,
+    sessionClosed: closed,
     refundedCount: refunds.count,
     refundedAmount: moneyNumber(refunds.amount),
     voidedCount: paid.voidedCount,
@@ -527,7 +577,7 @@ export async function sessionReceiptLines(
         centerId,
         sessionId,
         attendanceStatus: { in: ["PRESENT", "LATE"] },
-        payments: { none: { voided: false } },
+        payments: { none: { voided: false, refunded: false } },
         studentProfileId: { not: null },
       },
       orderBy: { createdAt: "asc" },

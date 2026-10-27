@@ -4,6 +4,7 @@ import * as React from "react";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { Check, ChevronDown } from "lucide-react";
 
+import { useUrlFilterSync } from "@/lib/ui/url-filter-sync";
 import { cn } from "@/lib/utils";
 
 export type SelectOptionItem = {
@@ -99,6 +100,14 @@ function Select({
   "aria-describedby"?: string;
 }) {
   const [uncontrolled, setUncontrolled] = React.useState(defaultValue);
+  // Inside a URL filter form the control re-seeds from the server's value
+  // whenever the URL moves (Back, a reset) — see `lib/ui/url-filter-sync.ts`.
+  const urlSync = useUrlFilterSync();
+  const [seenUrlSync, setSeenUrlSync] = React.useState(urlSync);
+  if (urlSync !== seenUrlSync) {
+    setSeenUrlSync(urlSync);
+    setUncontrolled(defaultValue);
+  }
   const value = controlledValue ?? uncontrolled;
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const pendingSubmit = React.useRef(false);
@@ -174,7 +183,7 @@ function Select({
           <SelectPrimitive.Popup
             className={cn(
               "max-h-[min(20rem,var(--available-height))] min-w-[var(--anchor-width)] max-w-[min(22rem,var(--available-width))]",
-              "overflow-y-auto rounded-xl border border-border bg-popover p-1 text-sm shadow-popover outline-none",
+              "scrollbar-neutral overflow-y-auto rounded-xl border border-border bg-popover p-1 text-sm shadow-popover outline-none",
               "origin-(--transform-origin) transition-ui",
               "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
               "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",

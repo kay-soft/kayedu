@@ -15,16 +15,21 @@ export function signUpProjectOnly(testInfo: TestInfo) {
 /** A password that satisfies the sign-up rule (≥ 8 characters). */
 export const E2E_PASSWORD = "e2e-Passw0rd!";
 
+/** "I'm joining as" (F4) — required on the register form; routes onboarding, grants nothing. */
+export type SignupIntent = "STUDENT" | "PARENT" | "TEACHER";
+
 export async function signUp(
   page: Page,
   locale: AppLocale,
-  person: { firstName: string; lastName: string; email: string; phone?: string },
+  person: { firstName: string; lastName: string; email: string },
+  intent: SignupIntent = "STUDENT",
 ) {
   await page.goto(`/${locale}/register`);
+  // The radio itself is visually hidden (`sr-only`); the card around it is the target.
+  await page.locator("label").filter({ has: page.locator(`input[name="signupIntent"][value="${intent}"]`) }).click();
   await page.getByLabel(t(locale, "Auth.fields.firstName"), { exact: true }).fill(person.firstName);
   await page.getByLabel(t(locale, "Auth.fields.lastName"), { exact: true }).fill(person.lastName);
   await page.getByLabel(t(locale, "Auth.fields.email"), { exact: true }).fill(person.email);
-  if (person.phone) await page.getByLabel(new RegExp(`^${t(locale, "Auth.fields.phone")}`)).fill(person.phone);
   await page.getByLabel(t(locale, "Auth.fields.password"), { exact: true }).fill(E2E_PASSWORD);
   await page.getByLabel(t(locale, "Auth.fields.confirmPassword"), { exact: true }).fill(E2E_PASSWORD);
   await page.getByRole("button", { name: t(locale, "Auth.register.submit"), exact: true }).click();

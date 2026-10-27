@@ -24,9 +24,15 @@ import {
   changeAttendanceStatus,
   consecutiveAbsenceCount,
   createAttendance,
+  recheckInAttendee,
   SessionClosedError,
   updateAttendanceStatus,
 } from "../lib/db/attendance.ts";
+import { attendanceDisplay, EXCLUDE_DROP_IN_NO_SHOWS, isDropInNoShow } from "../lib/attendance-rules.ts";
+import { studentSessionState } from "../lib/db/reception.ts";
+import { studentPastAttendance } from "../lib/db/student-portal.ts";
+import { studentSessionsWithTeacher } from "../lib/db/teacher-portal.ts";
+import { attendedSessionsToRate, submitSessionRating } from "../lib/db/ratings.ts";
 import { recordPayment, sessionReceiptTotals, voidPayment } from "../lib/db/payments.ts";
 import { refundPayment } from "../lib/db/refunds.ts";
 import {
@@ -36,6 +42,8 @@ import {
   isSessionClosed,
   listSessionAttendanceChanges,
   materializeAbsences,
+  orderChangeLog,
+  sessionChangeLog,
   SYSTEM_ACTOR_ID,
 } from "../lib/db/session-lifecycle.ts";
 import {
@@ -45,7 +53,7 @@ import {
   updateSessionShareOverride,
 } from "../lib/db/sessions.ts";
 import { createPeriodSettlement, createSessionSettlement } from "../lib/db/settlements.ts";
-import { revenueTotals } from "../lib/db/analytics.ts";
+import { attendanceStatusCounts, revenueTotals } from "../lib/db/analytics.ts";
 import {
   ensureDefaultPaymentMethods,
   listActivePaymentMethods,
@@ -292,6 +300,117 @@ function checkStatic() {
       isSessionClosed({ closedAt: null, date: D }, cairo(8, 0, 1), TZ) &&
       !isSessionClosed({ closedAt: null, date: D }, cairo(7, 23, 0), TZ) &&
       isSessionClosed({ closedAt: null, date: D }, cairo(8, 1, 0), TZ),
+  );
+
+  console.log("\nT5 — void/refund resets attendance (no database needed)");
+  const normalize = (sql: string) => sql.replace(/\s+/g, " ").trim();
+  const migrationSql = readFileSync(
+    "prisma/migrations/20261027190000_t5_void_refund_reset_attendance/migration.sql",
+    "utf8",
+  );
+  const indexPredicate = migrationSql.match(
+    /CREATE UNIQUE INDEX "Payment_one_active_per_attendee_t5"\s+ON "Payment"\("sessionAttendeeId"\) WHERE ([^;]+);/,
+  )?.[1];
+  const paymentsSource = readFileSync("lib/db/payments.ts", "utf8");
+  const conflictPredicate = paymentsSource.match(/ON CONFLICT \("sessionAttendeeId"\) WHERE (.+?) DO NOTHING/)?.[1];
+  check(
+    "recordPayment's ON CONFLICT predicate matches the active-payment index in the T5 migration exactly",
+    indexPredicate !== undefined &&
+      conflictPredicate !== undefined &&
+      normalize(indexPredicate) === normalize(conflictPredicate) &&
+      normalize(indexPredicate) === `"voided" = false AND "refunded" = false`,
+    JSON.stringify({ indexPredicate, conflictPredicate }),
+  );
+  check(
+    "The migration swaps the index without a gap: create the new one, drop the old, rename — and keeps the CHECK",
+    (() => {
+      const create = migrationSql.indexOf(`CREATE UNIQUE INDEX "Payment_one_active_per_attendee_t5"`);
+      const drop = migrationSql.indexOf(`DROP INDEX "Payment_one_active_per_attendee";`);
+      const rename = migrationSql.indexOf(
+        `ALTER INDEX "Payment_one_active_per_attendee_t5" RENAME TO "Payment_one_active_per_attendee";`,
+      );
+      return create !== -1 && create < drop && drop < rename && !/Payment_not_voided_and_refunded/.test(migrationSql.replace(/--.*$/gm, ""));
+    })(),
+  );
+  check(
+    "lockAttendeeRow's active-payment fact is 'not voided AND not refunded' too",
+    /p\."voided" = false AND p\."refunded" = false\s*\) AS "hasActivePayment"/.test(readFileSync("lib/db/session-lifecycle.ts", "utf8")),
+  );
+  const body = (source: string, name: string) => {
+    const at = source.indexOf(`export async function ${name}(`);
+    return at === -1 ? "" : source.slice(at, source.indexOf("\n}\n", at));
+  };
+  const voidBody = body(paymentsSource, "voidPayment");
+  const refundBody = body(readFileSync("lib/db/refunds.ts", "utf8"), "refundPayment");
+  check(
+    "voidPayment and refundPayment lock session → attendee → payment, then reset through the one writer",
+    voidBody.indexOf("ensureSessionOpenOrAutoClose") < voidBody.indexOf("lockAttendeeRow") &&
+      voidBody.indexOf("lockAttendeeRow") < voidBody.indexOf("voidPaymentRow") &&
+      voidBody.indexOf("voidPaymentRow") < voidBody.indexOf("resetAttendanceAfterReversal") &&
+      refundBody.indexOf("ensureSessionOpenOrAutoClose") < refundBody.indexOf("lockAttendeeRow") &&
+      refundBody.indexOf("lockAttendeeRow") < refundBody.indexOf("lockPaymentRow") &&
+      refundBody.indexOf("lockPaymentRow") < refundBody.indexOf("resetAttendanceAfterReversal") &&
+      voidBody.includes("historicalBackfill") && refundBody.includes("historicalBackfill"),
+  );
+  check(
+    "There is one attendance-change writer: only lib/db/attendance-change.ts creates SessionAttendanceChange rows",
+    [...appFiles, ...libFiles].filter((file) => /sessionAttendanceChange\.create\(/.test(readFileSync(file, "utf8")))
+      .map((file) => file.replace(/\\/g, "/"))
+      .join() === "lib/db/attendance-change.ts",
+  );
+  check(
+    "A drop-in's ABSENT row is never an absence; any live ABSENT row reads Not arrived; an enrolled one closed reads Absent",
+    isDropInNoShow({ isDropIn: true, attendanceStatus: "ABSENT" }) &&
+      !isDropInNoShow({ isDropIn: false, attendanceStatus: "ABSENT" }) &&
+      !isDropInNoShow({ isDropIn: true, attendanceStatus: "PRESENT" }) &&
+      attendanceDisplay({ isDropIn: false, attendanceStatus: "ABSENT" }, false) === "NOT_ARRIVED" &&
+      attendanceDisplay({ isDropIn: true, attendanceStatus: "ABSENT" }, true) === "NOT_ARRIVED" &&
+      attendanceDisplay({ isDropIn: false, attendanceStatus: "ABSENT" }, true) === "ABSENT" &&
+      attendanceDisplay({ isDropIn: true, attendanceStatus: "LATE" }, false) === "LATE" &&
+      JSON.stringify(EXCLUDE_DROP_IN_NO_SHOWS) === JSON.stringify({ NOT: { isDropIn: true, attendanceStatus: "ABSENT" } }),
+  );
+  check(
+    "Every consumer the drop-in rule covers applies the one filter (streak, analytics, student/parent history, teacher history)",
+    /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(body(readFileSync("lib/db/attendance.ts", "utf8"), "consecutiveAbsenceCount")) &&
+      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(body(readFileSync("lib/db/analytics.ts", "utf8"), "attendanceStatusCounts")) &&
+      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(readFileSync("lib/db/student-portal.ts", "utf8").split("export function studentPastAttendance")[1] ?? "") &&
+      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(readFileSync("lib/db/teacher-portal.ts", "utf8").split("export function studentSessionsWithTeacher")[1] ?? ""),
+  );
+  // The change log's order is causal: changes run on the app's clock and
+  // payments on the database's — here the two clocks are a month apart.
+  const at = (iso: string) => new Date(iso);
+  const log = orderChangeLog({
+    checkedInAt: at("2026-11-01T10:00:00Z"),
+    changes: [
+      { id: "c1", changedAt: at("2026-12-16T14:05:00Z"), fromStatus: "PRESENT", toStatus: "ABSENT", reason: "Wrong student", byName: null, cause: { reversal: "void", paymentId: "p1" } },
+      { id: "c2", changedAt: at("2026-12-16T14:20:00Z"), fromStatus: "ABSENT", toStatus: "LATE", reason: null, byName: null, cause: null },
+    ],
+    payments: [
+      { id: "p2", recordedAt: at("2026-11-01T10:30:00Z"), amount: PRICE, byName: null },
+      { id: "p1", recordedAt: at("2026-11-01T10:01:00Z"), amount: PRICE, byName: null },
+    ],
+  });
+  check(
+    "The change log reads checked in → paid → voided (amount, reason) → reset → checked in again → paid, whatever the clocks",
+    log.map((event) => event.kind).join() === "checkIn,payment,reversal,change,change,payment" &&
+      log[1].kind === "payment" && log[1].paymentId === "p1" &&
+      log[2].kind === "reversal" && log[2].reversal === "void" && log[2].amount === PRICE && log[2].reason === "Wrong student" &&
+      log[3].kind === "change" && log[3].toStatus === "ABSENT" && log[3].reason === null &&
+      log[4].kind === "change" && log[4].fromStatus === "ABSENT" && log[4].toStatus === "LATE" &&
+      log[5].kind === "payment" && log[5].paymentId === "p2",
+    JSON.stringify(log.map((event) => event.kind)),
+  );
+  const refundLog = orderChangeLog({
+    checkedInAt: at("2026-12-16T14:00:00Z"),
+    changes: [
+      { id: "c1", changedAt: at("2026-12-16T14:10:00Z"), fromStatus: "PRESENT", toStatus: "ABSENT", reason: "cash back", byName: null, cause: { reversal: "refund", paymentId: "p1" } },
+    ],
+    payments: [{ id: "p1", recordedAt: at("2026-12-16T14:01:00Z"), amount: PRICE, byName: null }],
+  });
+  check(
+    "A refund reads as a refund in the log, not as a void",
+    refundLog.map((event) => event.kind).join() === "checkIn,payment,reversal,change" &&
+      refundLog[2].kind === "reversal" && refundLog[2].reversal === "refund",
   );
 
   console.log("\nPermissions (no database needed)");
@@ -889,6 +1008,313 @@ async function main() {
     crossCheckInRefused = true;
   }
   check("Centre B cannot check a student into Centre A's session", crossCheckInRefused);
+
+  await checkVoidRefundReset();
+
+  // ── 7. T5 — a void or refund on a live session resets attendance ───────
+  async function checkVoidRefundReset() {
+    console.log("\n7. T5 — void/refund on a live session resets attendance");
+    const classT5 = await prisma.classGroup.create({
+      data: scopedData(centerA.id, {
+        startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"),
+        teacherId: teacher.id, price: PRICE, centerShareType: "FIXED", centerShareValue: FIXED_CUT,
+        lateThresholdMinutes: CLASS_THRESHOLD,
+      }),
+    });
+    async function t5Student(code: string) {
+      const user = await prisma.user.create({
+        data: { firstName: code, lastName: "T5", email: `${EMAIL_PREFIX}${code.toLowerCase()}@kayedu.test`, locale: "en" },
+      });
+      const profile = await prisma.studentProfile.create({
+        data: scopedData(centerA.id, { userId: user.id, studentCode: code, firstName: code, lastName: "Local" }),
+      });
+      return { userId: user.id, id: profile.id };
+    }
+    const [voider, refunder, enrolledReset, noShow, booker, racer] = await Promise.all(
+      ["T5V", "T5R", "T5E", "T5N", "T5B", "T5C"].map(t5Student),
+    );
+    await prisma.enrollment.create({
+      data: { centerId: centerA.id, studentProfileId: enrolledReset.id, classGroupId: classT5.id, status: "ACTIVE" },
+    });
+    const enrolledRow = await prisma.enrollment.findFirstOrThrow({ where: { studentProfileId: enrolledReset.id } });
+    const live = await makeSession(day(16), "16:00", "18:00", classT5.id);
+    const gateSession = { id: live.id, teacherId: teacher.id, classGroupId: classT5.id };
+
+    // Void → reset → re-check-in → a NEW payment.
+    const vA = await checkIn(live.id, voider.id, cairo(16, 16, 0));
+    const p1 = await pay(vA.id, cairo(16, 16, 1));
+    const voided = await prisma.$transaction((tx) =>
+      voidPayment(tx, centerA.id, p1.id, "Wrong student", staff.id, { now: cairo(16, 16, 5) }),
+    );
+    const vAfterVoid = await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: vA.id } });
+    check(
+      "voiding a payment on a live session resets the attendee to ABSENT, in the same call, with one change row naming the void",
+      voided.ok &&
+        vAfterVoid.attendanceStatus === "ABSENT" &&
+        voided.attendanceChange?.fromStatus === "PRESENT" &&
+        voided.attendanceChange.toStatus === "ABSENT" &&
+        voided.attendanceChange.voidedPaymentId === p1.id &&
+        voided.attendanceChange.refundedPaymentId === null &&
+        voided.attendanceChange.reason === "Wrong student" &&
+        (await prisma.sessionAttendanceChange.count({ where: { sessionId: live.id, studentProfileId: voider.id } })) === 1,
+      JSON.stringify(voided),
+    );
+    const voidResetAudit = await prisma.auditLog.findMany({ where: { entityId: vA.id, action: "attendance.correct" } });
+    check(
+      "the reset writes the attendance.correct audit row (ids only, trigger payment.void)",
+      voidResetAudit.length === 1 &&
+        (voidResetAudit[0].after as { trigger?: string; voidedPaymentId?: string } | null)?.trigger === "payment.void" &&
+        (voidResetAudit[0].after as { voidedPaymentId?: string } | null)?.voidedPaymentId === p1.id &&
+        !JSON.stringify(voidResetAudit[0].after).includes("Wrong student"),
+    );
+    const afterVoidTotals = await sessionReceiptTotals(prisma, centerA.id, live.id);
+    check(
+      "the reset student is Not arrived: out of the checked-in counts, not absent, not unpaid",
+      afterVoidTotals.presentCount === 0 &&
+        afterVoidTotals.lateCount === 0 &&
+        afterVoidTotals.absentCount === 0 &&
+        afterVoidTotals.notArrivedCount === 1 &&
+        afterVoidTotals.unpaidCount === 0 &&
+        afterVoidTotals.collected === 0 &&
+        !afterVoidTotals.sessionClosed,
+      JSON.stringify(afterVoidTotals),
+    );
+    const readyAgain = await studentSessionState(prisma, {
+      centerId: centerA.id,
+      session: gateSession,
+      student: { id: voider.id, userId: voider.userId },
+    });
+    check("reception offers the reset student for check-in again (ready, not 'already')", readyAgain.outcome === "ready");
+    const payWhileReset = await prisma.$transaction((tx) =>
+      recordPayment(tx, centerA.id, vA.id, methodA.id, staff.id, { now: cairo(16, 16, 6) }),
+    );
+    check("a Not-arrived student cannot pay before checking in again", !payWhileReset.ok && payWhileReset.error === "attendanceNotPayable");
+    const recheck = await recheckInAttendee(prisma, { centerId: centerA.id, attendeeId: vA.id, recordedBy: staff.id }, { now: cairo(16, 16, 20) });
+    check(
+      "re-check-in: same row, Late decided by the server from this arrival, recordedAt = now, ABSENT → LATE logged",
+      recheck.ok &&
+        recheck.attendee.id === vA.id &&
+        recheck.attendee.attendanceStatus === "LATE" &&
+        recheck.attendee.recordedAt.getTime() === cairo(16, 16, 20).getTime() &&
+        recheck.change.fromStatus === "ABSENT" &&
+        recheck.change.toStatus === "LATE" &&
+        (await prisma.sessionAttendee.count({ where: { sessionId: live.id, studentProfileId: voider.id } })) === 1,
+      JSON.stringify(recheck),
+    );
+    const twice = await recheckInAttendee(prisma, { centerId: centerA.id, attendeeId: vA.id, recordedBy: staff.id }, { now: cairo(16, 16, 21) });
+    check("checking in a PRESENT/LATE row again is refused (alreadyCheckedIn)", !twice.ok && twice.error === "alreadyCheckedIn");
+    const p2 = await pay(vA.id, cairo(16, 16, 22));
+    const voiderPayments = await prisma.payment.findMany({ where: { sessionAttendeeId: vA.id }, orderBy: { recordedAt: "asc" } });
+    check(
+      "void then re-check-in then re-pay yields two payments: the first still voided and untouched, the second active with fresh snapshots",
+      voiderPayments.length === 2 &&
+        voiderPayments.filter((row) => row.voided).length === 1 &&
+        voiderPayments.find((row) => row.id === p1.id)?.voided === true &&
+        voiderPayments.find((row) => row.id === p1.id)?.amount === p1.amount &&
+        p2.id !== p1.id && !p2.voided && !p2.refunded &&
+        p2.priceSnapshot === PRICE && p2.centerShareSnapshot === FIXED_CUT && p2.teacherShareSnapshot === TEACHER_SHARE,
+      JSON.stringify(voiderPayments.map((row) => [row.id, row.voided, row.refunded])),
+    );
+
+    // Refund → reset → re-check-in → re-pay: the refund frees the slot.
+    const rA = await checkIn(live.id, refunder.id, cairo(16, 16, 2));
+    const q1 = await pay(rA.id, cairo(16, 16, 3));
+    const refunded = await prisma.$transaction((tx) =>
+      refundPayment(tx, centerA.id, q1.id, "cash back", staff.id, { now: cairo(16, 16, 30) }),
+    );
+    check(
+      "a refund on a live session resets the attendee too — the change row names the refund, not a void",
+      refunded.ok &&
+        refunded.attendanceChange?.toStatus === "ABSENT" &&
+        refunded.attendanceChange.refundedPaymentId === q1.id &&
+        refunded.attendanceChange.voidedPaymentId === null &&
+        (await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: rA.id } })).attendanceStatus === "ABSENT",
+      JSON.stringify(refunded),
+    );
+    const refundAudit = await prisma.auditLog.findMany({ where: { entityId: rA.id, action: "attendance.correct" } });
+    check(
+      "the refund's reset is audited (attendance.correct, trigger payment.refund)",
+      refundAudit.length === 1 && (refundAudit[0].after as { trigger?: string } | null)?.trigger === "payment.refund",
+    );
+    await recheckInAttendee(prisma, { centerId: centerA.id, attendeeId: rA.id, recordedBy: staff.id }, { now: cairo(16, 16, 31) });
+    const q2 = await prisma.$transaction((tx) =>
+      recordPayment(tx, centerA.id, rA.id, methodA.id, staff.id, { now: cairo(16, 16, 32) }),
+    );
+    const q1After = await prisma.payment.findUniqueOrThrow({ where: { id: q1.id }, include: { refund: true } });
+    check(
+      "a refunded payment frees the attendee's active-payment slot: re-pay works, the refund row and flag stay as they were",
+      q2.ok &&
+        q2.payment.id !== q1.id &&
+        q1After.refunded && !q1After.voided && q1After.refund?.amount === q1.amount &&
+        (await prisma.payment.count({ where: { sessionAttendeeId: rA.id, voided: false, refunded: false } })) === 1,
+      JSON.stringify(q2),
+    );
+
+    // A refund/void that is already done is refused as before; a reason is still required.
+    const voidAgain = await prisma.$transaction((tx) => voidPayment(tx, centerA.id, p1.id, "again", staff.id, { now: cairo(16, 16, 40) }));
+    const refundAgain = await prisma.$transaction((tx) => refundPayment(tx, centerA.id, q1.id, "again", staff.id, { now: cairo(16, 16, 40) }));
+    const noReason = await prisma.$transaction((tx) => voidPayment(tx, centerA.id, p2.id, "  ", staff.id, { now: cairo(16, 16, 40) }));
+    check(
+      "an already voided/refunded payment is refused as before, and a void still needs its reason (D-13)",
+      !voidAgain.ok && voidAgain.error === "alreadyVoided" &&
+        !refundAgain.ok && refundAgain.error === "alreadyRefunded" &&
+        !noReason.ok && noReason.error === "reasonRequired",
+    );
+
+    // Concurrency: a void racing a re-check-in on one student — one transaction at a time, coherent result.
+    const cA = await checkIn(live.id, racer.id, cairo(16, 16, 4));
+    const c1 = await pay(cA.id, cairo(16, 16, 5));
+    const [raceVoid, raceRecheck] = await Promise.all([
+      prisma.$transaction((tx) => voidPayment(tx, centerA.id, c1.id, "race", staff.id, { now: cairo(16, 16, 41) })),
+      recheckInAttendee(prisma, { centerId: centerA.id, attendeeId: cA.id, recordedBy: staff.id }, { now: cairo(16, 16, 41) }),
+    ]);
+    const cAfter = await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: cA.id } });
+    check(
+      "a void racing a re-check-in serializes on the attendee row: no duplicate row, no second active payment, a coherent status",
+      raceVoid.ok &&
+        (await prisma.sessionAttendee.count({ where: { sessionId: live.id, studentProfileId: racer.id } })) === 1 &&
+        (await prisma.payment.count({ where: { sessionAttendeeId: cA.id, voided: false, refunded: false } })) === 0 &&
+        (raceRecheck.ok ? cAfter.attendanceStatus !== "ABSENT" : raceRecheck.error === "alreadyCheckedIn" && cAfter.attendanceStatus === "ABSENT"),
+      JSON.stringify({ raceRecheck, status: cAfter.attendanceStatus }),
+    );
+
+    // F6 — a booking survives the reset and is linked (again) on re-check-in.
+    await prisma.sessionBooking.create({
+      data: { centerId: centerA.id, sessionId: live.id, studentId: booker.userId, status: "CONFIRMED" },
+    });
+    const bA = await checkIn(live.id, booker.id, cairo(16, 16, 6));
+    const bPay = await pay(bA.id, cairo(16, 16, 7));
+    await prisma.$transaction((tx) => voidPayment(tx, centerA.id, bPay.id, "wrong class", staff.id, { now: cairo(16, 16, 42) }));
+    const bookingAfterReset = await prisma.sessionBooking.findFirstOrThrow({ where: { sessionId: live.id, studentId: booker.userId } });
+    await prisma.sessionBooking.update({ where: { id: bookingAfterReset.id }, data: { sessionAttendeeId: null } });
+    await recheckInAttendee(prisma, { centerId: centerA.id, attendeeId: bA.id, recordedBy: staff.id }, { now: cairo(16, 16, 43) });
+    const bookingAfterRecheck = await prisma.sessionBooking.findFirstOrThrow({ where: { sessionId: live.id, studentId: booker.userId } });
+    check(
+      "a reset does not cancel or unlink the booking (still CONFIRMED, linked to the same row); re-check-in links it again without conflict",
+      bookingAfterReset.status === "CONFIRMED" &&
+        bookingAfterReset.sessionAttendeeId === bA.id &&
+        bookingAfterRecheck.status === "CONFIRMED" &&
+        bookingAfterRecheck.sessionAttendeeId === bA.id,
+      JSON.stringify({ bookingAfterReset, bookingAfterRecheck }),
+    );
+    // Leave the booker reset again (a drop-in who never came) for the exclusions below.
+    const bPay2 = await pay(bA.id, cairo(16, 16, 44));
+    await prisma.$transaction((tx) => voidPayment(tx, centerA.id, bPay2.id, "left", staff.id, { now: cairo(16, 16, 45) }));
+
+    // A drop-in who is voided and never comes back, and an enrolled student who is reset.
+    const nA = await checkIn(live.id, noShow.id, cairo(16, 16, 8));
+    const nPay = await pay(nA.id, cairo(16, 16, 9));
+    await prisma.$transaction((tx) => voidPayment(tx, centerA.id, nPay.id, "not this class", staff.id, { now: cairo(16, 16, 46) }));
+    const eA = await checkIn(live.id, enrolledReset.id, cairo(16, 16, 10), enrolledRow.id);
+    const ePay = await pay(eA.id, cairo(16, 16, 11));
+    await prisma.$transaction((tx) => refundPayment(tx, centerA.id, ePay.id, "teacher absent", staff.id, { now: cairo(16, 16, 47) }));
+
+    // The change log on the receipt.
+    const changeLog = await sessionChangeLog(prisma, centerA.id, live.id);
+    const voiderLog = changeLog.find((entry) => entry.studentProfileId === voider.id);
+    check(
+      "the receipt's change log reads checked in → paid → voided (amount, reason) → reset → checked in again → paid",
+      voiderLog?.events.map((event) => event.kind).join() === "checkIn,payment,reversal,change,change,payment" &&
+        voiderLog.events[2].kind === "reversal" &&
+        voiderLog.events[2].reversal === "void" &&
+        voiderLog.events[2].amount === PRICE &&
+        voiderLog.events[2].reason === "Wrong student",
+      JSON.stringify(voiderLog?.events.map((event) => event.kind)),
+    );
+    const refunderLog = changeLog.find((entry) => entry.studentProfileId === refunder.id);
+    check(
+      "a refund reads as a refund in the change log",
+      refunderLog?.events.some((event) => event.kind === "reversal" && event.reversal === "refund" && event.reason === "cash back") === true,
+    );
+
+    // Close: the drop-in's ABSENT rows are no absence anywhere; the enrolled one is, as today.
+    const closedT5 = await closeSession(prisma, centerA.id, live.id, { closedBy: staff.id, now: cairo(16, 18, 30) });
+    check("End session closes it (materializeAbsences stays idempotent: the reset rows already exist)", closedT5.ok && closedT5.absentCreated === 0, JSON.stringify(closedT5));
+    const closedTotals = await sessionReceiptTotals(prisma, centerA.id, live.id);
+    // The race above may legally end either way; the racer is a drop-in.
+    const racerIn = cAfter.attendanceStatus !== "ABSENT";
+    check(
+      "the closed receipt counts the enrolled reset student as absent and no drop-in no-show",
+      closedTotals.sessionClosed &&
+        closedTotals.absentCount === 1 &&
+        closedTotals.notArrivedCount === (racerIn ? 2 : 3) &&
+        closedTotals.lateCount + closedTotals.presentCount === (racerIn ? 3 : 2),
+      JSON.stringify(closedTotals),
+    );
+    check(
+      "a drop-in ABSENT row is not in the absence streak; the enrolled one still is",
+      (await consecutiveAbsenceCount(prisma, centerA.id, classT5.id, noShow.id, day(16))) === 0 &&
+        (await consecutiveAbsenceCount(prisma, centerA.id, classT5.id, enrolledReset.id, day(16))) === 1,
+    );
+    const statusCounts = await attendanceStatusCounts(prisma, centerA.id, { from: day(16), to: day(16) });
+    check("analytics' absences exclude the drop-in no-shows (one enrolled absence)", statusCounts.ABSENT === 1, JSON.stringify(statusCounts));
+    const noShowHistory = await studentPastAttendance(prisma, centerA.id, noShow.id, day(17));
+    const enrolledHistory = await studentPastAttendance(prisma, centerA.id, enrolledReset.id, day(17));
+    check(
+      "the drop-in no-show has no past session in the student/parent history; the enrolled absence is still there",
+      noShowHistory.every((row) => row.sessionId !== live.id) && enrolledHistory.some((row) => row.sessionId === live.id),
+    );
+    check(
+      "nor in the teacher's history with that student",
+      (await studentSessionsWithTeacher(prisma, centerA.id, teacher.id, noShow.id)).every((row) => row.sessionId !== live.id),
+    );
+    const toRate = await attendedSessionsToRate(prisma, noShow.userId, cairo(16, 20, 0));
+    const voiderToRate = await attendedSessionsToRate(prisma, voider.userId, cairo(16, 20, 0));
+    const rateReset = await submitSessionRating(prisma, { studentUserId: enrolledReset.userId, sessionId: live.id, score: 5, now: cairo(16, 20, 0) });
+    check(
+      "ratings exclude ABSENT: a reset or no-show student is not asked and cannot rate; the re-checked-in one is asked",
+      toRate.every((row) => row.sessionId !== live.id) &&
+        voiderToRate.some((row) => row.sessionId === live.id) &&
+        !rateReset.ok && rateReset.error === "notAttended",
+    );
+
+    // Revenue and settlements see only the live payments.
+    const revenue = await revenueTotals(prisma, centerA.id, { from: day(16), to: day(16) });
+    const settled = await prisma.$transaction((tx) =>
+      createSessionSettlement(tx, centerA.id, live.id, staff.id, { now: cairo(16, 18, 31) }),
+    );
+    check(
+      "revenue and the settlement count only the live payments (the re-payments), never the voided or refunded ones",
+      revenue.collected === 2 * PRICE &&
+        revenue.teacherShare === 2 * TEACHER_SHARE &&
+        settled.ok &&
+        settled.settlement.totalAmount === 2 * TEACHER_SHARE,
+      JSON.stringify({ revenue, settled }),
+    );
+
+    // A closed session refuses void, refund and re-check-in.
+    const voidClosed = await prisma.$transaction((tx) => voidPayment(tx, centerA.id, p2.id, "late", staff.id, { now: cairo(16, 18, 40) }));
+    const refundClosed = await prisma.$transaction((tx) => refundPayment(tx, centerA.id, p2.id, "late", staff.id, { now: cairo(16, 18, 40) }));
+    const recheckClosed = await recheckInAttendee(prisma, { centerId: centerA.id, attendeeId: nA.id, recordedBy: staff.id }, { now: cairo(16, 18, 40) });
+    check(
+      "a closed session refuses void, refund and re-check-in (sessionClosed), and nothing moved",
+      !voidClosed.ok && voidClosed.error === "sessionClosed" &&
+        !refundClosed.ok && refundClosed.error === "sessionClosed" &&
+        !recheckClosed.ok && recheckClosed.error === "sessionClosed" &&
+        (await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: nA.id } })).attendanceStatus === "ABSENT" &&
+        !(await prisma.payment.findUniqueOrThrow({ where: { id: p2.id } })).voided,
+    );
+    const crossRecheck = await recheckInAttendee(prisma, { centerId: centerB.id, attendeeId: nA.id, recordedBy: staff.id }, { now: cairo(16, 16, 50) });
+    check("Centre B cannot re-check-in Centre A's attendee (notFound)", !crossRecheck.ok && crossRecheck.error === "notFound");
+
+    // historicalBackfill (scripts) states history explicitly: no reset.
+    const backfillSession = await makeSession(day(2), "10:00", "11:00", classT5.id);
+    const hA = await createAttendance(
+      prisma,
+      { centerId: centerA.id, sessionId: backfillSession.id, studentProfileId: racer.id, enrollmentId: null, isDropIn: true, recordedBy: staff.id },
+      { historicalBackfill: true, status: "PRESENT" },
+    );
+    const hPay = await prisma.$transaction((tx) => recordPayment(tx, centerA.id, hA.id, methodA.id, staff.id, { historicalBackfill: true }));
+    const hVoid = hPay.ok
+      ? await prisma.$transaction((tx) => voidPayment(tx, centerA.id, hPay.payment.id, "backfill", staff.id, { historicalBackfill: true }))
+      : null;
+    check(
+      "a historicalBackfill void leaves the attendance it was told about (no reset)",
+      hVoid?.ok === true &&
+        hVoid.attendanceChange === null &&
+        (await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: hA.id } })).attendanceStatus === "PRESENT",
+    );
+  }
 }
 
 main()

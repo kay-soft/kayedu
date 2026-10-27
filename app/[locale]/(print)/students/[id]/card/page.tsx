@@ -3,6 +3,8 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { IdCardPreview } from "@/components/center/id-card-preview";
 import { PrintToolbar } from "@/components/shared/print-toolbar";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { studentCardSvg } from "@/lib/db/id-cards";
 import { scoped } from "@/lib/db/scoped";
@@ -22,6 +24,7 @@ export default async function StudentCardPrintPage({
   params: Promise<{ id: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <div className="mx-auto w-full max-w-2xl p-4 sm:p-8"><PickBranchScreen ctx={ctx} /></div>;
   await requirePermission(ctx, "student.manage");
 
   const { id } = await params;

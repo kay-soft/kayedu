@@ -19,10 +19,13 @@ Set them in Vercel → Project → Settings → Environment Variables, per envir
 | `DIRECT_URL` | Yes for migrations (set it anyway — `prisma validate`/`generate` read the schema's `directUrl`) | server | Same screen → **Session pooler** (port 5432). |
 | `NEXT_PUBLIC_SUPABASE_URL` | **Yes** | public | Supabase → Project Settings → API → Project URL. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Yes** | public | Same page → `anon` / publishable key. (The Data API is closed to it — SEC-10.) |
+| `MEDIA_UPLOADS_ENABLED` | No (default off) | server only | `true` lets the Branding logo change store a file. While off, logo and profile-photo uploads validate and then answer "not connected" — nothing is stored. Turn on only once media storage is connected (M20). |
+| `MEDIA_AVATARS_DISPLAY` | No (default off) | server only | `true` shows profile photos in the user menu, teacher cards and rosters. Off: the photo shows only on the Account page. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes for photos, ID cards, logos, session uploads | **server only** | Same page → `service_role` key. Never prefix with `NEXT_PUBLIC_`. Without it, Storage features degrade. |
 | `NEXT_PUBLIC_APP_URL` | **Yes** in production | public | The deployment's real origin, e.g. `https://kayedu.example` — no trailing slash. Used for the email-confirmation redirect. |
 | `REQUIRE_EMAIL_CONFIRMATION` | **`true` in production** | server | A literal `true`. Needs Supabase *Confirm email* on **and** working SMTP. |
 | `ALLOW_AUTO_CONFIRM_DEMO` | No — **demo only** | server | `yes` only for a demo deployment with *Confirm email* off. See §4. Ignored if `REQUIRE_EMAIL_CONFIRMATION=true`. |
+| `ALLOW_UNVERIFIED_EMAIL_CHANGE` | No — **demo only** | server | `yes` lets Account settings change a person's email without a confirmation link, until SMTP exists. Off → the email field is read-only. See §4. Ignored if `REQUIRE_EMAIL_CONFIRMATION=true` — and production **refuses to start** with both set. |
 | `KAYEDU_ENV` | Only off-Vercel | server | `production` marks a non-Vercel production host. Vercel sets `VERCEL_ENV` itself — don't set either by hand on Vercel. |
 
 `NODE_ENV` and `NEXT_RUNTIME` are set by Next/Vercel.
@@ -69,6 +72,10 @@ What the guard does (`instrumentation.ts` → `lib/auth/production-guard.ts`, `l
 
 The override: `ALLOW_AUTO_CONFIRM_DEMO=yes` (exact value) on a production deployment lifts both checks, and logs a loud `!!! KayEdu: ALLOW_AUTO_CONFIRM_DEMO=yes … !!!` warning at start. It is off by default, ignored when `REQUIRE_EMAIL_CONFIRMATION=true`, and `check:security` asserts the guard still refuses without it. The account-claim flow still prevents a sign-up from taking over a staff-created person, but emails are unverified. **Remove it before a real centre** (M20).
 
+### The email-change override (F2)
+
+`ALLOW_UNVERIFIED_EMAIL_CHANGE=yes` (exact value) lets a signed-in person change their own email on **Account settings** (`/{locale}/account`) without a confirmation link: after their current password is checked (rate-limited per account and per IP), the Supabase admin API sets the new address **already confirmed** (so it needs `SUPABASE_SERVICE_ROLE_KEY`). Without it the email field is read-only ("coming soon"). It logs a loud `!!! KayEdu: ALLOW_UNVERIFIED_EMAIL_CHANGE=yes … !!!` warning at every server start, does nothing when `REQUIRE_EMAIL_CONFIRMATION=true` (then Supabase's own email-change flow mails a link to the new address, which lands on `/{locale}/auth/confirm`), and a **production deployment refuses to start** when both are set. It adds no hole the demo posture does not already have: with *Confirm email* off, anyone can already sign up with an address they do not control. **Remove it before a real centre** (M20).
+
 ## 5. Storage
 
 Buckets: `avatars`, `id-cards`, `logos`, `session-uploads`. The `20261017090100_sec2a_data_api_lockdown` migration creates them **private** with size and MIME caps (it only warns if the migration role lacks privilege on `storage.buckets` — then create them by hand).
@@ -88,5 +95,6 @@ Do this by hand on the deployed URL, in a private window. Passwords are the seed
 3. **Student photo upload:** as an owner/manager/receptionist open a student → upload a small JPEG/PNG (< 1 MB). It must display (signed URL) and survive a reload.
 4. **Print a receipt:** as a receptionist/owner open a closed session with a payment → print/receipt view → browser print preview renders cleanly (no app chrome).
 5. **Response headers** (browser DevTools → Network → any page → Headers, or `curl -I https://<origin>/en/login`): `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, `Content-Security-Policy-Report-Only`; **no** `X-Powered-By`.
-6. **Start-up log:** Vercel → Logs shows no `AuthMisconfiguredError`; with the override you see the loud warning (and know to remove it).
+6. **Start-up log:** Vercel → Logs shows no `AuthMisconfiguredError`; with either override (`ALLOW_AUTO_CONFIRM_DEMO`, `ALLOW_UNVERIFIED_EMAIL_CHANGE`) you see its loud warning (and know to remove it).
 7. **Tenant sanity:** `manager.downtown` cannot see Nokhba's data; `teacher.shared` sees both branches' sessions only.
+8. **Account settings:** as any role, open the user menu → Account settings; change the name and save; change the password with the wrong current password (refused), then the right one. With `ALLOW_UNVERIFIED_EMAIL_CHANGE=yes`, change the email to a fresh address and sign in with it; without it, the email field is read-only.

@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-import { optionalPhone } from "./phone-schema.ts";
-
 export const localeSchema = z.enum(["ar", "en"]);
 
-const email = z
+export const email = z
   .string()
   .trim()
   .min(1, "required")
@@ -12,9 +10,10 @@ const email = z
   .email("invalidEmail")
   .transform((value) => value.toLowerCase());
 
-const password = z.string().min(8, "passwordTooShort").max(72, "tooLong");
+/** The password policy — sign-up and Account settings share it. */
+export const password = z.string().min(8, "passwordTooShort").max(72, "tooLong");
 
-const personName = z.string().trim().min(1, "required").max(60, "tooLong");
+export const personName = z.string().trim().min(1, "required").max(60, "tooLong");
 
 export const signInSchema = z.object({
   email,
@@ -30,12 +29,17 @@ export const resendConfirmationSchema = z.object({
   locale: localeSchema,
 });
 
+/** F4: who the person says they are joining as — required, three values. */
+export const signupIntentSchema = z.enum(["STUDENT", "PARENT", "TEACHER"], {
+  error: "intentRequired",
+});
+
 export const signUpSchema = z
   .object({
+    signupIntent: signupIntentSchema,
     firstName: personName,
     lastName: personName,
     email,
-    phone: optionalPhone,
     password,
     confirmPassword: z.string().max(72, "tooLong"),
     locale: localeSchema,
@@ -56,6 +60,11 @@ export const signUpSchema = z
 export const selectCenterSchema = z.object({
   selectionId: z.string().uuid("invalidCenter"),
   locale: localeSchema,
+  /**
+   * T6: the page a branch was picked from (the pick-a-branch screen), so the
+   * pick lands back there. Untrusted — only ever read through `safeNextPath`.
+   */
+  next: z.string().max(512).optional(),
 });
 
 /**
@@ -81,6 +90,17 @@ export const createInvitationSchema = z.object({
   email,
   role: staffRoleField,
   locale: localeSchema,
+  /**
+   * F1: the branch to invite into; absent = the active branch. Only an id —
+   * the action re-resolves the actor's context there and checks the
+   * permission at that branch (`getTenantContextForBranch`).
+   */
+  branchId: z
+    .string()
+    .trim()
+    .max(64, "invalidCenter")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
 });
 
 export const invitationIdSchema = z.object({

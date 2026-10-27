@@ -39,12 +39,12 @@ import { expenseTotals, revenueTotals } from "../lib/db/analytics.ts";
 import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import { revenueTotalsRollup } from "../lib/db/organizations.ts";
 import { loadPermissionGrants } from "../lib/db/permissions.ts";
-import { verifiedChildLinks } from "../lib/db/parents.ts";
+import { activeChildLinks, hashFamilyCode } from "../lib/db/parents.ts";
 import { baselineGrantKeys, centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
 import { splitShare } from "../lib/money.ts";
 import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
 import { DEFAULT_SEED_EMAIL_DOMAIN, SEED_EMAIL_DOMAIN, mail } from "../prisma/seed-data/domain.ts";
-import { BRANCHES, seedAccounts, type StaffRole } from "../prisma/seed-data/plan.ts";
+import { BRANCHES, DEV_FAMILY_CODES, seedAccounts, type StaffRole } from "../prisma/seed-data/plan.ts";
 import { pageGateFor } from "./lib/nav-gates.ts";
 
 const prisma = new PrismaClient();
@@ -200,17 +200,37 @@ async function main() {
   check("Student nav is the 3 student items", same(navForExperience("student", "STUDENT").map((i) => i.labelKey), EXPECTED_STUDENT_NAV));
   check("Parent nav is the 1 parent item", same(navForExperience("parent", "PARENT").map((i) => i.labelKey), EXPECTED_PARENT_NAV));
 
+  // F3: families are FamilyLinks (a real code issued and accepted, or the
+  // migration's LEGACY_VERIFIED copy of a verified ParentLink).
   const family = byEmail.get(mail("parent.family"));
   if (family) {
-    const links = await prisma.parentLink.findMany({ where: { parentUserId: family.id } });
-    const verified = (await verifiedChildLinks(prisma, family.id)).length;
-    check("The family parent has 2 VERIFIED and 1 PENDING child", links.length === 3 && verified === 2, `${links.length} links, ${verified} verified`);
+    const links = await activeChildLinks(prisma, family.id);
+    const branches = new Set(links.flatMap((link) => link.studentUser.studentProfiles.map((profile) => profile.center.slug)));
+    check(
+      "The family parent has 2 ACTIVE children, one per Center 60 branch",
+      links.length === 2 && branches.has("center-60-downtown") && branches.has("center-60-nasr-city"),
+      `${links.length} links at ${[...branches].join(", ")}`,
+    );
   }
   const nokhbaParent = byEmail.get(mail("parent.nokhba"));
   if (nokhbaParent) {
-    const verified = await verifiedChildLinks(prisma, nokhbaParent.id);
-    check("The second parent's verified child is at Al Nokhba", verified.length === 1 && verified[0].center.slug === "al-nokhba-academy");
+    const links = await activeChildLinks(prisma, nokhbaParent.id);
+    const slugs = links.flatMap((link) => link.studentUser.studentProfiles.map((profile) => profile.center.slug));
+    check(
+      "The second parent's one child shows at both her branches (Al Nokhba and Downtown)",
+      links.length === 1 && slugs.includes("al-nokhba-academy") && slugs.includes("center-60-downtown"),
+      slugs.join(", "),
+    );
   }
+  for (const [label, code] of [
+    ["student invitation", DEV_FAMILY_CODES.studentInvite],
+    ["branch code", DEV_FAMILY_CODES.branchCode],
+  ] as const) {
+    const row = await prisma.familyInvitation.findUnique({ where: { codeHash: hashFamilyCode(code) } });
+    check(`The dev ${label} ${code.slice(0, 4)}-${code.slice(4)} exists (PENDING until someone uses it)`, row !== null, row?.status ?? "missing");
+  }
+  const plaintextRows = await prisma.$queryRaw<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM "FamilyInvitation" WHERE "codeHash" !~ '^[0-9a-f]{64}$'`;
+  check("Every parent code is stored as a sha256 only", (plaintextRows[0]?.n ?? 1) === 0);
 
   const admin = byEmail.get(mail("admin"));
   check("The platform admin is flagged", admin?.isPlatformAdmin === true);
@@ -404,7 +424,7 @@ async function main() {
     ["Settlements for a teacher who is not at that centre", `SELECT COUNT(*)::int AS n FROM "Settlement" s WHERE NOT EXISTS (SELECT 1 FROM "Membership" m WHERE m."userId" = s."teacherId" AND m."centerId" = s."centerId" AND m."role" = 'TEACHER')`],
     ["Students whose grade the centre never picked", `SELECT COUNT(*)::int AS n FROM "StudentProfile" s WHERE s."gradeId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "CenterCatalogSelection" x WHERE x."centerId" = s."centerId" AND x."kind" = 'GRADE' AND x."gradeId" = s."gradeId")`],
     ["Classes whose subject the centre never picked", `SELECT COUNT(*)::int AS n FROM "ClassGroup" c WHERE c."subjectId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "CenterCatalogSelection" x WHERE x."centerId" = c."centerId" AND x."kind" = 'SUBJECT' AND x."subjectId" = c."subjectId")`],
-    ["Parent links that name another centre than their child's", `SELECT COUNT(*)::int AS n FROM "ParentLink" l JOIN "StudentProfile" s ON s."id" = l."studentProfileId" WHERE s."centerId" <> l."centerId"`],
+    ["Branch parent codes for a student the branch has no record of", `SELECT COUNT(*)::int AS n FROM "FamilyInvitation" i WHERE i."source" = 'CENTER_CODE' AND i."issuingCenterId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "StudentProfile" s WHERE s."userId" = i."studentUserId" AND s."centerId" = i."issuingCenterId")`],
     ["Reservations for another centre's class", `SELECT COUNT(*)::int AS n FROM "Reservation" r JOIN "ClassGroup" c ON c."id" = r."classGroupId" WHERE c."centerId" <> r."centerId"`],
     ["Memberships at a centre that does not exist", `SELECT COUNT(*)::int AS n FROM "Membership" m WHERE NOT EXISTS (SELECT 1 FROM "Center" c WHERE c."id" = m."centerId")`],
     [
@@ -412,7 +432,7 @@ async function main() {
       `SELECT COUNT(*)::int AS n FROM "User" u WHERE NOT u."isPlatformAdmin"
          AND NOT EXISTS (SELECT 1 FROM "Membership" m WHERE m."userId" = u."id")
          AND NOT EXISTS (SELECT 1 FROM "StudentProfile" s WHERE s."userId" = u."id")
-         AND NOT EXISTS (SELECT 1 FROM "ParentLink" p WHERE p."parentUserId" = u."id")
+         AND NOT EXISTS (SELECT 1 FROM "FamilyLink" p WHERE p."parentUserId" = u."id")
          AND NOT EXISTS (SELECT 1 FROM "Reservation" r WHERE r."studentId" = u."id")
          AND NOT EXISTS (SELECT 1 FROM "ChangeRequest" q WHERE q."requestedBy" = u."id")`,
     ],
@@ -449,7 +469,8 @@ async function main() {
     ["Users", await prisma.user.count()],
     ["Memberships", await prisma.membership.count()],
     ["Student profiles", await prisma.studentProfile.count()],
-    ["Parent links", await prisma.parentLink.count()],
+    ["Family links", await prisma.familyLink.count()],
+    ["Parent codes (hashed)", await prisma.familyInvitation.count()],
     ["Permission grant rows", await prisma.permissionGrant.count()],
     ["Catalog education systems", await prisma.catalogEducationSystem.count()],
     ["  grades", await prisma.catalogGrade.count()],

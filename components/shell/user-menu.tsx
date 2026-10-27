@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut } from "lucide-react";
+import { LogOut, UserCog } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { signOutAction } from "@/app/[locale]/(auth)/actions";
@@ -9,7 +9,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import type { ShellUser } from "@/components/shell/app-shell";
+import { Link } from "@/lib/i18n/navigation";
+import { accountPath, type ShellExperience } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -19,7 +22,14 @@ import { cn } from "@/lib/utils";
  * only way to see who you are signed in as, or to sign out, was to open the
  * navigation. An account action does not belong behind a nav drawer.
  */
-export function UserMenu({ user }: { user: ShellUser }) {
+export function UserMenu({
+  user,
+  experience,
+}: {
+  user: ShellUser;
+  /** The shell this menu sits in — Account settings opens inside it (F2). */
+  experience: ShellExperience;
+}) {
   const t = useTranslations("Shell");
   const tRoles = useTranslations("Roles");
   const locale = useLocale();
@@ -32,17 +42,15 @@ export function UserMenu({ user }: { user: ShellUser }) {
         aria-label={t("accountMenu")}
         className="group/account inline-flex size-11 shrink-0 items-center justify-center rounded-full focus-ring"
       >
-        <span
-          aria-hidden
+        <UserAvatar
+          initials={user.initials}
+          photoSrc={user.photoSrc}
           className={cn(
-            "flex size-9 items-center justify-center rounded-full border border-border-strong bg-surface",
-            "text-xs font-semibold text-text-primary shadow-card transition-ui",
+            "border border-border-strong shadow-card transition-ui",
             "group-hover/account:border-brand group-hover/account:bg-brand/10 group-hover/account:text-brand",
             "group-active/account:scale-95 group-data-[popup-open]/account:border-brand group-data-[popup-open]/account:text-brand",
           )}
-        >
-          {user.initials}
-        </span>
+        />
       </PopoverTrigger>
 
       <PopoverContent align="end" className="w-60">
@@ -60,7 +68,20 @@ export function UserMenu({ user }: { user: ShellUser }) {
           </p>
         </div>
 
-        <form action={signOutAction} className="pt-1">
+        {/* F2: every signed-in person's own account, above Sign out. */}
+        <Link
+          href={accountPath(experience)}
+          className={cn(
+            "mt-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start text-sm",
+            "text-text-primary transition-ui-fast focus-ring",
+            "hover:bg-surface-hover active:bg-surface-active",
+          )}
+        >
+          <UserCog className="size-4 shrink-0 text-text-secondary" aria-hidden />
+          {t("accountSettings")}
+        </Link>
+
+        <form action={signOutAction}>
           <input type="hidden" name="locale" value={locale} />
           <button
             type="submit"

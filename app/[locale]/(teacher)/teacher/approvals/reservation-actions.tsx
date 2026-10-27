@@ -36,10 +36,12 @@ export function TeacherReservationActions({ id }: { id: string }) {
   }
 
   const error = approveState.error ?? declineState.error;
+  // F6: "sessionFull" names the first full session's date.
+  const errorDate = approveState.errorDate;
 
   return (
     <div className="flex flex-col items-stretch gap-2 lg:items-end">
-      {error ? <FormMessage className="text-xs">{tErrors(error)}</FormMessage> : null}
+      {error ? <FormMessage className="text-xs">{errorDate ? tErrors(error, { date: errorDate }) : tErrors(error)}</FormMessage> : null}
       <div className="grid grid-cols-2 gap-2 lg:w-64">
         {/* A decline is final — it asks first (docs/04 §14.6). */}
         <ConfirmAction

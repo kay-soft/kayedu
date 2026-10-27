@@ -6,7 +6,6 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUser, syncUserFromAuth } from "@/lib/auth/session";
 import { requireEmailConfirmation } from "@/lib/auth/auth-config";
 import { clientIp } from "@/lib/auth/request-ip";
-import { originateParentLinks } from "@/lib/db/parents";
 import {
   clearActiveCenterId,
   setActiveCenterId,
@@ -14,14 +13,14 @@ import {
 import {
   getOwnerOrgGroups,
   getUserCenterRelations,
-  homeWithoutBranch,
+  landingWithoutBranch,
   primaryRole,
   type CenterRelation,
 } from "@/lib/auth/tenant";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
 import { checkRateLimits } from "@/lib/rate-limit";
 import { redirect } from "@/lib/i18n/navigation";
-import { ROUTES, homePathForRole, safeNextPath } from "@/lib/routes";
+import { ROUTES, authConfirmUrl, homePathForRole, safeNextPath } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   acceptInvitationSchema,
@@ -50,15 +49,15 @@ export type AuthFormState = {
   email?: string;
 };
 
+/** `User.locale` when it is a locale this app speaks, else the form's (F2). */
+function preferredLocale(user: User, fallback: "ar" | "en"): "ar" | "en" {
+  const parsed = localeSchema.safeParse(user.locale);
+  return parsed.success ? parsed.data : fallback;
+}
+
 function readLocale(formData: FormData): "ar" | "en" {
   const parsed = localeSchema.safeParse(formData.get("locale"));
   return parsed.success ? parsed.data : "en";
-}
-
-/** Where Supabase's confirmation link should land (SEC-66). */
-function confirmRedirect(locale: "ar" | "en"): string | undefined {
-  const origin = process.env.NEXT_PUBLIC_APP_URL;
-  return origin ? `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.authConfirm}` : undefined;
 }
 
 /**
@@ -74,8 +73,9 @@ async function resolveLandingPath(user: User): Promise<string> {
     return homePathForRole(primaryRole(relation));
   }
 
-  // No branch: the admin console, the parent portal (verified children), or the hub (SYS).
-  if (relations.length === 0) return homeWithoutBranch(user);
+  // No branch: the admin console, the parent portal (verified children), the
+  // person's own onboarding when they declared a sign-up intent (F4), or the hub (SYS).
+  if (relations.length === 0) return landingWithoutBranch(user);
 
   return ROUTES.selectCenter;
 }
@@ -125,7 +125,9 @@ export async function signInAction(
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(identity.user));
 
-  redirect({ href: target, locale });
+  // F2: a signed-in person lands in their preferred language (User.locale,
+  // set on Account settings), not whichever page the form happened to be on.
+  redirect({ href: target, locale: preferredLocale(identity.user, locale) });
   return {};
 }
 
@@ -137,7 +139,7 @@ export async function signUpAction(
   if (!parsed.success) {
     return { fieldErrors: fieldErrorsFrom(parsed.error) };
   }
-  const { firstName, lastName, email, phone, password, locale, next } = parsed.data;
+  const { firstName, lastName, email, password, locale, next, signupIntent } = parsed.data;
 
   const allowed = await checkRateLimits([
     { name: "signUpPerIp", key: await clientIp() },
@@ -145,16 +147,19 @@ export async function signUpAction(
   ]);
   if (!allowed) return { error: "rateLimited" };
 
-  // No "phone in use" answer any more (SEC-40, D-02): a phone is never an
-  // identity key, so a self-typed phone is not stored on the global `User`
-  // and cannot clash with anyone — nor tell a stranger who holds a number.
+  // No phone is collected here (SEC-40, D-02): a phone is never an identity
+  // key, so there is nothing to clash and nothing that tells a stranger who
+  // holds a number. A contact phone lives only in Account settings.
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: confirmRedirect(locale),
-      data: { first_name: firstName, last_name: lastName, locale },
+      emailRedirectTo: authConfirmUrl(locale),
+      // `signup_intent` (F4) rides in the metadata so it survives the
+      // confirm-email round trip; `resolveAppIdentity` stores it on the new
+      // User. It routes onboarding and authorises nothing.
+      data: { first_name: firstName, last_name: lastName, locale, signup_intent: signupIntent },
     },
   });
 
@@ -181,17 +186,9 @@ export async function signUpAction(
       : { error: "signUpFailed" };
   }
 
-  // Parent account origination (M16, spec §4.5 item 0 / §5.1 "Parent role &
-  // portal"): if this phone appears as a parent phone on some student's
-  // record, this creates PENDING ParentLink row(s) — never a read, never for
-  // a privileged phone (`lib/db/parents.ts`'s `originateParentLinks`). A
-  // PENDING link grants nothing, and staff verification is disabled until
-  // OD-6 is decided (D-03 (d)). The phone itself is not stored (D-02).
-  // Best-effort: a person registering as themselves must never be blocked by
-  // an unrelated parent-matching failure.
-  await originateParentLinks(prisma, { parentUserId: identity.user.id, phone }).catch(
-    logBestEffort("sign-up parent-link origination"),
-  );
+  // F3 (OD-6 decided): a sign-up never originates parent access — a parent
+  // links with a one-time code (`/family/join`, lib/db/parents.ts's
+  // `acceptFamilyCode`).
 
   const target = safeNextPath(next) ?? (await resolveLandingPath(identity.user));
 
@@ -220,7 +217,7 @@ export async function resendConfirmationAction(
 
   const supabase = await createSupabaseServerClient();
   await supabase.auth
-    .resend({ type: "signup", email, options: { emailRedirectTo: confirmRedirect(locale) } })
+    .resend({ type: "signup", email, options: { emailRedirectTo: authConfirmUrl(locale) } })
     .catch(logBestEffort("confirmation email resend"));
 
   return { status: "resent", email };
@@ -262,7 +259,9 @@ export async function selectCenterAction(formData: FormData): Promise<void> {
   );
   if (relation) {
     await setActiveCenterId(relation.center.id);
-    redirect({ href: homePathForRole(primaryRole(relation)), locale });
+    // T6: a pick from the pick-a-branch screen returns to the page it was on;
+    // that page still runs its own gate at the chosen branch.
+    redirect({ href: safeNextPath(parsed.data.next) ?? homePathForRole(primaryRole(relation)), locale });
     return;
   }
 

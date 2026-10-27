@@ -25,7 +25,10 @@ export const approveSessionRequestSchema = approvalIdSchema.extend({
 
 export type ApprovalsActionState = SlotConflictState & {
   error?: string;
-  status?: "approved" | "declined";
+  /** F6 — a formatted date for `error` ("sessionFull": the first full session). */
+  errorDate?: string;
+  /** `cancelled` — a staff cancel of a confirmed booking (T7). */
+  status?: "approved" | "declined" | "cancelled";
 };
 
 export const IDLE_APPROVALS_STATE: ApprovalsActionState = {};

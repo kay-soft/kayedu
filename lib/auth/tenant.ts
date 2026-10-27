@@ -23,11 +23,12 @@ import {
   type CenterRelation,
   type Experience,
 } from "@/lib/auth/relations";
+import { onboardingPath } from "@/lib/auth/onboarding";
 import { loadPermissionGrants } from "@/lib/db/permissions";
-import { verifiedChildLinks } from "@/lib/db/parents";
+import { activeChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
-import { ROUTES, homePathForRole } from "@/lib/routes";
+import { ROUTES, SHELL_EXPERIENCES, homePathForRole, type ShellExperience } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 
 export type { CenterRelation, Experience };
@@ -64,9 +65,11 @@ export type TenantContext = {
   /**
    * Set when the active-selection cookie named an Organization rather than a
    * branch — an Owner's "Whole Management" choice (M11). `center` above is
-   * still one real, resolved branch (a representative one) that every
-   * operational query scopes on unchanged; only a consumer that wants the
-   * roll-up (Analytics) reads this field. `null` for every other request.
+   * still one real, resolved branch (a representative one), so nothing may
+   * read or write it under a roll-up: Analytics sums the organization, and
+   * every other centre page and Server Action refuses through
+   * `requireBranchScope` (`lib/auth/branch-scope.ts`, T6). `null` for every
+   * other request.
    */
   rollupOrganizationId: string | null;
 };
@@ -411,60 +414,100 @@ export type ParentChildOption = {
   childName: string;
 };
 
+/** One linked child, whether or not they are at a branch yet. */
+export type ParentLinkedChild = {
+  linkId: string;
+  /** The child's account name. */
+  childName: string;
+  /** Active profiles at accessible branches — 0 before the child joins one. */
+  branchCount: number;
+};
+
+export type ParentChildren = {
+  /** One option per (child, active branch profile) — what the selector offers. */
+  options: ParentChildOption[];
+  /** Every ACTIVE link, including a child who has joined no branch yet. */
+  linked: ParentLinkedChild[];
+};
+
 /**
  * A parent's readable children — the **only** child list any parent-portal
- * page may build on (M16, `lib/db/parents.ts`'s `verifiedChildLinks`, which
- * is itself already filtered to VERIFIED). A PENDING link contributes
- * nothing here, which is what makes "inert until verified" true for the
- * child selector too, not just for the schedule read underneath it.
+ * page may build on (F3, `lib/db/parents.ts`'s `activeChildLinks`: ACTIVE
+ * family links, and per child only the active profiles at accessible
+ * branches). A pending invitation is not a link and contributes nothing; a
+ * revoked link is gone from the next request.
  */
-export const getVerifiedParentChildren = cache(
-  async (parentUserId: string): Promise<ParentChildOption[]> => {
-    const links = await verifiedChildLinks(prisma, parentUserId);
-    return links.map((link) => ({
+export const getParentChildren = cache(async (parentUserId: string): Promise<ParentChildren> => {
+  const links = await activeChildLinks(prisma, parentUserId);
+  return {
+    options: links.flatMap((link) =>
+      link.studentUser.studentProfiles.map((profile) => ({
+        linkId: link.id,
+        centerId: profile.center.id,
+        centerName: profile.center.name,
+        centerLogoUrl: centerLogoSrc(profile.center),
+        centerThemeColor: profile.center.themeColor,
+        studentProfileId: profile.id,
+        childName: fullName(localName(profile, link.studentUser)),
+      })),
+    ),
+    linked: links.map((link) => ({
       linkId: link.id,
-      centerId: link.center.id,
-      centerName: link.center.name,
-      centerLogoUrl: centerLogoSrc(link.center),
-      centerThemeColor: link.center.themeColor,
-      studentProfileId: link.studentProfileId,
-      childName: fullName(localName(link.studentProfile, link.studentProfile.user)),
-    }));
-  },
-);
+      childName: fullName(link.studentUser),
+      branchCount: link.studentUser.studentProfiles.length,
+    })),
+  };
+});
 
 /**
  * Where a signed-in user with NO centre relation belongs (SYS): the platform
- * admin's console, the parent portal when they hold a verified child link
- * (a `ParentLink` is not a centre relation, so the hub would otherwise tell a
- * parent "not connected to a branch" with no way to their children), else the
+ * admin's console, the parent portal when they hold an active family link
+ * (a link is not a centre relation, so the hub would otherwise tell a parent
+ * "not connected to a branch" with no way to their children), else the
  * hub's empty state.
  */
 export async function homeWithoutBranch(user: Pick<User, "id" | "isPlatformAdmin">): Promise<string> {
   if (user.isPlatformAdmin) return ROUTES.adminCenters;
-  const children = await getVerifiedParentChildren(user.id);
-  return children.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
+  const children = await getParentChildren(user.id);
+  return children.linked.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
+}
+
+/**
+ * Where a sign-in or sign-up with no branch lands (F4): the same answer as
+ * `homeWithoutBranch`, except that a person who declared a sign-up intent and
+ * would otherwise reach the empty hub goes to their own onboarding instead.
+ * The admin console and a parent's linked children are never overridden.
+ * Account settings keeps asking `homeWithoutBranch` — an intent is not an
+ * experience.
+ */
+export async function landingWithoutBranch(
+  user: Pick<User, "id" | "isPlatformAdmin" | "signupIntent" | "gradeId">,
+): Promise<string> {
+  const home = await homeWithoutBranch(user);
+  if (home !== ROUTES.selectCenter) return home;
+  return onboardingPath(user) ?? home;
 }
 
 export type ParentSession = {
   user: User;
-  /** Verified children only — see `getVerifiedParentChildren`'s doc comment. */
+  /** Selectable (child, branch) pairs — see `getParentChildren`. */
   children: ParentChildOption[];
+  /** Every linked child, including one at no branch yet. */
+  linkedChildren: ParentLinkedChild[];
 };
 
 /**
- * The (parent) route group's gate (M16, spec §4.5 "Parent portal"). Any
- * signed-in `User` — a brand-new parent account has zero VERIFIED children
- * until OD-6's still-open verification step happens, and the page itself
- * renders that as an empty state rather than a redirect (mirroring
+ * The (parent) route group's gate (M16, F3; spec §4.5 "Parent portal"). Any
+ * signed-in `User` — a parent with no linked child yet sees "Link your
+ * child", rendered by the page rather than a redirect (mirroring
  * `requireStudentUser`'s "zero relations is a valid state to render" shape).
  */
 export async function requireParentUser(): Promise<ParentSession> {
   const user = await getCurrentUser();
   if (!user) return redirectTo(ROUTES.login);
 
-  const children = await getVerifiedParentChildren(user.id);
-  return { user, children };
+  const children = await getParentChildren(user.id);
+  return { user, children: children.options, linkedChildren: children.linked };
 }
 
 export function hasExperience(ctx: TenantContext, experience: Experience): boolean {
@@ -505,6 +548,55 @@ export async function actionContext(experience: Experience): Promise<TenantConte
 }
 
 /**
+ * A context for a branch the request **names** rather than the active one
+ * (F1: Settings → Staff "Invite" and Teachers → "Add teacher" take a Branch).
+ * The posted id is never trusted: it is looked up among the actor's own
+ * relations — the same `getUserCenterRelations()` resolution (Owner
+ * widening, branch grants, lifecycle filter) and the same `buildContext()`
+ * every request uses — so a branch the actor does not hold resolves to
+ * `null`, and so does one where they hold no role of this experience. The
+ * caller then checks its permission with `ctxCan` on the returned context
+ * and writes through `scoped()` on it, exactly as with the active branch.
+ */
+export async function getTenantContextForBranch(
+  centerId: string,
+  experience: Experience,
+): Promise<TenantContext | null> {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const relations = await getUserCenterRelations(user.id);
+  const relation = relations.find((item) => item.center.id === centerId);
+  if (!relation) return null;
+  const ctx = await buildContext(user, relation, experience);
+  if (ctx.experienceDenied || !hasExperience(ctx, experience)) return null;
+  return ctx;
+}
+
+export type BranchOption = { id: string; name: string };
+
+/**
+ * The branches where this user holds `permission` as centre staff (F1) —
+ * what a branch-aware "Invite" / "Add teacher" offers. Each branch is
+ * resolved through `buildContext()` and checked with `ctxCan`, so the list is
+ * exactly the set the action would accept.
+ */
+export const branchesWithPermission = cache(
+  async (permission: Permission): Promise<BranchOption[]> => {
+    const user = await getCurrentUser();
+    if (!user) return [];
+    const relations = await getUserCenterRelations(user.id);
+    const contexts = await Promise.all(
+      relations
+        .filter((relation) => relation.roles.some((role) => isCenterStaffRole(role)))
+        .map((relation) => buildContext(user, relation, "center")),
+    );
+    return contexts
+      .filter((ctx) => ctxCan(ctx, permission))
+      .map((ctx) => ({ id: ctx.center.id, name: ctx.center.name }));
+  },
+);
+
+/**
  * Authoritative permission check bound to the resolved context. A context
  * whose requested experience was denied grants nothing (SEC-09) — this is the
  * one choke point every `(center)` Server Action already passes through.
@@ -531,4 +623,45 @@ export async function requirePlatformAdmin(): Promise<User> {
     return redirectTo(homePathForRole(role));
   }
   return user;
+}
+
+function experienceForRole(role: TenantRole): ShellExperience {
+  if (role === "TEACHER") return "teacher";
+  if (isCenterStaffRole(role)) return "center";
+  if (role === "PARENT") return "parent";
+  if (role === "PLATFORM_ADMIN") return "admin";
+  return "student";
+}
+
+/**
+ * Which shell Account settings renders in (F2): the experience the person
+ * came from — the user menu's `?from=` — when they may be there, else the one
+ * their sign-in would land them in. The hint only picks chrome: the page
+ * reads and writes nothing but the caller's own `User`, and each shell still
+ * runs its own gate. A `center` hint is honoured only while the active
+ * branch grants a staff role (`requireExperience` would otherwise bounce the
+ * page away); `teacher`, `student` and `parent` admit any signed-in user,
+ * exactly as their own layouts do.
+ */
+export async function resolveAccountExperience(hint: string | undefined): Promise<ShellExperience> {
+  const user = await getCurrentUser();
+  if (!user) return redirectTo(ROUTES.login);
+
+  const wanted = SHELL_EXPERIENCES.find((experience) => experience === hint);
+  if (wanted === "admin" && user.isPlatformAdmin) return "admin";
+  if (wanted === "teacher" || wanted === "student" || wanted === "parent") return wanted;
+
+  const relations = await getUserCenterRelations(user.id);
+  if (relations.length === 0) {
+    const home = await homeWithoutBranch(user);
+    if (home === ROUTES.adminCenters) return "admin";
+    return home === ROUTES.parentHome ? "parent" : "student";
+  }
+
+  if (wanted === "center") {
+    const ctx = await getTenantContext("center");
+    if (!ctx.experienceDenied && hasExperience(ctx, "center")) return "center";
+  }
+  const ctx = await getTenantContext();
+  return experienceForRole(ctx.role);
 }

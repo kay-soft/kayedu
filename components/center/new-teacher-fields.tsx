@@ -33,7 +33,13 @@ export function NewTeacherFields({
   showHeader = true,
   onPendingChange,
   pending,
+  lookupBranchId,
 }: {
+  /**
+   * F1: the branch the Add teacher form targets, when it is not the active
+   * one — the phone lookup runs there (the action re-resolves it).
+   */
+  lookupBranchId?: string;
   idPrefix: string;
   /** Keys under `People.errors`. */
   fieldErrors?: Record<string, string>;
@@ -60,7 +66,10 @@ export function NewTeacherFields({
       {linkUserId ? <input type="hidden" name="linkUserId" value={linkUserId} /> : null}
 
       {!linkedMatch ? (
-        <PhoneLookupField lookup={lookupPersonByPhoneAction} onMatch={setLinkedMatch} />
+        <PhoneLookupField
+          lookup={lookupBranchId ? (phone) => lookupPersonByPhoneAction(phone, lookupBranchId) : lookupPersonByPhoneAction}
+          onMatch={setLinkedMatch}
+        />
       ) : null}
 
       {showHeader ? (

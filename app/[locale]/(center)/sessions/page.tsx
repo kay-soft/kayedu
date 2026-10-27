@@ -22,6 +22,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { revenueTotals } from "@/lib/db/analytics";
@@ -43,6 +45,7 @@ import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { sessionListFilterSchema } from "@/lib/validation/sessions";
 import { dateFilterSchema, toSharedDateFilterInput } from "@/lib/validation/date-filter";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
  * Today's Sessions dashboard (spec §4.1 item 7): a KPI row, filters (date/
@@ -59,6 +62,7 @@ export default async function SessionsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "session.view");
 
   const rawParams = await searchParams;
@@ -304,37 +308,39 @@ export default async function SessionsPage({
             allLabel={t("filters.all")}
           />
 
-          {tableRows.length === 0 ? (
-            <EmptyState
-              icon={<CalendarSearch />}
-              tone="warning"
-              title={t("empty")}
-              description={t("emptyHint")}
-              action={
-                <LinkButton href={ROUTES.centerSessions} size="sm">
-                  {t("clearFilters")}
-                </LinkButton>
-              }
-            />
-          ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                <span className={SESSION_COLUMNS.when}>{t("columns.when")}</span>
-                <span className={SESSION_COLUMNS.name}>{t("columns.class")}</span>
-                <span className={SESSION_COLUMNS.teacher}>{t("columns.teacher")}</span>
-                <span className={cn("hidden lg:block", SESSION_COLUMNS.room)}>{t("columns.room")}</span>
-                <span className={SESSION_COLUMNS.marked}>{t("columns.marked")}</span>
-                <span className={SESSION_COLUMNS.price}>{t("columns.price")}</span>
-                <span className={SESSION_COLUMNS.status}>{tCommon("status")}</span>
-              </ListHeader>
+          <ResultsRegion className="flex flex-col gap-4">
+            {tableRows.length === 0 ? (
+              <EmptyState
+                icon={<CalendarSearch />}
+                tone="warning"
+                title={t("empty")}
+                description={t("emptyHint")}
+                action={
+                  <LinkButton href={ROUTES.centerSessions} size="sm" soft>
+                    {t("clearFilters")}
+                  </LinkButton>
+                }
+              />
+            ) : (
+              <ul className="flex flex-col gap-3 md:gap-0">
+                <ListHeader>
+                  <span className={SESSION_COLUMNS.when}>{t("columns.when")}</span>
+                  <span className={SESSION_COLUMNS.name}>{t("columns.class")}</span>
+                  <span className={SESSION_COLUMNS.teacher}>{t("columns.teacher")}</span>
+                  <span className={cn("hidden lg:block", SESSION_COLUMNS.room)}>{t("columns.room")}</span>
+                  <span className={SESSION_COLUMNS.marked}>{t("columns.marked")}</span>
+                  <span className={SESSION_COLUMNS.price}>{t("columns.price")}</span>
+                  <span className={SESSION_COLUMNS.status}>{tCommon("status")}</span>
+                </ListHeader>
 
-              {tableRows.map((row) => (
-                <SessionRow key={row.sessionId} session={row} locale={locale} />
-              ))}
-            </ul>
-          )}
+                {tableRows.map((row) => (
+                  <SessionRow key={row.sessionId} session={row} locale={locale} />
+                ))}
+              </ul>
+            )}
 
-          <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+            <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+          </ResultsRegion>
         </CardContent>
       </Card>
     </div>

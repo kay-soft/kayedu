@@ -25,7 +25,7 @@ const ROLE_OPTIONS = [
   "OWNER",
 ] as const;
 
-function InviteLink({ token }: { token: string }) {
+function InviteLink({ token, branchName }: { token: string; branchName?: string }) {
   const t = useTranslations("Staff");
   const locale = useLocale();
   const path = `/${locale}${ROUTES.invite(token)}`;
@@ -34,7 +34,9 @@ function InviteLink({ token }: { token: string }) {
   const href = `${origin}${path}`;
   return (
     <div className="flex flex-col gap-2">
-      <FormMessage tone="success">{t("inviteCreated")}</FormMessage>
+      <FormMessage tone="success">
+        {branchName ? t("inviteCreatedForBranch", { branch: branchName }) : t("inviteCreated")}
+      </FormMessage>
       <CopyLinkField
         id="invite-link"
         href={href}
@@ -48,7 +50,18 @@ function InviteLink({ token }: { token: string }) {
   );
 }
 
-export function InviteForm() {
+/**
+ * F1: `branches` are the branches where the actor may invite (holds
+ * `membership.role.assign` there); with more than one, a Branch select
+ * appears, defaulting to the active branch. The action re-checks the target.
+ */
+export function InviteForm({
+  branches,
+  activeBranchId,
+}: {
+  branches: { id: string; name: string }[];
+  activeBranchId: string;
+}) {
   const t = useTranslations("Staff");
   const tErrors = useTranslations("Staff.errors");
   const tRoles = useTranslations("Roles");
@@ -66,6 +79,22 @@ export function InviteForm() {
         {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
+          {branches.length > 1 ? (
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <Label htmlFor="invite-branch">{t("fields.branch")}</Label>
+              <Select
+                id="invite-branch"
+                name="branchId"
+                defaultValue={activeBranchId}
+                aria-invalid={state.fieldErrors?.branchId ? true : undefined}
+                options={branches.map((branch) => ({ value: branch.id, label: branch.name }))}
+              />
+              {state.fieldErrors?.branchId ? (
+                <FieldError>{tErrors(state.fieldErrors.branchId)}</FieldError>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="invite-email">{t("fields.email")}</Label>
             <Input
@@ -107,7 +136,7 @@ export function InviteForm() {
         </SubmitButton>
       </form>
 
-      {state.token ? <InviteLink token={state.token} /> : null}
+      {state.token ? <InviteLink token={state.token} branchName={state.branchName} /> : null}
     </div>
   );
 }

@@ -2,7 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
+import {
+  ctxCan,
+  getTenantContext,
+  getTenantContextForBranch,
+  type TenantContext,
+} from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import {
@@ -35,8 +41,8 @@ import {
 } from "@/lib/validation/people";
 import {
   boundSearchArgs,
+  branchPhoneLookupArgs,
   parseActionArgs,
-  phoneLookupArgs,
   searchArgs,
 } from "@/lib/validation/action-args";
 
@@ -60,9 +66,18 @@ const NOT_FOUND: PeopleActionState = { error: "notFound" };
 
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
-async function teacherScope(): Promise<Scope | null> {
-  const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "teacher.manage")) return null;
+/**
+ * The active branch — or, for Add teacher (F1), the branch the form names.
+ * A named branch is never trusted: the actor's context is re-resolved there
+ * (`getTenantContextForBranch`, the same relation resolution) and
+ * `teacher.manage` is checked at that branch; every write is then scoped to it.
+ */
+async function teacherScope(branchId?: string | null): Promise<Scope | PickBranch | null> {
+  const active = await getTenantContext("center");
+  if (requireBranchScope(active)) return PICK_BRANCH;
+  const ctx =
+    branchId && branchId !== active.center.id ? await getTenantContextForBranch(branchId, "center") : active;
+  if (!ctx || !ctxCan(ctx, "teacher.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
 
@@ -80,6 +95,7 @@ export async function searchTeachersTypeAheadAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
   const scope = await teacherScope();
+  if (isPickBranch(scope)) return [];
   if (!scope) return [];
   const args = parseActionArgs(searchArgs, [query]);
   if (!args) return [];
@@ -113,6 +129,7 @@ export async function searchBlockCandidatesAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return [];
   if (!ctxCan(ctx, "student.block")) return [];
   const args = parseActionArgs(boundSearchArgs, [teacherMembershipId, query]);
   if (!args) return [];
@@ -149,11 +166,13 @@ export async function searchBlockCandidatesAction(
 
 export async function lookupPersonByPhoneAction(
   phone: string,
+  branchId?: string,
 ): Promise<PhoneLookupResult> {
-  const scope = await teacherScope();
-  if (!scope) return { status: "notFound" };
-  const args = parseActionArgs(phoneLookupArgs, [phone]);
+  const args = parseActionArgs(branchPhoneLookupArgs, [phone, branchId]);
   if (!args) return { status: "notFound" };
+  const scope = await teacherScope(args[1]);
+  if (isPickBranch(scope)) return { status: "notFound" };
+  if (!scope) return { status: "notFound" };
 
   const normalized = normalizePhone(args[0]);
   if (!normalized) return { status: "notFound" };
@@ -177,14 +196,21 @@ export async function createTeacherAction(
   _state: PeopleActionState,
   formData: FormData,
 ): Promise<PeopleActionState> {
-  const scope = await teacherScope();
-  if (!scope) return FORBIDDEN;
+  const active = await teacherScope();
+  if (isPickBranch(active)) return active;
+  if (!active) return FORBIDDEN;
 
   const parsed = teacherCreateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { locale, firstName, lastName, email, phone, altPhone, linkUserId } =
+  const { locale, firstName, lastName, email, phone, altPhone, linkUserId, branchId } =
     parsed.data;
+
+  // F1: the teacher lands at the branch the form names — only where the
+  // actor holds `teacher.manage` there.
+  const scope = branchId && branchId !== active.ctx.center.id ? await teacherScope(branchId) : active;
+  if (isPickBranch(scope)) return scope;
+  if (!scope) return { fieldErrors: { branchId: "branchNotAllowed" } };
 
   // R6: the one teacher-creation path (lib/db/teacher-membership.ts) — also
   // what the class dialog's "New teacher" runs, inside its own transaction.
@@ -211,7 +237,10 @@ export async function createTeacherAction(
   }
 
   revalidateTeacherList(locale);
-  return { status: "created" };
+  return {
+    status: "created",
+    ...(scope.ctx.center.id !== active.ctx.center.id ? { branchName: scope.ctx.center.name } : {}),
+  };
 }
 
 // ── Edit ───────────────────────────────────────────────────────────────────
@@ -221,6 +250,7 @@ export async function updateTeacherAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await teacherScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = teacherUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -261,6 +291,7 @@ export async function setTeacherActiveAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const scope = await teacherScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = membershipActiveSchema.safeParse(Object.fromEntries(formData));
@@ -299,6 +330,7 @@ export async function deleteTeacherAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   // Delete is a Manager/Owner action, never a receptionist's (spec §3).
   if (!ctxCan(ctx, "teacher.delete")) return FORBIDDEN;
   const db = scoped(ctx);
@@ -355,6 +387,7 @@ export async function blockStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.block")) return FORBIDDEN;
   const db = scoped(ctx);
 
@@ -406,6 +439,7 @@ export async function unblockStudentAction(
   formData: FormData,
 ): Promise<PeopleActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "student.block")) return FORBIDDEN;
   const db = scoped(ctx);
 

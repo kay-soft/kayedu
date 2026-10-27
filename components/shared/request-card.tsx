@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import {
   BookOpen,
+  CalendarCheck,
   CalendarPlus,
   GraduationCap,
   UserRoundPlus,
@@ -34,12 +35,15 @@ export type RequestKind =
   | "class"
   | "session"
   | "reservation"
+  /** F6 — a student asking to attend one session without enrolling. */
+  | "booking"
   | "onboarding";
 
 const KIND_ICONS: Record<RequestKind, typeof BookOpen> = {
   class: BookOpen,
   session: CalendarPlus,
   reservation: GraduationCap,
+  booking: CalendarCheck,
   onboarding: UserRoundPlus,
 };
 

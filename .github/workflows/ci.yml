@@ -35,6 +35,10 @@ jobs:
       # R10a: static presentation gate (one locale toggle, no native select,
       # no hardcoded colours, PageHeader coverage). Needs no database.
       - run: npm run check:design
+      - run: npm run check:account
+      # F5: the public Explore pages read only lib/db/public-catalog.ts, its
+      # selects name nothing private, and ?next= stays on-site. No database.
+      - run: npm run check:public
       # SEC-35: no high/critical advisory in what ships to production.
       - run: npm audit --omit=dev --audit-level=high
 

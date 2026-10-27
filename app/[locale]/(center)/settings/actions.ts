@@ -3,6 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { MATRIX_ROLES, PERMISSIONS, editableActionsFor } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/db/audit";
@@ -13,10 +14,8 @@ import {
   savePermissionGrants,
   type PermissionGrantWrite,
 } from "@/lib/db/permissions";
-import {
-  roomCombinationUsage,
-  setRoomLinks,
-} from "@/lib/db/room-sets";
+import { roomCombinationUsage, saveRoomWithLinks } from "@/lib/db/room-sets";
+import { formatDay, formatTimeRange } from "@/lib/format";
 import { DEFAULT_TIMEZONE, dateKey } from "@/lib/scheduling";
 import { createTerm, deleteTerm, setTermActive, updateTerm } from "@/lib/db/terms";
 import {
@@ -47,13 +46,18 @@ import {
   permissionMatrixSchema,
   recordDeleteSchema,
   recordToggleSchema,
-  roomLinksSchema,
   roomSchema,
   roomUpdateSchema,
   termSchema,
   termUpdateSchema,
 } from "@/lib/validation/settings";
 import { nameClashes } from "@/lib/like";
+import { logBestEffort } from "@/lib/log";
+import { mediaUploadsEnabled } from "@/lib/media";
+import { setCenterLogoPath } from "@/lib/db/platform";
+import { readRasterImage, removeStoredObject, uploadCenterLogo } from "@/lib/db/storage";
+import { LOGOS_BUCKET, MAX_LOGO_BYTES } from "@/lib/storage-paths";
+import { localeSchema } from "@/lib/validation/auth";
 
 /**
  * Center configuration (M2). Every action follows docs/02 §7:
@@ -72,8 +76,9 @@ const NOT_FOUND: ActionState = { error: "notFound" };
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
 /** Resolves the context and enforces `center.settings.edit`. */
-async function editorScope(): Promise<Scope | null> {
+async function editorScope(): Promise<Scope | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "center.settings.edit")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -108,6 +113,7 @@ async function roomInCombinationRefusal(
 
 async function toggleRoomRecord(formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
@@ -128,6 +134,7 @@ async function toggleRoomRecord(formData: FormData): Promise<ActionState> {
 
 async function deleteRoomRecord(formData: FormData): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -187,6 +194,7 @@ export async function selectCatalogEntryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogSelectSchema.safeParse(Object.fromEntries(formData));
@@ -216,6 +224,7 @@ export async function updateCatalogSelectionAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogSelectionUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -258,6 +267,7 @@ export async function toggleCatalogSelectionAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogSelectionToggleSchema.safeParse(Object.fromEntries(formData));
@@ -277,6 +287,7 @@ export async function deselectCatalogEntryAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = catalogDeselectSchema.safeParse(Object.fromEntries(formData));
@@ -319,16 +330,18 @@ export async function createRoomAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = roomSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { name, capacity, locale } = parsed.data;
+  const { name, capacity, linkedRoomIds, locale } = parsed.data;
   // SEC-61: compared by the one name key, never with an (I)LIKE.
   if (nameClashes(name, await scope.db.rooms.list())) return { fieldErrors: { name: "duplicateName" } };
 
-  await scope.db.rooms.create({ name, capacity });
+  const failure = await saveRoom(scope, null, { name, capacity }, linkedRoomIds, locale);
+  if (failure) return failure;
   revalidateSettings(locale);
   return { status: "created" };
 }
@@ -338,21 +351,78 @@ export async function updateRoomAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = roomUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { id, name, capacity, locale } = parsed.data;
+  const { id, name, capacity, linkedRoomIds, locale } = parsed.data;
   if (!(await scope.db.rooms.findById(id))) return NOT_FOUND;
 
   if (nameClashes(name, await scope.db.rooms.list({ NOT: { id } }))) {
     return { fieldErrors: { name: "duplicateName" } };
   }
 
-  await scope.db.rooms.update(id, { name, capacity });
+  // Capacity has no further rule today: it is a plain edit, and seats on a
+  // class are derived from it at read time (lib/rooms.ts), never stored.
+  const failure = await saveRoom(scope, id, { name, capacity }, linkedRoomIds, locale);
+  if (failure) return failure;
   revalidateSettings(locale);
   return { status: "saved" };
+}
+
+/** The "still in use" refusal: counts, plus the first few classes and sessions by name. */
+function inUseRefusal(
+  result: Extract<Awaited<ReturnType<typeof saveRoomWithLinks>>, { error: "combinationInUse" }>,
+  locale: string,
+): ActionState {
+  const list = new Intl.ListFormat(locale, { style: "long", type: "conjunction" });
+  const sessionNames = result.sessionList.map(
+    (row) => `${row.name} — ${formatDay(row.date, locale)}, ${formatTimeRange(row.startTime, row.endTime, locale)}`,
+  );
+  return {
+    error: "combinationInUse",
+    errorValues: {
+      classes: result.classes,
+      sessions: result.sessions,
+      classList: result.classNames.length > 0 ? list.format(result.classNames) : "none",
+      classMore: Math.max(0, result.classes - result.classNames.length),
+      sessionList: sessionNames.length > 0 ? list.format(sessionNames) : "none",
+      sessionMore: Math.max(0, result.sessions - sessionNames.length),
+    },
+  };
+}
+
+/**
+ * The one write behind Add room and Edit room: the room's fields and its
+ * "Can be combined with" set in a single transaction (a refusal changes
+ * nothing), with one `AuditLog` row per link added or removed written on that
+ * same transaction (rule 7 — `saveRoomWithLinks`). Returns the refusal, or null
+ * when saved. `roomId` null = create.
+ */
+async function saveRoom(
+  scope: Scope,
+  roomId: string | null,
+  fields: { name: string; capacity: number },
+  linkedRoomIds: string[],
+  locale: string,
+): Promise<ActionState | null> {
+  const result = await saveRoomWithLinks(
+    prisma,
+    scope.ctx.center.id,
+    roomId,
+    fields,
+    linkedRoomIds,
+    centreClock(scope.ctx),
+    locale,
+    scope.ctx.user.id,
+  );
+  if (!result.ok) {
+    if (result.error === "combinationInUse") return inUseRefusal(result, locale);
+    return { error: result.error === "roomNotFound" ? "notFound" : result.error };
+  }
+  return null;
 }
 
 export async function toggleRoomAction(
@@ -369,61 +439,6 @@ export async function deleteRoomAction(
   return deleteRoomRecord(formData);
 }
 
-/**
- * "Can be combined with" (R3) — makes one room's links exactly the posted
- * set. Same gate as the rest of rooms (`center.settings.edit`); every rule
- * that can refuse (self-link, a room from another centre, unlinking a pair
- * an active class or a non-closed future session still uses) lives in
- * `lib/db/room-sets.ts`. Each link and unlink is audited.
- */
-export async function setRoomLinksAction(
-  _state: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const scope = await editorScope();
-  if (!scope) return FORBIDDEN;
-
-  const parsed = roomLinksSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return NOT_FOUND;
-  const { locale, roomId, linkedRoomIds } = parsed.data;
-
-  const result = await setRoomLinks(
-    prisma,
-    scope.ctx.center.id,
-    roomId,
-    linkedRoomIds,
-    centreClock(scope.ctx),
-  );
-  if (!result.ok) {
-    if (result.error === "combinationInUse") {
-      return {
-        error: "combinationInUse",
-        errorValues: { classes: result.classes ?? 0, sessions: result.sessions ?? 0 },
-      };
-    }
-    return { error: result.error === "roomNotFound" ? "notFound" : result.error };
-  }
-
-  for (const [action, ids] of [
-    ["room.link", result.added],
-    ["room.unlink", result.removed],
-  ] as const) {
-    for (const otherRoomId of ids) {
-      await writeAuditLog({
-        centerId: scope.ctx.center.id,
-        actorUserId: scope.ctx.user.id,
-        action,
-        entityType: "Room",
-        entityId: roomId,
-        after: { roomId, otherRoomId },
-      });
-    }
-  }
-
-  revalidateSettings(locale);
-  return { status: "saved" };
-}
-
 // ── Payment methods (R1) ───────────────────────────────────────────────────
 // Same gate as rooms (`center.settings.edit` — no new matrix action). Every
 // rule that can refuse a change (last active method, referenced → deactivate
@@ -436,6 +451,7 @@ export async function createPaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = paymentMethodSchema.safeParse(Object.fromEntries(formData));
@@ -463,6 +479,7 @@ export async function updatePaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = paymentMethodUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -496,6 +513,7 @@ export async function togglePaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
@@ -526,6 +544,7 @@ export async function deletePaymentMethodAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -576,6 +595,7 @@ export async function createTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = termSchema.safeParse(Object.fromEntries(formData));
@@ -605,6 +625,7 @@ export async function updateTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = termUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -636,6 +657,7 @@ export async function toggleTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordToggleSchema.safeParse(Object.fromEntries(formData));
@@ -666,6 +688,7 @@ export async function deleteTermAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = recordDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -695,6 +718,7 @@ export async function saveGeneralSettingsAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = generalSettingsSchema.safeParse(Object.fromEntries(formData));
@@ -710,6 +734,7 @@ export async function saveGeneralSettingsAction(
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
     dataVisibilityDays,
+    publicListing,
   } = parsed.data;
 
   const before = await scope.db.settings.get();
@@ -722,6 +747,7 @@ export async function saveGeneralSettingsAction(
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
     dataVisibilityDays,
+    publicListing,
   });
 
   // The default center cut is money configuration, so the change is audited
@@ -743,6 +769,7 @@ export async function saveGeneralSettingsAction(
           scheduleConflictPolicy: before.scheduleConflictPolicy,
           dataVisibilityDays: before.dataVisibilityDays,
           teacherEditDeadlineHours: before.teacherEditDeadlineHours,
+          publicListing: before.publicListing,
         }
       : null,
     after: {
@@ -755,6 +782,8 @@ export async function saveGeneralSettingsAction(
       dataVisibilityDays,
       // SEC-74: the edit deadline is a setting too — it was missing here.
       teacherEditDeadlineHours,
+      // F5: listing on the public Explore pages.
+      publicListing,
     },
   });
 
@@ -769,6 +798,7 @@ export async function saveCardLayoutAction(
   formData: FormData,
 ): Promise<ActionState> {
   const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = cardLayoutSchema.safeParse(Object.fromEntries(formData));
@@ -802,6 +832,7 @@ export async function savePermissionMatrixAction(
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "permission.manage")) return FORBIDDEN;
 
   const parsed = permissionMatrixSchema.safeParse({
@@ -845,4 +876,80 @@ export async function savePermissionMatrixAction(
 
   revalidateSettings(locale);
   return { status: "saved" };
+}
+
+// ── Branding: the branch's own logo (F8) ───────────────────────────────────
+
+/**
+ * Change the branch logo. Same checks as at creation — typed by its bytes,
+ * PNG/JPEG/WebP, `MAX_LOGO_BYTES` — then, until the media provider is
+ * connected (`MEDIA_UPLOADS_ENABLED`), refused as `mediaNotConnected` with
+ * nothing stored. Audited `center.logo.update`.
+ */
+export async function updateCenterLogoAction(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
+  if (!scope) return FORBIDDEN;
+
+  const file = formData.get("logo");
+  if (!(file instanceof File) || file.size === 0) return { error: "logoMissing" };
+
+  const image = await readRasterImage(file, MAX_LOGO_BYTES);
+  if (!image.ok) return { error: image.error };
+  if (!mediaUploadsEnabled()) return { error: "mediaNotConnected" };
+
+  const centerId = scope.ctx.center.id;
+  const uploaded = await uploadCenterLogo(centerId, file);
+  if (!uploaded.ok) return { error: uploaded.error };
+
+  const previous = scope.ctx.center.logoPath;
+  await setCenterLogoPath(prisma, centerId, uploaded.path);
+  if (previous && previous !== uploaded.path) {
+    await removeStoredObject(centerId, LOGOS_BUCKET, previous).catch(logBestEffort("replaced logo clean-up"));
+  }
+
+  await writeAuditLog({
+    centerId,
+    actorUserId: scope.ctx.user.id,
+    action: "center.logo.update",
+    entityType: "Center",
+    entityId: centerId,
+    before: { hadLogo: Boolean(previous) },
+    after: { hasLogo: true },
+  });
+
+  revalidateSettings(localeOf(formData));
+  return { status: "saved" };
+}
+
+/** Remove the branch logo (the mark falls back to the initial). Audited `center.logo.remove`. */
+export async function removeCenterLogoAction(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const scope = await editorScope();
+  if (isPickBranch(scope)) return scope;
+  if (!scope) return FORBIDDEN;
+
+  const centerId = scope.ctx.center.id;
+  const previous = scope.ctx.center.logoPath;
+  if (!previous) return { status: "deleted" };
+
+  await setCenterLogoPath(prisma, centerId, null);
+  await removeStoredObject(centerId, LOGOS_BUCKET, previous).catch(logBestEffort("removed logo clean-up"));
+
+  await writeAuditLog({
+    centerId,
+    actorUserId: scope.ctx.user.id,
+    action: "center.logo.remove",
+    entityType: "Center",
+    entityId: centerId,
+    before: { hadLogo: true },
+    after: { hasLogo: false },
+  });
+
+  revalidateSettings(localeOf(formData));
+  return { status: "deleted" };
+}
+
+function localeOf(formData: FormData): string {
+  const parsed = localeSchema.safeParse(formData.get("locale"));
+  return parsed.success ? parsed.data : "en";
 }

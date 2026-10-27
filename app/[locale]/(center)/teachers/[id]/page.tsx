@@ -20,6 +20,8 @@ import { DetailRow } from "@/components/shared/field";
 import { PageHeader } from "@/components/shared/page-header";
 import { PersonAvatar } from "@/components/shared/person-avatar";
 import { Badge } from "@/components/ui/badge";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
@@ -30,6 +32,7 @@ import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const MAX_BLOCK_CANDIDATES = 8;
 
@@ -55,6 +58,7 @@ export default async function TeacherDetailPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "teacher.manage");
 
   const { id } = await params;
@@ -230,12 +234,14 @@ export default async function TeacherDetailPage({
                 />
               ) : null}
 
-              <BlockList
-                teacherUserId={teacher.userId}
-                blocked={blocked}
-                candidates={canBlock ? candidates : []}
-                query={canBlock ? query : ""}
-              />
+              <ResultsRegion>
+                <BlockList
+                  teacherUserId={teacher.userId}
+                  blocked={blocked}
+                  candidates={canBlock ? candidates : []}
+                  query={canBlock ? query : ""}
+                />
+              </ResultsRegion>
             </DetailCard>
           </>
         }

@@ -2,22 +2,26 @@ import { notFound } from "next/navigation";
 import { Clock, DoorOpen, Lock, Printer } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { cancelBookingAction } from "@/app/[locale]/(center)/approvals/actions";
 import { AddAttendeePanel, type AttendeeCandidate } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-panel";
+import { AddAttendeeSearch } from "@/app/[locale]/(center)/sessions/[id]/add-attendee-search";
+import { BookedNotArrived, type BookedStudent } from "@/app/[locale]/(center)/sessions/[id]/booked-not-arrived";
 import { DeleteSessionButton } from "@/app/[locale]/(center)/sessions/[id]/delete-session-button";
 import { ActionBar } from "@/components/shared/action-bar";
 import { EndSessionButton } from "@/app/[locale]/(center)/sessions/[id]/end-session-button";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
+import { SessionCheckInProvider } from "@/app/[locale]/(center)/sessions/[id]/session-check-in-provider";
 import { SessionLifecycleActions } from "@/app/[locale]/(center)/sessions/[id]/session-lifecycle-actions";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { SessionRoster, type RosterRowData } from "@/app/[locale]/(center)/sessions/[id]/session-roster";
 import { SessionSettlementAction } from "@/app/[locale]/(center)/settlements/session-settlement-action";
-import { searchAddAttendeeCandidatesAction } from "@/app/[locale]/(center)/sessions/actions";
-import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { DetailRow } from "@/components/shared/field";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { manualSessionDeleteState } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
@@ -25,7 +29,9 @@ import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
+import { attendanceDisplay } from "@/lib/attendance-rules";
 import { studentSearchWhere } from "@/lib/db/students";
+import { signedUrlFor } from "@/lib/db/storage";
 import {
   formatDate,
   formatDateTime,
@@ -38,6 +44,9 @@ import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { LinkButton } from "@/components/shared/link-button";
 import { centreTimeZone, dateKey } from "@/lib/scheduling";
+import { AVATARS_BUCKET } from "@/lib/storage-paths";
+import { storageConfigured } from "@/lib/storage";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const MAX_CANDIDATES = 8;
 
@@ -70,6 +79,7 @@ export default async function SessionDetailPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "session.view");
 
   const { id } = await params;
@@ -96,7 +106,7 @@ export default async function SessionDetailPage({
   // D-14 — the session's own frozen timezone (its lifecycle and its times).
   const timeZone = sessionTimeZone(session, centreTimeZone(ctx.settings));
   const canReschedule = ctxCan(ctx, "session.manage");
-  const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks, deleteBlockers] = await Promise.all([
+  const [enrollments, receipt, existingSettlement, paymentMethods, rooms, roomLinks, deleteBlockers, confirmedBookings] = await Promise.all([
     // A one-time session (R5) has no class, so no enrolled roster: everyone is a drop-in.
     session.classGroupId ? db.enrollments.listForClass(session.classGroupId) : Promise.resolve([]),
     loadSessionReceiptView(ctx.center.id, session),
@@ -112,12 +122,36 @@ export default async function SessionDetailPage({
     // R5 — Delete is offered only for a manual/one-time session that passes
     // the data layer's own rule (it re-checks on submit regardless).
     canReschedule ? manualSessionDeleteState(prisma, ctx.center.id, session.id) : Promise.resolve(null),
+    // F6 — students who booked this one session online.
+    db.sessionBookings.listConfirmedForSession(session.id),
   ]);
+  // A booking names the global User; its branch profile exists from
+  // confirmation on (`ensureStudentProfile`).
+  const bookedProfiles =
+    confirmedBookings.length > 0
+      ? await db.students.search({
+          where: { userId: { in: confirmedBookings.map((booking) => booking.studentId) } },
+          take: confirmedBookings.length,
+        })
+      : [];
+  const bookingIdByUserId = new Map(confirmedBookings.map((booking) => [booking.studentId, booking.id]));
+  const bookedAttendeeIds = new Set(
+    confirmedBookings.flatMap((booking) => (booking.sessionAttendeeId ? [booking.sessionAttendeeId] : [])),
+  );
   // R3 — this session's own room set (primary + extras) and what it seats.
   const sessionRooms = session.room
     ? [session.room, ...session.extraRooms.map((extra) => extra.room)]
     : [];
   const sessionSeats = effectiveCapacity(sessionRooms);
+
+  // A cancelled session never happened; a rescheduled one moved to its
+  // replacement (M15); a closed one is a final record (R2). None accepts
+  // attendance or payment changes, and the server actions refuse every one
+  // by direct call, not just by hiding controls here.
+  const displayStatus = deriveSessionDisplayStatus(session, new Date(), timeZone);
+  const closed = session.closedAt !== null;
+  const rosterReadOnly =
+    closed || displayStatus === "CANCELLED" || displayStatus === "RESCHEDULED";
 
   const activeEnrollments = enrollments.filter((e) => e.status === "ACTIVE");
   const attendeeByStudentId = new Map(
@@ -128,19 +162,42 @@ export default async function SessionDetailPage({
 
   const rosterMap = new Map<string, RosterRowData>();
 
+  // Storage paths of the photos the confirm panel may show (signed below, once
+  // we know which rows can still be checked in).
+  const photoPathByStudentId = new Map<string, string>();
+
   const toRow = (
     studentProfileId: string,
-    profile: { firstName: string | null; lastName: string | null; studentCode: string; user: { firstName: string; lastName: string } },
+    profile: {
+      firstName: string | null;
+      lastName: string | null;
+      studentCode: string;
+      photoUrl: string | null;
+      user: { firstName: string; lastName: string };
+    },
+    enrolled: boolean,
   ): RosterRowData => {
+    if (profile.photoUrl) photoPathByStudentId.set(studentProfileId, profile.photoUrl);
     const attendee = attendeeByStudentId.get(studentProfileId);
-    const activePayment = attendee?.payments.find((p) => !p.voided) ?? null;
+    // The row's payment is its active one — neither voided nor refunded (T5:
+    // a refund frees the slot, so a student checked in again pays anew). A
+    // read-only roster also shows a refunded one, newest first, as history.
+    const activePayment =
+      attendee?.payments.find((p) => !p.voided && !p.refunded) ??
+      (rosterReadOnly ? attendee?.payments.find((p) => !p.voided) : undefined) ??
+      null;
     return {
       studentProfileId,
       attendeeId: attendee?.id ?? null,
       name: fullName(localName(profile, profile.user)),
       studentCode: profile.studentCode,
       isDropIn: attendee?.isDropIn ?? false,
+      booked: attendee ? bookedAttendeeIds.has(attendee.id) : false,
+      enrolled,
+      photoUrl: null,
       status: attendee?.attendanceStatus ?? null,
+      // T5 — an ABSENT row on a live session, or a drop-in's: "Not arrived".
+      notArrived: attendee ? attendanceDisplay(attendee, closed) === "NOT_ARRIVED" : false,
       payment: activePayment
         ? {
             id: activePayment.id,
@@ -156,15 +213,19 @@ export default async function SessionDetailPage({
   for (const enrollment of activeEnrollments) {
     rosterMap.set(
       enrollment.studentProfileId,
-      toRow(enrollment.studentProfileId, enrollment.studentProfile),
+      toRow(enrollment.studentProfileId, enrollment.studentProfile, true),
     );
   }
   for (const attendee of session.attendees) {
     if (!attendee.studentProfileId || rosterMap.has(attendee.studentProfileId)) continue;
-    rosterMap.set(attendee.studentProfileId, toRow(attendee.studentProfileId, attendee.studentProfile!));
+    rosterMap.set(attendee.studentProfileId, toRow(attendee.studentProfileId, attendee.studentProfile!, false));
   }
 
   const roster = [...rosterMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // F6 — "Booked — not arrived": a CONFIRMED booking with no roster row yet.
+  // A student who has since enrolled is on the roster already and not listed.
+  const notArrivedProfiles = bookedProfiles.filter((profile) => !rosterMap.has(profile.id));
 
   // An absence streak is per class; a one-time session (R5) belongs to none.
   // The streaks and the add-student search both need only the roster, so they
@@ -175,7 +236,7 @@ export default async function SessionDetailPage({
     streakClassId
       ? Promise.all(
           roster
-            .filter((row) => row.status === "ABSENT")
+            .filter((row) => row.status === "ABSENT" && !row.notArrived)
             .map(async (row) => {
               // SEC-62: counted back no further than the visibility window.
               row.consecutiveAbsences = await db.attendees.absenceStreak(
@@ -199,25 +260,57 @@ export default async function SessionDetailPage({
         })
       : null,
   ]);
-  const candidates: AttendeeCandidate[] = (candidateProfiles ?? []).map((profile) => ({
-    studentProfileId: profile.id,
-    name: fullName(localName(profile, profile.user)),
-    studentCode: profile.studentCode,
-  }));
-
-  const displayStatus = deriveSessionDisplayStatus(session, new Date(), timeZone);
   const teacherName = fullName(session.teacher);
   const className = sessionDisplayName(locale, session);
   const kind = sessionKind(session);
   const canDelete = deleteBlockers !== null && deleteBlockers.length === 0;
-  // A cancelled session never happened; a rescheduled one moved to its
-  // replacement (M15); a closed one is a final record (R2). None accepts
-  // attendance or payment changes, and the server actions refuse every one
-  // by direct call, not just by hiding controls here.
-  const closed = session.closedAt !== null;
-  const rosterReadOnly =
-    closed || displayStatus === "CANCELLED" || displayStatus === "RESCHEDULED";
   const canEnd = !rosterReadOnly && displayStatus === "LIVE" && ctxCan(ctx, "session.close");
+
+  // T2 — a check-in here is reception's `checkInAction`, so it needs what that
+  // action checks: `reception.use` as well as `attendance.record`.
+  const canCheckIn = ctxCan(ctx, "attendance.record") && ctxCan(ctx, "reception.use");
+  const canRecordPayment = ctxCan(ctx, "payment.record");
+
+  // The confirm panel's photo (the anti-impersonation control, spec §5.1) must
+  // be on the page before the panel opens — nothing is fetched on click. Only
+  // rows that can still be checked in, and the search candidates, get one.
+  const signPhoto = (path: string | null | undefined) =>
+    path && storageConfigured() ? signedUrlFor(ctx.center.id, AVATARS_BUCKET, path) : Promise.resolve(null);
+  const candidateRows = canCheckIn && !rosterReadOnly ? (candidateProfiles ?? []) : [];
+  const canCheckInHere = canCheckIn && !rosterReadOnly;
+  // T7 — cancelling a booked no-show is the same gate as confirming it.
+  const canCancelBooking = ctxCan(ctx, "approvals.manage") && !rosterReadOnly;
+  const [, candidates, bookedNotArrived] = await Promise.all([
+    Promise.all(
+      roster
+        // T5 — a "Not arrived" row can be checked in again: it needs the photo too.
+        .filter((row) => canCheckIn && !rosterReadOnly && (row.status === null || row.notArrived))
+        .map(async (row) => {
+          row.photoUrl = await signPhoto(photoPathByStudentId.get(row.studentProfileId));
+        }),
+    ),
+    Promise.all(
+      candidateRows.map(
+        async (profile): Promise<AttendeeCandidate> => ({
+          studentProfileId: profile.id,
+          name: fullName(localName(profile, profile.user)),
+          studentCode: profile.studentCode,
+          photoUrl: await signPhoto(profile.photoUrl),
+        }),
+      ),
+    ),
+    Promise.all(
+      notArrivedProfiles.map(
+        async (profile): Promise<BookedStudent> => ({
+          bookingId: bookingIdByUserId.get(profile.userId)!,
+          studentProfileId: profile.id,
+          name: fullName(localName(profile, profile.user)),
+          studentCode: profile.studentCode,
+          photoUrl: canCheckInHere ? await signPhoto(profile.photoUrl) : null,
+        }),
+      ),
+    ),
+  ]);
   const tClosure = await getTranslations("Sessions.closure");
   const tEnd = await getTranslations("Sessions.endSession");
 
@@ -365,17 +458,30 @@ export default async function SessionDetailPage({
       <DetailLayout
         stickySide
         main={
+          <SessionCheckInProvider
+            sessionId={session.id}
+            priceLabel={session.priceSnapshot > 0 ? formatMoney(session.priceSnapshot, locale) : null}
+            paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
+            canRecordPayment={canRecordPayment}
+            bookedStudentIds={bookedProfiles.map((profile) => profile.id)}
+          >
           <DetailCard title={t("roster.title")} description={t("roster.description")}>
             <SessionRoster
               sessionId={session.id}
               rows={roster}
-              canRecord={ctxCan(ctx, "attendance.record")}
+              canRecord={canCheckIn}
               canCorrect={ctxCan(ctx, "attendance.correct")}
-              canRecordPayment={ctxCan(ctx, "payment.record")}
+              canRecordPayment={canRecordPayment}
               canVoid={ctxCan(ctx, "payment.void")}
               canRefund={ctxCan(ctx, "payment.refund")}
               paymentMethods={paymentMethods.map(({ id, name }) => ({ id, name }))}
               readOnly={rosterReadOnly}
+            />
+
+            <BookedNotArrived
+              students={bookedNotArrived}
+              canCheckIn={canCheckInHere}
+              cancelAction={canCancelBooking ? cancelBookingAction : undefined}
             />
 
             {rosterReadOnly ? null : (
@@ -383,23 +489,21 @@ export default async function SessionDetailPage({
                 <p className="mb-2 text-sm font-medium text-text-primary">
                   {t("addAttendee.title")}
                 </p>
-                <TypeAheadSearch
-                  value={query}
-                  label={t("addAttendee.searchLabel")}
-                  placeholder={t("addAttendee.searchPlaceholder")}
-                  submitLabel={t("addAttendee.searchSubmit")}
-                  search={searchAddAttendeeCandidatesAction.bind(null, session.id)}
-                />
+                {canCheckIn ? <AddAttendeeSearch sessionId={session.id} value={query} /> : null}
                 <div className="mt-4">
-                  <AddAttendeePanel
-                    sessionId={session.id}
-                    candidates={candidates}
-                    hasQuery={query.length > 0}
-                  />
+                  <ResultsRegion>
+                    <AddAttendeePanel
+                      sessionId={session.id}
+                      candidates={candidates}
+                      hasQuery={query.length > 0}
+                      canCheckIn={canCheckIn}
+                    />
+                  </ResultsRegion>
                 </div>
               </div>
             )}
           </DetailCard>
+          </SessionCheckInProvider>
         }
         side={
           <>

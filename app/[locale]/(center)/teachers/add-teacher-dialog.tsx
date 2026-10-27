@@ -13,7 +13,14 @@ import { Button } from "@/components/ui/button";
  * rather than a form embedded in the page. R10b: the shared `DialogShell`
  * (docs/04 §11.15, §11.19), mounted fresh on every open.
  */
-export function AddTeacherDialog() {
+export function AddTeacherDialog({
+  branches,
+  activeBranchId,
+}: {
+  /** F1: where the actor may add a teacher (teacher.manage there). */
+  branches: { id: string; name: string }[];
+  activeBranchId: string;
+}) {
   const t = useTranslations("Teachers");
 
   return (
@@ -24,7 +31,7 @@ export function AddTeacherDialog() {
           {t("add")}
         </Button>
       )}
-      render={(dialog) => <TeacherForm {...dialog} />}
+      render={(dialog) => <TeacherForm {...dialog} branches={branches} activeBranchId={activeBranchId} />}
     />
   );
 }

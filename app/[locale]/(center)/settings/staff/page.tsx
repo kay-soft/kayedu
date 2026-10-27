@@ -8,7 +8,10 @@ import {
   MemberRow,
   type MemberRowData,
 } from "@/app/[locale]/(center)/settings/staff/member-row";
-import { ListHeader } from "@/components/shared/list-header";
+import {
+  SettingsList,
+  SettingsListHeader,
+} from "@/components/settings/settings-list";
 import { Ltr } from "@/components/shared/ltr";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +23,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
+import { branchesWithPermission, ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { isBranchGrantableRole } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/db/client";
 import { organizationBranches } from "@/lib/db/organizations";
@@ -31,6 +36,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 
 export default async function StaffSettingsPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "staff.invite");
 
   const db = scoped(ctx);
@@ -43,9 +49,12 @@ export default async function StaffSettingsPage() {
   // hidden former member is how a center loses track of who has access.
   // Centre staff only (R9): teachers — members or pending invitations — are
   // managed on the Teachers page and filtered out here in the data layer.
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, inviteBranches] = await Promise.all([
     db.memberships.listStaffWithUser(),
     db.invitations.listStaff({ status: "PENDING" }),
+    // F1: every branch where this actor may invite — the same permission the
+    // action checks, resolved per branch.
+    branchesWithPermission("membership.role.assign"),
   ]);
 
   const canManage = ctxCan(ctx, "staff.manage");
@@ -106,7 +115,7 @@ export default async function StaffSettingsPage() {
             <CardDescription>{t("inviteSubtitle")}</CardDescription>
           </CardHeader>
           <CardContent>
-            <InviteForm />
+            <InviteForm branches={inviteBranches} activeBranchId={ctx.center.id} />
           </CardContent>
         </Card>
       ) : null}
@@ -125,21 +134,22 @@ export default async function StaffSettingsPage() {
               description={t("noMembersHint")}
             />
           ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                <span className="min-w-0 flex-1">{t("columns.name")}</span>
-                <span className="w-64 shrink-0">{t("columns.role")}</span>
-                <span className="w-20 shrink-0">{tCommon("status")}</span>
-                <span className="w-32 shrink-0 text-end">
-                  {tCommon("actions")}
-                </span>
-              </ListHeader>
+            <SettingsList>
+              <SettingsListHeader
+                columns={[
+                  { key: "name", label: t("columns.name") },
+                  { key: "role", label: t("columns.role"), className: "w-64 shrink-0" },
+                ]}
+                statusLabel={tCommon("status")}
+                actionsLabel={tCommon("actions")}
+                actionsSize="narrow"
+              />
 
               {/* Stacked cards below md, table rows from md up (docs/04 §6). */}
               {rows.map((member) => (
                 <MemberRow key={member.membershipId} member={member} />
               ))}
-            </ul>
+            </SettingsList>
           )}
         </CardContent>
       </Card>

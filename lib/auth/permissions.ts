@@ -21,6 +21,7 @@ export const PERMISSIONS = [
   "permission.manage", // edit the permission matrix (M12)
   "membership.role.assign", // grant/change a member's role (M12)
   "membership.branch.grant", // widen a member's branch access (M12)
+  "organization.branch.create", // add a branch to the organization, within its limit (F1)
   // Center-level
   "center.settings.edit",
   "center.branding.edit",
@@ -68,10 +69,10 @@ export const PERMISSIONS = [
   "reservation.manage.own",
   // Trust
   "audit.view",
-  // Parent accounts (M16) — the OD-6 placeholder seam: a centre staff member
-  // manually flips a PENDING ParentLink to VERIFIED from the student's
-  // profile. Not OD-6's real answer, just an obvious, gated, audited seam
-  // until OD-6 settles who/how actually verifies.
+  // Parent access (M16, F3 — OD-6 decided): from a student's page, generate
+  // or cancel this branch's one-time parent code and remove a parent's
+  // access (with a reason). Audited `family.code.issue` / `family.code.revoke`
+  // / `family.link.revoke` (lib/db/parents.ts).
   "parent.link.manage",
   // Platform
   "platform.manage",
@@ -93,6 +94,9 @@ const OWNER_ONLY_ACTIONS: readonly Permission[] = [
   "permission.manage",
   "membership.role.assign",
   "membership.branch.grant",
+  // F1: adding a branch creates a tenant the organization pays for, so it is
+  // the Owner's alone — never a matrix cell, never grantable to anyone else.
+  "organization.branch.create",
 ];
 
 /**

@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { signUpAction, type AuthFormState } from "@/app/[locale]/(auth)/actions";
+import { IntentCards, type SignupIntentValue } from "@/app/[locale]/(auth)/register/intent-cards";
 import { Field } from "@/components/shared/field";
 import { CheckEmailNotice } from "@/components/shared/check-email-notice";
 import { FormMessage } from "@/components/shared/form-message";
@@ -18,14 +20,18 @@ const initialState: AuthFormState = {};
 export function RegisterForm({
   next,
   defaultEmail,
+  defaultIntent = null,
 }: {
   next?: string;
   defaultEmail?: string;
+  /** Pre-ticked only (a parent arriving from a join link) — still the person's choice to confirm. */
+  defaultIntent?: SignupIntentValue | null;
 }) {
   const t = useTranslations("Auth");
   const tErrors = useTranslations("Auth.errors");
   const locale = useLocale();
   const [state, formAction] = useGuardedActionState(signUpAction, initialState);
+  const [intent, setIntent] = useState<SignupIntentValue | null>(defaultIntent);
 
   if (state.status === "emailConfirmationRequired" && state.email) {
     return <CheckEmailNotice email={state.email} />;
@@ -37,6 +43,12 @@ export function RegisterForm({
       {next ? <input type="hidden" name="next" value={next} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+
+      <IntentCards
+        value={intent}
+        onChange={setIntent}
+        error={state.fieldErrors?.signupIntent ? tErrors(state.fieldErrors.signupIntent) : undefined}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
@@ -97,24 +109,6 @@ export function RegisterForm({
           readOnly={Boolean(defaultEmail)}
           required
           aria-invalid={state.fieldErrors?.email ? true : undefined}
-        />
-      </Field>
-
-      <Field
-        id="phone"
-        label={t("fields.phone")}
-        optional
-        error={state.fieldErrors?.phone ? tErrors(state.fieldErrors.phone) : undefined}
-      >
-        <Input
-          id="phone"
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          dir="ltr"
-          placeholder="01012345678"
-          aria-invalid={state.fieldErrors?.phone ? true : undefined}
         />
       </Field>
 

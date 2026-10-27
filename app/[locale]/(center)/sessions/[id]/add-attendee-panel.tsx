@@ -4,10 +4,8 @@ import { useEffect, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
-import {
-  addExistingAttendeeAction,
-  addNewAttendeeAction,
-} from "@/app/[locale]/(center)/sessions/actions";
+import { addNewAttendeeAction } from "@/app/[locale]/(center)/sessions/actions";
+import { useRequestCheckIn } from "@/app/[locale]/(center)/sessions/[id]/session-check-in-provider";
 import { ContactFields } from "@/components/center/contact-fields";
 import { MatchPanel } from "@/components/center/match-panel";
 import { PersonFields } from "@/components/center/person-fields";
@@ -21,6 +19,8 @@ export type AttendeeCandidate = {
   studentProfileId: string;
   name: string;
   studentCode: string;
+  /** A short-lived signed URL for the confirm panel, or null. */
+  photoUrl: string | null;
 };
 
 /**
@@ -33,32 +33,38 @@ export type AttendeeCandidate = {
  * arrival time (R2, `createAttendance`) — there is no status to pick — and
  * staff correct it from the roster (`session-roster.tsx`'s Attendance
  * control) while the session is live if that is wrong.
+ *
+ * T2: an **existing** student found by search is not added on the spot — the
+ * row opens reception's confirm panel (`session-check-in-provider.tsx`) and
+ * nothing is written until its confirm. The **new**-student form below is one
+ * explicit form with its own Add button, which is its confirm; it registers the
+ * person and checks them in as a drop-in, and the payment is then recorded from
+ * the roster row ("Record payment").
  */
 export function AddAttendeePanel({
   sessionId,
   candidates,
   hasQuery,
+  canCheckIn,
 }: {
   sessionId: string;
   candidates: AttendeeCandidate[];
   hasQuery: boolean;
+  /** `attendance.record` and `reception.use` — what the check-in itself needs. */
+  canCheckIn: boolean;
 }) {
   const t = useTranslations("Sessions.addAttendee");
   const [showNewForm, setShowNewForm] = useState(false);
 
   return (
     <div className="flex flex-col gap-4">
-      {hasQuery ? (
+      {hasQuery && canCheckIn ? (
         candidates.length === 0 ? (
           <p className="text-sm text-text-muted">{t("noCandidates")}</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {candidates.map((candidate) => (
-              <ExistingCandidateRow
-                key={candidate.studentProfileId}
-                sessionId={sessionId}
-                candidate={candidate}
-              />
+              <ExistingCandidateRow key={candidate.studentProfileId} candidate={candidate} />
             ))}
           </ul>
         )
@@ -76,20 +82,9 @@ export function AddAttendeePanel({
   );
 }
 
-function ExistingCandidateRow({
-  sessionId,
-  candidate,
-}: {
-  sessionId: string;
-  candidate: AttendeeCandidate;
-}) {
+function ExistingCandidateRow({ candidate }: { candidate: AttendeeCandidate }) {
   const t = useTranslations("Sessions.addAttendee");
-  const tErrors = useTranslations("Sessions.errors");
-  const locale = useLocale();
-  const [state, formAction] = useGuardedActionState(
-    addExistingAttendeeAction,
-    IDLE_SESSION_STATE,
-  );
+  const requestCheckIn = useRequestCheckIn();
 
   return (
     <li className="flex flex-col gap-2 rounded-xl border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -99,16 +94,24 @@ function ExistingCandidateRow({
           {candidate.studentCode}
         </p>
       </div>
-      <form action={formAction} className="flex shrink-0 flex-col gap-1">
-        <input type="hidden" name="locale" value={locale} />
-        <input type="hidden" name="sessionId" value={sessionId} />
-        <input type="hidden" name="studentProfileId" value={candidate.studentProfileId} />
-        <SubmitButton className="w-full sm:w-auto">
-          <UserPlus className="size-4" />
-          {t("add")}
-        </SubmitButton>
-        {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
-      </form>
+      <Button
+        type="button"
+        className="h-11 w-full px-4 sm:w-auto"
+        onClick={() =>
+          // Search results exclude everyone on the roster and every active
+          // enrolment, so a pick here is always a drop-in.
+          requestCheckIn({
+            id: candidate.studentProfileId,
+            name: candidate.name,
+            code: candidate.studentCode,
+            photoUrl: candidate.photoUrl,
+            enrolled: false,
+          })
+        }
+      >
+        <UserPlus className="size-4" aria-hidden />
+        {t("add")}
+      </Button>
     </li>
   );
 }

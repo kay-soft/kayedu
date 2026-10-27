@@ -1,8 +1,12 @@
-import type { EnrollmentStatus, Prisma, PrismaClient, SessionStatus } from "@prisma/client";
+import type { EnrollmentStatus, Prisma, PrismaClient, SessionBookingStatus, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/discover.ts).
+import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts";
+import { DEFAULT_TIMEZONE, addDays, startOfUtcDay, todayInTimezone } from "../scheduling.ts";
+import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
@@ -88,28 +92,41 @@ export async function listReservationsForStudent(db: Db, studentUserId: string) 
     orderBy: { requestedAt: "desc" },
     include: {
       center: { select: { id: true, name: true, logoPath: true, themeColor: true } },
-      classGroup: {
-        select: {
-          id: true,
-          centerId: true,
-          subjectId: true,
-          gradeId: true,
-          subject: { select: { nameAr: true, nameEn: true } },
-          grade: { select: { nameAr: true, nameEn: true } },
-        },
-      },
+      classGroup: { select: CROSS_CENTRE_CLASS_LABEL_SELECT },
     },
   });
+  const labelled = await withCentreCatalogNames(db, rows.map((row) => row.classGroup));
+  return rows.map((row, index) => ({ ...row, classGroup: labelled[index] }));
+}
 
+/** A class's catalog labels as an identity-scoped (cross-centre) read selects them. */
+const CROSS_CENTRE_CLASS_LABEL_SELECT = {
+  id: true,
+  centerId: true,
+  subjectId: true,
+  gradeId: true,
+  subject: { select: { nameAr: true, nameEn: true } },
+  grade: { select: { nameAr: true, nameEn: true } },
+} satisfies Prisma.ClassGroupSelect;
+
+type CrossCentreClassLabel = Prisma.ClassGroupGetPayload<{ select: typeof CROSS_CENTRE_CLASS_LABEL_SELECT }>;
+
+/**
+ * The centre-local display names for classes read across centres (M13): one
+ * batched query over the distinct (centre, catalog id) pairs present, attached
+ * as a `selections` array in the shape a single-centre nested include has, so
+ * `lib/catalog.ts`'s `catalogLabelWithSelection` reads it back identically.
+ */
+async function withCentreCatalogNames(db: Db, classes: CrossCentreClassLabel[]) {
   type Pair = { kind: "SUBJECT" | "GRADE"; centerId: string; catalogId: string };
   const pairsByKey = new Map<string, Pair>();
-  for (const row of rows) {
-    if (row.classGroup.subjectId) {
-      const pair: Pair = { kind: "SUBJECT", centerId: row.classGroup.centerId, catalogId: row.classGroup.subjectId };
+  for (const row of classes) {
+    if (row.subjectId) {
+      const pair: Pair = { kind: "SUBJECT", centerId: row.centerId, catalogId: row.subjectId };
       pairsByKey.set(`${pair.kind}:${pair.centerId}:${pair.catalogId}`, pair);
     }
-    if (row.classGroup.gradeId) {
-      const pair: Pair = { kind: "GRADE", centerId: row.classGroup.centerId, catalogId: row.classGroup.gradeId };
+    if (row.gradeId) {
+      const pair: Pair = { kind: "GRADE", centerId: row.centerId, catalogId: row.gradeId };
       pairsByKey.set(`${pair.kind}:${pair.centerId}:${pair.catalogId}`, pair);
     }
   }
@@ -148,22 +165,60 @@ export async function listReservationsForStudent(db: Db, studentUserId: string) 
     return [override ?? { displayNameAr: null, displayNameEn: null }];
   };
 
+  return classes.map((row) => ({
+    ...row,
+    subject: row.subject
+      ? { ...row.subject, selections: withDisplayName("SUBJECT", row.centerId, row.subjectId) }
+      : null,
+    grade: row.grade
+      ? { ...row.grade, selections: withDisplayName("GRADE", row.centerId, row.gradeId) }
+      : null,
+  }));
+}
+
+/**
+ * "My requests → Session bookings" (F6): every single-session booking this
+ * student has made, across every branch — read by their own `studentId`,
+ * like the reservations above. Carries the replacement session's date for one
+ * a reschedule cancelled ("moved to <date> — book again").
+ */
+export async function listBookingsForStudent(db: Db, studentUserId: string) {
+  const rows = await db.sessionBooking.findMany({
+    where: { studentId: studentUserId },
+    orderBy: { requestedAt: "desc" },
+    take: 100,
+    select: {
+      id: true,
+      centerId: true,
+      status: true,
+      cancelReason: true,
+      requestedAt: true,
+      sessionAttendeeId: true,
+      center: { select: { id: true, name: true, nameEn: true } },
+      session: {
+        select: {
+          id: true,
+          classGroupId: true,
+          status: true,
+          closedAt: true,
+          rescheduledToId: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          timezone: true,
+          rescheduledTo: { select: { date: true, startTime: true } },
+          classGroup: { select: CROSS_CENTRE_CLASS_LABEL_SELECT },
+        },
+      },
+    },
+  });
+  const classes = rows.flatMap((row) => (row.session.classGroup ? [row.session.classGroup] : []));
+  const labelled = new Map((await withCentreCatalogNames(db, classes)).map((row) => [row.id, row]));
   return rows.map((row) => ({
     ...row,
-    classGroup: {
-      ...row.classGroup,
-      subject: row.classGroup.subject
-        ? {
-            ...row.classGroup.subject,
-            selections: withDisplayName("SUBJECT", row.classGroup.centerId, row.classGroup.subjectId),
-          }
-        : null,
-      grade: row.classGroup.grade
-        ? {
-            ...row.classGroup.grade,
-            selections: withDisplayName("GRADE", row.classGroup.centerId, row.classGroup.gradeId),
-          }
-        : null,
+    session: {
+      ...row.session,
+      classGroup: row.session.classGroup ? labelled.get(row.session.classGroup.id)! : null,
     },
   }));
 }
@@ -211,6 +266,108 @@ export function studentUpcomingSessions(
   });
 }
 
+/** A booking that still holds (or asks for) a seat — the only ones a schedule shows. */
+const SCHEDULE_BOOKING_STATUSES: SessionBookingStatus[] = ["PENDING", "CONFIRMED"];
+
+export type BookedUpcomingSession = {
+  bookingId: string;
+  /** CONFIRMED reads "Booked", PENDING reads "Requested". */
+  bookingStatus: "PENDING" | "CONFIRMED";
+  centerId: string;
+  centerName: string;
+  session: Prisma.SessionGetPayload<{ include: ReturnType<typeof studentUpcomingSessionInclude> }>;
+};
+
+/**
+ * F6 follow-up (T7): the upcoming sessions a student has **booked** (single
+ * session, not enrolled) — read-only, no write path. A CONFIRMED booking is
+ * "Booked"; a PENDING one is "Requested" for as long as its session can still
+ * be booked (once it has started it reads as expired and drops out, as on My
+ * requests). Cancelled, rejected, expired, moved (rescheduled) and cancelled
+ * sessions never appear, and neither does a closed session.
+ *
+ * `bookingWhere` is the one place a caller scopes the read: the student's own
+ * id (identity-scoped, like `listBookingsForStudent` — a PENDING booking can
+ * sit at a branch where no `StudentProfile` exists yet) or one branch's child
+ * (`childBookedUpcoming`). Each branch's session rows are then fetched with
+ * that branch's own `centerId` filter and its own catalog renames.
+ */
+async function bookedUpcoming(
+  db: Db,
+  bookingWhere: Prisma.SessionBookingWhereInput,
+  now: Date,
+): Promise<BookedUpcomingSession[]> {
+  const rows = await db.sessionBooking.findMany({
+    where: {
+      ...bookingWhere,
+      status: { in: SCHEDULE_BOOKING_STATUSES },
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      session: { ...BOOKABLE_SESSION, date: { gte: addDays(startOfUtcDay(now), -1) } },
+    },
+    orderBy: [{ session: { date: "asc" } }, { session: { startTime: "asc" } }],
+    take: 100,
+    select: {
+      id: true,
+      centerId: true,
+      status: true,
+      center: { select: { name: true } },
+      session: {
+        select: {
+          id: true,
+          classGroupId: true,
+          status: true,
+          closedAt: true,
+          rescheduledToId: true,
+          date: true,
+          startTime: true,
+          timezone: true,
+        },
+      },
+    },
+  });
+
+  const shown = rows.filter((row) =>
+    row.status === "PENDING"
+      ? isBookableNow(row.session, now)
+      : row.session.date.getTime() >= todayInTimezone(row.session.timezone ?? DEFAULT_TIMEZONE, now).getTime(),
+  );
+
+  const idsByCenter = new Map<string, string[]>();
+  for (const row of shown) idsByCenter.set(row.centerId, [...(idsByCenter.get(row.centerId) ?? []), row.session.id]);
+  const sessions = new Map<string, Awaited<ReturnType<typeof loadBookedSessions>>[number]>();
+  for (const [centerId, ids] of idsByCenter) {
+    for (const session of await loadBookedSessions(db, centerId, ids)) sessions.set(session.id, session);
+  }
+
+  return shown.flatMap((row) => {
+    const session = sessions.get(row.session.id);
+    return session
+      ? [{ bookingId: row.id, bookingStatus: row.status as "PENDING" | "CONFIRMED", centerId: row.centerId, centerName: row.center.name, session }]
+      : [];
+  });
+}
+
+function loadBookedSessions(db: Db, centerId: string, sessionIds: string[]) {
+  return db.session.findMany({
+    where: scopedWhere(centerId, { id: { in: sessionIds } }),
+    include: studentUpcomingSessionInclude(centerId),
+  });
+}
+
+/** Every upcoming session this student has booked or requested, across every branch. */
+export function studentBookedUpcoming(db: Db, studentUserId: string, now: Date = new Date()) {
+  return bookedUpcoming(db, { studentId: studentUserId }, now);
+}
+
+/** The same read for one child at one branch — the parent portal's mirror. */
+export function childBookedUpcoming(db: Db, centerId: string, studentProfileId: string, now: Date = new Date()) {
+  return bookedUpcoming(
+    db,
+    scopedWhere(centerId, { student: { studentProfiles: { some: { id: studentProfileId, centerId } } } }),
+    now,
+  );
+}
+
 /**
  * Past attendance for this student at one center — read from `SessionAttendee`
  * rather than the enrollment's schedule, because "past" must show what
@@ -229,6 +386,9 @@ export function studentPastAttendance(
     where: scopedWhere(centerId, {
       studentProfileId,
       session: { date: { lt: uptoDate } },
+      // T5 — a drop-in's ABSENT row is a "never really came" record, not a
+      // past session (lib/attendance-rules.ts).
+      ...EXCLUDE_DROP_IN_NO_SHOWS,
     }),
     include: {
       session: {

@@ -5,7 +5,6 @@ import { AlertTriangle, Ban, LogIn, Undo2, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
-  checkInRosterAction,
   recordPaymentAction,
   refundPaymentAction,
   setAttendanceAction,
@@ -34,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useRequestCheckIn } from "@/app/[locale]/(center)/sessions/[id]/session-check-in-provider";
 import { Link } from "@/lib/i18n/navigation";
 import { formatMoney } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -50,7 +50,19 @@ export type RosterRowData = {
   name: string;
   studentCode: string;
   isDropIn: boolean;
+  /** F6 — this drop-in's check-in fulfilled an online booking: "Booked" instead of Drop-in. */
+  booked?: boolean;
+  /** On the class's active enrolments — what the confirm panel's Enrolled / Drop-in badge shows. */
+  enrolled: boolean;
+  /** A short-lived signed URL for the confirm panel; only an unmarked row carries one. */
+  photoUrl: string | null;
   status: AttendanceStatusValue | null;
+  /**
+   * T5 — an ABSENT row that reads "Not arrived" (lib/attendance-rules.ts):
+   * any ABSENT row on a live session (a void or refund reset it, or it was
+   * corrected to Absent), and a drop-in's once closed. Never shown as Absent.
+   */
+  notArrived: boolean;
   /** `methodLabel` is the payment's frozen `methodLabelSnapshot` (R1), never the live name. */
   payment: { id: string; amount: number; methodLabel: string; refunded: boolean } | null;
   consecutiveAbsences: number;
@@ -59,10 +71,19 @@ export type RosterRowData = {
 /**
  * The session roster (spec §4.1 item 7): every actively-enrolled student
  * (marked or not) plus any drop-ins. An unmarked row gets a **Check in**
- * button — the server decides Present or Late from the clock (R2), there is
- * no status picker. A marked row gets the Attendance control for
+ * button that opens reception's confirm panel (T2: confirm, then write — the
+ * button itself calls no Server Action; the panel's confirm is the one write,
+ * attendance and payment together). The server decides Present or Late from
+ * the clock (R2), there is no status picker. A marked row gets the Attendance control for
  * corrections while the session is live, and, once PRESENT/LATE, the money —
  * record a payment, void one already recorded, or (M14) refund one.
+ *
+ * T5 — a void or refund on a live session resets the student to **Not
+ * arrived** (ABSENT underneath, never shown as Absent). That row gets **Check
+ * in** again (the same confirm panel: the server decides Present or Late, and
+ * the panel records a new payment) and, for `attendance.correct`, a
+ * Present / Late correction; who was voided or refunded, and why, is in the
+ * receipt's change log.
  *
  * Switching a paid student to Absent voids their payment (R2). The row says
  * so in plain words before anyone clicks, and the click opens a
@@ -161,10 +182,7 @@ function AttendeeRow({
     },
     IDLE_SESSION_STATE,
   );
-  const [checkInState, checkInFormAction] = useGuardedActionState(
-    checkInRosterAction,
-    IDLE_SESSION_STATE,
-  );
+  const requestCheckIn = useRequestCheckIn();
   const [paymentState, paymentFormAction] = useGuardedActionState(
     recordPaymentAction,
     IDLE_SESSION_STATE,
@@ -207,7 +225,7 @@ function AttendeeRow({
           <p className="flex items-center gap-2 text-xs text-text-secondary">
             <Ltr>{row.studentCode}</Ltr>
             {row.isDropIn ? (
-              <Badge variant="info">{t("dropIn")}</Badge>
+              <Badge variant="info">{row.booked ? t("booked") : t("dropIn")}</Badge>
             ) : null}
           </p>
         </div>
@@ -220,21 +238,54 @@ function AttendeeRow({
         </p>
       ) : null}
 
-      {readOnly || (!alreadyMarked && !canRecord) ? (
+      {readOnly || (!alreadyMarked && !canRecord) || (row.notArrived && !canRecord && !canCorrect) ? (
         // Present / late / absent keep their colours on a closed roster too
-        // (they had all been grey) — docs/04 §2.
-        <Badge variant={row.status ? STATUS_VARIANT[row.status] : "neutral"}>
-          {row.status ? tAttendance(row.status) : t("unmarked")}
+        // (they had all been grey) — docs/04 §2. "Not arrived" is neutral.
+        <Badge variant={row.status && !row.notArrived ? STATUS_VARIANT[row.status] : "neutral"}>
+          {row.notArrived ? tAttendance("NOT_ARRIVED") : row.status ? tAttendance(row.status) : t("unmarked")}
         </Badge>
-      ) : !alreadyMarked ? (
-        <form action={checkInFormAction} className="flex flex-col items-stretch gap-2 sm:items-start">
-          {hiddenRowFields}
-          <SubmitButton className="w-full sm:w-auto">
-            <LogIn className="size-4" aria-hidden />
-            {t("checkIn")}
-          </SubmitButton>
-          {checkInState.error ? <FormMessage>{tErrors(checkInState.error)}</FormMessage> : null}
-        </form>
+      ) : !alreadyMarked || row.notArrived ? (
+        <div className="flex flex-col gap-2">
+          {row.notArrived ? (
+            <Badge variant="neutral" className="self-start">
+              {tAttendance("NOT_ARRIVED")}
+            </Badge>
+          ) : null}
+          {canRecord ? (
+            // Opens the confirm panel; nothing is written until its confirm button.
+            <Button
+              type="button"
+              className="h-11 w-full px-4 sm:w-auto sm:self-start"
+              onClick={() =>
+                requestCheckIn({
+                  id: row.studentProfileId,
+                  name: row.name,
+                  code: row.studentCode,
+                  photoUrl: row.photoUrl,
+                  enrolled: row.enrolled,
+                })
+              }
+            >
+              <LogIn className="size-4" aria-hidden />
+              {t("checkIn")}
+            </Button>
+          ) : null}
+          {row.notArrived && canCorrect ? (
+            <>
+              <p className="text-xs text-text-muted">{t("notArrivedCorrectHint")}</p>
+              <AttendanceControl
+                formAction={attendanceFormAction}
+                value={null}
+                pending={attendancePending}
+                hiddenFields={hiddenRowFields}
+                statuses={["PRESENT", "LATE"]}
+              />
+              {attendanceState.error ? (
+                <FormMessage>{tErrors(attendanceState.error)}</FormMessage>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       ) : (
         <>
           <AttendanceControl
@@ -311,6 +362,11 @@ function AttendeeRow({
               amount: formatMoney(row.payment.amount, locale),
               method: row.payment.methodLabel,
             })}
+            {row.payment.refunded ? (
+              <Badge variant="neutral" className="ms-2">
+                {t("refunded")}
+              </Badge>
+            ) : null}
           </p>
         ) : null
       ) : payable ? (

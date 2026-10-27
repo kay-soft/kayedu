@@ -70,20 +70,15 @@ export const roomSchema = z.object({
   ...base,
   name: entityName,
   capacity: wholeNumber(10_000),
+  // "Can be combined with" (R3): the full set of rooms this one should be
+  // linked to after the save — links are added and removed to match. Only a
+  // shape rule here; same centre, active, and in-use are decided by
+  // lib/db/room-sets.ts.
+  linkedRoomIds: extraRoomIdsField,
 });
 
 /** Every master-data update carries the id of the row being edited. */
 export const roomUpdateSchema = roomSchema.extend({ id: recordId });
-
-/**
- * "Can be combined with" for one room (R3): the full set of rooms it should
- * be linked to after the save — links are added and removed to match.
- */
-export const roomLinksSchema = z.object({
-  ...base,
-  roomId: recordId,
-  linkedRoomIds: extraRoomIdsField,
-});
 
 export const recordToggleSchema = z.object({
   ...base,
@@ -199,6 +194,8 @@ export const generalSettingsSchema = z
     teacherEditDeadlineEnabled: checkbox,
     teacherEditDeadlineHours: z.string().trim().optional(),
     dataVisibilityDays: visibilityWindowDays,
+    // F5: whether this branch appears on the public Explore pages.
+    publicListing: checkbox,
   })
   .transform((value, ctx) => {
     // The share value means two different things depending on the mode, so it
@@ -271,6 +268,7 @@ export const generalSettingsSchema = z
         : ("WARN" as const),
       teacherEditDeadlineHours,
       dataVisibilityDays: value.dataVisibilityDays,
+      publicListing: value.publicListing,
     };
   });
 

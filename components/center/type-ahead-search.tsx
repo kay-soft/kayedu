@@ -2,11 +2,12 @@
 
 import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, ScanLine, Search } from "lucide-react";
+import { Loader2, ScanLine, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Ltr } from "@/components/shared/ltr";
+import { useUrlFilters } from "@/components/shared/url-filters";
 import { Input } from "@/components/ui/input";
 import { useRouter } from "@/lib/i18n/navigation";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,11 @@ export type TypeAheadResult = {
   secondary?: string;
   /** Where selecting this result navigates (a detail page, or `?studentId=…`). */
   href: string;
+  /**
+   * A short-lived signed photo URL, for a screen that hands the pick to a
+   * confirm panel (the session page's add-attendee search). Optional.
+   */
+  photoUrl?: string | null;
 };
 
 /** What a screen can do to the input from outside (R7: clear and refocus after a completed check-in). */
@@ -66,6 +72,28 @@ const useIsomorphicLayoutEffect =
  * so a scan can never select a stale suggestion under a resting mouse.
  * Session mode (R7) passes `onSubmitValue`/`onSelect` to take over both
  * paths without a page navigation.
+ *
+ * **A pick stays picked (T2).** Choosing a suggestion closes the panel and it
+ * must not come back on its own: not when the page re-renders around it, not
+ * when the input is refocused, not when a navigation hands this component a
+ * fresh `search` function (a `.bind`ed Server Action is a new function every
+ * render, which re-ran the effect below and reopened the list). The text the
+ * pick was made for — or that arrived from the URL on load — is recorded in
+ * `settledQuery`; the effect, the late-result handler and the focus handler all
+ * stand down for exactly that text, and only a keystroke (which changes it)
+ * lets the panel open again.
+ *
+ * **Soft submit (T4).** On a list or detail page the submit is a soft
+ * navigation (`useUrlFilters`, docs/02 §14): the form still GETs without
+ * JavaScript, but with it the URL changes in place — no document reload, scroll
+ * kept, results dimmed while the next ones load — and the field re-seeds from
+ * `value` when the URL moves (Back). Reception's own scan field opts out with
+ * `softSubmit={false}`: the scanner contract above is verified against the
+ * full-page submit and stays exactly that. Session mode (`onSubmitValue`) never
+ * navigates at all.
+ *
+ * `onClear` adds a clear (X) control and makes Escape — when no list is open —
+ * do the same: the reception desk's way back to its default state.
  */
 export function TypeAheadSearch({
   name = "q",
@@ -81,6 +109,8 @@ export function TypeAheadSearch({
   controlRef,
   onSubmitValue,
   onSelect,
+  onClear,
+  softSubmit = true,
   size = "default",
   hideLabel,
   hint,
@@ -109,6 +139,18 @@ export function TypeAheadSearch({
   /** When set, choosing a suggestion calls this instead of navigating to its `href`. */
   onSelect?: (result: TypeAheadResult) => void;
   /**
+   * When set, a clear (X) control shows in the field and Escape (with no list
+   * open) calls it after emptying the input. The screen decides what "clear"
+   * means — the desk returns to its default state — and passes this only while
+   * there is something to clear.
+   */
+  onClear?: () => void;
+  /**
+   * Submit as a soft navigation (default). `false` keeps the plain full-page
+   * GET submit — Reception's scan field only (the scanner contract, R7).
+   */
+  softSubmit?: boolean;
+  /**
    * `lg` is the reception desk's find / scan field (docs/04 §14.5): 56px, a
    * scan icon at its start, a larger type size.
    */
@@ -120,6 +162,7 @@ export function TypeAheadSearch({
 }) {
   const t = useTranslations("Shared.typeAhead");
   const router = useRouter();
+  const urlFilters = useUrlFilters();
   const generatedInputId = useId();
   const inputId = inputIdProp ?? generatedInputId;
   const listboxId = useId();
@@ -136,6 +179,29 @@ export function TypeAheadSearch({
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
+  // Text whose suggestions must not (re)open the panel: what a pick was made
+  // for, or what the URL handed us on load. Cleared by the next keystroke.
+  const settledQuery = useRef<string | null>(value ? value : null);
+
+  // On a soft-submit search the field mirrors the URL: when `value` changes
+  // (Back, a clear-search link) the typed text and any open suggestions go with
+  // it. Reception's field (`softSubmit={false}`) and session mode keep today's
+  // behaviour — their text is theirs, whatever the URL does around them.
+  const mirrorsUrl = softSubmit && !onSubmitValue;
+  const [seenValue, setSeenValue] = useState(value ?? "");
+  if (mirrorsUrl && (value ?? "") !== seenValue) {
+    setSeenValue(value ?? "");
+    setQuery(value ?? "");
+    setResults([]);
+    setSearched(false);
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+  // Declared before the search effect below, so the new settled text is in
+  // place when that effect decides whether to fetch.
+  useEffect(() => {
+    if (mirrorsUrl) settledQuery.current = value ? value : null;
+  }, [mirrorsUrl, value]);
 
   const queryTooShort = query.trim().length < MIN_QUERY_LENGTH;
 
@@ -146,6 +212,9 @@ export function TypeAheadSearch({
     // `queryTooShort` at render time instead, so this early return never
     // triggers a cascading re-render from inside the effect.
     if (trimmed.length < MIN_QUERY_LENGTH) return;
+    // Settled text is not searched at all — a new `search` identity or a
+    // re-render must not bring the list back after a pick.
+    if (settledQuery.current === query) return;
 
     const id = ++requestId.current;
     const timer = setTimeout(() => {
@@ -153,7 +222,7 @@ export function TypeAheadSearch({
       setLoading(true);
       search(trimmed)
         .then((rows) => {
-          if (requestId.current !== id) return;
+          if (requestId.current !== id || settledQuery.current === query) return;
           setResults(rows.slice(0, MAX_RESULTS));
           setSearched(true);
           setOpen(true);
@@ -178,15 +247,23 @@ export function TypeAheadSearch({
     setActiveIndex(-1);
   }
 
+  function clearInput() {
+    cancelPending();
+    settledQuery.current = null;
+    setQuery("");
+    setResults([]);
+    setSearched(false);
+    if (inputRef.current) inputRef.current.value = "";
+    inputRef.current?.focus();
+  }
+
+  function clearSelection() {
+    clearInput();
+    onClear?.();
+  }
+
   useImperativeHandle(controlRef, () => ({
-    clear: () => {
-      cancelPending();
-      setQuery("");
-      setResults([]);
-      setSearched(false);
-      if (inputRef.current) inputRef.current.value = "";
-      inputRef.current?.focus();
-    },
+    clear: clearInput,
     focus: () => inputRef.current?.focus(),
   }));
 
@@ -247,6 +324,7 @@ export function TypeAheadSearch({
 
   function select(result: TypeAheadResult) {
     cancelPending();
+    settledQuery.current = inputRef.current?.value ?? query;
     if (onSelect) onSelect(result);
     else router.push(result.href);
   }
@@ -258,11 +336,22 @@ export function TypeAheadSearch({
     if (onSubmitValue) {
       event.preventDefault();
       onSubmitValue(submitted);
+    } else if (softSubmit) {
+      // A soft navigation, from the input's own value (FormData reads the DOM,
+      // not React state, so the scan-between-renders rule above still holds).
+      event.preventDefault();
+      urlFilters.submit(event.currentTarget);
     }
-    // Otherwise the plain GET form submits the input's own value, as before.
+    // Otherwise (Reception) the plain GET form submits the input's own value, as before.
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    // With no list open, Escape clears the selection (when the screen has one).
+    if (event.key === "Escape" && onClear && !(open && results.length > 0)) {
+      event.preventDefault();
+      clearSelection();
+      return;
+    }
     if (!open || results.length === 0) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -318,13 +407,14 @@ export function TypeAheadSearch({
             autoFocus={autoFocus}
             value={query}
             onChange={(event) => {
+              settledQuery.current = null;
               setQuery(event.currentTarget.value);
               // A new character invalidates any highlight made for the old text.
               setActiveIndex(-1);
             }}
             onKeyDown={onKeyDown}
             onFocus={() => {
-              if (results.length > 0) setOpen(true);
+              if (results.length > 0 && settledQuery.current !== query) setOpen(true);
             }}
             placeholder={placeholder}
             maxLength={80}
@@ -332,13 +422,30 @@ export function TypeAheadSearch({
             aria-expanded={open}
             aria-controls={listboxId}
             aria-autocomplete="list"
-            className={size === "lg" ? "h-14 ps-12 text-base" : undefined}
+            className={cn(
+              size === "lg" && "h-14 ps-12 text-base",
+              // Our clear button replaces the browser's own one.
+              onClear && "pe-12 [&::-webkit-search-cancel-button]:appearance-none",
+            )}
           />
           {loading && !queryTooShort ? (
             <Loader2
-              className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-text-muted"
+              className={cn(
+                "pointer-events-none absolute top-1/2 size-4 -translate-y-1/2 animate-spin text-text-muted",
+                onClear ? "end-12" : "end-3",
+              )}
               aria-hidden
             />
+          ) : null}
+          {onClear ? (
+            <button
+              type="button"
+              onClick={clearSelection}
+              aria-label={t("clear")}
+              className="absolute end-0.5 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-lg text-text-secondary transition-ui focus-ring hover:bg-surface-hover hover:text-text-primary active:bg-surface-active"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
           ) : null}
         </div>
 
@@ -354,7 +461,7 @@ export function TypeAheadSearch({
                 // card on every screen that has one — which used to cut this
                 // panel off at the card's bottom edge.
                 style={{ visibility: "hidden" }}
-                className="fixed z-50 overflow-y-auto rounded-lg border border-border bg-surface shadow-popover"
+                className="scrollbar-neutral fixed z-50 overflow-y-auto rounded-lg border border-border bg-surface shadow-popover"
               >
                 {results.length > 0 ? (
                   <ul className="py-1">

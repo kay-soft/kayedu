@@ -3,6 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
@@ -33,6 +34,7 @@ import {
   type WeeklySlotsError,
 } from "@/lib/scheduling";
 import { redirect } from "@/lib/i18n/navigation";
+import { formatDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { blockRemoveSchema, teacherCreateSchema } from "@/lib/validation/people";
@@ -175,6 +177,7 @@ export async function searchEnrollCandidatesAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return [];
   if (!scope) return [];
   const args = parseActionArgs(boundSearchArgs, [classGroupId, query]);
   if (!args) return [];
@@ -209,8 +212,9 @@ export async function searchEnrollCandidatesAction(
 
 type Scope = { ctx: TenantContext; db: ScopedDb };
 
-async function classScope(): Promise<Scope | null> {
+async function classScope(): Promise<Scope | PickBranch | null> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "class.manage")) return null;
   return { ctx, db: scoped(ctx) };
 }
@@ -292,6 +296,7 @@ export async function createClassAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = parseNewClass(Object.fromEntries(formData), false);
@@ -311,6 +316,8 @@ export async function createClassAction(
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
+    sessionBookingMode,
+    maxBookingSeats,
     startDate,
     endDate,
     confirmConflicts,
@@ -344,6 +351,8 @@ export async function createClassAction(
       lateThresholdMinutes,
       acceptsNewStudents,
       requiresConfirmation,
+      sessionBookingMode,
+      maxBookingSeats,
       startDate,
       endDate,
       slots: parsed.slots,
@@ -375,6 +384,7 @@ export async function createClassWithNewTeacherAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope || !ctxCan(scope.ctx, "teacher.manage")) return FORBIDDEN;
 
   const raw = Object.fromEntries(formData);
@@ -414,6 +424,8 @@ export async function createClassWithNewTeacherAction(
         lateThresholdMinutes: classData.lateThresholdMinutes,
         acceptsNewStudents: classData.acceptsNewStudents,
         requiresConfirmation: classData.requiresConfirmation,
+        sessionBookingMode: classData.sessionBookingMode,
+        maxBookingSeats: classData.maxBookingSeats,
         startDate: classData.startDate,
         endDate: classData.endDate,
       },
@@ -453,6 +465,7 @@ export async function updateClassAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = classGroupUpdateSchema.safeParse(Object.fromEntries(formData));
@@ -473,6 +486,8 @@ export async function updateClassAction(
     lateThresholdMinutes,
     acceptsNewStudents,
     requiresConfirmation,
+    sessionBookingMode,
+    maxBookingSeats,
     startDate,
     endDate,
     confirmConflicts,
@@ -519,6 +534,8 @@ export async function updateClassAction(
       lateThresholdMinutes,
       acceptsNewStudents,
       requiresConfirmation,
+      sessionBookingMode,
+      maxBookingSeats,
       startDate,
       endDate,
     },
@@ -540,6 +557,7 @@ export async function setClassActiveAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = classActiveSchema.safeParse(Object.fromEntries(formData));
@@ -591,6 +609,7 @@ export async function deleteClassAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = classRecordSchema.safeParse(Object.fromEntries(formData));
@@ -642,6 +661,7 @@ export async function createScheduleAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const input = Object.fromEntries(formData);
@@ -667,6 +687,7 @@ export async function updateScheduleAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const input = Object.fromEntries(formData);
@@ -690,6 +711,7 @@ export async function removeScheduleAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = classScheduleDeleteSchema.safeParse(Object.fromEntries(formData));
@@ -715,6 +737,7 @@ export async function enrollStudentAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = enrollmentCreateSchema.safeParse(Object.fromEntries(formData));
@@ -754,7 +777,10 @@ export async function enrollStudentAction(
   const seat = await runInTransaction(prisma, (tx) =>
     claimClassSeat(tx, scope.ctx.center.id, classGroupId, studentProfileId),
   );
-  if (!seat.ok) return seat.error === "classFull" ? { error: "classFull" } : NOT_FOUND;
+  if (!seat.ok) {
+    if (seat.error === "sessionFull") return { error: "sessionFull", errorDate: formatDate(seat.date, locale) };
+    return seat.error === "classFull" ? { error: "classFull" } : NOT_FOUND;
+  }
 
   revalidateClassDetail(locale, classGroupId);
   revalidateStudentDetail(locale, studentProfileId);
@@ -766,6 +792,7 @@ export async function removeEnrollmentAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = enrollmentActionSchema.safeParse(Object.fromEntries(formData));
@@ -787,6 +814,7 @@ export async function blockEnrollmentAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = classBlockCreateSchema.safeParse(Object.fromEntries(formData));
@@ -843,6 +871,7 @@ export async function unblockEnrollmentAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = blockRemoveSchema.safeParse(Object.fromEntries(formData));
@@ -886,6 +915,7 @@ export async function createHolidayAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = holidaySchema.safeParse(Object.fromEntries(formData));
@@ -925,6 +955,7 @@ export async function removeHolidayAction(
   formData: FormData,
 ): Promise<ClassActionState> {
   const scope = await classScope();
+  if (isPickBranch(scope)) return scope;
   if (!scope) return FORBIDDEN;
 
   const parsed = holidayDeleteSchema.safeParse(Object.fromEntries(formData));

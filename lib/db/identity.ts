@@ -109,15 +109,15 @@ export async function findPeopleByContact(
   >();
   const record = (
     user: User,
-    contactEmail: string | null,
-    contactPhone: string | null,
+    recordEmail: string | null,
+    recordPhone: string | null,
     isGlobal: boolean,
   ) => {
     const existing = byUser.get(user.id);
     const matchedOn = existing?.matchedOn ?? new Set<ContactMatchField>();
-    const emailHit = Boolean(email && contactEmail === email);
+    const emailHit = Boolean(email && recordEmail === email);
     if (emailHit) matchedOn.add("email");
-    if (phone && contactPhone === phone) matchedOn.add("phone");
+    if (phone && recordPhone === phone) matchedOn.add("phone");
     if (matchedOn.size === 0) return;
     byUser.set(user.id, {
       user: existing?.user ?? user,

@@ -9,8 +9,10 @@ import { NewTeacherFields } from "@/components/center/new-teacher-fields";
 import { DialogSections, DialogShell, FormSection } from "@/components/shared/dialog-shell";
 import { ErrorSummary } from "@/components/shared/error-summary";
 import { FormMessage } from "@/components/shared/form-message";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { IDLE_PEOPLE_STATE, teacherCreateSchema } from "@/lib/validation/people";
-import { useGuardedActionState } from "@/lib/ui/action-feedback";
+import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 import { useClientValidation } from "@/lib/ui/client-validation";
 
 /**
@@ -29,9 +31,14 @@ import { useClientValidation } from "@/lib/ui/client-validation";
 export function TeacherForm({
   open,
   onOpenChange,
+  branches,
+  activeBranchId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** F1: the branches where the actor holds teacher.manage; a select appears with more than one. */
+  branches: { id: string; name: string }[];
+  activeBranchId: string;
 }) {
   const t = useTranslations("Teachers");
   const tSections = useTranslations("Teachers.addSections");
@@ -46,6 +53,19 @@ export function TeacherForm({
   const { clientErrors, check } = useClientValidation(teacherCreateSchema);
   const fieldErrors = clientErrors ?? state.fieldErrors;
   const [matchPending, setMatchPending] = useState(false);
+  const [branchId, setBranchId] = useState(activeBranchId);
+  const tToast = useTranslations("Teachers.toast");
+
+  // The row lands on this page's list only at the active branch; elsewhere
+  // the confirmation names the branch it went to (F1).
+  useActionFeedback(state, {
+    success: (status, result) =>
+      status === "created"
+        ? result.branchName
+          ? tToast("addedAtBranch", { branch: result.branchName })
+          : tToast("added")
+        : null,
+  });
 
   useEffect(() => {
     if (state.status === "created") onOpenChange(false);
@@ -76,6 +96,24 @@ export function TeacherForm({
         {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
         <ErrorSummary fieldErrors={fieldErrors} />
 
+        {branches.length > 1 ? (
+          <div className="flex flex-col gap-1.5 sm:max-w-md">
+            <Label htmlFor="teacher-create-branch">{t("branchLabel")}</Label>
+            <Select
+              id="teacher-create-branch"
+              name="branchId"
+              value={branchId}
+              onValueChange={setBranchId}
+              aria-describedby="teacher-create-branch-hint"
+              aria-invalid={fieldErrors?.branchId ? true : undefined}
+              options={branches.map((branch) => ({ value: branch.id, label: branch.name }))}
+            />
+            <p id="teacher-create-branch-hint" className="text-xs text-text-muted">
+              {t("branchHint")}
+            </p>
+          </div>
+        ) : null}
+
         <DialogSections>
           <FormSection
             wide
@@ -84,6 +122,10 @@ export function TeacherForm({
             icon={<UserRound />}
           >
             <NewTeacherFields
+              // A match found at one branch says nothing about another: a
+              // branch change starts the person afresh.
+              key={branchId}
+              lookupBranchId={branchId !== activeBranchId ? branchId : undefined}
               idPrefix="teacher-create"
               showHeader={false}
               fieldErrors={fieldErrors}

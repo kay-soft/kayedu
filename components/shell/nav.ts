@@ -4,7 +4,7 @@
 // `@/` alias does not resolve. (Same discipline as lib/db/*.)
 import type { TenantRole, PermissionGrants, Permission } from "../../lib/auth/permissions.ts";
 import { can } from "../../lib/auth/permissions.ts";
-import { ROUTES } from "../../lib/routes.ts";
+import { ROUTES, type ShellExperience } from "../../lib/routes.ts";
 
 /**
  * Icon names are passed as strings so the nav stays serializable across the
@@ -42,6 +42,13 @@ export type ShellNavItem = {
    * — the nav never shows a link a centre cannot use.
    */
   group?: string;
+  /**
+   * How many requests wait behind this item (F7) — the Approvals badge. Set by
+   * the shell frames after `navForExperience`, never by the nav definition
+   * itself: it is a per-request fact (and only for someone who can act on it),
+   * not part of what a role may see.
+   */
+  pendingCount?: number;
 };
 
 /**
@@ -118,6 +125,20 @@ const ADMIN_NAV: NavDef[] = [
   { href: ROUTES.adminCatalog, labelKey: "catalog", icon: "catalog" },
 ];
 
+/**
+ * Puts a pending count on the nav item at `href` (F7). A zero or absent count
+ * leaves the item untouched, so a role that cannot act — or has nothing
+ * waiting — gets exactly the nav it had.
+ */
+export function withPendingCount(
+  nav: ShellNavItem[],
+  href: string,
+  count: number | null | undefined,
+): ShellNavItem[] {
+  if (!count || count < 1) return nav;
+  return nav.map((item) => (item.href === href ? { ...item, pendingCount: count } : item));
+}
+
 function visible(
   items: NavDef[],
   role: TenantRole,
@@ -134,7 +155,7 @@ function visible(
 }
 
 export function navForExperience(
-  experience: "center" | "teacher" | "student" | "parent" | "admin",
+  experience: ShellExperience,
   role: TenantRole,
   grants?: PermissionGrants,
 ): ShellNavItem[] {

@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { sessionDisplayName } from "@/lib/session-label";
+import { attendanceDisplay } from "@/lib/attendance-rules";
 import { formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
@@ -52,7 +53,8 @@ export default async function TeacherSessionPrintPage({
       id: attendee.id,
       name: fullName(localName(attendee.studentProfile!, attendee.studentProfile!.user)),
       studentCode: attendee.studentProfile!.studentCode,
-      status: attendee.attendanceStatus,
+      // T5 — "Not arrived", never Absent, for a live ABSENT row or a drop-in's.
+      status: attendanceDisplay(attendee, session.closedAt !== null),
     }));
 
   const className = sessionDisplayName(locale, session);

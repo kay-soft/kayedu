@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
+import { PICK_BRANCH, requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import {
   createAttendance,
   findAttendee,
   isStudentBlockedFromSession,
+  recheckInAttendee,
   SessionClosedError,
 } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
@@ -47,8 +49,10 @@ import {
  * "Financial model", §5 "No debt") — records the payment in the same
  * request. There is no status picker (R2): `createAttendance` decides
  * PRESENT or LATE from the clock and the class's late threshold. A student
- * already on the roster keeps their mark — a correction is the roster's job,
- * live only — and only the payment is attempted. Both writes go through the exact same shared helpers
+ * already on the roster as PRESENT/LATE keeps their mark — a correction is
+ * the roster's job, live only — and only the payment is attempted. T5: one
+ * on the roster as ABSENT ("Not arrived" — reset by a void or refund) is
+ * checked in again on the same row (`recheckInAttendee`) and pays anew. Both writes go through the exact same shared helpers
  * `app/[locale]/(center)/sessions/actions.ts` uses
  * (`lib/db/attendance.ts`, `lib/db/payments.ts`), so there is one attendance
  * write path and one money write path in the whole app, not two.
@@ -97,6 +101,7 @@ export async function searchStudentsForReceptionAction(
   query: string,
 ): Promise<TypeAheadResult[]> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return [];
   if (!ctxCan(ctx, "reception.use")) return [];
   const args = parseActionArgs(searchArgs, [query]);
   if (!args) return [];
@@ -125,6 +130,8 @@ export type ReceptionResolution =
       student: { id: string; name: string; code: string; photoUrl: string | null };
       /** Actively enrolled in the session's class; otherwise a drop-in. */
       enrolled: boolean;
+      /** F6 — booked this session online: "Booked" instead of Drop-in. */
+      booked: boolean;
     }
   | { kind: "candidates"; students: { id: string; name: string; code: string }[] }
   | { kind: "already"; name: string; time: string; status: "PRESENT" | "LATE" | "ABSENT" }
@@ -169,12 +176,15 @@ async function describeStudent(
     kind: "ready",
     student: { id: student.id, name: student.name, code: student.code, photoUrl },
     enrolled: state.enrolled,
+    booked: state.booked,
   };
 }
 
 async function sessionModeScope(sessionId: string) {
   const ctx = await getTenantContext("center");
-  if (!ctxCan(ctx, "reception.use") || !ctxCan(ctx, "attendance.record")) {
+  // T6: a read under "Whole Management" resolves nothing — the page itself
+  // shows the pick-a-branch screen, so there is no session to resolve against.
+  if (requireBranchScope(ctx) || !ctxCan(ctx, "reception.use") || !ctxCan(ctx, "attendance.record")) {
     return { ok: false as const, resolution: { kind: "forbidden" } satisfies ReceptionResolution };
   }
   // Re-validated on EVERY request: the id in the URL is untrusted input.
@@ -263,6 +273,7 @@ export async function checkInAction(
   formData: FormData,
 ): Promise<SessionActionState> {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return PICK_BRANCH;
   if (!ctxCan(ctx, "reception.use")) return FORBIDDEN;
   const db = scoped(ctx);
   const centerId = ctx.center.id;
@@ -286,9 +297,33 @@ export async function checkInAction(
   if (!student) return NOT_FOUND;
 
   let attendee = await findAttendee(prisma, centerId, sessionId, studentProfileId);
-  let alreadyCheckedIn = attendee !== null;
+  let alreadyCheckedIn = attendee !== null && attendee.attendanceStatus !== "ABSENT";
 
-  if (!attendee) {
+  if (attendee && attendee.attendanceStatus === "ABSENT") {
+    // T5 — "Not arrived" (a void or refund reset them, or a drop-in who never
+    // came): the same row is checked in again, Present or Late decided by the
+    // server from this arrival (`recheckInAttendee`), and a NEW payment is
+    // recorded below with snapshots frozen now. A blocked student is refused.
+    if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
+    if (await isStudentBlockedFromSession(prisma, centerId, session, student.userId)) {
+      return { error: "studentBlocked" };
+    }
+    const rechecked = await recheckInAttendee(prisma, {
+      centerId,
+      attendeeId: attendee.id,
+      recordedBy: ctx.user.id,
+    });
+    if (!rechecked.ok) {
+      if (rechecked.error === "notFound") return NOT_FOUND;
+      if (rechecked.error !== "alreadyCheckedIn") return { error: rechecked.error };
+      // Another desk checked them in first: report it, never a second change.
+      alreadyCheckedIn = true;
+      attendee = await findAttendee(prisma, centerId, sessionId, studentProfileId);
+      if (!attendee) return NOT_FOUND;
+    } else {
+      attendee = rechecked.attendee;
+    }
+  } else if (!attendee) {
     if (!ctxCan(ctx, "attendance.record")) return FORBIDDEN;
     // A blocked student (either scope) is refused before anything is written.
     if (await isStudentBlockedFromSession(prisma, centerId, session, student.userId)) {

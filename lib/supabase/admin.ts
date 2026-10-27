@@ -4,8 +4,12 @@ import { requireSupabaseEnv } from "@/lib/supabase/env";
 /**
  * Service-role Supabase client — **server only**.
  *
- * Used only by the Storage adapter (`lib/storage/supabase.ts`, SYS) — never
- * by a page or an action. The tenant boundary for files is
+ * Used by the Storage adapter (`lib/storage/supabase.ts`, SYS) and by one
+ * action: Account settings' email change under
+ * `ALLOW_UNVERIFIED_EMAIL_CHANGE=yes` (F2, `app/[locale]/account/actions.ts`),
+ * which sets the signed-in login's own email, confirmed — the override's
+ * whole point, and why it must be gone before a real centre (M20). Never by
+ * a page. The tenant boundary for files is
  * `lib/storage-paths.ts` + `lib/db/storage.ts` (docs/02 §10), exactly as
  * `lib/db/tenant-scope.ts` is the boundary for queries; every bucket is
  * private with no `storage.objects` policy (D-19 (a)).

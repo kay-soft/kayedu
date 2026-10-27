@@ -36,6 +36,7 @@ import {
   teacherSessionListFilterSchema,
 } from "@/lib/validation/teacher";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const STATUS_BADGE = {
   SCHEDULED: "info",
@@ -229,42 +230,44 @@ export default async function TeacherSessionsPage({
             allLabel={t("filters.all")}
           />
 
-          {pageEntries.length === 0 ? (
-            <EmptyState icon={<CalendarSearch />} tone="warning" title={t("empty")} description={t("emptyHint")} />
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {pageEntries.map(({ row, displayStatus }) => (
-                <li key={row.id}>
-                  <Link
-                    href={ROUTES.teacherSession(row.id)}
-                    className="flex flex-col gap-2 rounded-xl border border-border p-4 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <p className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-text-primary">
-                        <span className="min-w-0 truncate">{sessionDisplayName(locale, row)}</span>
-                        <SessionKindBadge kind={sessionKind(row)} />
-                      </p>
-                      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-                        <span>{formatDate(row.date, locale)}</span>
-                        <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
-                        <span>{row.room?.name ?? tCommon("none")}</span>
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span className="text-xs text-text-muted">
-                        {t("columns.marked", { count: row._count.attendees })}
-                      </span>
-                      <Badge variant={STATUS_BADGE[displayStatus]}>
-                        {tStatus(displayStatus)}
-                      </Badge>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ResultsRegion className="flex flex-col gap-4">
+            {pageEntries.length === 0 ? (
+              <EmptyState icon={<CalendarSearch />} tone="warning" title={t("empty")} description={t("emptyHint")} />
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {pageEntries.map(({ row, displayStatus }) => (
+                  <li key={row.id}>
+                    <Link
+                      href={ROUTES.teacherSession(row.id)}
+                      className="flex flex-col gap-2 rounded-xl border border-border p-4 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-text-primary">
+                          <span className="min-w-0 truncate">{sessionDisplayName(locale, row)}</span>
+                          <SessionKindBadge kind={sessionKind(row)} />
+                        </p>
+                        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                          <span>{formatDate(row.date, locale)}</span>
+                          <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
+                          <span>{row.room?.name ?? tCommon("none")}</span>
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span className="text-xs text-text-muted">
+                          {t("columns.marked", { count: row._count.attendees })}
+                        </span>
+                        <Badge variant={STATUS_BADGE[displayStatus]}>
+                          {tStatus(displayStatus)}
+                        </Badge>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-          <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+            <Pagination page={page} pageSize={pageSize} total={total} buildHref={buildHref} />
+          </ResultsRegion>
         </CardContent>
       </Card>
     </div>

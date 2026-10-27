@@ -17,6 +17,7 @@ import { StatCard } from "@/components/shared/stat-card";
 import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { attendanceStatusCounts, revenueTotals } from "@/lib/db/analytics";
 import { prisma } from "@/lib/db/client";
@@ -25,7 +26,7 @@ import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName } from "@/lib/session-label";
 import { formatDay, formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
-import { Link } from "@/lib/i18n/navigation";
+import { Link, redirect } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, todayInTimezone } from "@/lib/scheduling";
 import { closeEndedSessions } from "@/lib/db/session-lifecycle";
@@ -50,6 +51,9 @@ const STATUS_BADGE = {
  */
 export default async function CenterDashboardPage() {
   const ctx = await getTenantContext("center");
+  // T6: under "Whole Management" the organization's home is Analytics — the
+  // only page with a roll-up meaning (docs/02-architecture.md §4).
+  if (requireBranchScope(ctx)) redirect({ href: ROUTES.centerAnalytics, locale: await getLocale() });
   const db = scoped(ctx);
   const locale = await getLocale();
   const t = await getTranslations("CenterDashboard");

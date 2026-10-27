@@ -20,6 +20,8 @@ import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { DetailRow } from "@/components/shared/field";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { classSessionCounts, keptClassSessions } from "@/lib/db/class-sessions";
 import { prisma } from "@/lib/db/client";
@@ -33,6 +35,7 @@ import { piastresToInputValue } from "@/lib/money";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { dateKey } from "@/lib/scheduling";
 import { Link } from "@/lib/i18n/navigation";
+import { ResultsRegion } from "@/components/shared/results-region";
 
 const MAX_CANDIDATES = 8;
 
@@ -60,6 +63,7 @@ export default async function ClassDetailPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "class.manage");
 
   const locale = await getLocale();
@@ -270,6 +274,8 @@ export default async function ClassDetailPage({
                 lateThresholdMinutes: String(classGroup.lateThresholdMinutes),
                 acceptsNewStudents: classGroup.acceptsNewStudents,
                 requiresConfirmation: classGroup.requiresConfirmation,
+                sessionBookingMode: classGroup.sessionBookingMode,
+                maxBookingSeats: classGroup.maxBookingSeats === null ? "" : String(classGroup.maxBookingSeats),
                 startDate: dateKey(classGroup.startDate),
                 endDate: dateKey(classGroup.endDate),
               }}
@@ -338,13 +344,15 @@ export default async function ClassDetailPage({
                 submitLabel={t("roster.searchSubmit")}
                 search={searchEnrollCandidatesAction.bind(null, classGroup.id)}
               />
-              <ClassRoster
-                classGroupId={classGroup.id}
-                roster={roster}
-                blocked={blocked}
-                candidates={candidates}
-                query={query}
-              />
+              <ResultsRegion>
+                <ClassRoster
+                  classGroupId={classGroup.id}
+                  roster={roster}
+                  blocked={blocked}
+                  candidates={candidates}
+                  query={query}
+                />
+              </ResultsRegion>
             </DetailCard>
           </>
         }

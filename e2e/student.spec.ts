@@ -6,8 +6,9 @@ import { choose, field } from "./support/ui";
 /**
  * Journey 7 — the student (SYS Part A): the rating pop-up (skippable; closing
  * persists nothing), the schedule, Discover, reservations, and a brand-new
- * sign-up's whole path: empty hub → Discover → instant enrolment → the
- * one-time profile completion → the schedule.
+ * sign-up's whole path: a Student sign-up lands on "Your studies" (F4) →
+ * grade → skip the optional parent invite → Discover → instant enrolment →
+ * the one-time profile completion → the schedule.
  */
 
 test("a seeded student: the rating pop-up closes without a decision, every page renders", async ({ as, appLocale, msg }) => {
@@ -33,14 +34,22 @@ test("a student with no centre sees their pending and declined requests", async 
   await expect(page.getByText(msg("StudentReservations.status.PENDING")).first()).toBeVisible();
 });
 
-test("@write a new sign-up enrols instantly, completes the profile once, sees the schedule", async ({ page, appLocale, msg }, testInfo) => {
+test("@write a new sign-up onboards, enrols instantly, completes the profile once, sees the schedule", async ({ page, appLocale, msg }, testInfo) => {
   signUpProjectOnly(testInfo);
   const tag = uniqueTag("e2e").toLowerCase();
   await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Student ${tag}`, email: `${tag}-student@example.com` });
-  // No branch yet: the hub's empty state offers Discover.
-  await expect(page).toHaveURL(/select-center/);
-  await page.getByRole("link", { name: msg("Auth.selectCenter.browseClasses") }).click();
+  // A Student sign-up with no branch lands on "Your studies" (F4): the account
+  // grade, then an optional parent invite (skipped here), then Discover.
+  await expect(page).toHaveURL(/\/student\/onboarding/);
+  await expectHealthy(page, appLocale);
+  await choose(page, msg("Account.study.picker.system"), /.+/);
+  await choose(page, msg("Account.study.picker.grade"), /.+/);
+  await page.getByRole("button", { name: msg("Onboarding.student.continue"), exact: true }).click();
+  await page.getByRole("link", { name: msg("Onboarding.student.skip"), exact: true }).click();
   await expect(page).toHaveURL(/\/student\/discover/);
+  // Discover opens on the account grade; "All grades" keeps this journey
+  // independent of which grades the seeded branches teach.
+  await page.goto(`/${appLocale}/student/discover?grade=all`);
   await expectHealthy(page, appLocale);
 
   await page.getByRole("button", { name: msg("StudentDiscover.card.enroll"), exact: true }).first().click();

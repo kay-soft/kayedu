@@ -6,6 +6,7 @@ import {
   SettingsNav,
   type SettingsNavItem,
 } from "@/components/settings/settings-nav";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
 import { ROUTES, homePathForRole } from "@/lib/routes";
@@ -22,6 +23,9 @@ export default async function SettingsLayout({
   children: ReactNode;
 }) {
   const ctx = await getTenantContext("center");
+  // T6: under "Whole Management" every settings page is the pick-a-branch
+  // screen, with no branch's settings header or sub-navigation around it.
+  if (requireBranchScope(ctx)) return children;
   const t = await getTranslations("Settings");
 
   const items: SettingsNavItem[] = [];
@@ -34,6 +38,7 @@ export default async function SettingsLayout({
       { href: ROUTES.centerSettingsTerms, labelKey: "terms" },
       { href: ROUTES.centerSettingsCatalog, labelKey: "catalog" },
       { href: ROUTES.centerSettingsCard, labelKey: "card" },
+      { href: ROUTES.centerSettingsBranding, labelKey: "branding" },
     );
   }
 
@@ -49,6 +54,12 @@ export default async function SettingsLayout({
 
   if (ctxCan(ctx, "staff.invite")) {
     items.push({ href: ROUTES.centerStaff, labelKey: "staff" });
+  }
+
+  // F1: the page asserts `organization.branch.create` (OWNER-only) and
+  // nothing else, so that is the one gate that shows its link.
+  if (ctxCan(ctx, "organization.branch.create")) {
+    items.push({ href: ROUTES.centerSettingsBranches, labelKey: "branches" });
   }
 
   // Nothing here is open to this role — send them back to their own home.

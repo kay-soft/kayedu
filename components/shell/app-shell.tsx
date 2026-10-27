@@ -12,9 +12,11 @@ import {
   type RollupOption,
 } from "@/components/shell/branch-switcher";
 import { NavItem } from "@/components/shell/nav-item";
+import { RollupNavItem } from "@/components/shell/rollup-nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { UserMenu } from "@/components/shell/user-menu";
+import type { ShellExperience } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +30,8 @@ export type ShellUser = {
   name: string;
   email: string | null;
   initials: string;
+  /** Profile photo, only when `MEDIA_AVATARS_DISPLAY` is on (F8) — otherwise null and initials show. */
+  photoSrc?: string | null;
   roleKey: string;
 };
 
@@ -43,12 +47,16 @@ export type ShellScope = {
   rollups: RollupOption[];
 };
 
-type AppShellProps = {
+export type AppShellProps = {
+  /** Which experience this shell is — the user menu's Account settings link returns into it (F2). */
+  experience: ShellExperience;
   nav: ShellNavItem[];
   brand: ShellBrand;
   user: ShellUser;
   /** Omitted for an experience with nothing to switch between. */
   scope?: ShellScope;
+  /** Nav hrefs shown disabled with a reason — "Whole Management" only. */
+  disabledHrefs?: string[];
   /** Read server-side from the cookie, so the first paint is already correct. */
   defaultCollapsed: boolean;
   children: ReactNode;
@@ -79,6 +87,7 @@ function SidebarContent({
   onNavigate,
   onClose,
   closeRef,
+  disabledHrefs,
 }: {
   nav: ShellNavItem[];
   brand: ShellBrand;
@@ -90,6 +99,8 @@ function SidebarContent({
   onClose?: () => void;
   /** Drawer only: the close button, focused when the drawer opens. */
   closeRef?: Ref<HTMLButtonElement>;
+  /** Under "Whole Management": the operational pages shown disabled (docs/04 §11.1). */
+  disabledHrefs?: string[];
 }) {
   const pathname = usePathname();
   const tNav = useTranslations("Nav");
@@ -139,7 +150,7 @@ function SidebarContent({
 
       <nav
         aria-label={tShell("primaryNav")}
-        className="flex-1 overflow-y-auto overscroll-contain p-3"
+        className="scrollbar-sidebar flex-1 overflow-y-auto overscroll-contain p-3"
       >
         <ul className="flex flex-col gap-1">
           {groupNav(nav).map((run, runIndex) => (
@@ -163,13 +174,22 @@ function SidebarContent({
               ) : null}
               {run.items.map((item) => (
                 <li key={item.href}>
-                  <NavItem
-                    item={item}
-                    active={isActive(pathname, item.href)}
-                    label={tNav(item.labelKey)}
-                    collapsed={collapsed}
-                    onNavigate={onNavigate}
-                  />
+                  {disabledHrefs?.includes(item.href) ? (
+                    <RollupNavItem
+                      item={item}
+                      label={tNav(item.labelKey)}
+                      reason={tShell("rollupDisabledReason")}
+                      collapsed={collapsed}
+                    />
+                  ) : (
+                    <NavItem
+                      item={item}
+                      active={isActive(pathname, item.href)}
+                      label={tNav(item.labelKey)}
+                      collapsed={collapsed}
+                      onNavigate={onNavigate}
+                    />
+                  )}
                 </li>
               ))}
             </Fragment>
@@ -210,10 +230,12 @@ function SidebarContent({
 }
 
 export function AppShell({
+  experience,
   nav,
   brand,
   user,
   scope,
+  disabledHrefs,
   defaultCollapsed,
   children,
 }: AppShellProps) {
@@ -287,6 +309,7 @@ export function AppShell({
           brand={brand}
           user={user}
           collapsed={collapsed}
+          disabledHrefs={disabledHrefs}
         />
       </aside>
 
@@ -322,6 +345,7 @@ export function AppShell({
           onNavigate={() => setDrawerOpen(false)}
           onClose={() => setDrawerOpen(false)}
           closeRef={closeRef}
+          disabledHrefs={disabledHrefs}
         />
       </aside>
 
@@ -336,10 +360,12 @@ export function AppShell({
         {/* The app bar (docs/04 §5): branch context on the start edge, account
             and language on the end edge, one baseline, real controls. */}
         <header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/80">
-          {/* Padding outside the content column, like main's, so the controls
-              end exactly at the content's edge at every width. */}
-          <div className="px-3 sm:px-6">
-          <div className="content-shell flex h-16 items-center gap-2">
+          {/* The start cluster (sidebar toggle, branch switcher) sits at the
+              start edge of the main column, directly beside the sidebar, on
+              the standard gutter. The end cluster still ends at the content's
+              edge (`content-edge-end`), so past 1536px it does not run off to
+              the screen's edge while the content stays centred. */}
+          <div className="flex h-16 items-center gap-2 px-3 sm:px-6">
             <button
               ref={menuRef}
               type="button"
@@ -395,11 +421,10 @@ export function AppShell({
               {brand.name}
             </span>
 
-            <div className="ms-auto flex items-center gap-2">
+            <div className="content-edge-end ms-auto flex items-center gap-2">
               <LocaleToggle />
-              <UserMenu user={user} />
+              <UserMenu user={user} experience={experience} />
             </div>
-          </div>
           </div>
         </header>
 

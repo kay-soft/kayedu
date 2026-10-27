@@ -30,6 +30,20 @@ export const cancelReservationSchema = z.object({
   reservationId: recordId,
 });
 
+/** F6 — "Attend this session only": one session, at one branch. */
+export const bookSessionSchema = z.object({
+  locale: localeSchema,
+  centerId: recordId,
+  sessionId: recordId,
+});
+
+/** F6 — a student withdrawing their own booking. */
+export const cancelBookingSchema = z.object({
+  locale: localeSchema,
+  centerId: recordId,
+  bookingId: recordId,
+});
+
 // ── Self-registration profile completion (M18, spec §4.3 item 4) ──────────
 // The exact same fields a receptionist's add-student form collects — grade,
 // phone, alt phone, parent name/phone/alt phone — filled in by the student
@@ -45,9 +59,10 @@ export const completeStudentProfileSchema = z.object({
 
 export type StudentActionState = {
   error?: string;
-  /** Formatted date for the `coolingOff` error message (M15). */
+  /** Formatted date for the `coolingOff` (M15) and `sessionFull` (F6) error messages. */
   errorDate?: string;
-  status?: "enrolled" | "pending" | "cancelled" | "profileCompleted";
+  /** `booked` / `bookingPending` — F6's two booking outcomes. */
+  status?: "enrolled" | "pending" | "cancelled" | "profileCompleted" | "booked" | "bookingPending";
   fieldErrors?: Record<string, string>;
 };
 

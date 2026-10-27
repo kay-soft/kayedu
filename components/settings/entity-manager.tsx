@@ -9,7 +9,12 @@ import {
   type EntityField,
 } from "@/components/settings/entity-fields";
 import { ConfirmAction } from "@/components/shared/confirm-action";
-import { ListHeader } from "@/components/shared/list-header";
+import {
+  SETTINGS_ACTION_BUTTON,
+  SettingsList,
+  SettingsListHeader,
+  SettingsListRow,
+} from "@/components/settings/settings-list";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +28,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DialogLauncher, DialogShell } from "@/components/shared/dialog-shell";
+import { cn } from "@/lib/utils";
 import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 import { IDLE_ACTION_STATE, type ActionState } from "@/lib/validation/form";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -134,16 +140,12 @@ export function EntityManager({
               description={labels.emptyHint ?? t("emptyHint")}
             />
           ) : (
-            <ul className="flex flex-col gap-3 md:gap-0">
-              <ListHeader>
-                {fields.map((field) => (
-                  <span key={field.name} className="min-w-0 flex-1">
-                    {field.label}
-                  </span>
-                ))}
-                <span className="md:w-20 md:shrink-0">{t("status")}</span>
-                <span className="w-40 shrink-0 text-end">{t("actions")}</span>
-              </ListHeader>
+            <SettingsList>
+              <SettingsListHeader
+                columns={fields.map((field) => ({ key: field.name, label: field.label }))}
+                statusLabel={t("status")}
+                actionsLabel={t("actions")}
+              />
 
               {records.map((record) => (
                 <EntityRow
@@ -155,7 +157,7 @@ export function EntityManager({
                   deleteAction={deleteAction}
                 />
               ))}
-            </ul>
+            </SettingsList>
           )}
         </CardContent>
       </Card>
@@ -424,67 +426,70 @@ function EntityRow({
   }
 
   return (
-    <li className="flex flex-col gap-3 rounded-xl border border-border p-3 md:flex-row md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3">
-      {fields.map((field, index) => (
-        <div key={field.name} className="flex min-w-0 flex-1 flex-col">
-          {/* The column label rides along on mobile, where headers are gone. */}
-          <span className="text-xs text-text-secondary md:sr-only">
-            {field.label}
-          </span>
-          <span className="truncate text-sm text-text-primary">
+    <SettingsListRow
+      cells={fields.map((field, index) => ({
+        key: field.name,
+        label: field.label,
+        content: (
+          <span
+            className={cn(
+              "truncate text-sm text-text-primary",
+              index === 0 && "font-medium",
+            )}
+            title={record.cells[index] || undefined}
+          >
             {record.cells[index] || "—"}
           </span>
-        </div>
-      ))}
-
-      <div className="md:w-20 md:shrink-0">
+        ),
+      }))}
+      status={
         <Badge variant={record.active ? "success" : "neutral"}>
           {record.active ? t("active") : t("inactive")}
         </Badge>
-      </div>
-
-      <div className="flex shrink-0 flex-col gap-2 sm:flex-row md:w-40 md:justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 px-4"
-          onClick={() => setEditing(true)}
-        >
-          <Pencil className="size-4" aria-hidden />
-          {t("edit")}
-        </Button>
-
-        {/* Deactivating takes the entry out of every picker at once (a payment
-            method out of Reception) — it asks first; activating is one tap
-            (docs/04 §14.6). An absent field means false, so only activating
-            sends `active`. */}
-        {record.active ? (
-          <ConfirmAction
-            label={t("deactivate")}
+      }
+      actions={
+        <>
+          <Button
+            type="button"
             variant="outline"
-            triggerClassName="h-11 w-full px-4"
-            title={t("deactivateConfirm.title")}
-            description={t("deactivateConfirm.body")}
-            action={toggleFormAction}
-            fields={{ locale, id: record.id }}
-          />
-        ) : (
-          <form action={toggleFormAction}>
-            <input type="hidden" name="locale" value={locale} />
-            <input type="hidden" name="id" value={record.id} />
-            <input type="hidden" name="active" value="true" />
-            <Button type="submit" variant="ghost" className="h-11 w-full px-4">
-              {t("activate")}
-            </Button>
-          </form>
-        )}
-      </div>
+            className={SETTINGS_ACTION_BUTTON}
+            onClick={() => setEditing(true)}
+          >
+            <Pencil className="size-4" aria-hidden />
+            {t("edit")}
+          </Button>
 
-      {toggleState.error ? (
-        <div className="md:w-full md:basis-full">
+          {/* Deactivating takes the entry out of every picker at once (a
+              payment method out of Reception) — it asks first; activating is
+              one tap (docs/04 §14.6). An absent field means false, so only
+              activating sends `active`. */}
+          {record.active ? (
+            <ConfirmAction
+              label={t("deactivate")}
+              variant="outline"
+              triggerClassName={SETTINGS_ACTION_BUTTON}
+              title={t("deactivateConfirm.title")}
+              description={t("deactivateConfirm.body")}
+              action={toggleFormAction}
+              fields={{ locale, id: record.id }}
+            />
+          ) : (
+            <form action={toggleFormAction}>
+              <input type="hidden" name="locale" value={locale} />
+              <input type="hidden" name="id" value={record.id} />
+              <input type="hidden" name="active" value="true" />
+              <Button type="submit" variant="outline" className={SETTINGS_ACTION_BUTTON}>
+                {t("activate")}
+              </Button>
+            </form>
+          )}
+        </>
+      }
+      notice={
+        toggleState.error ? (
           <FormMessage>{tErrors(toggleState.error, toggleState.errorValues)}</FormMessage>
-        </div>
-      ) : null}
-    </li>
+        ) : null
+      }
+    />
   );
 }

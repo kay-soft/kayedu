@@ -7,8 +7,12 @@ import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import {
+  addBranchToOrganization,
   createCenterWithSettings,
   transitionCenterLifecycle,
+  type AddBranchResult,
+  type CenterInvite,
+  type CreateCenterResult,
 } from "@/lib/db/platform";
 import { readRasterImage, uploadCenterLogo } from "@/lib/db/storage";
 import { MAX_LOGO_BYTES } from "@/lib/storage-paths";
@@ -51,7 +55,14 @@ export async function createCenterAction(
 
   const parsed = createCenterSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-  const { locale, ownerEmail, ...input } = parsed.data;
+  const data = parsed.data;
+  const { locale } = data;
+  const branch = {
+    name: data.name,
+    nameEn: data.nameEn,
+    slug: data.slug,
+    themeColor: data.themeColor,
+  };
 
   // The logo (D-25 (b)) is checked by its bytes before anything is created,
   // then stored in the private `logos` bucket under the new centre's folder.
@@ -62,15 +73,35 @@ export async function createCenterAction(
     if (!checked.ok) return { fieldErrors: { logo: checked.error } };
   }
 
-  const invite = {
-    email: ownerEmail,
-    token: randomBytes(32).toString("base64url"),
-    invitedBy: admin.id,
-    expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000),
-  };
-
-  const result = await createCenterWithSettings(prisma, { ...input, invite });
-  if (!result.ok) return { error: result.error };
+  // F1 (OD-12 (a)): a new organization founded by this branch, with its
+  // founding Owner's invitation — or a branch added to an existing
+  // organization within its limit, inviting nobody (its Owner already
+  // resolves every branch under it).
+  let invite: CenterInvite | null = null;
+  let result: CreateCenterResult | AddBranchResult;
+  if (data.organizationMode === "new") {
+    invite = {
+      email: data.ownerEmail,
+      token: randomBytes(32).toString("base64url"),
+      invitedBy: admin.id,
+      expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000),
+    };
+    result = await createCenterWithSettings(prisma, {
+      ...branch,
+      invite,
+      // A blank organization name means "the same as the branch".
+      organization: data.organizationName
+        ? { name: data.organizationName, nameEn: data.organizationNameEn, maxBranches: data.maxBranches }
+        : { name: data.name, nameEn: data.organizationNameEn ?? data.nameEn, maxBranches: data.maxBranches },
+    });
+  } else {
+    result = await addBranchToOrganization(prisma, { ...branch, organizationId: data.organizationId });
+  }
+  if (!result.ok) {
+    if (result.error === "organizationNotFound") return { fieldErrors: { organizationId: result.error } };
+    if (result.error === "slugTaken") return { fieldErrors: { slug: result.error } };
+    return { error: result.error };
+  }
 
   let logoError: string | undefined;
   if (logo) {
@@ -94,13 +125,16 @@ export async function createCenterAction(
     after: {
       slug: result.center.slug,
       lifecycleState: result.center.lifecycleState,
+      organizationId: result.center.organizationId,
+      newOrganization: data.organizationMode === "new",
     },
   });
 
   revalidatePath(centersPath(locale));
+  revalidatePath(`/${locale}${ROUTES.adminOrganizations}`);
   return {
-    status: "created",
-    invitationToken: invite.token,
+    status: invite ? "created" : "branchAdded",
+    ...(invite ? { invitationToken: invite.token } : {}),
     ...(logoError ? { fieldErrors: { logo: logoError } } : {}),
   };
 }

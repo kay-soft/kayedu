@@ -6,6 +6,8 @@ import {
   type CatalogSelectionItem,
 } from "@/components/settings/catalog-section";
 import { SectionHeader } from "@/components/shared/section-header";
+import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
+import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import {
@@ -26,6 +28,7 @@ import { scoped } from "@/lib/db/scoped";
  */
 export default async function CatalogPage() {
   const ctx = await getTenantContext("center");
+  if (requireBranchScope(ctx)) return <PickBranchScreen ctx={ctx} />;
   await requirePermission(ctx, "center.settings.edit");
 
   const locale = await getLocale();

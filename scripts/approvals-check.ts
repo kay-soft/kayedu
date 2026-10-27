@@ -22,6 +22,13 @@ import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.
 import { resolveChangeRequest, resolveSessionRequest } from "../lib/db/approvals.ts";
 import { confirmReservation, rejectReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { can } from "../lib/auth/permissions.ts";
+import { cancelBookingByStaff, confirmBooking, rejectBooking, requestBooking } from "../lib/db/session-bookings.ts";
+import { scopedWith } from "../lib/db/scoped.ts";
+import { pendingClaimsForCenter } from "../lib/db/account-claims.ts";
+import { pendingApprovalCounts, pendingTeacherApprovalCounts } from "../lib/db/approval-counts.ts";
+import { navForExperience, withPendingCount } from "../components/shell/nav.ts";
+import { ROUTES } from "../lib/routes.ts";
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { addDays, dateKey, todayInTimezone } from "../lib/scheduling.ts";
 
 const prisma = await gatePrisma();
@@ -421,6 +428,335 @@ async function main() {
       !can("TEACHER", "reservation.manage.own") &&
       !can("STUDENT", "reservation.manage.own"),
   );
+
+  await checkBookingQueues(centerA.id, centerB.id, teacherA.id, managerA.id);
+  await checkPendingCounts(centerA.id, centerB.id, teacherA.id, teacherB.id, managerA.id);
+}
+
+/**
+ * F7 — the Approvals tab counts and the sidebar badge: `pendingApprovalCounts`
+ * / `pendingTeacherApprovalCounts` must equal the rows of the queues they sit
+ * on (through the same scoped readers the pages call), the teacher variant must
+ * leave out another teacher's classes, another branch must never be counted,
+ * and a role that cannot act gets no badge. Runs against throwaway centres.
+ */
+async function checkPendingCounts(
+  centerId: string,
+  otherCenterId: string,
+  teacherId: string,
+  otherBranchTeacherId: string,
+  managerId: string,
+) {
+  console.log("\nF7 — approval counts equal the queues");
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const d = new Date(Date.now() + 3 * DAY);
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const otherTeacher = await makeTeacher(centerId, "f7-other-teacher");
+
+  const ctx = (id: string, role: string) => ({
+    center: { id },
+    user: { locale: "en" },
+    role,
+    isPlatformAdmin: false,
+    settings: null,
+  });
+  const managerCtx = ctx(centerId, "MANAGER");
+  const teacherCtx = ctx(centerId, "TEACHER");
+  const dbA = scopedWith(prisma, managerCtx);
+  // Earlier sections leave some requests pending (a refused duplicate-slot
+  // request stays PENDING), so the fixture below is asserted as a delta on
+  // these baselines — never as an absolute number a stray row could break.
+  const baseline = await pendingApprovalCounts(managerCtx, prisma);
+  const baselineB = await pendingApprovalCounts(ctx(otherCenterId, "MANAGER"), prisma);
+  const baselineMine = await pendingTeacherApprovalCounts(teacherCtx, teacherId, prisma);
+
+  const classFor = (cid: string, teacher: string, extra: { active?: boolean; sessionBookingMode?: "APPROVAL" } = {}) =>
+    prisma.classGroup.create({
+      data: scopedData(cid, {
+        startDate: new Date("2026-01-01"),
+        endDate: new Date("2027-12-31"),
+        teacherId: teacher,
+        price: 10_000,
+        ...extra,
+      }),
+    });
+  const mine = await classFor(centerId, teacherId, { sessionBookingMode: "APPROVAL" });
+  const theirs = await classFor(centerId, otherTeacher.id, { sessionBookingMode: "APPROVAL" });
+  const retired = await classFor(centerId, teacherId, { active: false });
+  const elsewhere = await classFor(otherCenterId, otherBranchTeacherId, { sessionBookingMode: "APPROVAL" });
+
+  const sessionFor = (cid: string, classGroupId: string, teacher: string) =>
+    prisma.session.create({
+      data: scopedData(cid, { classGroupId, teacherId: teacher, date, startTime: "19:00", endTime: "20:00", priceSnapshot: 10_000 }),
+    });
+  const reserve = async (cid: string, classGroupId: string, tag: string) =>
+    prisma.reservation.create({
+      data: scopedData(cid, { classGroupId, studentId: (await makeStudentUser(tag)).id, status: "PENDING" }),
+    });
+  const book = async (cid: string, sessionId: string, tag: string) =>
+    prisma.$transaction(async (tx) =>
+      requestBooking(tx, { centerId: cid, sessionId, studentUserId: (await makeStudentUser(tag)).id }),
+    );
+
+  // Centre A: 2 enrolments on my class, 1 on theirs, 1 on a deactivated class (never listed).
+  await reserve(centerId, mine.id, "f7-r1");
+  await reserve(centerId, mine.id, "f7-r2");
+  await reserve(centerId, theirs.id, "f7-r3");
+  await reserve(centerId, retired.id, "f7-r4");
+  // Bookings: 1 on my session, 2 on theirs.
+  const mineSession = await sessionFor(centerId, mine.id, teacherId);
+  const theirsSession = await sessionFor(centerId, theirs.id, otherTeacher.id);
+  await book(centerId, mineSession.id, "f7-b1");
+  await book(centerId, theirsSession.id, "f7-b2");
+  await book(centerId, theirsSession.id, "f7-b3");
+  // Change requests: 2 class, 1 session. Account claim: 1 on a person this centre knows.
+  await makeChangeRequest(centerId, teacherId);
+  await makeChangeRequest(centerId, teacherId);
+  await prisma.changeRequest.create({
+    data: scopedData(centerId, {
+      type: "NEW_SESSION",
+      requestedBy: teacherId,
+      payload: { classGroupId: mine.id, date: dateKey(date), startTime: "09:00", endTime: "10:00", note: null },
+      status: "PENDING",
+    }),
+  });
+  await prisma.accountClaim.create({
+    data: { authId: "approvals-check-auth-a", email: "approvals-check-claim-a@kayedu.test", targetUserId: teacherId },
+  });
+  // Centre B has its own, different numbers — and a claim on a person only B knows.
+  await reserve(otherCenterId, elsewhere.id, "f7-rb1");
+  await makeChangeRequest(otherCenterId, otherBranchTeacherId);
+  await prisma.accountClaim.create({
+    data: { authId: "approvals-check-auth-b", email: "approvals-check-claim-b@kayedu.test", targetUserId: otherBranchTeacherId },
+  });
+
+  const counts = await pendingApprovalCounts(managerCtx, prisma);
+  const rows = {
+    classRequests: (await dbA.changeRequests.list({ status: "PENDING", type: "NEW_CLASS" }, { order: "asc" })).length,
+    sessionRequests: (await dbA.changeRequests.list({ status: "PENDING", type: "NEW_SESSION" }, { order: "asc" })).length,
+    enrolments: (await dbA.reservations.listPending()).length,
+    bookings: (await dbA.sessionBookings.listPending()).length,
+    accountClaims: (await pendingClaimsForCenter(prisma, centerId)).length,
+  };
+  check(
+    "Each tab count equals the rows in that tab's queue (class, session, enrolments, bookings, claims)",
+    counts.classRequests === rows.classRequests &&
+      counts.sessionRequests === rows.sessionRequests &&
+      counts.enrolments === rows.enrolments &&
+      counts.bookings === rows.bookings &&
+      counts.accountClaims === rows.accountClaims,
+    `counts ${JSON.stringify(counts)} vs rows ${JSON.stringify(rows)}`,
+  );
+  check(
+    "The fixture moved each tab by its own rows: +2 class, +1 session, +3 enrolments (the deactivated class's is not counted), +3 bookings, +1 claim",
+    counts.classRequests - baseline.classRequests === 2 &&
+      counts.sessionRequests - baseline.sessionRequests === 1 &&
+      counts.enrolments - baseline.enrolments === 3 &&
+      counts.bookings - baseline.bookings === 3 &&
+      counts.accountClaims - baseline.accountClaims === 1,
+    `baseline ${JSON.stringify(baseline)} → ${JSON.stringify(counts)}`,
+  );
+  check(
+    "The badge total is the sum of the tab counts",
+    counts.total === counts.classRequests + counts.sessionRequests + counts.enrolments + counts.bookings + counts.accountClaims &&
+      counts.total - baseline.total === 10,
+    JSON.stringify(counts),
+  );
+
+  // The teacher variant: only the classes that teacher teaches.
+  const teacherCounts = await pendingTeacherApprovalCounts(teacherCtx, teacherId, prisma);
+  const dbT = scopedWith(prisma, teacherCtx);
+  check(
+    "A teacher's counts equal their own two queues' rows",
+    teacherCounts.enrolments === (await dbT.reservations.listPendingForTeacher(teacherId)).length &&
+      teacherCounts.bookings === (await dbT.sessionBookings.listPending({ teacherId })).length,
+    JSON.stringify(teacherCounts),
+  );
+  check(
+    "A teacher's count excludes other teachers' classes (+2 of the 3 enrolments, +1 of the 3 bookings) and never counts requests or claims",
+    teacherCounts.enrolments - baselineMine.enrolments === 2 &&
+      teacherCounts.bookings - baselineMine.bookings === 1 &&
+      teacherCounts.total === teacherCounts.enrolments + teacherCounts.bookings,
+    JSON.stringify(teacherCounts),
+  );
+  const otherTeacherCounts = await pendingTeacherApprovalCounts(teacherCtx, otherTeacher.id, prisma);
+  check(
+    "The other teacher's count is their own (1 enrolment, 2 bookings) — the two never overlap",
+    otherTeacherCounts.enrolments === 1 && otherTeacherCounts.bookings === 2,
+    JSON.stringify(otherTeacherCounts),
+  );
+
+  // Isolation: another branch is counted from its own rows only.
+  const countsB = await pendingApprovalCounts(ctx(otherCenterId, "MANAGER"), prisma);
+  check(
+    "Another branch's counts moved by its own rows only (+1 class request, +1 enrolment, +1 claim) — never summed with this branch",
+    countsB.classRequests - baselineB.classRequests === 1 &&
+      countsB.sessionRequests === baselineB.sessionRequests &&
+      countsB.enrolments - baselineB.enrolments === 1 &&
+      countsB.bookings === baselineB.bookings &&
+      countsB.accountClaims - baselineB.accountClaims === 1 &&
+      countsB.total - baselineB.total === 3,
+    JSON.stringify(countsB),
+  );
+
+  // Deciding a request moves the count by exactly one.
+  const toResolve = await prisma.reservation.findFirstOrThrow({
+    where: scopedWhere(centerId, { classGroupId: mine.id, status: PENDING_RESERVATION }),
+  });
+  await rejectReservation(prisma, centerId, toResolve.id, managerId);
+  const after = await pendingApprovalCounts(managerCtx, prisma);
+  check("Resolving a request lowers its tab and the total by one", after.enrolments === counts.enrolments - 1 && after.total === counts.total - 1, JSON.stringify(after));
+
+  // Who gets a badge: only a role that can act on the queue (the shell reads
+  // the count only for `approvals.manage` / `reservation.manage.own`).
+  const grants = { "approvals.manage": true } as const;
+  const receptionistNav = navForExperience("center", "RECEPTIONIST", undefined);
+  check(
+    "A receptionist has no Approvals item, so no badge — withPendingCount cannot add one",
+    !receptionistNav.some((item) => item.href === ROUTES.centerApprovals) &&
+      withPendingCount(receptionistNav, ROUTES.centerApprovals, 12).every((item) => item.pendingCount === undefined),
+  );
+  const managerNav = withPendingCount(navForExperience("center", "MANAGER", grants), ROUTES.centerApprovals, 12);
+  check(
+    "A manager's badge lands on the Approvals item alone, and a zero count adds none",
+    managerNav.filter((item) => item.pendingCount !== undefined).map((item) => item.href).join() === ROUTES.centerApprovals &&
+      managerNav.find((item) => item.href === ROUTES.centerApprovals)?.pendingCount === 12 &&
+      withPendingCount(managerNav, ROUTES.centerApprovals, 0) === managerNav,
+  );
+}
+
+/**
+ * F6 — single-session bookings in the two approvals queues, through the REAL
+ * `scopedWith(...).sessionBookings.listPending` and `confirmBooking` /
+ * `rejectBooking`: an APPROVAL booking waits in the branch's queue AND the
+ * class teacher's own, an INSTANT one in neither; the teacher queue lists
+ * only classes that teacher teaches, and its pinned resolve refuses another
+ * teacher's booking; another branch's queue never lists it; reject is audited.
+ */
+async function checkBookingQueues(centerId: string, otherCenterId: string, teacherId: string, managerId: string) {
+  console.log("\nF6 — session bookings in both approvals queues");
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const d = new Date(Date.now() + 3 * DAY);
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const otherTeacher = await makeTeacher(centerId, "f6-other-teacher");
+  const classFor = (teacher: string, mode: "INSTANT" | "APPROVAL") =>
+    prisma.classGroup.create({
+      data: scopedData(centerId, {
+        startDate: new Date("2026-01-01"),
+        endDate: new Date("2027-12-31"),
+        teacherId: teacher,
+        price: 10_000,
+        sessionBookingMode: mode,
+      }),
+    });
+  const sessionFor = (classGroupId: string, teacher: string) =>
+    prisma.session.create({
+      data: scopedData(centerId, { classGroupId, teacherId: teacher, date, startTime: "17:00", endTime: "18:00", priceSnapshot: 10_000 }),
+    });
+
+  const mine = await classFor(teacherId, "APPROVAL");
+  const theirs = await classFor(otherTeacher.id, "APPROVAL");
+  const instant = await classFor(teacherId, "INSTANT");
+  const mineSession = await sessionFor(mine.id, teacherId);
+  const theirsSession = await sessionFor(theirs.id, otherTeacher.id);
+  const instantSession = await sessionFor(instant.id, teacherId);
+  const book = async (sessionId: string, tag: string) =>
+    prisma.$transaction(async (tx) =>
+      requestBooking(tx, { centerId, sessionId, studentUserId: (await makeStudentUser(tag)).id }),
+    );
+  const myBooking = await book(mineSession.id, "f6-mine");
+  const theirBooking = await book(theirsSession.id, "f6-theirs");
+  const instantBooking = await book(instantSession.id, "f6-instant");
+  check(
+    "APPROVAL bookings are PENDING, an INSTANT one is CONFIRMED",
+    myBooking.ok && myBooking.kind === "pending" && theirBooking.ok && theirBooking.kind === "pending" &&
+      instantBooking.ok && instantBooking.kind === "confirmed",
+  );
+
+  const ctx = (id: string, role: string) => ({
+    center: { id },
+    user: { locale: "en" },
+    role,
+    isPlatformAdmin: false,
+    settings: null,
+  });
+  const branchQueue = await scopedWith(prisma, ctx(centerId, "MANAGER")).sessionBookings.listPending();
+  const teacherQueue = await scopedWith(prisma, ctx(centerId, "TEACHER")).sessionBookings.listPending({ teacherId });
+  const otherBranchQueue = await scopedWith(prisma, ctx(otherCenterId, "MANAGER")).sessionBookings.listPending();
+  const ids = (rows: { id: string }[]) => new Set(rows.map((row) => row.id));
+  const myId = myBooking.ok ? myBooking.booking.id : "";
+  const theirId = theirBooking.ok ? theirBooking.booking.id : "";
+  const instantId = instantBooking.ok ? instantBooking.booking.id : "";
+  check(
+    "The branch queue lists every pending booking, never an INSTANT (confirmed) one",
+    ids(branchQueue).has(myId) && ids(branchQueue).has(theirId) && !ids(branchQueue).has(instantId),
+  );
+  check(
+    "The teacher queue lists only bookings on classes that teacher teaches",
+    ids(teacherQueue).has(myId) && !ids(teacherQueue).has(theirId),
+  );
+  check("Another branch's queue never lists this branch's bookings", !ids(otherBranchQueue).has(myId) && !ids(otherBranchQueue).has(theirId));
+
+  const pinned = await prisma.$transaction((tx) =>
+    confirmBooking(tx, centerId, theirId, teacherId, { teacherId, via: "teacher" }),
+  );
+  check(
+    "A teacher's pinned confirm refuses another teacher's booking at the same branch (notFound)",
+    !pinned.ok && pinned.error === "notFound",
+  );
+  const otherBranch = await prisma.$transaction((tx) => rejectBooking(tx, otherCenterId, myId, managerId));
+  check("Another branch cannot reject this branch's booking (notFound)", !otherBranch.ok && otherBranch.error === "notFound");
+
+  const ownConfirm = await prisma.$transaction((tx) =>
+    confirmBooking(tx, centerId, myId, teacherId, { teacherId, via: "teacher" }),
+  );
+  const declined = await prisma.$transaction((tx) => rejectBooking(tx, centerId, theirId, managerId));
+  const audits = await prisma.auditLog.findMany({
+    where: { centerId, entityType: "SessionBooking", entityId: { in: [myId, theirId] } },
+    select: { action: true, after: true },
+  });
+  check(
+    "The teacher confirms their own; the branch declines the other; each writes one audit row",
+    ownConfirm.ok && ownConfirm.booking.status === "CONFIRMED" &&
+      declined.ok && declined.booking.status === "REJECTED" &&
+      audits.filter((row) => row.action === "sessionBooking.confirm").length === 1 &&
+      audits.filter((row) => row.action === "sessionBooking.reject").length === 1,
+    JSON.stringify(audits),
+  );
+  const queueAfter = await scopedWith(prisma, ctx(centerId, "MANAGER")).sessionBookings.listPending();
+  check("Resolved bookings leave the queue", !ids(queueAfter).has(myId) && !ids(queueAfter).has(theirId));
+
+  // T7 — the session page's "Booked — not arrived" list: staff cancel, with the
+  // teacher pinned to their own classes. The confirmed booking `myId` is on it.
+  const booked = (id: string) => scopedWith(prisma, ctx(centerId, "MANAGER")).sessionBookings.listConfirmedForSession(id);
+  check("The confirmed booking is on its session's booked list", (await booked(mineSession.id)).some((row) => row.id === myId));
+  const cancelByOther = await prisma.$transaction((tx) =>
+    cancelBookingByStaff(tx, centerId, myId, otherTeacher.id, { teacherId: otherTeacher.id, via: "teacher" }),
+  );
+  check(
+    "A teacher cannot cancel a booking on another teacher's class (notFound); it stays on the list",
+    !cancelByOther.ok && cancelByOther.error === "notFound" && (await booked(mineSession.id)).some((row) => row.id === myId),
+  );
+  const cancelByOwner = await prisma.$transaction((tx) =>
+    cancelBookingByStaff(tx, centerId, myId, teacherId, { teacherId, via: "teacher" }),
+  );
+  const cancelAudit = await prisma.auditLog.findMany({
+    where: { centerId, entityType: "SessionBooking", entityId: myId, action: "sessionBooking.cancel" },
+    select: { actorUserId: true, after: true },
+  });
+  check(
+    "The class's own teacher cancels it: reason STAFF, one audit row naming the teacher, off the booked list",
+    cancelByOwner.ok &&
+      cancelByOwner.booking.cancelReason === "STAFF" &&
+      cancelAudit.length === 1 &&
+      cancelAudit[0].actorUserId === teacherId &&
+      !(await booked(mineSession.id)).some((row) => row.id === myId),
+    JSON.stringify(cancelAudit),
+  );
+
+  await deleteAuditRows(prisma, { centerId: { in: [centerId, otherCenterId] } });
 }
 
 main()

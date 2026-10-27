@@ -31,6 +31,7 @@
       "pickRangeHint": "Pick a day, or a start and an end"
     },
     "typeAhead": {
+      "clear": "Clear",
       "noResults": "No matches yet — keep typing, or add a new record.",
       "searching": "Searching…",
       "resultCount": "{count, plural, =0 {No matches} one {# match} other {# matches}}"
@@ -100,7 +101,18 @@
     "accountMenu": "Account",
     "wholeManagement": "Whole Management — {organization}",
     "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
-    "skipToContent": "Skip to content"
+    "wholeManagementLabel": "Whole Management",
+    "rollupDisabledReason": "Pick a branch to use this",
+    "pickBranch": {
+      "title": "Pick a branch to open this page",
+      "description": "Whole Management for {organization} shows Analytics only. Everything else works on one branch at a time.",
+      "branchesLabel": "Branches of {organization}",
+      "backToAnalytics": "Back to Analytics"
+    },
+    "skipToContent": "Skip to content",
+    "accountSettings": "Account settings",
+    "pendingNavLabel": "{label}, {count} pending",
+    "pendingCapped": "{max}+"
   },
   "NavGroups": {
     "frontDesk": "Front desk",
@@ -123,7 +135,7 @@
     "staff": "Users & roles",
     "schedule": "My schedule",
     "discover": "Discover",
-    "reservations": "My reservations",
+    "reservations": "My requests",
     "centers": "Branches",
     "platform": "Platform",
     "catalog": "Catalog",
@@ -148,7 +160,6 @@
       "hidePassword": "Hide password",
       "firstName": "First name",
       "lastName": "Last name",
-      "phone": "Phone",
       "optional": "optional",
       "firstNamePlaceholder": "e.g. Mona",
       "lastNamePlaceholder": "e.g. Kamel"
@@ -166,7 +177,22 @@
       "submit": "Create account",
       "haveAccount": "Already have an account?",
       "loginLink": "Sign in",
-      "passwordHint": "At least 8 characters."
+      "passwordHint": "At least 8 characters.",
+      "intent": {
+        "legend": "I'm joining as",
+        "STUDENT": {
+          "label": "Student",
+          "hint": "Find classes and follow your schedule."
+        },
+        "PARENT": {
+          "label": "Parent",
+          "hint": "Follow your child's schedule and attendance."
+        },
+        "TEACHER": {
+          "label": "Teacher",
+          "hint": "Teach at one or more branches."
+        }
+      }
     },
     "selectCenter": {
       "title": "Choose a branch",
@@ -178,7 +204,9 @@
       "platformAdminLink": "Go to the platform admin",
       "wholeManagement": "Whole Management — {organization}",
       "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
-      "emptyTitle": "You’re not in a branch yet"
+      "emptyTitle": "You’re not in a branch yet",
+      "linkMyChild": "I'm a parent: link my child",
+      "parentViewLink": "Your children (parent view)"
     },
     "invite": {
       "title": "Staff invitation",
@@ -212,7 +240,8 @@
       "invalidCenter": "Unknown branch.",
       "invalidInvitation": "Unknown invitation.",
       "rateLimited": "Too many attempts — wait a few minutes and try again.",
-      "emailNotConfirmed": "Confirm your email address first, then accept the invitation."
+      "emailNotConfirmed": "Confirm your email address first, then accept the invitation.",
+      "intentRequired": "Choose how you are joining."
     },
     "shell": {
       "headline": "Run the whole centre from one screen.",
@@ -252,7 +281,8 @@
     "sendInvite": "Create invitation",
     "fields": {
       "email": "Email",
-      "role": "Role"
+      "role": "Role",
+      "branch": "Branch"
     },
     "membersTitle": "Members",
     "membersSubtitle": "Everyone connected to this branch. Change a role or suspend access here.",
@@ -274,6 +304,7 @@
     "copied": "Copied",
     "errors": {
       "forbidden": "You are not allowed to invite people to this branch.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "alreadyMember": "That person already has this role at this branch.",
       "ownerOnly": "Only an owner can invite another owner.",
       "required": "This field is required.",
@@ -314,7 +345,8 @@
       "branchGranted": "Branch access granted.",
       "branchRevoked": "Access to {branch} removed."
     },
-    "copyFailed": "Couldn't copy. Select the link and copy it."
+    "copyFailed": "Couldn't copy. Select the link and copy it.",
+    "inviteCreatedForBranch": "Invitation created for {branch}. Share the link below — it appears in {branch}'s pending invitations."
   },
   "People": {
     "fields": {
@@ -359,6 +391,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
@@ -384,7 +417,14 @@
       "privilegedPerson": "That phone belongs to a platform administrator, so it cannot be used for a teacher.",
       "rateLimited": "Too many contact lookups — wait a minute and try again.",
       "alreadyCompleted": "Your profile is already complete. Ask the branch to change these details.",
-      "verificationUnavailable": "Parent verification is turned off until a safe verification method is decided."
+      "verificationUnavailable": "Parent verification is turned off until a safe verification method is decided.",
+      "branchNotAllowed": "You can't add teachers at that branch.",
+      "generic": "Something went wrong. Try again.",
+      "promotionNotLatest": "Only the latest promotion can be undone.",
+      "promotionExpired": "This promotion is past its undo period.",
+      "promotionAlreadyUndone": "This promotion was already undone.",
+      "tooManyStudents": "That is more students than one promotion can carry.",
+      "accountGradeNotOffered": "This branch does not offer the grade on the student's account."
     }
   },
   "Teachers": {
@@ -465,6 +505,12 @@
     "deactivateConfirm": {
       "title": "Deactivate {name}?",
       "body": "They leave this branch’s active lists. Their history is kept, and you can activate them again."
+    },
+    "branchLabel": "Branch",
+    "branchHint": "The teacher is added at this branch. Changing it clears the details below.",
+    "toast": {
+      "added": "Teacher added.",
+      "addedAtBranch": "Teacher added at {branch}."
     }
   },
   "Students": {
@@ -509,14 +555,51 @@
       "otherCenters": "Other branches"
     },
     "promote": {
-      "title": "Promote a grade",
-      "description": "At the end of a term, move every active student in one grade to the next.",
+      "title": "Promote students",
+      "description": "Move students from one grade to the next. You see who moves before anything changes, you can leave students out, and you can undo it for {days} days.",
+      "open": "Promote students",
+      "backToStudents": "Back to students",
+      "chooseTitle": "Choose the grades",
+      "chooseDescription": "Pick the grade students are in now and the grade they move to.",
       "from": "From grade",
       "to": "To grade",
-      "warning": "This moves every active student in the chosen grade. The change is recorded in the audit log.",
-      "submit": "Promote students",
-      "done": "Students promoted.",
-      "needsGrades": "Add at least two grades in settings before promoting."
+      "chooseGrade": "Choose a grade",
+      "preview": "Preview",
+      "needsGrades": "Add at least two grades in settings before promoting.",
+      "sameGrade": "Choose a different grade to promote to.",
+      "previewTitle": "Moving from {from} to {to}",
+      "previewDescription": "Every active student in the From grade is ticked. Untick anyone who stays where they are.",
+      "noStudents": "No active students are in {from}.",
+      "searchLabel": "Search these students",
+      "searchPlaceholder": "Name or code",
+      "noSearchMatches": "No student here matches that search.",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "selectedCount": "{selected} of {total} selected",
+      "tick": "Promote {name}",
+      "accountSays": "Account says: {grade}",
+      "enrollments": "{count, plural, one {# active class enrolment} other {# active class enrolments}} in this grade",
+      "noEnrollments": "No active class enrolments in this grade",
+      "enrollmentKept": "Enrolment is kept",
+      "confirm": "Promote {count, plural, one {# student} other {# students}} to {to}",
+      "confirmNote": "Only the grade on this branch's record changes. Classes, enrolments, sessions, payments, other branches and students' own account grades stay as they are. You can undo this for {days} days.",
+      "done": "{count, plural, one {# student promoted} other {# students promoted}}. You can undo this for {days} days.",
+      "doneSkipped": "{skipped, plural, one {# was} other {# were}} left as they are because they changed after the preview.",
+      "historyTitle": "Promotion history",
+      "historyDescription": "Recent promotions at this branch. The latest one can be undone for {days} days.",
+      "historyEmpty": "No promotions yet.",
+      "historyEmptyHint": "When you promote students, each batch is listed here.",
+      "historyRoute": "{from} → {to}",
+      "historyMeta": "{date} · {count, plural, one {# student} other {# students}} · by {by}",
+      "historyUndone": "Undone on {date} by {by}",
+      "statusUndone": "Undone",
+      "undo": "Undo",
+      "undoTitle": "Undo this promotion?",
+      "undoDescription": "Students still in {to} go back to {from}. Anyone whose grade has changed since stays where they are.",
+      "undoConfirm": "Undo promotion",
+      "undoDone": "{reverted, plural, one {# student put back} other {# students put back}}. {skipped, plural, =0 {} one {# was left as it is.} other {# were left as they are.}}",
+      "bannerTitle": "Promotion on {date}: {from} → {to}, {count, plural, one {# student} other {# students}}",
+      "bannerHint": "You can undo it until {date}."
     },
     "photo": {
       "title": "Photo",
@@ -558,20 +641,6 @@
       "unknownClass": "Former class",
       "emptyHint": "No teacher has blocked this student from a class."
     },
-    "parentLinks": {
-      "title": "Parent accounts",
-      "description": "Accounts that matched this student’s parent phone. A match alone grants no access. A link is revoked automatically when the parent phone changes.",
-      "empty": "No parent account has matched this student's parent phone yet.",
-      "status": {
-        "PENDING": "Pending",
-        "VERIFIED": "Verified",
-        "REVOKED": "Revoked"
-      },
-      "verify": "Verify",
-      "verified": "Verified.",
-      "emptyHint": "A parent who signs up with this student's parent phone appears here as pending. Verifying them is turned off until a safe method is decided.",
-      "verifyUnavailable": "Verification is turned off until a safe method is decided."
-    },
     "print": {
       "print": "Print",
       "back": "Back to the student",
@@ -601,6 +670,13 @@
     "deactivateConfirm": {
       "title": "Deactivate {name}?",
       "body": "They leave this branch’s active lists. Their history is kept, and you can activate them again."
+    },
+    "filtersLabel": "Filters",
+    "gradeDiffersChip": "Grade differs from account",
+    "accountGrade": {
+      "says": "Account says: {grade}",
+      "use": "Use account grade",
+      "notOffered": "This branch does not offer that grade."
     }
   },
   "Classes": {
@@ -660,7 +736,21 @@
       "seatsValue": "{enrolled} of {seats}",
       "seatsUnlimited": "{enrolled} · no seat limit",
       "centerCutPercent": "{value}% of each payment",
-      "centerCutFixed": "{amount} per payment"
+      "centerCutFixed": "{amount} per payment",
+      "enrolmentMode": "Enrolment",
+      "enrolmentModeHint": "When a student enrols from Discover. Enrolments you add yourself are always immediate.",
+      "modeInstant": "Instant",
+      "modeApproval": "Needs approval",
+      "sessionBookingMode": "Single-session attendance online",
+      "sessionBookingModeHint": "Lets a student who is not enrolled book one session. They pay at the desk when they arrive.",
+      "bookingOff": "Off",
+      "maxBookingSeats": "Max single-session seats per session",
+      "maxBookingSeatsHint": "Leave empty for no extra limit — the seat limit still applies.",
+      "seatLimit": "Seat limit",
+      "seatLimitValue": "{count} seats",
+      "seatLimitUnlimited": "No limit — a room has no capacity set",
+      "seatLimitNoRoom": "Choose a room first",
+      "seatLimitHint": "From the rooms above. Enrolled students and confirmed bookings share it."
     },
     "context": {
       "title": "Key facts",
@@ -737,7 +827,8 @@
       "rescheduled": "{count, plural, one {# rescheduled session} other {# rescheduled sessions}}",
       "enrollments": "{count, plural, one {# student enrolment} other {# student enrolments}}",
       "reservations": "{count, plural, one {# enrolment request} other {# enrolment requests}}",
-      "deactivateHint": "Deactivate it instead: its upcoming sessions are removed and its history is kept."
+      "deactivateHint": "Deactivate it instead: its upcoming sessions are removed and its history is kept.",
+      "bookings": "{count, plural, one {# single-session booking} other {# single-session bookings}}"
     },
     "holidays": {
       "title": "Holiday calendar",
@@ -780,6 +871,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
@@ -813,7 +905,10 @@
       "slotsRequired": "Add at least one weekly time slot.",
       "slotOverlap": "This row overlaps another row on the same day.",
       "tooManySlots": "That is too many weekly rows.",
-      "fixedAbovePrice": "A fixed centre cut can't be more than the price — lower the cut or raise the price."
+      "fixedAbovePrice": "A fixed centre cut can't be more than the price — lower the cut or raise the price.",
+      "invalidBookingMode": "Choose how single sessions can be booked.",
+      "invalidBookingSeats": "Enter a whole number from 1 to 1000, or leave it empty.",
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet. Choose a bigger room, or wait until that session has passed."
     },
     "emptyHint": "A class pairs a teacher, a subject, a period and a weekly schedule. Add the first one and its sessions are created for the whole period.",
     "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
@@ -828,7 +923,9 @@
       "schedule": "Weekly schedule",
       "scheduleHint": "Each row creates a session every week of the class period. A clash with the teacher or a room shows right here.",
       "pricing": "Pricing & branch cut",
-      "attendance": "Attendance & enrollment"
+      "attendance": "Attendance",
+      "joining": "Joining",
+      "joiningHint": "How students join this class online: enrolling in the whole class, or attending one session. Walk-ins at the desk are not affected."
     },
     "newTeacher": {
       "modeLabel": "Teacher",
@@ -912,7 +1009,8 @@
       "groupLabel": "Attendance",
       "PRESENT": "Present",
       "LATE": "Late",
-      "ABSENT": "Absent"
+      "ABSENT": "Absent",
+      "NOT_ARRIVED": "Not arrived"
     },
     "paymentMethod": {
       "groupLabel": "Payment method",
@@ -920,7 +1018,7 @@
     },
     "roster": {
       "title": "Roster",
-      "description": "Every enrolled student, plus any drop-ins. Check students in — Present or Late is set from the arrival time — then record the payment. Corrections are possible until the session is ended.",
+      "description": "Every enrolled student, plus any drop-ins. Check a student in and choose the payment method in one step — Present or Late is set from the arrival time. Corrections are possible until the session is ended.",
       "empty": "No students enrolled or added yet.",
       "dropIn": "Drop-in",
       "unmarked": "Not marked",
@@ -944,7 +1042,9 @@
         "confirm": "Mark absent and void payment",
         "cancel": "Keep as is"
       },
-      "paidAbsentNote": "Paid — switching to Absent voids the payment."
+      "paidAbsentNote": "Paid — switching to Absent voids the payment.",
+      "notArrivedCorrectHint": "Or correct the mark — they were here all along:",
+      "booked": "Booked"
     },
     "addAttendee": {
       "title": "Add a student",
@@ -1006,6 +1106,13 @@
       "present": "Present",
       "late": "Late",
       "absent": "Absent",
+      "notArrived": "Not arrived",
+      "logCheckedIn": "Checked in · {status}",
+      "logPaid": "Paid {amount}",
+      "logVoided": "Payment voided · {amount}",
+      "logRefunded": "Payment refunded · {amount}",
+      "logReset": "Reset to not checked in",
+      "logCheckedInAgain": "Checked in again · {status}",
       "closed": "Closed",
       "closedManual": "{time} · {name}",
       "closedAuto": "{time} · automatically, end of day",
@@ -1034,6 +1141,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "required": "This field is required.",
       "tooLong": "This value is too long.",
@@ -1089,7 +1197,7 @@
       "cutRequired": "A one-time session needs its own centre cut.",
       "missingCut": "This session has no centre cut set, so the payment can't be recorded. Set the session's cut first.",
       "sessionInUse": "This session can no longer be deleted — it has started or has records on it. Cancel it instead.",
-      "sessionNotToday": "Only today's sessions can be checked in from the reception desk.",
+      "sessionNotToday": "Only today's sessions can be checked in.",
       "rateLimited": "Too many contact lookups — wait a minute and try again.",
       "reasonRequired": "Give a reason — switching a paid student to Absent voids their payment.",
       "hasPayments": "This session still has payments. Void or refund them first, each with its reason, then cancel or reschedule.",
@@ -1158,7 +1266,26 @@
       "confirm": "Delete session",
       "cancel": "Keep it"
     },
-    "zeroPriced": "Free session"
+    "zeroPriced": "Free session",
+    "booked": {
+      "notArrived": "{count, plural, one {Booked — not arrived (#)} other {Booked — not arrived (#)}}",
+      "badge": "Booked",
+      "checkIn": "Check in",
+      "cancel": {
+        "label": "Cancel booking",
+        "title": "Cancel this booking?",
+        "body": "The seat is freed at once and the student sees “Cancelled by the branch”.",
+        "done": "Cancelled",
+        "errors": {
+          "forbidden": "You are not allowed to do this.",
+          "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
+          "notFound": "That booking no longer exists, or is not for one of your classes.",
+          "notOpen": "That booking can no longer be cancelled — the student may already be checked in.",
+          "sessionClosed": "This session is closed, so its bookings can't be changed.",
+          "failed": "Something went wrong. Try again."
+        }
+      }
+    }
   },
   "Reception": {
     "title": "Reception Desk",
@@ -1228,6 +1355,7 @@
       "dropIn": "Drop-in — not enrolled in this class",
       "price": "Session price",
       "enterHint": "Press Enter to confirm.",
+      "confirmTitle": "Confirm check-in",
       "cancel": "Cancel",
       "checkedInAs": "{name} checked in — {status}.",
       "alreadyCheckedIn": "{name} is already checked in at {time}.",
@@ -1237,7 +1365,8 @@
       "sessionUnavailable": "That session is no longer open for check-in, so session mode was closed.",
       "failed": "Something went wrong. Try again.",
       "ready": "Ready to scan — the next card goes into this session.",
-      "checkedInCount": "{count} checked in"
+      "checkedInCount": "{count} checked in",
+      "booked": "Booked this session online"
     },
     "recent": {
       "title": "Recent check-ins",
@@ -1354,6 +1483,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to manage expenses.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "invalidAmount": "Enter a valid amount in EGP.",
       "invalidDate": "Enter a valid date.",
@@ -1374,6 +1504,16 @@
     "unknownActor": "someone"
   },
   "Approvals": {
+    "tabsLabel": "Request types",
+    "tabsSelectLabel": "Show requests of type",
+    "tabs": {
+      "all": "All",
+      "classRequests": "Class requests",
+      "sessionRequests": "Session requests",
+      "enrolments": "Enrolments",
+      "bookings": "Session bookings",
+      "accountClaims": "Account claims"
+    },
     "pageCapped": "Showing {shown} of {total}. Resolve some to see the rest.",
     "title": "Approvals",
     "subtitle": "{count, plural, =0 {Nothing pending} one {# pending request} other {# pending requests}}.",
@@ -1420,6 +1560,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
@@ -1431,7 +1572,8 @@
       "alreadyResolved": "That claim has already been decided.",
       "alreadyLinked": "That record or that account is already connected to a login.",
       "pastDate": "That date has passed — a session can't be added in the past. Decline the request instead.",
-      "invalidDate": "The requested date isn't a valid date."
+      "invalidDate": "The requested date isn't a valid date.",
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet."
     },
     "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
     "kinds": {
@@ -1439,7 +1581,8 @@
       "session": "New session",
       "reservation": "Joining a class",
       "onboarding": "New teacher",
-      "accountClaim": "Account claim"
+      "accountClaim": "Account claim",
+      "booking": "One session"
     },
     "onboarding": {
       "headline": "Wants to teach at this branch",
@@ -1448,6 +1591,8 @@
     "accountClaims": {
       "title": "Account claims",
       "description": "Someone signed up with the email of a person this branch already has. Approve only when that person is in front of you.",
+      "empty": "No pending account claims.",
+      "emptyHint": "When someone signs up with the email of a person this branch already has, the claim waits here for you to approve in person.",
       "headline": {
         "student": "Wants to use their student record",
         "teacher": "Wants to use their teacher record",
@@ -1461,6 +1606,33 @@
     "declineConfirm": {
       "title": "Decline this request?",
       "body": "This cannot be undone — the request leaves the queue as declined."
+    },
+    "bookings": {
+      "title": "Session bookings",
+      "description": "Students asking to attend one session of a class that needs approval. Approving takes a seat for that session; they pay at the desk.",
+      "empty": "No pending session bookings.",
+      "emptyHint": "Bookings for a class set to “Needs approval” appear here until their session starts.",
+      "headline": "Wants to attend one session",
+      "approved": "Approved",
+      "declined": "Declined",
+      "declineConfirm": {
+        "title": "Decline this booking?",
+        "body": "The student sees it declined. They can book again."
+      },
+      "errors": {
+        "forbidden": "You are not allowed to do this.",
+        "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
+        "notFound": "That booking no longer exists, or is not for one of these classes.",
+        "notPending": "That booking has already been decided.",
+        "expired": "This session has already started, so the booking has expired and can't be confirmed.",
+        "studentBlocked": "This student cannot join this class.",
+        "alreadyEnrolled": "This student is enrolled in the class now — they don't need a booking.",
+        "alreadyCheckedIn": "This student is already checked in to the session.",
+        "sessionFull": "This session is full — every seat is taken by enrolled students, bookings or walk-ins.",
+        "bookingSeatsFull": "All the seats this class keeps for single-session bookings are taken for this session.",
+        "bookingOff": "Booking is closed for this class.",
+        "failed": "Something went wrong. Try again."
+      }
     }
   },
   "Refunds": {
@@ -1506,6 +1678,7 @@
     "teacherEmpty": "No settlements recorded for you yet.",
     "errors": {
       "forbidden": "You are not allowed to do this.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That settlement no longer exists.",
       "sessionNotFound": "That session no longer exists in this branch.",
       "sessionAlreadySettled": "This session's teacher share has already been settled.",
@@ -1547,7 +1720,9 @@
       "catalog": "Academic catalog",
       "card": "ID card",
       "permissions": "Permissions",
-      "staff": "Users & roles"
+      "staff": "Users & roles",
+      "branches": "Branches",
+      "branding": "Branding"
     },
     "common": {
       "add": "Add",
@@ -1575,6 +1750,7 @@
     },
     "errors": {
       "forbidden": "You are not allowed to change this branch's configuration.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
       "notFound": "That record no longer exists in this branch.",
       "inUse": "Something still uses this record, so it cannot be deleted. Deactivate it instead.",
       "duplicateName": "That name is already used here.",
@@ -1593,7 +1769,8 @@
       "catalogAlreadySelected": "This branch has already picked that catalog entry.",
       "lastActiveMethod": "This is the branch's only active payment method. Add or activate another one first.",
       "roomInCombination": "This room is part of a combined room used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first.",
-      "combinationInUse": "That combination is still used by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}. Change their rooms first, then unlink.",
+      "combinationInUse": "These rooms cannot be unlinked yet. They are still combined by {classes, plural, =0 {no active class} one {# active class} other {# active classes}} and {sessions, plural, =0 {no upcoming session} one {# upcoming session} other {# upcoming sessions}}.{classList, select, none {} other { Classes: {classList}{classMore, plural, =0 {} other { and # more}}.}}{sessionList, select, none {} other { Sessions: {sessionList}{sessionMore, plural, =0 {} other { and # more}}.}} Change their rooms first, then save again.",
+      "roomInactive": "Only active rooms can be combined. Reactivate it first, or pick another room.",
       "selfLink": "A room cannot be combined with itself.",
       "invalidDate": "Enter a valid date.",
       "endBeforeStart": "The end date cannot be before the start date.",
@@ -1637,7 +1814,11 @@
       "schedulingTitle": "Scheduling conflicts",
       "schedulingDescription": "What happens when a class's sessions, or a single session, would double-book a teacher or a room.",
       "denyConflictsLabel": "Deny double-booked slots and sessions",
-      "denyConflictsDescription": "Off by default: a double-booked room or teacher can be saved only after staff tick “I understand, create anyway”, and the confirmation is recorded in the audit log. On: the conflicting slot or session is refused, with no override."
+      "denyConflictsDescription": "Off by default: a double-booked room or teacher can be saved only after staff tick “I understand, create anyway”, and the confirmation is recorded in the audit log. On: the conflicting slot or session is refused, with no override.",
+      "publicListingTitle": "Public listing",
+      "publicListingDescription": "Whether people without an account can find this branch on Explore — its name, logo, classes open to new students, their prices and teachers. Contact details and students are never shown.",
+      "publicListingLabel": "List this branch on Explore",
+      "publicListingHint": "On by default. Turn it off and the branch's public pages disappear at once; signed-in students can still find its classes in Discover."
     },
     "catalog": {
       "title": "Academic catalog",
@@ -1654,7 +1835,9 @@
         "basePrice": "Base price",
         "displayNameAr": "Your name in Arabic",
         "displayNameEn": "Your name in English",
-        "displayNameHint": "Shown only in this language. Leave blank to use the catalog name."
+        "displayNameHint": "Shown only in this language. Leave blank to use the catalog name.",
+        "name": "Name",
+        "details": "Details"
       },
       "educationSystems": {
         "title": "Education systems",
@@ -1674,23 +1857,28 @@
     },
     "rooms": {
       "title": "Rooms",
-      "description": "Where sessions physically happen. A class's seat limit is the capacity of its room — or of its rooms added together when they are combined.",
+      "description": "Where sessions physically happen. A class's seat limit is the capacity of its room — or of its rooms added together when they are combined. Which rooms can be combined is set on each room.",
+      "addButton": "Add room",
       "addTitle": "Add a room",
       "addDescription": "Name it the way staff say it out loud — that is what they will pick from.",
+      "editTitle": "Edit room",
+      "editDescription": "Change its name, its seats, or which rooms it can be combined with.",
       "listTitle": "Rooms",
-      "listDescription": "Deactivate a room that is out of service.",
-      "empty": "No rooms yet. Add the first one above.",
+      "listDescription": "Deactivate a room that is out of service. A combination is listed on both of its rooms.",
+      "empty": "No rooms yet.",
+      "emptyHint": "Add the first one with the Add room button above.",
+      "deleteConfirm": {
+        "title": "Delete this room?"
+      },
       "fields": {
         "name": "Name",
         "capacity": "Capacity",
-        "capacityHint": "Seats. Use 0 if not set — a class using this room is then not capped."
-      },
-      "links": {
-        "title": "Rooms that can be combined",
-        "description": "Tick the rooms each room can be joined with to make one bigger room — for example Room 1 + Room 2. A class or session can then use a room plus any room linked to it, and its seats are the rooms' capacities added together.",
+        "capacityHint": "Seats. Use 0 if not set — a class using this room is then not capped.",
+        "combinesWith": "Combines with",
         "combinableWith": "Can be combined with",
-        "needTwo": "Add at least two active rooms to combine them.",
-        "save": "Save combinations"
+        "combineHint": "Rooms that can be joined with this one into a bigger room — for example Room 1 + Room 2. A class or session can then use this room plus any room linked to it, and its seats are their capacities added together. The link shows on both rooms.",
+        "combineNone": "There are no other active rooms to combine with yet.",
+        "removeLink": "Remove {room}"
       }
     },
     "paymentMethods": {
@@ -1834,6 +2022,97 @@
       "notGrantable": "Never grantable to this role — a platform safeguard, not a branch setting.",
       "cellLabel": "{action} — {role}",
       "saveMatrixCount": "{count, plural, one {Save # change} other {Save # changes}}"
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "Every branch of this center. You can add branches up to the limit KayEdu has set for your center.",
+      "usage": "{used} of {max} branches used",
+      "underLimit": "You can add another branch.",
+      "atLimit": "Your center has reached its branch limit.",
+      "atLimitReason": "To add another branch, ask KayEdu to raise your center's branch limit.",
+      "add": "Add branch",
+      "listTitle": "Your branches",
+      "listDescription": "Archived branches are listed but don't count toward the limit.",
+      "empty": "No branches yet.",
+      "current": "You're here",
+      "dialogTitle": "Add a branch",
+      "dialogDescription": "The new branch starts with the setup you choose to copy — and nothing else.",
+      "created": "{branch} added. Switch to it from the branch switcher.",
+      "sections": {
+        "branch": "Branch",
+        "theme": "Theme colour",
+        "copy": "Copy setup"
+      },
+      "fields": {
+        "name": "Name (Arabic)",
+        "nameEn": "Name (English)",
+        "nameEnHint": "Optional. Shown in the English interface when set.",
+        "timezone": "Timezone",
+        "themeColor": "Theme colour",
+        "useColor": "Use {color}",
+        "copyFrom": "Copy setup from"
+      },
+      "copyDescription": "Everything ticked is copied from the branch you pick. You can change any of it at the new branch afterwards.",
+      "copy": {
+        "catalog": {
+          "label": "Academic catalog",
+          "hint": "Picked systems, grades and subjects, with your names and base prices."
+        },
+        "paymentMethods": {
+          "label": "Payment methods",
+          "hint": "The active methods, replacing the defaults."
+        },
+        "terms": {
+          "label": "Terms",
+          "hint": "The active term presets."
+        },
+        "holidays": {
+          "label": "Holidays",
+          "hint": "The holiday calendar."
+        },
+        "permissions": {
+          "label": "Permission matrix",
+          "hint": "What each role may do."
+        },
+        "generalSettings": {
+          "label": "General settings",
+          "hint": "Default cut, late threshold, conflict policy, visibility window and teacher edit deadline."
+        }
+      },
+      "neverCopied": "Never copied: rooms, classes, sessions, staff, teachers, students, money, the ID-card layout and the logo.",
+      "errors": {
+        "forbidden": "Only an owner can add a branch.",
+        "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
+        "branchLimitReached": "Your center has reached its branch limit. Ask KayEdu to raise it.",
+        "sourceNotFound": "Choose a branch of this center to copy from.",
+        "tryAgain": "Something changed while the branch was being created. Nothing was saved — try again.",
+        "required": "This field is required.",
+        "tooLong": "This value is too long.",
+        "invalidColor": "Choose a colour.",
+        "invalidTimezone": "Choose a timezone from the list."
+      }
+    },
+    "branding": {
+      "title": "Branding",
+      "description": "The logo shown beside this branch's name in the sidebar, branch switcher and branch pickers.",
+      "label": "Branch logo",
+      "hint": "PNG, JPEG or WebP, up to 512 KB. A larger picture is shrunk before it is sent.",
+      "upload": "Upload logo",
+      "remove": "Remove logo",
+      "removeConfirm": {
+        "title": "Remove the logo?",
+        "body": "The branch goes back to showing its initial on its theme color."
+      },
+      "errors": {
+        "forbidden": "You are not allowed to do this.",
+        "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
+        "logoMissing": "Choose a logo first.",
+        "photoType": "The logo must be a PNG, JPEG or WebP image.",
+        "photoTooLarge": "The logo is larger than 512 KB.",
+        "storage": "The logo could not be stored. Try again later.",
+        "mediaNotConnected": "Logo storage isn't connected yet, so nothing was saved. It will work once media storage is switched on.",
+        "failed": "Something went wrong. Try again."
+      }
     }
   },
   "CenterDashboard": {
@@ -2059,6 +2338,12 @@
     "emptyHint": "Classes a branch assigns to you appear here. You can also request a new one below."
   },
   "TeacherApprovals": {
+    "tabsLabel": "Request types",
+    "tabsSelectLabel": "Show requests of type",
+    "tabs": {
+      "enrolments": "Enrolments",
+      "bookings": "Session bookings"
+    },
     "title": "My approvals",
     "subtitle": "{count, plural, one {# student waiting} other {# students waiting}} to join your classes.",
     "listTitle": "Pending requests",
@@ -2074,7 +2359,8 @@
       "notFound": "That request no longer exists, or is not for one of your classes.",
       "notPending": "That request has already been resolved.",
       "studentBlocked": "This student cannot be enrolled in this class.",
-      "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it."
+      "classFull": "This class is full — every seat in its room is taken. Move it to a bigger room or combine another room with it.",
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet."
     },
     "emptyHint": "When a student asks to join one of your classes, the request appears here with their name and the class.",
     "headline": "Wants to join your class",
@@ -2082,7 +2368,14 @@
     "declineConfirm": {
       "title": "Decline this request?",
       "body": "This cannot be undone — the request leaves your queue as declined."
-    }
+    },
+    "bookingsTitle": "Session bookings",
+    "bookingsDescription": "Students asking to attend one session of your classes.",
+    "bookingsEmpty": "No pending session bookings.",
+    "bookingKindLabel": "One session",
+    "bookingHeadline": "Wants to attend one session",
+    "bookingDate": "Date",
+    "bookingTime": "Time"
   },
   "TeacherCenters": {
     "title": "Find a centre to teach at",
@@ -2122,11 +2415,13 @@
   },
   "StudentSchedule": {
     "title": "My schedule",
-    "subtitle": "Every class you're enrolled in, across every branch you've joined.",
+    "subtitle": "Every class you're enrolled in and every single session you've booked, across every branch.",
     "filterDate": "Filter by date",
     "upcomingTitle": "Upcoming",
     "upcomingEmpty": "No upcoming sessions.",
     "upcomingBadge": "Upcoming",
+    "bookedBadge": "Booked",
+    "requestedBadge": "Requested",
     "pastTitle": "Past",
     "pastEmpty": "No past sessions yet.",
     "dropIn": "Drop-in",
@@ -2171,9 +2466,37 @@
       "alreadyEnrolled": "You are already enrolled in this class.",
       "alreadyRequested": "You already have a pending request for this class.",
       "classFull": "This class is full — every seat is taken.",
-      "coolingOff": "Your last request for this class was declined. You can request it again from {date}."
+      "coolingOff": "Your last request for this class was declined. You can request it again from {date}.",
+      "sessionFull": "The session on {date} is fully booked, so you can't enrol in the whole class yet. You can still book other single sessions."
     },
-    "emptyHint": "No published class matches these filters. Clear one to see more."
+    "emptyHint": "No published class matches these filters. Clear one to see more.",
+    "sessions": {
+      "title": "Upcoming sessions",
+      "empty": "No upcoming sessions to book.",
+      "enrolledNote": "You are enrolled — every session of this class is yours.",
+      "offNote": "This class can't be booked one session at a time online. Enrol in the class, or ask the branch.",
+      "instantNote": "Attend just one session: your seat is booked at once. You pay at the desk.",
+      "approvalNote": "Attend just one session: the branch confirms your booking. You pay at the desk.",
+      "attendOnly": "Attend this session only",
+      "booked": "Booked",
+      "requested": "Requested",
+      "errors": {
+        "forbidden": "You need to sign in to book a session.",
+        "rateLimited": "Too many attempts. Try again in a little while.",
+        "notFound": "That session is no longer available.",
+        "notAcceptingStudents": "This class is not accepting new students right now.",
+        "bookingOff": "This class does not take single-session bookings.",
+        "sessionUnavailable": "This session can no longer be booked — it has started, ended, moved or been cancelled.",
+        "studentBlocked": "You cannot join this class.",
+        "alreadyEnrolled": "You are enrolled in this class, so every session is already yours.",
+        "alreadyCheckedIn": "You are already checked in to this session.",
+        "alreadyBooked": "You already booked this session.",
+        "bookingLimit": "You have 10 open session bookings — the most allowed. Cancel one or wait until one has happened.",
+        "sessionFull": "This session is full.",
+        "bookingSeatsFull": "All the seats this class keeps for single-session bookings are taken for this session.",
+        "failed": "Something went wrong. Try again."
+      }
+    }
   },
   "StudentProfile": {
     "title": "Complete your profile",
@@ -2181,7 +2504,7 @@
     "submit": "Save and continue"
   },
   "StudentReservations": {
-    "title": "My reservations",
+    "title": "My requests",
     "subtitle": "{count, plural, one {# request} other {# requests}}, across every branch.",
     "empty": "You haven't requested to join any classes yet.",
     "cancel": "Cancel request",
@@ -2196,7 +2519,33 @@
       "notFound": "That request no longer exists.",
       "notPending": "That request has already been resolved."
     },
-    "emptyHint": "Request to join a class from Discover and the request appears here with its status."
+    "emptyHint": "Request to join a class from Discover and the request appears here with its status.",
+    "tabsLabel": "Request type",
+    "tabs": {
+      "enrolments": "Class enrolments",
+      "bookings": "Session bookings"
+    },
+    "bookingsEmpty": "You haven't booked a single session yet.",
+    "bookingsEmptyHint": "On a class page, “Attend this session only” books one session; it appears here with its status.",
+    "movedTo": "This session moved to {date} — book again.",
+    "bookAgain": "Book again",
+    "bookingStatus": {
+      "PENDING": "Pending",
+      "CONFIRMED": "Booked",
+      "ATTENDED": "Attended",
+      "EXPIRED": "Expired",
+      "REJECTED": "Declined",
+      "CANCELLED": "Cancelled",
+      "CANCELLED_BY_BRANCH": "Cancelled by the branch",
+      "MOVED": "Moved"
+    },
+    "bookingErrors": {
+      "forbidden": "You are not allowed to do this.",
+      "notFound": "That booking no longer exists.",
+      "notOpen": "That booking can no longer be cancelled.",
+      "tooLate": "This session has started — the booking can't be cancelled now.",
+      "failed": "Something went wrong. Try again."
+    }
   },
   "RatingPopup": {
     "title": "Rate your sessions",
@@ -2216,18 +2565,27 @@
   "ParentPortal": {
     "title": "My children",
     "subtitle": "A read-only mirror of your child's own schedule — nothing here can be changed from this account.",
-    "noChildren": "No verified children yet. Once a branch verifies your account against your child's record, their schedule will appear here.",
+    "noChildren": "No child linked yet",
     "childSelectorLabel": "Child",
     "filterDate": "Filter by date",
     "upcomingTitle": "Upcoming",
     "upcomingEmpty": "No upcoming sessions.",
     "upcomingBadge": "Upcoming",
+    "bookedBadge": "Booked",
+    "requestedBadge": "Requested",
     "pastTitle": "Past",
     "pastEmpty": "No past sessions yet.",
     "dropIn": "Drop-in",
     "upcomingEmptyHint": "Sessions scheduled for this child will appear here.",
     "pastEmptyHint": "Attendance is listed here once a session has been marked.",
-    "showMoreUpcoming": "{count, plural, one {Show # more upcoming session} other {Show # more upcoming sessions}}"
+    "showMoreUpcoming": "{count, plural, one {Show # more upcoming session} other {Show # more upcoming sessions}}",
+    "linkDescription": "Enter the code your child or their branch gave you to see their classes here.",
+    "codeLabel": "Parent code",
+    "continue": "Continue",
+    "howToGet": "Where to get a code: your child opens Account → Family → Invite a parent, or the branch's reception prints one for you.",
+    "noBranchTitle": "Not at a branch yet",
+    "noBranch": "{names} — classes appear here once they join a branch.",
+    "linkAnother": "Link another child"
   },
   "AdminCenters": {
     "title": "Branches",
@@ -2262,7 +2620,14 @@
         "ownerEmail": "Founding owner's email",
         "ownerEmailHint": "They accept the invite link below to become this branch's first Owner.",
         "logo": "Logo",
-        "logoHint": "PNG, JPEG or WebP, up to 512 KB. Stored privately for this branch."
+        "logoHint": "PNG, JPEG or WebP, up to 512 KB. Stored privately for this branch.",
+        "organizationName": "Center name",
+        "organizationNameHint": "Leave blank to use the branch name.",
+        "organizationNameEn": "Center name (English)",
+        "maxBranches": "Branch limit",
+        "maxBranchesHint": "How many branches this center may have. Only a platform admin changes it.",
+        "organization": "Center",
+        "organizationHint": "Refused while the center is at its branch limit — raise the limit on its page first."
       },
       "submit": "Create branch",
       "created": "Branch created. Share the owner invite link below.",
@@ -2270,7 +2635,22 @@
       "inviteLinkHint": "Email delivery is not part of Phase 1, so send this link yourself. It expires in 7 days.",
       "copy": "Copy",
       "copied": "Copied",
-      "copyFailed": "Couldn't copy. Select the link and copy it."
+      "copyFailed": "Couldn't copy. Select the link and copy it.",
+      "modeLabel": "Which center does this branch belong to?",
+      "modeNew": "New center",
+      "modeExisting": "Add to an existing center",
+      "modeNewHint": "The branch founds a new center (the paying customer), and its founding Owner is invited.",
+      "modeExistingHint": "The branch joins a center that already exists, within that center's branch limit. Nobody is invited: the center's Owner already reaches every branch.",
+      "organizationUsage": "{used} of {max} branches",
+      "organizationFull": "{usage} — limit reached",
+      "submitExisting": "Add branch",
+      "branchAdded": "Branch added. The center's Owner sees it in their branch switcher.",
+      "organizationPicker": {
+        "placeholder": "Search centers",
+        "empty": "No centers match.",
+        "clear": "Clear center",
+        "open": "Show all centers"
+      }
     },
     "detail": {
       "subtitle": "/{slug}",
@@ -2307,8 +2687,12 @@
       "invalidNumber": "Enter a whole number of days, between 1 and 3650.",
       "photoType": "The logo must be a PNG, JPEG or WebP image.",
       "photoTooLarge": "The logo is larger than 512 KB.",
-      "storage": "The branch was created, but the logo could not be stored. Try again later."
-    }
+      "storage": "The branch was created, but the logo could not be stored. Try again later.",
+      "organizationNotFound": "Choose a center from the list.",
+      "branchLimitReached": "That center is at its branch limit. Raise the limit on its page, then try again.",
+      "invalidLimit": "Enter a whole number of branches, from 1 to 500."
+    },
+    "organizationsLink": "Centers & branch limits"
   },
   "AdminCatalog": {
     "title": "Academic catalog",
@@ -2671,14 +3055,6 @@
     "unknownAction": "Other change",
     "diffSet": "{field}: {after}"
   },
-  "Public": {
-    "landing": {
-      "tagline": "Attendance, payments and schedules for education centres — in Arabic and English.",
-      "signIn": "Sign in",
-      "register": "Create an account",
-      "note": "Branch staff join through an invitation from their branch. Teachers and students can create an account."
-    }
-  },
   "Toasts": {
     "saved": "Saved.",
     "studentActivated": "Student reactivated.",
@@ -2697,6 +3073,374 @@
     "catalogAdded": "Added to this branch.",
     "catalogRemoved": "Removed from this branch.",
     "expenseAdded": "Expense added.",
-    "expenseVoided": "Expense voided. It stays in the list, struck through."
+    "expenseVoided": "Expense voided. It stays in the list, struck through.",
+    "familyLinked": "Child linked",
+    "familyUnlinked": "Child unlinked",
+    "familyInvitationCancelled": "Invitation cancelled",
+    "familyCodeCancelled": "Code cancelled",
+    "familyAccessRemoved": "Parent access removed",
+    "studentAccountGradeUsed": "Grade updated from the student's account.",
+    "logoSaved": "Logo saved.",
+    "logoRemoved": "Logo removed."
+  },
+  "Account": {
+    "title": "Account settings",
+    "description": "Your own sign-in, name and language — the same in every branch you belong to.",
+    "profileSection": "Profile",
+    "profileSectionDescription": "How you appear when no branch has a name of its own for you.",
+    "securitySection": "Sign-in & security",
+    "securitySectionDescription": "Changing either one needs your current password.",
+    "profile": {
+      "title": "Your details",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "contactPhone": "Contact phone",
+      "contactPhoneHint": "Your own number, kept on your account. It does not change any branch's record.",
+      "preferredLocale": "Preferred language",
+      "preferredLocaleHint": "Where you land after signing in. The language switch at the top still changes this page.",
+      "localeAr": "العربية",
+      "localeEn": "English",
+      "save": "Save details",
+      "saving": "Saving…",
+      "saved": "Your details are saved."
+    },
+    "onFile": {
+      "title": "How {branch} has you on file",
+      "role": "As",
+      "name": "Name",
+      "phone": "Phone",
+      "askBranch": "Ask the branch to update this.",
+      "empty": "No branch has a record of you yet."
+    },
+    "email": {
+      "title": "Email",
+      "description": "You sign in with this address.",
+      "current": "Current email",
+      "newEmail": "New email",
+      "currentPassword": "Current password",
+      "submit": "Change email",
+      "submitting": "Changing…",
+      "changed": "Your email is changed. Sign in with the new address from now on.",
+      "requested": "We sent a confirmation link to the new address. Your email changes once you open it.",
+      "pending": "Waiting for confirmation of the new address:",
+      "comingSoon": "Changing email needs email confirmation — coming soon."
+    },
+    "password": {
+      "title": "Password",
+      "description": "At least 8 characters.",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "signOutOthers": "Sign out other devices",
+      "signOutOthersHint": "This device stays signed in.",
+      "submit": "Change password",
+      "submitting": "Changing…",
+      "changed": "Your password is changed.",
+      "changedOthersKept": "Your password is changed, but other devices could not be signed out. Try again later."
+    },
+    "errors": {
+      "required": "This field is required.",
+      "tooLong": "This is too long.",
+      "invalidEmail": "Enter a valid email address.",
+      "invalidPhone": "Enter a valid Egyptian mobile number.",
+      "passwordTooShort": "Password must be at least 8 characters.",
+      "passwordMismatch": "The passwords do not match.",
+      "wrongPassword": "That is not your current password.",
+      "samePassword": "Choose a password different from your current one.",
+      "weakPassword": "This password is too weak. Choose a stronger one.",
+      "sameEmail": "That is already your email.",
+      "emailTaken": "This email is already used by another account.",
+      "emailOnBranchRecord": "This email is on a record at a branch. Ask that branch.",
+      "emailChangeDisabled": "Changing email needs email confirmation — coming soon.",
+      "rateLimited": "Too many attempts — wait a few minutes, then try again.",
+      "failed": "Something went wrong. Try again.",
+      "photoMissing": "Choose a photo first.",
+      "photoType": "Photos must be PNG, JPEG or WebP.",
+      "photoTooLarge": "That photo is larger than 1 MB.",
+      "mediaNotConnected": "Photo storage isn't connected yet, so nothing was saved. It will work once media storage is switched on."
+    },
+    "study": {
+      "title": "Study details",
+      "description": "Your own details as a student.",
+      "cardTitle": "Your grade",
+      "cardDescription": "The grade you are in now. It pre-selects Discover's grade filter and fills in your grade when you join a new branch.",
+      "branchNote": "Changing this never changes what a branch has on file for you. Each branch keeps its own record, and only the branch can change it.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Your grade was saved.",
+      "picker": {
+        "system": "Education system",
+        "systemPlaceholder": "Choose an education system",
+        "grade": "Grade",
+        "gradePlaceholder": "Choose a grade",
+        "none": "Not set",
+        "noSystem": "Other grades"
+      }
+    },
+    "photo": {
+      "title": "Profile photo",
+      "label": "Photo",
+      "hint": "PNG, JPEG or WebP, up to 1 MB. Only you can set it.",
+      "upload": "Upload photo",
+      "remove": "Remove photo",
+      "visibility": "Shown here on your account. Other screens keep showing your initials until profile photos are switched on.",
+      "saved": "Your photo is saved.",
+      "removed": "Your photo is removed.",
+      "removeConfirm": {
+        "title": "Remove your photo?",
+        "body": "Your initials will show instead."
+      }
+    }
+  },
+  "AdminOrganizations": {
+    "title": "Centers",
+    "subtitle": "Every paying customer and how many branches it may have.",
+    "backToBranches": "All branches",
+    "backToList": "All centers",
+    "empty": "No centers yet.",
+    "usage": "{used} of {max} branches",
+    "countedNote": "Every branch counts toward the limit.",
+    "archivedNote": "{count} archived — archived branches don't count toward the limit.",
+    "openDetail": "Open",
+    "limit": {
+      "title": "Branch limit",
+      "description": "How many non-archived branches this center may have. Its Owner adds branches up to it from Settings → Branches; you can add one from All branches.",
+      "label": "Branches allowed",
+      "hint": "This center has {used, plural, one {# branch} other {# branches}} that count. Lowering the limit below that only stops new branches — nothing existing changes.",
+      "save": "Save limit",
+      "saved": "Limit saved."
+    },
+    "detail": {
+      "subtitle": "A center (the paying customer) and its branches.",
+      "branchesTitle": "Branches",
+      "branchesDescription": "Open a branch for its lifecycle, visibility window and recent activity.",
+      "noBranches": "This center has no branches."
+    }
+  },
+  "Family": {
+    "section": {
+      "title": "Family",
+      "description": "Who can follow a student's classes — read-only, and only with a one-time code."
+    },
+    "code": {
+      "label": "Parent code",
+      "onceWarning": "This code is shown only once. Copy or share it now — it can't be shown again.",
+      "rules": "It has no expiry, and it works once.",
+      "copy": "Copy code",
+      "copied": "Copied",
+      "copyFailed": "The browser didn't allow copying. Select the code and copy it by hand.",
+      "whatsapp": "Share on WhatsApp",
+      "shareText": "{student} invited you to follow their classes on KayEdu. Open {url} and enter the code {code}."
+    },
+    "student": {
+      "title": "Your parents",
+      "description": "A linked parent sees your schedule and attendance. They can't change anything.",
+      "slots": "{used} of {max} parent slots used",
+      "invite": "Invite a parent",
+      "slotsFull": "All {max} parent slots are in use. Cancel an invitation you no longer need first.",
+      "noParents": "No parent is linked yet.",
+      "noParentsHint": "Invite a parent, then send them the code.",
+      "since": "Linked {date}",
+      "cannotRemove": "Only your branch or the parent can remove a linked parent.",
+      "pendingTitle": "Waiting to be used",
+      "pendingFor": "For {name}",
+      "pendingBranch": "Printed by {branch}",
+      "pendingMeta": "Code ending <code>{hint}</code> · {date}",
+      "newCode": "New code",
+      "newCodeTitle": "Make a new code?",
+      "newCodeDescription": "The old code stops working at once. The new one is shown only once.",
+      "cancel": "Cancel invitation",
+      "cancelTitle": "Cancel this invitation?",
+      "cancelDescription": "The code stops working. You can invite again later."
+    },
+    "invite": {
+      "title": "Invite a parent",
+      "description": "Say who you're inviting. Your branch sees this name beside the account that uses the code.",
+      "firstName": "Parent's first name",
+      "lastName": "Parent's last name",
+      "phone": "Parent's phone",
+      "phoneHint": "For your branch's records. It is never used to sign in or to link.",
+      "submit": "Create code",
+      "cancel": "Cancel",
+      "done": "Done",
+      "issuedTitle": "Send this code to your parent",
+      "issuedDescription": "They open the link, sign in or create their own parent account, and enter the code."
+    },
+    "parent": {
+      "title": "Your children",
+      "description": "Children whose classes you can follow, read-only.",
+      "noChildren": "No child is linked yet.",
+      "noChildrenHint": "Enter the code your child or their branch gave you.",
+      "since": "Linked {date}",
+      "noBranch": "Not at a branch yet",
+      "unlink": "Unlink",
+      "unlinkTitle": "Unlink {name}?",
+      "unlinkDescription": "You stop seeing {name}'s classes at once. Linking again needs a new code.",
+      "openPortal": "Open the parent view",
+      "linkAnother": "Link another child",
+      "linkFirst": "Link your child",
+      "howToGet": "Where to get a code: your child opens Account → Family → Invite a parent, or the branch's reception prints one for you."
+    },
+    "join": {
+      "title": "Link your child",
+      "description": "Enter the 8-character code your child or their branch gave you.",
+      "codeLabel": "Parent code",
+      "codeHint": "Letters and numbers, like ABCD-2345. Capitals and the dash don't matter.",
+      "submit": "Link my child",
+      "submitting": "Linking…",
+      "signInFirst": "Sign in or create a parent account to use this code. It stays filled in while you do.",
+      "signIn": "Sign in",
+      "register": "Create a parent account",
+      "signedInAs": "Signed in as {name}",
+      "studentAccount": "You're signed in with a student account. A parent needs their own parent account, not a student account.",
+      "backToAccount": "Account settings"
+    },
+    "branch": {
+      "title": "Parent access",
+      "description": "Parent accounts that can see this student's schedule and attendance, read-only.",
+      "empty": "No parent account is linked.",
+      "emptyHint": "Generate a code and hand it to the parent in person.",
+      "generate": "Generate parent code",
+      "regenerate": "Replace the code",
+      "regenerateHint": "The code waiting now stops working.",
+      "pending": "A code from this branch is waiting (ending <code>{hint}</code>, {date}).",
+      "cancelCode": "Cancel code",
+      "cancelCodeTitle": "Cancel this branch's code?",
+      "cancelCodeDescription": "The printed code stops working. You can generate a new one any time.",
+      "slots": "{used} of {max} parent slots used",
+      "since": "Linked {date}",
+      "declared": "The student named: {name}",
+      "origin": {
+        "childInvite": "Student's invitation",
+        "thisBranch": "This branch's code",
+        "otherBranch": "Another branch's code",
+        "legacy": "Linked before codes"
+      },
+      "noPermission": "Ask a manager to generate a parent code or remove access.",
+      "revoke": "Remove access",
+      "revokeTitle": "Remove {name}'s access?",
+      "revokeDescription": "They stop seeing this student at once, at every branch. Linking again needs a new code.",
+      "reason": "Reason",
+      "reasonHint": "Kept on the record for staff. Required.",
+      "keep": "Keep access",
+      "dialogTitle": "Parent code for {student}",
+      "dialogDescription": "Print the slip and hand it to the parent in person. This is the only time the code is shown.",
+      "print": "Print slip",
+      "done": "Done",
+      "slotsFullHint": "All 3 parent slots are in use. The student can cancel an unused invitation, or remove a parent's access first."
+    },
+    "slip": {
+      "title": "Parent access code",
+      "branch": "Branch",
+      "student": "Student",
+      "code": "Code",
+      "link": "Link",
+      "handOver": "Hand this to the parent in person.",
+      "steps": "Open the link, sign in or create a parent account, and enter the code. It works once."
+    },
+    "errors": {
+      "invalidCode": "This code is invalid or has already been used.",
+      "ownCode": "This is your own code. Give it to your parent — they need their own parent account.",
+      "studentAccount": "A parent needs their own parent account, not a student account.",
+      "platformAdmin": "A platform administrator account can't be linked as a parent.",
+      "alreadyLinked": "You're already linked to this child.",
+      "parentLimit": "This child already has 3 parents linked.",
+      "childLimit": "You already have 10 children linked — the most one account can hold.",
+      "rateLimited": "Too many attempts. Try again in an hour.",
+      "slotsFull": "All 3 parent slots are in use. Cancel an unused invitation or remove a parent first.",
+      "notAStudent": "Only a student's own account can invite a parent.",
+      "notFound": "That is no longer available. Refresh the page.",
+      "forbidden": "You don't have permission to do that.",
+      "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
+      "signInRequired": "Sign in first.",
+      "reasonRequired": "Give a reason — it is kept on the record.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidPhone": "Enter a valid Egyptian mobile number."
+    }
+  },
+  "Onboarding": {
+    "student": {
+      "title": "Your studies",
+      "description": "Tell us your grade so we can show you the right classes.",
+      "step": "Step {current} of {total}",
+      "gradeTitle": "Your education system and grade",
+      "gradeDescription": "Pick the system you study in, then your grade. You can change it any time in Account settings.",
+      "continue": "Continue",
+      "saving": "Saving…",
+      "parentTitle": "Invite a parent",
+      "parentDescription": "Optional. Give us your parent's details and you get a one-time code to send them. A parent only sees your schedule and attendance. You can skip this and do it later in Account settings.",
+      "skip": "Skip for now",
+      "toDiscover": "Find classes"
+    }
+  },
+  "Explore": {
+    "title": "Explore",
+    "subtitle": "Browse branches, their classes and teachers. You only need an account to enrol.",
+    "viewsLabel": "Browse by",
+    "views": {
+      "branches": "Branches",
+      "classes": "Classes"
+    },
+    "branchCardHint": "See classes and teachers",
+    "branchesEmpty": "No branches to show yet.",
+    "branchesEmptyHint": "Branches appear here once they open to new students.",
+    "classesFound": "{count, plural, =0 {No classes found} one {# class found} other {# classes found}}",
+    "classesEmpty": "No classes match these filters.",
+    "classesEmptyHint": "Try another subject, grade or day, or set a filter back to All.",
+    "backToExplore": "Explore",
+    "backToBranch": "{branch}",
+    "backToDiscover": "Discover",
+    "branch": {
+      "subtitle": "Classes open to new students at this branch, and the teachers who teach them.",
+      "classesTitle": "Classes",
+      "classesEmpty": "This branch has no classes open to new students right now.",
+      "teachersTitle": "Teachers",
+      "teachersEmpty": "No teachers to show yet."
+    },
+    "teacher": {
+      "subtitle": "Teaches at {branch}",
+      "classesTitle": "Classes at this branch"
+    },
+    "class": {
+      "untitled": "Class",
+      "detailsTitle": "About this class",
+      "branch": "Branch",
+      "teacher": "Teacher",
+      "grade": "Grade",
+      "period": "Runs",
+      "periodValue": "{from} to {to}",
+      "schedule": "Weekly schedule",
+      "joinTitle": "Join this class",
+      "price": "Price",
+      "status": "Status",
+      "joinInstant": "You're enrolled as soon as you confirm. You pay for each session at the branch.",
+      "joinApproval": "The branch reviews each request before you're enrolled. You pay for each session at the branch."
+    },
+    "card": {
+      "rating": "★ {value}",
+      "noSchedule": "Schedule not set yet",
+      "perSession": "{price} / session"
+    },
+    "seats": {
+      "open": "Open",
+      "few": "Few seats left",
+      "full": "Full"
+    },
+    "shell": {
+      "home": "KayEdu — Explore",
+      "nav": "Main",
+      "explore": "Explore",
+      "signIn": "Sign in",
+      "register": "Create account",
+      "dashboard": "Go to my dashboard"
+    },
+    "sessions": {
+      "title": "Attend one session",
+      "instantNote": "This class lets you book a single session online. You pay at the desk.",
+      "approvalNote": "This class lets you request a single session online; the branch confirms it. You pay at the desk.",
+      "see": "See upcoming sessions",
+      "signIn": "Sign in to book a session"
+    }
   }
 }

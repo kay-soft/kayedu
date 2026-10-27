@@ -21,7 +21,9 @@
  *     frozen by `lib/money.ts` at the instant it is recorded. Past history is
  *     the scripts-only `historicalBackfill` option (those days have ended; the
  *     live path would refuse them), then closed by the real `closeSession`;
- *   - settlements, reservations, ratings, parent links: their own modules.
+ *   - settlements, reservations, ratings, family links: their own modules
+ *     (F3: a link is a real code issued and accepted through lib/db/parents.ts;
+ *     the two dev-only waiting codes are the one fixture write, below).
  * The only direct writes are rows with no writer in `lib/db` (rooms, holidays,
  * expenses, catalog selections, change requests) — written in the exact shape
  * the app's own actions write them.
@@ -59,7 +61,13 @@ import {
 import { createPaymentMethod, listActivePaymentMethods } from "../lib/db/payment-methods.ts";
 import { createTeacherMembership } from "../lib/db/teacher-membership.ts";
 import { createPerson } from "../lib/db/identity.ts";
-import { originateParentLinks } from "../lib/db/parents.ts";
+import {
+  acceptFamilyCode,
+  familyCodeHint,
+  hashFamilyCode,
+  issueBranchCode,
+  issueStudentInvitation,
+} from "../lib/db/parents.ts";
 import { transitionCenterLifecycle } from "../lib/db/platform.ts";
 import { recordPayment } from "../lib/db/payments.ts";
 import { auditRowData, writeAuditRow } from "../lib/db/audit-row.ts";
@@ -99,6 +107,7 @@ import { PhoneBook, dayOf, hashString, hhmm, makeRng, pool, toMinutes } from "./
 import { generatePerson, parentFirstName } from "./seed-data/names.ts";
 import {
   BRANCHES,
+  DEV_FAMILY_CODES,
   DISCOVER_STUDENT,
   ORGANIZATIONS,
   PARENTS,
@@ -339,7 +348,13 @@ async function ensureOrganization(orgKey: string): Promise<string> {
   if (known) return known;
   const def = ORGANIZATIONS[orgKey];
   const existing = await prisma.organization.findFirst({ where: { name: def.name } });
-  const org = existing ?? (await prisma.organization.create({ data: def }));
+  // F1: a re-run puts the demo limit back too (an organization the migration
+  // backfilled to its branch count, or one an admin edited while testing).
+  const org = existing
+    ? existing.maxBranches === def.maxBranches
+      ? existing
+      : await prisma.organization.update({ where: { id: existing.id }, data: { maxBranches: def.maxBranches } })
+    : await prisma.organization.create({ data: def });
   orgIds.set(orgKey, org.id);
   return org.id;
 }
@@ -1450,53 +1465,91 @@ async function seedReservationsAndRequests(ctx: Centre, catalog: Catalog, today:
 // ── Parents ──────────────────────────────────────────────────────────────────
 
 async function seedParents(centres: Centre[]) {
-  for (const def of [PARENTS.family, PARENTS.nokhba]) {
-    const parent = await ensurePerson(def);
-    // A phone match only ever produces PENDING links - origination is not verification.
-    const origin = await originateParentLinks(prisma, { parentUserId: parent.id, phone: phones.forKey(def.key).canonical });
-    if (origin.refused) throw new Error(`Parent ${def.email}: ${origin.reason}`);
-  }
+  const studentUser = (key: string) => {
+    for (const centre of centres) {
+      const row = centre.students.find((student) => student.key === key);
+      if (row) return { centre, row };
+    }
+    throw new Error(`Seed student ${key} not found`);
+  };
+  const family = await ensurePerson(PARENTS.family);
+  const nokhba = await ensurePerson(PARENTS.nokhba);
 
-  const keyByProfile = new Map<string, string>();
-  for (const centre of centres) for (const student of centre.students) keyByProfile.set(student.profileId, student.key);
-
-  const family = await prisma.user.findUniqueOrThrow({ where: { email: PARENTS.family.email } });
-  const nokhba = await prisma.user.findUniqueOrThrow({ where: { email: PARENTS.nokhba.email } });
-  const links = await prisma.parentLink.findMany({
-    where: { parentUserId: { in: [family.id, nokhba.id] } },
-    include: { studentProfile: { include: { center: true } } },
-  });
-  for (const link of links) {
-    const key = keyByProfile.get(link.studentProfileId);
-    // family: the two Center 60 children (one per branch) are verified; the third stays PENDING.
-    // nokhba: the Al Nokhba link is verified; the same child's Downtown link stays PENDING.
-    const shouldVerify =
-      link.parentUserId === family.id
-        ? key === "dt-yara" || key === "nc-ziad"
-        : link.studentProfile.center.slug === "al-nokhba-academy";
-    if (!shouldVerify || link.status !== "PENDING") continue;
-    // No app path verifies a link since SEC-2a (D-03 (d) — OD-6 is open), so
-    // the demo world marks its two verified links directly, as fixture data,
-    // exactly like the links the dev data held before SEC-2a. Conditional on
-    // PENDING, and audited like any verification.
-    const verifier = await centreStaffId(link.centerId);
-    const verified = await prisma.parentLink.updateMany({
-      where: { id: link.id, centerId: link.centerId, status: "PENDING" },
-      data: { status: "VERIFIED", verifiedAt: new Date(), verifiedBy: verifier },
+  // A link the demo needs: skipped when it is already ACTIVE (a re-run, or the
+  // F3 migration's LEGACY_VERIFIED copy of the old verified ParentLink).
+  async function ensureLink(parentId: string, studentKey: string, via: "student" | "branch") {
+    const { centre, row } = studentUser(studentKey);
+    const existing = await prisma.familyLink.findUnique({
+      where: { parentUserId_studentUserId: { parentUserId: parentId, studentUserId: row.userId } },
     });
-    if (verified.count !== 1) throw new Error(`Verify parent link ${link.id}: not PENDING`);
-    await audit(link.centerId, verifier, "parentLink.verify", "ParentLink", link.id, { via: "seed" });
+    if (existing?.status === "ACTIVE") return `${studentKey}: already linked (${existing.source})`;
+    const issued =
+      via === "student"
+        ? await issueStudentInvitation(prisma, {
+            studentUserId: row.userId,
+            declaredParentFirstName: PARENTS.family.first,
+            declaredParentLastName: PARENTS.family.last,
+            declaredParentPhone: phones.forKey(PARENTS.family.key).canonical,
+          })
+        : await issueBranchCode(prisma, { centerId: centre.center.id, studentProfileId: row.profileId, actorUserId: centre.actorId });
+    if (!issued.ok) throw new Error(`Issue a code for ${studentKey}: ${issued.error}`);
+    const accepted = await acceptFamilyCode(prisma, { acceptorUserId: parentId, code: issued.code, ip: "seed" });
+    if (!accepted.ok) throw new Error(`Accept the code for ${studentKey}: ${accepted.error}`);
+    return `${studentKey}: linked (${via === "student" ? "student invitation" : `${centre.branch.name} code`})`;
   }
-  const summary = await prisma.parentLink.groupBy({ by: ["status"], _count: { _all: true } });
-  line(`\n■ Parents: ${summary.map((row) => `${row._count._all} ${row.status}`).join(", ")}`);
-}
 
-async function centreStaffId(centerId: string): Promise<string> {
-  const membership = await prisma.membership.findFirstOrThrow({
-    where: { centerId, role: { in: ["OWNER", "MANAGER"] } },
-    orderBy: { role: "asc" },
-  });
-  return membership.userId;
+  line("\n■ Families");
+  // Hanan: Yara (her own invitation) and Ziad (Nasr City's printed code).
+  line(`  ${PARENTS.family.email}: ${await ensureLink(family.id, "dt-yara", "student")}`);
+  line(`  ${PARENTS.family.email}: ${await ensureLink(family.id, "nc-ziad", "branch")}`);
+  // Ashraf: Farida, by Al Nokhba's printed code — she shows at both her branches.
+  line(`  ${PARENTS.nokhba.email}: ${await ensureLink(nokhba.id, "nk-farida", "branch")}`);
+
+  // The two waiting dev codes (fixture rows in the exact shape the issuers write).
+  const farida = studentUser("nk-farida").row;
+  const mazen = studentUser("dt-mazen");
+  const waiting = [
+    {
+      code: DEV_FAMILY_CODES.studentInvite,
+      data: {
+        studentUserId: farida.userId,
+        source: "STUDENT_INVITE" as const,
+        createdBy: farida.userId,
+        declaredParentFirstName: "Nadia",
+        declaredParentLastName: "Salah",
+        declaredParentPhone: phones.forKey("nk-farida:second-parent").canonical,
+      },
+      label: "Farida's invitation for a second parent",
+    },
+    {
+      code: DEV_FAMILY_CODES.branchCode,
+      data: {
+        studentUserId: mazen.row.userId,
+        source: "CENTER_CODE" as const,
+        createdBy: mazen.centre.actorId,
+        issuingCenterId: mazen.centre.center.id,
+      },
+      label: `${mazen.centre.branch.name}'s printed code for Mazen (no login)`,
+    },
+  ];
+  for (const item of waiting) {
+    const codeHash = hashFamilyCode(item.code);
+    const found = await prisma.familyInvitation.findUnique({ where: { codeHash } });
+    let state: string = found?.status ?? "created";
+    if (!found) {
+      const clash =
+        item.data.source === "CENTER_CODE"
+          ? await prisma.familyInvitation.findFirst({
+              where: { studentUserId: item.data.studentUserId, issuingCenterId: item.data.issuingCenterId, source: "CENTER_CODE", status: "PENDING" },
+            })
+          : null;
+      if (clash) state = "skipped — another code from this branch is waiting";
+      else await prisma.familyInvitation.create({ data: { ...item.data, codeHash, codeHint: familyCodeHint(item.code) } });
+    }
+    line(`  waiting code ${item.code.slice(0, 4)}-${item.code.slice(4)} — ${item.label}: ${state}`);
+  }
+  const summary = await prisma.familyLink.groupBy({ by: ["status", "source"], _count: { _all: true } });
+  line(`  family links: ${summary.map((row) => `${row._count._all} ${row.status} ${row.source}`).join(", ")}`);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

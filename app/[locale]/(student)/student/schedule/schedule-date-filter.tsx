@@ -2,9 +2,10 @@
 
 import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
+import { UrlFilterForm } from "@/components/shared/url-filters";
 
 /**
- * The student schedule's date filter (spec §4.3 item 1). A plain GET form —
+ * The student schedule's date filter (spec §4.3 item 1). A plain GET form (`UrlFilterForm`: a soft navigation with JavaScript, docs/02 §14) —
  * state lives in the URL, the same pattern as the center/teacher session
  * filters.
  *
@@ -25,7 +26,7 @@ export function ScheduleDateFilter({
   dateLabel: string;
 }) {
   return (
-    <form className="flex flex-col gap-1.5 sm:w-64">
+    <UrlFilterForm className="flex flex-col gap-1.5 sm:w-64">
       <Label htmlFor="schedule-date">{dateLabel}</Label>
       <DatePicker
         id="schedule-date"
@@ -35,6 +36,6 @@ export function ScheduleDateFilter({
         clearable
         submitOnChange
       />
-    </form>
+    </UrlFilterForm>
   );
 }

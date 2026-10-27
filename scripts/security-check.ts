@@ -28,6 +28,9 @@ import { PrismaClient } from "@prisma/client";
 
 import { AuthMisconfiguredError, productionAuthProblems } from "../lib/auth/auth-config.ts";
 import { profileFromMetadata, resolveAppIdentity } from "../lib/auth/identity-link.ts";
+import { changeEmail, changePassword, type AccountAuthPort } from "../lib/auth/account.ts";
+import { updateAccountProfile } from "../lib/db/account.ts";
+import { accountProfileSchema } from "../lib/validation/account.ts";
 import { enforceProductionAuthSettings } from "../lib/auth/production-guard.ts";
 import {
   DEFAULT_ROLE_GRANTS,
@@ -50,10 +53,11 @@ import {
 } from "../lib/db/identity.ts";
 import { revenueTotalsRollup } from "../lib/db/organizations.ts";
 import {
-  originateParentLinks,
-  revokeStaleParentLinks,
-  verifiedChildLinks,
-  verifyParentLinkPlaceholder,
+  acceptFamilyCode,
+  activeChildLinks,
+  hashFamilyCode,
+  issueBranchCode,
+  revokeFamilyLink,
 } from "../lib/db/parents.ts";
 import { loadPermissionGrants } from "../lib/db/permissions.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
@@ -71,7 +75,7 @@ import { loadAuditFeed, loadUnpaidCheckIns } from "../lib/db/audit-feed.ts";
 import { AuditPayloadError, FORBIDDEN_AUDIT_KEYS, forbiddenAuditKey, writeAuditRow } from "../lib/db/audit-row.ts";
 import { revenueTotals } from "../lib/db/analytics.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
-import { changeAttendanceStatus, createAttendance, SessionClosedError } from "../lib/db/attendance.ts";
+import { changeAttendanceStatus, createAttendance, recheckInAttendee, SessionClosedError } from "../lib/db/attendance.ts";
 import { classMoneyError } from "../lib/db/class-sessions.ts";
 import { createPaymentMethod, listActivePaymentMethods } from "../lib/db/payment-methods.ts";
 import { recordPayment, sessionReceiptLines, sessionReceiptTotals, voidPayment } from "../lib/db/payments.ts";
@@ -204,6 +208,14 @@ async function cleanup() {
   if (rateLimitKeys.size > 0) {
     await prisma.rateLimitBucket.deleteMany({ where: { key: { in: [...rateLimitKeys] } } });
   }
+}
+
+/** A fresh client address for one family-code accept; both of its limiter keys are cleaned up (F3). */
+function familyJoinIp(userId: string): string {
+  const ip = `${PREFIX}${randomUUID()}`;
+  rateLimitKeys.add(`familyJoinPerIp:${ip}`);
+  rateLimitKeys.add(`familyJoinPerUser:${userId}`);
+  return ip;
 }
 
 async function makeCenter(tag: string, organizationId?: string, lifecycleState: "ACTIVE" | "SUSPENDED" = "ACTIVE") {
@@ -405,63 +417,190 @@ async function main() {
     ];
   });
 
-  await assertSec("SEC-03", "a phone match never becomes parent access by one staff click (D-03 (d))", async () => {
-    const parentPhone = await freePhone();
-    const child = await makeUser("child3");
-    const profile = await makeStudent(orgCenter.id, child, { parentPhone });
-    const stranger = await makeUser("stranger3");
-    const origin = await originateParentLinks(prisma, { parentUserId: stranger.id, phone: parentPhone });
-    const link = await prisma.parentLink.findFirst({ where: { parentUserId: stranger.id, studentProfileId: profile.id } });
-    const verify = await verifyParentLinkPlaceholder(prisma, {
-      parentLinkId: link?.id ?? "",
-      centerId: orgCenter.id,
-      verifiedByUserId: manager.id,
+  await assertSec("F2", "account settings: the current password, collisions, claims and the flag (ids-only audit)", async () => {
+    const self = await makeUser("acct-self", { authId: randomUUID() });
+    const second = await makeUser("acct-second", { authId: randomUUID() });
+    const holder = await makeUser("acct-holder", { authId: randomUUID() });
+    const staffMade = await createPerson(
+      { firstName: "Branch", lastName: "Made", email: EMAIL("acct-staffmade"), phone: null, altPhone: null, locale: "ar" },
+      prisma,
+    );
+    await makeStudent(orgCenter.id, staffMade, { email: EMAIL("acct-staffmade") });
+    const membership = await prisma.membership.create({
+      data: { centerId: orgCenter.id, userId: self.id, role: "TEACHER", joinedAt: new Date(), firstName: "Local", lastName: "Teacher" },
     });
-    const after = await prisma.parentLink.findUnique({ where: { id: link?.id ?? "" } });
+    const profile = await makeStudent(otherCenter.id, self);
+
+    // A fake Supabase: one right password; every call recorded.
+    const RIGHT = "the-right-password";
+    const calls: string[] = [];
+    const port = (authId: string): AccountAuthPort => ({
+      verifyPassword: async (_email, password) => password === RIGHT,
+      setPassword: async () => {
+        calls.push("setPassword");
+        return { ok: true };
+      },
+      signOutOthers: async () => {
+        calls.push("signOutOthers");
+        return true;
+      },
+      setEmailConfirmed: async (email) => {
+        calls.push("setEmailConfirmed");
+        return { ok: true, identity: { id: authId, email, email_confirmed_at: new Date().toISOString() } };
+      },
+      requestEmailChange: async () => {
+        calls.push("requestEmailChange");
+        return { ok: true };
+      },
+    });
+    const ip = `seccheck-acct-${randomUUID()}`;
+    for (const key of [self.id, second.id]) rateLimitKeys.add(`accountVerifyPerUser:${key}`);
+    rateLimitKeys.add(`accountVerifyPerIp:${ip}`);
+    const callerFor = async (userId: string) => {
+      const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+      return { user, authEmail: user.email, ip };
+    };
+    const direct = { ALLOW_UNVERIFIED_EMAIL_CHANGE: "yes", REQUIRE_EMAIL_CONFIRMATION: "false" };
+    const selfPort = port(self.authId ?? "");
+
+    await awayFromWindowEdge(RATE_LIMITS.accountVerifyPerUser.windowMs);
+    // Flag off: refused before the password is even asked (no attempt counted).
+    const flagOff = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-new"), currentPassword: RIGHT }, {});
+    // Attempts 1-2: a wrong current password refuses both changes.
+    const wrongPw = await changePassword(prisma, selfPort, await callerFor(self.id), {
+      currentPassword: "nope",
+      newPassword: "another-password",
+      signOutOthers: true,
+    });
+    const wrongPwEmail = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-new"), currentPassword: "nope" }, direct);
+    const noWriteOnWrong = !calls.includes("setPassword") && !calls.includes("setEmailConfirmed");
+    // 3: another login's email. 4: a person a branch created, and no claim opens.
+    const taken = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: holder.email ?? "", currentPassword: RIGHT }, direct);
+    const claimsBefore = await prisma.accountClaim.count({ where: { targetUserId: staffMade.id } });
+    const branchRecord = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-staffmade"), currentPassword: RIGHT }, direct);
+    const claimsAfter = await prisma.accountClaim.count({ where: { targetUserId: staffMade.id } });
+    // 5: the direct change goes through the one sync, audited without the address.
+    const changed = await changeEmail(prisma, selfPort, await callerFor(self.id), { newEmail: EMAIL("acct-new"), currentPassword: RIGHT }, direct);
+    const selfAfter = await prisma.user.findUniqueOrThrow({ where: { id: self.id } });
+    const emailAudit = await prisma.auditLog.findMany({ where: { action: "account.email.change", entityId: self.id } });
+    // 6: the per-account limit (5 per window) now refuses even the right password.
+    const limited = await changePassword(prisma, selfPort, await callerFor(self.id), {
+      currentPassword: RIGHT,
+      newPassword: "another-password",
+      signOutOthers: true,
+    });
+
+    // A second account: password change + sign-out-others, and the confirmation branch.
+    const secondPort = port(second.authId ?? "");
+    const pwChanged = await changePassword(prisma, secondPort, await callerFor(second.id), {
+      currentPassword: RIGHT,
+      newPassword: "a-new-password",
+      signOutOthers: true,
+    });
+    const pwAudit = await prisma.auditLog.findMany({ where: { action: "account.password.change", entityId: second.id } });
+    const requested = await changeEmail(
+      prisma,
+      secondPort,
+      await callerFor(second.id),
+      { newEmail: EMAIL("acct-second-new"), currentPassword: RIGHT },
+      { REQUIRE_EMAIL_CONFIRMATION: "true" },
+    );
+    const secondAfter = await prisma.user.findUniqueOrThrow({ where: { id: second.id } });
+
+    // Renaming the account never touches a branch record (rule 4).
+    const parsed = accountProfileSchema.parse({
+      firstName: "Renamed",
+      lastName: "Person",
+      contactPhone: "+20 101 234 5678",
+      preferredLocale: "en",
+      locale: "en",
+    });
+    await updateAccountProfile(prisma, self.id, { ...parsed, locale: parsed.preferredLocale });
+    const renamed = await prisma.user.findUniqueOrThrow({ where: { id: self.id } });
+    const membershipAfter = await prisma.membership.findUniqueOrThrow({ where: { id: membership.id } });
+    const profileAfter = await prisma.studentProfile.findUniqueOrThrow({ where: { id: profile.id } });
+
     return [
-      ["origination still writes only a PENDING link", origin.ok && !origin.refused && origin.createdLinkIds.length === 1],
-      ["the staff Verify stand-in refuses", !verify.ok && verify.error === "verificationUnavailable"],
-      ["the link stays PENDING", after?.status === "PENDING"],
-      ["the stranger reads no child", (await verifiedChildLinks(prisma, stranger.id)).length === 0],
-      ["the Verify button is disabled in the UI", /SubmitButton variant="outline" disabled/.test(read("app/[locale]/(center)/students/[id]/verify-parent-link-button.tsx"))],
+      ["flag off: the email change is refused (read-only)", !flagOff.ok && flagOff.error === "emailChangeDisabled"],
+      ["a wrong current password refuses a password change", !wrongPw.ok && wrongPw.fieldErrors?.currentPassword === "wrongPassword"],
+      ["a wrong current password refuses an email change", !wrongPwEmail.ok && wrongPwEmail.fieldErrors?.currentPassword === "wrongPassword"],
+      ["nothing reaches Supabase after a wrong password", noWriteOnWrong],
+      ["an email another account holds is refused", !taken.ok && taken.fieldErrors?.newEmail === "emailTaken"],
+      ["a staff-created person's email is refused (ask that branch)", !branchRecord.ok && branchRecord.fieldErrors?.newEmail === "emailOnBranchRecord"],
+      ["settings never opens an AccountClaim (D-01)", claimsBefore === claimsAfter],
+      ["the direct change lands on User.email through the sync", changed.ok && selfAfter.email === EMAIL("acct-new") && selfAfter.emailVerifiedAt !== null],
+      [
+        "account.email.change is audited once, centre-less, with no address (D-20)",
+        emailAudit.length === 1 &&
+          emailAudit[0].centerId === null &&
+          forbiddenAuditKey(emailAudit[0].after) === null &&
+          !JSON.stringify(emailAudit[0].after).includes("@"),
+      ],
+      ["the current-password check is rate-limited per account", !limited.ok && limited.error === "rateLimited"],
+      [
+        "a password change signs other devices out and is audited ids-only",
+        pwChanged.ok && calls.includes("signOutOthers") && pwAudit.length === 1 && pwAudit[0].centerId === null,
+      ],
+      [
+        "REQUIRE_EMAIL_CONFIRMATION: a link is requested; User.email waits for the confirmed sync",
+        requested.ok && requested.status === "emailChangeRequested" && calls.includes("requestEmailChange") && secondAfter.email === second.email,
+      ],
+      [
+        "the account name changes the User only; no branch record moves",
+        renamed.firstName === "Renamed" &&
+          membershipAfter.firstName === "Local" &&
+          profileAfter.firstName === profile.firstName &&
+          profileAfter.lastName === profile.lastName,
+      ],
+      ["contactPhone is normalized by lib/phone.ts and User.phone is untouched", renamed.contactPhone === "01012345678" && renamed.phone === self.phone],
     ];
   });
 
-  await assertSec("SEC-04", "a verified parent link stops on deactivation and is revoked when the phone changes", async () => {
-    const oldPhone = await freePhone();
-    const newPhone = await freePhone();
-    const child = await makeUser("child4");
-    const profile = await makeStudent(orgCenter.id, child, { parentPhone: oldPhone });
-    const parent = await makeUser("parent4");
-    const link = await prisma.parentLink.create({
-      data: {
-        parentUserId: parent.id,
-        studentProfileId: profile.id,
-        centerId: orgCenter.id,
-        matchedPhone: oldPhone,
-        status: "VERIFIED",
-        verifiedAt: new Date(),
-      },
-    });
-    const before = (await verifiedChildLinks(prisma, parent.id)).length;
-    await prisma.studentProfile.update({ where: { id: profile.id }, data: { active: false } });
-    const whileInactive = (await verifiedChildLinks(prisma, parent.id)).length;
-    await prisma.studentProfile.update({ where: { id: profile.id }, data: { active: true, parentPhone: newPhone } });
-    const beforeRevoke = (await verifiedChildLinks(prisma, parent.id)).length;
-    const revoked = await revokeStaleParentLinks(prisma, {
-      centerId: orgCenter.id,
-      studentProfileId: profile.id,
-      actorUserId: manager.id,
-    });
-    const row = await prisma.parentLink.findUniqueOrThrow({ where: { id: link.id } });
-    const audits = await prisma.auditLog.count({ where: { action: "parentLink.revoke", entityId: link.id } });
+  await assertSec("SEC-03", "a phone match never becomes parent access — access needs a one-time code (F3, OD-6)", async () => {
+    const parentPhone = await freePhone();
+    const child = await makeUser("child3");
+    const profile = await makeStudent(orgCenter.id, child, { parentPhone });
+    const stranger = await makeUser("stranger3", { phone: parentPhone });
+    const classmate = await makeUser("classmate3");
+    await makeStudent(siblingCenter.id, classmate);
+    const issued = await issueBranchCode(prisma, { centerId: orgCenter.id, studentProfileId: profile.id, actorUserId: manager.id });
+    const code = issued.ok ? issued.code : "";
+    const byClassmate = await acceptFamilyCode(prisma, { acceptorUserId: classmate.id, code, ip: familyJoinIp(classmate.id) });
+    const row = issued.ok ? await prisma.familyInvitation.findUnique({ where: { id: issued.invitationId } }) : null;
+    const signUp = exportedBody("app/[locale]/(auth)/actions.ts", "signUpAction");
     return [
-      ["the verified link reads before anything changes", before === 1],
+      ["sign-up originates nothing from a phone", !/originateParentLinks|acceptFamilyCode|familyLink|parentLink\./.test(signUp)],
+      ["a stranger whose phone is the parent phone has no link and reads no child", (await prisma.familyLink.count({ where: { parentUserId: stranger.id } })) === 0 && (await activeChildLinks(prisma, stranger.id)).length === 0],
+      ["a classmate (a student account) cannot accept the child's code", !byClassmate.ok && byClassmate.error === "studentAccount"],
+      ["the code is stored as its sha256 only", row !== null && row.codeHash === hashFamilyCode(code) && !JSON.stringify(row).includes(code)],
+      ["the staff Verify stand-in is gone", !existsSync(join(ROOT, "app/[locale]/(center)/students/[id]/verify-parent-link-button.tsx"))],
+    ];
+  });
+
+  await assertSec("SEC-04", "a parent link stops on deactivation and ends only by explicit, audited revocation", async () => {
+    const child = await makeUser("child4");
+    const profile = await makeStudent(orgCenter.id, child, { parentPhone: await freePhone() });
+    const parent = await makeUser("parent4");
+    const issued = await issueBranchCode(prisma, { centerId: orgCenter.id, studentProfileId: profile.id, actorUserId: manager.id });
+    const accepted = await acceptFamilyCode(prisma, { acceptorUserId: parent.id, code: issued.ok ? issued.code : "", ip: familyJoinIp(parent.id) });
+    const reads = async () => (await activeChildLinks(prisma, parent.id)).flatMap((link) => link.studentUser.studentProfiles).length;
+    const before = await reads();
+    await prisma.studentProfile.update({ where: { id: profile.id }, data: { active: false } });
+    const whileInactive = await reads();
+    await prisma.studentProfile.update({ where: { id: profile.id }, data: { active: true, parentPhone: await freePhone() } });
+    const afterPhoneChange = await reads();
+    const linkId = accepted.ok ? accepted.linkId : "";
+    const revoked = await revokeFamilyLink(prisma, { by: "branch", linkId, actorUserId: manager.id, centerId: orgCenter.id, studentUserId: child.id, reason: "seccheck" });
+    const row = await prisma.familyLink.findUnique({ where: { id: linkId } });
+    const audits = await prisma.auditLog.count({ where: { action: "family.link.revoke", entityId: linkId } });
+    return [
+      ["the linked parent reads before anything changes", accepted.ok && before === 1],
       ["a deactivated child disappears (D-10)", whileInactive === 0],
-      ["a changed parent phone reads as nothing even before revocation", beforeRevoke === 0],
-      ["the stale link is revoked", revoked === 1 && row.status === "REVOKED" && row.revokedAt !== null],
-      ["the revocation is audited (parentLink.revoke)", audits === 1],
-      ["staff editing the parent phone triggers the revocation", /revokeStaleParentLinks\(/.test(exportedBody("app/[locale]/(center)/students/actions.ts", "updateStudentAction"))],
+      ["a parent-phone change ends nothing (the phone is not the key)", afterPhoneChange === 1],
+      ["staff revoke the link: REVOKED, with the reason on the record", revoked.ok && row?.status === "REVOKED" && row.revokedReason === "seccheck"],
+      ["reads stop at once", (await reads()) === 0],
+      ["the revocation is audited (family.link.revoke)", audits === 1],
+      ["staff editing the parent phone revokes nothing", !/revoke/i.test(exportedBody("app/[locale]/(center)/students/actions.ts", "updateStudentAction"))],
     ];
   });
 
@@ -557,18 +696,16 @@ async function main() {
     const whileInactive = await prisma.$transaction((tx) =>
       reserveOrEnroll(tx, { centerId: orgCenter.id, classGroupId: openClass.id, studentUserId: student.id }),
     );
-    const phone = await freePhone();
     const child = await makeUser("child16");
-    const childProfile = await makeStudent(suspended.id, child, { parentPhone: phone });
+    await makeStudent(suspended.id, child);
     const parent = await makeUser("parent16");
-    await prisma.parentLink.create({
-      data: { parentUserId: parent.id, studentProfileId: childProfile.id, centerId: suspended.id, matchedPhone: phone, status: "VERIFIED", verifiedAt: new Date() },
-    });
+    // F3: a family link to the child's account; the child's only branch is SUSPENDED.
+    await prisma.familyLink.create({ data: { parentUserId: parent.id, studentUserId: child.id, source: "LEGACY_VERIFIED" } });
     const profileAction = exportedBody("app/[locale]/(student)/student/profile/actions.ts", "completeStudentProfileAction");
     return [
       ["reserving at a SUSPENDED centre → notFound", !atSuspended.ok && atSuspended.error === "notFound"],
       ["a deactivated student cannot self-enrol", !whileInactive.ok && whileInactive.error === "studentBlocked"],
-      ["a parent reads nothing at a SUSPENDED centre", (await verifiedChildLinks(prisma, parent.id)).length === 0],
+      ["a parent reads nothing at a SUSPENDED centre", (await activeChildLinks(prisma, parent.id)).every((link) => link.studentUser.studentProfiles.length === 0)],
       ["profile completion requires an active profile at an accessible centre", /active: true/.test(profileAction) && /ACCESSIBLE_LIFECYCLE_STATES/.test(profileAction)],
     ];
   });
@@ -577,7 +714,8 @@ async function main() {
     const body = exportedBody("app/[locale]/(student)/student/profile/actions.ts", "completeStudentProfileAction");
     return [
       ["a completed profile is refused (alreadyCompleted) before any write", /if \(profile\.profileCompletedAt\) return \{ error: "alreadyCompleted" \}/.test(body) && body.indexOf("alreadyCompleted") < body.indexOf("studentProfile.update")],
-      ["a parent-phone change there still revokes stale links", /revokeStaleParentLinks\(/.test(body)],
+      // F3 old → new: "a parent-phone change revokes the link" → "only explicit, audited revocation ends a link".
+      ["profile completion touches no family link (only explicit revocation ends one)", !/revoke|familyLink|parentLink/i.test(body)],
     ];
   });
 
@@ -1216,10 +1354,33 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
     }
     const index = await prisma.$queryRaw<{ indexdef: string }[]>`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'Payment_one_active_per_attendee'`;
+    // T5 — a refund frees the slot: refund → reset → re-check-in, then two
+    // desks pay at once. Exactly one wins; the invariant (at most one payment
+    // per attendee neither voided nor refunded) holds.
+    let refundBad = 0;
+    for (let i = 0; i < 3; i++) {
+      const r = await attendee(s.id);
+      const first = await pay(r.id);
+      const back = await prisma.$transaction((tx) => refundPayment(tx, centerId, first.id, "cash back", managerA.id), WRITE_TRANSACTION_OPTIONS);
+      const again = await recheckInAttendee(prisma, { centerId, attendeeId: r.id, recordedBy: managerA.id });
+      const run = (client: PrismaClient) =>
+        client.$transaction((tx) => recordPayment(tx, centerId, r.id, method.id, managerA.id), WRITE_TRANSACTION_OPTIONS);
+      const results = await Promise.all([run(deskA), run(deskB)]);
+      const active = await prisma.payment.count({ where: { sessionAttendeeId: r.id, voided: false, refunded: false } });
+      const oneOk = results.filter((x) => x.ok).length === 1;
+      const oneAlreadyPaid = results.some((x) => !x.ok && x.error === "alreadyPaid");
+      if (!back.ok || !again.ok || active !== 1 || !oneOk || !oneAlreadyPaid) refundBad++;
+    }
+    const t5Migration = read("prisma/migrations/20261027190000_t5_void_refund_reset_attendance/migration.sql");
+    const t5Predicate = t5Migration.match(/"Payment_one_active_per_attendee_t5"\s+ON "Payment"\("sessionAttendeeId"\) WHERE ([^;]+);/)?.[1];
+    const conflict = read("lib/db/payments.ts").match(/ON CONFLICT \("sessionAttendeeId"\) WHERE (.+?) DO NOTHING/)?.[1];
     return [
       [`4 rounds × 2 concurrent payments: one ok + one alreadyPaid + one active row each (${bad} bad)`, bad === 0],
       ["a second active payment written around the app is refused by the database", databaseRefused],
       ["the partial unique index is WHERE voided = false", /UNIQUE/.test(index[0]?.indexdef ?? "") && /voided = false/.test(index[0]?.indexdef ?? "")],
+      ["T5: the index is WHERE voided = false AND refunded = false (a refund frees the slot)", /voided = false\) AND \(refunded = false/.test(index[0]?.indexdef ?? "")],
+      ["T5: recordPayment's ON CONFLICT predicate is the migration's index predicate, exactly", t5Predicate !== undefined && conflict !== undefined && t5Predicate.replace(/\s+/g, " ").trim() === conflict.replace(/\s+/g, " ").trim()],
+      [`T5: refund → re-check-in → 2 concurrent payments ×3: one ok + one alreadyPaid + one active row each (${refundBad} bad)`, refundBad === 0],
       ["lockAttendeeRow re-reads the payment fact in a fresh statement after the lock", /FOR UPDATE OF a`;[\s\S]*SELECT EXISTS/.test(read("lib/db/session-lifecycle.ts"))],
     ];
   });
@@ -1405,9 +1566,11 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
     const receipt = read("app/[locale]/(center)/sessions/[id]/session-receipt.tsx");
     const entry = feed.entries.find((e) => e.entityId === paid.id);
     return [
-      ["the receipt counts the void and the unpaid check-ins", totals.voidedCount === 1 && totals.voidedAmount === paid.amount && totals.unpaidCount === 2],
+      // T5 (old → new, by instruction): the live void resets the voided
+      // student to Not arrived, so one present-but-unpaid student remains.
+      ["the receipt counts the void and the unpaid check-in", totals.voidedCount === 1 && totals.voidedAmount === paid.amount && totals.unpaidCount === 1 && totals.notArrivedCount === 1],
       ["the receipt lists the void with its actor and reason", lines.voids.length === 1 && lines.voids[0].reason === "Wrong student" && lines.voids[0].voidedByName !== null],
-      ["the receipt lists the present-but-unpaid students", lines.unpaid.length === 2],
+      ["the receipt lists the present-but-unpaid student", lines.unpaid.length === 1],
       ["SessionReceipt renders the voided and unpaid sections", /voidsTitle/.test(receipt) && /unpaidTitle/.test(receipt) && /voidedLine/.test(receipt)],
       ["the audit feed shows the void with its amount, student and reason", entry !== undefined && entry.amount === paid.amount && entry.reason === "Wrong student" && entry.subjectName !== null],
       ["the unpaid list is filterable and centre-scoped", unpaid.rows.some((row) => row.sessionId === s.id)],
@@ -1442,7 +1605,9 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
     const cancelAfterRefund = await cancelSession(prisma, centerId, s.id);
     const closedNextDay = await closeSessionIfDayOver(prisma, centerId, s.id, addDays(now, 1));
     const row = await prisma.session.findUniqueOrThrow({ where: { id: s.id } });
-    const absences = await prisma.sessionAttendee.count({ where: { sessionId: s.id, attendanceStatus: "ABSENT" } });
+    // T5: the live refund reset its drop-in to Not arrived (an ABSENT row that
+    // is no absence); "no absences" = none materialized for enrolled students.
+    const absences = await prisma.sessionAttendee.count({ where: { sessionId: s.id, attendanceStatus: "ABSENT", isDropIn: false } });
     // A legacy cancelled session still holding a payment: no void/refund path stays open.
     const legacy = await session(today);
     const lp = await pay((await attendee(legacy.id)).id);

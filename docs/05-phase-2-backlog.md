@@ -128,7 +128,7 @@
 
 **Why deferred.** Supabase Auth owns credentials and email/password is what Phase 1 wires (`02-architecture.md` §3). SMS OTP has a real per-message cost and needs a provider contract — the same one the deferred notification layer needs — and MFA is a hardening step that belongs after there is production data worth protecting.
 
-**Depends on.** An SMS provider (M20 provisions the account; the *feature* is this entry); and the parent-account mechanism (M16), which keys on a phone number and would be markedly stronger with OTP as its verification step — see the parent↔child verification open decision in `00-master-product-spec.md` §2.2.
+**Depends on.** An SMS provider (M20 provisions the account; the *feature* is this entry). **F3 note:** parent access no longer keys on a phone (OD-6 decided — a one-time code from the student or the branch, `00-master-product-spec.md` §5.1 "Parent role & portal"). An OTP to the parent phone the student declared stays a possible **extra factor** on accepting a code — it would narrow the residual risk recorded there (a student handing a code to a non-student adult) — and needs OD-2's answer on minors' data before it is built.
 
 ---
 
@@ -240,11 +240,81 @@
 
 ## 24. Identity merge: one person recorded as two `User` rows
 
-**What it is.** A platform-admin tool to merge two global `User` rows that turn out to be the same person (registered twice before the duplicate-match caught it, or a sign-up whose account claim was declined and who is later proven to be the staff-created person): move every `Membership`, `StudentProfile`, `ParentLink`, rating and claim from one `User` to the other, in one audited transaction, and retire the loser.
+**What it is.** A platform-admin tool to merge two global `User` rows that turn out to be the same person (registered twice before the duplicate-match caught it, or a sign-up whose account claim was declined and who is later proven to be the staff-created person): move every `Membership`, `StudentProfile`, `FamilyLink` (both sides) and `FamilyInvitation`, rating and claim from one `User` to the other, in one audited transaction, and retire the loser.
 
 **Why deferred.** Earlier docs described "merge is a manual, audited admin action" as if it existed; the SYS audit found no such tool (`docs/08-system-audit.md`). The match workflow (M3, SEC-2a) already prevents most duplicates by refusing to create a second `User` for a known global email, and an `AccountClaim` (D-01) covers the sign-up case without a merge. A merge touches money-bearing history across centres (`Payment.studentProfileId`, `Settlement.teacherId`, `Payment.teacherId`) and the identity rules of CLAUDE.md rule 4, so it needs its own design — including what happens when both rows hold a profile at the same centre.
 
 **Depends on.** A decision on conflict rules (two profiles at one centre; two Supabase logins), the verified-phone/OTP work (entry 12) for proving the merge is wanted, and the retention/erasure rule (OD-2) for the retired row.
+
+---
+
+## 25. Drop `ParentLink` after the pilot
+
+**What it is.** A migration that drops the deprecated `ParentLink` table, its `ParentLinkStatus` enum and the three relations to it (`User.parentLinks`, `StudentProfile.parentLinks`, `Center.parentLinks`), plus `gate-db`'s orphan filter on it.
+
+**Why deferred.** F3 replaced it with `FamilyLink` and copied its VERIFIED rows across (`LEGACY_VERIFIED`), and nothing reads or writes it any more — but every migration in the F3 batch is additive, so the live build and the dev database can be migrated in either order. Dropping a table is the one change that is not; it waits until the pilot has run on family links and nobody needs to look back at the old rows.
+
+**Depends on.** The pilot (M20 → first centre live) having run on F3's family links; a backup taken before the drop (M20's tested restore).
+
+---
+
+## 26. A platform-admin screen to find and revoke a family link
+
+**What it is.** A small `/admin` tool: look up a family link by either person's account, see how it was made, and revoke it with a reason — the screen for `revokeFamilyLink({ by: "admin" })`, which F3 built and gates (`lib/db/parents.ts`, asserted in `check:parent`).
+
+**Why deferred.** F3's revocation paths that a centre operates — the branch (from the student's page) and the parent (Account → Family) — cover the cases a pilot will meet; a platform admin is the escalation path for a link no branch can see (a child at no branch yet), which needs a support process before it needs a screen. Building a cross-tenant people lookup for the admin is a privacy surface of its own.
+
+**Depends on.** A support process (backlog entry 9's support tickets, or the pilot's own escalation route); OD-2 for what an admin may see of a minor's family.
+
+---
+
+## 27. A real order for catalog grades (a "next grade" in promotion)
+
+**What it is.** A sequence on the global academic catalog's grades within an education system (Grade 9 → Grade 10 → …), so that Promote students (F4) can **pre-select the next grade** as the To grade, and a future "promote a whole year" or report can reason about "this grade's successor".
+
+**Why deferred.** `CatalogGrade` has no order — only a name, an education system and an active flag — and grades are free-text bilingual names a platform admin adds (R8). F4's promotion therefore asks the admin to pick the To grade and **invents no order** (sorting by name would put "Grade 10" before "Grade 2" and promote students the wrong way). A sequence is a modelling decision across every education system the platform carries (some have two terms, some skip a year, some end), best made with the platform admin who owns the catalog.
+
+**Depends on.** A `sortOrder` (or a successor link) on `CatalogGrade`, editable at `/admin/catalog` (R8), backfilled by the platform admin for the systems in use; entry 11 (academic terms) if promotion is ever to be automatic.
+
+---
+
+## 28. Written reviews of teachers and classes
+
+**What it is.** Free-text reviews a student (or parent) writes about a teacher or a class, shown beside the star average on Explore (F5), Discover and the teacher's own view.
+
+**Why deferred.** Today a rating is a 1–5 score and what is published is the **average only, never a count** (spec §5 "Teacher ratings") — nothing a person wrote is ever shown. Written reviews change that in three ways the product has no answer for yet: **moderation** (who reads every review before it is public, what is removed, how fast, and who answers an appeal); **minors** — most reviewers are school students, so a public text field is a child's words published under (or traceable to) their name, with the retention and erasure questions of OD-2; and **defamation** — a public claim about a named teacher is the platform's liability the moment it is shown. F5's public pages make the exposure larger, not smaller: a review would be readable by anyone, without an account. Explore therefore shows the star average only, by design.
+
+**Depends on.** A moderation workflow and the people to run it; OD-2's retention and erasure rule (legal review for minors' data, M20); a terms-of-use and takedown policy (needs the domain and legal entity, OD-1); a decision on whether reviews are anonymous (and how anonymity holds with small classes — the same reasoning that keeps the count hidden).
+
+---
+
+## 29. Booking a one-time session (no class) online
+
+**What it is.** Let a student book a one-time session (R5 — `Session.classGroupId` null: its own title, price and cut) from the student portal, the way F6 lets them book one session of a class.
+
+**Why deferred.** F6's booking rules all hang off a class: whether booking is on and whether it needs approval (`ClassGroup.sessionBookingMode`), the optional cap (`maxBookingSeats`), the seat limit (the class's room set), the teacher queue (the class's teacher) and where a student finds the session at all (a class page on Discover / Explore). A one-time session has none of these — no setting to say it is bookable, no page that lists it, no seat limit defined independently of a class, and no class teacher to route an approval to. Answering each is a product decision, not a configuration of what F6 built, so F6 refuses them (`requestBooking` needs a class session) rather than guessing.
+
+**Depends on.** Booking settings on a one-time session (mode and cap, probably on the New session form); a seat limit for it (its own room set's capacity); a place a student discovers one-time sessions (Discover / Explore list classes only); who approves (the session's teacher, or the branch only).
+
+---
+
+## 30. A pending-approvals count that updates without navigating
+
+**What it is.** The sidebar Approvals badge and the Approvals tab counts (F7) refresh the moment a request is made, in a manager's or teacher's already-open tab, without them navigating or acting.
+
+**Why deferred.** F7 reads the counts on every navigation and after each approval action (the action's `revalidatePath` refreshes the page and the shell together) and deliberately does not poll: polling every open tab multiplies pooled-connection load for a number that is usually unchanged, and the pooler is the product's scarce resource (`02-architecture.md` §14). A request made while someone sits on another page therefore shows on their next click. Doing better needs a push channel, which the product does not have anywhere yet.
+
+**Depends on.** A realtime transport (Supabase Realtime or server-sent events) that carries only "a request landed for branch X" — never the rows — and re-reads `pendingApprovalCounts` on receipt, subscribed per branch so `center_id` stays the sole isolation key; a decision on the load it adds against the connection budget.
+
+---
+
+## 31. A note on a staff-cancelled booking
+
+**What it is.** When staff cancel a student's confirmed single-session booking (T7), an optional one-line note — "the room is closed that day", "duplicate booking" — that the student sees beside **Cancelled by the branch** in My requests.
+
+**Why deferred.** T7 was an explicitly no-schema-change session. `SessionBooking` has no text column, and an `AuditLog` row may not carry free text (D-20 — ids, amounts, statuses only), so there is nowhere to put the note without a migration. The cancel itself (reason `STAFF`, seat freed, audited with ids) is delivered without it.
+
+**Depends on.** A nullable note column on `SessionBooking` (length-capped, cleared with the booking like the rest of the row), an optional textarea in the Cancel booking confirm dialog, and a line in My requests. The audit row stays free of the text — it lives on the record, like `Payment.voidReason`.
 
 ---
 

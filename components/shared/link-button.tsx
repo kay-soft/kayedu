@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 
+import { SoftLink } from "@/components/shared/soft-link";
 import { buttonVariants } from "@/components/ui/button";
 import { Link } from "@/lib/i18n/navigation";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,11 @@ import { cn } from "@/lib/utils";
  * lines up on the same baseline with the same height in every list row. The
  * default size is `touch` — 44px, the desk minimum from §6 — because these
  * sit in table rows and toolbars that get used on a phone.
+ *
+ * `soft` is for a link that changes URL state on the page it is on — a "Clear
+ * filters" in an empty state: it keeps the scroll position and dims the
+ * results while they reload, like every other URL-state control
+ * (docs/02-architecture.md §14).
  */
 const SIZES = {
   touch: "h-11 px-4",
@@ -25,16 +31,19 @@ const SIZES = {
 type LinkButtonProps = ComponentProps<typeof Link> & {
   variant?: NonNullable<Parameters<typeof buttonVariants>[0]>["variant"];
   size?: keyof typeof SIZES;
+  soft?: boolean;
 };
 
 export function LinkButton({
   variant = "outline",
   size = "touch",
+  soft,
   className,
   ...props
 }: LinkButtonProps) {
+  const Component = soft ? SoftLink : Link;
   return (
-    <Link
+    <Component
       className={cn(
         buttonVariants({ variant }),
         SIZES[size],
