@@ -97,6 +97,13 @@ export const teacherCreateSchema = z
     ...base,
     ...teacherFields,
     linkUserId,
+    // U1: "Trusted teacher" at creation — an explicit "true"/"false" from the
+    // form's hidden input; absent (a hidden switch, a direct call) means the
+    // column's own default, trusted. Only applied when a membership is created.
+    isTrustedTeacher: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((value) => value !== "false"),
     // F1: the branch to add the teacher at; absent = the active branch. The
     // action re-resolves the actor's context there (never trusts the id).
     branchId: optionalRecordId,

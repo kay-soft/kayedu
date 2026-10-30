@@ -8,10 +8,13 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 /**
- * A password input with a show/hide toggle (docs/04 §12). The toggle sits on
- * the logical end edge, so it mirrors in Arabic, and is a real 44px button
- * rather than a bare icon. The value is still posted under `name` exactly as
- * before — only the input's `type` flips.
+ * A password input with a show/hide toggle (docs/04 §12). A password is Latin
+ * text, so the whole control is `dir="ltr"` in both locales: the eye sits
+ * inside the field at the physical right in English and Arabic, and typed text
+ * never runs under it. Only the control is pinned — the label and errors around
+ * it (`Field`) keep following the page direction. The toggle is a real 44px
+ * button rather than a bare icon. The value is still posted under `name`
+ * exactly as before — only the input's `type` flips.
  */
 export function PasswordField({
   className,
@@ -22,13 +25,10 @@ export function PasswordField({
   const label = visible ? t("hidePassword") : t("showPassword");
 
   return (
-    <div className="relative">
+    <div className="relative" dir="ltr">
       <Input
         {...props}
         type={visible ? "text" : "password"}
-        // A visible password is still not prose: keep it left-to-right and
-        // unspell-checked, whichever locale the page is in.
-        dir="ltr"
         autoCapitalize="none"
         spellCheck={false}
         className={cn("pe-12 text-start", className)}

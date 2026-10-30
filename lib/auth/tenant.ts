@@ -28,7 +28,14 @@ import { loadPermissionGrants } from "@/lib/db/permissions";
 import { activeChildLinks } from "@/lib/db/parents";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
-import { ROUTES, SHELL_EXPERIENCES, homePathForRole, type ShellExperience } from "@/lib/routes";
+import {
+  ACCOUNT_HUB_HINT,
+  ROUTES,
+  SHELL_EXPERIENCES,
+  homePathForRole,
+  type AccountOrigin,
+  type ShellExperience,
+} from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 
 export type { CenterRelation, Experience };
@@ -643,9 +650,13 @@ function experienceForRole(role: TenantRole): ShellExperience {
  * page away); `teacher`, `student` and `parent` admit any signed-in user,
  * exactly as their own layouts do.
  */
-export async function resolveAccountExperience(hint: string | undefined): Promise<ShellExperience> {
+export async function resolveAccountExperience(hint: string | undefined): Promise<AccountOrigin> {
   const user = await getCurrentUser();
   if (!user) return redirectTo(ROUTES.login);
+
+  // U1: from the branch hub no branch is active, so there is no tenant context
+  // to resolve — and resolving one is what used to bounce back to the hub.
+  if (hint === ACCOUNT_HUB_HINT) return ACCOUNT_HUB_HINT;
 
   const wanted = SHELL_EXPERIENCES.find((experience) => experience === hint);
   if (wanted === "admin" && user.isPlatformAdmin) return "admin";

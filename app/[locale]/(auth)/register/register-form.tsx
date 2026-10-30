@@ -8,6 +8,7 @@ import { IntentCards, type SignupIntentValue } from "@/app/[locale]/(auth)/regis
 import { Field } from "@/components/shared/field";
 import { CheckEmailNotice } from "@/components/shared/check-email-notice";
 import { FormMessage } from "@/components/shared/form-message";
+import { NewPasswordField } from "@/components/shared/new-password-field";
 import { PasswordField } from "@/components/shared/password-field";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
@@ -115,14 +116,13 @@ export function RegisterForm({
       <Field
         id="password"
         label={t("fields.password")}
-        hint={state.fieldErrors?.password ? undefined : t("register.passwordHint")}
         error={
           state.fieldErrors?.password
             ? tErrors(state.fieldErrors.password)
             : undefined
         }
       >
-        <PasswordField
+        <NewPasswordField
           id="password"
           name="password"
           autoComplete="new-password"

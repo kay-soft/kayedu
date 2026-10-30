@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+// Relative on purpose: the people/security gates load this schema outside Next.
+import { PASSWORD_MAX_LENGTH, passwordChecks } from "../password-policy.ts";
+
 export const localeSchema = z.enum(["ar", "en"]);
 
 export const email = z
@@ -10,8 +13,20 @@ export const email = z
   .email("invalidEmail")
   .transform((value) => value.toLowerCase());
 
-/** The password policy — sign-up and Account settings share it. */
-export const password = z.string().min(8, "passwordTooShort").max(72, "tooLong");
+/**
+ * The password policy (U1, `lib/password-policy.ts`) — sign-up and Account
+ * settings share it; sign-in deliberately does not (`signInSchema`). The first
+ * unmet rule is the message; the live checklist shows all of them.
+ */
+export const password = z
+  .string()
+  .max(PASSWORD_MAX_LENGTH, "tooLong")
+  .superRefine((value, ctx) => {
+    const met = passwordChecks(value);
+    if (!met.length) ctx.addIssue({ code: "custom", message: "passwordTooShort" });
+    else if (!met.letter) ctx.addIssue({ code: "custom", message: "passwordNeedsLetter" });
+    else if (!met.digit) ctx.addIssue({ code: "custom", message: "passwordNeedsDigit" });
+  });
 
 export const personName = z.string().trim().min(1, "required").max(60, "tooLong");
 

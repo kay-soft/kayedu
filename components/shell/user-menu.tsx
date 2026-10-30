@@ -12,7 +12,7 @@ import {
 import { UserAvatar } from "@/components/shared/user-avatar";
 import type { ShellUser } from "@/components/shell/app-shell";
 import { Link } from "@/lib/i18n/navigation";
-import { accountPath, type ShellExperience } from "@/lib/routes";
+import { accountPath, type AccountOrigin } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,7 +28,7 @@ export function UserMenu({
 }: {
   user: ShellUser;
   /** The shell this menu sits in — Account settings opens inside it (F2). */
-  experience: ShellExperience;
+  experience: AccountOrigin;
 }) {
   const t = useTranslations("Shell");
   const tRoles = useTranslations("Roles");
@@ -63,9 +63,12 @@ export function UserMenu({
               {user.email}
             </p>
           ) : null}
-          <p className="mt-1 text-xs font-medium text-brand">
-            {tRoles(user.roleKey)}
-          </p>
+          {/* The hub shell has no branch, so no role to name. */}
+          {user.roleKey ? (
+            <p className="mt-1 text-xs font-medium text-brand">
+              {tRoles(user.roleKey)}
+            </p>
+          ) : null}
         </div>
 
         {/* F2: every signed-in person's own account, above Sign out. */}

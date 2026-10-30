@@ -865,6 +865,8 @@ export type NewTeacherClassInput = {
   teacher: PersonInput;
   /** Set only after staff confirmed a match ("Use this person"). */
   linkUserId: string | null;
+  /** U1: the new membership's trusted flag; omitted = the column default (trusted). */
+  isTrustedTeacher?: boolean;
   /** The class, without its teacher — the teacher is created first. */
   class: Omit<ClassInput, "teacherId">;
   slots: ClassSlot[];
@@ -948,6 +950,7 @@ export async function createClassWithNewTeacher(
         linkUserId: input.linkUserId,
         via: "class.create",
         refusePrivileged: true,
+        isTrustedTeacher: input.isTrustedTeacher,
       });
       if (!teacher.ok) throw new TeacherStepRefusedError(teacher);
 

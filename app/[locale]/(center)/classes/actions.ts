@@ -405,13 +405,14 @@ export async function createClassWithNewTeacherAction(
   });
   if (!refs.ok) return { fieldErrors: refs.fieldErrors };
 
-  const { firstName, lastName, email, phone, altPhone, linkUserId } = parsedTeacher.data;
+  const { firstName, lastName, email, phone, altPhone, linkUserId, isTrustedTeacher } = parsedTeacher.data;
   const result = await createClassWithNewTeacher(
     prisma,
     scope.ctx.center.id,
     {
       teacher: { firstName, lastName, email, phone, altPhone, locale: classData.locale },
       linkUserId,
+      isTrustedTeacher,
       class: {
         subjectId: refs.subjectId,
         gradeId: refs.gradeId,

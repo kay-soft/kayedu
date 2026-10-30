@@ -202,7 +202,7 @@ export async function createTeacherAction(
   const parsed = teacherCreateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { locale, firstName, lastName, email, phone, altPhone, linkUserId, branchId } =
+  const { locale, firstName, lastName, email, phone, altPhone, linkUserId, branchId, isTrustedTeacher } =
     parsed.data;
 
   // F1: the teacher lands at the branch the form names — only where the
@@ -225,6 +225,7 @@ export async function createTeacherAction(
       linkUserId,
       via: "teacher.add",
       refusePrivileged: false,
+      isTrustedTeacher,
     },
   );
 

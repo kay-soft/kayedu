@@ -22,7 +22,9 @@ import { recordsOnFile, type RecordOnFile } from "@/lib/db/account";
 import { prisma } from "@/lib/db/client";
 import { fullName, localName } from "@/lib/identity";
 import { personInitials } from "@/lib/initials";
-import type { ShellExperience } from "@/lib/routes";
+import { HubShell } from "@/components/shell/hub-shell";
+import type { ShellUser } from "@/components/shell/app-shell";
+import { ACCOUNT_HUB_HINT, type ShellExperience } from "@/lib/routes";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("Account");
@@ -58,7 +60,11 @@ function shellFrame(experience: ShellExperience): Promise<ShellFrame> {
 export default async function AccountPage({ searchParams }: PageProps<"/[locale]/account">) {
   const { from } = await searchParams;
   const experience = await resolveAccountExperience(typeof from === "string" ? from : undefined);
-  const [frame, user, authUser] = await Promise.all([shellFrame(experience), getCurrentUser(), getAuthUser()]);
+  const [frame, user, authUser] = await Promise.all([
+    experience === ACCOUNT_HUB_HINT ? null : shellFrame(experience),
+    getCurrentUser(),
+    getAuthUser(),
+  ]);
   // resolveAccountExperience already redirected a signed-out visitor.
   if (!user) return null;
 
@@ -70,8 +76,7 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
   ]);
   const pendingEmail = authUser?.new_email && authUser.new_email !== authUser.email ? authUser.new_email : null;
 
-  return (
-    <AppShell {...frame.props}>
+  const body = (
       <div className="flex flex-col gap-6">
         <PageHeader title={t("title")} description={t("description")} />
 
@@ -125,8 +130,20 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
           </div>
         </PageSection>
       </div>
-    </AppShell>
   );
+
+  // U1: from the branch hub there is no branch, so a neutral shell — no sidebar.
+  if (!frame) {
+    const hubUser: ShellUser = {
+      name: fullName(user),
+      email: user.email,
+      initials: personInitials(user.firstName, user.lastName),
+      roleKey: "",
+    };
+    return <HubShell user={hubUser}>{body}</HubShell>;
+  }
+
+  return <AppShell {...frame.props}>{body}</AppShell>;
 }
 
 /** One branch's record of this person — read-only; the branch owns it (rule 4). */

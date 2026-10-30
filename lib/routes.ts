@@ -124,10 +124,19 @@ export const SHELL_EXPERIENCES = ["center", "teacher", "student", "parent", "adm
 export type ShellExperience = (typeof SHELL_EXPERIENCES)[number];
 
 /**
+ * U1: Account settings opened from the branch hub (`/select-center`), where no
+ * branch is active — rendered in a neutral hub shell (header + user menu, no
+ * branch sidebar), whose back link returns to the hub. Not a `ShellExperience`:
+ * it has no nav, no branch scope and no tenant context.
+ */
+export const ACCOUNT_HUB_HINT = "hub";
+export type AccountOrigin = ShellExperience | typeof ACCOUNT_HUB_HINT;
+
+/**
  * Account settings, asked for from inside `experience` (F2) — the page renders
  * that experience's shell. Only a hint: the page re-checks it server-side.
  */
-export function accountPath(experience: ShellExperience): string {
+export function accountPath(experience: AccountOrigin): string {
   return `${ROUTES.account}?from=${experience}`;
 }
 

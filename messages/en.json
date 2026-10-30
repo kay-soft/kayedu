@@ -111,6 +111,7 @@
     },
     "skipToContent": "Skip to content",
     "accountSettings": "Account settings",
+    "backToHub": "Back to my branches",
     "pendingNavLabel": "{label}, {count} pending",
     "pendingCapped": "{max}+"
   },
@@ -158,6 +159,12 @@
       "confirmPassword": "Confirm password",
       "showPassword": "Show password",
       "hidePassword": "Hide password",
+      "policyTitle": "Your password needs",
+      "policyLength": "{min}+ characters",
+      "policyLetter": "A letter",
+      "policyDigit": "A digit",
+      "policyMet": "done",
+      "policyUnmet": "not yet",
       "firstName": "First name",
       "lastName": "Last name",
       "optional": "optional",
@@ -177,7 +184,6 @@
       "submit": "Create account",
       "haveAccount": "Already have an account?",
       "loginLink": "Sign in",
-      "passwordHint": "At least 8 characters.",
       "intent": {
         "legend": "I'm joining as",
         "STUDENT": {
@@ -228,6 +234,8 @@
       "invalidEmail": "Enter a valid email address.",
       "invalidPhone": "Enter a valid Egyptian mobile number.",
       "passwordTooShort": "Password must be at least 8 characters.",
+      "passwordNeedsLetter": "Password must include at least one letter.",
+      "passwordNeedsDigit": "Password must include at least one digit.",
       "passwordMismatch": "The two passwords do not match.",
       "invalidCredentials": "Wrong email or password.",
       "signUpFailed": "We could not create the account. Check the details and try again.",
@@ -487,6 +495,8 @@
     "contactDescription": "This branch's own name and contact for this teacher, seeded from their KayEdu identity and always editable here — separate from any other branch's record.",
     "trusted": {
       "label": "Trusted teacher",
+      "createLabel": "Trusted teacher — can request new classes and sessions",
+      "createDescription": "You can change this later on the teacher's page.",
       "description": "Lets this teacher request a new class or session from their portal at this branch. Off hides those request forms for them."
     },
     "emptyHint": "Teachers you add appear here, with the classes and blocks attached to them.",
@@ -3144,6 +3154,8 @@
       "invalidEmail": "Enter a valid email address.",
       "invalidPhone": "Enter a valid Egyptian mobile number.",
       "passwordTooShort": "Password must be at least 8 characters.",
+      "passwordNeedsLetter": "Password must include at least one letter.",
+      "passwordNeedsDigit": "Password must include at least one digit.",
       "passwordMismatch": "The passwords do not match.",
       "wrongPassword": "That is not your current password.",
       "samePassword": "Choose a password different from your current one.",

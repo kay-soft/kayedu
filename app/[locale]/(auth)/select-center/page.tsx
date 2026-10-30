@@ -18,7 +18,7 @@ import {
   primaryRole,
 } from "@/lib/auth/tenant";
 import { redirect } from "@/lib/i18n/navigation";
-import { ROUTES, homePathForRole } from "@/lib/routes";
+import { ACCOUNT_HUB_HINT, ROUTES, accountPath, homePathForRole } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 import { cn } from "@/lib/utils";
 
@@ -221,7 +221,7 @@ export default async function SelectCenterPage({
 
       {/* F2: the hub has no user menu, so its account link sits here. */}
       <AnchorButton
-        href={`/${locale}${ROUTES.account}`}
+        href={`/${locale}${accountPath(ACCOUNT_HUB_HINT)}`}
         variant="ghost"
         className="w-full font-medium text-text-secondary hover:text-text-primary"
       >

@@ -645,6 +645,23 @@ async function main() {
     );
     const teacherAudit = await prisma.auditLog.findFirst({ where: { centerId: A, action: "membership.create", entityId: membership?.id ?? "-" } });
     check("The teacher audit row records where it came from (class.create)", JSON.stringify(teacherAudit?.after).includes("class.create"));
+    check("U1: left unset, the new teacher is trusted (the column default)", membership?.isTrustedTeacher === true);
+  }
+
+  // U1: "Trusted teacher" at creation, class-dialog path — saved in the same write as the teacher.
+  const untrusted = await createClassWithNewTeacher(
+    prisma,
+    A,
+    {
+      ...newTeacherInput("untrusted", `${PHONE_PREFIX}1003`, roomA2.id, [{ dayOfWeek: 2, startTime: "10:00", endTime: "11:00" }]),
+      isTrustedTeacher: false,
+    },
+    withTeacherOptions(actor.id),
+  );
+  check("U1: a new teacher created untrusted in the class dialog path", untrusted.ok, JSON.stringify(untrusted));
+  if (untrusted.ok) {
+    const membership = await prisma.membership.findFirst({ where: { centerId: A, userId: untrusted.teacherUserId, role: "TEACHER" } });
+    check("U1: …is stored isTrustedTeacher=false on that centre's membership", membership?.isTrustedTeacher === false);
   }
 
   // ── 4. A phone is not an identity key (SEC-2a, SEC-02 / D-02) ───────────────

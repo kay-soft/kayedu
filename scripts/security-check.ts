@@ -30,7 +30,9 @@ import { AuthMisconfiguredError, productionAuthProblems } from "../lib/auth/auth
 import { profileFromMetadata, resolveAppIdentity } from "../lib/auth/identity-link.ts";
 import { changeEmail, changePassword, type AccountAuthPort } from "../lib/auth/account.ts";
 import { updateAccountProfile } from "../lib/db/account.ts";
-import { accountProfileSchema } from "../lib/validation/account.ts";
+import { accountProfileSchema, changePasswordSchema } from "../lib/validation/account.ts";
+import { signInSchema, signUpSchema } from "../lib/validation/auth.ts";
+import { PASSWORD_MIN_LENGTH } from "../lib/password-policy.ts";
 import { enforceProductionAuthSettings } from "../lib/auth/production-guard.ts";
 import {
   DEFAULT_ROLE_GRANTS,
@@ -1199,6 +1201,38 @@ async function main() {
       ["two distinct ≥6-character passwords pass", seedPasswordProblems({ SEED_PASSWORD: same, SEED_ADMIN_PASSWORD: "y".repeat(16) }).length === 0],
       ["the platform admin is created with the admin password", /admin: isPlatformAdmin/.test(read("prisma/seed.ts")) && /account\.admin \? this\.adminPassword : this\.password/.test(read("prisma/seed-data/auth.ts"))],
       [".env.example documents SEED_ADMIN_PASSWORD", /SEED_ADMIN_PASSWORD=/.test(read(".env.example"))],
+    ];
+  });
+
+  await assertSec("U1", "the password policy is refused server-side on sign-up and change — never on sign-in", () => {
+    const signUp = (password: string) =>
+      signUpSchema.safeParse({
+        signupIntent: "STUDENT",
+        firstName: "A",
+        lastName: "B",
+        email: "u1@kayedu.test",
+        password,
+        confirmPassword: password,
+        locale: "en",
+      });
+    const change = (newPassword: string) =>
+      changePasswordSchema.safeParse({ currentPassword: "old", newPassword, confirmPassword: newPassword, signOutOthers: "true", locale: "en" });
+    const message = (result: { success: boolean; error?: { issues: { message: string }[] } }) =>
+      result.success ? "ok" : (result.error?.issues[0]?.message ?? "?");
+    const good = "abcdef12";
+    return [
+      [`the minimum length is one constant (${PASSWORD_MIN_LENGTH})`, PASSWORD_MIN_LENGTH === 8],
+      ["sign-up refuses 7 characters", message(signUp("abcde12")) === "passwordTooShort"],
+      ["sign-up refuses no digit", message(signUp("abcdefgh")) === "passwordNeedsDigit"],
+      ["sign-up refuses no letter", message(signUp("12345678")) === "passwordNeedsLetter"],
+      ["sign-up accepts 8 characters with a letter and a digit", signUp(good).success],
+      ["change password refuses 7 characters, no digit and no letter",
+        message(change("abcde12")) === "passwordTooShort" &&
+          message(change("abcdefgh")) === "passwordNeedsDigit" &&
+          message(change("12345678")) === "passwordNeedsLetter"],
+      ["change password accepts a compliant password", change(good).success],
+      ["sign-in still accepts an old short password (existing accounts keep working)",
+        signInSchema.safeParse({ email: "old@kayedu.test", password: "abc", locale: "en" }).success],
     ];
   });
 

@@ -41,6 +41,7 @@ import {
 import { normalizePhone } from "../lib/phone.ts";
 import { checkRateLimit } from "../lib/rate-limit.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
+import { createTeacherMembership } from "../lib/db/teacher-membership.ts";
 import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import { confirmGradePromotion, promotionPreview, undoGradePromotion } from "../lib/db/promotion.ts";
 import { PROMOTION_UNDO_DAYS, isWithinUndoWindow } from "../lib/promotion.ts";
@@ -863,6 +864,44 @@ async function main() {
     blockForm.teacherUserId === teacher.id &&
       blockForm.studentProfileId === inA.profileId,
   );
+
+  // ── 4b. U1: "Trusted teacher" at creation (Add teacher path) ───────────
+  const trustedDefault = parse(
+    teacherCreateSchema,
+    { locale: "en", firstName: "Tru", lastName: "Sted", phone: "01011112222" },
+    "teacherCreate",
+  );
+  const trustedOff = parse(
+    teacherCreateSchema,
+    { locale: "en", firstName: "Un", lastName: "Trusted", phone: "01011112223", isTrustedTeacher: "false" },
+    "teacherCreate",
+  );
+  check(
+    "The teacher-create schema defaults the flag to trusted, and reads an explicit false",
+    trustedDefault.isTrustedTeacher === true && trustedOff.isTrustedTeacher === false,
+  );
+  const untrustedEmail = "people-check-f4-untrusted@kayedu.test";
+  const untrusted = await createTeacherMembership(
+    prisma,
+    centerA.id,
+    { firstName: "Un", lastName: "Trusted", email: untrustedEmail, phone: null, altPhone: null, locale: "en" },
+    { actorUserId: null, linkUserId: null, via: "teacher.add", refusePrivileged: false, isTrustedTeacher: false },
+  );
+  const untrustedRow = untrusted.ok
+    ? await prisma.membership.findUnique({ where: { id: untrusted.membershipId } })
+    : null;
+  check("Add teacher with the switch off saves isTrustedTeacher=false on the new membership", untrustedRow?.isTrustedTeacher === false);
+  const trustedEmail = "people-check-f4-trusted@kayedu.test";
+  const trustedMade = await createTeacherMembership(
+    prisma,
+    centerA.id,
+    { firstName: "Tru", lastName: "Sted", email: trustedEmail, phone: null, altPhone: null, locale: "en" },
+    { actorUserId: null, linkUserId: null, via: "teacher.add", refusePrivileged: false },
+  );
+  const trustedRow = trustedMade.ok
+    ? await prisma.membership.findUnique({ where: { id: trustedMade.membershipId } })
+    : null;
+  check("Add teacher with the flag unset keeps the column default (trusted)", trustedRow?.isTrustedTeacher === true);
 
   // ── 5. Grade promotion stays inside its center ─────────────────────────
   await prisma.studentProfile.updateMany({

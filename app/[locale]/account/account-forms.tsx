@@ -12,6 +12,7 @@ import {
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { Ltr } from "@/components/shared/ltr";
+import { NewPasswordField } from "@/components/shared/new-password-field";
 import { PasswordField } from "@/components/shared/password-field";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -242,7 +243,7 @@ export function AccountPasswordForm() {
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="account-newPassword" label={t("newPassword")} error={errorText(state.fieldErrors?.newPassword)}>
-              <PasswordField
+              <NewPasswordField
                 id="account-newPassword"
                 name="newPassword"
                 autoComplete="new-password"

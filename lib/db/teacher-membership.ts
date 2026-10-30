@@ -80,6 +80,12 @@ export type TeacherMembershipOptions = {
    * match panel with the "already a staff member" notice, does not.
    */
   refusePrivileged: boolean;
+  /**
+   * U1: written on a **newly created** membership, in the same transaction.
+   * Omitted = the column default (trusted). A re-activated membership keeps its
+   * own flag.
+   */
+  isTrustedTeacher?: boolean;
 };
 
 /**
@@ -102,6 +108,9 @@ async function privilegedRefusal(
 export function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
 }
+
+const trustedData = (options: TeacherMembershipOptions) =>
+  options.isTrustedTeacher === undefined ? {} : { isTrustedTeacher: options.isTrustedTeacher };
 
 const fail = (error: TeacherRefusal | "matchFound", match?: MatchCandidate) =>
   ({ ok: false, error, ...(match ? { match } : {}) }) as const;
@@ -152,7 +161,13 @@ export async function addTeacherMembership(
     if (options.linkUserId) return fail("matchGone");
     const person = await createPerson(input, tx);
     const membership = await tx.membership.create({
-      data: scopedData(centerId, { userId: person.id, role: TEACHER, joinedAt: new Date(), ...local }),
+      data: scopedData(centerId, {
+        userId: person.id,
+        role: TEACHER,
+        joinedAt: new Date(),
+        ...local,
+        ...trustedData(options),
+      }),
     });
     await writeAuditRow(tx, {
       centerId,
@@ -198,7 +213,13 @@ export async function addTeacherMembership(
   }
 
   const membership = await tx.membership.create({
-    data: scopedData(centerId, { userId: matched.id, role: TEACHER, joinedAt: new Date(), ...local }),
+    data: scopedData(centerId, {
+      userId: matched.id,
+      role: TEACHER,
+      joinedAt: new Date(),
+      ...local,
+      ...trustedData(options),
+    }),
   });
   await writeAuditRow(tx, {
     centerId,
