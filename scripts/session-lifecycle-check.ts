@@ -30,7 +30,7 @@ import {
 } from "../lib/db/attendance.ts";
 import { attendanceDisplay, EXCLUDE_DROP_IN_NO_SHOWS, isDropInNoShow } from "../lib/attendance-rules.ts";
 import { studentSessionState } from "../lib/db/reception.ts";
-import { studentPastAttendance } from "../lib/db/student-portal.ts";
+import { studentPastAttendance, studentUpcomingSessions } from "../lib/db/student-portal.ts";
 import { studentSessionsWithTeacher } from "../lib/db/teacher-portal.ts";
 import { attendedSessionsToRate, submitSessionRating } from "../lib/db/ratings.ts";
 import { recordPayment, sessionReceiptTotals, voidPayment } from "../lib/db/payments.ts";
@@ -50,8 +50,13 @@ import {
   cancelSession,
   deriveSessionDisplayStatus,
   rescheduleSession,
+  SESSION_MOVE_LINKS_SELECT,
+  sessionListSelect,
   updateSessionShareOverride,
 } from "../lib/db/sessions.ts";
+import { classSessionCounts, materializeClassSessions } from "../lib/db/class-sessions.ts";
+import { loadSessionOccupancy, slotTakenError } from "../lib/db/slot-conflicts.ts";
+import { scopedWith } from "../lib/db/scoped.ts";
 import { createPeriodSettlement, createSessionSettlement } from "../lib/db/settlements.ts";
 import { attendanceStatusCounts, revenueTotals } from "../lib/db/analytics.ts";
 import {
@@ -61,6 +66,7 @@ import {
 import { can, DEFAULT_ROLE_GRANTS, type PermissionGrants } from "../lib/auth/permissions.ts";
 import {
   checkInStatus,
+  dateKey,
   endOfSessionDay,
   isSessionDayOver,
   resolveLateThreshold,
@@ -1315,6 +1321,219 @@ async function main() {
         (await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: hA.id } })).attendanceStatus === "PRESENT",
     );
   }
+
+  await checkRescheduleFreesSlot(centerA.id, s6);
+}
+
+/**
+ * U2 — a session rescheduled away no longer holds its slot
+ * (docs/00 §5.1 "Session lifecycle", docs/03 U2): the
+ * `(classGroupId, date, startTime)` uniqueness is a partial unique index over
+ * sessions with `rescheduledToId` null; a replacement can be rescheduled back
+ * to its original's slot; the class engine still never recreates a moved or
+ * cancelled slot; every reader hides the moved original; the replacement
+ * carries "moved from".
+ */
+async function checkRescheduleFreesSlot(centerId: string, studentProfileId: string) {
+  console.log("\nU2 — reschedule frees the slot");
+
+  // The schema and the database agree on the index; a future generated
+  // migration must not have dropped it.
+  const schema = readFileSync("prisma/schema.prisma", "utf8");
+  check(
+    "schema.prisma declares a plain @@index, not @@unique, on (classGroupId, date, startTime)",
+    !/@@unique\(\[classGroupId, date, startTime\]\)/.test(schema) &&
+      /@@index\(\[classGroupId, date, startTime\]\)/.test(schema),
+  );
+  const indexes = await prisma.$queryRaw<{ indexname: string; indexdef: string }[]>`
+    SELECT indexname, indexdef FROM pg_indexes
+    WHERE schemaname = current_schema() AND tablename = 'Session'`;
+  const live = indexes.find((row) => row.indexname === "Session_classGroupId_date_startTime_live_key");
+  check(
+    "The partial unique index exists: UNIQUE (classGroupId, date, startTime) WHERE rescheduledToId IS NULL",
+    !!live &&
+      /CREATE UNIQUE INDEX/.test(live.indexdef) &&
+      /\("classGroupId", date, "startTime"\)/.test(live.indexdef) &&
+      /WHERE \("rescheduledToId" IS NULL\)/.test(live.indexdef),
+    live?.indexdef ?? "missing — a stray DROP INDEX in a generated migration?",
+  );
+  check(
+    "The old full unique index is gone",
+    !indexes.some((row) => row.indexname === "Session_classGroupId_date_startTime_key"),
+  );
+
+  const now = cairo(1, 9, 0); // Tue 1 Dec 2026 — every slot below is in the future
+  const teacherU = await prisma.user.create({
+    data: { firstName: "Uma", lastName: "Teacher", email: `${EMAIL_PREFIX}u2-teacher@kayedu.test`, locale: "en" },
+  });
+  await prisma.membership.create({
+    data: scopedData(centerId, { userId: teacherU.id, role: "TEACHER", joinedAt: new Date() }),
+  });
+  // Mondays 7, 14 and 21 Dec, 17:00–18:00.
+  const classU = await prisma.classGroup.create({
+    data: scopedData(centerId, {
+      startDate: day(7),
+      endDate: day(21),
+      teacherId: teacherU.id,
+      price: PRICE,
+      schedules: { create: [{ centerId, dayOfWeek: 1, startTime: "17:00", endTime: "18:00" }] },
+    }),
+  });
+  await prisma.enrollment.create({
+    data: scopedData(centerId, { studentProfileId, classGroupId: classU.id, status: "ACTIVE" }),
+  });
+  await prisma.$transaction((tx) =>
+    materializeClassSessions(tx, centerId, classU.id, { from: now, confirmConflicts: false }),
+  );
+  const at = (date: Date) =>
+    prisma.session.findMany({
+      where: { centerId, classGroupId: classU.id, date, startTime: "17:00" },
+      orderBy: { createdAt: "asc" },
+    });
+  const [mon7] = await at(day(7));
+  const [mon14] = await at(day(14));
+  const [mon21] = await at(day(21));
+  check("The engine materialized the three Mondays", !!mon7 && !!mon14 && !!mon21);
+  if (!mon7 || !mon14 || !mon21) return;
+
+  const move = (sessionId: string, date: Date) =>
+    rescheduleSession(prisma, centerId, sessionId, { date, startTime: "17:00", endTime: "18:00" }, "WARN", "en", {
+      now,
+      confirmConflicts: false,
+    });
+
+  // Reschedule, then reschedule the replacement back to the original slot.
+  const there = await move(mon7.id, day(8));
+  check("Rescheduling Mon 7 → Tue 8 works", there.ok, JSON.stringify(!there.ok && there.error));
+  if (!there.ok) return;
+  const back = await move(there.session.id, day(7));
+  check(
+    "Rescheduling the replacement back to Mon 7 17:00 works (the moved original no longer holds the slot)",
+    back.ok && dateKey(back.session.date) === dateKey(day(7)) && back.session.startTime === "17:00",
+    JSON.stringify(!back.ok && back.error),
+  );
+  if (!back.ok) return;
+  const atMon7 = await at(day(7));
+  check(
+    "Mon 7 17:00 holds the moved original and the replacement — exactly one not rescheduled",
+    atMon7.length === 2 &&
+      atMon7.filter((row) => row.rescheduledToId === null).length === 1 &&
+      atMon7.some((row) => row.id === back.session.id && row.rescheduledToId === null),
+  );
+  let duplicateRefused = false;
+  try {
+    await prisma.session.create({
+      data: scopedData(centerId, {
+        classGroupId: classU.id,
+        teacherId: teacherU.id,
+        date: day(7),
+        startTime: "17:00",
+        endTime: "18:00",
+      }),
+    });
+  } catch (error) {
+    duplicateRefused = (error as { code?: string }).code === "P2002";
+  }
+  check("The database still refuses a second not-rescheduled session at the same slot (P2002)", duplicateRefused);
+
+  // A slot moved away and left, and a cancelled one: resync must bring neither back.
+  const away = await move(mon14.id, day(16));
+  check("Rescheduling Mon 14 → Wed 16 works", away.ok, JSON.stringify(!away.ok && away.error));
+  if (!away.ok) return;
+  const cancelled = await cancelSession(prisma, centerId, mon21.id, { now });
+  check("Cancelling Mon 21 works", cancelled.ok);
+  check(
+    "slotTakenError: a moved-away slot is free; a cancelled one is taken (own message); a live one is taken",
+    (await slotTakenError(prisma, centerId, classU.id, day(14), "17:00")) === null &&
+      (await slotTakenError(prisma, centerId, classU.id, day(21), "17:00")) === "duplicateSlotCancelled" &&
+      (await slotTakenError(prisma, centerId, classU.id, day(7), "17:00")) === "duplicateSlot",
+  );
+  const ontoCancelled = await move(back.session.id, day(21));
+  check(
+    "Rescheduling onto the cancelled Mon 21 slot is refused (duplicateSlotCancelled)",
+    !ontoCancelled.ok && ontoCancelled.error === "duplicateSlotCancelled",
+    JSON.stringify(!ontoCancelled.ok && ontoCancelled.error),
+  );
+  const resync = await prisma.$transaction((tx) =>
+    materializeClassSessions(tx, centerId, classU.id, { from: now, confirmConflicts: false }),
+  );
+  const atMon14 = await at(day(14));
+  const atMon21 = await at(day(21));
+  check(
+    "Resync never recreates a moved or cancelled slot: nothing created; Mon 14 holds only the moved original, Mon 21 only the cancelled one",
+    resync.created === 0 &&
+      atMon14.length === 1 &&
+      atMon14[0].rescheduledToId !== null &&
+      atMon21.length === 1 &&
+      atMon21[0].status === "CANCELLED",
+    JSON.stringify({ created: resync.created, mon14: atMon14.length, mon21: atMon21.length }),
+  );
+
+  // Readers hide RESCHEDULED; the replacement carries "moved from".
+  const db = scopedWith(
+    prisma,
+    {
+      center: { id: centerId },
+      user: { locale: "en" },
+      role: "OWNER",
+      isPlatformAdmin: false,
+      settings: { dataVisibilityDays: 3650, timezone: TZ },
+    },
+    { now },
+  );
+  const range = { date: { gte: day(7), lte: day(21) }, classGroupId: classU.id };
+  const listed = await db.sessions.search({ where: range });
+  const listedWithMoved = await db.sessions.search({ where: range, includeMoved: true });
+  const movedIds = new Set([mon7.id, there.session.id, mon14.id]);
+  check(
+    "The staff and teacher session lists hide moved sessions; Show moved lists them",
+    listed.length === 3 && listed.every((row) => !movedIds.has(row.id)) && listedWithMoved.length === 6,
+    JSON.stringify({ listed: listed.length, withMoved: listedWithMoved.length }),
+  );
+  const listedDay = await db.sessions.listForDay(day(7));
+  check(
+    "The day list (dashboard, reception rail) shows Mon 7 once — the replacement",
+    listedDay.filter((row) => row.classGroupId === classU.id).map((row) => row.id).join() === back.session.id,
+  );
+  const upcoming = (await studentUpcomingSessions(prisma, centerId, studentProfileId, day(1))).filter(
+    (row) => row.classGroupId === classU.id,
+  );
+  check(
+    "The student and parent schedules hide moved sessions (Mon 7 replacement + Wed 16 only)",
+    upcoming.map((row) => row.id).sort().join() === [back.session.id, away.session.id].sort().join(),
+  );
+  const counts = await classSessionCounts(prisma, centerId, [classU.id]);
+  check(
+    "The class session count leaves out moved and cancelled sessions",
+    counts.get(classU.id) === 2,
+    String(counts.get(classU.id)),
+  );
+  const occupancy = await loadSessionOccupancy(prisma, centerId, "en", day(7), day(7));
+  check(
+    "Occupancy (conflict checks) counts Mon 7 once",
+    occupancy.filter((row) => row.classGroupId === classU.id).length === 1,
+  );
+  const replacement = await prisma.session.findUniqueOrThrow({
+    where: { id: back.session.id },
+    select: { ...sessionListSelect(centerId), ...SESSION_MOVE_LINKS_SELECT },
+  });
+  const original = await prisma.session.findUniqueOrThrow({
+    where: { id: mon7.id },
+    select: { ...sessionListSelect(centerId), ...SESSION_MOVE_LINKS_SELECT },
+  });
+  check(
+    "The replacement carries moved-from (Tue 8 17:00, its predecessor); the moved original carries moved-to",
+    replacement.rescheduledFrom !== null &&
+      dateKey(replacement.rescheduledFrom.date) === dateKey(day(8)) &&
+      replacement.rescheduledFrom.startTime === "17:00" &&
+      original.rescheduledTo !== null &&
+      dateKey(original.rescheduledTo.date) === dateKey(day(8)),
+  );
+  check(
+    "A moved original displays RESCHEDULED; its replacement does not",
+    deriveSessionDisplayStatus(original, now, TZ) === "RESCHEDULED" &&
+      deriveSessionDisplayStatus(replacement, now, TZ) === "SCHEDULED",
+  );
 }
 
 main()

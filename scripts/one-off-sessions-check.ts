@@ -129,9 +129,21 @@ function staticChecks() {
       /\n\s*gradeId\s+String\?/.test(sessionModel) &&
       /\n\s*isManual\s+Boolean\s+@default\(false\)/.test(sessionModel),
   );
+  // U2 (old → new): the uniqueness covers every session except one rescheduled
+  // away — a hand-written partial unique index, since Prisma 6 cannot declare
+  // one; the schema keeps a plain index (check:session-lifecycle asserts the
+  // live database's index and its WHERE clause).
+  const u2Migration = readFileSync(
+    "prisma/migrations/20261030120000_u2_session_slot_partial_unique/migration.sql",
+    "utf8",
+  );
   check(
-    "@@unique([classGroupId, date, startTime]) stays (NULLs are distinct in Postgres)",
-    sessionModel.includes("@@unique([classGroupId, date, startTime])"),
+    "(classGroupId, date, startTime) is unique among sessions not rescheduled away (partial index; NULLs are distinct in Postgres)",
+    sessionModel.includes("@@index([classGroupId, date, startTime])") &&
+      !sessionModel.includes("@@unique([classGroupId, date, startTime])") &&
+      /CREATE UNIQUE INDEX "Session_classGroupId_date_startTime_live_key"\s+ON "Session"\("classGroupId", "date", "startTime"\)\s+WHERE "rescheduledToId" IS NULL;/.test(
+        u2Migration,
+      ),
   );
 
   const readers = [...listFiles("app"), ...listFiles("lib"), ...listFiles("components")];

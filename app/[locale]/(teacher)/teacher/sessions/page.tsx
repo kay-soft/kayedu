@@ -24,7 +24,7 @@ import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
-import { formatDate, formatNumber, formatTimeRange } from "@/lib/format";
+import { formatDate, formatDay, formatNumber, formatTime, formatTimeRange } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { addDays, centreTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
@@ -86,6 +86,7 @@ export default async function TeacherSessionsPage({
   const t = await getTranslations("TeacherSessions");
   const tCommon = await getTranslations("Settings.common");
   const tStatus = await getTranslations("Sessions.status");
+  const tSessions = await getTranslations("Sessions");
   const locale = await getLocale();
 
   // R2's lazy end-of-day close for this teacher's sessions in view.
@@ -251,6 +252,15 @@ export default async function TeacherSessionsPage({
                           <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                           <span>{row.room?.name ?? tCommon("none")}</span>
                         </p>
+                        {/* U2 — a replacement says where it came from; the original is not listed. */}
+                        {row.rescheduledFrom ? (
+                          <p className="mt-1 text-xs text-text-secondary">
+                            {tSessions("movedFrom", {
+                              date: formatDay(row.rescheduledFrom.date, locale),
+                              time: formatTime(row.rescheduledFrom.startTime, locale),
+                            })}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
                         <span className="text-xs text-text-muted">

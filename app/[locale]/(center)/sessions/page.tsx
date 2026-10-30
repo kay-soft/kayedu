@@ -32,7 +32,7 @@ import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionListWhere } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatDay, formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import {
@@ -84,6 +84,7 @@ export default async function SessionsPage({
         subjectId: null,
         classGroupId: null,
         status: null,
+        moved: false,
       };
 
   // R7b: the filter's "today", the visibility floor and the picker's today
@@ -122,7 +123,7 @@ export default async function SessionsPage({
   const canCreate = ctxCan(ctx, "session.manage");
 
   const [rows, teachers, subjects, classes, revenue, newSession] = await Promise.all([
-    db.sessions.search({ where }),
+    db.sessions.search({ where, includeMoved: filters.moved }),
     db.teachers.list({ active: true }),
     db.subjects.list(),
     db.classGroups.list(),
@@ -178,6 +179,11 @@ export default async function SessionsPage({
     teachers.map((teacher) => [teacher.userId, fullName(localName(teacher, teacher.user))]),
   );
 
+  const slotLabel = (slot: { date: Date; startTime: string }) => ({
+    date: formatDay(slot.date, locale),
+    time: formatTime(slot.startTime, locale),
+  });
+
   const tableRows: SessionRowData[] = pageEntries.map(({ row, displayStatus }) => ({
     sessionId: row.id,
     className: sessionDisplayName(locale, row),
@@ -192,6 +198,9 @@ export default async function SessionsPage({
     // A one-time session (R5) has no class, so nobody is enrolled in it.
     enrolledCount: row.classGroup?._count.enrollments ?? 0,
     displayStatus,
+    // U2 — "Moved to …" on a moved original (greyed), "Moved from …" on its replacement.
+    movedTo: row.rescheduledTo ? slotLabel(row.rescheduledTo) : null,
+    movedFrom: row.rescheduledFrom ? slotLabel(row.rescheduledFrom) : null,
   }));
 
   const liveCount = filtered.filter((entry) => entry.displayStatus === "LIVE").length;
@@ -228,6 +237,7 @@ export default async function SessionsPage({
     if (filters.subjectId) params.set("subjectId", filters.subjectId);
     if (filters.classGroupId) params.set("classGroupId", filters.classGroupId);
     if (filters.status) params.set("status", filters.status);
+    if (filters.moved) params.set("moved", "on");
     if (targetPage > 1) params.set("page", String(targetPage));
     const qs = params.toString();
     return qs ? `${ROUTES.centerSessions}?${qs}` : ROUTES.centerSessions;
@@ -302,6 +312,7 @@ export default async function SessionsPage({
             subjectId={filters.subjectId ?? ""}
             classGroupId={filters.classGroupId ?? ""}
             status={filters.status ?? ""}
+            moved={filters.moved}
             teachers={teacherOptions}
             subjects={subjectOptions}
             classes={classOptions}

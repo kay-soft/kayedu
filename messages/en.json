@@ -1006,7 +1006,8 @@
       "teacher": "Teacher",
       "subject": "Subject",
       "class": "Class",
-      "all": "All"
+      "all": "All",
+      "showMoved": "Show moved sessions"
     },
     "status": {
       "SCHEDULED": "Scheduled",
@@ -1035,10 +1036,10 @@
       "consecutiveAbsentAlert": "Absent {count} times in a row — consider contacting the guardian.",
       "paid": "Paid {amount} · {method}",
       "recordPayment": "Record payment",
-      "void": "Void",
+      "void": "Void — recorded by mistake",
       "voidReasonPlaceholder": "Reason for voiding",
       "confirmVoid": "Confirm void",
-      "refund": "Refund",
+      "refund": "Refund — give the money back",
       "refunded": "Refunded",
       "refundReasonPlaceholder": "Reason for the refund",
       "confirmRefund": "Confirm refund",
@@ -1053,8 +1054,10 @@
         "cancel": "Keep as is"
       },
       "paidAbsentNote": "Paid — switching to Absent voids the payment.",
-      "notArrivedCorrectHint": "Or correct the mark — they were here all along:",
-      "booked": "Booked"
+      "booked": "Booked",
+      "voidHelp": "Cancels a payment that shouldn't exist (wrong student, wrong amount, entered twice). No money is given back.",
+      "refundHelp": "Records that the student was paid back. Shows on the Refunds page.",
+      "reversalResets": "The student goes back to Not arrived and can check in again."
     },
     "addAttendee": {
       "title": "Add a student",
@@ -1076,7 +1079,9 @@
       "room": "Room",
       "price": "Price",
       "seats": "Seats",
-      "seatsUnlimited": "No seat limit"
+      "seatsUnlimited": "No seat limit",
+      "status": "Status",
+      "movedFrom": "Moved from"
     },
     "lifecycle": {
       "cancel": "Cancel session",
@@ -1212,7 +1217,8 @@
       "reasonRequired": "Give a reason — switching a paid student to Absent voids their payment.",
       "hasPayments": "This session still has payments. Void or refund them first, each with its reason, then cancel or reschedule.",
       "fixedAbovePrice": "A fixed centre cut can't be more than the price — the teacher would get nothing.",
-      "zeroPriceNeedsConfirmation": "This session is free (0 EGP). Tick the box to confirm that is intended."
+      "zeroPriceNeedsConfirmation": "This session is free (0 EGP). Tick the box to confirm that is intended.",
+      "duplicateSlotCancelled": "This class has a cancelled session at that exact date and time. A cancelled session can't be brought back — pick another time."
     },
     "emptyHint": "Sessions come from each class's weekly schedule and period. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
@@ -1295,7 +1301,10 @@
           "failed": "Something went wrong. Try again."
         }
       }
-    }
+    },
+    "movedFrom": "Moved from {date}, {time}",
+    "movedTo": "Moved to {date}, {time}",
+    "slot": "{date}, {time}"
   },
   "Reception": {
     "title": "Reception Desk",
@@ -1583,7 +1592,8 @@
       "alreadyLinked": "That record or that account is already connected to a login.",
       "pastDate": "That date has passed — a session can't be added in the past. Decline the request instead.",
       "invalidDate": "The requested date isn't a valid date.",
-      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet."
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet.",
+      "duplicateSlotCancelled": "This class has a cancelled session at that exact date and time. A cancelled session can't be brought back — decline the request, or ask for another time."
     },
     "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
     "kinds": {

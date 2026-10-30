@@ -7,6 +7,7 @@ import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts
 import { DEFAULT_TIMEZONE, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
 import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
 import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
+import { NOT_MOVED_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
@@ -239,6 +240,8 @@ function studentUpcomingSessionInclude(centerId: string) {
     subject: withSelection,
     grade: withSelection,
     room: true,
+    // U2 — "Moved from <date, time>" on a replacement.
+    rescheduledFrom: { select: { date: true, startTime: true } },
   } satisfies Prisma.SessionInclude;
 }
 
@@ -258,6 +261,8 @@ export function studentUpcomingSessions(
     where: scopedWhere(centerId, {
       date: { gte: fromDate },
       status: { not: CANCELLED_STATUS },
+      // U2 — a session rescheduled away is off the schedule; its replacement is on it.
+      ...NOT_MOVED_SESSION,
       classGroup: { active: true, enrollments: { some: { studentProfileId, status: ACTIVE_ENROLLMENT } } },
     }),
     include: studentUpcomingSessionInclude(centerId),

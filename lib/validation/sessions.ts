@@ -92,6 +92,9 @@ export const sessionListFilterSchema = dateFilterSchema.extend({
   subjectId: optionalRef,
   classGroupId: optionalRef,
   status: optionalSessionStatus,
+  // U2 — "Show moved": sessions rescheduled away, listed greyed. Off unless
+  // the switch posts its "on".
+  moved: z.preprocess((value) => value === "on", z.boolean()),
 });
 
 // ── Attendance (check in / correct) ─────────────────────────────────────────

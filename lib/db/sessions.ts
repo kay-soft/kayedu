@@ -30,7 +30,7 @@ import {
   sessionTimeZone,
 } from "./session-lifecycle.ts";
 import { resolveRoomSet, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
-import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
+import { loadSessionOccupancy, slotTakenError, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { cancelSessionBookings } from "./session-bookings.ts";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 
@@ -239,6 +239,7 @@ export type RescheduleSessionResult =
         | "alreadyRescheduled"
         | "sessionClosed"
         | "duplicateSlot"
+        | "duplicateSlotCancelled"
         | "pastDate"
         | "hasPayments"
         | RoomSetError;
@@ -269,10 +270,13 @@ export type RescheduleSessionResult =
  * session's own class, so the moved session never "conflicts with itself"
  * (and the original slot it vacates occupies nothing once linked).
  *
- * The `(classGroupId, date, startTime)` unique constraint still applies to
- * the new row — if this class already has another session at the target
- * slot, the write fails with `duplicateSlot` rather than silently merging
- * two sessions.
+ * The `(classGroupId, date, startTime)` uniqueness still applies to the new
+ * row — if this class already has another session at the target slot, the
+ * write fails with `duplicateSlot` (`duplicateSlotCancelled` when that
+ * session is cancelled) rather than silently merging two sessions. U2: it is
+ * a partial unique index that leaves out sessions rescheduled away, so a
+ * replacement can be rescheduled back to its original's slot (the original,
+ * moved, no longer holds it) — subject to the same conflict policy.
  *
  * R2: a closed session cannot be rescheduled (`sessionClosed`); the closure
  * guard runs inside the same transaction as the write, so a session that
@@ -325,6 +329,9 @@ export async function rescheduleSession(
     roomId = next.roomId;
     extraRoomIds = next.roomId ? [...(next.extraRoomIds ?? [])] : [];
   }
+
+  const taken = await slotTakenError(db, centerId, session.classGroupId, next.date, next.startTime);
+  if (taken) return { ok: false, error: taken };
 
   const existing = await loadSessionOccupancy(
     db,
@@ -606,12 +613,26 @@ export function sessionListSelect(centerId: string) {
   } satisfies Prisma.SessionSelect;
 }
 
+/**
+ * U2 — the two reschedule links a session list shows: "Moved from <date,
+ * time>" on a replacement, "Moved to …" on a moved original (the staff list's
+ * "Show moved sessions"). Kept out of `sessionListSelect` on purpose: each is
+ * a relation read of its own, and the day list (dashboard, reception) shows
+ * neither — reception's statement budget is asserted (`check:reception`).
+ */
+export const SESSION_MOVE_LINKS_SELECT = {
+  rescheduledFrom: { select: { date: true, startTime: true } },
+  rescheduledTo: { select: { date: true, startTime: true } },
+} satisfies Prisma.SessionSelect;
+
 /** A session detail page — every field it renders, including the roster. */
 export function sessionDetailInclude(centerId: string) {
   const withSelection = { include: { selections: { where: { centerId } } } } as const;
   return {
     teacher: true,
     room: true,
+    // U2 — a replacement's "Moved from <date, time>".
+    rescheduledFrom: { select: { date: true, startTime: true } },
     extraRooms: { include: { room: true }, orderBy: { createdAt: "asc" } },
     // Null on a one-time session (R5) — its own subject/grade below label it.
     classGroup: { include: { subject: withSelection, grade: withSelection } },

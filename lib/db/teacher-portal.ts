@@ -6,7 +6,7 @@ import type { Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
 import { type DateRange, revenueTotals } from "./analytics.ts";
-import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
+import { NOT_MOVED_SESSION, OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 import { likeSearchToken } from "../like.ts";
 
@@ -74,6 +74,7 @@ export async function teacherCenterSummary(
         teacherId,
         date: today,
         status: { not: CANCELLED_STATUS },
+        ...NOT_MOVED_SESSION,
         ...OPEN_CLASS_SESSION,
       }),
     }),
@@ -82,6 +83,7 @@ export async function teacherCenterSummary(
         teacherId,
         date: { gte: weekRange.start, lte: weekRange.end },
         status: { not: CANCELLED_STATUS },
+        ...NOT_MOVED_SESSION,
         ...OPEN_CLASS_SESSION,
       }),
     }),

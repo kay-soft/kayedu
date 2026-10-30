@@ -51,6 +51,43 @@ export const OPEN_CLASS_SESSION = {
   OR: [{ classGroupId: null }, { classGroup: { active: true } }, { closedAt: { not: null } }],
 } satisfies Prisma.SessionWhereInput;
 
+/**
+ * U2 (docs/00 §5.1 "Session lifecycle") — a session that has not been
+ * rescheduled away. A RESCHEDULED original is history: it no longer holds its
+ * slot (the partial unique index), and every list, schedule, calendar,
+ * reception and Discover/Explore read leaves it out — its replacement is the
+ * session, labelled "Moved from …". Only the staff Sessions list's "Show
+ * moved" toggle, the session's own page, receipts, audit and change logs
+ * still read it. A CANCELLED session is not filtered by this: it keeps
+ * showing with its badge.
+ */
+export const NOT_MOVED_SESSION = { rescheduledToId: null } satisfies Prisma.SessionWhereInput;
+
+/**
+ * U2 — why a class's exact slot is taken, before a write puts a session
+ * there: the read form of the partial unique index
+ * `Session_classGroupId_date_startTime_live_key` (every session at the slot
+ * except one rescheduled away). A CANCELLED one still holds it and gets its
+ * own message: there is no way to reinstate a cancelled session, so the
+ * person picks another time. The index stays the backstop for a race — the
+ * writer maps P2002 to `duplicateSlot`.
+ */
+export async function slotTakenError(
+  db: Db,
+  centerId: string,
+  classGroupId: string | null,
+  date: Date,
+  startTime: string,
+): Promise<"duplicateSlot" | "duplicateSlotCancelled" | null> {
+  if (!classGroupId) return null;
+  const held = await db.session.findFirst({
+    where: scopedWhere(centerId, { classGroupId, date, startTime, ...NOT_MOVED_SESSION }),
+    select: { status: true },
+  });
+  if (!held) return null;
+  return held.status === CANCELLED ? "duplicateSlotCancelled" : "duplicateSlot";
+}
+
 type Db = PrismaClient | Prisma.TransactionClient;
 
 const CANCELLED: SessionStatus = "CANCELLED";

@@ -13,7 +13,7 @@ import {
   studentUpcomingSessions,
   type BookedUpcomingSession,
 } from "@/lib/db/student-portal";
-import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
+import { formatDate, formatDay, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
 import { centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 import { ScheduleDateFilter } from "./schedule-date-filter";
 import { CappedList } from "@/components/shared/capped-list";
@@ -40,6 +40,8 @@ type UpcomingRow = {
   teacherName: string;
   /** F6: set on a single-session booking — "Booked" (CONFIRMED) or "Requested" (PENDING). */
   bookingStatus?: "PENDING" | "CONFIRMED";
+  /** U2 — a replacement's original slot ("Moved from …"). */
+  movedFrom?: { date: Date; startTime: string } | null;
 };
 
 type PastRow = {
@@ -89,6 +91,7 @@ async function loadCenterSchedule(
     ...sessionLabelParts(locale, row),
     roomName: row.room?.name ?? row.classGroup?.room?.name ?? null,
     teacherName: names.get(row.teacherId) ?? "—",
+    movedFrom: row.rescheduledFrom,
   }));
 
   const past = history.map((row) => ({
@@ -165,6 +168,7 @@ export default async function StudentSchedulePage({
   const t = await getTranslations("StudentSchedule");
   const tAttendance = await getTranslations("Sessions.attendance");
   const tCommon = await getTranslations("Settings.common");
+  const tSessions = await getTranslations("Sessions");
   const locale = await getLocale();
 
   const now = new Date();
@@ -254,6 +258,14 @@ export default async function StudentSchedulePage({
                       <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                       {row.roomName ? <span>{row.roomName}</span> : null}
                     </p>
+                    {row.movedFrom ? (
+                      <p className="mt-1 text-xs text-text-secondary">
+                        {tSessions("movedFrom", {
+                          date: formatDay(row.movedFrom.date, locale),
+                          time: formatTime(row.movedFrom.startTime, locale),
+                        })}
+                      </p>
+                    ) : null}
                   </div>
                   <Badge variant={row.bookingStatus === "PENDING" ? "warning" : "info"}>
                     {row.bookingStatus === "CONFIRMED"

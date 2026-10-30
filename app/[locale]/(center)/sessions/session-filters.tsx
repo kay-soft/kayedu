@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { DateFilter, type DateFilterValue } from "@/components/shared/date-filter";
 import { FilterBar, FilterField } from "@/components/shared/filter-bar";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 
 export type SelectOption = { value: string; label: string };
 
@@ -24,6 +26,7 @@ export function SessionFilters({
   subjectId,
   classGroupId,
   status,
+  moved,
   teachers,
   subjects,
   classes,
@@ -36,6 +39,8 @@ export function SessionFilters({
   subjectId: string;
   classGroupId: string;
   status: string;
+  /** U2 — "Show moved" (off by default): sessions rescheduled away, greyed. */
+  moved: boolean;
   teachers: SelectOption[];
   subjects: SelectOption[];
   classes: SelectOption[];
@@ -112,6 +117,43 @@ export function SessionFilters({
           </Select>
         </FilterField>
       </div>
+
+      <ShowMovedSwitch defaultChecked={moved} label={t("showMoved")} />
     </FilterBar>
+  );
+}
+
+/**
+ * U2 — the "Show moved" switch. Like the selects beside it, changing it
+ * re-submits the filter form (from an effect, once the new value is
+ * rendered). The value travels in a hidden field that is always present —
+ * "on", or empty when off — because the soft filter form keeps any param a
+ * submit does not mention (`mergeFilterParams`): a switch that posted
+ * nothing when off would leave `?moved=on` in the URL. The whole label row is
+ * the 44px target; the switch itself is 24px tall.
+ */
+function ShowMovedSwitch({ defaultChecked, label }: { defaultChecked: boolean; label: string }) {
+  const [checked, setChecked] = useState(defaultChecked);
+  const rowRef = useRef<HTMLLabelElement>(null);
+  const pendingSubmit = useRef(false);
+
+  useEffect(() => {
+    if (!pendingSubmit.current) return;
+    pendingSubmit.current = false;
+    rowRef.current?.closest("form")?.requestSubmit();
+  }, [checked]);
+
+  return (
+    <label ref={rowRef} className="flex min-h-11 w-fit cursor-pointer items-center gap-3 text-sm text-text-primary">
+      <input type="hidden" name="moved" value={checked ? "on" : ""} />
+      <Switch
+        checked={checked}
+        onCheckedChange={(next) => {
+          pendingSubmit.current = true;
+          setChecked(next);
+        }}
+      />
+      {label}
+    </label>
   );
 }

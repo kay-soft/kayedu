@@ -1097,9 +1097,16 @@ model Session {
 
   // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
   // lib/db/class-sessions.ts): materializing a class's range is a
-  // `createMany({ skipDuplicates: true })` against this constraint, so a
-  // class's own slot is never duplicated, however often its range is resynced.
-  @@unique([classGroupId, date, startTime])
+  // `createMany({ skipDuplicates: true })` against a unique index on these
+  // columns, so a class's own slot is never duplicated, however often its
+  // range is resynced. U2: that unique index is PARTIAL —
+  // `"Session_classGroupId_date_startTime_live_key" … WHERE "rescheduledToId"
+  // IS NULL` (migration `20261030120000_u2_session_slot_partial_unique`) — so a
+  // rescheduled-away original no longer holds its slot. Prisma 6 cannot
+  // express a partial index, so it is hand-written SQL and this is a plain
+  // index: every future `prisma migrate diff` emits a DROP INDEX for it, which
+  // must be deleted from the generated migration (docs/02 §11, CLAUDE.md rule 7).
+  @@index([classGroupId, date, startTime])
   @@index([centerId])
   @@index([centerId, date])
   @@index([centerId, teacherId, date])

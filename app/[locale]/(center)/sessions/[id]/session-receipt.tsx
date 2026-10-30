@@ -139,7 +139,7 @@ export async function SessionReceipt({
           <ul className="mt-2 flex flex-col gap-1 text-sm">
             {unpaid.map((line) => (
               <li key={line.attendeeId} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                <span className="min-w-0 text-text-primary">{line.studentName}</span>
+                <span className="min-w-0 break-words text-text-primary">{line.studentName}</span>
                 <span className="text-xs text-text-secondary">{tAttendance(line.status)}</span>
               </li>
             ))}
@@ -157,7 +157,7 @@ export async function SessionReceipt({
             {voids.map((line) => (
               <li key={line.paymentId} className="flex flex-col gap-1 rounded-lg bg-danger-bg px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <span className="min-w-0 font-medium text-text-primary">{line.studentName}</span>
+                  <span className="min-w-0 font-medium break-words text-text-primary">{line.studentName}</span>
                   <span className="tabular-nums text-text-primary">{formatMoney(line.amount, locale)}</span>
                 </div>
                 <p className="text-xs text-text-secondary">
@@ -167,7 +167,7 @@ export async function SessionReceipt({
                   })}
                 </p>
                 {line.reason ? (
-                  <p className="text-xs text-text-secondary">{t("changeReason", { reason: line.reason })}</p>
+                  <p className="text-xs break-words text-text-secondary">{t("changeReason", { reason: line.reason })}</p>
                 ) : null}
               </li>
             ))}
@@ -185,7 +185,7 @@ export async function SessionReceipt({
             {refunds.map((line) => (
               <li key={line.paymentId} className="flex flex-col gap-1 rounded-lg bg-surface-subtle px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <span className="min-w-0 font-medium text-text-primary">{line.studentName}</span>
+                  <span className="min-w-0 font-medium break-words text-text-primary">{line.studentName}</span>
                   <span className="whitespace-nowrap tabular-nums text-text-primary">{formatMoney(-line.amount, locale)}</span>
                 </div>
                 <p className="text-xs text-text-secondary">
@@ -194,7 +194,7 @@ export async function SessionReceipt({
                     name: line.refundedByName ?? t("unknownActor"),
                   })}
                 </p>
-                <p className="text-xs text-text-secondary">{t("changeReason", { reason: line.reason })}</p>
+                <p className="text-xs break-words text-text-secondary">{t("changeReason", { reason: line.reason })}</p>
               </li>
             ))}
           </ul>
@@ -210,7 +210,7 @@ export async function SessionReceipt({
                 key={entry.studentProfileId}
                 className="flex flex-col gap-2 rounded-lg bg-surface-subtle px-3 py-2 text-sm"
               >
-                <span className="min-w-0 font-medium text-text-primary">{entry.studentName}</span>
+                <span className="min-w-0 font-medium break-words text-text-primary">{entry.studentName}</span>
                 {/* T5 — the student's timeline, in order; a logical border, so it flips in RTL. */}
                 <ol className="flex flex-col gap-2 border-s border-border ps-3">
                   {entry.events.map((event, index) => (
@@ -251,9 +251,11 @@ function Row({
   tone?: keyof typeof ROW_TONE;
 }) {
   return (
+    // U2 — both sides may shrink and wrap: the receipt sits in a Card, whose
+    // `overflow-hidden` cut off a long closing line or label instead.
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-text-secondary">{label}</dt>
-      <dd className={`text-end font-medium tabular-nums ${ROW_TONE[tone]}`}>{value}</dd>
+      <dt className="min-w-0 break-words text-text-secondary">{label}</dt>
+      <dd className={`min-w-0 break-words text-end font-medium tabular-nums ${ROW_TONE[tone]}`}>{value}</dd>
     </div>
   );
 }
@@ -340,7 +342,7 @@ function ChangeLogLine({
         {label}
       </span>
       <span className="text-xs text-text-muted">{by ? t("changeMeta", { time, name: by }) : time}</span>
-      {reason ? <span className="text-xs text-text-secondary">{t("changeReason", { reason })}</span> : null}
+      {reason ? <span className="text-xs break-words text-text-secondary">{t("changeReason", { reason })}</span> : null}
     </>
   );
 }
