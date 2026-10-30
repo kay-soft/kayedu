@@ -20,7 +20,10 @@
  *      session…), no class without a real teacher at its centre, no user with
  *      no relationship at all;
  *   5. every seed account is listed in docs/dev-accounts.md;
- *   6. the entity counts, printed.
+ *   6. the catalog shape (U3) — each subject once with its grade links, no
+ *      two subjects sharing a name, every class's (grade, subject) pair
+ *      linked — and the three bookable test classes;
+ *   7. the entity counts, printed.
  *
  * SEC-2b adds the money-integrity invariants to 3: one active payment per
  * roster row, never voided-and-refunded, one live claim per payment, every
@@ -32,7 +35,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PrismaClient, type Role } from "@prisma/client";
+import { PrismaClient, type Role, type SessionBookingMode } from "@prisma/client";
 import { DEFAULT_ROLE_GRANTS, can, type PermissionGrants } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { expenseTotals, revenueTotals } from "../lib/db/analytics.ts";
@@ -43,6 +46,7 @@ import { activeChildLinks, hashFamilyCode } from "../lib/db/parents.ts";
 import { baselineGrantKeys, centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
 import { splitShare } from "../lib/money.ts";
 import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
+import { seedSubjectLinkCounts } from "../prisma/seed-data/catalog.ts";
 import { DEFAULT_SEED_EMAIL_DOMAIN, SEED_EMAIL_DOMAIN, mail } from "../prisma/seed-data/domain.ts";
 import { BRANCHES, DEV_FAMILY_CODES, seedAccounts, type StaffRole } from "../prisma/seed-data/plan.ts";
 import { pageGateFor } from "./lib/nav-gates.ts";
@@ -71,6 +75,18 @@ const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "students", "classes", "a
 const EXPECTED_STUDENT_NAV = ["schedule", "discover", "reservations"];
 const EXPECTED_PARENT_NAV = ["schedule"];
 const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog"];
+
+/**
+ * U3 — the bookable test classes (single-session attendance, F6) per branch
+ * key, written out by hand: mode and per-session booking cap (null = none).
+ */
+const EXPECTED_BOOKABLE: Record<string, { mode: SessionBookingMode; cap: number | null }[]> = {
+  downtown: [
+    { mode: "INSTANT", cap: 3 },
+    { mode: "INSTANT", cap: null },
+  ],
+  nasrcity: [{ mode: "APPROVAL", cap: null }],
+};
 
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((value, i) => value === b[i]);
 
@@ -461,8 +477,83 @@ async function main() {
   );
   check("The doc never prints the password", !/SEED_PASSWORD\s*=\s*\S/.test(doc));
 
-  // ── 6. Counts ────────────────────────────────────────────────────────
-  console.log("\n6. Entity counts");
+  // ── 6. Catalog shape and the bookable classes (U3) ──────────────────
+  console.log("\n6. Catalog: each subject once, linked to its grades (U3); the bookable classes");
+  const nameKey = (column: string) => `lower(regexp_replace(btrim(${column}), '\\s+', ' ', 'g'))`;
+  check(
+    "No two subjects share an English name (case-insensitive, across the catalog)",
+    (await count(`SELECT COUNT(*)::int AS n FROM (SELECT ${nameKey('"nameEn"')} FROM "CatalogSubject" GROUP BY 1 HAVING COUNT(*) > 1) d`)) === 0,
+  );
+  check(
+    "No two subjects share an Arabic name (across the catalog)",
+    (await count(`SELECT COUNT(*)::int AS n FROM (SELECT ${nameKey('"nameAr"')} FROM "CatalogSubject" GROUP BY 1 HAVING COUNT(*) > 1) d`)) === 0,
+  );
+  for (const [subjectEn, links] of Object.entries(seedSubjectLinkCounts())) {
+    const rows = await prisma.catalogSubject.findMany({
+      where: { nameEn: subjectEn },
+      select: { _count: { select: { gradeLinks: true } } },
+    });
+    check(
+      `${subjectEn}: one subject row, linked to ${links} grades`,
+      rows.length === 1 && rows[0]._count.gradeLinks === links,
+      `${rows.length} row(s)${rows[0] ? `, ${rows[0]._count.gradeLinks} link(s)` : ""}`,
+    );
+  }
+  const unlinkedPairs = `NOT EXISTS (SELECT 1 FROM "CatalogSubjectGrade" l WHERE l."subjectId" = x."subjectId" AND l."gradeId" = x."gradeId")`;
+  check(
+    "Every class with a subject has a grade, and the pair is linked: 0 unlinked",
+    (await count(`SELECT COUNT(*)::int AS n FROM "ClassGroup" x WHERE x."subjectId" IS NOT NULL AND (x."gradeId" IS NULL OR ${unlinkedPairs})`)) === 0,
+  );
+  check(
+    "Every one-time session with a subject and a grade names a linked pair: 0 unlinked",
+    (await count(`SELECT COUNT(*)::int AS n FROM "Session" x WHERE x."classGroupId" IS NULL AND x."subjectId" IS NOT NULL AND x."gradeId" IS NOT NULL AND ${unlinkedPairs}`)) === 0,
+  );
+
+  const today = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+  const inTwoWeeks = new Date(today.getTime() + 14 * 86_400_000);
+  for (const [branchKey, expected] of Object.entries(EXPECTED_BOOKABLE)) {
+    const branch = BRANCHES.find((row) => row.key === branchKey);
+    const center = centers.find((row) => row.name === branch?.name);
+    check(`${branchKey}: the branch exists`, Boolean(center));
+    if (!center) continue;
+    const bookable = await prisma.classGroup.findMany({
+      where: { centerId: center.id, active: true, sessionBookingMode: { not: "OFF" } },
+      include: {
+        room: { select: { capacity: true } },
+        extraRooms: { select: { room: { select: { capacity: true } } } },
+        _count: { select: { enrollments: { where: { status: "ACTIVE" } } } },
+      },
+    });
+    const shape = (rows: { mode: SessionBookingMode; cap: number | null }[]) =>
+      rows.map((row) => `${row.mode}/${row.cap ?? "none"}`).sort().join(", ");
+    const found = bookable.map((row) => ({ mode: row.sessionBookingMode, cap: row.maxBookingSeats }));
+    check(
+      `${branchKey}: bookable classes are ${shape(expected)}`,
+      shape(found) === shape(expected),
+      shape(found) || "none",
+    );
+    for (const row of bookable) {
+      const upcoming = await prisma.session.count({
+        where: {
+          classGroupId: row.id,
+          status: "SCHEDULED",
+          rescheduledToId: null,
+          date: { gte: today, lt: inTwoWeeks },
+        },
+      });
+      const capacities = [row.room?.capacity ?? 0, ...row.extraRooms.map((extra) => extra.room.capacity)];
+      const seats = capacities.includes(0) ? 0 : capacities.reduce((sum, value) => sum + value, 0);
+      const enrolled = row._count.enrollments;
+      check(
+        `${branchKey} ${row.sessionBookingMode}/${row.maxBookingSeats ?? "none"}: sessions in the coming two weeks, seats partly used`,
+        upcoming > 0 && enrolled > 0 && (seats === 0 || enrolled < seats) && row.acceptsNewStudents,
+        `upcoming=${upcoming}, enrolled=${enrolled}, seats=${seats || "unlimited"}, accepts=${row.acceptsNewStudents}`,
+      );
+    }
+  }
+
+  // ── 7. Counts ────────────────────────────────────────────────────────
+  console.log("\n7. Entity counts");
   const counts: [string, number][] = [
     ["Organizations", await prisma.organization.count()],
     ["Centres", await prisma.center.count()],
@@ -475,6 +566,7 @@ async function main() {
     ["Catalog education systems", await prisma.catalogEducationSystem.count()],
     ["  grades", await prisma.catalogGrade.count()],
     ["  subjects", await prisma.catalogSubject.count()],
+    ["  subject–grade links", await prisma.catalogSubjectGrade.count()],
     ["Rooms", await prisma.room.count()],
     ["Room links", await prisma.roomLink.count()],
     ["Terms", await prisma.centerTerm.count()],

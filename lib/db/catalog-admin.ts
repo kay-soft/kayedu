@@ -27,12 +27,16 @@ import { writeAuditRow } from "./audit-row.ts";
  * Rules (docs/00 §5.1 "Global academic catalog"):
  * - both `nameAr` and `nameEn` are required, trimmed, 1..80 characters;
  * - a name may not repeat — compared case-insensitively, for `nameEn` and
- *   `nameAr` each — among the entries of the **same parent** (all systems;
- *   the grades of one system, or the parentless grades; the subjects of one
- *   grade, or the parentless subjects), deactivated entries included;
+ *   `nameAr` each — among: all education systems; the grades of one system
+ *   (or the systemless grades); and, since U3, **all subjects** (a subject
+ *   exists once), deactivated entries included;
+ * - a subject links to zero or more grades (`CatalogSubjectGrade`, any
+ *   system). Removing a link is refused while an **active** class anywhere
+ *   uses that (grade, subject) pair, with the count;
  * - delete is a hard delete **only** if nothing references the row; otherwise
- *   it is refused with the counts, and Deactivate is the way out. Deactivated
- *   entries vanish from every picker but still resolve in history.
+ *   it is refused with the counts, and Deactivate is the way out. A subject's
+ *   own grade links never block its delete; a grade's subject links do.
+ *   Deactivated entries vanish from every picker but still resolve in history.
  */
 
 type Kind = CatalogEntryKind;
@@ -47,6 +51,8 @@ export type CatalogWriteError =
   | "duplicateNameAr"
   | "duplicateNameEn"
   | "parentNotFound"
+  | "gradeNotFound"
+  | "linkInUse"
   | "invalidShare"
   | "alreadyInState"
   | "inUse";
@@ -60,15 +66,21 @@ export type CatalogUsage = {
   students: number;
   /** One-time sessions that name it (grades and subjects). */
   sessions: number;
-  /** Child entries: a system's grades, a grade's subjects. */
+  /** Child entries: a system's grades; a grade's subject links (U3). */
   children: number;
 };
+
+/** A grade link an edit tried to remove while active classes still use the pair (U3). */
+export type CatalogLinkInUse = { gradeId: string; classes: number };
 
 export type CatalogEntrySnapshot = {
   kind: Kind;
   nameAr: string;
   nameEn: string;
+  /** A grade's education system; null for a system and (since U3) a subject. */
   parentId: string | null;
+  /** A subject's linked grades, sorted (U3); null for a system or a grade. */
+  gradeIds: string[] | null;
   /** Piastres — education systems only; null elsewhere. */
   defaultFixedCenterShare: number | null;
   active: boolean;
@@ -77,15 +89,17 @@ export type CatalogEntrySnapshot = {
 export type CatalogEntryInput = {
   nameAr: string;
   nameEn: string;
-  /** A grade's education system / a subject's grade. Optional (null = none); ignored for an education system. */
+  /** A grade's education system. Optional (null = none); ignored for a system and a subject. */
   parentId?: string | null;
+  /** A subject's grades (U3) — the complete set after the write; ignored for a system and a grade. */
+  gradeIds?: string[];
   /** Piastres. Education systems only; ignored elsewhere. */
   defaultFixedCenterShare?: number;
 };
 
 export type CatalogWriteResult =
   | { ok: true; id: string; before: CatalogEntrySnapshot | null; after: CatalogEntrySnapshot }
-  | { ok: false; error: CatalogWriteError; usage?: CatalogUsage };
+  | { ok: false; error: CatalogWriteError; usage?: CatalogUsage; linksInUse?: CatalogLinkInUse[] };
 
 export type CatalogDeleteResult =
   | { ok: true; before: CatalogEntrySnapshot }
@@ -122,6 +136,7 @@ async function loadEntry(
           nameAr: row.nameAr,
           nameEn: row.nameEn,
           parentId: null,
+          gradeIds: null,
           defaultFixedCenterShare: row.defaultFixedCenterShare,
           active: row.active,
         }
@@ -135,18 +150,23 @@ async function loadEntry(
           nameAr: row.nameAr,
           nameEn: row.nameEn,
           parentId: row.educationSystemId,
+          gradeIds: null,
           defaultFixedCenterShare: null,
           active: row.active,
         }
       : null;
   }
-  const row = await tx.catalogSubject.findUnique({ where: { id } });
+  const row = await tx.catalogSubject.findUnique({
+    where: { id },
+    include: { gradeLinks: { select: { gradeId: true } } },
+  });
   return row
     ? {
         kind,
         nameAr: row.nameAr,
         nameEn: row.nameEn,
-        parentId: row.gradeId,
+        parentId: null,
+        gradeIds: row.gradeLinks.map((link) => link.gradeId).sort(),
         defaultFixedCenterShare: null,
         active: row.active,
       }
@@ -179,10 +199,11 @@ export async function catalogEntryUsage(
         db.gradePromotionBatch.count({ where: { OR: [{ fromGradeId: id }, { toGradeId: id }] } }),
       ]).then((counts) => counts.reduce((sum, count) => sum + count, 0)),
       db.session.count({ where: { gradeId: id } }),
-      db.catalogSubject.count({ where: { gradeId: id } }),
+      db.catalogSubjectGrade.count({ where: { gradeId: id } }),
     ]);
     return { centres, classes, students, sessions, children };
   }
+  // A subject's own grade links never block its delete (they go with it).
   const [centres, classes, sessions] = await Promise.all([
     db.centerCatalogSelection.count({ where: { subjectId: id } }),
     db.classGroup.count({ where: { subjectId: id } }),
@@ -203,6 +224,8 @@ type CheckedInput = {
   nameAr: string;
   nameEn: string;
   parentId: string | null;
+  /** Subjects only: the de-duplicated, existing grade ids. */
+  gradeIds: string[];
   defaultFixedCenterShare: number | null;
 };
 
@@ -220,13 +243,21 @@ async function checkInput(
   if (nameEn.length > CATALOG_NAME_MAX) return { ok: false, error: "nameEnTooLong" };
 
   let parentId: string | null = null;
-  if (kind !== "EDUCATION_SYSTEM" && input.parentId) {
-    const parent =
-      kind === "GRADE"
-        ? await tx.catalogEducationSystem.findUnique({ where: { id: input.parentId }, select: { id: true } })
-        : await tx.catalogGrade.findUnique({ where: { id: input.parentId }, select: { id: true } });
+  if (kind === "GRADE" && input.parentId) {
+    const parent = await tx.catalogEducationSystem.findUnique({ where: { id: input.parentId }, select: { id: true } });
     if (!parent) return { ok: false, error: "parentNotFound" };
     parentId = parent.id;
+  }
+
+  // U3: a subject's grades, any system. Every id must exist (a deactivated
+  // grade may stay linked — history — but the form only offers active ones).
+  let gradeIds: string[] = [];
+  if (kind === "SUBJECT") {
+    gradeIds = [...new Set(input.gradeIds ?? [])].sort();
+    if (gradeIds.length > 0) {
+      const found = await tx.catalogGrade.count({ where: { id: { in: gradeIds } } });
+      if (found !== gradeIds.length) return { ok: false, error: "gradeNotFound" };
+    }
   }
 
   let share: number | null = null;
@@ -237,8 +268,9 @@ async function checkInput(
     }
   }
 
-  // Duplicate refusal — among this parent's entries (deactivated ones too),
-  // compared through the one name normalizer, English and Arabic each.
+  // Duplicate refusal — among this parent's entries (for a subject, since U3,
+  // among ALL subjects), deactivated ones too, compared through the one name
+  // normalizer, English and Arabic each.
   const siblings: { id: string; nameAr: string; nameEn: string }[] =
     kind === "EDUCATION_SYSTEM"
       ? await tx.catalogEducationSystem.findMany({ select: { id: true, nameAr: true, nameEn: true } })
@@ -247,10 +279,7 @@ async function checkInput(
             where: { educationSystemId: parentId },
             select: { id: true, nameAr: true, nameEn: true },
           })
-        : await tx.catalogSubject.findMany({
-            where: { gradeId: parentId },
-            select: { id: true, nameAr: true, nameEn: true },
-          });
+        : await tx.catalogSubject.findMany({ select: { id: true, nameAr: true, nameEn: true } });
   const others = siblings.filter((row) => row.id !== selfId);
   if (others.some((row) => catalogNameKey(row.nameEn) === catalogNameKey(nameEn))) {
     return { ok: false, error: "duplicateNameEn" };
@@ -259,7 +288,7 @@ async function checkInput(
     return { ok: false, error: "duplicateNameAr" };
   }
 
-  return { ok: true, value: { nameAr, nameEn, parentId, defaultFixedCenterShare: share } };
+  return { ok: true, value: { nameAr, nameEn, parentId, gradeIds, defaultFixedCenterShare: share } };
 }
 
 async function audit(
@@ -295,7 +324,7 @@ export async function createCatalogEntry(
   return db.$transaction(async (tx): Promise<CatalogWriteResult> => {
     const checked = await checkInput(tx, kind, input, null);
     if (!checked.ok) return checked;
-    const { nameAr, nameEn, parentId, defaultFixedCenterShare } = checked.value;
+    const { nameAr, nameEn, parentId, gradeIds, defaultFixedCenterShare } = checked.value;
 
     let id: string;
     if (kind === "EDUCATION_SYSTEM") {
@@ -307,7 +336,12 @@ export async function createCatalogEntry(
     } else if (kind === "GRADE") {
       id = (await tx.catalogGrade.create({ data: { nameAr, nameEn, educationSystemId: parentId } })).id;
     } else {
-      id = (await tx.catalogSubject.create({ data: { nameAr, nameEn, gradeId: parentId } })).id;
+      // U3: the deprecated `gradeId` column is never written.
+      id = (
+        await tx.catalogSubject.create({
+          data: { nameAr, nameEn, gradeLinks: { create: gradeIds.map((gradeId) => ({ gradeId })) } },
+        })
+      ).id;
     }
 
     const after = (await loadEntry(tx, kind, id))!;
@@ -331,7 +365,15 @@ export async function updateCatalogEntry(
 
     const checked = await checkInput(tx, kind, input, id);
     if (!checked.ok) return checked;
-    const { nameAr, nameEn, parentId, defaultFixedCenterShare } = checked.value;
+    const { nameAr, nameEn, parentId, gradeIds, defaultFixedCenterShare } = checked.value;
+
+    if (kind === "SUBJECT") {
+      // A link may go only while no ACTIVE class anywhere teaches the pair
+      // (U3) — refused with the count per grade, nothing written.
+      const removed = (before.gradeIds ?? []).filter((gradeId) => !gradeIds.includes(gradeId));
+      const linksInUse = await activeClassesUsingPairs(tx, id, removed);
+      if (linksInUse.length > 0) return { ok: false, error: "linkInUse", linksInUse };
+    }
 
     if (kind === "EDUCATION_SYSTEM") {
       await tx.catalogEducationSystem.update({
@@ -341,13 +383,38 @@ export async function updateCatalogEntry(
     } else if (kind === "GRADE") {
       await tx.catalogGrade.update({ where: { id }, data: { nameAr, nameEn, educationSystemId: parentId } });
     } else {
-      await tx.catalogSubject.update({ where: { id }, data: { nameAr, nameEn, gradeId: parentId } });
+      await tx.catalogSubject.update({ where: { id }, data: { nameAr, nameEn } });
+      await tx.catalogSubjectGrade.deleteMany({ where: { subjectId: id, gradeId: { notIn: gradeIds } } });
+      await tx.catalogSubjectGrade.createMany({
+        data: gradeIds.map((gradeId) => ({ subjectId: id, gradeId })),
+        skipDuplicates: true,
+      });
     }
 
     const after = (await loadEntry(tx, kind, id))!;
     await audit(tx, actorUserId, "update", kind, id, before, after);
     return { ok: true, id, before, after };
   });
+}
+
+/**
+ * How many ACTIVE classes, in any centre, teach each (grade, `subjectId`) pair
+ * among `gradeIds` — the pairs a subject edit would unlink (U3). Platform-wide
+ * by design: a catalog link is global, so is what depends on it. Only the
+ * pairs still in use come back.
+ */
+async function activeClassesUsingPairs(
+  tx: Prisma.TransactionClient,
+  subjectId: string,
+  gradeIds: string[],
+): Promise<CatalogLinkInUse[]> {
+  if (gradeIds.length === 0) return [];
+  const rows = await tx.classGroup.groupBy({
+    by: ["gradeId"],
+    where: { subjectId, gradeId: { in: gradeIds }, active: true },
+    _count: { _all: true },
+  });
+  return rows.flatMap((row) => (row.gradeId ? [{ gradeId: row.gradeId, classes: row._count._all }] : []));
 }
 
 /** Deactivate / reactivate. Never touches names or references — history keeps resolving. */
@@ -418,9 +485,12 @@ export type CatalogAdminRow = {
   nameAr: string;
   nameEn: string;
   active: boolean;
+  /** A grade's education system; null for a system and a subject. */
   parentId: string | null;
   parentNameAr: string | null;
   parentNameEn: string | null;
+  /** A subject's linked grades (U3); empty for a system or a grade. */
+  gradeIds: string[];
   /** Piastres; education systems only. */
   defaultFixedCenterShare: number | null;
   usage: CatalogUsage;
@@ -451,6 +521,7 @@ export async function listCatalogAdminRows(
       parentId: null,
       parentNameAr: null,
       parentNameEn: null,
+      gradeIds: [],
       defaultFixedCenterShare: row.defaultFixedCenterShare,
       usage: {
         ...NO_USAGE,
@@ -473,7 +544,7 @@ export async function listCatalogAdminRows(
             promotionsFrom: true,
             promotionsTo: true,
             sessions: true,
-            subjects: true,
+            subjectLinks: true,
           },
         },
       },
@@ -488,19 +559,20 @@ export async function listCatalogAdminRows(
       parentId: row.educationSystemId,
       parentNameAr: row.educationSystem?.nameAr ?? null,
       parentNameEn: row.educationSystem?.nameEn ?? null,
+      gradeIds: [],
       defaultFixedCenterShare: null,
       usage: {
         centres: row._count.selections,
         classes: row._count.classGroups,
         students: row._count.studentProfiles + row._count.accountUsers + row._count.promotionsFrom + row._count.promotionsTo,
         sessions: row._count.sessions,
-        children: row._count.subjects,
+        children: row._count.subjectLinks,
       },
     }));
   }
   const rows = await db.catalogSubject.findMany({
     include: {
-      grade: { select: { nameAr: true, nameEn: true } },
+      gradeLinks: { select: { gradeId: true } },
       _count: { select: { selections: true, classGroups: true, sessions: true } },
     },
     orderBy: [{ active: "desc" }, { nameEn: "asc" }],
@@ -511,9 +583,10 @@ export async function listCatalogAdminRows(
     nameAr: row.nameAr,
     nameEn: row.nameEn,
     active: row.active,
-    parentId: row.gradeId,
-    parentNameAr: row.grade?.nameAr ?? null,
-    parentNameEn: row.grade?.nameEn ?? null,
+    parentId: null,
+    parentNameAr: null,
+    parentNameEn: null,
+    gradeIds: row.gradeLinks.map((link) => link.gradeId),
     defaultFixedCenterShare: null,
     usage: {
       ...NO_USAGE,

@@ -318,6 +318,16 @@
 
 ---
 
+## 32. Drop `CatalogSubject.gradeId` after the pilot
+
+**What it is.** A migration that drops the deprecated `CatalogSubject.gradeId` column (U3) — the subject's old single parent grade.
+
+**Why deferred.** U3 made a subject grade-independent (links live in `CatalogSubjectGrade`) and its migration was expand-only, so the build deployed before U3 kept working on the migrated database until the new code shipped. Nothing reads or writes the column since U3, and its FK and index are already gone; dropping it is the one step that is not backward-compatible, so it waits until no build that reads it can be running and nobody needs the old values to look back at.
+
+**Depends on.** The pilot (M20 → first centre live) on the U3 build; a backup taken before the drop (M20's tested restore). Remove the column and its schema comment in the same change.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

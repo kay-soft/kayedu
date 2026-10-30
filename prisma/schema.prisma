@@ -608,7 +608,9 @@ model CatalogGrade {
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
 
-  subjects        CatalogSubject[]
+  // U3 — the subjects taught in this grade (a subject exists once and links
+  // to every grade that teaches it, across any education system).
+  subjectLinks    CatalogSubjectGrade[]
   selections      CenterCatalogSelection[]
   classGroups     ClassGroup[]
   studentProfiles StudentProfile[]
@@ -622,20 +624,43 @@ model CatalogGrade {
   @@index([educationSystemId])
 }
 
+// U3 — a subject exists ONCE, grade-independent: its names are unique across
+// the whole catalog (case-insensitive, English and Arabic each), and it links
+// to the grades that teach it through CatalogSubjectGrade (any education
+// system). A (grade, subject) pair is offered at a centre when the grade and
+// the subject are both picked and active there and the pair is linked
+// (lib/db/catalog.ts `isPairOffered`).
 model CatalogSubject {
-  id        String        @id @default(uuid())
+  id        String   @id @default(uuid())
   nameAr    String
   nameEn    String
+  // DEPRECATED (U3) — the subject's old single parent grade. Kept, nullable and
+  // unread, only so the code deployed before U3 keeps working until the new
+  // code ships (expand-only); no FK, no index, never written. Dropped after the
+  // pilot — docs/05-phase-2-backlog.md "Drop CatalogSubject.gradeId".
   gradeId   String?
-  grade     CatalogGrade? @relation(fields: [gradeId], references: [id])
-  active    Boolean       @default(true)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  gradeLinks  CatalogSubjectGrade[]
   selections  CenterCatalogSelection[]
   classGroups ClassGroup[]
   sessions    Session[] // R5 — one-time sessions
+}
 
+/// U3 — "this subject is taught in this grade". Platform-owned like the rest of
+/// the catalog (no centerId); written only by lib/db/catalog-admin.ts. Removing
+/// a link is refused while an active class anywhere uses the pair; deleting a
+/// subject takes its links with it; a grade with links cannot be deleted.
+model CatalogSubjectGrade {
+  subjectId String
+  subject   CatalogSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  gradeId   String
+  grade     CatalogGrade   @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  createdAt DateTime       @default(now())
+
+  @@id([subjectId, gradeId])
   @@index([gradeId])
 }
 

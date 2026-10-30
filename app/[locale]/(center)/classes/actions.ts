@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { PICK_BRANCH, isPickBranch, requireBranchScope, type PickBranch } from "@/lib/auth/branch-scope";
 import { ctxCan, getTenantContext, type TenantContext } from "@/lib/auth/tenant";
 import { writeAuditLog } from "@/lib/db/audit";
+import { isPairOffered } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import {
   createClassWithNewTeacher,
@@ -288,7 +289,21 @@ async function resolveClassRefs(
   if (!subject.ok) return { ok: false, fieldErrors: { subjectId: "notFound" } };
   if (!grade.ok) return { ok: false, fieldErrors: { gradeId: "notFound" } };
   if (!educationSystem.ok) return { ok: false, fieldErrors: { educationSystemId: "notFound" } };
+  if (!(await pairAllowed(scope, grade.id, subject.id))) {
+    return { ok: false, fieldErrors: { subjectId: "subjectNotInGrade" } };
+  }
   return { ok: true, subjectId: subject.id, gradeId: grade.id, educationSystemId: educationSystem.id };
+}
+
+/**
+ * U3 — a class's (grade, subject) pair must be offered here: both picked and
+ * active, and linked in the catalog (`isPairOffered`). Checked on create and
+ * whenever an edit changes the pair; a pair with no grade or no subject has
+ * nothing to check.
+ */
+async function pairAllowed(scope: Scope, gradeId: string | null, subjectId: string | null): Promise<boolean> {
+  if (!gradeId || !subjectId) return true;
+  return isPairOffered(prisma, scope.ctx.center.id, gradeId, subjectId);
 }
 
 export async function createClassAction(
@@ -513,6 +528,11 @@ export async function updateClassAction(
   if (!grade.ok) return { fieldErrors: { gradeId: "notFound" } };
   if (!educationSystem.ok) {
     return { fieldErrors: { educationSystemId: "notFound" } };
+  }
+  // U3: an unchanged pair saves as it is, even if no longer offered.
+  const pairChanged = subject.id !== existing.subjectId || grade.id !== existing.gradeId;
+  if (pairChanged && !(await pairAllowed(scope, grade.id, subject.id))) {
+    return { fieldErrors: { subjectId: "subjectNotInGrade" } };
   }
   // R4: changing the period, teacher or room set resyncs the class's future
   // sessions in the same transaction (resolves OD-9) — pristine ones follow

@@ -918,7 +918,8 @@
       "fixedAbovePrice": "A fixed centre cut can't be more than the price — lower the cut or raise the price.",
       "invalidBookingMode": "Choose how single sessions can be booked.",
       "invalidBookingSeats": "Enter a whole number from 1 to 1000, or leave it empty.",
-      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet. Choose a bigger room, or wait until that session has passed."
+      "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet. Choose a bigger room, or wait until that session has passed.",
+      "subjectNotInGrade": "This subject isn’t offered for that grade here. Pick a subject listed under the grade."
     },
     "emptyHint": "A class pairs a teacher, a subject, a period and a weekly schedule. Add the first one and its sessions are created for the whole period.",
     "noMatchesHint": "Clear a filter to see the rest of this branch's classes.",
@@ -1218,7 +1219,8 @@
       "hasPayments": "This session still has payments. Void or refund them first, each with its reason, then cancel or reschedule.",
       "fixedAbovePrice": "A fixed centre cut can't be more than the price — the teacher would get nothing.",
       "zeroPriceNeedsConfirmation": "This session is free (0 EGP). Tick the box to confirm that is intended.",
-      "duplicateSlotCancelled": "This class has a cancelled session at that exact date and time. A cancelled session can't be brought back — pick another time."
+      "duplicateSlotCancelled": "This class has a cancelled session at that exact date and time. A cancelled session can't be brought back — pick another time.",
+      "subjectNotInGrade": "This subject isn’t offered for that grade here. Pick a subject listed under the grade."
     },
     "emptyHint": "Sessions come from each class's weekly schedule and period. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
@@ -1871,8 +1873,10 @@
       },
       "subjects": {
         "title": "Subjects",
-        "description": "What is taught, per grade.",
-        "empty": "No subjects picked yet."
+        "description": "What is taught. Each subject appears once, with the grades of this branch it covers.",
+        "empty": "No subjects picked yet.",
+        "covers": "Covers {grades}",
+        "coversNone": "None of this branch’s grades"
       }
     },
     "rooms": {
@@ -2353,7 +2357,8 @@
       "invalidTimeRange": "The end time must be after the start time.",
       "invalidNumber": "Enter a whole number.",
       "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here.",
-      "notFound": "That option is no longer available."
+      "notFound": "That option is no longer available.",
+      "subjectNotInGrade": "This subject isn’t taught in that grade. Pick a subject listed under the grade."
     },
     "emptyHint": "Classes a branch assigns to you appear here. You can also request a new one below."
   },
@@ -2429,7 +2434,8 @@
       "invalidDay": "Choose a day of the week.",
       "invalidTime": "Enter a valid time.",
       "invalidTimeRange": "The end time must be after the start time.",
-      "invalidNumber": "Enter a whole number."
+      "invalidNumber": "Enter a whole number.",
+      "subjectNotInGrade": "This subject isn’t taught in that grade. Pick a subject listed under the grade."
     },
     "emptyHint": "No branch on the platform is open to new teachers right now."
   },
@@ -2735,7 +2741,7 @@
       },
       "subject": {
         "title": "Subjects",
-        "description": "What is taught, optionally under a grade.",
+        "description": "What is taught. Each subject exists once and is linked to every grade that teaches it, in any education system.",
         "empty": "No subjects yet."
       }
     },
@@ -2761,14 +2767,14 @@
     "emptyHint": "Anything you add here becomes available for every branch to pick.",
     "defaultShareValue": "Default branch cut {amount}",
     "noEducationSystem": "No education system",
-    "noGrade": "No grade",
     "usage": {
       "summary": "{centres, plural, =0 {Not picked by any branch} one {Picked by # branch} other {Picked by # branches}} · {classes, plural, =0 {no classes} one {# class} other {# classes}}",
       "centres": "{count, plural, =0 {} one {# branch} other {# branches}}",
       "classes": "{count, plural, =0 {} one {# class} other {# classes}}",
       "students": "{count, plural, =0 {} one {# student} other {# students}}",
       "sessions": "{count, plural, =0 {} one {# one-time session} other {# one-time sessions}}",
-      "children": "{count, plural, =0 {} one {# child entry} other {# child entries}}"
+      "children": "{count, plural, =0 {} one {# child entry} other {# child entries}}",
+      "linkedSubjects": "{count, plural, =0 {} one {# linked subject} other {# linked subjects}}"
     },
     "dialog": {
       "description": "Both names are required; branches see the one that matches their language.",
@@ -2788,10 +2794,10 @@
       "nameAr": "Arabic name",
       "educationSystem": "Education system",
       "educationSystemHint": "Leave empty for a grade that belongs to no system.",
-      "grade": "Grade",
-      "gradeHint": "Leave empty for a subject that belongs to no grade.",
       "defaultShare": "Default centre cut (EGP)",
-      "defaultShareHint": "The amount a new class starts from when its cut is a fixed amount. It is a starting point only: changing it never moves an existing class or a recorded payment."
+      "defaultShareHint": "The amount a new class starts from when its cut is a fixed amount. It is a starting point only: changing it never moves an existing class or a recorded payment.",
+      "grades": "Grades",
+      "gradesHint": "Tick every grade that teaches this subject. A grade still taught by an active class can’t be unticked."
     },
     "placeholders": {
       "educationSystem": {
@@ -2816,12 +2822,19 @@
       "nameArRequired": "Enter the Arabic name.",
       "nameEnTooLong": "The English name is too long (80 characters at most).",
       "nameArTooLong": "The Arabic name is too long (80 characters at most).",
-      "duplicateNameEn": "Another entry in the same place already has this English name.",
-      "duplicateNameAr": "Another entry in the same place already has this Arabic name.",
+      "duplicateNameEn": "Another entry already has this English name (a subject: anywhere in the catalog; a system or grade: in the same place).",
+      "duplicateNameAr": "Another entry already has this Arabic name (a subject: anywhere in the catalog; a system or grade: in the same place).",
       "parentNotFound": "That parent no longer exists.",
       "invalidShare": "Enter a valid amount in EGP.",
-      "invalidAmount": "Enter a valid amount in EGP."
-    }
+      "invalidAmount": "Enter a valid amount in EGP.",
+      "linkInUse": "Nothing was saved. These grades are still taught by active classes, so they stay linked:",
+      "gradeNotFound": "One of the chosen grades no longer exists."
+    },
+    "gradeFilter": "Filter subjects by grade",
+    "allGrades": "All grades",
+    "noGrades": "Not linked to any grade yet",
+    "noGradesYet": "There are no grades in the catalog yet.",
+    "linkInUseRow": "{grade}: {count, plural, one {# active class} other {# active classes}}"
   },
   "AdminPlatform": {
     "title": "Platform",
@@ -3464,5 +3477,13 @@
       "see": "See upcoming sessions",
       "signIn": "Sign in to book a session"
     }
+  },
+  "CatalogPicker": {
+    "educationSystem": "Education system",
+    "grade": "Grade",
+    "subject": "Subject",
+    "anySystem": "Any system",
+    "chooseGradeFirst": "Choose a grade first.",
+    "noSubjectsForGrade": "No subject is offered for this grade here."
   }
 }

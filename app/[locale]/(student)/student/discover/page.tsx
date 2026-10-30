@@ -157,7 +157,7 @@ export default async function StudentDiscoverPage({
   }
 
   const subjectOptions = allSubjects
-    .map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject) }))
+    .map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject), gradeIds: subject.gradeIds }))
     .sort((a, b) => a.label.localeCompare(b.label));
   const gradeOptions = allGrades
     .map((grade) => ({ value: grade.id, label: catalogLabel(locale, grade) }))

@@ -32,6 +32,11 @@ import type { CatalogAdminActionState } from "@/app/[locale]/(admin)/admin/catal
  * data layer refuses them even on a direct call.
  */
 
+/** The form as an object, with a subject's repeated `gradeIds` kept as a list (U3). */
+function entryFields(formData: FormData) {
+  return { ...Object.fromEntries(formData), gradeIds: formData.getAll("gradeIds") };
+}
+
 function catalogPath(locale: string) {
   return `/${locale}${ROUTES.adminCatalog}`;
 }
@@ -51,6 +56,8 @@ function refusal(error: CatalogWriteError): CatalogAdminActionState {
       return { fieldErrors: { defaultFixedCenterShare: error } };
     case "parentNotFound":
       return { fieldErrors: { parentId: error } };
+    case "gradeNotFound":
+      return { fieldErrors: { gradeIds: error } };
     default:
       return { error };
   }
@@ -62,7 +69,7 @@ export async function createCatalogEntryAction(
 ): Promise<CatalogAdminActionState> {
   const admin = await requirePlatformAdmin();
 
-  const parsed = catalogEntryCreateSchema.safeParse(Object.fromEntries(formData));
+  const parsed = catalogEntryCreateSchema.safeParse(entryFields(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, kind, ...input } = parsed.data;
 
@@ -79,12 +86,16 @@ export async function updateCatalogEntryAction(
 ): Promise<CatalogAdminActionState> {
   const admin = await requirePlatformAdmin();
 
-  const parsed = catalogEntryUpdateSchema.safeParse(Object.fromEntries(formData));
+  const parsed = catalogEntryUpdateSchema.safeParse(entryFields(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const { locale, kind, id, ...input } = parsed.data;
 
   const result = await updateCatalogEntry(prisma, admin.id, kind, id, input);
-  if (!result.ok) return refusal(result.error);
+  if (!result.ok) {
+    return result.error === "linkInUse"
+      ? { error: "linkInUse", linksInUse: result.linksInUse }
+      : refusal(result.error);
+  }
 
   revalidatePath(catalogPath(locale));
   return { status: "saved" };

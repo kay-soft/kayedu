@@ -22,6 +22,7 @@ import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardAction,
@@ -33,7 +34,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { CATALOG_NAME_MAX, catalogLabel } from "@/lib/catalog";
-import type { CatalogAdminRow, CatalogUsage } from "@/lib/db/catalog-admin";
+import type { CatalogAdminRow, CatalogLinkInUse, CatalogUsage } from "@/lib/db/catalog-admin";
 import { piastresToInputValue } from "@/lib/money";
 import { foldPickerText } from "@/lib/picker-search";
 import { cn } from "@/lib/utils";
@@ -50,10 +51,20 @@ const KIND_KEY: Record<Kind, "educationSystem" | "grade" | "subject"> = {
   SUBJECT: "subject",
 };
 
+/** A grade's label with its education system, so two "Grade 1"s under different systems are distinct. */
+function gradeWithSystem(locale: string, grade: CatalogAdminRow): string {
+  const system =
+    grade.parentNameAr !== null && grade.parentNameEn !== null
+      ? catalogLabel(locale, { nameAr: grade.parentNameAr, nameEn: grade.parentNameEn })
+      : null;
+  return catalogLabel(locale, grade) + (system ? ` — ${system}` : "");
+}
+
 /**
  * The management surface behind `/admin/catalog` (R8): three kinds in tabs
  * (the lists are small and already loaded, so switching is instant), a
- * type-ahead search over both names and the parent, and the add-via-dialog
+ * type-ahead search over both names and the parent (a subject's grades, U3),
+ * a grade filter on the subject tab, and the add-via-dialog
  * pattern (docs/04 §5) with side-by-side English and Arabic fields.
  * Responsive per docs/04 §6: tabs are an equal-width three-up control, rows
  * are stacked cards below `md`, 44px targets, the dialog a full-screen sheet
@@ -72,6 +83,14 @@ export function CatalogManager({
   const tabLocale = useLocale();
   const [kind, setKind] = useState<Kind>("EDUCATION_SYSTEM");
   const [query, setQuery] = useState("");
+  // U3 — the subject tab narrows to one grade's subjects.
+  const [gradeFilter, setGradeFilter] = useState("");
+  const gradeById = new Map(grades.map((grade) => [grade.id, grade]));
+  const gradeNames = (row: CatalogAdminRow) =>
+    row.gradeIds.flatMap((id) => {
+      const grade = gradeById.get(id);
+      return grade ? [grade.nameEn, grade.nameAr] : [];
+    });
 
   const rowsByKind: Record<Kind, CatalogAdminRow[]> = {
     EDUCATION_SYSTEM: systems,
@@ -83,12 +102,15 @@ export function CatalogManager({
   // A short, client-side list: filtered on each render (the React compiler
   // memoises what is worth it).
   const words = foldPickerText(query).split(" ").filter(Boolean);
+  const inGrade = kind === "SUBJECT" && gradeFilter ? rows.filter((row) => row.gradeIds.includes(gradeFilter)) : rows;
   const visible =
     words.length === 0
-      ? rows
-      : rows.filter((row) => {
+      ? inGrade
+      : inGrade.filter((row) => {
           const haystack = foldPickerText(
-            [row.nameEn, row.nameAr, row.parentNameEn, row.parentNameAr].filter(Boolean).join(" "),
+            [row.nameEn, row.nameAr, row.parentNameEn, row.parentNameAr, ...gradeNames(row)]
+              .filter(Boolean)
+              .join(" "),
           );
           return words.every((word) => haystack.includes(word));
         });
@@ -111,6 +133,7 @@ export function CatalogManager({
               onClick={() => {
                 setKind(tabKind);
                 setQuery("");
+                setGradeFilter("");
               }}
               className={cn(
                 "focus-ring flex min-h-11 min-w-0 flex-col items-center justify-center rounded-lg px-2 py-1.5 text-sm font-medium transition-colors sm:flex-row sm:gap-2",
@@ -147,19 +170,36 @@ export function CatalogManager({
           </CardAction>
         </CardHeader>
         <CardContent id="catalog-panel" role="tabpanel" aria-labelledby={`catalog-tab-${kind}`} className="flex flex-col gap-4">
-          <div className="relative">
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 start-3 my-auto size-4 text-text-muted"
-            />
-            <Input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("searchPlaceholder")}
-              aria-label={t("search")}
-              className="ps-9"
-            />
+          <div className={cn("grid gap-3", kind === "SUBJECT" && "sm:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]")}>
+            <div className="relative">
+              <Search
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 start-3 my-auto size-4 text-text-muted"
+              />
+              <Input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("searchPlaceholder")}
+                aria-label={t("search")}
+                className="ps-9"
+              />
+            </div>
+            {kind === "SUBJECT" ? (
+              <Select
+                id="catalog-grade-filter"
+                aria-label={t("gradeFilter")}
+                value={gradeFilter}
+                onValueChange={setGradeFilter}
+              >
+                <option value="">{t("allGrades")}</option>
+                {grades.map((grade) => (
+                  <option key={grade.id} value={grade.id}>
+                    {gradeWithSystem(tabLocale, grade)}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
           </div>
 
           {rows.length === 0 ? (
@@ -181,15 +221,15 @@ export function CatalogManager({
 
 // ── One entry ───────────────────────────────────────────────────────────────
 
-/** The parts of a usage record worth naming — zero counts are left out. */
-function usageParts(usage: CatalogUsage, t: ReturnType<typeof useTranslations>): string[] {
+/** The parts of a usage record worth naming — zero counts are left out. A grade's children are its subject links (U3). */
+function usageParts(kind: Kind, usage: CatalogUsage, t: ReturnType<typeof useTranslations>): string[] {
   return (
     [
       ["centres", usage.centres],
       ["classes", usage.classes],
       ["students", usage.students],
       ["sessions", usage.sessions],
-      ["children", usage.children],
+      [kind === "GRADE" ? "linkedSubjects" : "children", usage.children],
     ] as const
   )
     .filter(([, count]) => count > 0)
@@ -228,6 +268,15 @@ function CatalogRow({
     row.parentNameAr !== null && row.parentNameEn !== null
       ? catalogLabel(locale, { nameAr: row.parentNameAr, nameEn: row.parentNameEn })
       : null;
+  // U3 — a subject's grades, as chips (each with its system).
+  const linkedGrades =
+    row.kind === "SUBJECT"
+      ? grades.filter((grade) => row.gradeIds.includes(grade.id)).map((grade) => ({
+          id: grade.id,
+          label: gradeWithSystem(locale, grade),
+          active: grade.active,
+        }))
+      : [];
   const meta = [
     parentLabel,
     row.defaultFixedCenterShare !== null
@@ -236,7 +285,7 @@ function CatalogRow({
     t("usage.summary", { centres: row.usage.centres, classes: row.usage.classes }),
   ].filter(Boolean);
 
-  const blockers = deleteState.error === "inUse" && deleteState.usage ? usageParts(deleteState.usage, t) : [];
+  const blockers = deleteState.error === "inUse" && deleteState.usage ? usageParts(row.kind, deleteState.usage, t) : [];
   const error = toggleState.error ?? (deleteState.error === "inUse" ? undefined : deleteState.error);
 
   return (
@@ -264,6 +313,19 @@ function CatalogRow({
             </p>
           </div>
           <p className="text-xs text-text-secondary sm:col-span-2">{meta.join(" · ")}</p>
+          {row.kind === "SUBJECT" ? (
+            <div className="flex flex-wrap gap-1.5 sm:col-span-2" aria-label={t("fields.grades")}>
+              {linkedGrades.length === 0 ? (
+                <span className="text-xs text-text-muted">{t("noGrades")}</span>
+              ) : (
+                linkedGrades.map((grade) => (
+                  <Badge key={grade.id} variant="neutral" className={cn(!grade.active && "opacity-60")}>
+                    {grade.active ? grade.label : `${grade.label} · ${t("inactive")}`}
+                  </Badge>
+                ))
+              )}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -401,29 +463,15 @@ function EntryDialog({
     if (state.status === "created" || state.status === "saved") onOpenChange(false);
   }, [state.status, onOpenChange]);
 
-  // A grade's parent is an education system; a subject's is a grade (labelled
-  // with its own system so two "Grade 1"s under different systems are distinct).
+  // A grade's parent is an education system. A subject has no parent since
+  // U3: it links to any number of grades (GradeLinksField below).
   const parentOptions =
     kind === "GRADE"
       ? systems.map((system) => ({
           value: system.id,
           label: catalogLabel(locale, system) + (system.active ? "" : ` · ${t("inactive")}`),
         }))
-      : kind === "SUBJECT"
-        ? grades.map((grade) => {
-            const system =
-              grade.parentNameAr !== null && grade.parentNameEn !== null
-                ? catalogLabel(locale, { nameAr: grade.parentNameAr, nameEn: grade.parentNameEn })
-                : null;
-            return {
-              value: grade.id,
-              label:
-                catalogLabel(locale, grade) +
-                (system ? ` — ${system}` : "") +
-                (grade.active ? "" : ` · ${t("inactive")}`),
-            };
-          })
-        : [];
+      : [];
 
   const idPrefix = `catalog-${mode}-${row?.id ?? kind}`;
   const fieldErrors = state.fieldErrors ?? {};
@@ -446,18 +494,22 @@ function EntryDialog({
         <input type="hidden" name="kind" value={kind} />
         {row ? <input type="hidden" name="id" value={row.id} /> : null}
 
-        {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
+        {state.error === "linkInUse" && state.linksInUse ? (
+          <LinksInUseMessage linksInUse={state.linksInUse} grades={grades} />
+        ) : state.error ? (
+          <FormMessage>{tErrors(state.error)}</FormMessage>
+        ) : null}
 
-        {kind !== "EDUCATION_SYSTEM" ? (
+        {kind === "GRADE" ? (
           <Field
             id={`${idPrefix}-parent`}
-            label={kind === "GRADE" ? t("fields.educationSystem") : t("fields.grade")}
-            hint={kind === "GRADE" ? t("fields.educationSystemHint") : t("fields.gradeHint")}
+            label={t("fields.educationSystem")}
+            hint={t("fields.educationSystemHint")}
             error={fieldError("parentId")}
             optional
           >
             <Select id={`${idPrefix}-parent`} name="parentId" defaultValue={row?.parentId ?? ""}>
-              <option value="">{kind === "GRADE" ? t("noEducationSystem") : t("noGrade")}</option>
+              <option value="">{t("noEducationSystem")}</option>
               {parentOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -496,6 +548,16 @@ function EntryDialog({
           </Field>
         </div>
 
+        {kind === "SUBJECT" ? (
+          <GradeLinksField
+            idPrefix={idPrefix}
+            systems={systems}
+            grades={grades}
+            defaultGradeIds={row?.gradeIds ?? []}
+            error={fieldError("gradeIds")}
+          />
+        ) : null}
+
         {kind === "EDUCATION_SYSTEM" ? (
           <Field
             id={`${idPrefix}-share`}
@@ -521,4 +583,105 @@ function EntryDialog({
       </div>
     </DialogShell>
   );
+}
+
+// ── A subject's grades (U3) ─────────────────────────────────────────────────
+
+/**
+ * The grades a subject is taught in: a checkbox list grouped by education
+ * system (then the systemless grades), posted as repeated `gradeIds` fields.
+ * Active grades are offered; a deactivated one shows only while it is
+ * already linked, so an edit never drops it silently.
+ */
+function GradeLinksField({
+  idPrefix,
+  systems,
+  grades,
+  defaultGradeIds,
+  error,
+}: {
+  idPrefix: string;
+  systems: CatalogAdminRow[];
+  grades: CatalogAdminRow[];
+  defaultGradeIds: string[];
+  error?: string;
+}) {
+  const t = useTranslations("AdminCatalog");
+  const locale = useLocale();
+  const [chosen, setChosen] = useState<string[]>(defaultGradeIds);
+
+  const offered = grades.filter((grade) => grade.active || defaultGradeIds.includes(grade.id));
+  const groups = [
+    ...systems.map((system) => ({
+      id: system.id,
+      label: catalogLabel(locale, system),
+      grades: offered.filter((grade) => grade.parentId === system.id),
+    })),
+    { id: "none", label: t("noEducationSystem"), grades: offered.filter((grade) => grade.parentId === null) },
+  ].filter((group) => group.grades.length > 0);
+
+  function toggle(gradeId: string, on: boolean) {
+    setChosen((current) => (on ? [...current, gradeId] : current.filter((id) => id !== gradeId)));
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-lg border border-border p-3">
+      <legend className="px-1 text-sm font-medium text-text-primary">{t("fields.grades")}</legend>
+      <p className="text-xs text-text-muted">{t("fields.gradesHint")}</p>
+      {chosen.map((gradeId) => (
+        <input key={gradeId} type="hidden" name="gradeIds" value={gradeId} />
+      ))}
+      {groups.length === 0 ? (
+        <p className="text-xs text-text-muted">{t("noGradesYet")}</p>
+      ) : (
+        groups.map((group) => (
+          <div key={group.id} className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-text-secondary">{group.label}</p>
+            <ul className="grid gap-x-3 sm:grid-cols-2">
+              {group.grades.map((grade) => (
+                <li key={grade.id}>
+                  <label
+                    htmlFor={`${idPrefix}-grade-${grade.id}`}
+                    className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-1 text-sm hover:bg-surface-hover"
+                  >
+                    <Checkbox
+                      id={`${idPrefix}-grade-${grade.id}`}
+                      checked={chosen.includes(grade.id)}
+                      onCheckedChange={(checked) => toggle(grade.id, checked === true)}
+                    />
+                    <span className="min-w-0 flex-1 text-text-primary">
+                      {catalogLabel(locale, grade)}
+                      {grade.active ? null : <span className="text-text-muted"> · {t("inactive")}</span>}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
+      {error ? <p className="text-xs text-danger-fg">{error}</p> : null}
+    </fieldset>
+  );
+}
+
+/** "Can't remove Grade 10 — 3 active classes teach it", one line per refused link (U3). */
+function LinksInUseMessage({
+  linksInUse,
+  grades,
+}: {
+  linksInUse: CatalogLinkInUse[];
+  grades: CatalogAdminRow[];
+}) {
+  const t = useTranslations("AdminCatalog");
+  const locale = useLocale();
+  const gradeById = new Map(grades.map((grade) => [grade.id, grade]));
+  const rows = linksInUse.map((link) => {
+    const grade = gradeById.get(link.gradeId);
+    return t("linkInUseRow", {
+      grade: grade ? gradeWithSystem(locale, grade) : link.gradeId,
+      count: link.classes,
+    });
+  });
+  return <FormMessage>{`${t("errors.linkInUse")} ${rows.join(" · ")}`}</FormMessage>;
 }

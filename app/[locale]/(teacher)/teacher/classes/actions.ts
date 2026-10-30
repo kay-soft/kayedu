@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, actionContext } from "@/lib/auth/tenant";
+import { isPairLinked } from "@/lib/db/catalog";
+import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
@@ -50,6 +52,10 @@ export async function createClassRequestAction(
     if (!grade || !grade.active || !grade.catalogActive) {
       return { fieldErrors: { gradeId: "notFound" } };
     }
+  }
+  // U3: both picked and active here (above), and linked in the catalog.
+  if (payload.subjectId && payload.gradeId && !(await isPairLinked(prisma, payload.gradeId, payload.subjectId))) {
+    return { fieldErrors: { subjectId: "subjectNotInGrade" } };
   }
 
   await db.changeRequests.create({

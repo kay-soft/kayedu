@@ -155,7 +155,7 @@ async function ClassesView({
   const pageEntries = classes.slice((page - 1) * EXPLORE_CLASS_PAGE_SIZE, page * EXPLORE_CLASS_PAGE_SIZE);
 
   const subjectOptions = options.subjects
-    .map((entry) => ({ value: entry.id, label: catalogLabel(locale, entry) }))
+    .map((entry) => ({ value: entry.id, label: catalogLabel(locale, entry), gradeIds: entry.gradeIds }))
     .sort((a, b) => a.label.localeCompare(b.label));
   const gradeOptions = options.grades
     .map((entry) => ({ value: entry.id, label: catalogLabel(locale, entry) }))

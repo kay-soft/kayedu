@@ -402,11 +402,23 @@ export async function publicTeacherAt(
 
 const CATALOG_OPTION_SELECT = { id: true, nameAr: true, nameEn: true } as const;
 
-/** The active global catalog, for the subject/grade filters (M13: one id means the same everywhere). */
+/**
+ * The active global catalog, for the grade → subject filters (M13: one id means
+ * the same everywhere). Each subject once, with the grades it links to (U3).
+ */
 export async function publicFilterOptions(db: Db) {
   const [subjects, grades] = await Promise.all([
-    db.catalogSubject.findMany({ where: { active: true }, select: CATALOG_OPTION_SELECT }),
+    db.catalogSubject.findMany({
+      where: { active: true },
+      select: { ...CATALOG_OPTION_SELECT, gradeLinks: { select: { gradeId: true } } },
+    }),
     db.catalogGrade.findMany({ where: { active: true }, select: CATALOG_OPTION_SELECT }),
   ]);
-  return { subjects, grades };
+  return {
+    subjects: subjects.map(({ gradeLinks, ...subject }) => ({
+      ...subject,
+      gradeIds: gradeLinks.map((link) => link.gradeId),
+    })),
+    grades,
+  };
 }

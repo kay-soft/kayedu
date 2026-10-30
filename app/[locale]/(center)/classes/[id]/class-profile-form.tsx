@@ -15,7 +15,6 @@ import {
   ClassFields,
   type ClassFieldsValues,
   type ClassPlacementInputs,
-  type SelectOption,
 } from "@/components/center/class-fields";
 import type { RoomOption } from "@/components/center/room-set-picker";
 import {
@@ -28,6 +27,7 @@ import { DialogLauncher, DialogShell } from "@/components/shared/dialog-shell";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { Button } from "@/components/ui/button";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 import type { RoomLinkPair } from "@/lib/rooms";
 import { IDLE_CLASS_STATE } from "@/lib/validation/classes";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
@@ -52,9 +52,8 @@ type EditClassProps = {
   classGroupId: string;
   values: ClassFieldsValues;
   teachers: TeacherOption[];
-  subjects: SelectOption[];
-  grades: SelectOption[];
-  educationSystems: SelectOption[];
+  /** The centre's offered systems → grades → subjects (U3). */
+  catalog: CatalogPickerData;
   educationSystemDefaultFixedShare: Record<string, number>;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
@@ -101,9 +100,7 @@ function EditClassDialogContent({
   classGroupId,
   values,
   teachers,
-  subjects,
-  grades,
-  educationSystems,
+  catalog,
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
@@ -257,9 +254,7 @@ function EditClassDialogContent({
         <ClassFields
           idPrefix={`class-${classGroupId}`}
           values={values}
-          subjects={subjects}
-          grades={grades}
-          educationSystems={educationSystems}
+          catalog={catalog}
           educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
           rooms={rooms}
           roomLinks={roomLinks}

@@ -45,11 +45,13 @@ import {
   centerGradeById,
   centerSubjects,
   findSelectionById,
+  isPairOffered,
   listCatalogEducationSystems,
   listCatalogGrades,
   listCatalogSubjects,
   removeCatalogSelection,
   selectCatalogEntry,
+  setCatalogSelectionActive,
   updateCatalogSelection,
 } from "../lib/db/catalog.ts";
 import {
@@ -69,6 +71,12 @@ import {
   listActivePaymentMethods,
 } from "../lib/db/payment-methods.ts";
 import { splitShare } from "../lib/money.ts";
+import {
+  buildCatalogPicker,
+  filterSubjectsForGrade,
+  gradesForSystem,
+  subjectsForGrade,
+} from "../lib/catalog-picker.ts";
 
 const prisma = await gatePrisma();
 
@@ -176,7 +184,11 @@ async function main() {
     },
   });
   const subject = await prisma.catalogSubject.create({
-    data: { nameAr: `${CATALOG_PREFIX} مادة`, nameEn: `${CATALOG_PREFIX} Subject`, gradeId: grade.id },
+    data: {
+      nameAr: `${CATALOG_PREFIX} مادة`,
+      nameEn: `${CATALOG_PREFIX} Subject`,
+      gradeLinks: { create: { gradeId: grade.id } }, // U3
+    },
   });
 
   const selectA = await selectCatalogEntry(prisma, centerA.id, "EDUCATION_SYSTEM", system.id, null, 12_000);
@@ -320,7 +332,7 @@ async function main() {
 
   // ── 6. R8: global writes are platform-admin only — by direct call ───────
   const spare = await prisma.catalogSubject.create({
-    data: { nameAr: "احتياطي", nameEn: `${CATALOG_PREFIX} Spare`, gradeId: grade.id },
+    data: { nameAr: "احتياطي", nameEn: `${CATALOG_PREFIX} Spare`, gradeLinks: { create: { gradeId: grade.id } } },
   });
 
   const actors: { label: string; id: string }[] = [];
@@ -392,12 +404,12 @@ async function main() {
       await createCatalogEntry(prisma, actor.id, "SUBJECT", {
         nameAr: "م",
         nameEn: `${CATALOG_PREFIX} Forbidden Subject`,
-        parentId: grade.id,
+        gradeIds: [grade.id],
       }),
       await updateCatalogEntry(prisma, actor.id, "SUBJECT", subject.id, {
         nameAr: "تغيير",
         nameEn: `${CATALOG_PREFIX} Hijacked`,
-        parentId: grade.id,
+        gradeIds: [],
       }),
       await updateCatalogEntry(prisma, actor.id, "EDUCATION_SYSTEM", system.id, {
         nameAr: system.nameAr,
@@ -428,6 +440,7 @@ async function main() {
     JSON.stringify(globalCountsBefore) === JSON.stringify(globalCountsAfter) &&
       subjectAfterRefusals?.nameEn === subject.nameEn &&
       subjectAfterRefusals.active &&
+      (await prisma.catalogSubjectGrade.count({ where: { subjectId: subject.id } })) === 1 &&
       gradeAfterRefusals?.active === true &&
       systemAfterRefusals?.defaultFixedCenterShare === 4_000 &&
       (await prisma.catalogSubject.findUnique({ where: { id: spare.id } })) !== null,
@@ -446,13 +459,19 @@ async function main() {
   const created = await createCatalogEntry(prisma, admin.id, "SUBJECT", {
     nameAr: "جبر",
     nameEn: `${CATALOG_PREFIX} Algebra`,
-    parentId: grade.id,
+    gradeIds: [grade.id],
   });
-  check("A platform admin can add a subject under a grade", created.ok, JSON.stringify(created));
-  const createdRow = created.ok ? await prisma.catalogSubject.findUnique({ where: { id: created.id } }) : null;
+  check("A platform admin can add a subject linked to a grade", created.ok, JSON.stringify(created));
+  const createdRow = created.ok
+    ? await prisma.catalogSubject.findUnique({ where: { id: created.id }, include: { gradeLinks: true } })
+    : null;
   check(
-    "…it is stored with both names under that grade",
-    createdRow?.nameAr === "جبر" && createdRow.nameEn === `${CATALOG_PREFIX} Algebra` && createdRow.gradeId === grade.id,
+    "…it is stored with both names and links to that grade through CatalogSubjectGrade (U3), never the deprecated gradeId",
+    createdRow?.nameAr === "جبر" &&
+      createdRow.nameEn === `${CATALOG_PREFIX} Algebra` &&
+      createdRow.gradeLinks.length === 1 &&
+      createdRow.gradeLinks[0].gradeId === grade.id &&
+      createdRow.gradeId === null,
   );
   const createdAudit = created.ok
     ? await prisma.auditLog.findFirst({ where: { action: "platform.catalog.create", entityId: created.id } })
@@ -485,7 +504,7 @@ async function main() {
     const edited = await updateCatalogEntry(prisma, admin.id, "SUBJECT", created.id, {
       nameAr: "جبر متقدم",
       nameEn: `${CATALOG_PREFIX} Advanced Algebra`,
-      parentId: grade.id,
+      gradeIds: [grade.id],
     });
     const editedAudit = await prisma.auditLog.findFirst({
       where: { action: "platform.catalog.update", entityId: created.id },
@@ -553,60 +572,60 @@ async function main() {
     await deleteCatalogEntry(prisma, admin.id, "SUBJECT", padded.id);
   }
 
-  // ── 8. Duplicates are refused case-insensitively within a parent ────────
+  // ── 8. Duplicates are refused case-insensitively — subjects across the whole
+  //       catalog (U3), systems among all systems, grades within a system ──
   const grade2 = await prisma.catalogGrade.create({
     data: { nameAr: "صف ٢", nameEn: `${CATALOG_PREFIX} Grade Two`, educationSystemId: system.id },
   });
   const dupBase = await createCatalogEntry(prisma, admin.id, "SUBJECT", {
     nameAr: "هندسة",
     nameEn: `${CATALOG_PREFIX} Geometry`,
-    parentId: grade.id,
+    gradeIds: [grade.id],
   });
   check("Fixture: a subject to collide with", dupBase.ok, JSON.stringify(dupBase));
   check(
-    "The same English name in another case and spacing under the same grade → duplicateNameEn",
+    "The same English name in another case and spacing → duplicateNameEn",
     refused(
       await createCatalogEntry(prisma, admin.id, "SUBJECT", {
         nameAr: "اسم مختلف",
         nameEn: `  ${CATALOG_PREFIX.toLowerCase()}   GEOMETRY `,
-        parentId: grade.id,
+        gradeIds: [grade.id],
       }),
       "duplicateNameEn",
     ),
   );
   check(
-    "The same Arabic name under the same grade (different English) → duplicateNameAr",
+    "The same Arabic name (different English) → duplicateNameAr",
     refused(
       await createCatalogEntry(prisma, admin.id, "SUBJECT", {
         nameAr: " هندسة ",
         nameEn: `${CATALOG_PREFIX} Geometry Two`,
-        parentId: grade.id,
+        gradeIds: [grade.id],
       }),
       "duplicateNameAr",
     ),
   );
-  const sameUnderOtherGrade = await createCatalogEntry(prisma, admin.id, "SUBJECT", {
-    nameAr: "هندسة",
-    nameEn: `${CATALOG_PREFIX} Geometry`,
-    parentId: grade2.id,
-  });
-  check("The same names under a different grade are allowed (the rule is per parent)", sameUnderOtherGrade.ok, JSON.stringify(sameUnderOtherGrade));
-  const parentless = await createCatalogEntry(prisma, admin.id, "SUBJECT", {
-    nameAr: "هندسة",
-    nameEn: `${CATALOG_PREFIX} Geometry`,
-    parentId: null,
-  });
-  check("…and with no grade at all", parentless.ok, JSON.stringify(parentless));
   check(
-    "…but a second parentless subject with those names is refused",
+    "U3: subject names are unique across the catalog — the same names linked to a different grade are refused",
     refused(
       await createCatalogEntry(prisma, admin.id, "SUBJECT", {
-        nameAr: "هندسة جديدة",
-        nameEn: `${CATALOG_PREFIX} geometry`,
-        parentId: null,
+        nameAr: "هندسة",
+        nameEn: `${CATALOG_PREFIX} Geometry`,
+        gradeIds: [grade2.id],
       }),
       "duplicateNameEn",
     ),
+  );
+  check(
+    "…and so are they with no grade at all (English or Arabic)",
+    refused(
+      await createCatalogEntry(prisma, admin.id, "SUBJECT", { nameAr: "هندسة جديدة", nameEn: `${CATALOG_PREFIX} geometry` }),
+      "duplicateNameEn",
+    ) &&
+      refused(
+        await createCatalogEntry(prisma, admin.id, "SUBJECT", { nameAr: "هندسة", nameEn: `${CATALOG_PREFIX} Geometry Three` }),
+        "duplicateNameAr",
+      ),
   );
   if (dupBase.ok) {
     check(
@@ -615,41 +634,93 @@ async function main() {
         await updateCatalogEntry(prisma, admin.id, "SUBJECT", dupBase.id, {
           nameAr: "هندسة",
           nameEn: `${CATALOG_PREFIX} Geometry`,
-          parentId: grade.id,
+          gradeIds: [grade.id],
         })
       ).ok,
     );
     check(
-      "Renaming an entry to a sibling's name is refused",
+      "Renaming a subject to another subject's name is refused",
       refused(
         await updateCatalogEntry(prisma, admin.id, "SUBJECT", dupBase.id, {
           nameAr: "جبر متقدم",
           nameEn: `${CATALOG_PREFIX} Advanced Algebra`,
-          parentId: grade.id,
+          gradeIds: [grade.id],
         }),
         "duplicateNameEn",
       ),
     );
+
+    // U3: a subject links to zero or more grades through CatalogSubjectGrade,
+    // in any education system — an edit sets the whole set.
+    const otherSystem = await prisma.catalogEducationSystem.create({
+      data: { nameAr: `${CATALOG_PREFIX} نظام آخر`, nameEn: `${CATALOG_PREFIX} Other System` },
+    });
+    const otherGrade = await prisma.catalogGrade.create({
+      data: { nameAr: `${CATALOG_PREFIX} صف آخر`, nameEn: `${CATALOG_PREFIX} Other Grade`, educationSystemId: otherSystem.id },
+    });
+    const linked = await updateCatalogEntry(prisma, admin.id, "SUBJECT", dupBase.id, {
+      nameAr: "هندسة",
+      nameEn: `${CATALOG_PREFIX} Geometry`,
+      gradeIds: [grade.id, grade2.id, otherGrade.id, grade.id],
+    });
+    const links = await prisma.catalogSubjectGrade.findMany({ where: { subjectId: dupBase.id } });
     check(
-      "Moving an entry under a parent that already has its name is refused",
-      sameUnderOtherGrade.ok &&
-        refused(
-          await updateCatalogEntry(prisma, admin.id, "SUBJECT", dupBase.id, {
-            nameAr: "هندسة",
-            nameEn: `${CATALOG_PREFIX} Geometry`,
-            parentId: grade2.id,
-          }),
-          "duplicateNameEn",
-        ),
+      "U3: a subject links to several grades across education systems (one row per pair, duplicates in the input ignored)",
+      linked.ok && links.length === 3 && [grade.id, grade2.id, otherGrade.id].every((id) => links.some((link) => link.gradeId === id)),
+      JSON.stringify(linked),
     );
+    const linkAudit = await prisma.auditLog.findFirst({
+      where: { action: "platform.catalog.update", entityId: dupBase.id },
+      orderBy: { createdAt: "desc" },
+    });
+    check(
+      "…audited with the grade links before and after",
+      (linkAudit?.before as { gradeIds?: string[] } | null)?.gradeIds?.length === 1 &&
+        (linkAudit?.after as { gradeIds?: string[] } | null)?.gradeIds?.length === 3,
+      JSON.stringify(linkAudit),
+    );
+    const unlinked = await updateCatalogEntry(prisma, admin.id, "SUBJECT", dupBase.id, {
+      nameAr: "هندسة",
+      nameEn: `${CATALOG_PREFIX} Geometry`,
+      gradeIds: [otherGrade.id],
+    });
+    check(
+      "…an edit replaces the set (links no longer listed are removed)",
+      unlinked.ok &&
+        (await prisma.catalogSubjectGrade.findMany({ where: { subjectId: dupBase.id } })).map((link) => link.gradeId).join() === otherGrade.id,
+    );
+    check(
+      "…a grade that does not exist is refused as gradeNotFound",
+      refused(
+        await updateCatalogEntry(prisma, admin.id, "SUBJECT", dupBase.id, {
+          nameAr: "هندسة",
+          nameEn: `${CATALOG_PREFIX} Geometry`,
+          gradeIds: ["no-such-grade"],
+        }),
+        "gradeNotFound",
+      ),
+    );
+    check(
+      "…and zero grades is allowed",
+      (
+        await updateCatalogEntry(prisma, admin.id, "SUBJECT", dupBase.id, {
+          nameAr: "هندسة",
+          nameEn: `${CATALOG_PREFIX} Geometry`,
+          gradeIds: [],
+        })
+      ).ok && (await prisma.catalogSubjectGrade.count({ where: { subjectId: dupBase.id } })) === 0,
+    );
+    await prisma.catalogGrade.delete({ where: { id: otherGrade.id } });
+    await prisma.catalogEducationSystem.delete({ where: { id: otherSystem.id } });
+
     await setCatalogEntryActive(prisma, admin.id, "SUBJECT", dupBase.id, false);
     check(
-      "A deactivated sibling still blocks its name",
+      "A deactivated subject still blocks its name",
       refused(
         await createCatalogEntry(prisma, admin.id, "SUBJECT", {
           nameAr: "هندسة أخرى",
           nameEn: `${CATALOG_PREFIX} GEOMETRY`,
-          parentId: grade.id,
+          gradeIds: [grade.id],
         }),
         "duplicateNameEn",
       ),
@@ -777,7 +848,7 @@ async function main() {
     check("…delete succeeds once the session is gone", (await deleteCatalogEntry(prisma, admin.id, "SUBJECT", delSession.id)).ok);
   }
 
-  // 9d. a student profile (grades) and child entries (systems, grades)
+  // 9d. a student profile, subject links and classes (grades); child entries (systems)
   const delGrade = await createCatalogEntry(prisma, admin.id, "GRADE", {
     nameAr: "صف للحذف",
     nameEn: `${CATALOG_PREFIX} Del Grade`,
@@ -799,21 +870,44 @@ async function main() {
     const child = await createCatalogEntry(prisma, admin.id, "SUBJECT", {
       nameAr: "فرعي",
       nameEn: `${CATALOG_PREFIX} Del Child`,
-      parentId: delGrade.id,
+      gradeIds: [delGrade.id],
     });
     const blocked = await deleteCatalogEntry(prisma, admin.id, "GRADE", delGrade.id);
     check(
-      "Delete is blocked while a student has the grade and a subject sits under it (students: 1, children: 1)",
+      "Delete is blocked while a student has the grade and a subject links to it (students: 1, children: 1)",
       refused(blocked, "inUse") && !blocked.ok && blocked.usage?.students === 1 && blocked.usage.children === 1,
       JSON.stringify(blocked),
     );
     await prisma.studentProfile.delete({ where: { id: profile.id } });
     check(
-      "…still blocked by the child subject alone",
+      "…still blocked by the subject link alone (U3)",
       refused(await deleteCatalogEntry(prisma, admin.id, "GRADE", delGrade.id), "inUse"),
     );
-    if (child.ok) await deleteCatalogEntry(prisma, admin.id, "SUBJECT", child.id);
-    check("…and deleted once both are gone", (await deleteCatalogEntry(prisma, admin.id, "GRADE", delGrade.id)).ok);
+    if (child.ok) {
+      // A subject's own grade links never block deleting the subject.
+      check(
+        "U3: deleting a subject whose only references are its grade links succeeds, and its links go with it",
+        (await deleteCatalogEntry(prisma, admin.id, "SUBJECT", child.id)).ok &&
+          (await prisma.catalogSubjectGrade.count({ where: { gradeId: delGrade.id } })) === 0,
+      );
+    }
+    const classOnGrade = await prisma.classGroup.create({
+      data: scopedData(centerB.id, {
+        startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"),
+        teacherId: teacherB.id,
+        gradeId: delGrade.id,
+        roomId: roomB.id,
+        price: 10_000,
+      }),
+    });
+    const blockedByClass = await deleteCatalogEntry(prisma, admin.id, "GRADE", delGrade.id);
+    check(
+      "…blocked while a class uses the grade (classes: 1)",
+      refused(blockedByClass, "inUse") && !blockedByClass.ok && blockedByClass.usage?.classes === 1,
+      JSON.stringify(blockedByClass),
+    );
+    await prisma.classGroup.delete({ where: { id: classOnGrade.id } });
+    check("…and deleted once nothing uses it", (await deleteCatalogEntry(prisma, admin.id, "GRADE", delGrade.id)).ok);
   }
   const usedSystem = await catalogEntryUsage(prisma, "EDUCATION_SYSTEM", system.id);
   check(
@@ -1250,7 +1344,155 @@ async function main() {
     JSON.stringify(sqlResult),
   );
 
-  // ── 17. Static: nothing of the suggestion queue, nothing reads displayName,
+  // ── 17. U3 — the (grade, subject) pair rule and the picker cascade ──────
+  const pairSystem = await prisma.catalogEducationSystem.create({
+    data: { nameAr: `${CATALOG_PREFIX} نظام الأزواج`, nameEn: `${CATALOG_PREFIX} Pair System` },
+  });
+  const [pairGradeOne, pairGradeTwo] = await Promise.all(
+    ["One", "Two"].map((tag) =>
+      prisma.catalogGrade.create({
+        data: { nameAr: `${CATALOG_PREFIX} صف ${tag}`, nameEn: `${CATALOG_PREFIX} Pair Grade ${tag}`, educationSystemId: pairSystem.id },
+      }),
+    ),
+  );
+  const pairSubject = await createCatalogEntry(prisma, admin.id, "SUBJECT", {
+    nameAr: "مادة الأزواج",
+    nameEn: `${CATALOG_PREFIX} Pair Subject`,
+    gradeIds: [pairGradeOne.id],
+  });
+  check("Fixture: a subject linked to one grade of two", pairSubject.ok, JSON.stringify(pairSubject));
+  if (pairSubject.ok) {
+    const [pickOne, pickTwo, pickSubject] = await Promise.all([
+      selectCatalogEntry(prisma, centerA.id, "GRADE", pairGradeOne.id, null, null),
+      selectCatalogEntry(prisma, centerA.id, "GRADE", pairGradeTwo.id, null, null),
+      selectCatalogEntry(prisma, centerA.id, "SUBJECT", pairSubject.id, null, null),
+    ]);
+    check(
+      "A centre picking both, with the pair linked → offered",
+      await isPairOffered(prisma, centerA.id, pairGradeOne.id, pairSubject.id),
+    );
+    check(
+      "…both picked but the catalog does not link them → not offered",
+      !(await isPairOffered(prisma, centerA.id, pairGradeTwo.id, pairSubject.id)),
+    );
+    check(
+      "…another centre that picked neither → not offered (the pick is per centre)",
+      !(await isPairOffered(prisma, centerB.id, pairGradeOne.id, pairSubject.id)),
+    );
+    if (pickSubject.ok) {
+      await setCatalogSelectionActive(prisma, pickSubject.selectionId, false);
+      check(
+        "…the centre switched its subject pick off → not offered",
+        !(await isPairOffered(prisma, centerA.id, pairGradeOne.id, pairSubject.id)),
+      );
+      await setCatalogSelectionActive(prisma, pickSubject.selectionId, true);
+    }
+    await setCatalogEntryActive(prisma, admin.id, "GRADE", pairGradeOne.id, false);
+    check(
+      "…the platform deactivated the grade → not offered",
+      !(await isPairOffered(prisma, centerA.id, pairGradeOne.id, pairSubject.id)),
+    );
+    await setCatalogEntryActive(prisma, admin.id, "GRADE", pairGradeOne.id, true);
+
+    // Removing a link is refused while an ACTIVE class anywhere teaches the pair.
+    const pairClass = await prisma.classGroup.create({
+      data: scopedData(centerB.id, {
+        startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"),
+        teacherId: teacherB.id,
+        subjectId: pairSubject.id,
+        gradeId: pairGradeOne.id,
+        roomId: roomB.id,
+        price: 10_000,
+      }),
+    });
+    const unlinkRefused = await updateCatalogEntry(prisma, admin.id, "SUBJECT", pairSubject.id, {
+      nameAr: "مادة الأزواج",
+      nameEn: `${CATALOG_PREFIX} Pair Subject`,
+      gradeIds: [pairGradeTwo.id],
+    });
+    check(
+      "Unlinking a grade an active class teaches with the subject → linkInUse, naming the grade and the class count",
+      refused(unlinkRefused, "linkInUse") &&
+        !unlinkRefused.ok &&
+        unlinkRefused.linksInUse?.length === 1 &&
+        unlinkRefused.linksInUse[0].gradeId === pairGradeOne.id &&
+        unlinkRefused.linksInUse[0].classes === 1,
+      JSON.stringify(unlinkRefused),
+    );
+    check(
+      "…and nothing was written: the link stays, the new one was not added",
+      (await prisma.catalogSubjectGrade.findMany({ where: { subjectId: pairSubject.id } })).map((link) => link.gradeId).join() ===
+        pairGradeOne.id,
+    );
+    await prisma.classGroup.update({ where: { id: pairClass.id }, data: { active: false } });
+    const unlinkAllowed = await updateCatalogEntry(prisma, admin.id, "SUBJECT", pairSubject.id, {
+      nameAr: "مادة الأزواج",
+      nameEn: `${CATALOG_PREFIX} Pair Subject`,
+      gradeIds: [pairGradeTwo.id],
+    });
+    check(
+      "…once the class is inactive the link can go (only an ACTIVE class blocks it)",
+      unlinkAllowed.ok && (await isPairOffered(prisma, centerA.id, pairGradeTwo.id, pairSubject.id)),
+      JSON.stringify(unlinkAllowed),
+    );
+    check(
+      "…and the inactive class keeps its (grade, subject) untouched",
+      (await prisma.classGroup.findUnique({ where: { id: pairClass.id } }))?.gradeId === pairGradeOne.id,
+    );
+    await prisma.classGroup.delete({ where: { id: pairClass.id } });
+    for (const pick of [pickOne, pickTwo, pickSubject]) if (pick.ok) await removeCatalogSelection(prisma, pick.selectionId);
+  }
+
+  // The picker cascade, as pure functions (lib/catalog-picker.ts).
+  const pick = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, active: true, catalogActive: true, ...extra });
+  const pickerRows = {
+    systems: [pick("SYS")],
+    grades: [
+      pick("G1", { educationSystemId: "SYS" }),
+      pick("G2", { educationSystemId: "SYS", active: false }),
+      pick("G3", { educationSystemId: null }),
+    ] as (ReturnType<typeof pick> & { educationSystemId: string | null })[],
+    subjects: [
+      pick("MATHS", { gradeIds: ["G1", "G2", "G3"] }),
+      pick("PHYS", { gradeIds: ["G2"] }),
+      pick("ART", { gradeIds: ["G1"], catalogActive: false }),
+    ] as (ReturnType<typeof pick> & { gradeIds: string[] })[],
+  };
+  const picker = buildCatalogPicker(pickerRows, (name) => `${name}*`);
+  check(
+    "Picker: only offered grades (pick active and entry active); a subject once, under only its offered linked grades",
+    picker.grades.map((grade) => grade.value).join() === "G1,G3" &&
+      picker.subjects.map((subject) => `${subject.value}:${subject.gradeIds.join("+")}`).join() === "MATHS:G1+G3",
+    JSON.stringify(picker),
+  );
+  check(
+    "Picker: the subject waits for a grade, then lists only that grade's subjects",
+    subjectsForGrade(picker.subjects, "").length === 0 &&
+      subjectsForGrade(picker.subjects, "G1").map((subject) => subject.value).join() === "MATHS",
+  );
+  check(
+    "Picker: a system narrows the grades; no system lists them all",
+    gradesForSystem(picker.grades, "SYS").map((grade) => grade.value).join() === "G1" &&
+      gradesForSystem(picker.grades, "").length === 2,
+  );
+  const editing = buildCatalogPicker(pickerRows, (name) => `${name}*`, { gradeId: "G2", subjectId: "PHYS" });
+  check(
+    "Picker: an existing record keeps its own (no longer offered) grade and subject, labelled, the subject under its grade",
+    editing.grades.some((grade) => grade.value === "G2" && grade.label === "G2*") &&
+      editing.subjects.some((subject) => subject.value === "PHYS" && subject.label === "PHYS" && subject.gradeIds.includes("G2")),
+    JSON.stringify(editing),
+  );
+  const filterSubjects = [
+    { value: "MATHS", label: "Maths", gradeIds: ["G1", "G3"] },
+    { value: "PHYS", label: "Physics", gradeIds: ["G3"] },
+  ];
+  check(
+    "Filter: no grade → every subject once; a grade → only the subjects linked to it",
+    filterSubjectsForGrade(filterSubjects, "").length === 2 &&
+      filterSubjectsForGrade(filterSubjects, "G1").map((subject) => subject.value).join() === "MATHS",
+  );
+
+  // ── 18. Static: nothing of the suggestion queue, nothing reads displayName,
   //       no centre-side code writes a global row ────────────────────────────
   const root = process.cwd();
   const scanRoots = ["app", "lib", "components", "messages", "prisma", "supabase", "scripts", "proxy.ts"].map((entry) =>
@@ -1325,7 +1567,7 @@ async function main() {
     messageKeysWithSuggest.join(", "),
   );
 
-  const GLOBAL_WRITE = /\bcatalog(EducationSystem|Grade|Subject)\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\b/;
+  const GLOBAL_WRITE = /\bcatalog(EducationSystem|Grade|Subject|SubjectGrade)\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\b/;
   const runtimeCode = scannable.filter((file) => /^(app|lib|components)\//.test(rel(file)));
   const writers = grepCode(GLOBAL_WRITE, runtimeCode).filter((file) => file !== "lib/db/catalog-admin.ts");
   check(

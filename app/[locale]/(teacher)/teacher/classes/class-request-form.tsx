@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import { createClassRequestAction } from "@/app/[locale]/(teacher)/teacher/classes/actions";
+import { CatalogPickerFields } from "@/components/center/catalog-picker-fields";
 import { TimeRangeFields } from "@/components/center/time-range-fields";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
@@ -10,6 +11,7 @@ import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
@@ -17,13 +19,7 @@ export type SelectOption = { value: string; label: string };
 
 const DAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
-export function ClassRequestForm({
-  subjects,
-  grades,
-}: {
-  subjects: SelectOption[];
-  grades: SelectOption[];
-}) {
+export function ClassRequestForm({ catalog }: { catalog: CatalogPickerData }) {
   const t = useTranslations("TeacherClasses.request");
   const tClasses = useTranslations("Classes");
   const tErrors = useTranslations("TeacherClasses.errors");
@@ -41,28 +37,17 @@ export function ClassRequestForm({
         <FormMessage tone="success">{t("submitted")}</FormMessage>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field id="request-subjectId" label={t("subject")} optional error={state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined}>
-          <Select id="request-subjectId" name="subjectId" defaultValue="">
-            <option value="">{t("none")}</option>
-            {subjects.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field id="request-gradeId" label={t("grade")} optional error={state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined}>
-          <Select id="request-gradeId" name="gradeId" defaultValue="">
-            <option value="">{t("none")}</option>
-            {grades.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <CatalogPickerFields
+          idPrefix="request"
+          data={catalog}
+          systemName={null}
+          noneLabel={t("none")}
+          errors={{
+            gradeId: state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined,
+            subjectId: state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined,
+          }}
+        />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">

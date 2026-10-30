@@ -34,6 +34,7 @@ import { dateKey } from "@/lib/scheduling";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { buildCatalogFilter, buildCatalogPicker } from "@/lib/catalog-picker";
 import { ResultsRegion } from "@/components/shared/results-region";
 
 /**
@@ -129,23 +130,11 @@ export default async function ClassesPage({
   }));
   // The list filter keeps every entry (an existing class may use one the
   // platform has since deactivated); the New class dialog offers only the
-  // entries still on offer (R8).
-  const toOption = (row: { id: string; name: string; active: boolean }) => ({
-    value: row.id,
-    label: row.active ? row.name : `${row.name} · ${tCommon("inactive")}`,
-  });
-  const subjectOptions = subjects.map(toOption);
-  const gradeOptions = grades.map(toOption);
-  const pickableSubjectOptions = subjects.filter((row) => row.catalogActive).map(toOption);
-  const pickableGradeOptions = grades.filter((row) => row.catalogActive).map(toOption);
-  const educationSystemOptions = educationSystems
-    .filter((system) => system.catalogActive)
-    .map((system) => ({
-      value: system.id,
-      label: system.active
-        ? system.name
-        : `${system.name} · ${tCommon("inactive")}`,
-    }));
+  // entries still on offer (R8) — system → grade → subject, a subject only
+  // under a grade it links to (U3).
+  const inactiveLabel = (name: string) => `${name} · ${tCommon("inactive")}`;
+  const filterCatalog = buildCatalogFilter({ grades, subjects }, inactiveLabel);
+  const pickerCatalog = buildCatalogPicker({ systems: educationSystems, grades, subjects }, inactiveLabel);
   const roomOptions = rooms.map((room) => ({
     id: room.id,
     name: room.name,
@@ -174,9 +163,7 @@ export default async function ClassesPage({
         action={
           <AddClassDialog
             teachers={teacherOptions}
-            subjects={pickableSubjectOptions}
-            grades={pickableGradeOptions}
-            educationSystems={educationSystemOptions}
+            catalog={pickerCatalog}
             educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
             rooms={roomOptions}
             roomLinks={roomLinks}
@@ -207,8 +194,8 @@ export default async function ClassesPage({
             subjectId={subjectId ?? ""}
             gradeId={gradeId ?? ""}
             teachers={teacherOptions}
-            subjects={subjectOptions}
-            grades={gradeOptions}
+            subjects={filterCatalog.subjects}
+            grades={filterCatalog.grades}
             allLabel={t("filters.all")}
           />
 

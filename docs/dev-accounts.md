@@ -56,11 +56,23 @@ Navigation is gated on the stored permission matrix (`PermissionGrant`), with ea
 - **Branch limits (F1)** — Center 60 may have **3** branches (it has two, so `owner.center60@…` can try **Settings → Branches → Add branch** once; a fourth is refused until the platform admin raises the limit at **Branches → Centers & branch limits**). Al Nokhba Academy and both test centres have a limit of **1** and are at it. Re-running the seed puts these limits back. Settings → Branches is in the Owner's settings sub-navigation only — a Manager never sees it.
 - **Organization "Al Nokhba Academy"** — one smaller branch (20 students, 4 classes): the isolation test bed. Farida Salah studies here *and* at Downtown.
 - **Two sign-in test centres** — Al Amal Learning Hub (ONBOARDING) and Future Skills Academy (SUSPENDED), one staff account each.
-- **Catalog** — three education systems (Egyptian National, American, IGCSE), 19 grades and 71 subject rows, all bilingual.
+- **Catalog** — three education systems (Egyptian National, American, IGCSE), 19 grades and **11 subjects, each once**, linked to the grades that teach them (71 subject–grade links — Mathematics alone to 14 grades across the three systems), all bilingual (U3).
 - **History** — the last five weeks of closed sessions (≈ 80% present, 10% late, 10% absent; payments over Cash / InstaPay / Vodafone Cash and the custom method; a few live absent-switch voids; one auto-closed, one cancelled session per branch), then **today, relative to when you ran the seed**: a live session (started earlier today, not ended), upcoming sessions, a one-time session, an extra session and one rescheduled session.
 - **Money and workflow** — settlements (one PAID, one APPROVED, one DRAFT per Center 60 branch), expenses in Rent / Salaries / Utilities / Supplies / Marketing, ratings inside the last seven days (the three signed-in students' own sessions are left unrated so the pop-up appears), reservations (pending, confirmed, and rejected inside the 7-day cooldown) and teacher change requests (NEW_CLASS, NEW_SESSION, and a zero-centre teacher's request to teach).
 - **Not signed-in people** — about 110 students, parents' phone numbers and the other teachers are real rows with no login. Their emails are `@example.com` too and mean nothing.
 - **Phones** are canonical `01XXXXXXXXX` (010 / 011 / 012 / 015), produced through `lib/phone.ts`; no photos exist (`photoUrl` is empty).
+
+## Bookable classes — single-session attendance (F6, seeded since U3)
+
+Three existing term-long classes take single-session bookings. Each has sessions every week of the coming two weeks and enrolled students, so its seats are partly used. Book from **Discover → the class → Upcoming sessions** with a student who is **not** enrolled in it (an enrolled student is refused as already enrolled).
+
+| Branch | Class | Booking | Test with |
+|---|---|---|---|
+| Center 60 — Downtown | **English · Primary 6** (Karim, Wednesdays 16:00–17:30) | **Instant**, at most **3** bookings per session | `student.nasrcity@…` (Mariam) — the fourth booking on one session is refused |
+| Center 60 — Downtown | **English · Grade 10** (American, Karim, Thursdays 17:00–19:00) | **Instant**, no booking cap (only the room's seats) | `student.nasrcity@…` (Mariam) |
+| Center 60 — Nasr City | **Mathematics · Secondary 3** (Hesham, Sundays 15:00–17:00) | **Needs approval** — the booking waits in Nasr City's Approvals and Hesham's own queue | `student.downtown@…` (Youssef); approve as `manager.nasrcity@…` or Hesham, `teacher.shared@…` |
+
+To reach a cap of 3 on one session, book it as Mariam, then as Youssef and Farida (`student.both@…`), then try a fourth student — or a fresh sign-up. `seed:verify` asserts the three classes, their modes and caps, that each has sessions in the coming two weeks, and that its enrolments leave seats free.
 
 ## Family links and the two dev parent codes (F3)
 

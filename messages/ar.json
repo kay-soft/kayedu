@@ -918,7 +918,8 @@
       "fixedAbovePrice": "لا يمكن أن تزيد حصة المركز الثابتة عن السعر — اخفض الحصة أو ارفع السعر.",
       "invalidBookingMode": "اختر طريقة حجز الحصص المفردة.",
       "invalidBookingSeats": "أدخل رقمًا صحيحًا من ١ إلى ١٠٠٠، أو اتركه فارغًا.",
-      "sessionFull": "حصة {date} ممتلئة بحجوزات الحصص المفردة، فلا يمكن تسجيل هذا الطالب بعد. اختر قاعة أكبر، أو انتظر حتى تمر تلك الحصة."
+      "sessionFull": "حصة {date} ممتلئة بحجوزات الحصص المفردة، فلا يمكن تسجيل هذا الطالب بعد. اختر قاعة أكبر، أو انتظر حتى تمر تلك الحصة.",
+      "subjectNotInGrade": "هذه المادة غير متاحة لهذا الصف هنا. اختر مادة من مواد الصف."
     },
     "emptyHint": "الفصل يجمع مدرّسًا ومادة ومدة وجدولًا أسبوعيًا. أضف أول فصل وستُنشأ حصصه لكل المدة.",
     "noMatchesHint": "امسح أحد عوامل التصفية لعرض بقية فصول الفرع.",
@@ -1218,7 +1219,8 @@
       "hasPayments": "هذه الحصة ما زالت عليها مدفوعات. ألغِ الدفعات أو استردها أولًا مع ذكر السبب، ثم ألغِ الحصة أو غيّر موعدها.",
       "fixedAbovePrice": "لا يمكن أن تزيد حصة المركز الثابتة عن السعر — لن يحصل المدرس على شيء.",
       "zeroPriceNeedsConfirmation": "هذه الحصة مجانية (٠ جنيه). علّم المربع لتأكيد أن هذا مقصود.",
-      "duplicateSlotCancelled": "لهذه المجموعة حصة ملغاة في هذا التاريخ والوقت بالضبط. لا يمكن استعادة حصة ملغاة — اختر وقتًا آخر."
+      "duplicateSlotCancelled": "لهذه المجموعة حصة ملغاة في هذا التاريخ والوقت بالضبط. لا يمكن استعادة حصة ملغاة — اختر وقتًا آخر.",
+      "subjectNotInGrade": "هذه المادة غير متاحة لهذا الصف هنا. اختر مادة من مواد الصف."
     },
     "emptyHint": "تأتي الحصص من الجدول الأسبوعي لكل فصل ومدته. وسّع نطاق التاريخ أو امسح أحد عوامل التصفية.",
     "clearFilters": "مسح عوامل التصفية",
@@ -1871,8 +1873,10 @@
       },
       "subjects": {
         "title": "المواد",
-        "description": "ما يُدرَّس، لكل صف.",
-        "empty": "لم تُختَر أي مادة بعد."
+        "description": "ما يُدرَّس. تظهر كل مادة مرة واحدة، مع صفوف هذا الفرع التي تغطيها.",
+        "empty": "لم تُختَر أي مادة بعد.",
+        "covers": "تغطي {grades}",
+        "coversNone": "لا تغطي أي صف من صفوف هذا الفرع"
       }
     },
     "rooms": {
@@ -2353,7 +2357,8 @@
       "invalidTimeRange": "يجب أن يكون وقت النهاية بعد وقت البداية.",
       "invalidNumber": "أدخل رقمًا صحيحًا.",
       "notTrusted": "هذا الفرع لم يضعك كمدرّس موثوق، لذا لا يمكنك طلب مجموعة أو حصة جديدة هنا.",
-      "notFound": "هذا الخيار لم يعد متاحًا."
+      "notFound": "هذا الخيار لم يعد متاحًا.",
+      "subjectNotInGrade": "هذه المادة لا تُدرَّس في هذا الصف. اختر مادة من مواد الصف."
     },
     "emptyHint": "تظهر هنا الفصول التي يُسندها إليك أي فرع. ويمكنك أيضًا طلب فصل جديد بالأسفل."
   },
@@ -2429,7 +2434,8 @@
       "invalidDay": "اختر يومًا من الأسبوع.",
       "invalidTime": "أدخل وقتًا صحيحًا.",
       "invalidTimeRange": "يجب أن يكون وقت النهاية بعد وقت البداية.",
-      "invalidNumber": "أدخل رقمًا صحيحًا."
+      "invalidNumber": "أدخل رقمًا صحيحًا.",
+      "subjectNotInGrade": "هذه المادة لا تُدرَّس في هذا الصف. اختر مادة من مواد الصف."
     },
     "emptyHint": "لا يوجد فرع على المنصة مفتوح لمدرّسين جدد حاليًا."
   },
@@ -2735,7 +2741,7 @@
       },
       "subject": {
         "title": "المواد",
-        "description": "ما يُدرَّس، ويمكن ربطه بصف.",
+        "description": "ما يُدرَّس. كل مادة موجودة مرة واحدة ومربوطة بكل صف يدرّسها، في أي نظام تعليمي.",
         "empty": "لا توجد مواد بعد."
       }
     },
@@ -2761,14 +2767,14 @@
     "emptyHint": "أي عنصر تضيفه هنا يصبح متاحًا لكل الفروع لتختاره.",
     "defaultShareValue": "نصيب الفرع الثابت الافتراضي {amount}",
     "noEducationSystem": "بدون نظام تعليمي",
-    "noGrade": "بدون صف",
     "usage": {
       "summary": "{centres, plural, =0 {لم يخترها أي فرع} one {اختارها فرع واحد} two {اختارها فرعان} few {اختارها {centres, number, arab} فروع} many {اختارها {centres, number, arab} فرعًا} other {اختارها {centres, number, arab} فرع}} · {classes, plural, =0 {بلا فصول} one {فصل واحد} two {فصلان} few {{classes, number, arab} فصول} many {{classes, number, arab} فصلًا} other {{classes, number, arab} فصل}}",
       "centres": "{count, plural, =0 {} one {فرع واحد} two {فرعان} few {{count, number, arab} فروع} many {{count, number, arab} فرعًا} other {{count, number, arab} فرع}}",
       "classes": "{count, plural, =0 {} one {فصل واحد} two {فصلان} few {{count, number, arab} فصول} many {{count, number, arab} فصلًا} other {{count, number, arab} فصل}}",
       "students": "{count, plural, =0 {} one {طالب واحد} two {طالبان} few {{count, number, arab} طلاب} many {{count, number, arab} طالبًا} other {{count, number, arab} طالب}}",
       "sessions": "{count, plural, =0 {} one {حصة لمرة واحدة} two {حصتان لمرة واحدة} few {{count, number, arab} حصص لمرة واحدة} many {{count, number, arab} حصة لمرة واحدة} other {{count, number, arab} حصة لمرة واحدة}}",
-      "children": "{count, plural, =0 {} one {عنصر فرعي واحد} two {عنصران فرعيان} few {{count, number, arab} عناصر فرعية} many {{count, number, arab} عنصرًا فرعيًا} other {{count, number, arab} عنصر فرعي}}"
+      "children": "{count, plural, =0 {} one {عنصر فرعي واحد} two {عنصران فرعيان} few {{count, number, arab} عناصر فرعية} many {{count, number, arab} عنصرًا فرعيًا} other {{count, number, arab} عنصر فرعي}}",
+      "linkedSubjects": "{count, plural, =0 {} one {مادة مربوطة واحدة} two {مادتان مربوطتان} few {{count, number, arab} مواد مربوطة} many {{count, number, arab} مادة مربوطة} other {{count, number, arab} مادة مربوطة}}"
     },
     "dialog": {
       "description": "الاسمان مطلوبان؛ يرى كل فرع الاسم المطابق للغته.",
@@ -2788,10 +2794,10 @@
       "nameAr": "الاسم بالعربية",
       "educationSystem": "النظام التعليمي",
       "educationSystemHint": "اتركه فارغًا لصف لا ينتمي إلى نظام.",
-      "grade": "الصف",
-      "gradeHint": "اتركه فارغًا لمادة لا تنتمي إلى صف.",
       "defaultShare": "نسبة المركز الثابتة الافتراضية (ج.م)",
-      "defaultShareHint": "المبلغ الذي يبدأ منه الفصل الجديد عندما تكون نسبة المركز مبلغًا ثابتًا. هو نقطة بداية فقط: تغييره لا يحرّك أي فصل قائم ولا أي دفعة مسجّلة."
+      "defaultShareHint": "المبلغ الذي يبدأ منه الفصل الجديد عندما تكون نسبة المركز مبلغًا ثابتًا. هو نقطة بداية فقط: تغييره لا يحرّك أي فصل قائم ولا أي دفعة مسجّلة.",
+      "grades": "الصفوف",
+      "gradesHint": "حدّد كل صف يدرّس هذه المادة. لا يمكن إلغاء صف ما زال يدرّسها فصل نشط."
     },
     "placeholders": {
       "educationSystem": {
@@ -2816,12 +2822,19 @@
       "nameArRequired": "أدخل الاسم بالعربية.",
       "nameEnTooLong": "الاسم بالإنجليزية طويل جدًا (٨٠ حرفًا كحد أقصى).",
       "nameArTooLong": "الاسم بالعربية طويل جدًا (٨٠ حرفًا كحد أقصى).",
-      "duplicateNameEn": "يوجد عنصر آخر في نفس المكان بنفس الاسم الإنجليزي.",
-      "duplicateNameAr": "يوجد عنصر آخر في نفس المكان بنفس الاسم العربي.",
+      "duplicateNameEn": "يوجد عنصر آخر بنفس الاسم الإنجليزي (المادة: في أي مكان في الكتالوج؛ النظام أو الصف: في نفس المكان).",
+      "duplicateNameAr": "يوجد عنصر آخر بنفس الاسم العربي (المادة: في أي مكان في الكتالوج؛ النظام أو الصف: في نفس المكان).",
       "parentNotFound": "هذا الأصل لم يعد موجودًا.",
       "invalidShare": "أدخل مبلغًا صحيحًا بالجنيه.",
-      "invalidAmount": "أدخل مبلغًا صحيحًا بالجنيه."
-    }
+      "invalidAmount": "أدخل مبلغًا صحيحًا بالجنيه.",
+      "linkInUse": "لم يُحفظ شيء. هذه الصفوف ما زالت تدرّسها فصول نشطة، لذا تبقى مربوطة:",
+      "gradeNotFound": "أحد الصفوف المختارة لم يعد موجودًا."
+    },
+    "gradeFilter": "تصفية المواد حسب الصف",
+    "allGrades": "كل الصفوف",
+    "noGrades": "غير مربوطة بأي صف بعد",
+    "noGradesYet": "لا توجد صفوف في الكتالوج بعد.",
+    "linkInUseRow": "{grade}: {count, plural, one {فصل نشط واحد} two {فصلان نشطان} few {{count, number, arab} فصول نشطة} many {{count, number, arab} فصلًا نشطًا} other {{count, number, arab} فصل نشط}}"
   },
   "AdminPlatform": {
     "title": "المنصة",
@@ -3464,5 +3477,13 @@
       "see": "عرض الحصص القادمة",
       "signIn": "سجّل الدخول لحجز حصة"
     }
+  },
+  "CatalogPicker": {
+    "educationSystem": "النظام التعليمي",
+    "grade": "الصف",
+    "subject": "المادة",
+    "anySystem": "أي نظام",
+    "chooseGradeFirst": "اختر الصف أولًا.",
+    "noSubjectsForGrade": "لا توجد مادة متاحة لهذا الصف هنا."
   }
 }

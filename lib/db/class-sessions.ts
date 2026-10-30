@@ -29,7 +29,7 @@ import {
   type ExistingSession,
   type WeeklySlotsError,
 } from "../scheduling.ts";
-import { centerGradeById, centerSubjectById } from "./catalog.ts";
+import { centerGradeById, centerSubjectById, isPairLinked } from "./catalog.ts";
 import { resolveRoomSet, writeClassExtraRooms, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
 import {
   cancelSession,
@@ -1719,6 +1719,7 @@ export type ManualSessionError =
   | "teacherNotFound"
   | "subjectNotFound"
   | "gradeNotFound"
+  | "subjectNotInGrade"
   | "invalidTitle"
   | "invalidPrice"
   | "invalidCut"
@@ -1987,6 +1988,10 @@ export async function createOneOffSession(
       if (input.gradeId) {
         const grade = await centerGradeById(tx, centerId, input.gradeId);
         if (!grade || !grade.active || !grade.catalogActive) return { ok: false, error: "gradeNotFound" };
+      }
+      // U3: both picked and active (above) and linked in the catalog.
+      if (input.subjectId && input.gradeId && !(await isPairLinked(tx, input.gradeId, input.subjectId))) {
+        return { ok: false, error: "subjectNotInGrade" };
       }
       return {
         ok: true,

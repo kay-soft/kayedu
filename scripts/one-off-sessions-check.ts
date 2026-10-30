@@ -354,14 +354,17 @@ async function main() {
       prisma.catalogSubject.create({ data: { nameAr: tag, nameEn: `${CATALOG_PREFIX}${tag}` } }),
     ),
   );
-  const [gradeA, gradeB] = await Promise.all(
-    ["g10", "g11"].map((tag) => prisma.catalogGrade.create({ data: { nameAr: tag, nameEn: `${CATALOG_PREFIX}${tag}` } })),
+  const [gradeA, gradeB, gradeA2] = await Promise.all(
+    ["g10", "g11", "g12"].map((tag) => prisma.catalogGrade.create({ data: { nameAr: tag, nameEn: `${CATALOG_PREFIX}${tag}` } })),
   );
+  // U3: physics is taught in g10 (linked); g12 is picked by A but not linked to it.
+  await prisma.catalogSubjectGrade.create({ data: { subjectId: subjectA.id, gradeId: gradeA.id } });
   await prisma.centerCatalogSelection.createMany({
     data: [
       { centerId: A, kind: "SUBJECT", subjectId: subjectA.id, displayNameEn: "A's Physics" },
       { centerId: A, kind: "SUBJECT", subjectId: subjectOff.id, active: false },
       { centerId: A, kind: "GRADE", gradeId: gradeA.id },
+      { centerId: A, kind: "GRADE", gradeId: gradeA2.id },
       { centerId: B, kind: "SUBJECT", subjectId: subjectB.id },
       { centerId: B, kind: "GRADE", gradeId: gradeB.id },
     ],
@@ -514,6 +517,9 @@ async function main() {
   check("A subject only another centre selected → subjectNotFound", !crossSubject.ok && crossSubject.error === "subjectNotFound", JSON.stringify(crossSubject));
   check("A grade only another centre selected → gradeNotFound", !crossGrade.ok && crossGrade.error === "gradeNotFound", JSON.stringify(crossGrade));
   check("A subject this centre deactivated → subjectNotFound", !inactiveSubject.ok && inactiveSubject.error === "subjectNotFound", JSON.stringify(inactiveSubject));
+  // U3: both picked and active here, but the catalog does not link the pair.
+  const unlinkedPair = await createOneOffSession(prisma, A, oneOff({ ...slot(t5.id, r5.id, "2026-10-21", "08:00", "09:00"), subjectId: subjectA.id, gradeId: gradeA2.id }), { confirmConflicts: true, now: NOW });
+  check("A subject the catalog does not link to the grade → subjectNotInGrade (U3)", !unlinkedPair.ok && unlinkedPair.error === "subjectNotInGrade", JSON.stringify(unlinkedPair));
   const classIn = await prisma.classGroup.update({ where: { id: C3 }, data: { active: false } });
   const inactiveClass = await createManualSession(prisma, A, { classGroupId: C3, ...slot(t4.id, r4.id, "2026-11-04", "08:00", "09:00") }, { confirmConflicts: true, now: NOW });
   await prisma.classGroup.update({ where: { id: classIn.id }, data: { active: true } });

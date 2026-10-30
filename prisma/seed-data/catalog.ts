@@ -4,12 +4,13 @@
  * only code that may write a global row (it re-checks `isPlatformAdmin` and
  * audits each write), as the seeded platform admin.
  *
- * A subject row hangs off ONE grade (the schema has a single `gradeId`), so
- * "Mathematics" exists once per grade it is taught in. The matrix below is the
- * list of grades each subject is attached to — sensible, not exhaustive.
+ * U3: a subject exists ONCE and links to every grade that teaches it
+ * (`CatalogSubjectGrade`, any system) — "Mathematics" is one row linked to 14
+ * grades, not 14 rows. The matrix below is the list of grades each subject
+ * links to — sensible, not exhaustive.
  */
 import type { CatalogGrade, CatalogSubject, PrismaClient } from "@prisma/client";
-import { createCatalogEntry } from "../../lib/db/catalog-admin.ts";
+import { createCatalogEntry, updateCatalogEntry } from "../../lib/db/catalog-admin.ts";
 
 export type SystemKey = "EG" | "US" | "IG";
 
@@ -57,7 +58,7 @@ const SUBJECT_AR: Record<string, string> = {
   "Computer Science": "علوم الحاسب",
 };
 
-/** subject → the grades (per system) it is attached to. */
+/** subject → the grades (per system) it links to. */
 const SUBJECT_GRADES: Record<string, Partial<Record<SystemKey, string[]>>> = {
   Arabic: {
     EG: ["Primary 4", "Primary 6", "Preparatory 2", "Preparatory 3", "Secondary 1", "Secondary 3"],
@@ -98,14 +99,31 @@ const SUBJECT_GRADES: Record<string, Partial<Record<SystemKey, string[]>>> = {
   },
 };
 
+/**
+ * The seed catalog's subject shape, read from the matrix above: each subject's
+ * English name → how many grades it links to. `seed:verify` asserts the
+ * database matches it (U3: one row per subject, these links).
+ */
+export function seedSubjectLinkCounts(): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(SUBJECT_GRADES).map(([subjectEn, perSystem]) => [
+      subjectEn,
+      Object.values(perSystem).reduce((sum, grades) => sum + (grades?.length ?? 0), 0),
+    ]),
+  );
+}
+
+export type CatalogSubjectRow = CatalogSubject & { gradeIds: string[] };
+
 export type Catalog = {
   systemIds: Record<SystemKey, string>;
   grades: CatalogGrade[];
-  subjects: CatalogSubject[];
+  /** Each subject once, with its grade links (U3). */
+  subjects: CatalogSubjectRow[];
   /** The grade row for a system + English grade name. */
   grade: (system: SystemKey, gradeEn: string) => CatalogGrade;
-  /** The subject row for a system + English grade + English subject name. */
-  subject: (system: SystemKey, gradeEn: string, subjectEn: string) => CatalogSubject;
+  /** A linked (grade, subject) pair by English names — throws if the subject does not link to that grade. */
+  pair: (system: SystemKey, gradeEn: string, subjectEn: string) => { subjectId: string; gradeId: string };
   systemOfGrade: (gradeId: string) => SystemKey;
 };
 
@@ -117,7 +135,7 @@ export async function ensureCatalog(
   const systemIds = {} as Record<SystemKey, string>;
   const gradeIndex = new Map<string, CatalogGrade>();
   const gradeSystem = new Map<string, SystemKey>();
-  const subjectIndex = new Map<string, CatalogSubject>();
+  const subjectIndex = new Map<string, CatalogSubjectRow>();
   let created = 0;
 
   for (const key of Object.keys(SYSTEMS) as SystemKey[]) {
@@ -155,30 +173,52 @@ export async function ensureCatalog(
     }
   }
 
+  // Each subject once, linked to its grades; a rerun adds any missing link
+  // (through the admin write path, like the create).
   for (const [subjectEn, perSystem] of Object.entries(SUBJECT_GRADES)) {
-    for (const [key, gradeNames] of Object.entries(perSystem) as [SystemKey, string[]][]) {
-      for (const gradeEn of gradeNames) {
+    const gradeIds = (Object.entries(perSystem) as [SystemKey, string[]][]).flatMap(([key, gradeNames]) =>
+      gradeNames.map((gradeEn) => {
         const grade = gradeIndex.get(`${key}:${gradeEn}`);
         if (!grade) throw new Error(`Catalog: no grade ${key}:${gradeEn} for ${subjectEn}`);
-        let row = await prisma.catalogSubject.findFirst({
-          where: { nameEn: subjectEn, gradeId: grade.id },
+        return grade.id;
+      }),
+    );
+    const existing = await prisma.catalogSubject.findFirst({
+      where: { nameEn: subjectEn },
+      include: { gradeLinks: { select: { gradeId: true } } },
+    });
+    let id: string;
+    if (!existing) {
+      const result = await createCatalogEntry(prisma, adminUserId, "SUBJECT", {
+        nameEn: subjectEn,
+        nameAr: SUBJECT_AR[subjectEn],
+        gradeIds,
+      });
+      if (!result.ok) throw new Error(`Catalog subject ${subjectEn}: ${result.error}`);
+      id = result.id;
+      created += 1;
+    } else {
+      id = existing.id;
+      const linked = new Set(existing.gradeLinks.map((link) => link.gradeId));
+      if (gradeIds.some((gradeId) => !linked.has(gradeId))) {
+        const result = await updateCatalogEntry(prisma, adminUserId, "SUBJECT", id, {
+          nameEn: existing.nameEn,
+          nameAr: existing.nameAr,
+          gradeIds: [...new Set([...linked, ...gradeIds])],
         });
-        if (!row) {
-          const result = await createCatalogEntry(prisma, adminUserId, "SUBJECT", {
-            nameEn: subjectEn,
-            nameAr: SUBJECT_AR[subjectEn],
-            parentId: grade.id,
-          });
-          if (!result.ok) throw new Error(`Catalog subject ${subjectEn}/${gradeEn}: ${result.error}`);
-          row = await prisma.catalogSubject.findUniqueOrThrow({ where: { id: result.id } });
-          created += 1;
-        }
-        subjectIndex.set(`${key}:${gradeEn}:${subjectEn}`, row);
+        if (!result.ok) throw new Error(`Catalog subject ${subjectEn} links: ${result.error}`);
       }
     }
+    const row = await prisma.catalogSubject.findUniqueOrThrow({
+      where: { id },
+      include: { gradeLinks: { select: { gradeId: true } } },
+    });
+    const { gradeLinks, ...subject } = row;
+    subjectIndex.set(subjectEn, { ...subject, gradeIds: gradeLinks.map((link) => link.gradeId) });
   }
 
-  log(`  catalog: ${created} entr${created === 1 ? "y" : "ies"} created (${subjectIndex.size} subject rows, ${gradeIndex.size} grades, 3 systems)`);
+  const links = [...subjectIndex.values()].reduce((sum, row) => sum + row.gradeIds.length, 0);
+  log(`  catalog: ${created} entr${created === 1 ? "y" : "ies"} created (${subjectIndex.size} subjects with ${links} grade links, ${gradeIndex.size} grades, 3 systems)`);
 
   return {
     systemIds,
@@ -189,10 +229,13 @@ export async function ensureCatalog(
       if (!row) throw new Error(`Unknown grade ${system}:${gradeEn}`);
       return row;
     },
-    subject: (system, gradeEn, subjectEn) => {
-      const row = subjectIndex.get(`${system}:${gradeEn}:${subjectEn}`);
-      if (!row) throw new Error(`Unknown subject ${system}:${gradeEn}:${subjectEn}`);
-      return row;
+    pair: (system, gradeEn, subjectEn) => {
+      const grade = gradeIndex.get(`${system}:${gradeEn}`);
+      const subject = subjectIndex.get(subjectEn);
+      if (!grade || !subject || !subject.gradeIds.includes(grade.id)) {
+        throw new Error(`Not a linked pair: ${system}:${gradeEn} × ${subjectEn}`);
+      }
+      return { subjectId: subject.id, gradeId: grade.id };
     },
     systemOfGrade: (gradeId) => {
       const key = gradeSystem.get(gradeId);

@@ -585,16 +585,17 @@ async function pickCatalog(centerId: string, branch: BranchDef, catalog: Catalog
   for (const grade of catalog.grades) {
     if (systems.has(catalog.systemOfGrade(grade.id))) rows.push({ centerId, kind: "GRADE", gradeId: grade.id });
   }
+  // A subject is picked once (U3) when it links to a grade of one of the branch's systems.
   for (const subject of catalog.subjects) {
-    if (subject.gradeId && systems.has(catalog.systemOfGrade(subject.gradeId))) {
+    if (subject.gradeIds.some((gradeId) => systems.has(catalog.systemOfGrade(gradeId)))) {
       rows.push({ centerId, kind: "SUBJECT", subjectId: subject.id });
     }
   }
   await prisma.centerCatalogSelection.createMany({ data: rows, skipDuplicates: true });
   for (const rename of branch.renames ?? []) {
-    const subject = catalog.subject(rename.system, rename.grade, rename.subject);
+    const { subjectId } = catalog.pair(rename.system, rename.grade, rename.subject);
     await prisma.centerCatalogSelection.updateMany({
-      where: { centerId, kind: "SUBJECT", subjectId: subject.id },
+      where: { centerId, kind: "SUBJECT", subjectId },
       data: { displayNameAr: rename.ar ?? null, displayNameEn: rename.en ?? null },
     });
   }
@@ -754,7 +755,7 @@ async function ensureStudents(ctx: Centre, catalog: Catalog): Promise<void> {
 async function ensureClasses(ctx: Centre, catalog: Catalog, terms: Record<TermKey, TermWindow>, today: Date, historyStart: Date) {
   const centerId = ctx.center.id;
   for (const def of ctx.branch.classes) {
-    const subject = catalog.subject(def.system, def.grade, def.subject);
+    const { subjectId, gradeId } = catalog.pair(def.system, def.grade, def.subject);
     const term = terms[def.term];
     // A class's period is COPIED from its term preset (R4). A class that ran
     // before the term preset's start (it is already five weeks into its run)
@@ -765,8 +766,8 @@ async function ensureClasses(ctx: Centre, catalog: Catalog, terms: Record<TermKe
     const extraRoomIds = (def.extraRooms ?? []).map((index) => ctx.rooms[index].id);
     const input = {
       teacherId,
-      subjectId: subject.id,
-      gradeId: subject.gradeId,
+      subjectId,
+      gradeId,
       educationSystemId: catalog.systemIds[def.system],
       roomId,
       extraRoomIds,
@@ -776,11 +777,14 @@ async function ensureClasses(ctx: Centre, catalog: Catalog, terms: Record<TermKe
       lateThresholdMinutes: 10,
       acceptsNewStudents: def.acceptsNewStudents ?? true,
       requiresConfirmation: def.requiresConfirmation ?? false,
+      sessionBookingMode: def.sessionBookingMode ?? "OFF",
+      maxBookingSeats: def.maxBookingSeats ?? null,
       startDate,
       endDate: term.endDate,
     };
     const options = { confirmConflicts: true, actorUserId: ctx.actorId, now: new Date() };
-    const existing = await prisma.classGroup.findFirst({ where: { centerId, subjectId: subject.id, teacherId } });
+    // U3: a subject id spans grades now, so the class is found by its pair.
+    const existing = await prisma.classGroup.findFirst({ where: { centerId, subjectId, gradeId, teacherId } });
     let group: ClassGroup;
     if (existing) {
       // A class deactivated by an earlier run keeps its history and stays off.
@@ -1148,14 +1152,12 @@ async function seedSpecialSessions(ctx: Centre, catalog: Catalog, today: Date) {
   const title = "Exam revision day";
   const oneOffDay = skipFriday(addDays(today, 1));
   if ((await prisma.session.count({ where: { centerId, classGroupId: null, title } })) === 0) {
-    const subject = catalog.subject("EG", "Secondary 3", "Physics");
     const created = await createOneOffSession(
       prisma,
       centerId,
       {
         title,
-        subjectId: subject.id,
-        gradeId: subject.gradeId,
+        ...catalog.pair("EG", "Secondary 3", "Physics"),
         teacherId: ctx.teacherIds.yasser,
         roomId: ctx.rooms[3].id,
         extraRoomIds: [ctx.rooms[4].id],
@@ -1426,10 +1428,8 @@ async function seedReservationsAndRequests(ctx: Centre, catalog: Catalog, today:
       if (exists === 0) await prisma.changeRequest.create({ data: { centerId, type, requestedBy, payload } });
     };
 
-    const english = catalog.subject("EG", "Primary 6", "English");
     await request("NEW_CLASS", ctx.teacherIds.karim, {
-      subjectId: english.id,
-      gradeId: english.gradeId,
+      ...catalog.pair("EG", "Primary 6", "English"),
       dayOfWeek: 0,
       startTime: "15:00",
       endTime: "16:30",
@@ -1448,10 +1448,8 @@ async function seedReservationsAndRequests(ctx: Centre, catalog: Catalog, today:
     }
     // A teacher with no centre at all asking to teach here (from the centre directory).
     const walid = await ensurePerson(ZERO_CENTRE_TEACHER);
-    const physics = catalog.subject("EG", "Secondary 3", "Physics");
     await request("NEW_CLASS", walid.id, {
-      subjectId: physics.id,
-      gradeId: physics.gradeId,
+      ...catalog.pair("EG", "Secondary 3", "Physics"),
       dayOfWeek: 4,
       startTime: "13:00",
       endTime: "15:00",

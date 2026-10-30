@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { ctxCan, getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
+import { buildCatalogPicker } from "@/lib/catalog-picker";
 import { formatDate, formatTimeRange } from "@/lib/format";
 import { EmptyState } from "@/components/shared/empty-state";
 
@@ -50,21 +51,21 @@ export default async function TeacherClassesPage() {
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  const [subjects, grades, requests] = await Promise.all([
+  const [systems, subjects, grades, requests] = await Promise.all([
+    db.educationSystems.list(),
     db.subjects.list(),
     db.grades.list(),
     db.changeRequests.list({ requestedBy: ctx.user.id, type: "NEW_CLASS" }),
   ]);
 
-  // The form offers only entries still on offer; a past request keeps naming
+  // The form offers only entries still on offer — system → grade → subject, a
+  // subject only under a grade it links to (U3); a past request keeps naming
   // the entry it asked for even if the platform has since deactivated it (R8),
   // so the history lookup reads the full lists.
-  const subjectOptions = subjects
-    .filter((subject) => subject.active && subject.catalogActive)
-    .map((subject) => ({ value: subject.id, label: subject.name }));
-  const gradeOptions = grades
-    .filter((grade) => grade.active && grade.catalogActive)
-    .map((grade) => ({ value: grade.id, label: grade.name }));
+  const catalog = buildCatalogPicker(
+    { systems, grades, subjects },
+    (name) => `${name} · ${tCommon("inactive")}`,
+  );
   const subjectNameById = new Map(subjects.map((subject) => [subject.id, subject.name]));
   const gradeNameById = new Map(grades.map((grade) => [grade.id, grade.name]));
   const dayNames = tDays.raw("dayNames") as string[];
@@ -83,7 +84,7 @@ export default async function TeacherClassesPage() {
             <CardDescription>{t("request.description")}</CardDescription>
           </CardHeader>
           <CardContent>
-            <ClassRequestForm subjects={subjectOptions} grades={gradeOptions} />
+            <ClassRequestForm catalog={catalog} />
           </CardContent>
         </Card>
       ) : null}

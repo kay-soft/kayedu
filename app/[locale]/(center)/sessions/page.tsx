@@ -1,5 +1,6 @@
 import { CalendarClock, CalendarSearch, ClipboardCheck, Radio, Wallet } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
+import { buildCatalogPicker } from "@/lib/catalog-picker";
 
 import {
   NewSessionDialog,
@@ -133,11 +134,12 @@ export default async function SessionsPage({
     canCreate
       ? Promise.all([
             db.classGroups.listForNewSession(),
-            db.subjects.list({ active: true }),
-            db.grades.list({ active: true }),
+            db.educationSystems.list(),
+            db.grades.list(),
+            db.subjects.list(),
             db.rooms.list(),
             db.roomLinks.list(),
-          ]).then(([activeClasses, activeSubjects, activeGrades, rooms, roomLinks]) => ({
+          ]).then(([activeClasses, catalogSystems, catalogGrades, catalogSubjects, rooms, roomLinks]) => ({
             classes: activeClasses.map((classGroup): NewSessionClassOption => {
               const label = sessionDisplayName(locale, { classGroup });
               return {
@@ -149,8 +151,11 @@ export default async function SessionsPage({
                 slots: classGroup.schedules,
               };
             }),
-            subjects: activeSubjects.map((subject) => ({ value: subject.id, label: subject.name })),
-            grades: activeGrades.map((grade) => ({ value: grade.id, label: grade.name })),
+            // U3 — system → grade → subject; only what is on offer here.
+            catalog: buildCatalogPicker(
+              { systems: catalogSystems, grades: catalogGrades, subjects: catalogSubjects },
+              (name) => `${name} · ${tCommon("inactive")}`,
+            ),
             rooms: rooms.map((room) => ({
               id: room.id,
               name: room.name,
@@ -253,8 +258,7 @@ export default async function SessionsPage({
             <NewSessionDialog
               classes={newSession.classes}
               teachers={teacherOptions}
-              subjects={newSession.subjects}
-              grades={newSession.grades}
+              catalog={newSession.catalog}
               rooms={newSession.rooms}
               roomLinks={newSession.roomLinks}
               defaultCut={{

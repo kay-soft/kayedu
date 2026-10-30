@@ -5,6 +5,7 @@ import { Banknote, CalendarClock, DoorOpen, Layers, LogIn, UserRound, UsersRound
 import { useLocale, useTranslations } from "next-intl";
 import type { SessionBookingMode, ShareType } from "@prisma/client";
 
+import { CatalogPickerFields } from "@/components/center/catalog-picker-fields";
 import {
   ClassPeriodFields,
   type TermOption,
@@ -19,6 +20,7 @@ import { formatMoney, formatNumber } from "@/lib/format";
 import { MAX_BOOKING_SEATS, MAX_LATE_THRESHOLD_MINUTES } from "@/lib/validation/classes";
 import { MAX_PRICE_PIASTRES, centerCutError, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
 import { effectiveCapacity, type RoomLinkPair } from "@/lib/rooms";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 
 export type SelectOption = { value: string; label: string };
 
@@ -62,7 +64,8 @@ export type ClassPlacementInputs = {
  * titled cards (R6, docs/04 §11.15) so the common path fits a 1280px dialog
  * with little or no scrolling:
  *
- * - **Basics** — subject, grade, education system, side by side;
+ * - **Basics** — education system → grade → subject, side by side (U3: each
+ *   narrows the next, `CatalogPickerFields`);
  * - **Teacher** — whatever the caller puts there (a searchable picker; on
  *   create, also "New teacher") — next to **Room(s)** (R3 — a required
  *   primary room plus any rooms combined with it; the set's summed capacity is
@@ -82,9 +85,7 @@ export type ClassPlacementInputs = {
 export function ClassFields({
   idPrefix,
   values,
-  subjects,
-  grades,
-  educationSystems,
+  catalog,
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
@@ -98,9 +99,8 @@ export function ClassFields({
 }: {
   idPrefix: string;
   values: ClassFieldsValues;
-  subjects: SelectOption[];
-  grades: SelectOption[];
-  educationSystems: SelectOption[];
+  /** The centre's offered systems, grades and subjects (`buildCatalogPicker`). */
+  catalog: CatalogPickerData;
   /**
    * Piastres, keyed by catalog education-system id — each system's
    * `defaultFixedCenterShare` (M13, spec §5.1 "Center cut"). A class set to
@@ -189,69 +189,25 @@ export function ClassFields({
     <div className="grid items-start gap-4 lg:grid-cols-2">
       <FormSection title={tSections("basics")} icon={<Layers />} wide>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field
-            id={`${idPrefix}-subjectId`}
-            label={t("subject")}
-            optional
-            error={error("subjectId")}
-          >
-            <Select
-              id={`${idPrefix}-subjectId`}
-              name="subjectId"
-              defaultValue={values.subjectId}
-            >
-              <option value="">{noneLabel}</option>
-              {subjects.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field
-            id={`${idPrefix}-gradeId`}
-            label={t("grade")}
-            optional
-            error={error("gradeId")}
-          >
-            <Select
-              id={`${idPrefix}-gradeId`}
-              name="gradeId"
-              defaultValue={values.gradeId}
-            >
-              <option value="">{noneLabel}</option>
-              {grades.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field
-            id={`${idPrefix}-educationSystemId`}
-            label={t("educationSystem")}
-            optional
-            error={error("educationSystemId")}
-          >
-            <Select
-              id={`${idPrefix}-educationSystemId`}
-              name="educationSystemId"
-              value={educationSystemId}
-              onValueChange={(next) => {
-                setEducationSystemId(next);
-                applyInheritedFixedShare(next, shareType);
-              }}
-            >
-              <option value="">{noneLabel}</option>
-              {educationSystems.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          <CatalogPickerFields
+            idPrefix={idPrefix}
+            data={catalog}
+            defaultValues={{
+              educationSystemId: values.educationSystemId,
+              gradeId: values.gradeId,
+              subjectId: values.subjectId,
+            }}
+            noneLabel={noneLabel}
+            errors={{
+              educationSystemId: error("educationSystemId"),
+              gradeId: error("gradeId"),
+              subjectId: error("subjectId"),
+            }}
+            onSystemChange={(next) => {
+              setEducationSystemId(next);
+              applyInheritedFixedShare(next, shareType);
+            }}
+          />
         </div>
       </FormSection>
 

@@ -153,6 +153,8 @@ const catalogEntryFields = {
     .optional()
     .transform((value) => (value && value.length > 0 ? value : null)),
   defaultFixedCenterShare: catalogShareEgp,
+  /** A subject's grades (U3), posted as repeated `gradeIds` fields — the action reads them with `getAll`. */
+  gradeIds: z.array(z.string().trim().min(1, "gradeNotFound").max(64, "gradeNotFound")).max(500).default([]),
 };
 
 export const catalogEntryCreateSchema = z.object(catalogEntryFields);

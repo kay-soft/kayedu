@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { requestToTeachAction } from "@/app/[locale]/(teacher)/teacher/centers/actions";
+import { CatalogPickerFields } from "@/components/center/catalog-picker-fields";
 import { TimeRangeFields } from "@/components/center/time-range-fields";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { Field } from "@/components/shared/field";
@@ -13,23 +14,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
 import { Button } from "@/components/ui/button";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
-type SelectOption = { value: string; label: string };
 type CenterCard = { id: string; name: string; logoUrl: string | null; themeColor: string };
 
 const DAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
 export function TeachAtCenterCard({
   center,
-  subjects,
-  grades,
+  catalog,
 }: {
   center: CenterCard;
-  subjects: SelectOption[];
-  grades: SelectOption[];
+  /** The global catalog (U3: system → grade → subject) — a teacher with no branch reads no branch's picks. */
+  catalog: CatalogPickerData;
 }) {
   const t = useTranslations("TeacherCenters");
   const tDays = useTranslations("Classes");
@@ -51,8 +51,7 @@ export function TeachAtCenterCard({
           <RequestForm
             centerId={center.id}
             centerName={center.name}
-            subjects={subjects}
-            grades={grades}
+            catalog={catalog}
             dayNames={tDays.raw("dayNames") as string[]}
             onCancel={() => setOpen(false)}
           />
@@ -69,15 +68,13 @@ export function TeachAtCenterCard({
 function RequestForm({
   centerId,
   centerName,
-  subjects,
-  grades,
+  catalog,
   dayNames,
   onCancel,
 }: {
   centerId: string;
   centerName: string;
-  subjects: SelectOption[];
-  grades: SelectOption[];
+  catalog: CatalogPickerData;
   dayNames: string[];
   onCancel: () => void;
 }) {
@@ -100,38 +97,18 @@ function RequestForm({
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          id={`${centerId}-subjectId`}
-          label={t("subject")}
-          optional
-          error={state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined}
-        >
-          <Select id={`${centerId}-subjectId`} name="subjectId" defaultValue="">
-            <option value="">{t("none")}</option>
-            {subjects.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field
-          id={`${centerId}-gradeId`}
-          label={t("grade")}
-          optional
-          error={state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined}
-        >
-          <Select id={`${centerId}-gradeId`} name="gradeId" defaultValue="">
-            <option value="">{t("none")}</option>
-            {grades.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+      {/* The card is a third of the page wide from `lg`: the three pickers stack. */}
+      <div className="grid gap-4">
+        <CatalogPickerFields
+          idPrefix={centerId}
+          data={catalog}
+          systemName={null}
+          noneLabel={t("none")}
+          errors={{
+            gradeId: state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined,
+            subjectId: state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined,
+          }}
+        />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
