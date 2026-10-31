@@ -31,6 +31,7 @@ import { studentSearchWhere } from "@/lib/db/students";
 import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
+import { formatPhone } from "@/lib/phone";
 import { ROUTES } from "@/lib/routes";
 import { ResultsRegion } from "@/components/shared/results-region";
 
@@ -148,7 +149,7 @@ export default async function TeacherDetailPage({
             {teacher.phone ? (
               <span className="inline-flex items-center gap-1.5">
                 <Phone className="size-4 text-text-muted" aria-hidden />
-                <span dir="ltr">{teacher.phone}</span>
+                <span dir="ltr">{formatPhone(teacher.phone)}</span>
               </span>
             ) : null}
           </>

@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { formatPhone } from "@/lib/phone";
 import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
 
 const IDLE: AccountFormState = {};
@@ -81,7 +82,7 @@ export function AccountProfileForm({
               autoComplete="tel"
               dir="ltr"
               placeholder="01012345678"
-              defaultValue={contactPhone}
+              defaultValue={formatPhone(contactPhone)}
             />
           </Field>
 

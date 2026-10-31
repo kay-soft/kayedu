@@ -618,13 +618,13 @@ async function checkAccountSeeding(
 
   // a. grade + declared parent -> seeded, and whole: no second form.
   const u1 = await user("whole", { gradeId: gSeed.id });
-  await invite(u1.id, "01000000001", "ACCEPTED", new Date(Date.now() - 2 * day), "Older");
-  await invite(u1.id, "01000000002", "PENDING", new Date(Date.now() - day), "Newer");
+  await invite(u1.id, "+201000000001", "ACCEPTED", new Date(Date.now() - 2 * day), "Older");
+  await invite(u1.id, "+201000000002", "PENDING", new Date(Date.now() - day), "Newer");
   await join(centerA.id, classA.id, u1.id);
   const whole = await profileAt(centerA.id, u1.id);
   check(
     "A new profile takes the account grade and the latest declared parent, and is stamped complete",
-    whole?.gradeId === gSeed.id && whole.parentPhone === "01000000002" && whole.parentFirstName === "Newer" &&
+    whole?.gradeId === gSeed.id && whole.parentPhone === "+201000000002" && whole.parentFirstName === "Newer" &&
       whole.parentLastName === "Parent" && whole.profileCompletedAt !== null,
     JSON.stringify(whole),
   );
@@ -637,21 +637,21 @@ async function checkAccountSeeding(
 
   // c. parent only -> the form stays.
   const u3 = await user("parent-only");
-  await invite(u3.id, "01000000003", "PENDING", new Date());
+  await invite(u3.id, "+201000000003", "PENDING", new Date());
   await join(centerA.id, classA.id, u3.id);
   const parentOnly = await profileAt(centerA.id, u3.id);
-  check("Parent without a grade: seeded, but the one-time form still stands", parentOnly?.gradeId === null && parentOnly.parentPhone === "01000000003" && parentOnly.profileCompletedAt === null);
+  check("Parent without a grade: seeded, but the one-time form still stands", parentOnly?.gradeId === null && parentOnly.parentPhone === "+201000000003" && parentOnly.profileCompletedAt === null);
 
   // d. a grade this branch does not offer is not seeded (SEC-49).
   const u4 = await user("unoffered", { gradeId: gNotOffered.id });
-  await invite(u4.id, "01000000004", "PENDING", new Date());
+  await invite(u4.id, "+201000000004", "PENDING", new Date());
   await join(centerA.id, classA.id, u4.id);
   const unoffered = await profileAt(centerA.id, u4.id);
   check("A grade the branch does not offer is left empty, so the form stays", unoffered?.gradeId === null && unoffered.profileCompletedAt === null);
 
   // e. a cancelled invitation declares nobody.
   const u5 = await user("cancelled", { gradeId: gSeed.id });
-  await invite(u5.id, "01000000005", "REVOKED", new Date());
+  await invite(u5.id, "+201000000005", "REVOKED", new Date());
   await join(centerA.id, classA.id, u5.id);
   const cancelled = await profileAt(centerA.id, u5.id);
   check("A cancelled invitation seeds no parent", cancelled?.parentPhone === null && cancelled.profileCompletedAt === null);
@@ -667,7 +667,7 @@ async function checkAccountSeeding(
   );
   await join(centerB.id, classB.id, u1.id);
   const atB = await profileAt(centerB.id, u1.id);
-  check("A second branch seeds from the account as it is now, independently of the first", atB?.gradeId === gOther.id && atB.parentPhone === "01000000002");
+  check("A second branch seeds from the account as it is now, independently of the first", atB?.gradeId === gOther.id && atB.parentPhone === "+201000000002");
 
   // g. a sign-up intent grants nothing.
   for (const intent of ["STUDENT", "PARENT", "TEACHER"] as const) {

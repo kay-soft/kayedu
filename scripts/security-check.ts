@@ -244,7 +244,7 @@ async function makeUser(tag: string, data: { authId?: string | null; phone?: str
 
 async function freePhone(): Promise<string> {
   for (let i = 0; i < 50; i++) {
-    const phone = `015${String(randomInt(0, 99_999_999)).padStart(8, "0")}`;
+    const phone = `+2015${String(randomInt(0, 99_999_999)).padStart(8, "0")}`; // the stored E.164 form (U4)
     const [users, profiles, memberships] = await Promise.all([
       prisma.user.count({ where: { OR: [{ phone }, { altPhone: phone }] } }),
       prisma.studentProfile.count({
@@ -555,7 +555,7 @@ async function main() {
           profileAfter.firstName === profile.firstName &&
           profileAfter.lastName === profile.lastName,
       ],
-      ["contactPhone is normalized by lib/phone.ts and User.phone is untouched", renamed.contactPhone === "01012345678" && renamed.phone === self.phone],
+      ["contactPhone is normalized by lib/phone.ts and User.phone is untouched", renamed.contactPhone === "+201012345678" && renamed.phone === self.phone],
     ];
   });
 

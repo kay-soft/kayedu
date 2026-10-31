@@ -58,7 +58,8 @@
     "e2e": "playwright test",
     "e2e:report": "playwright show-report e2e/.report",
     "perf:queries": "node scripts/with-env.ts scripts/query-count.ts",
-    "perf:db": "node scripts/with-env.ts scripts/db-timing.ts"
+    "perf:db": "node scripts/with-env.ts scripts/db-timing.ts",
+    "report:phones": "node scripts/with-env.ts scripts/phone-report.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

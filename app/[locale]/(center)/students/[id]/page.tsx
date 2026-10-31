@@ -387,8 +387,8 @@ export default async function StudentDetailPage({
               contentClassName="gap-0"
             >
               <DetailRow label={t("fields.parentName")} value={parentName} />
-              <DetailRow label={t("fields.parentPhone")} value={student.parentPhone} ltr />
-              <DetailRow label={t("fields.parentAltPhone")} value={student.parentAltPhone} ltr />
+              <DetailRow label={t("fields.parentPhone")} value={student.parentPhone} phone />
+              <DetailRow label={t("fields.parentAltPhone")} value={student.parentAltPhone} phone />
               <DetailRow label={t("fields.otherCenters")} value={formatNumber(otherRelations, locale)} />
             </DetailCard>
 

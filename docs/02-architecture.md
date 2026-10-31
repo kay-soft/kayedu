@@ -191,9 +191,11 @@ lib/
                                 #   only Storage API caller), index.ts (picks the adapter; storageConfigured)
   log.ts                        # logBestEffort — the few deliberately best-effort steps log, never swallow (SYS)
   money.ts                      # the ONLY center-cut math + piastre helpers
-  phone.ts                      # the ONE phone normalizer, 11–15 digits, +20…/20…/0… → 01…;
-                                #   used by validation, duplicate-matching AND search alike (M18);
-                                #   R6: phoneSearchDigits/phoneMatchesQuery — partial-phone search in any format
+  phone.ts                      # the ONE phone normalizer: 0…/…/+20…/0020…/20…, any punctuation,
+                                #   Arabic/Persian digits → E.164 +20XXXXXXXXXX (U4); used by validation,
+                                #   duplicate-matching AND search alike (M18); formatPhone ("+20 101 234 5678"),
+                                #   phoneTelHref, phoneWhatsAppNumber; R6: phoneSearchDigits/phoneMatchesQuery/
+                                #   looksLikePhone — partial-phone search in any format
   digits.ts                     # Arabic-Indic → ASCII digit folding, shared by phone search, the time parser
                                 #   and the parent-code normalizer (R6, F3)
   family-code.ts                # the parent code's alphabet, normalizer and display form — pure, browser-safe (F3)

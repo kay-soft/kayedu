@@ -1233,7 +1233,7 @@ Low findings use a compact form. Every field is still present.
 - Exploit: direct GoTrue sign-up stores an un-normalised phone or a 10k-character name.
 - Fix: zod-validate the metadata and normalise it, or drop the phone (SEC-02); don't overwrite linked rows.
 - Behaviour: no.
-- Gate: metadata phone `+20 10 1234 5678` is stored as `01012345678` or null.
+- Gate: metadata phone `+20 10 1234 5678` is stored as `+201012345678` (E.164 since U4; `01012345678` before) or null.
 - Repro: none.
 
 **SEC-42 — Invitation acceptance is check-then-act; invitations outlive the inviter's authority; revoke is gated more loosely than create.**

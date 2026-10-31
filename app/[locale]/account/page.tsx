@@ -22,6 +22,7 @@ import { recordsOnFile, type RecordOnFile } from "@/lib/db/account";
 import { prisma } from "@/lib/db/client";
 import { fullName, localName } from "@/lib/identity";
 import { personInitials } from "@/lib/initials";
+import { formatPhone } from "@/lib/phone";
 import { HubShell } from "@/components/shell/hub-shell";
 import type { ShellUser } from "@/components/shell/app-shell";
 import { ACCOUNT_HUB_HINT, type ShellExperience } from "@/lib/routes";
@@ -177,7 +178,7 @@ function RecordCard({
           </div>
           <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-3">
             <dt className="text-xs font-medium text-text-secondary sm:w-20 sm:shrink-0">{labels.phone}</dt>
-            <dd className="text-text-primary">{record.phone ? <Ltr>{record.phone}</Ltr> : "—"}</dd>
+            <dd className="text-text-primary">{record.phone ? <Ltr>{formatPhone(record.phone)}</Ltr> : "—"}</dd>
           </div>
         </dl>
         <p className="mt-3 text-xs text-text-muted">{labels.askBranch}</p>

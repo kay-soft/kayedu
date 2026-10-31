@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Field } from "@/components/shared/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { formatPhone } from "@/lib/phone";
 
 export type GradeOption = { value: string; label: string };
 
@@ -159,7 +160,7 @@ export function ParentFields({
           type="tel"
           inputMode="tel"
           dir="ltr"
-          defaultValue={values?.parentPhone ?? ""}
+          defaultValue={formatPhone(values?.parentPhone)}
           maxLength={20}
           placeholder={tPeople("phonePlaceholder")}
           aria-invalid={fieldErrors?.parentPhone ? true : undefined}
@@ -178,7 +179,7 @@ export function ParentFields({
           type="tel"
           inputMode="tel"
           dir="ltr"
-          defaultValue={values?.parentAltPhone ?? ""}
+          defaultValue={formatPhone(values?.parentAltPhone)}
           maxLength={20}
           placeholder={tPeople("phonePlaceholder")}
           aria-invalid={fieldErrors?.parentAltPhone ? true : undefined}

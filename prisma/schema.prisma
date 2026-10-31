@@ -240,6 +240,8 @@ model User {
   // A staff-typed (never self-typed) contact, seeded once at creation. Phone
   // is never an identity key (SEC-2a, D-02): nothing links on it, and sign-up
   // never writes it.
+  // U4: every phone column in this schema stores E.164 `+20XXXXXXXXXX`, only
+  // ever written through lib/phone.ts's `normalizePhone` (docs/01 "Phone numbers").
   phone           String?   @unique
   altPhone        String?
   // F2: the person's own self-declared phone, set on Account settings and
@@ -1706,7 +1708,7 @@ model ParentLink {
   centerId         String
   center           Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
   status           ParentLinkStatus @default(PENDING)
-  // The normalized phone that produced this link. Re-checked on every read
+  // The normalized (E.164, U4) phone that produced this link. Re-checked on every read
   // (SEC-2a, D-04): a link whose phone is no longer the student's parent
   // phone or alt phone reads as nothing, and is revoked when staff change it.
   matchedPhone     String

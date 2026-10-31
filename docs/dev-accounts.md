@@ -60,7 +60,7 @@ Navigation is gated on the stored permission matrix (`PermissionGrant`), with ea
 - **History** — the last five weeks of closed sessions (≈ 80% present, 10% late, 10% absent; payments over Cash / InstaPay / Vodafone Cash and the custom method; a few live absent-switch voids; one auto-closed, one cancelled session per branch), then **today, relative to when you ran the seed**: a live session (started earlier today, not ended), upcoming sessions, a one-time session, an extra session and one rescheduled session.
 - **Money and workflow** — settlements (one PAID, one APPROVED, one DRAFT per Center 60 branch), expenses in Rent / Salaries / Utilities / Supplies / Marketing, ratings inside the last seven days (the three signed-in students' own sessions are left unrated so the pop-up appears), reservations (pending, confirmed, and rejected inside the 7-day cooldown) and teacher change requests (NEW_CLASS, NEW_SESSION, and a zero-centre teacher's request to teach).
 - **Not signed-in people** — about 110 students, parents' phone numbers and the other teachers are real rows with no login. Their emails are `@example.com` too and mean nothing.
-- **Phones** are canonical `01XXXXXXXXX` (010 / 011 / 012 / 015), produced through `lib/phone.ts`; no photos exist (`photoUrl` is empty).
+- **Phones** are stored in E.164, `+201XXXXXXXXX` (010 / 011 / 012 / 015), produced through `lib/phone.ts`, and shown as `+20 1XX XXX XXXX`; you can search by any spelling (`0101…`, `+20 101…`); no photos exist (`photoUrl` is empty).
 
 ## Bookable classes — single-session attendance (F6, seeded since U3)
 

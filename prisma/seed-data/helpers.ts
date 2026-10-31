@@ -58,7 +58,10 @@ export function hashString(value: string): number {
  * Egyptian mobile numbers (010 / 011 / 012 / 015), handed out in the raw
  * formats people actually type — `0100 123 4567`, `+20 100 123 4567`,
  * `0100-1234567` — and always run through `lib/phone.ts` (CLAUDE.md rule 10),
- * so what is stored is the one canonical `01XXXXXXXXX`.
+ * so what is stored is the one canonical E.164 `+20XXXXXXXXXX` (U4). The raw
+ * display string is passed on purpose wherever the app's own writers
+ * (`createPerson`, `addTeacherMembership`) take it, so the seed exercises
+ * their normalization rather than skipping it.
  *
  * **Keyed, not sequential:** a person's number is derived from a stable key
  * (`"downtown:student:07"`), so a re-run of the seed produces the same number

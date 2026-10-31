@@ -9,6 +9,7 @@ import { FormMessage } from "@/components/shared/form-message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/lib/i18n/navigation";
+import { formatPhone } from "@/lib/phone";
 import { ROUTES } from "@/lib/routes";
 import { IDLE_PEOPLE_STATE } from "@/lib/validation/people";
 import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
@@ -66,7 +67,7 @@ export function TeacherRow({
           {t("columns.contact")}
         </span>
         <span className="truncate text-sm text-text-secondary">
-          <Ltr>{teacher.phone ?? teacher.email ?? "—"}</Ltr>
+          <Ltr>{teacher.phone ? formatPhone(teacher.phone) : (teacher.email ?? "—")}</Ltr>
         </span>
       </div>
 

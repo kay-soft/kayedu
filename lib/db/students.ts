@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 // `npm run check:people` outside the Next.js runtime, so this module and
 // everything it pulls in must stay resolvable without the `@/` alias (same
 // reasoning as lib/identity.ts).
-import { normalizePhone } from "../phone.ts";
+import { looksLikePhone, phoneSearchDigits } from "../phone.ts";
 import type { ScopedDb } from "@/lib/db/scoped";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 import { likeSearchToken } from "../like.ts";
@@ -94,27 +94,45 @@ export const TEACHER_LIST_SELECT = {
   user: { select: { firstName: true, lastName: true } },
 } satisfies Prisma.MembershipSelect;
 
+/** The typed words — one word when the whole query is written like a phone. */
+function searchWords(query: string): string[] {
+  const trimmed = query.trim();
+  if (trimmed !== "" && looksLikePhone(trimmed)) return [trimmed.replace(/\s+/g, "")];
+  return trimmed.split(/\s+/).filter(Boolean);
+}
+
+/** A phone-shaped token's `contains` filter on a stored E.164 column, or null. */
+function phoneContains(token: string): { contains: string } | null {
+  if (!looksLikePhone(token)) return null;
+  const digits = phoneSearchDigits(token);
+  return digits === "" ? null : { contains: digits };
+}
+
 /**
  * Reception searches by code, name or phone (spec §4.1 item 8). Each typed
  * word must match somewhere, so "ahmed 1004" finds Ahmed with code 1004.
  * Matches this center's **local** name/contact first — what the row actually
  * displays — plus the global `User` name as a fallback for a record whose
  * local name was never seeded, and the parent's contact.
+ *
+ * Phones (U4): a query written like a phone is one token however it is spaced
+ * ("0101 234" = "+20101234"), searched by `phoneSearchDigits` against the
+ * stored E.164 column — the national digits, so any prefix or tail matches.
  */
 export function studentSearchWhere(
   query: string,
 ): Prisma.StudentProfileWhereInput | undefined {
   // SEC-61: LIKE pattern characters removed — Prisma cannot escape them. A
   // query that was only such characters matches nobody, never everyone.
-  const typed = query.trim().split(/\s+/).filter(Boolean);
+  const typed = searchWords(query);
   const tokens = typed.map(likeSearchToken).filter(Boolean).slice(0, 5);
   if (typed.length === 0) return undefined;
   if (tokens.length === 0) return { id: { in: [] } };
 
   return {
     AND: tokens.map((token) => {
-      const asPhone = normalizePhone(token);
       const contains = { contains: token, mode: "insensitive" as const };
+      const phone = phoneContains(token);
 
       return {
         OR: [
@@ -125,11 +143,7 @@ export function studentSearchWhere(
           { user: { lastName: contains } },
           { parentFirstName: contains },
           { parentLastName: contains },
-          { parentPhone: contains },
-          { phone: contains },
-          ...(asPhone
-            ? [{ phone: asPhone }, { parentPhone: asPhone }]
-            : []),
+          ...(phone ? [{ phone }, { parentPhone: phone }] : []),
         ],
       };
     }),
@@ -142,15 +156,15 @@ export function teacherSearchWhere(
 ): Prisma.MembershipWhereInput | undefined {
   // SEC-61: LIKE pattern characters removed — Prisma cannot escape them. A
   // query that was only such characters matches nobody, never everyone.
-  const typed = query.trim().split(/\s+/).filter(Boolean);
+  const typed = searchWords(query);
   const tokens = typed.map(likeSearchToken).filter(Boolean).slice(0, 5);
   if (typed.length === 0) return undefined;
   if (tokens.length === 0) return { id: { in: [] } };
 
   return {
     AND: tokens.map((token) => {
-      const asPhone = normalizePhone(token);
       const contains = { contains: token, mode: "insensitive" as const };
+      const phone = phoneContains(token);
 
       return {
         OR: [
@@ -158,9 +172,8 @@ export function teacherSearchWhere(
           { lastName: contains },
           { user: { firstName: contains } },
           { user: { lastName: contains } },
-          { phone: contains },
           { email: contains },
-          ...(asPhone ? [{ phone: asPhone }] : []),
+          ...(phone ? [{ phone }] : []),
         ],
       };
     }),

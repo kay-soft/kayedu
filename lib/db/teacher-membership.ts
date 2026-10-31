@@ -14,6 +14,7 @@ import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import type { MatchCandidate } from "../validation/people.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { normalizePhone } from "../phone.ts";
 
 /**
  * **The one place a teacher is added to a centre** (CLAUDE.md rule 4; spec §5
@@ -121,7 +122,11 @@ export async function addTeacherMembership(
   input: PersonInput,
   options: TeacherMembershipOptions,
 ): Promise<TeacherMembershipResult> {
-  const { email, phone, altPhone } = input;
+  // The one normalizer at the write itself, not only in the form schema: a
+  // caller that skips zod (the seed, a gate) still stores the E.164 form (U4).
+  const { email } = input;
+  const phone = normalizePhone(input.phone);
+  const altPhone = normalizePhone(input.altPhone);
   const contact = { email, phone };
   const resolution = await resolveContact(
     { centerId, actorUserId: options.actorUserId, adding: "teacher" },

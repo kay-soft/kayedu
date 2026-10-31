@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { Field } from "@/components/shared/field";
 import { Input } from "@/components/ui/input";
+import { formatPhone } from "@/lib/phone";
 
 /**
  * A person's contact details **as this center has them on file**
@@ -65,7 +66,7 @@ export function ContactFields({
           type="tel"
           inputMode="tel"
           dir="ltr"
-          defaultValue={values?.phone ?? ""}
+          defaultValue={formatPhone(values?.phone)}
           maxLength={20}
           placeholder={t("phonePlaceholder")}
           aria-invalid={fieldErrors?.phone ? true : undefined}
@@ -85,7 +86,7 @@ export function ContactFields({
           type="tel"
           inputMode="tel"
           dir="ltr"
-          defaultValue={values?.altPhone ?? ""}
+          defaultValue={formatPhone(values?.altPhone)}
           maxLength={20}
           placeholder={t("phonePlaceholder")}
           aria-invalid={fieldErrors?.altPhone ? true : undefined}

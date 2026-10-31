@@ -361,7 +361,7 @@ export async function createPerson(
       lastName: data.lastName,
       email: emailTaken ? null : email,
       phone: phoneTaken ? null : phone,
-      altPhone: data.altPhone,
+      altPhone: normalizePhone(data.altPhone),
       locale: data.locale,
     },
   });

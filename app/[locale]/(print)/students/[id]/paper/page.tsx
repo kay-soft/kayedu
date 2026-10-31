@@ -90,7 +90,7 @@ export default async function StudentPaperPrintPage({
                 stacked
                 label={t("fields.phone")}
                 value={student.phone}
-                ltr
+                phone
               />
               <DetailRow
                 stacked
@@ -122,13 +122,13 @@ export default async function StudentPaperPrintPage({
                 stacked
                 label={t("fields.parentPhone")}
                 value={student.parentPhone}
-                ltr
+                phone
               />
               <DetailRow
                 stacked
                 label={t("fields.parentAltPhone")}
                 value={student.parentAltPhone}
-                ltr
+                phone
               />
             </div>
           </section>

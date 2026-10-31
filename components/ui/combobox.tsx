@@ -5,6 +5,7 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { Check, ChevronDown, X } from "lucide-react";
 
 import { matchesPicker } from "@/lib/picker-search";
+import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
 export type ComboboxOption = {
@@ -152,7 +153,7 @@ export function Combobox({
                     <span className="block truncate text-text-primary">{option.label}</span>
                     {option.phone ? (
                       <span dir="ltr" className="block truncate text-start text-xs tabular-nums text-text-muted">
-                        {option.phone}
+                        {formatPhone(option.phone)}
                       </span>
                     ) : option.description ? (
                       <span className="block truncate text-xs text-text-muted">{option.description}</span>

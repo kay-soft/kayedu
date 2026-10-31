@@ -38,7 +38,7 @@ import {
   seedLocalName,
   type LookupContext,
 } from "../lib/db/identity.ts";
-import { normalizePhone } from "../lib/phone.ts";
+import { formatPhone, normalizePhone, phoneTelHref, phoneWhatsAppNumber } from "../lib/phone.ts";
 import { checkRateLimit } from "../lib/rate-limit.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 import { createTeacherMembership } from "../lib/db/teacher-membership.ts";
@@ -79,13 +79,14 @@ const SLUG_A = "people-check-a";
 const SLUG_B = "people-check-b";
 const SLUG_C = "people-check-c";
 const SHARED_EMAIL = "people-check-shared@kayedu.test";
-const SHARED_PHONE = "01012345678";
+// The stored form (U4: E.164) — what the database holds and every assertion expects.
+const SHARED_PHONE = "+201012345678";
 const TEACHER_EMAIL = "people-check-teacher@kayedu.test";
 const LOCAL_ONLY_EMAIL = "people-check-local-only@kayedu.test";
 const LOCAL_EMAIL = "people-check-local@kayedu.test";
 const RACE_EMAIL_PREFIX = "people-check-race";
 const CONTACT_PHONE_EMAIL = "people-check-contact-phone@kayedu.test";
-const CONTACT_PHONE = "01544443322";
+const CONTACT_PHONE = "+201544443322";
 
 let failures = 0;
 
@@ -287,6 +288,7 @@ async function cleanup() {
     where: {
       OR: [
         { email: { startsWith: "people-check-f4-" } },
+        { email: { startsWith: "people-check-u4-" } },
         { email: { in: [SHARED_EMAIL, TEACHER_EMAIL, LOCAL_ONLY_EMAIL, LOCAL_EMAIL, CONTACT_PHONE_EMAIL] } },
         { phone: SHARED_PHONE },
         { email: { startsWith: RACE_EMAIL_PREFIX } },
@@ -600,7 +602,7 @@ async function main() {
     firstName: "Mona",
     lastName: "Hassan",
     email: SHARED_EMAIL,
-    phone: SHARED_PHONE,
+    phone: "01012345678",
     parentFirstName: "Hassan",
     parentPhone: "01112345678",
   };
@@ -642,7 +644,7 @@ async function main() {
   // (this was a brand-new person) AND onto centerA's local StudentProfile.
   // Center A now edits its own copy; Center B's copy — and the global User —
   // must be untouched.
-  const localOnlyContact = { email: LOCAL_ONLY_EMAIL, phone: "01099999999" };
+  const localOnlyContact = { email: LOCAL_ONLY_EMAIL, phone: "+201099999999" };
   await prisma.studentProfile.update({
     where: { id: inA.profileId },
     data: localOnlyContact,
@@ -663,7 +665,7 @@ async function main() {
   );
   check(
     "Center A's local record reflects its own edit",
-    profileA.email === LOCAL_ONLY_EMAIL && profileA.phone === "01099999999",
+    profileA.email === LOCAL_ONLY_EMAIL && profileA.phone === "+201099999999",
   );
 
   // A third center registers someone new, entering only a contact that lives
@@ -902,6 +904,34 @@ async function main() {
     ? await prisma.membership.findUnique({ where: { id: trustedMade.membershipId } })
     : null;
   check("Add teacher with the flag unset keeps the column default (trusted)", trustedRow?.isTrustedTeacher === true);
+
+  // ── 4c. U4: the teacher writer normalizes, whoever calls it ────────────
+  // The seed used to hand `createTeacherMembership` its raw display string
+  // (`012-7681-7691`, `+20 10 7325 3370`) and the membership stored it as
+  // typed — only the form's zod schema normalized. The writer itself now
+  // runs `normalizePhone`, so a caller that skips zod still stores E.164.
+  const rawTeacher = await createTeacherMembership(
+    prisma,
+    centerA.id,
+    {
+      firstName: "Raw",
+      lastName: "Phone",
+      email: "people-check-u4-raw@kayedu.test",
+      phone: "+20 15 0000 4321",
+      altPhone: "012-0000-4322",
+      locale: "en",
+    },
+    { actorUserId: null, linkUserId: null, via: "teacher.add", refusePrivileged: false },
+  );
+  const rawRow = rawTeacher.ok
+    ? await prisma.membership.findUnique({ where: { id: rawTeacher.membershipId }, include: { user: true } })
+    : null;
+  check(
+    "createTeacherMembership stores a raw typed phone in E.164 (membership and new User)",
+    rawRow?.phone === "+201500004321" && rawRow.altPhone === "+201200004322" &&
+      rawRow.user.phone === "+201500004321" && rawRow.user.altPhone === "+201200004322",
+    JSON.stringify({ ok: rawTeacher.ok, phone: rawRow?.phone, altPhone: rawRow?.altPhone, userPhone: rawRow?.user.phone }),
+  );
 
   // ── 5. Grade promotion stays inside its center ─────────────────────────
   await prisma.studentProfile.updateMany({
@@ -1229,6 +1259,42 @@ async function main() {
     "A phone is normalized to one canonical form",
     normalizePhone("+20 101 234 5678") === SHARED_PHONE &&
       normalizePhone("00201012345678") === SHARED_PHONE,
+  );
+  check(
+    "Every accepted input shape normalizes to the one E.164 form (U4)",
+    [
+      "01012345678",
+      "1012345678",
+      "+201012345678",
+      "00201012345678",
+      "201012345678",
+      "0101-234-5678",
+      "(0101) 234.5678",
+      "+20 (101) 234-56-78",
+      "٠١٠١٢٣٤٥٦٧٨",
+      "+٢٠ ١٠١ ٢٣٤ ٥٦٧٨",
+      "۰۱۰۱۲۳۴۵۶۷۸",
+    ].every((typed) => normalizePhone(typed) === SHARED_PHONE),
+    JSON.stringify([normalizePhone("٠١٠١٢٣٤٥٦٧٨"), normalizePhone("1012345678")]),
+  );
+  check(
+    "Only 010/011/012/015 mobiles are accepted",
+    normalizePhone("01112345678") === "+201112345678" &&
+      normalizePhone("01212345678") === "+201212345678" &&
+      normalizePhone("01512345678") === "+201512345678" &&
+      normalizePhone("01312345678") === null &&
+      normalizePhone("0223456789") === null &&
+      normalizePhone("+447700900123") === null &&
+      normalizePhone("0101234567") === null &&
+      normalizePhone("") === null,
+  );
+  check(
+    "A phone displays as +20 101 234 5678, links as tel:+20… and wa.me digits",
+    formatPhone(SHARED_PHONE) === "+20 101 234 5678" &&
+      formatPhone("0101-234-5678") === "+20 101 234 5678" &&
+      formatPhone(null) === "" &&
+      phoneTelHref(SHARED_PHONE) === "tel:+201012345678" &&
+      phoneWhatsAppNumber(SHARED_PHONE) === "201012345678",
   );
   check(
     "A non-Egyptian mobile is rejected",

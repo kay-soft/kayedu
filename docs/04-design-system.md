@@ -226,6 +226,7 @@ Every screen must work on a phone. Breakpoints: `sm 640` / `md 768` / `lg 1024` 
 - Logical properties only: `ps-*/pe-*`, `ms-*/me-*`, `text-start/end`, `start-*/end-*`. **Never** `left/right`, `pl/pr`, `ml/mr`.
 - Icons that imply direction (arrows, chevrons, back) must mirror in RTL; icons that don't (calendar, user, money) must not.
 - Charts: axis and legend placement follow reading direction; numeric axes stay conventional.
+- **Phone numbers (U4)** display in one form, `+20 101 234 5678`, through `lib/phone.ts`'s `formatPhone` — never the stored `+201012345678` and never a hand-built string — and always LTR: `<Ltr>` inside text, `DetailRow`'s `phone` prop on a detail card, `dir="ltr"` on an input (an edit form is prefilled in the same display form). A `tel:` link uses `phoneTelHref` (E.164); a WhatsApp link `phoneWhatsAppNumber` (the digits without `+`).
 - Every screen is reviewed in **both** `ar` and `en` before it's considered done.
 
 ---
