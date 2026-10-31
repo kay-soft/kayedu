@@ -14,7 +14,7 @@ import type {
 import { seedFromAccount } from "./account-study.ts";
 import { claimStudentCode } from "./students.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { cooldownUntil, enrollmentCap, isAtCapacity, isInCooldown } from "../capacity.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
 import { firstOverflowingSession } from "./session-seats.ts";
@@ -258,7 +258,7 @@ export async function reserveOrEnroll(
     where: scopedWhere(centerId, {
       id: classGroupId,
       active: true,
-      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      center: ACCESSIBLE_CENTER,
     }),
     include: { room: ROOM_SET_SELECT.room, extraRooms: ROOM_SET_SELECT.extraRooms },
   });

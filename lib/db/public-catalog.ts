@@ -6,10 +6,11 @@ import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 import { enrollmentCap, seatStatus, type SeatStatus } from "../capacity.ts";
 import { mapWithConcurrency } from "../concurrency.ts";
 import { effectiveCapacity } from "../rooms.ts";
-import { centreTimeZone, todayInTimezone } from "../scheduling.ts";
+import { centreTimeZone, dateKey, todayInTimezone } from "../scheduling.ts";
 import { centerLogoSrc } from "../storage-paths.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 import { teacherRatingAverages } from "./ratings.ts";
+import { pausedUntilFrom } from "./branch-pauses.ts";
 
 /**
  * The public catalog (F5, docs/02-architecture.md §2 "(public)"): everything a
@@ -58,6 +59,14 @@ const PUBLIC_BRANCH_SELECT = {
   logoPath: true,
   themeColor: true,
   settings: { select: { timezone: true } },
+  // U5: the newest pause not ended early — at most one is current or upcoming,
+  // so if one covers today it is this one (`pausedUntilFrom`). Dates only.
+  pauses: {
+    where: { endedEarlyAt: null },
+    select: { startDate: true, endDate: true },
+    orderBy: { endDate: "desc" },
+    take: 1,
+  },
 } satisfies Prisma.CenterSelect;
 
 type PublicBranchRow = Prisma.CenterGetPayload<{ select: typeof PUBLIC_BRANCH_SELECT }>;
@@ -71,17 +80,22 @@ export type PublicBranch = {
   logoUrl: string | null;
   themeColor: string;
   timeZone: string;
+  /** U5 — the last day of a platform admin's pause covering the branch's today, or null. */
+  pausedUntil: Date | null;
 };
 
 function publicBranchWhere(extra: Prisma.CenterWhereInput = {}): Prisma.CenterWhereInput {
   return {
     ...extra,
     lifecycleState: { in: [...PUBLIC_LIFECYCLE_STATES] },
+    // U5: a branch a platform admin deleted is gone from Explore at once.
+    deletedAt: null,
     settings: { is: { publicListing: true } },
   };
 }
 
 function toPublicBranch(row: PublicBranchRow): PublicBranch {
+  const timeZone = centreTimeZone(row.settings);
   return {
     id: row.id,
     slug: row.slug,
@@ -89,7 +103,8 @@ function toPublicBranch(row: PublicBranchRow): PublicBranch {
     nameEn: row.nameEn,
     logoUrl: centerLogoSrc(row),
     themeColor: row.themeColor,
-    timeZone: centreTimeZone(row.settings),
+    timeZone,
+    pausedUntil: pausedUntilFrom(row.pauses, dateKey(todayInTimezone(timeZone))),
   };
 }
 

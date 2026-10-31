@@ -39,6 +39,7 @@ import {
   type OneOffShapeError,
 } from "./sessions.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { branchPauseRefusal } from "./branch-pauses.ts";
 
 export type { ConflictRefusal, DatedConflict };
 import type { PersonInput } from "./identity.ts";
@@ -1726,6 +1727,7 @@ export type ManualSessionError =
   | "fixedAbovePrice"
   | "duplicateSlot"
   | "duplicateSlotCancelled"
+  | "branchPaused"
   | OneOffShapeError
   | RoomSetError;
 
@@ -1771,6 +1773,11 @@ async function checkManualSlot(
   const { timeZone, policy } = await centreScheduling(db, centerId);
   const clock = centreClock(options.now ?? new Date(), timeZone);
   if (dateKey(slot.date) < clock.todayKey) return { ok: false, error: "pastDate" };
+  // U5: no extra or one-time session while the branch is paused today, nor
+  // dated inside a current or upcoming pause.
+  if (await branchPauseRefusal(db, centerId, { date: slot.date, whilePausedToday: true, now: options.now })) {
+    return { ok: false, error: "branchPaused" };
+  }
 
   const teacher = await db.membership.findFirst({
     where: scopedWhere(centerId, { userId: slot.teacherId, role: TEACHER, active: true }),

@@ -40,3 +40,12 @@ export const BRANCH_THEME_SWATCHES = [
   "#DC2626",
   "#16A34A",
 ] as const;
+
+/** The longest branch pause, in days, both ends included (U5; a CHECK backs it up). */
+export const MAX_PAUSE_DAYS = 90;
+
+/** The optional reason kept on a pause — never in its audit row (D-20). */
+export const BRANCH_PAUSE_REASON_MAX = 300;
+
+/** How long a deleted branch stays restorable from the admin page (U5). */
+export const RESTORE_WINDOW_DAYS = 30;

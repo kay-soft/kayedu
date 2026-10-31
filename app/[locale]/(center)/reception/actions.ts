@@ -88,6 +88,7 @@ const SESSION_REFUSAL_ERROR: Record<ReceptionSessionRefusal, string> = {
   cancelled: "sessionCancelled",
   rescheduled: "sessionRescheduled",
   closed: "sessionClosed",
+  branchPaused: "branchPaused",
 };
 
 // ── Live type-ahead (M18, docs/04 §11.8) ────────────────────────────────────

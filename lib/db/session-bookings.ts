@@ -12,7 +12,7 @@ import type {
 import { bookingSeatError, bookingSeatStatus, enrollmentCap, type SeatStatus } from "../capacity.ts";
 import { centreTimeZone, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
 import { writeAuditRow } from "./audit-row.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { ensureStudentProfile, isBlockedFromClass, lockClassRow, lockSelfService } from "./reservations.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
 import {
@@ -105,7 +105,7 @@ function loadSession(db: Db, centerId: string, sessionId: string, accessibleOnly
   return db.session.findFirst({
     where: scopedWhere(centerId, {
       id: sessionId,
-      ...(accessibleOnly ? { center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } } } : {}),
+      ...(accessibleOnly ? { center: ACCESSIBLE_CENTER } : {}),
     }),
     select: SESSION_FOR_BOOKING,
   });

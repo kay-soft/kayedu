@@ -38,15 +38,16 @@
  *     manager, receptionist, accountant and teacher exactly their expected nav
  *     items, computed through the shell's own functions; and every nav item
  *     shows on the permission its page asserts.
- *  8. (F1) `organization.branch.create` is an ownership action: OWNER-only by
- *     the ceiling, never a matrix cell or a baseline row, asserted by the
- *     Settings → Branches link, page and action alike; and every branch is
- *     created through the one `provisionBranch`.
+ *  8. (U5, replacing F1's owner self-serve) No centre role can create a
+ *     branch: `organization.branch.create` is gone from the catalogue, no
+ *     permission any role can hold (every matrix cell open) is a branch
+ *     action, Settings → Branches does not exist; and every branch is created
+ *     through the one `provisionBranch` (the platform admin's paths).
  *
  * Needs a reachable database and cleans up after itself.
  */
 import { gatePrisma } from "./lib/gate-db.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Role } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
@@ -318,41 +319,34 @@ async function main() {
   checkBranchCreatePermission();
 }
 
-// ── 8. F1: organization.branch.create is an ownership action ────────────────
+// ── 8. U5: no centre role holds any branch action (replaces F1's owner self-serve) ──
 
 function checkBranchCreatePermission() {
-  console.log("\n8. F1 — organization.branch.create (Settings → Branches)");
+  console.log("\n8. U5 — no centre role can create a branch (organization.branch.create removed)");
   const allOpen = Object.fromEntries(PERMISSIONS.map((permission) => [permission, true])) as Record<Permission, boolean>;
   check(
-    "OWNER holds organization.branch.create with zero stored rows",
-    can("OWNER", "organization.branch.create", {}),
+    "organization.branch.create is not in the permission catalogue, so no role — Owner included — can hold it",
+    !(PERMISSIONS as readonly string[]).includes("organization.branch.create"),
   );
   check(
-    "No other role can be granted it, whatever the matrix says — the ceiling (OWNER_ONLY_ACTIONS)",
-    (["MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"] as const).every((role) => !can(role, "organization.branch.create", allOpen)) &&
-      !can("STUDENT", "organization.branch.create", allOpen) &&
-      !can("PARENT", "organization.branch.create", allOpen),
-  );
-  check(
-    "It is never a matrix cell and never part of any role's baseline rows",
-    MATRIX_ROLES.every((role) => !editableActionsFor(role).includes("organization.branch.create")) &&
-      Object.values(DEFAULT_ROLE_GRANTS).every((actions) => !actions.includes("organization.branch.create")),
+    "No permission any centre role can hold creates, edits, pauses or deletes a branch — with every matrix cell open",
+    (["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"] as const).every((role) =>
+      PERMISSIONS.filter((permission) => can(role, permission, allOpen)).every(
+        (permission) => !/^organization\.|^branch\./.test(permission),
+      ),
+    ) &&
+      MATRIX_ROLES.every((role) => editableActionsFor(role).every((action) => !action.startsWith("organization."))) &&
+      Object.values(DEFAULT_ROLE_GRANTS).every((actions) => actions.every((action) => !action.startsWith("organization."))),
   );
 
-  // The page gate is the authority (P1): the settings link, the page and the
-  // action all assert exactly this permission.
+  // No centre screen or action exists to call (P1: the page gate is the authority).
   const read = (...segments: string[]) => readFileSync(join(ROOT, ...segments), "utf8");
-  const layout = read("app", "[locale]", "(center)", "settings", "layout.tsx");
-  const page = read("app", "[locale]", "(center)", "settings", "branches", "page.tsx");
-  const action = read("app", "[locale]", "(center)", "settings", "branches", "actions.ts");
+  const layout = read("app", "[locale]", "(center)", "settings", "layout.tsx").replace(/\/\/.*$/gm, "");
   check(
-    "Settings → Branches shows on organization.branch.create, and its page asserts the same (static)",
-    /ctxCan\(ctx, "organization\.branch\.create"\)\) \{\s*items\.push\(\{ href: ROUTES\.centerSettingsBranches/.test(layout) &&
-      /requirePermission\(ctx, "organization\.branch\.create"\)/.test(page),
-  );
-  check(
-    "addBranchAction refuses without organization.branch.create before parsing anything (static)",
-    /if \(!ctxCan\(ctx, "organization\.branch\.create"\)\) return \{ error: "forbidden" \};[\s\S]*addBranchSchema\.safeParse/.test(action),
+    "Settings → Branches is gone: no page, no actions, no sub-nav item (static)",
+    !existsSync(join(ROOT, "app", "[locale]", "(center)", "settings", "branches")) &&
+      !/centerSettingsBranches|organization\.branch/.test(layout) &&
+      !/centerSettingsBranches/.test(read("lib", "routes.ts")),
   );
 
   // One provisioning path (P1, F1): every way a branch is born goes through

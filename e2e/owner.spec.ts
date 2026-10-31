@@ -27,11 +27,13 @@ const SETTINGS = [
   ["/settings/terms", "terms"],
   ["/settings/catalog", "catalog"],
   ["/settings/card", "card"],
+  ["/settings/branding", "branding"],
   ["/settings/permissions", "permissions"],
   ["/settings/staff", "staff"],
 ] as const;
 
-test("every settings screen renders, and its sub-nav lists all eight", async ({ as, appLocale, msg }) => {
+// U5: Settings → Branches is gone — only a platform admin manages branches.
+test("every settings screen renders, and its sub-nav lists all nine (no Branches)", async ({ as, appLocale, msg }) => {
   const page = await as("owner");
   await selectBranch(page, appLocale);
   for (const [route] of SETTINGS) {
@@ -43,6 +45,10 @@ test("every settings screen renders, and its sub-nav lists all eight", async ({ 
   for (const [, key] of SETTINGS) {
     await expect(subNav.getByRole("link", { name: msg(`Settings.nav.${key}`), exact: true })).toBeVisible();
   }
+  await expect(subNav.getByRole("link")).toHaveCount(SETTINGS.length);
+  // The old URL is no settings screen any more.
+  await page.goto(`/${appLocale}/settings/branches`);
+  await expect(page.getByRole("navigation", { name: msg("Settings.nav.label") })).toHaveCount(0);
   // The permission matrix: every matrix role is a column, every action a row.
   await page.goto(`/${appLocale}/settings/permissions`);
   await expect(page.getByRole("button", { name: msg("Settings.permissions.saveMatrix") })).toBeVisible();

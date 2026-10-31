@@ -385,6 +385,15 @@ model Center {
   // additive parent, not a rewrite of scoping (docs/01-data-model.md §4).
   organizationId String
   organization   Organization         @relation(fields: [organizationId], references: [id])
+  // U5 — a platform admin's soft delete. A deleted branch is excluded wherever
+  // a branch is resolved, listed or counted (`ACCESSIBLE_CENTER`,
+  // `COUNTED_BRANCHES`, lib/db/platform.ts), frees its slot under
+  // `Organization.maxBranches`, and is restorable until `restorableUntil`
+  // (deletedAt + 30 days). Nothing is hard-deleted; purge waits on OD-2
+  // (backlog). Separate from `lifecycleState`, which a delete never changes.
+  deletedAt       DateTime?
+  deletedBy       String?
+  restorableUntil DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -423,8 +432,37 @@ model Center {
   familyInvitations FamilyInvitation[]
   // F4 — this branch's bulk grade promotions (and their undo ledger).
   gradePromotions   GradePromotionBatch[]
+  // U5 — the platform admin's pauses of this branch.
+  pauses            BranchPause[]
 
   @@index([organizationId])
+}
+
+// U5 — a platform admin pauses a branch for a date range (docs/00 §5.1
+// "Branch pause and delete"). Creating it cancels every SCHEDULED, not yet
+// started session of the branch dated in the range through `cancelSession`
+// (tagged `Session.pauseId`), in one transaction. It ends by itself after
+// `endDate` — no cron: "current" is `startDate <= today <= endDate` in the
+// branch's timezone, read on every request — or early, by the admin, which
+// restores the untouched tagged sessions still in the future. At most one
+// current or future pause per branch, checked under the Center row lock
+// (lib/db/branch-admin.ts). `startDate`/`endDate` are UTC-midnight day
+// markers, inclusive, like `Session.date` and `Holiday.date`.
+model BranchPause {
+  id           String    @id @default(uuid())
+  centerId     String
+  center       Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  startDate    DateTime
+  endDate      DateTime
+  reason       String?
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  endedEarlyAt DateTime?
+  endedEarlyBy String?
+
+  sessions Session[]
+
+  @@index([centerId, endDate])
 }
 
 model CenterSettings {
@@ -1104,6 +1142,10 @@ model Session {
   // `20261018090000_sec2b_money_integrity`. Nullable in the schema only so
   // writers need not pass it; every row has one.
   timezone         String?
+  // U5 — the branch pause that cancelled this session (null otherwise).
+  // "End pause now" restores only sessions still tagged with it.
+  pauseId          String?
+  pause            BranchPause?      @relation(fields: [pauseId], references: [id], onDelete: SetNull)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -1138,6 +1180,7 @@ model Session {
   @@index([centerId, date])
   @@index([centerId, teacherId, date])
   @@index([centerId, roomId, date])
+  @@index([pauseId])
 }
 
 model SessionAttendee {

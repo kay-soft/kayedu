@@ -10,6 +10,7 @@ import { requireStudentUser } from "@/lib/auth/tenant";
 import { branchName } from "@/lib/branch-name";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { currentBranchPause } from "@/lib/db/branch-pauses";
 import { prisma } from "@/lib/db/client";
 import { discoverCenter, discoverClassById, teacherDisplayNames } from "@/lib/db/discover";
 import { teacherRatingAverage } from "@/lib/db/ratings";
@@ -73,6 +74,8 @@ export default async function StudentDiscoverClassPage({
     requiresConfirmation: row.requiresConfirmation,
   });
   const name = branchName(locale, center);
+  // U5: "Paused until <date>" — enrolment stays open while it is paused.
+  const pause = await currentBranchPause(prisma, center.id);
   const subject = catalogLabelWithSelection(locale, row.subject) ?? tExplore("class.untitled");
 
   return (
@@ -85,7 +88,7 @@ export default async function StudentDiscoverClassPage({
 
       <ClassDetail
         gradeName={catalogLabelWithSelection(locale, row.grade)}
-        branch={{ name, logoUrl: centerLogoSrc(center), themeColor: center.themeColor }}
+        branch={{ name, logoUrl: centerLogoSrc(center), themeColor: center.themeColor, pausedUntil: pause?.endDate ?? null }}
         teacher={{ name: names.get(row.teacherId) ?? "—", rating: rating.average }}
         schedules={row.schedules}
         startDate={row.startDate}

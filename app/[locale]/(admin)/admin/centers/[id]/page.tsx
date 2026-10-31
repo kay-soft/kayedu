@@ -2,6 +2,11 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Building2, GraduationCap, ScrollText, ShieldCheck, Users } from "lucide-react";
 
+import {
+  BranchDeleteDialog,
+  BranchEditForm,
+  BranchPauseCard,
+} from "@/app/[locale]/(admin)/admin/centers/branch-tools";
 import { LifecycleTransitionForm } from "@/app/[locale]/(admin)/admin/centers/lifecycle-transition-form";
 import { LIFECYCLE_BADGE_VARIANT } from "@/app/[locale]/(admin)/admin/centers/lifecycle-badge";
 import { VisibilityWindowForm } from "@/app/[locale]/(admin)/admin/centers/visibility-window-form";
@@ -12,6 +17,8 @@ import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
+import { branchDeleteBlocker } from "@/lib/db/branch-admin";
+import { branchTodayKey, liveBranchPause } from "@/lib/db/branch-pauses";
 import { prisma } from "@/lib/db/client";
 import { DEFAULT_VISIBILITY_WINDOW_DAYS } from "@/lib/db/visibility";
 import {
@@ -24,6 +31,9 @@ import {
 } from "@/lib/db/platform";
 import { formatDate, formatNumber } from "@/lib/format";
 import { EmptyState } from "@/components/shared/empty-state";
+import { FormMessage } from "@/components/shared/form-message";
+import { LinkButton } from "@/components/shared/link-button";
+import { ROUTES } from "@/lib/routes";
 
 /**
  * A center's support view (spec §4.4 "controlled privileged support access").
@@ -50,11 +60,17 @@ export default async function AdminCenterDetailPage({
   const locale = await getLocale();
   const t = await getTranslations("AdminCenters");
 
-  const [stats, recentAudit, settings] = await Promise.all([
+  const now = new Date();
+  const deleted = center.deletedAt !== null;
+  const [stats, recentAudit, settings, todayKey, livePause, deleteBlocker] = await Promise.all([
     platformCenterDetailStats(prisma, center.id),
     platformCenterAuditTrail(prisma, center.id),
     centerSettingsFor(prisma, center.id),
+    branchTodayKey(prisma, center.id, now),
+    deleted ? null : liveBranchPause(prisma, center.id, now),
+    deleted ? null : branchDeleteBlocker(prisma, center, now),
   ]);
+  const tBranches = await getTranslations("AdminBranches");
 
   return (
     <div className="flex flex-col gap-6">
@@ -66,7 +82,23 @@ export default async function AdminCenterDetailPage({
             {t(`lifecycle.${center.lifecycleState}`)}
           </Badge>
         }
+        back={{ href: ROUTES.adminOrganization(center.organizationId), label: tBranches("backToOrganization") }}
       />
+
+      {deleted ? (
+        // U5: a deleted branch is read-only here; it is restored from its organization's page.
+        <div className="flex flex-col gap-3">
+          <FormMessage tone="warning">
+            {tBranches("deletedNotice", {
+              date: formatDate(center.deletedAt!, locale),
+              until: formatDate(center.restorableUntil ?? center.deletedAt!, locale),
+            })}
+          </FormMessage>
+          <LinkButton href={ROUTES.adminOrganization(center.organizationId)} variant="outline">
+            {tBranches("restore.goToOrganization")}
+          </LinkButton>
+        </div>
+      ) : null}
 
       <StatGrid count={4}>
         <StatCard
@@ -91,31 +123,74 @@ export default async function AdminCenterDetailPage({
         />
       </StatGrid>
 
-      <SectionHeader
-        title={t("detail.lifecycleTitle")}
-        description={t("detail.lifecycleDescription")}
-      />
-      <Card>
-        <CardContent>
-          <LifecycleTransitionForm
-            centerId={center.id}
-            validNext={validNextLifecycleStates(center.lifecycleState)}
-          />
-        </CardContent>
-      </Card>
+      {deleted ? null : (
+        <>
+          <SectionHeader title={tBranches("edit.title")} description={tBranches("edit.description")} />
+          <Card>
+            <CardContent>
+              <BranchEditForm
+                centerId={center.id}
+                name={center.name}
+                nameEn={center.nameEn}
+                themeColor={center.themeColor}
+              />
+            </CardContent>
+          </Card>
 
-      <SectionHeader
-        title={t("detail.visibilityTitle")}
-        description={t("detail.visibilityDescription")}
-      />
-      <Card>
-        <CardContent>
-          <VisibilityWindowForm
-            centerId={center.id}
-            dataVisibilityDays={settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS}
+          <SectionHeader title={tBranches("pause.title")} description={tBranches("pause.description")} />
+          <Card>
+            <CardContent>
+              <BranchPauseCard
+                centerId={center.id}
+                todayKey={todayKey}
+                pause={
+                  livePause
+                    ? {
+                        id: livePause.id,
+                        startDate: livePause.startDate,
+                        endDate: livePause.endDate,
+                        current: livePause.startDate.toISOString().slice(0, 10) <= todayKey,
+                      }
+                    : null
+                }
+              />
+            </CardContent>
+          </Card>
+
+          <SectionHeader
+            title={t("detail.lifecycleTitle")}
+            description={t("detail.lifecycleDescription")}
           />
-        </CardContent>
-      </Card>
+          <Card>
+            <CardContent>
+              <LifecycleTransitionForm
+                centerId={center.id}
+                validNext={validNextLifecycleStates(center.lifecycleState)}
+              />
+            </CardContent>
+          </Card>
+
+          <SectionHeader
+            title={t("detail.visibilityTitle")}
+            description={t("detail.visibilityDescription")}
+          />
+          <Card>
+            <CardContent>
+              <VisibilityWindowForm
+                centerId={center.id}
+                dataVisibilityDays={settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS}
+              />
+            </CardContent>
+          </Card>
+
+          <SectionHeader title={tBranches("delete.sectionTitle")} description={tBranches("delete.sectionDescription")} />
+          <Card>
+            <CardContent>
+              <BranchDeleteDialog centerId={center.id} branchName={center.name} blocker={deleteBlocker} />
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       <SectionHeader
         title={t("detail.auditTitle")}

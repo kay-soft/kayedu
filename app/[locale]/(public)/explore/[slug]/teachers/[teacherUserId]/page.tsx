@@ -85,6 +85,7 @@ export default async function ExploreTeacherPage({ params }: Params) {
                   href={href}
                   subjectName={catalogLabelWithSelection(locale, item.subject)}
                   branchName={name}
+                  pausedUntil={branch.pausedUntil}
                   teacherName={item.teacherName}
                   teacherRating={item.teacherRating}
                   gradeName={catalogLabelWithSelection(locale, item.grade)}

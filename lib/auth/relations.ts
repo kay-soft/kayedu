@@ -14,7 +14,7 @@ import {
   type TenantRole,
 } from "./permissions.ts";
 import { membershipBranchGrantsFor } from "../db/permissions.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "../db/platform.ts";
+import { ACCESSIBLE_CENTER } from "../db/platform.ts";
 
 export type Experience = "center" | "teacher" | "student";
 
@@ -75,7 +75,7 @@ export async function resolveCenterRelations(
     where: {
       userId,
       active: true,
-      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      center: ACCESSIBLE_CENTER,
     },
     include: { center: true },
   });
@@ -87,7 +87,7 @@ export async function resolveCenterRelations(
     where: {
       userId,
       active: true,
-      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      center: ACCESSIBLE_CENTER,
     },
     include: { center: true },
   });
@@ -108,10 +108,7 @@ export async function resolveCenterRelations(
     studentProfilesPromise,
     ownerOrgIds.length > 0
       ? prisma.center.findMany({
-          where: {
-            organizationId: { in: ownerOrgIds },
-            lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] },
-          },
+          where: { organizationId: { in: ownerOrgIds }, ...ACCESSIBLE_CENTER },
         })
       : Promise.resolve([]),
     membershipBranchGrantsFor(prisma, branchGrantableMembershipIds),

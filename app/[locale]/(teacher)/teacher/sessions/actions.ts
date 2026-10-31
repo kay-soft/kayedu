@@ -3,13 +3,15 @@
 import { revalidatePath } from "next/cache";
 
 import { ctxCan, actionContext } from "@/lib/auth/tenant";
+import { branchPauseRefusal } from "@/lib/db/branch-pauses";
+import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { studentSearchWhere } from "@/lib/db/students";
 import { taughtByTeacherWhere } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
-import { centreTimeZone, startOfSessionDay } from "@/lib/scheduling";
+import { centreTimeZone, dayMarker, startOfSessionDay } from "@/lib/scheduling";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   sessionRequestSchema,
@@ -130,6 +132,10 @@ export async function createSessionRequestAction(
   // client-trusted classGroupId (docs/02 §7).
   const classGroup = await db.classGroups.findById(classGroupId);
   if (!classGroup || classGroup.teacherId !== ctx.user.id) return REQUEST_NOT_FOUND;
+  // U5: never a request for a date inside a branch pause (approval re-checks).
+  if (await branchPauseRefusal(prisma, ctx.center.id, { date: dayMarker(date) })) {
+    return { error: "branchPaused" };
+  }
 
   await db.changeRequests.create({
     type: "NEW_SESSION",

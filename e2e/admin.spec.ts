@@ -1,5 +1,7 @@
 import { uniqueTag } from "./support/accounts";
 import { expect, expectHealthy, test } from "./support/fixtures";
+import { tPattern } from "./support/i18n";
+import { dayFromToday, field, openDialog, pickDate } from "./support/ui";
 
 /**
  * Journey 1 — the platform admin (SYS Part A): provision a branch (and the
@@ -95,4 +97,87 @@ test("@write the global catalog: add a subject, find it, delete it", async ({ as
   await entry.getByRole("button", { name: msg("AdminCatalog.delete"), exact: true }).click();
   await page.getByRole("button", { name: msg("AdminCatalog.deleteYes"), exact: true }).click();
   await expect(page.getByText(`${tag} Subject`)).toHaveCount(0);
+});
+
+// U5: only a platform admin creates, edits, pauses, deletes and restores a branch.
+test("@write branch tools: add with copy setup, edit, pause (preview), end the pause, delete by name, restore", async ({ as, appLocale, msg }) => {
+  const page = await as("admin");
+  const tag = uniqueTag("e2e").toLowerCase();
+  const orgName = `E2E Org ${tag}`;
+  const mainName = `E2E Main ${tag}`;
+  const secondName = `E2E Second ${tag}`;
+
+  // A new organization allowed two branches…
+  await page.goto(`/${appLocale}/admin/centers`);
+  await page.getByLabel(msg("AdminCenters.create.fields.organizationName"), { exact: true }).fill(orgName);
+  await page.getByLabel(msg("AdminCenters.create.fields.maxBranches"), { exact: true }).fill("2");
+  await page.getByLabel(msg("AdminCenters.create.fields.name"), { exact: true }).fill(mainName);
+  await page.getByLabel(msg("AdminCenters.create.fields.slug"), { exact: true }).fill(`${tag}-main`);
+  await page.getByLabel(msg("AdminCenters.create.fields.ownerEmail"), { exact: true }).fill(`${tag}-owner@example.com`);
+  await page.getByRole("button", { name: msg("AdminCenters.create.submit"), exact: true }).click();
+  await expect(page.getByText(msg("AdminCenters.create.created"))).toBeVisible();
+
+  // …and a second branch added to it, copying the first one's setup.
+  await page.reload();
+  await page.getByRole("button", { name: msg("AdminCenters.create.modeExisting"), exact: true }).click();
+  await page.getByLabel(field(msg("AdminCenters.create.fields.organization"))).first().fill(orgName);
+  await page.getByRole("option", { name: new RegExp(orgName) }).first().click();
+  await expect(page.getByText(msg("AdminCenters.create.copySetup.neverCopied"))).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: new RegExp(msg("AdminCenters.create.copySetup.keys.catalog.label")) })).toBeChecked();
+  await page.getByLabel(msg("AdminCenters.create.fields.name"), { exact: true }).fill(secondName);
+  await page.getByLabel(msg("AdminCenters.create.fields.slug"), { exact: true }).fill(`${tag}-second`);
+  await page.getByRole("button", { name: msg("AdminCenters.create.submitExisting"), exact: true }).click();
+  await expect(page.getByText(msg("AdminCenters.create.branchAdded"))).toBeVisible();
+
+  // Edit: the names and colour (the slug stays).
+  await page.reload();
+  await page.getByRole("link", { name: secondName, exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/centers\/[0-9a-f-]+$/);
+  await expectHealthy(page, appLocale);
+  const edited = `${secondName} edited`;
+  await page.getByLabel(msg("AdminBranches.edit.name"), { exact: true }).fill(edited);
+  await page.getByRole("button", { name: msg("AdminBranches.edit.save"), exact: true }).click();
+  await expect(page.getByText(msg("AdminBranches.edit.saved"))).toBeVisible();
+
+  // Pause: preview first, then confirm; then end it early.
+  await pickDate(page, appLocale, msg("AdminBranches.pause.start"), dayFromToday(1));
+  // The first calendar must finish closing, or the second pick sees its day cells too.
+  await expect(page.getByRole("grid")).toHaveCount(0);
+  await pickDate(page, appLocale, msg("AdminBranches.pause.end"), dayFromToday(3));
+  await page.getByRole("button", { name: msg("AdminBranches.pause.preview"), exact: true }).click();
+  await expect(page.getByText(msg("AdminBranches.pause.previewTitle"))).toBeVisible();
+  await page.getByRole("button", { name: msg("AdminBranches.pause.confirm"), exact: true }).click();
+  const endNow = page.getByRole("button", { name: msg("AdminBranches.pause.endNow"), exact: true });
+  await expect(endNow).toBeVisible();
+  await endNow.click();
+  await openDialog(page).getByRole("button", { name: msg("AdminBranches.pause.endNow"), exact: true }).click();
+  await expect(page.getByText(tPattern(appLocale, "AdminBranches.pause.ended"))).toBeVisible();
+
+  // Delete: the button waits for the branch's name, typed exactly.
+  await page.reload();
+  await page.getByRole("button", { name: msg("AdminBranches.delete.open"), exact: true }).click();
+  const dialog = openDialog(page);
+  const confirmDelete = dialog.getByRole("button", { name: msg("AdminBranches.delete.confirm"), exact: true });
+  await expect(confirmDelete).toBeDisabled();
+  await dialog.getByLabel(msg("AdminBranches.delete.typeName", { branch: edited }), { exact: true }).fill(edited);
+  await confirmDelete.click();
+  await expect(page).toHaveURL(/\/admin\/organizations\/[^/]+$/);
+  await expect(page.getByText(msg("AdminBranches.deleted.title"), { exact: true })).toBeVisible();
+
+  // Restore it from the organization's page.
+  const deletedCard = page.getByRole("listitem").filter({ hasText: edited }).first();
+  await deletedCard.getByRole("button", { name: msg("AdminBranches.restore.open"), exact: true }).click();
+  await openDialog(page).getByRole("button", { name: msg("AdminBranches.restore.open"), exact: true }).click();
+  await expect(page.getByText(msg("AdminBranches.restore.done"))).toBeVisible();
+
+  // Clean up the only way a branch can be: ARCHIVED is terminal.
+  for (const name of [edited, mainName]) {
+    await page.goto(`/${appLocale}/admin/centers`);
+    await page.getByRole("link", { name, exact: true }).click();
+    await page.getByLabel(msg("AdminCenters.lifecycleTransitionLabel"), { exact: true }).click();
+    await page.getByRole("option", { name: msg("AdminCenters.lifecycle.ARCHIVED"), exact: true }).click();
+    await page.getByRole("checkbox", { name: msg("AdminCenters.archiveConfirm") }).check();
+    await page.getByRole("button", { name: msg("AdminCenters.lifecycleTransitionSubmit"), exact: true }).click();
+    await expect(page.getByText(msg("AdminCenters.lifecycleTerminal"))).toBeVisible();
+  }
 });

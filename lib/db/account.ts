@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient, Role } from "@prisma/client";
 
 // Relative imports on purpose — `npm run check:security` exercises this
 // module outside the Next.js runtime (same reasoning as lib/db/payments.ts).
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -65,7 +65,7 @@ export type RecordOnFile = {
  * siblings — a branch that has no record of this person must not appear to.
  */
 export async function recordsOnFile(db: Db, userId: string): Promise<RecordOnFile[]> {
-  const accessible = { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } };
+  const accessible = ACCESSIBLE_CENTER;
   const [memberships, profiles] = await Promise.all([
     db.membership.findMany({
       where: { userId, active: true, center: accessible },

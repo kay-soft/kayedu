@@ -5,7 +5,7 @@ import type { EnrollmentStatus, Prisma, PrismaClient, SessionBookingStatus, Sess
 import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts";
 import { DEFAULT_TIMEZONE, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
 import { NOT_MOVED_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
@@ -89,7 +89,8 @@ export async function studentActiveEnrollmentClassIds(
  */
 export async function listReservationsForStudent(db: Db, studentUserId: string) {
   const rows = await db.reservation.findMany({
-    where: { studentId: studentUserId },
+    // U5: a branch a platform admin deleted takes its requests with it.
+    where: { studentId: studentUserId, center: { deletedAt: null } },
     orderBy: { requestedAt: "desc" },
     include: {
       center: { select: { id: true, name: true, logoPath: true, themeColor: true } },
@@ -185,7 +186,7 @@ async function withCentreCatalogNames(db: Db, classes: CrossCentreClassLabel[]) 
  */
 export async function listBookingsForStudent(db: Db, studentUserId: string) {
   const rows = await db.sessionBooking.findMany({
-    where: { studentId: studentUserId },
+    where: { studentId: studentUserId, center: { deletedAt: null } },
     orderBy: { requestedAt: "desc" },
     take: 100,
     select: {
@@ -306,7 +307,7 @@ async function bookedUpcoming(
     where: {
       ...bookingWhere,
       status: { in: SCHEDULE_BOOKING_STATUSES },
-      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      center: ACCESSIBLE_CENTER,
       // Bookings across branches: a floor safe in any frozen zone; each row
       // is then judged in its own session's zone below.
       session: { ...BOOKABLE_SESSION, date: { gte: earliestTodayAnywhere(now) } },

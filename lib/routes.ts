@@ -70,7 +70,6 @@ export const ROUTES = {
   centerSettingsBranding: "/settings/branding",
   centerSettingsPermissions: "/settings/permissions",
   // F1: the organization's branches and an Owner's Add branch.
-  centerSettingsBranches: "/settings/branches",
   centerStaff: "/settings/staff",
   teacherDashboard: "/teacher/dashboard",
   teacherSessions: "/teacher/sessions",

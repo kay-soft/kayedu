@@ -18,7 +18,7 @@ import {
   type StudentCounts,
   type TeacherCounts,
 } from "./analytics.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -149,7 +149,7 @@ export async function organizationBranches(
   organizationId: string,
 ): Promise<{ id: string; name: string }[]> {
   return db.center.findMany({
-    where: { organizationId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    where: { organizationId, ...ACCESSIBLE_CENTER },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });

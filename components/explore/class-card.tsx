@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { Link } from "@/lib/i18n/navigation";
 import { Badge } from "@/components/ui/badge";
+import { PausedNote } from "@/components/explore/paused-note";
 import { formatMoney, formatRating, formatTimeRange } from "@/lib/format";
 import { nameInitial } from "@/lib/initials";
 import { subjectAccentColor } from "@/lib/subject-accent";
@@ -27,6 +28,8 @@ export type ClassCardProps = {
   badge: ClassCardBadge;
   /** The card's action slot (docs/04 §10): enrol / request / a status badge. */
   action: ReactNode;
+  /** U5 — the branch is paused until this day (enrolment stays open). */
+  pausedUntil?: Date | null;
 };
 
 /**
@@ -45,6 +48,7 @@ export async function ClassCard({
   price,
   badge,
   action,
+  pausedUntil,
 }: ClassCardProps) {
   const locale = await getLocale();
   const t = await getTranslations("Explore.card");
@@ -65,6 +69,7 @@ export async function ClassCard({
             {subjectName ?? tClasses("columns.untitled")}
           </Link>
           <p className="truncate text-xs text-text-muted">{branchName}</p>
+          {pausedUntil ? <PausedNote until={pausedUntil} /> : null}
         </div>
         <Badge variant={badge.variant}>{badge.label}</Badge>
       </div>

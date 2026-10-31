@@ -5,7 +5,7 @@ import type { Prisma, PrismaClient, Role, SessionBookingMode } from "@prisma/cli
 import { fullName, localName } from "../identity.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 
 /**
  * Discover/Browse read helpers (M8, docs/04-design-system.md §10). A class
@@ -168,7 +168,7 @@ export function discoverClassById(
 /** A centre Discover may show (the same lifecycle rule as `listAccessibleCenters`), or null. */
 export function discoverCenter(db: PrismaClient, centerId: string) {
   return db.center.findFirst({
-    where: { id: centerId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    where: { id: centerId, ...ACCESSIBLE_CENTER },
     select: { id: true, name: true, nameEn: true, logoPath: true, themeColor: true },
   });
 }

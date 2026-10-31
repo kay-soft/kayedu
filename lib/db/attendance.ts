@@ -17,6 +17,7 @@ import {
 import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
 import { applyAttendanceChange } from "./attendance-change.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { branchPauseRefusal } from "./branch-pauses.ts";
 import { voidPaymentRow } from "./payments.ts";
 import {
   closeSessionIfDayOver,
@@ -132,6 +133,11 @@ export async function createAttendance(
 
   if (session.status === "CANCELLED") throw new SessionClosedError("sessionCancelled");
   if (session.rescheduledToId) throw new SessionClosedError("sessionRescheduled");
+  // U5: no check-in at all while a branch pause covers today — every desk,
+  // the session page and a drop-in registration all write through here.
+  if (!options.historicalBackfill && (await branchPauseRefusal(db, params.centerId, { whilePausedToday: true, now }))) {
+    throw new SessionClosedError("branchPaused");
+  }
 
   let status: AttendanceStatus;
   if (options.historicalBackfill) {
@@ -385,7 +391,7 @@ export async function updateAttendanceStatus(
 
 export type RecheckInResult =
   | { ok: true; attendee: SessionAttendee; change: SessionAttendanceChange }
-  | { ok: false; error: SessionClosedReason | "notFound" | "alreadyCheckedIn" };
+  | { ok: false; error: SessionClosedReason | "branchPaused" | "notFound" | "alreadyCheckedIn" };
 
 /**
  * T5 — checks a "Not arrived" student in again: a live session's ABSENT row
@@ -423,6 +429,10 @@ export async function recheckInAttendee(
     const gate = await ensureSessionOpenOrAutoClose(tx, current.sessionId, params.centerId, now);
     if (gate.status === "missing") return { ok: false, error: "notFound" };
     if (gate.status === "refused") return { ok: false, error: gate.reason };
+    // U5: re-checking in a "Not arrived" student is a check-in too.
+    if (await branchPauseRefusal(tx, params.centerId, { whilePausedToday: true, now })) {
+      return { ok: false, error: "branchPaused" };
+    }
 
     await lockAttendeeRow(tx, current.id, params.centerId);
     const attendee = await tx.sessionAttendee.findUniqueOrThrow({ where: { id: current.id } });

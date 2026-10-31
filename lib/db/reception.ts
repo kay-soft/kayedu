@@ -14,6 +14,7 @@ import {
   type SessionDisplayStatus,
 } from "./sessions.ts";
 import { sessionTimeZone } from "./session-lifecycle.ts";
+import { branchPauseRefusal } from "./branch-pauses.ts";
 import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { studentSearchWhere } from "./students.ts";
 
@@ -167,7 +168,8 @@ export type ReceptionSessionRefusal =
   | "cancelled"
   | "rescheduled"
   | "closed"
-  | "inactive";
+  | "inactive"
+  | "branchPaused";
 
 export type ReceptionSessionCheck =
   | {
@@ -224,6 +226,10 @@ export async function validateReceptionSession(
     return { ok: false, reason: "notToday" };
   }
   if (row.classGroup && !row.classGroup.active) return { ok: false, reason: "inactive" };
+  // U5: the desk attends nothing while a branch pause covers today.
+  if (await branchPauseRefusal(db, centerId, { whilePausedToday: true, now })) {
+    return { ok: false, reason: "branchPaused" };
+  }
   return {
     ok: true,
     session: {

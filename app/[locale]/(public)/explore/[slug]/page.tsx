@@ -1,5 +1,6 @@
 import { cache } from "react";
 import type { Metadata } from "next";
+import { PausedNote } from "@/components/explore/paused-note";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { SearchX } from "lucide-react";
@@ -76,6 +77,7 @@ export default async function ExploreBranchPage({
         description={t("branch.subtitle")}
         back={{ href: ROUTES.explore, label: t("backToExplore") }}
         leading={<BrandAvatar name={name} logoUrl={branch.logoUrl} themeColor={branch.themeColor} size="lg" />}
+        meta={branch.pausedUntil ? <PausedNote until={branch.pausedUntil} /> : undefined}
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -97,6 +99,7 @@ export default async function ExploreBranchPage({
                         href={href}
                         subjectName={catalogLabelWithSelection(locale, item.subject)}
                         branchName={name}
+                        pausedUntil={branch.pausedUntil}
                         teacherName={item.teacherName}
                         teacherRating={item.teacherRating}
                         gradeName={catalogLabelWithSelection(locale, item.grade)}

@@ -296,7 +296,8 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | 124 | `(teacher)/teacher/students/actions.ts:59` | `teacherBlockStudentAction` | getTenantContext("teacher") | NONE | teacherBlockStudentSchema | audit.writeAuditLog, teacher-portal.teacherStudentProfileIds, scoped.students.findById, scoped.studentBlocks.isBlocked, scoped.studentBlocks.create |
 | 125 | `(teacher)/teacher/students/actions.ts:102` | `teacherUnblockStudentAction` | getTenantContext("teacher") | NONE | teacherUnblockStudentSchema | audit.writeAuditLog, scoped.studentBlocks.findById, scoped.studentBlocks.remove, scoped.students.list |
 | 126 | `(admin)/admin/organizations/actions.ts` | `updateOrganizationBranchLimitAction` (F1) | requirePlatformAdmin() | NONE | organizationBranchLimitSchema | platform.updateOrganizationBranchLimit (audits `platform.organization.limit.update` on its transaction) |
-| 127 | `(center)/settings/branches/actions.ts` | `addBranchAction` (F1) | getTenantContext("center") | organization.branch.create (OWNER-only ceiling) | addBranchSchema | branches.addBranchAsOwner (re-resolves the actor; audits `organization.branch.create` on its transaction) |
+| 127 | ~~`(center)/settings/branches/actions.ts`~~ | ~~`addBranchAction` (F1)~~ — **removed at U5** (no centre role manages branches; `organization.branch.create` is gone) | — | — | — | — |
+| 127a | `(admin)/admin/centers/branch-actions.ts` | `updateBranchAction`, `pauseBranchAction`, `endBranchPauseAction`, `deleteBranchAction`, `restoreBranchAction` (U5) | requirePlatformAdmin() | NONE (platform admin only) | branchEditSchema, branchPauseSchema, branchPauseEndSchema, branchDeleteSchema, branchRestoreSchema | branch-admin.* (each audits `platform.branch.update / pause / pause.end / delete / restore` on its transaction) |
 
 **Facts that apply to the whole table:**
 - 24 `"use server"` files, **125 exported Server Actions** (all under `app/`; none in `lib/` or `components/`).

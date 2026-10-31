@@ -19,6 +19,7 @@ import {
 } from "../scheduling.ts";
 import { effectiveRoomIds } from "../rooms.ts";
 import { writeSessionExtraRooms } from "./room-sets.ts";
+import { branchPauseRefusal } from "./branch-pauses.ts";
 import { centerTimeZone, runInTransaction } from "./session-lifecycle.ts";
 import { loadSessionOccupancy, slotTakenError, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
@@ -115,7 +116,8 @@ export type ResolveSessionRequestResult =
         | "duplicateSlot"
         | "duplicateSlotCancelled"
         | "pastDate"
-        | "invalidDate";
+        | "invalidDate"
+        | "branchPaused";
     };
 
 /**
@@ -166,6 +168,10 @@ export async function resolveSessionRequest(
     const centreZone = await centerTimeZone(tx, centerId);
     if (dateKey(date) < zonedClock(options.now ?? new Date(), centreZone).dayKey) {
       return { ok: false, error: "pastDate" };
+    }
+    // U5: an approval never creates a session inside a branch pause.
+    if (await branchPauseRefusal(tx, centerId, { date, now: options.now })) {
+      return { ok: false, error: "branchPaused" };
     }
     const classGroup = await tx.classGroup.findFirst({
       where: scopedWhere(centerId, { id: payload.classGroupId, active: true }),

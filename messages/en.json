@@ -1220,7 +1220,8 @@
       "fixedAbovePrice": "A fixed centre cut can't be more than the price — the teacher would get nothing.",
       "zeroPriceNeedsConfirmation": "This session is free (0 EGP). Tick the box to confirm that is intended.",
       "duplicateSlotCancelled": "This class has a cancelled session at that exact date and time. A cancelled session can't be brought back — pick another time.",
-      "subjectNotInGrade": "This subject isn’t offered for that grade here. Pick a subject listed under the grade."
+      "subjectNotInGrade": "This subject isn’t offered for that grade here. Pick a subject listed under the grade.",
+      "branchPaused": "This branch is paused — no check-ins or new sessions until the pause ends. Contact KayEdu to change it."
     },
     "emptyHint": "Sessions come from each class's weekly schedule and period. Widen the date range, or clear a filter.",
     "clearFilters": "Clear filters",
@@ -1595,7 +1596,8 @@
       "pastDate": "That date has passed — a session can't be added in the past. Decline the request instead.",
       "invalidDate": "The requested date isn't a valid date.",
       "sessionFull": "The session on {date} is full of single-session bookings, so this student can't be enrolled yet.",
-      "duplicateSlotCancelled": "This class has a cancelled session at that exact date and time. A cancelled session can't be brought back — decline the request, or ask for another time."
+      "duplicateSlotCancelled": "This class has a cancelled session at that exact date and time. A cancelled session can't be brought back — decline the request, or ask for another time.",
+      "branchPaused": "This branch is paused on that date. Contact KayEdu to change the pause."
     },
     "emptyHint": "Class requests, session requests and student reservations all land here. Nothing needs a decision right now.",
     "kinds": {
@@ -1743,7 +1745,6 @@
       "card": "ID card",
       "permissions": "Permissions",
       "staff": "Users & roles",
-      "branches": "Branches",
       "branding": "Branding"
     },
     "common": {
@@ -2047,75 +2048,6 @@
       "cellLabel": "{action} — {role}",
       "saveMatrixCount": "{count, plural, one {Save # change} other {Save # changes}}"
     },
-    "branches": {
-      "title": "Branches",
-      "description": "Every branch of this center. You can add branches up to the limit KayEdu has set for your center.",
-      "usage": "{used} of {max} branches used",
-      "underLimit": "You can add another branch.",
-      "atLimit": "Your center has reached its branch limit.",
-      "atLimitReason": "To add another branch, ask KayEdu to raise your center's branch limit.",
-      "add": "Add branch",
-      "listTitle": "Your branches",
-      "listDescription": "Archived branches are listed but don't count toward the limit.",
-      "empty": "No branches yet.",
-      "current": "You're here",
-      "dialogTitle": "Add a branch",
-      "dialogDescription": "The new branch starts with the setup you choose to copy — and nothing else.",
-      "created": "{branch} added. Switch to it from the branch switcher.",
-      "sections": {
-        "branch": "Branch",
-        "theme": "Theme colour",
-        "copy": "Copy setup"
-      },
-      "fields": {
-        "name": "Name (Arabic)",
-        "nameEn": "Name (English)",
-        "nameEnHint": "Optional. Shown in the English interface when set.",
-        "timezone": "Timezone",
-        "themeColor": "Theme colour",
-        "useColor": "Use {color}",
-        "copyFrom": "Copy setup from"
-      },
-      "copyDescription": "Everything ticked is copied from the branch you pick. You can change any of it at the new branch afterwards.",
-      "copy": {
-        "catalog": {
-          "label": "Academic catalog",
-          "hint": "Picked systems, grades and subjects, with your names and base prices."
-        },
-        "paymentMethods": {
-          "label": "Payment methods",
-          "hint": "The active methods, replacing the defaults."
-        },
-        "terms": {
-          "label": "Terms",
-          "hint": "The active term presets."
-        },
-        "holidays": {
-          "label": "Holidays",
-          "hint": "The holiday calendar."
-        },
-        "permissions": {
-          "label": "Permission matrix",
-          "hint": "What each role may do."
-        },
-        "generalSettings": {
-          "label": "General settings",
-          "hint": "Default cut, late threshold, conflict policy, visibility window and teacher edit deadline."
-        }
-      },
-      "neverCopied": "Never copied: rooms, classes, sessions, staff, teachers, students, money, the ID-card layout and the logo.",
-      "errors": {
-        "forbidden": "Only an owner can add a branch.",
-        "pickBranch": "Pick a branch first. Whole Management can't change a single branch's data.",
-        "branchLimitReached": "Your center has reached its branch limit. Ask KayEdu to raise it.",
-        "sourceNotFound": "Choose a branch of this center to copy from.",
-        "tryAgain": "Something changed while the branch was being created. Nothing was saved — try again.",
-        "required": "This field is required.",
-        "tooLong": "This value is too long.",
-        "invalidColor": "Choose a colour.",
-        "invalidTimezone": "Choose a timezone from the list."
-      }
-    },
     "branding": {
       "title": "Branding",
       "description": "The logo shown beside this branch's name in the sidebar, branch switcher and branch pickers.",
@@ -2280,7 +2212,8 @@
       "editDeadlinePassed": "The deadline to edit this session's description has passed.",
       "invalidDate": "Enter a valid date.",
       "invalidTimeRange": "The end time must be after the start time.",
-      "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here."
+      "notTrusted": "This branch has not marked you as a trusted teacher, so you cannot request a new class or session here.",
+      "branchPaused": "The branch is paused on that date. Choose another date."
     },
     "emptyHint": "No session matches these filters. Widen the date range, or clear a filter.",
     "zeroHint": "No activity in this range"
@@ -2676,6 +2609,39 @@
         "empty": "No centers match.",
         "clear": "Clear center",
         "open": "Show all centers"
+      },
+      "copySetup": {
+        "title": "Copy setup",
+        "description": "Everything ticked is copied from the branch you pick. The center can change any of it at the new branch afterwards.",
+        "from": "Copy setup from",
+        "none": "Don't copy — start from the defaults",
+        "keys": {
+          "catalog": {
+            "label": "Academic catalog",
+            "hint": "Picked systems, grades and subjects, with your names and base prices."
+          },
+          "paymentMethods": {
+            "label": "Payment methods",
+            "hint": "The active methods, replacing the defaults."
+          },
+          "terms": {
+            "label": "Terms",
+            "hint": "The active term presets."
+          },
+          "holidays": {
+            "label": "Holidays",
+            "hint": "The holiday calendar."
+          },
+          "permissions": {
+            "label": "Permission matrix",
+            "hint": "What each role may do."
+          },
+          "generalSettings": {
+            "label": "General settings",
+            "hint": "Default cut, late threshold, conflict policy, visibility window and teacher edit deadline."
+          }
+        },
+        "neverCopied": "Never copied: rooms, classes, sessions, staff, teachers, students, money, the ID-card layout and the logo."
       }
     },
     "detail": {
@@ -2716,7 +2682,8 @@
       "storage": "The branch was created, but the logo could not be stored. Try again later.",
       "organizationNotFound": "Choose a center from the list.",
       "branchLimitReached": "That center is at its branch limit. Raise the limit on its page, then try again.",
-      "invalidLimit": "Enter a whole number of branches, from 1 to 500."
+      "invalidLimit": "Enter a whole number of branches, from 1 to 500.",
+      "sourceNotFound": "Choose a branch of this center to copy from."
     },
     "organizationsLink": "Centers & branch limits"
   },
@@ -3239,7 +3206,7 @@
     "openDetail": "Open",
     "limit": {
       "title": "Branch limit",
-      "description": "How many non-archived branches this center may have. Its Owner adds branches up to it from Settings → Branches; you can add one from All branches.",
+      "description": "How many non-archived, non-deleted branches this center may have. Only KayEdu adds branches — from All branches → Add to an existing center.",
       "label": "Branches allowed",
       "hint": "This center has {used, plural, one {# branch} other {# branches}} that count. Lowering the limit below that only stops new branches — nothing existing changes.",
       "save": "Save limit",
@@ -3485,5 +3452,105 @@
     "anySystem": "Any system",
     "chooseGradeFirst": "Choose a grade first.",
     "noSubjectsForGrade": "No subject is offered for this grade here."
+  },
+  "AdminBranches": {
+    "backToOrganization": "Center",
+    "manage": "Manage",
+    "deletedNotice": "This branch was deleted on {date}. It is hidden everywhere and can be restored until {until} from its center's page.",
+    "edit": {
+      "title": "Branch details",
+      "description": "The name and theme colour the center's people see.",
+      "name": "Name (Arabic)",
+      "nameEn": "Name (English)",
+      "nameEnHint": "Optional. Shown in the English interface when set.",
+      "themeColor": "Theme colour",
+      "useColor": "Use {color}",
+      "fixedNote": "The public address (slug) and the timezone don't change here.",
+      "save": "Save details",
+      "saved": "Branch details saved."
+    },
+    "pause": {
+      "title": "Pause",
+      "description": "Stops the branch for a few days: its scheduled sessions in the range are cancelled, check-in and new sessions are refused. Enrolments stay.",
+      "start": "First paused day",
+      "end": "Last paused day",
+      "rangeHint": "From the branch's today, up to {days} days.",
+      "reason": "Reason (optional)",
+      "reasonHint": "Kept on the pause for KayEdu. The center doesn't see it.",
+      "preview": "Preview",
+      "previewTitle": "Pausing this branch will:",
+      "previewNote": "Started, live and closed sessions are not touched. Enrolments stay as they are.",
+      "confirm": "Pause branch",
+      "changeDates": "Change dates",
+      "done": "Branch paused. {count, plural, one {# session was} other {# sessions were}} cancelled.",
+      "impact": {
+        "sessions": "{count, plural, =0 {cancel no sessions} one {cancel {value} session} other {cancel {value} sessions}}",
+        "classes": "{count, plural, =0 {in no classes} one {in {value} class} other {in {value} classes}}",
+        "bookings": "{count, plural, =0 {cancel no single-session bookings} one {cancel {value} single-session booking} other {cancel {value} single-session bookings}}",
+        "keptWithPayments": "{count, plural, one {keep {value} session that already has a payment} other {keep {value} sessions that already have payments}}"
+      },
+      "activeNow": "Paused from {from} to {to}.",
+      "scheduled": "A pause is scheduled from {from} to {to}.",
+      "endNow": "End pause now",
+      "endTitle": "End this pause now?",
+      "endDescription": "Sessions the pause cancelled that are still ahead and haven't been changed come back, unless they now clash with another session. Cancelled single-session bookings are not restored.",
+      "ended": "Pause ended. {count, plural, =0 {No sessions came back.} one {{value} session came back.} other {{value} sessions came back.}}",
+      "keptConflicts": "{count, plural, one {{value} session stayed cancelled because it now clashes with another session.} other {{value} sessions stayed cancelled because they now clash with other sessions.}}",
+      "keptOther": "{count, plural, one {{value} session stayed cancelled: it was changed, has passed, is on a holiday or its class is inactive.} other {{value} sessions stayed cancelled: they were changed, have passed, are on a holiday or their class is inactive.}}"
+    },
+    "delete": {
+      "sectionTitle": "Delete branch",
+      "sectionDescription": "Removes the branch for the center. Recoverable for 30 days.",
+      "open": "Delete branch",
+      "title": "Delete {branch}?",
+      "description": "For the center, this branch disappears:",
+      "lose": {
+        "branch": "the branch itself, from the switcher, the hub and Explore",
+        "classes": "its classes and sessions",
+        "students": "students' records there",
+        "staff": "staff access to it"
+      },
+      "restoreNote": "Nothing is erased. You can restore it from the center's page for 30 days.",
+      "typeName": "Type {branch} to confirm",
+      "confirm": "Delete branch"
+    },
+    "restore": {
+      "open": "Restore",
+      "title": "Restore {branch}?",
+      "description": "The branch comes back for the center exactly as it was, and counts toward the branch limit again.",
+      "done": "Branch restored.",
+      "goToOrganization": "Go to the center's page"
+    },
+    "deleted": {
+      "title": "Deleted branches",
+      "description": "Hidden everywhere and not counted toward the limit. Restore one within 30 days of deleting it.",
+      "badge": "Deleted",
+      "on": "Deleted on {date}",
+      "until": "Restorable until {date}",
+      "expired": "The restore window has ended."
+    },
+    "errors": {
+      "notFound": "That branch no longer exists.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidColor": "Choose a colour.",
+      "invalidDate": "Choose a date.",
+      "pauseStartPast": "The pause can't start before the branch's today.",
+      "pauseEndBeforeStart": "The last day must be on or after the first.",
+      "pauseTooLong": "A pause can be at most 90 days.",
+      "pauseExists": "This branch already has a current or upcoming pause.",
+      "pauseOver": "That pause has already ended.",
+      "nameMismatch": "Type the branch name exactly as shown.",
+      "onlyBranch": "This is the center's only branch. Archive the center instead.",
+      "liveSession": "A session is live at this branch right now. Try again when it has ended.",
+      "openSettlement": "This branch has a draft or approved settlement. It must be paid or cancelled first.",
+      "notDeleted": "This branch isn't deleted.",
+      "restoreExpired": "The 30-day restore window has ended.",
+      "branchLimitReached": "The center is at its branch limit. Raise the limit, then restore."
+    }
+  },
+  "BranchPause": {
+    "banner": "Paused until {date} — contact KayEdu to change this.",
+    "pausedUntil": "Paused until {date}"
   }
 }

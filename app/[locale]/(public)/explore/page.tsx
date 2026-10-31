@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PausedNote } from "@/components/explore/paused-note";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Building2, SearchX } from "lucide-react";
 
@@ -117,7 +118,11 @@ async function BranchesView({ page }: { page: number }) {
                   <BrandAvatar name={name} logoUrl={branch.logoUrl} themeColor={branch.themeColor} size="lg" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-semibold text-text-primary">{name}</span>
-                    <span className="block truncate text-sm text-text-muted">{t("branchCardHint")}</span>
+                    {branch.pausedUntil ? (
+                      <PausedNote until={branch.pausedUntil} />
+                    ) : (
+                      <span className="block truncate text-sm text-text-muted">{t("branchCardHint")}</span>
+                    )}
                   </span>
                 </Link>
               </li>
@@ -197,6 +202,7 @@ async function ClassesView({
                     href={href}
                     subjectName={catalogLabelWithSelection(locale, item.subject)}
                     branchName={branchName(locale, item.branch)}
+                    pausedUntil={item.branch.pausedUntil}
                     teacherName={item.teacherName}
                     teacherRating={item.teacherRating}
                     gradeName={catalogLabelWithSelection(locale, item.grade)}

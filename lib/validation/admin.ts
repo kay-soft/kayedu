@@ -5,7 +5,8 @@ import { z } from "zod";
 // lib/validation/settings.ts).
 import { localeSchema } from "./auth.ts";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres } from "../money.ts";
-import { MAX_BRANCH_LIMIT } from "../branch-setup.ts";
+import { BRANCH_COPY_KEYS, BRANCH_PAUSE_REASON_MAX, MAX_BRANCH_LIMIT, type BranchCopyKey } from "../branch-setup.ts";
+import { dateKeyField } from "./class-period.ts";
 
 /**
  * Platform-admin schemas (M9). Messages are i18n keys under
@@ -60,6 +61,18 @@ const maxBranches = z.coerce
   .min(1, "invalidLimit")
   .max(MAX_BRANCH_LIMIT, "invalidLimit");
 
+/** An unticked checkbox is absent from FormData. */
+const tick = z
+  .string()
+  .optional()
+  .transform((value) => value === "on" || value === "true");
+
+/** One `copy_<key>` checkbox per copyable part of a branch's setup (F1, U5). */
+const copyTicks = Object.fromEntries(BRANCH_COPY_KEYS.map((key) => [`copy_${key}`, tick])) as Record<
+  `copy_${BranchCopyKey}`,
+  typeof tick
+>;
+
 const branchFields = {
   locale: localeSchema,
   name: centerName,
@@ -97,9 +110,24 @@ export const createCenterSchema = z.preprocess(
       ...branchFields,
       organizationMode: z.literal("existing"),
       organizationId,
+      // U5: "Copy setup from <branch>" moved here from the Owner's retired
+      // Settings → Branches. Empty = copy nothing; the data layer checks the
+      // source belongs to the organization.
+      copyFromCenterId: z
+        .string()
+        .trim()
+        .max(64, "sourceNotFound")
+        .optional()
+        .transform((value) => (value && value.length > 0 ? value : null)),
+      ...copyTicks,
     }),
   ]),
 );
+
+/** The ticked copy keys of a parsed "existing organization" post, in catalogue order. */
+export function copyKeysFrom(value: Partial<Record<`copy_${BranchCopyKey}`, boolean>>): BranchCopyKey[] {
+  return BRANCH_COPY_KEYS.filter((key) => value[`copy_${key}`]);
+}
 
 /** F1 — the platform admin's branch-limit editor on `/admin/organizations/[id]`. */
 export const organizationBranchLimitSchema = z.object({
@@ -183,4 +211,49 @@ export const centerVisibilityWindowSchema = z.object({
     .int("invalidNumber")
     .min(1, "invalidNumber")
     .max(3650, "invalidNumber"),
+});
+
+// ── Branch management by a platform admin (U5) ─────────────────────────────
+// Shape checks only. Whether a pause, delete or restore is allowed (range,
+// one live pause, the only branch, a live session, open settlements, the
+// restore window, the limit) is `lib/db/branch-admin.ts`'s call.
+
+/** A branch id from an admin form — opaque, like an organization's (the seeded branches predate uuids). */
+const branchId = z.string().trim().min(1, "notFound").max(64, "notFound");
+
+/** Edit a branch: names and theme colour — never the slug or the timezone. */
+export const branchEditSchema = z.object({
+  locale: localeSchema,
+  id: branchId,
+  name: centerName,
+  nameEn: optionalText(120),
+  themeColor,
+});
+
+/** Pause a branch: `intent` is "preview" (nothing written) or "confirm". */
+export const branchPauseSchema = z.object({
+  locale: localeSchema,
+  id: branchId,
+  intent: z.enum(["preview", "confirm"], { error: "notFound" }),
+  startDate: dateKeyField,
+  endDate: dateKeyField,
+  reason: optionalText(BRANCH_PAUSE_REASON_MAX),
+});
+
+export const branchPauseEndSchema = z.object({
+  locale: localeSchema,
+  id: branchId,
+  pauseId: z.string().trim().min(1, "notFound").max(64, "notFound"),
+});
+
+/** Delete a branch: the admin types its name; the data layer compares it. */
+export const branchDeleteSchema = z.object({
+  locale: localeSchema,
+  id: branchId,
+  confirmName: z.string().trim().min(1, "nameMismatch").max(200, "nameMismatch"),
+});
+
+export const branchRestoreSchema = z.object({
+  locale: localeSchema,
+  id: branchId,
 });

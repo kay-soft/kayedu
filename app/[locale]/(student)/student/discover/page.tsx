@@ -33,6 +33,7 @@ import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
 import { listAccessibleCenters } from "@/lib/db/platform";
+import { currentBranchPause } from "@/lib/db/branch-pauses";
 import { ResultsRegion } from "@/components/shared/results-region";
 
 type CardViewModel = {
@@ -49,6 +50,8 @@ type CardViewModel = {
   requiresConfirmation: boolean;
   schedules: DiscoverClassRow["schedules"];
   status: DiscoverCardStatus;
+  /** U5 — a platform admin's pause covers the branch's today (enrolment stays open). */
+  pausedUntil: Date | null;
 };
 
 /** Centres whose classes load in parallel on one Discover page load (SEC-32). */
@@ -106,8 +109,11 @@ export default async function StudentDiscoverPage({
         gradeId: gradeFilter || undefined,
       });
       const teacherIds = [...new Set(classes.map((row) => row.teacherId))];
-      const teacherNames = await teacherDisplayNames(prisma, center.id, teacherIds);
-      return { center, classes, teacherNames };
+      const [teacherNames, pause] = await Promise.all([
+        teacherDisplayNames(prisma, center.id, teacherIds),
+        classes.length > 0 ? currentBranchPause(prisma, center.id) : null,
+      ]);
+      return { center, classes, teacherNames, pausedUntil: pause?.endDate ?? null };
     },
   );
 
@@ -120,7 +126,7 @@ export default async function StudentDiscoverPage({
   const blockedEverywhere = blockedByCenter;
   const cards: CardViewModel[] = [];
 
-  for (const { center, classes, teacherNames } of perCenter) {
+  for (const { center, classes, teacherNames, pausedUntil } of perCenter) {
     const blocked = blockedEverywhere.get(center.id);
     for (const row of classes) {
       if (blocked?.teacherIds.has(row.teacherId)) continue;
@@ -141,6 +147,7 @@ export default async function StudentDiscoverPage({
       });
 
       cards.push({
+        pausedUntil,
         centerId: center.id,
         centerName: center.name,
         classGroupId: row.id,
@@ -215,6 +222,7 @@ export default async function StudentDiscoverPage({
                 href={ROUTES.studentDiscoverClass(card.centerId, card.classGroupId)}
                 subjectName={card.subjectName}
                 branchName={card.centerName}
+                pausedUntil={card.pausedUntil}
                 teacherName={card.teacherName}
                 teacherRating={card.teacherRating}
                 gradeName={card.gradeName}

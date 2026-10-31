@@ -328,6 +328,16 @@
 
 ---
 
+## 33. Purge a deleted branch
+
+**What it is.** Permanently removing a branch a platform admin soft-deleted (U5) — its `Center` row and everything that hangs off it: classes, sessions, attendance, payments, settlements, students' records there, staff memberships, pauses — after its 30-day `restorableUntil` has passed. Today the row stays in the database for good once deleted: it is invisible everywhere (`ACCESSIBLE_CENTER`, `COUNTED_BRANCHES`), the admin's Restore is refused after the window, and bringing it back later is a manual database fix.
+
+**Why deferred.** It deletes minors' records and money history, so what may be erased, after how long, and with what export first is exactly the retention question **OD-2** (legal review for minors' data, D-20's retention half) is open on. Building an eraser before that answer would either erase what the law requires us to keep or keep what it requires us to erase. A soft delete is reversible and harmless meanwhile.
+
+**Depends on.** OD-2 answered (retention and erasure rules); OD-4 (data export scope — a centre may be owed an export before its data goes); a tested backup/restore (M20). The audit log is append-only by trigger, so a purge also needs a decided answer for the branch's own audit rows.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

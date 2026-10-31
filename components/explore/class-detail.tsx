@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PausedNote } from "@/components/explore/paused-note";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Building2, CalendarDays, Clock, GraduationCap, UserRound, Wallet } from "lucide-react";
 
@@ -11,7 +12,8 @@ import { formatDate, formatMoney, formatRating, formatTimeRange } from "@/lib/fo
 
 export type ClassDetailProps = {
   gradeName: string | null;
-  branch: { name: string; href?: string; logoUrl: string | null; themeColor: string };
+  /** `pausedUntil` (U5): a platform admin's pause covers the branch's today. */
+  branch: { name: string; href?: string; logoUrl: string | null; themeColor: string; pausedUntil?: Date | null };
   teacher: { name: string; href?: string; rating: number | null };
   schedules: { dayOfWeek: number; startTime: string; endTime: string }[];
   startDate: Date;
@@ -69,6 +71,7 @@ export async function ClassDetail({
                   <span className="font-medium">{branch.name}</span>
                 )}
               </span>
+              {branch.pausedUntil ? <PausedNote until={branch.pausedUntil} className="mt-1" /> : null}
             </Fact>
 
             <Fact icon={<UserRound className="size-4" aria-hidden />} label={t("teacher")}>

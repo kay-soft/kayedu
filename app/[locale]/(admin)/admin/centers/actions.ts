@@ -21,6 +21,7 @@ import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   centerLifecycleTransitionSchema,
   centerVisibilityWindowSchema,
+  copyKeysFrom,
   createCenterSchema,
 } from "@/lib/validation/admin";
 import type { AdminActionState } from "@/app/[locale]/(admin)/admin/centers/action-state";
@@ -95,10 +96,19 @@ export async function createCenterAction(
         : { name: data.name, nameEn: data.organizationNameEn ?? data.nameEn, maxBranches: data.maxBranches },
     });
   } else {
-    result = await addBranchToOrganization(prisma, { ...branch, organizationId: data.organizationId });
+    // U5: "Copy setup from <branch>" — moved here from the Owner's retired
+    // Settings → Branches; the data layer checks the source is this
+    // organization's and not deleted.
+    const keys = copyKeysFrom(data);
+    result = await addBranchToOrganization(prisma, {
+      ...branch,
+      organizationId: data.organizationId,
+      copyFrom: data.copyFromCenterId ? { centerId: data.copyFromCenterId, keys } : null,
+    });
   }
   if (!result.ok) {
     if (result.error === "organizationNotFound") return { fieldErrors: { organizationId: result.error } };
+    if (result.error === "sourceNotFound") return { fieldErrors: { copyFromCenterId: result.error } };
     if (result.error === "slugTaken") return { fieldErrors: { slug: result.error } };
     return { error: result.error };
   }
@@ -127,11 +137,17 @@ export async function createCenterAction(
       lifecycleState: result.center.lifecycleState,
       organizationId: result.center.organizationId,
       newOrganization: data.organizationMode === "new",
+      ...(data.organizationMode === "existing" && data.copyFromCenterId
+        ? { sourceCenterId: data.copyFromCenterId, copied: "copied" in result ? result.copied : [] }
+        : {}),
     },
   });
 
   revalidatePath(centersPath(locale));
   revalidatePath(`/${locale}${ROUTES.adminOrganizations}`);
+  revalidatePath(`/${locale}${ROUTES.adminOrganization(result.center.organizationId)}`);
+  // The organization's Owner sees the new branch in the switcher at once.
+  revalidatePath(`/${locale}`, "layout");
   return {
     status: invite ? "created" : "branchAdded",
     ...(invite ? { invitationToken: invite.token } : {}),

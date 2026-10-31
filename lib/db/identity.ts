@@ -163,7 +163,7 @@ export async function countOtherCenterRelations(
   const sameOrgElsewhere = {
     userId,
     centerId: { not: centerId },
-    center: { organizationId: center.organizationId },
+    center: { organizationId: center.organizationId, deletedAt: null },
   };
   const [memberships, profiles] = await Promise.all([
     db.membership.count({ where: sameOrgElsewhere }),
@@ -182,7 +182,7 @@ async function knownInOrganization(db: Db, userId: string, centerId: string): Pr
     select: { organizationId: true },
   });
   if (!center) return false;
-  const inOrg = { userId, center: { organizationId: center.organizationId } };
+  const inOrg = { userId, center: { organizationId: center.organizationId, deletedAt: null } };
   const [memberships, profiles] = await Promise.all([
     db.membership.count({ where: inOrg }),
     db.studentProfile.count({ where: inOrg }),

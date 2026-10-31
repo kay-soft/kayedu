@@ -7,7 +7,7 @@ import { clientIp } from "@/lib/auth/request-ip";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isPairLinked } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "@/lib/db/platform";
+import { ACCESSIBLE_CENTER } from "@/lib/db/platform";
 import { checkRateLimits } from "@/lib/rate-limit";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
@@ -57,7 +57,7 @@ export async function requestToTeachAction(
   if (!allowed) return { error: "rateLimited" };
 
   const center = await prisma.center.findFirst({
-    where: { id: centerId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    where: { id: centerId, ...ACCESSIBLE_CENTER },
   });
   if (!center) return { error: "notFound" };
 

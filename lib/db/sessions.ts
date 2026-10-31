@@ -32,6 +32,7 @@ import {
 import { resolveRoomSet, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
 import { loadSessionOccupancy, slotTakenError, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { cancelSessionBookings } from "./session-bookings.ts";
+import { branchPauseRefusal } from "./branch-pauses.ts";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 
 /**
@@ -99,7 +100,7 @@ type SessionDb = PrismaClient | Prisma.TransactionClient;
 const CANCELLED_ENUM: SessionStatus = "CANCELLED";
 
 export type CancelSessionResult =
-  | { ok: true; session: Session }
+  | { ok: true; session: Session; bookingsCancelled: number }
   | {
       ok: false;
       error: "notFound" | "alreadyCancelled" | "alreadyRescheduled" | "sessionClosed" | "hasPayments";
@@ -136,7 +137,15 @@ export async function cancelSession(
   db: SessionDb,
   centerId: string,
   sessionId: string,
-  options: { now?: Date } = {},
+  options: {
+    now?: Date;
+    /**
+     * U5 — a branch pause cancelling this session: it is tagged with the
+     * pause, and its `updatedAt` is the pause's own stamp, so "End pause now"
+     * can tell a session nobody has touched since (lib/db/branch-admin.ts).
+     */
+    pause?: { id: string; stampedAt: Date };
+  } = {},
 ): Promise<CancelSessionResult> {
   return runInTransaction(db, async (tx): Promise<CancelSessionResult> => {
     const gate = await ensureSessionOpenOrAutoClose(tx, sessionId, centerId, options.now, {
@@ -151,11 +160,14 @@ export async function cancelSession(
 
     const updated = await tx.session.update({
       where: { id: sessionId },
-      data: { status: CANCELLED_ENUM },
+      data: {
+        status: CANCELLED_ENUM,
+        ...(options.pause ? { pauseId: options.pause.id, updatedAt: options.pause.stampedAt } : {}),
+      },
     });
     // F6: its open bookings are cancelled with it, in this transaction.
-    await cancelSessionBookings(tx, centerId, sessionId, "SESSION_CANCELLED", options.now);
-    return { ok: true, session: updated };
+    const bookingsCancelled = await cancelSessionBookings(tx, centerId, sessionId, "SESSION_CANCELLED", options.now);
+    return { ok: true, session: updated, bookingsCancelled };
   });
 }
 
@@ -242,6 +254,7 @@ export type RescheduleSessionResult =
         | "duplicateSlotCancelled"
         | "pastDate"
         | "hasPayments"
+        | "branchPaused"
         | RoomSetError;
     };
 
@@ -315,6 +328,10 @@ export async function rescheduleSession(
   const centreZone = await centerTimeZone(db, centerId);
   if (dateKey(next.date) < zonedClock(options.now ?? new Date(), centreZone).dayKey) {
     return { ok: false, error: "pastDate" };
+  }
+  // U5: never into a current or upcoming branch pause.
+  if (await branchPauseRefusal(db, centerId, { date: next.date, now: options.now })) {
+    return { ok: false, error: "branchPaused" };
   }
 
   // The room set: the original's by default, or a newly chosen valid one.

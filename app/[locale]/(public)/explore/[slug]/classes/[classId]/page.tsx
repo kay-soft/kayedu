@@ -68,6 +68,7 @@ export default async function ExploreClassPage({ params }: Params) {
           href: ROUTES.exploreBranch(branch.slug),
           logoUrl: branch.logoUrl,
           themeColor: branch.themeColor,
+          pausedUntil: branch.pausedUntil,
         }}
         teacher={{
           name: item.teacherName,

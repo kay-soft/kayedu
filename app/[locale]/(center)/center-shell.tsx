@@ -8,6 +8,9 @@ import {
   type ShellFrame,
 } from "@/components/shell/from-context";
 import { navForExperience, withPendingCount } from "@/components/shell/nav";
+import { PauseBanner } from "@/components/shell/pause-banner";
+import { currentBranchPause } from "@/lib/db/branch-pauses";
+import { prisma } from "@/lib/db/client";
 import { getPendingApprovalCounts } from "@/lib/auth/approval-counts";
 import { ROUTES } from "@/lib/routes";
 import {
@@ -35,11 +38,14 @@ export async function centerShell(): Promise<ShellFrame> {
   // roll-up meaning. Read fresh on every navigation (no polling, no cross-request
   // cache), and shared with the Approvals page's tabs through `cache()`.
   const showApprovalsBadge = !ctx.rollupOrganizationId && ctxCan(ctx, "approvals.manage");
-  const [relations, orgGroups, defaultCollapsed, approvalCounts] = await Promise.all([
+  // U5: a platform admin's pause covering the branch's today — a read-only
+  // banner above every page (never under "Whole Management", which is no branch).
+  const [relations, orgGroups, defaultCollapsed, approvalCounts, pause] = await Promise.all([
     getUserCenterRelations(ctx.user.id),
     getOwnerOrgGroups(ctx.user.id),
     cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
     showApprovalsBadge ? getPendingApprovalCounts(ctx) : null,
+    ctx.rollupOrganizationId ? null : currentBranchPause(prisma, ctx.center.id),
   ]);
 
   // "Whole Management": the shell names the organization, never the
@@ -71,5 +77,6 @@ export async function centerShell(): Promise<ShellFrame> {
       scope: shellScope(relations, orgGroups, ctx.rollupOrganizationId ?? ctx.center.id),
       defaultCollapsed,
     },
+    lead: pause ? <PauseBanner until={pause.endDate} /> : null,
   };
 }
