@@ -67,13 +67,15 @@ test("a manager is refused the owner-only permissions matrix, by nav and by URL"
   await expect(page).not.toHaveURL(/\/settings\/permissions$/);
 });
 
-test("@write general settings save as they are (conflict policy, late threshold, window)", async ({ as, appLocale, msg }) => {
+test("@write general settings save as they are (conflict policy, late threshold, both windows)", async ({ as, appLocale, msg }) => {
   const page = await as("owner");
   await selectBranch(page, appLocale);
   await page.goto(`/${appLocale}/settings`);
   await expect(page.getByText(msg("Settings.general.schedulingTitle"), { exact: true })).toBeVisible();
   await expect(page.getByLabel(msg("Settings.general.lateThreshold"))).toBeVisible();
-  await expect(page.getByLabel(msg("Settings.general.visibilityDays"))).toBeVisible();
+  // U6: two windows, each with its cap.
+  await expect(page.getByLabel(msg("Settings.general.visibilityCenter.label"))).toHaveAttribute("max", "365");
+  await expect(page.getByLabel(msg("Settings.general.visibilityTeacher.label"))).toHaveAttribute("max", "30");
   await page.getByRole("button", { name: msg("Settings.common.save"), exact: true }).first().click();
   await expect(page.getByText(msg("Settings.common.saved"))).toBeVisible();
 });

@@ -7,7 +7,7 @@ import { parentShell } from "@/app/[locale]/(parent)/parent-shell";
 import { studentShell } from "@/app/[locale]/(student)/student-shell";
 import { teacherShell } from "@/app/[locale]/(teacher)/teacher-shell";
 import { AccountEmailForm, AccountPasswordForm, AccountProfileForm } from "@/app/[locale]/account/account-forms";
-import { FamilySection, StudyDetailsSection } from "@/app/[locale]/account/extension-points";
+import { FamilySection, StudyDetailsSection, TeacherHistorySection } from "@/app/[locale]/account/extension-points";
 import { ProfilePhotoForm } from "@/app/[locale]/account/photo-form";
 import { Ltr } from "@/components/shared/ltr";
 import { AppShell } from "@/components/shell/app-shell";
@@ -119,6 +119,7 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
         {/* Extension points (F4 Study details, F3 Family) — each renders nothing for an account it does not apply to. */}
         <StudyDetailsSection user={user} />
         <FamilySection user={user} />
+        <TeacherHistorySection user={user} />
 
         <PageSection title={t("securitySection")} description={t("securitySectionDescription")}>
           <div className="grid items-start gap-4 lg:grid-cols-2">

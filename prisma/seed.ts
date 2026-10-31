@@ -98,6 +98,7 @@ import {
   zonedDateTimeToUtc,
 } from "../lib/scheduling.ts";
 import { cardLayoutDocumentSchema } from "../lib/validation/settings.ts";
+import { MAX_TEACHER_VISIBILITY_DAYS } from "../lib/db/visibility.ts";
 
 import { SeedAuth, offlineAuth, projectRefOf, runAuthPreflight, type AuthPort } from "./seed-data/auth.ts";
 import { productionTargetReason } from "./seed-data/production-refs.ts";
@@ -446,7 +447,10 @@ async function seedCentre(
   // Per-branch configuration on top of the baseline.
   await prisma.centerSettings.update({
     where: { centerId: center.id },
-    data: { dataVisibilityDays: branch.dataVisibilityDays },
+    data: {
+      centerDataVisibilityDays: branch.centerDataVisibilityDays,
+      teacherDataVisibilityDays: Math.min(branch.centerDataVisibilityDays, MAX_TEACHER_VISIBILITY_DAYS),
+    },
   });
   const extras = BRANCH_EXTRAS[branch.key];
   if (extras?.cardLayout !== undefined) {

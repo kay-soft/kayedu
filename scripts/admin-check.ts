@@ -26,9 +26,10 @@
  *
  * M19 adds: the lifecycle-transition table (`isValidLifecycleTransition`/
  * `transitionCenterLifecycle`, replacing the old boolean activate/suspend),
- * `Center.plan` being fully gone, and `CenterSettings.dataVisibilityDays`
- * defaulting to 30 and being writable — the same shape
- * `updateCenterVisibilityWindowAction` writes in.
+ * `Center.plan` being fully gone, and (U6) `CenterSettings.
+ * centerDataVisibilityDays`/`teacherDataVisibilityDays` defaulting to 365/30
+ * and being writable — the same shape `updateCenterVisibilityWindowAction`
+ * writes in, under the caps its schema enforces.
  *
  * Needs a reachable database and cleans up after itself.
  */
@@ -53,7 +54,9 @@ import {
   validNextLifecycleStates,
 } from "../lib/db/platform.ts";
 import { centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
-import { createCenterSchema } from "../lib/validation/admin.ts";
+import { centerVisibilityWindowSchema, createCenterSchema } from "../lib/validation/admin.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 
 const prisma = await gatePrisma();
@@ -162,7 +165,8 @@ async function main() {
       settingsRow !== null &&
         settingsRow.defaultShareType === "PERCENTAGE" &&
         settingsRow.defaultShareValue === 15 &&
-        settingsRow.dataVisibilityDays === 30,
+        settingsRow.centerDataVisibilityDays === 365 &&
+        settingsRow.teacherDataVisibilityDays === 30,
       JSON.stringify(settingsRow),
     );
 
@@ -308,14 +312,38 @@ async function main() {
 
   // ── 3. Data-visibility window (M19) ──────────────────────────────────────
   const beforeWindow = await prisma.centerSettings.findUnique({ where: { centerId: centerA.id } });
-  check("A fresh center's dataVisibilityDays defaults to 30 (the settled 1-calendar-month default)", beforeWindow?.dataVisibilityDays === 30);
+  check(
+    "A fresh center's windows default to 365 days (centre) and 30 days (teacher) — U6",
+    beforeWindow?.centerDataVisibilityDays === 365 && beforeWindow?.teacherDataVisibilityDays === 30,
+  );
   const widenedWindow = await prisma.centerSettings.update({
     where: { centerId: centerA.id },
-    data: { dataVisibilityDays: 60 },
+    data: { centerDataVisibilityDays: 200, teacherDataVisibilityDays: 20 },
   });
   check(
-    "dataVisibilityDays is writable per-centre — the same column both the centre's own settings and a platform admin's override write",
-    widenedWindow.dataVisibilityDays === 60,
+    "Both windows are writable per-centre — the same columns both the centre's own settings and a platform admin's override write",
+    widenedWindow.centerDataVisibilityDays === 200 && widenedWindow.teacherDataVisibilityDays === 20,
+  );
+  const override = (centre: string, teacher: string) =>
+    centerVisibilityWindowSchema.safeParse({
+      locale: "en",
+      id: centerA.id,
+      centerDataVisibilityDays: centre,
+      teacherDataVisibilityDays: teacher,
+    }).success;
+  check(
+    "The platform admin's override refuses a centre window over 365 or a teacher window over 30 (server-side caps)",
+    override("365", "30") && !override("366", "30") && !override("365", "31") && !override("0", "30"),
+  );
+  check(
+    "The override action writes both windows and audits both, before and after",
+    (() => {
+      const source = readFileSync(join(process.cwd(), "app/[locale]/(admin)/admin/centers/actions.ts"), "utf8");
+      return (
+        /data: \{ centerDataVisibilityDays, teacherDataVisibilityDays \}/.test(source) &&
+        /after: \{ centerDataVisibilityDays, teacherDataVisibilityDays \}/.test(source)
+      );
+    })(),
   );
 
   // ── 4. Seed staff/teachers/students/sessions across both centers ─────────

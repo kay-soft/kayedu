@@ -1477,7 +1477,7 @@ async function checkRescheduleFreesSlot(centerId: string, studentProfileId: stri
       user: { locale: "en" },
       role: "OWNER",
       isPlatformAdmin: false,
-      settings: { dataVisibilityDays: 3650, timezone: TZ },
+      settings: { centerDataVisibilityDays: 3650, teacherDataVisibilityDays: 30, timezone: TZ },
     },
     { now },
   );

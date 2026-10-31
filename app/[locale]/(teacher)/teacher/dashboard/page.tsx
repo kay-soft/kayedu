@@ -21,6 +21,7 @@ import {
   combineTeacherSummaries,
   teacherCenterSummary,
   teacherDashboardAnchors,
+  teacherPortalHistoryFloor,
 } from "@/lib/db/teacher-portal";
 import { formatMoney, formatNumber, formatRating } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -62,6 +63,8 @@ export default async function TeacherDashboardPage() {
         today,
         week,
         { from: month.start, to: month.end },
+        // U6: the teacher's own history preference, per branch calendar.
+        teacherPortalHistoryFloor({ user: ctx.user, settings: centerCtx.settings }, now),
       );
     }),
   );

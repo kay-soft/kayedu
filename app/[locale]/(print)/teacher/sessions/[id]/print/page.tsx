@@ -8,6 +8,8 @@ import { getTenantContext } from "@/lib/auth/tenant";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
+import { teacherPortalHistoryFloor } from "@/lib/db/teacher-portal";
+import { isWithinVisibilityWindow } from "@/lib/db/visibility";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { sessionDisplayName } from "@/lib/session-label";
 import { attendanceDisplay } from "@/lib/attendance-rules";
@@ -35,6 +37,8 @@ export default async function TeacherSessionPrintPage({
   const db = scoped(ctx);
   const owned = await db.sessions.findById(id);
   if (!owned || owned.teacherId !== ctx.user.id) notFound();
+  // U6: a session older than the teacher's own history preference is out of view.
+  if (!isWithinVisibilityWindow(owned.date, teacherPortalHistoryFloor(ctx))) notFound();
   // R2's lazy end-of-day close, on read.
   await closeSessionIfDayOver(prisma, ctx.center.id, id);
   const session = await db.sessions.findDetailById(id);

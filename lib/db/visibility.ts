@@ -4,21 +4,24 @@
 import { addDays, centreTimeZone, dateKey, todayInTimezone } from "../scheduling.ts";
 
 /**
- * The data-visibility window (M19, docs/00-master-product-spec.md §5.1 "Data
- * visibility window", docs/01-data-model.md §7). By default, no centre-side
- * role (OWNER/MANAGER/RECEPTIONIST/ACCOUNTANT) may read analytics, money, old
- * sessions or attendance history older than this many days back — a *rolling*
- * window ending today, not "the 1st of this calendar month": the spec's "1
- * calendar month" is expressed as a day count (`CenterSettings.
- * dataVisibilityDays`, default 30) precisely so a centre widening it, or a
- * platform admin's bypass, takes effect on the very next request with nothing
- * to backfill — an anchored "since the 1st" window would instead jump
- * backwards by up to 30 days at the start of every new month, which is not
- * what "how far back can this role see" is supposed to mean.
+ * The data-visibility windows (M19, split in U6 — docs/00-master-product-spec.md
+ * §5.1 "Data visibility window", docs/01-data-model.md §7). Two per-branch
+ * day counts bind the centre-side roles (OWNER/MANAGER/RECEPTIONIST/
+ * ACCOUNTANT), each a *rolling* window ending today — a centre widening one,
+ * or a platform admin's bypass, takes effect on the very next request with
+ * nothing to backfill:
+ * - the **centre window** (`CenterSettings.centerDataVisibilityDays`, 1–365,
+ *   default 365) — the centre's own analytics, money, sessions and
+ *   attendance: `visibilityWindowFloor`, and the floor `scoped(ctx)` injects;
+ * - the **teacher window** (`CenterSettings.teacherDataVisibilityDays`, 1–30,
+ *   default 30) — reads about one teacher: the Analytics teacher breakdown
+ *   and every Analytics view filtered to a teacher
+ *   (`teacherVisibilityWindowFloor`). Independent of the centre window — it
+ *   neither caps nor is capped by it (decided with Kamal, 29 Oct).
  *
- * TEACHER/STUDENT/PARENT reads are never windowed — the settled decision is
- * scoped to centre-side ERP roles only (spec §3's role table: "no centre-side
- * role may read data older than..."). Settlement/payout records and audit
+ * TEACHER/STUDENT/PARENT reads are never windowed by either — a teacher's
+ * own portal is limited only by their own `User.teacherHistoryDays`
+ * preference (`teacherHistoryFloor`). Settlement/payout records and audit
  * logs are carved out and must never call this at all (`scoped(ctx).
  * settlements`/`auditLogs` — see lib/db/scoped.ts); refunds are windowed.
  *
@@ -28,40 +31,85 @@ import { addDays, centreTimeZone, dateKey, todayInTimezone } from "../scheduling
  * `scopedIgnoringVisibilityWindow(ctx, reason)` (writers' integrity checks,
  * settlement and audit reads) reads past it.
  */
-export const DEFAULT_VISIBILITY_WINDOW_DAYS = 30;
+export const DEFAULT_CENTER_VISIBILITY_DAYS = 365;
+export const DEFAULT_TEACHER_VISIBILITY_DAYS = 30;
+/** The caps the server enforces on each window (lib/validation/settings.ts, admin.ts). */
+export const MAX_CENTER_VISIBILITY_DAYS = 365;
+export const MAX_TEACHER_VISIBILITY_DAYS = 30;
+/** `User.teacherHistoryDays`: 0 = all history; otherwise 1 to this many days. */
+export const MAX_TEACHER_HISTORY_DAYS = 3650;
+
+/** The branch settings the windows read — a full `CenterSettings` satisfies it. */
+export type VisibilitySettings = {
+  centerDataVisibilityDays: number;
+  teacherDataVisibilityDays: number;
+  timezone: string;
+};
 
 /**
  * A minimal, structural slice of `TenantContext` (`lib/auth/tenant.ts`) — a
  * real `TenantContext` satisfies this directly (its `settings` is a full
  * `CenterSettings | null`), and a gate script can build one without
- * constructing a whole fake tenant context just to reach
- * `dataVisibilityDays`/`timezone`.
+ * constructing a whole fake tenant context just to reach the two windows
+ * and the timezone.
  */
 type VisibilityAwareContext = {
   isPlatformAdmin: boolean;
-  settings: { dataVisibilityDays: number; timezone: string } | null;
+  settings: VisibilitySettings | null;
 };
 
 /**
- * The oldest date a centre-side role may read historical data for right now,
- * or `null` when unbounded — the platform-admin bypass (spec §3: "Super Admin
- * ... Bypasses the data-visibility window"). A centre with no `CenterSettings`
- * row yet (should not happen post-M2, but every other reader of this table
- * treats a missing row as "use the default" the same way) falls back to
- * `DEFAULT_VISIBILITY_WINDOW_DAYS` and the default timezone.
+ * "Today minus `days`" in the branch's calendar, or `null` for a platform
+ * admin (spec §3: "Super Admin ... Bypasses the data-visibility window").
  *
- * R7b: "today minus N days" counts back from the **centre's** calendar day
- * (`todayInTimezone`), so the floor flips at the centre's midnight, not
- * UTC's. Between 00:00 and 03:00 Cairo time the UTC-anchored floor was a day
- * too old.
+ * R7b: counts back from the **centre's** calendar day (`todayInTimezone`), so
+ * the floor flips at the centre's midnight, not UTC's.
+ */
+function floorFor(ctx: VisibilityAwareContext, days: number, now: Date): Date | null {
+  if (ctx.isPlatformAdmin) return null;
+  return addDays(todayInTimezone(centreTimeZone(ctx.settings), now), -days);
+}
+
+/**
+ * The **centre window** floor: the oldest date a centre-side role may read
+ * the centre's own analytics, money, sessions and attendance for, or `null`
+ * when unbounded. A centre with no `CenterSettings` row yet (should not
+ * happen post-M2) falls back to `DEFAULT_CENTER_VISIBILITY_DAYS` and the
+ * default timezone.
  */
 export function visibilityWindowFloor(
   ctx: VisibilityAwareContext,
   now: Date = new Date(),
 ): Date | null {
-  if (ctx.isPlatformAdmin) return null;
-  const days = ctx.settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS;
-  return addDays(todayInTimezone(centreTimeZone(ctx.settings), now), -days);
+  return floorFor(ctx, ctx.settings?.centerDataVisibilityDays ?? DEFAULT_CENTER_VISIBILITY_DAYS, now);
+}
+
+/**
+ * The **teacher window** floor (U6): the oldest date a centre-side role may
+ * read about one teacher for — the Analytics teacher breakdown and every
+ * Analytics view filtered to a teacher. Falls back to
+ * `DEFAULT_TEACHER_VISIBILITY_DAYS` without a settings row.
+ */
+export function teacherVisibilityWindowFloor(
+  ctx: VisibilityAwareContext,
+  now: Date = new Date(),
+): Date | null {
+  return floorFor(ctx, ctx.settings?.teacherDataVisibilityDays ?? DEFAULT_TEACHER_VISIBILITY_DAYS, now);
+}
+
+/**
+ * The teacher portal's own floor (U6): `User.teacherHistoryDays` back from
+ * the branch's today, or `null` at 0 (all history, the default). The
+ * teacher's preference only — it never reads either centre window and no
+ * centre-side read consults it.
+ */
+export function teacherHistoryFloor(
+  historyDays: number,
+  timeZone: string,
+  now: Date = new Date(),
+): Date | null {
+  if (historyDays <= 0) return null;
+  return addDays(todayInTimezone(timeZone, now), -historyDays);
 }
 
 /** The roles the window binds — the centre-side ERP roles (docs/01 §7). */
@@ -69,9 +117,10 @@ const CENTRE_SIDE_ROLES: ReadonlySet<string> = new Set(["OWNER", "MANAGER", "REC
 
 /**
  * The floor `scoped(ctx)` injects into every session, attendee, attendance-
- * change, payment and expense read (SEC-62, CLAUDE.md rule 9): the window
- * floor for a centre-side role, `null` (unbounded) for a platform admin and
- * for a TEACHER/STUDENT/PARENT context, whose reads are never windowed.
+ * change, payment and expense read (SEC-62, CLAUDE.md rule 9): the centre
+ * window floor for a centre-side role, `null` (unbounded) for a platform
+ * admin and for a TEACHER/STUDENT/PARENT context, whose reads are never
+ * windowed by a centre.
  */
 export function centreReadFloor(
   ctx: VisibilityAwareContext & { role: string },
@@ -90,12 +139,14 @@ export function isWithinVisibilityWindow(date: Date, floor: Date | null): boolea
  * Raises `range.start` up to the window floor when the caller's requested
  * range reaches further back than that — never narrows a range that was
  * already inside the window. This is the enforcement point for every
- * date-filterable centre-side list/aggregate (Sessions, Analytics, Expenses):
- * the filter itself (`resolveSharedDateFilter`) accepts any `from`/`to` a
- * request supplies, by design (docs/01 §7 "a direct URL or API call must not
- * bypass it") — clamping happens here, once, right before the range reaches a
- * query, so a manipulated `?from=2020-01-01` cannot reach further back than a
- * legitimate one could.
+ * date-filterable list/aggregate (Sessions, Analytics, Expenses, and the
+ * teacher portal's own history): the filter itself (`resolveSharedDateFilter`)
+ * accepts any `from`/`to` a request supplies, by design (docs/01 §7 "a direct
+ * URL or API call must not bypass it") — clamping happens here, once, right
+ * before the range reaches a query. The caller picks the floor for the read
+ * (U6): `visibilityWindowFloor` for the centre's own data,
+ * `teacherVisibilityWindowFloor` for a read about one teacher,
+ * `teacherHistoryFloor` in the teacher portal.
  */
 export function clampRangeToVisibility<T extends { start: Date; end: Date }>(
   range: T,
@@ -107,9 +158,10 @@ export function clampRangeToVisibility<T extends { start: Date; end: Date }>(
 
 /**
  * When an expense may be dated (SEC-2b, D-24, SEC-51): backdated **within**
- * the visibility window (a late-entered receipt is legitimate), never older
- * than the window floor (a month the centre can no longer see), never in the
- * future, all in the centre's calendar. A platform admin has no floor.
+ * the centre window (U6: expenses are the centre's own money — a late-entered
+ * receipt is legitimate), never older than the window floor (a period the
+ * centre can no longer see), never in the future, all in the centre's
+ * calendar. A platform admin has no floor.
  */
 export function expenseDateError(
   ctx: VisibilityAwareContext,

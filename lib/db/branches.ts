@@ -133,6 +133,9 @@ export async function copyBranchSetup(
           defaultShareValue: settings.defaultShareValue,
           defaultLateThreshold: settings.defaultLateThreshold,
           scheduleConflictPolicy: settings.scheduleConflictPolicy,
+          centerDataVisibilityDays: settings.centerDataVisibilityDays,
+          teacherDataVisibilityDays: settings.teacherDataVisibilityDays,
+          // Deprecated (U6), copied only until it is dropped (backlog).
           dataVisibilityDays: settings.dataVisibilityDays,
           teacherEditDeadlineHours: settings.teacherEditDeadlineHours,
         },

@@ -338,6 +338,16 @@
 
 ---
 
+## 34. Drop `CenterSettings.dataVisibilityDays` after the pilot
+
+**What it is.** A migration that drops the deprecated `CenterSettings.dataVisibilityDays` column (U6) — the single M19 window, replaced by `centerDataVisibilityDays` and `teacherDataVisibilityDays`.
+
+**Why deferred.** U6's migration was additive and backfilled both new fields from it, so the build deployed before U6 kept working on the migrated database until the new code shipped. Since U6 the only code touching it is the branch-copy carry-over in `lib/db/branches.ts` (kept so `check:branches`' existing copy assertion still holds); dropping the column is the one step that is not backward-compatible, so it waits until no build that reads it can be running.
+
+**Depends on.** The pilot (M20 → first centre live) on the U6 build; a backup taken before the drop (M20's tested restore). Remove, in the same change: the column and its schema comment, the carry-over line in `copyBranchSetup`, the `dataVisibilityDays` fixture/assertion in `check:branches` (moved to the two new fields), and the allowance for it in `check:visibility`'s "no file reads the deprecated column" assertion.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

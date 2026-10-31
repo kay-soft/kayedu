@@ -1854,7 +1854,7 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
       data: { centerId, type: "NEW_SESSION", requestedBy: teacher.id, status: "PENDING", payload: { classGroupId: cls.id, date: dateKey(daysAgo(1)), startTime: "10:00", endTime: "11:00", note: null } },
     });
     const approve = await resolveSessionRequest(prisma, centerId, request.id, "APPROVED", managerA.id, "WARN", "en", { confirmConflicts: true });
-    const vctx = { isPlatformAdmin: false, settings: { dataVisibilityDays: 30, timezone: TZ } };
+    const vctx = { isPlatformAdmin: false, settings: { centerDataVisibilityDays: 30, teacherDataVisibilityDays: 30, timezone: TZ } };
     const expenses = read("app/[locale]/(center)/expenses/actions.ts");
     return [
       ["rescheduling into the past is refused (pastDate)", !back.ok && back.error === "pastDate"],

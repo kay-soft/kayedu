@@ -85,7 +85,8 @@ export type BranchDef = {
   lifecycle: "ACTIVE" | "ONBOARDING" | "SUSPENDED";
   /** Catalog systems this centre picks (every grade and subject under them). */
   systems: SystemKey[];
-  dataVisibilityDays: number;
+  /** U6: the centre window; the teacher window is seeded as min(this, 30). */
+  centerDataVisibilityDays: number;
   staff: StaffDef[];
   /** Teacher keys (see TEACHERS) with a membership at this branch. */
   teachers: string[];
@@ -186,7 +187,7 @@ const DOWNTOWN: BranchDef = {
   themeColor: "#2563EB",
   lifecycle: "ACTIVE",
   systems: ["EG", "US", "IG"],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   customMethod: "Bank transfer",
   staff: [
     { key: "owner-c60", role: "OWNER", first: "Tarek", last: "Hegazy", email: mail("owner.center60"), locale: "en" },
@@ -257,7 +258,7 @@ const NASR_CITY: BranchDef = {
   themeColor: "#0D9488",
   lifecycle: "ACTIVE",
   systems: ["EG", "US", "IG"],
-  dataVisibilityDays: 60,
+  centerDataVisibilityDays: 60,
   staff: [
     { key: "mgr-nc", role: "MANAGER", first: "Wael", last: "Shaker", email: mail("manager.nasrcity"), locale: "en" },
     { key: "rec-nc", role: "RECEPTIONIST", first: "Noha", last: "Fouad", email: mail("receptionist.nasrcity"), locale: "en" },
@@ -316,7 +317,7 @@ const NOKHBA: BranchDef = {
   themeColor: "#7C3AED",
   lifecycle: "ACTIVE",
   systems: ["EG", "IG"],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   staff: [
     { key: "owner-nk", role: "OWNER", first: "Hisham", last: "Badawy", email: mail("owner.nokhba"), locale: "en" },
     { key: "rec-nk", role: "RECEPTIONIST", first: "Rasha", last: "Younes", email: mail("receptionist.nokhba"), locale: "en" },
@@ -353,7 +354,7 @@ const ONBOARDING: BranchDef = {
   themeColor: "#F59E0B",
   lifecycle: "ONBOARDING",
   systems: [],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   staff: [
     { key: "owner-ob", role: "OWNER", first: "Mervat", last: "Salah", email: mail("owner.onboarding"), locale: "en" },
   ],
@@ -374,7 +375,7 @@ const SUSPENDED: BranchDef = {
   themeColor: "#DC2626",
   lifecycle: "SUSPENDED",
   systems: [],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   staff: [
     { key: "owner-sp", role: "OWNER", first: "Kamal", last: "Osman", email: mail("owner.suspended"), locale: "en" },
   ],

@@ -16,7 +16,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { sessionDisplayName } from "@/lib/session-label";
-import { studentSessionsWithTeacher } from "@/lib/db/teacher-portal";
+import { studentSessionsWithTeacher, teacherPortalHistoryFloor } from "@/lib/db/teacher-portal";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
@@ -51,7 +51,8 @@ export default async function TeacherStudentDetailPage({
   const student = await db.students.findDetailById(id);
   if (!student) notFound();
 
-  const sessions = await studentSessionsWithTeacher(prisma, ctx.center.id, ctx.user.id, id);
+  // U6: a student taught only before the teacher's history floor reads as not found.
+  const sessions = await studentSessionsWithTeacher(prisma, ctx.center.id, ctx.user.id, id, teacherPortalHistoryFloor(ctx));
   if (sessions.length === 0) notFound();
 
   const t = await getTranslations("TeacherStudents");

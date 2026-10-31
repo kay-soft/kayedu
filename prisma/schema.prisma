@@ -264,6 +264,11 @@ model User {
   // profile (`ensureStudentProfile`) — and never changes a branch record.
   gradeId         String?
   grade           CatalogGrade? @relation("UserGrade", fields: [gradeId], references: [id])
+  // U6: how many days back this person's own teacher portal shows (dashboard,
+  // session history, student history, past calendar days). 0 = all history,
+  // the default; 1–3650 otherwise. The teacher's own preference only — it
+  // never widens any centre window and no centre-side read consults it.
+  teacherHistoryDays Int    @default(0)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -483,12 +488,20 @@ model CenterSettings {
   // after the session date (M10, closing the gap flagged at M5/M7). Null =
   // no deadline, editable any time — the M7 default.
   teacherEditDeadlineHours Int?
-  // M19: how many days back a centre-side role (OWNER/MANAGER/RECEPTIONIST/
-  // ACCOUNTANT) may read analytics/money/sessions/attendance — a rolling
-  // window ending today, not a calendar-month anchor (docs/01-data-model.md
-  // §7). Platform admin bypasses this entirely; Settlement/payout and
-  // AuditLog reads are carved out and never consult it (lib/db/visibility.ts).
+  // DEPRECATED (U6): the single M19 window, replaced by the two fields below
+  // and backfilled into them. No code reads it; it stays only so the live
+  // site keeps working until the U6 code deploys (backlog: drop after the pilot).
   dataVisibilityDays       Int            @default(30)
+  // U6: how many days back a centre-side role (OWNER/MANAGER/RECEPTIONIST/
+  // ACCOUNTANT) may read the centre's own analytics, money, sessions and
+  // attendance — a rolling window ending today (docs/01-data-model.md §7).
+  // 1–365. Platform admin bypasses it; Settlement/payout and AuditLog reads
+  // are carved out and never consult it (lib/db/visibility.ts).
+  centerDataVisibilityDays Int            @default(365)
+  // U6: how many days back a centre-side role may read about one teacher —
+  // the Analytics teacher breakdown and every Analytics view filtered to a
+  // teacher. 1–30, independent of the centre window above.
+  teacherDataVisibilityDays Int           @default(30)
   // F5: whether this branch appears on the public Explore pages (guests, no
   // sign-in). Only ACTIVE/GRACE branches are ever listed, whatever this says
   // (lib/db/public-catalog.ts). It never affects the signed-in student Discover.

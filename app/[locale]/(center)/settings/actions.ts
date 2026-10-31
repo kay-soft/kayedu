@@ -733,7 +733,8 @@ export async function saveGeneralSettingsAction(
     timezone,
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
-    dataVisibilityDays,
+    centerDataVisibilityDays,
+    teacherDataVisibilityDays,
     publicListing,
   } = parsed.data;
 
@@ -746,7 +747,8 @@ export async function saveGeneralSettingsAction(
     timezone,
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
-    dataVisibilityDays,
+    centerDataVisibilityDays,
+    teacherDataVisibilityDays,
     publicListing,
   });
 
@@ -767,7 +769,8 @@ export async function saveGeneralSettingsAction(
           defaultLateThreshold: before.defaultLateThreshold,
           timezone: before.timezone,
           scheduleConflictPolicy: before.scheduleConflictPolicy,
-          dataVisibilityDays: before.dataVisibilityDays,
+          centerDataVisibilityDays: before.centerDataVisibilityDays,
+          teacherDataVisibilityDays: before.teacherDataVisibilityDays,
           teacherEditDeadlineHours: before.teacherEditDeadlineHours,
           publicListing: before.publicListing,
         }
@@ -779,7 +782,8 @@ export async function saveGeneralSettingsAction(
       defaultLateThreshold,
       timezone,
       scheduleConflictPolicy,
-      dataVisibilityDays,
+      centerDataVisibilityDays,
+      teacherDataVisibilityDays,
       // SEC-74: the edit deadline is a setting too — it was missing here.
       teacherEditDeadlineHours,
       // F5: listing on the public Explore pages.

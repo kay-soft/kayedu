@@ -23,8 +23,9 @@ import { CENTER_TIMEZONES } from "@/lib/branch-setup";
 import { formatMoney } from "@/lib/format";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres, piastresToInputValue, splitShare } from "@/lib/money";
 import { IDLE_ACTION_STATE } from "@/lib/validation/form";
-import { MAX_EDIT_DEADLINE_HOURS, MAX_LATE_THRESHOLD, MAX_TIMEOUT_DAYS, MAX_VISIBILITY_WINDOW_DAYS, generalSettingsSchema } from "@/lib/validation/settings";
+import { MAX_EDIT_DEADLINE_HOURS, MAX_LATE_THRESHOLD, MAX_TIMEOUT_DAYS, generalSettingsSchema } from "@/lib/validation/settings";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
+import { MAX_CENTER_VISIBILITY_DAYS, MAX_TEACHER_VISIBILITY_DAYS } from "@/lib/db/visibility";
 import { useClientValidation } from "@/lib/ui/client-validation";
 
 /** The session price the cut preview is worked out against: 120.00 EGP. */
@@ -41,7 +42,8 @@ export type GeneralSettingsValues = {
   timezone: string;
   scheduleConflictPolicy: ConflictPolicy;
   teacherEditDeadlineHours: number | null;
-  dataVisibilityDays: number;
+  centerDataVisibilityDays: number;
+  teacherDataVisibilityDays: number;
   publicListing: boolean;
 };
 
@@ -306,29 +308,35 @@ export function GeneralSettingsForm({
           <CardDescription>{t("visibilityDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex min-w-0 flex-col gap-1.5 sm:max-w-56">
-            <Label htmlFor="dataVisibilityDays">{t("visibilityDays")}</Label>
-            <Input
-              id="dataVisibilityDays"
-              name="dataVisibilityDays"
-              type="number"
-              dir="ltr"
-              inputMode="numeric"
-              min={1}
-              max={MAX_VISIBILITY_WINDOW_DAYS}
-              step={1}
-              defaultValue={values.dataVisibilityDays}
-              aria-invalid={
-                fieldErrors?.dataVisibilityDays ? true : undefined
-              }
-            />
-            <p className="text-xs text-text-muted">{t("visibilityHint")}</p>
-            {fieldErrors?.dataVisibilityDays ? (
-              <FieldError>
-                {tErrors(fieldErrors.dataVisibilityDays)}
-              </FieldError>
-            ) : null}
+          {/* U6: two windows, each with its cap and one line on what it covers. */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {(
+              [
+                ["centerDataVisibilityDays", MAX_CENTER_VISIBILITY_DAYS, "visibilityCenter"],
+                ["teacherDataVisibilityDays", MAX_TEACHER_VISIBILITY_DAYS, "visibilityTeacher"],
+              ] as const
+            ).map(([name, max, key]) => (
+              <div key={name} className="flex min-w-0 flex-col gap-1.5">
+                <Label htmlFor={name}>{t(`${key}.label`)}</Label>
+                <Input
+                  id={name}
+                  name={name}
+                  type="number"
+                  dir="ltr"
+                  inputMode="numeric"
+                  min={1}
+                  max={max}
+                  step={1}
+                  defaultValue={values[name]}
+                  aria-invalid={fieldErrors?.[name] ? true : undefined}
+                  className="sm:max-w-56"
+                />
+                <p className="text-xs text-text-muted">{t(`${key}.hint`, { max })}</p>
+                {fieldErrors?.[name] ? <FieldError>{tErrors(fieldErrors[name])}</FieldError> : null}
+              </div>
+            ))}
           </div>
+          <p className="mt-3 text-xs text-text-muted">{t("visibilityHint")}</p>
         </CardContent>
       </Card>
 

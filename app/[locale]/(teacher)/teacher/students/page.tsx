@@ -17,7 +17,7 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
-import { teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { teacherPortalHistoryFloor, teacherStudentProfileIds } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -46,7 +46,8 @@ export default async function TeacherStudentsPage({
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
 
-  const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id);
+  // U6: within the teacher's own history preference (all history by default).
+  const studentIds = await teacherStudentProfileIds(prisma, ctx.center.id, ctx.user.id, teacherPortalHistoryFloor(ctx));
 
   let rows: Awaited<ReturnType<typeof db.students.search>> = [];
   let total = 0;

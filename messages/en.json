@@ -1431,7 +1431,7 @@
     },
     "byTeacher": {
       "title": "By teacher",
-      "description": "Revenue collected per teacher in this period.",
+      "description": "Revenue collected per teacher, {period}. Limited to the individual-teacher window.",
       "empty": "No payments recorded in this period.",
       "unknown": "Unknown teacher",
       "columns": {
@@ -1830,10 +1830,17 @@
       "editDeadlineLabel": "Set a deadline for teachers to edit a session description",
       "editDeadlineDescription": "Counted from the session's date. Leave this off to let a teacher edit any of their own sessions at any time.",
       "editDeadlineHours": "Hours after the session",
-      "visibilityTitle": "Data visibility window",
-      "visibilityDescription": "How many days back your own staff (Owner/Manager/Receptionist/Accountant) may read analytics, money, sessions and attendance history. Nothing is ever deleted, so widening this restores full visibility instantly.",
-      "visibilityDays": "Window (days)",
-      "visibilityHint": "Default: 30 days. A platform admin can also override this for support purposes.",
+      "visibilityTitle": "Data visibility windows",
+      "visibilityDescription": "How many days back your own staff (Owner/Manager/Receptionist/Accountant) may read history. Two separate windows.",
+      "visibilityCenter": {
+        "label": "Branch data (days)",
+        "hint": "Analytics, money, sessions and attendance. 1–{max} days."
+      },
+      "visibilityTeacher": {
+        "label": "Individual teachers (days)",
+        "hint": "The by-teacher breakdown and Analytics filtered to one teacher. 1–{max} days."
+      },
+      "visibilityHint": "A read restriction only — nothing is ever deleted, so widening a window restores visibility instantly. Settlements and the activity log are never limited. A platform admin can also override these.",
       "schedulingTitle": "Scheduling conflicts",
       "schedulingDescription": "What happens when a class's sessions, or a single session, would double-book a teacher or a room.",
       "denyConflictsLabel": "Deny double-booked slots and sessions",
@@ -2654,9 +2661,16 @@
       },
       "lifecycleTitle": "Lifecycle",
       "lifecycleDescription": "ONBOARDING/ACTIVE/GRACE all permit sign-in; SUSPENDED/ARCHIVED both refuse it. Invalid transitions are refused server-side, not just hidden here.",
-      "visibilityTitle": "Data visibility window",
-      "visibilityDescription": "How many days back this branch's own staff (Owner/Manager/Receptionist/Accountant) may read analytics, money, sessions and attendance history. A read restriction only — nothing is ever deleted, so widening it restores full visibility instantly.",
-      "visibilityLabel": "Window (days)",
+      "visibilityTitle": "Data visibility windows",
+      "visibilityDescription": "How many days back this branch's own staff (Owner/Manager/Receptionist/Accountant) may read history. A read restriction only — nothing is ever deleted, so widening a window restores visibility instantly.",
+      "visibilityCenter": {
+        "label": "Branch data (days)",
+        "hint": "Analytics, money, sessions and attendance. 1–{max} days."
+      },
+      "visibilityTeacher": {
+        "label": "Individual teachers (days)",
+        "hint": "The by-teacher breakdown and Analytics filtered to one teacher. 1–{max} days."
+      },
       "saveVisibility": "Save",
       "visibilitySaved": "Saved.",
       "auditTitle": "Recent activity",
@@ -3159,7 +3173,9 @@
       "photoMissing": "Choose a photo first.",
       "photoType": "Photos must be PNG, JPEG or WebP.",
       "photoTooLarge": "That photo is larger than 1 MB.",
-      "mediaNotConnected": "Photo storage isn't connected yet, so nothing was saved. It will work once media storage is switched on."
+      "mediaNotConnected": "Photo storage isn't connected yet, so nothing was saved. It will work once media storage is switched on.",
+      "invalidNumber": "Enter a whole number in the allowed range.",
+      "forbidden": "This setting is only for teachers."
     },
     "study": {
       "title": "Study details",
@@ -3178,6 +3194,25 @@
         "none": "Not set",
         "noSystem": "Other grades"
       }
+    },
+    "teacherHistory": {
+      "title": "Teacher portal",
+      "description": "Settings for your own teacher portal.",
+      "label": "History shown in my teacher portal",
+      "all": {
+        "label": "All",
+        "hint": "Every session and student you have ever taught."
+      },
+      "days": {
+        "label": "A number of days",
+        "hint": "Only the most recent days."
+      },
+      "daysLabel": "Days back",
+      "daysHint": "1–{max} days.",
+      "note": "Only changes what you see in your teacher portal. It never changes what a branch can see, and settlements are always shown in full.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Your teacher portal history was saved."
     },
     "photo": {
       "title": "Profile photo",

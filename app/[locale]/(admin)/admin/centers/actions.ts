@@ -194,10 +194,11 @@ export async function transitionCenterLifecycleAction(
 }
 
 /**
- * The per-centre override of the data-visibility window (M19, docs/01 §7) —
- * the same `CenterSettings.dataVisibilityDays` column a centre's own
- * `/settings` screen edits, writable here too since the spec calls for both
- * "per-centre configurable ... AND adjustable by a platform admin".
+ * The per-centre override of the data-visibility windows (M19, U6, docs/01
+ * §7) — the same `CenterSettings.centerDataVisibilityDays` and
+ * `teacherDataVisibilityDays` columns a centre's own `/settings` screen
+ * edits, under the same caps, writable here too since the spec calls for
+ * both "per-centre configurable ... AND adjustable by a platform admin".
  */
 export async function updateCenterVisibilityWindowAction(
   _prevState: AdminActionState,
@@ -207,12 +208,12 @@ export async function updateCenterVisibilityWindowAction(
 
   const parsed = centerVisibilityWindowSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-  const { locale, id, dataVisibilityDays } = parsed.data;
+  const { locale, id, centerDataVisibilityDays, teacherDataVisibilityDays } = parsed.data;
 
   const before = await prisma.centerSettings.findUnique({ where: { centerId: id } });
   if (!before) return { error: "notFound" };
 
-  await prisma.centerSettings.update({ where: { centerId: id }, data: { dataVisibilityDays } });
+  await prisma.centerSettings.update({ where: { centerId: id }, data: { centerDataVisibilityDays, teacherDataVisibilityDays } });
 
   await writeAuditLog({
     centerId: id,
@@ -220,8 +221,11 @@ export async function updateCenterVisibilityWindowAction(
     action: "platform.center.visibilityWindow.update",
     entityType: "CenterSettings",
     entityId: before.id,
-    before: { dataVisibilityDays: before.dataVisibilityDays },
-    after: { dataVisibilityDays },
+    before: {
+      centerDataVisibilityDays: before.centerDataVisibilityDays,
+      teacherDataVisibilityDays: before.teacherDataVisibilityDays,
+    },
+    after: { centerDataVisibilityDays, teacherDataVisibilityDays },
   });
 
   revalidatePath(centerPath(locale, id));

@@ -35,7 +35,7 @@ import {
   scopedWhere,
 } from "./tenant-scope.ts";
 import { staffInvitationFilter, staffMembershipFilter } from "./staff-filter.ts";
-import { centreReadFloor } from "./visibility.ts";
+import { centreReadFloor, type VisibilitySettings } from "./visibility.ts";
 import { consecutiveAbsenceCount } from "./attendance.ts";
 import {
   PAYMENT_METHOD_ORDER,
@@ -58,7 +58,7 @@ export type ScopeContext = {
   user: { locale: string | null };
   role: string;
   isPlatformAdmin: boolean;
-  settings: { dataVisibilityDays: number; timezone: string } | null;
+  settings: VisibilitySettings | null;
 };
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */

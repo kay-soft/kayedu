@@ -20,7 +20,7 @@ import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { branchDeleteBlocker } from "@/lib/db/branch-admin";
 import { branchTodayKey, liveBranchPause } from "@/lib/db/branch-pauses";
 import { prisma } from "@/lib/db/client";
-import { DEFAULT_VISIBILITY_WINDOW_DAYS } from "@/lib/db/visibility";
+import { DEFAULT_CENTER_VISIBILITY_DAYS, DEFAULT_TEACHER_VISIBILITY_DAYS } from "@/lib/db/visibility";
 import {
   platformCenterDetailStats,
   recordSupportAccess,
@@ -178,7 +178,8 @@ export default async function AdminCenterDetailPage({
             <CardContent>
               <VisibilityWindowForm
                 centerId={center.id}
-                dataVisibilityDays={settings?.dataVisibilityDays ?? DEFAULT_VISIBILITY_WINDOW_DAYS}
+                centerDataVisibilityDays={settings?.centerDataVisibilityDays ?? DEFAULT_CENTER_VISIBILITY_DAYS}
+                teacherDataVisibilityDays={settings?.teacherDataVisibilityDays ?? DEFAULT_TEACHER_VISIBILITY_DAYS}
               />
             </CardContent>
           </Card>

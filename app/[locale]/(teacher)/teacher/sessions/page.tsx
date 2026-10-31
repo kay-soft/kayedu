@@ -23,7 +23,8 @@ import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
-import { teacherSessionListWhere } from "@/lib/db/teacher-portal";
+import { teacherPortalHistoryFloor, teacherSessionListWhere } from "@/lib/db/teacher-portal";
+import { clampRangeToVisibility } from "@/lib/db/visibility";
 import { formatDate, formatDay, formatNumber, formatTime, formatTimeRange } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
@@ -79,8 +80,14 @@ export default async function TeacherSessionsPage({
   const timeZone = centreTimeZone(ctx.settings);
   const today = todayInTimezone(timeZone, now);
   const anchor = filters.date ? new Date(`${filters.date}T00:00:00.000Z`) : today;
-  const from = anchor;
-  const to = addDays(anchor, RANGE_SPAN_DAYS[filters.range]);
+  const requestedTo = addDays(anchor, RANGE_SPAN_DAYS[filters.range]);
+  // U6: the teacher's own history preference (0 = all history, the default)
+  // is the only limit here — never a centre window. A range wholly before the
+  // floor reads as empty (start after end).
+  const { start: from, end: to } = clampRangeToVisibility(
+    { start: anchor, end: requestedTo },
+    teacherPortalHistoryFloor(ctx, now),
+  );
 
   const db = scoped(ctx);
   const t = await getTranslations("TeacherSessions");
@@ -90,7 +97,8 @@ export default async function TeacherSessionsPage({
   const locale = await getLocale();
 
   // R2's lazy end-of-day close for this teacher's sessions in view.
-  await closeEndedSessions(prisma, ctx.center.id, now, { from, to, teacherId: ctx.user.id });
+  // A write, so it covers the whole requested range, not the history view.
+  await closeEndedSessions(prisma, ctx.center.id, now, { from: anchor, to: requestedTo, teacherId: ctx.user.id });
 
   const [rows, grades, ownClasses] = await Promise.all([
     db.sessions.search({

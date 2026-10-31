@@ -9,12 +9,14 @@ import {
   UnlinkChildButton,
 } from "@/app/[locale]/account/family-controls";
 import { StudyDetailsForm } from "@/app/[locale]/account/study-details-form";
+import { TeacherHistoryForm } from "@/app/[locale]/account/teacher-history-form";
 import { JoinFamilyForm } from "@/components/family/join-family-form";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Ltr } from "@/components/shared/ltr";
 import { LinkButton } from "@/components/shared/link-button";
 import { PageSection } from "@/components/shared/page-section";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { hasTeacherMembership } from "@/lib/db/account";
 import { showsStudyDetails } from "@/lib/db/account-study";
 import { listCatalogGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
@@ -217,6 +219,26 @@ export async function FamilySection({ user }: AccountSectionProps) {
           </Card>
         ) : null}
       </div>
+    </PageSection>
+  );
+}
+
+/**
+ * Account → "History shown in my teacher portal" (U6, docs/04 §11.27): how
+ * far back this person's own teacher portal shows — only for someone with an
+ * active teacher membership, nothing for anyone else.
+ */
+export async function TeacherHistorySection({ user }: AccountSectionProps) {
+  if (!(await hasTeacherMembership(prisma, user.id))) return null;
+  const tHistory = await getTranslations("Account.teacherHistory");
+
+  return (
+    <PageSection title={tHistory("title")} description={tHistory("description")}>
+      <Card>
+        <CardContent>
+          <TeacherHistoryForm teacherHistoryDays={user.teacherHistoryDays} />
+        </CardContent>
+      </Card>
     </PageSection>
   );
 }

@@ -7,6 +7,13 @@ import { localeSchema } from "./auth.ts";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres } from "../money.ts";
 import { BRANCH_COPY_KEYS, BRANCH_PAUSE_REASON_MAX, MAX_BRANCH_LIMIT, type BranchCopyKey } from "../branch-setup.ts";
 import { dateKeyField } from "./class-period.ts";
+import { visibilityWindowField } from "./settings.ts";
+import {
+  DEFAULT_CENTER_VISIBILITY_DAYS,
+  DEFAULT_TEACHER_VISIBILITY_DAYS,
+  MAX_CENTER_VISIBILITY_DAYS,
+  MAX_TEACHER_VISIBILITY_DAYS,
+} from "../db/visibility.ts";
 
 /**
  * Platform-admin schemas (M9). Messages are i18n keys under
@@ -202,15 +209,15 @@ export const catalogEntryDeleteSchema = z.object({
   id: catalogEntryId,
 });
 
-/** M19 — per-centre override of the data-visibility window (docs/01 §7). */
+/**
+ * M19, U6 — the platform admin's override of a branch's two data-visibility
+ * windows (docs/01 §7), under the same caps a branch's own settings get.
+ */
 export const centerVisibilityWindowSchema = z.object({
   locale: localeSchema,
   id: centerId,
-  dataVisibilityDays: z.coerce
-    .number({ error: "invalidNumber" })
-    .int("invalidNumber")
-    .min(1, "invalidNumber")
-    .max(3650, "invalidNumber"),
+  centerDataVisibilityDays: visibilityWindowField(DEFAULT_CENTER_VISIBILITY_DAYS, MAX_CENTER_VISIBILITY_DAYS),
+  teacherDataVisibilityDays: visibilityWindowField(DEFAULT_TEACHER_VISIBILITY_DAYS, MAX_TEACHER_VISIBILITY_DAYS),
 });
 
 // ── Branch management by a platform admin (U5) ─────────────────────────────

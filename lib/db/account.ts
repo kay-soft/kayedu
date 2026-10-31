@@ -114,3 +114,35 @@ export async function recordsOnFile(db: Db, userId: string): Promise<RecordOnFil
   ];
   return rows.sort((a, b) => a.centerName.localeCompare(b.centerName));
 }
+
+// ── Teacher portal history (U6) ─────────────────────────────────────────────
+
+/**
+ * Whether Account settings shows "History shown in my teacher portal" (U6):
+ * only for a person with an active TEACHER membership at an accessible
+ * branch. The person's own rows only — the same scope `recordsOnFile` reads.
+ */
+export async function hasTeacherMembership(db: Db, userId: string): Promise<boolean> {
+  const count = await db.membership.count({
+    where: { userId, role: "TEACHER", active: true, center: ACCESSIBLE_CENTER },
+  });
+  return count > 0;
+}
+
+export type TeacherHistoryResult = { ok: true } | { ok: false; error: "forbidden" };
+
+/**
+ * Sets the caller's own teacher-portal history preference (U6):
+ * `User.teacherHistoryDays`, 0 = all history. Refused for a person with no
+ * teacher membership. It writes that one column and nothing else — it never
+ * widens or narrows any branch's window (lib/db/visibility.ts).
+ */
+export async function setTeacherHistoryDays(
+  db: PrismaClient,
+  userId: string,
+  teacherHistoryDays: number,
+): Promise<TeacherHistoryResult> {
+  if (!(await hasTeacherMembership(db, userId))) return { ok: false, error: "forbidden" };
+  await db.user.update({ where: { id: userId }, data: { teacherHistoryDays } });
+  return { ok: true };
+}

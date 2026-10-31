@@ -500,6 +500,8 @@ async function checkAdminAddBranch() {
       defaultLateThreshold: 5,
       scheduleConflictPolicy: "DENY",
       dataVisibilityDays: 45,
+      centerDataVisibilityDays: 120,
+      teacherDataVisibilityDays: 12,
       teacherEditDeadlineHours: 12,
       cardLayout: { version: 1, background: "#0f2a1d" },
     },
@@ -619,6 +621,11 @@ async function checkAdminAddBranch() {
       settings.scheduleConflictPolicy === "DENY" &&
       settings.dataVisibilityDays === 45 &&
       settings.teacherEditDeadlineHours === 12,
+    JSON.stringify(settings),
+  );
+  check(
+    "U6: both data-visibility windows are copied with the general settings",
+    settings?.centerDataVisibilityDays === 120 && settings.teacherDataVisibilityDays === 12,
     JSON.stringify(settings),
   );
 

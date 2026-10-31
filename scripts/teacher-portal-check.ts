@@ -309,6 +309,27 @@ async function main() {
     JSON.stringify(combined),
   );
 
+  // ── 2b. U6: the teacher's own history preference ───────────────────────
+  // No floor (0 = all history, the default) reads exactly what the summary
+  // above read; a floor after every fixture hides them — the clamp, not the
+  // fixtures, is what changes. The portal never takes a centre window.
+  const tomorrow = new Date(today.getTime() + 86_400_000);
+  const unlimited = await teacherCenterSummary(prisma, centerA.id, teacher.id, today, week, { from: week.start, to: week.end }, null);
+  const floored = await teacherCenterSummary(prisma, centerA.id, teacher.id, today, week, { from: week.start, to: week.end }, tomorrow);
+  check(
+    "U6: with no history floor the dashboard summary is unchanged; a floor past the fixtures drops their week count and earnings",
+    JSON.stringify(unlimited) === JSON.stringify(summaryA) &&
+      floored.earnings.paymentCount === 0 &&
+      floored.sessionsThisWeek < summaryA.sessionsThisWeek,
+    JSON.stringify({ unlimited, floored }),
+  );
+  check(
+    "U6: the roster and a student's history honour the floor, and are whole without one",
+    (await teacherStudentProfileIds(prisma, centerA.id, teacher.id, null)).length === 2 &&
+      (await teacherStudentProfileIds(prisma, centerA.id, teacher.id, tomorrow)).length === 0 &&
+      (await studentSessionsWithTeacher(prisma, centerA.id, teacher.id, studentA1.profile.id, tomorrow)).length === 0,
+  );
+
   // ── 3. Student rosters and per-student history never cross ──────────────
   const rosterA = await teacherStudentProfileIds(prisma, centerA.id, teacher.id);
   const rosterB = await teacherStudentProfileIds(prisma, centerB.id, teacher.id);

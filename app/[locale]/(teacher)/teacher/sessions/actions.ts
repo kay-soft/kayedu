@@ -8,7 +8,7 @@ import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { studentSearchWhere } from "@/lib/db/students";
-import { taughtByTeacherWhere } from "@/lib/db/teacher-portal";
+import { taughtByTeacherWhere, teacherPortalHistoryFloor } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, dayMarker, startOfSessionDay } from "@/lib/scheduling";
@@ -49,7 +49,7 @@ export async function searchOwnSessionStudentsTypeAheadAction(
 
   // SEC-52: a relational filter, not this teacher's whole roster loaded per keystroke.
   const rows = await scoped(ctx).students.search({
-    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id), ...studentSearchWhere(trimmed) },
+    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id, teacherPortalHistoryFloor(ctx)), ...studentSearchWhere(trimmed) },
     take: 8,
   });
 

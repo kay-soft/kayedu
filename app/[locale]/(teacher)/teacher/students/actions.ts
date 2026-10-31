@@ -7,7 +7,7 @@ import { writeAuditLog } from "@/lib/db/audit";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
-import { taughtByTeacherWhere, teacherStudentProfileIds } from "@/lib/db/teacher-portal";
+import { taughtByTeacherWhere, teacherPortalHistoryFloor, teacherStudentProfileIds } from "@/lib/db/teacher-portal";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
@@ -46,7 +46,7 @@ export async function searchTaughtStudentsTypeAheadAction(
 
   // SEC-52: a relational filter, not this teacher's whole roster loaded per keystroke.
   const rows = await scoped(ctx).students.search({
-    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id), ...studentSearchWhere(trimmed) },
+    where: { ...taughtByTeacherWhere(ctx.center.id, ctx.user.id, teacherPortalHistoryFloor(ctx)), ...studentSearchWhere(trimmed) },
     take: 8,
   });
 

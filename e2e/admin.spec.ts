@@ -6,7 +6,7 @@ import { dayFromToday, field, openDialog, pickDate } from "./support/ui";
 /**
  * Journey 1 — the platform admin (SYS Part A): provision a branch (and the
  * one-branch organization it creates), move it through its lifecycle,
- * override its visibility window, open its support view (audited), read the
+ * override its two visibility windows, open its support view (audited), read the
  * platform KPIs and manage the global catalog.
  */
 
@@ -19,7 +19,7 @@ test("platform KPIs and the centre list render", async ({ as, appLocale, msg }) 
   await expect(page.getByText(msg("AdminCenters.create.title"), { exact: true })).toBeVisible();
 });
 
-test("@write provision a branch, move it ONBOARDING → ACTIVE → ARCHIVED, override its window", async ({ as, appLocale, msg }) => {
+test("@write provision a branch, move it ONBOARDING → ACTIVE → ARCHIVED, override its windows", async ({ as, appLocale, msg }) => {
   const page = await as("admin");
   const tag = uniqueTag("e2e").toLowerCase();
   const name = `E2E Branch ${tag}`;
@@ -59,11 +59,13 @@ test("@write provision a branch, move it ONBOARDING → ACTIVE → ARCHIVED, ove
   };
   await moveTo("ACTIVE");
 
-  await page.getByLabel(msg("AdminCenters.detail.visibilityLabel"), { exact: true }).fill("45");
+  await page.getByLabel(msg("AdminCenters.detail.visibilityCenter.label"), { exact: true }).fill("200");
+  await page.getByLabel(msg("AdminCenters.detail.visibilityTeacher.label"), { exact: true }).fill("20");
   await page.getByRole("button", { name: msg("AdminCenters.detail.saveVisibility"), exact: true }).click();
   await expect(page.getByText(msg("AdminCenters.detail.visibilitySaved"))).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel(msg("AdminCenters.detail.visibilityLabel"), { exact: true })).toHaveValue("45");
+  await expect(page.getByLabel(msg("AdminCenters.detail.visibilityCenter.label"), { exact: true })).toHaveValue("200");
+  await expect(page.getByLabel(msg("AdminCenters.detail.visibilityTeacher.label"), { exact: true })).toHaveValue("20");
 
   // Clean up the only way a branch can be: ARCHIVED is terminal.
   await moveTo("ARCHIVED");
