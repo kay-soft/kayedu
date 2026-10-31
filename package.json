@@ -50,6 +50,7 @@
     "check:card-layout": "node scripts/with-env.ts scripts/card-layout-check.ts",
     "check:design": "node scripts/design-check.ts",
     "check:account": "node scripts/account-check.ts",
+    "check:gate-fixtures": "node scripts/gate-fixtures-check.ts",
     "check:public": "node scripts/public-check.ts",
     "check:security": "node scripts/with-env.ts scripts/security-check.ts",
     "check:rls": "node scripts/with-env.ts scripts/rls-check.ts",

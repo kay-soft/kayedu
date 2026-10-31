@@ -71,11 +71,11 @@ async function selectOne(): Promise<void> {
   }
 }
 
-function runGate(name: string): Promise<Pick<GateResult, "code" | "ms" | "timedOut" | "startupError">> {
+function runGate(name: string, extraArgs: string[] = []): Promise<Pick<GateResult, "code" | "ms" | "timedOut" | "startupError">> {
   const started = Date.now();
   return new Promise((resolve) => {
     // Output is tee'd (shown live and kept) so a fast failure can be explained in the summary.
-    const child = spawn("npm", ["run", "--silent", name], { stdio: ["inherit", "pipe", "pipe"], shell: process.platform === "win32" });
+    const child = spawn("npm", ["run", "--silent", name, ...extraArgs], { stdio: ["inherit", "pipe", "pipe"], shell: process.platform === "win32" });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => {
@@ -137,6 +137,10 @@ async function main() {
     }
     results.push({ name, ...(await runGate(name)) });
   }
+
+  // The run ends on a clean database: seed:verify --strict-clean fails on any gate fixture left behind.
+  console.log("\n━━━ seed:verify --strict-clean ━━━");
+  results.push({ name: "seed:verify --strict-clean", ...(await runGate("seed:verify", ["--", "--strict-clean"])) });
 
   const verifier = new PrismaClient();
   const leak = await verifyUserBaseline(verifier);

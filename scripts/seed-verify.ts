@@ -50,11 +50,21 @@ import { seedSubjectLinkCounts } from "../prisma/seed-data/catalog.ts";
 import { DEFAULT_SEED_EMAIL_DOMAIN, SEED_EMAIL_DOMAIN, mail } from "../prisma/seed-data/domain.ts";
 import { BRANCHES, DEV_FAMILY_CODES, seedAccounts, type StaffRole } from "../prisma/seed-data/plan.ts";
 import { pageGateFor } from "./lib/nav-gates.ts";
+import {
+  FIXTURE_STALE_AFTER_MS,
+  fixtureVerdict,
+  gateEmailPrefixes,
+  gateSlugPrefixes,
+  isGateFixtureSlug,
+} from "./lib/gate-fixtures.ts";
 
 const prisma = new PrismaClient();
 const ROOT = join(import.meta.dirname, "..");
 
 let failures = 0;
+let warnings = 0;
+/** `--strict-clean`: any gate fixture left in the database fails the run (the last step of check:all). */
+const STRICT_CLEAN = process.argv.includes("--strict-clean");
 
 function check(name: string, passed: boolean, detail = "") {
   if (passed) console.log(`  PASS  ${name}`);
@@ -72,7 +82,7 @@ const EXPECTED_CENTER_NAV: Record<StaffRole, string[]> = {
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };
 // U7: Calendar joins the teacher, student and parent nav.
-const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements"];
+const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements", "profile"];
 const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "discover", "reservations"];
 const EXPECTED_PARENT_NAV = ["schedule", "calendar"];
 const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog"];
@@ -99,7 +109,20 @@ async function count(sql: string): Promise<number> {
 async function main() {
   console.log("Seed verification (read-only)");
 
-  const centers = await prisma.center.findMany({ orderBy: { slug: "asc" } });
+  // Gate fixtures (scripts/lib/gate-fixtures.ts) are not the seed world: sections
+  // 1, 3, 4 and 7 leave them out, section 8 reports them.
+  const allCenters = await prisma.center.findMany({ orderBy: { slug: "asc" } });
+  const centers = allCenters.filter((center) => !isGateFixtureSlug(center.slug));
+  const fixtureCenters = allCenters.filter((center) => isGateFixtureSlug(center.slug));
+  const fixtureIds = fixtureCenters.map((center) => center.id);
+  const seedCenterWhere = { centerId: { notIn: fixtureIds } };
+  /** SQL list of the fixture centre ids; a sentinel keeps `NOT IN ()` valid when there are none. */
+  const fixtureIdList = fixtureIds.length > 0 ? fixtureIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(", ") : "''";
+  const seedCenter = (alias: string, column = "centerId") => `${alias}."${column}" NOT IN (${fixtureIdList})`;
+  const notFixtureUser = (alias: string) =>
+    gateEmailPrefixes()
+      .map((prefix) => `COALESCE(LOWER(${alias}."email"), '') NOT LIKE '${prefix.replace(/'/g, "''")}%'`)
+      .join(" AND ");
   const accounts = seedAccounts();
   const localDatabase = (() => {
     try {
@@ -309,11 +332,12 @@ async function main() {
     check(`${center.slug}: centre share + teacher share = collected`, analytics.centerShare + analytics.teacherShare === analytics.collected);
   }
 
-  const badSplit = await count(`SELECT COUNT(*)::int AS n FROM "Payment" WHERE "centerShareSnapshot" + "teacherShareSnapshot" <> "amount" OR "amount" <> "priceSnapshot"`);
+  const badSplit = await count(`SELECT COUNT(*)::int AS n FROM "Payment" p WHERE (p."centerShareSnapshot" + p."teacherShareSnapshot" <> p."amount" OR p."amount" <> p."priceSnapshot") AND ${seedCenter("p")}`);
   check("Every payment: centre share + teacher share = amount = price snapshot", badSplit === 0, `${badSplit} violate`);
 
   // Each snapshot is what lib/money.ts computes for the cut that was in force.
   const payments = await prisma.payment.findMany({
+    where: seedCenterWhere,
     select: {
       amount: true,
       centerShareSnapshot: true,
@@ -347,10 +371,10 @@ async function main() {
         rollup.teacherShare === center60[0].teacherShare + center60[1].teacherShare,
     );
   }
-  const voided = await prisma.payment.count({ where: { voided: true } });
-  const changes = await prisma.sessionAttendanceChange.count();
+  const voided = await prisma.payment.count({ where: { voided: true, ...seedCenterWhere } });
+  const changes = await prisma.sessionAttendanceChange.count({ where: seedCenterWhere });
   check("The live absent-switch voids left change-log rows", voided === 0 || changes >= voided, `${voided} voided, ${changes} change rows`);
-  const settlementStates = await prisma.settlement.groupBy({ by: ["status"], _count: { _all: true } });
+  const settlementStates = await prisma.settlement.groupBy({ by: ["status"], where: seedCenterWhere, _count: { _all: true } });
   check(
     "Settlements cover PAID, APPROVED and DRAFT",
     ["PAID", "APPROVED", "DRAFT"].every((status) => settlementStates.some((row) => row.status === status)),
@@ -454,7 +478,12 @@ async function main() {
          AND NOT EXISTS (SELECT 1 FROM "ChangeRequest" q WHERE q."requestedBy" = u."id")`,
     ],
   ];
-  for (const [name, sql] of orphanChecks) {
+  for (const [name, rawSql] of orphanChecks) {
+    // Gate fixtures are left out: every query ends in its WHERE, and names its primary table first.
+    const [, table, alias] = /FROM "(\w+)" (\w+)/.exec(rawSql) ?? [];
+    const scope =
+      table === "User" ? notFixtureUser(alias) : table === "FamilyInvitation" ? seedCenter(alias, "issuingCenterId") : seedCenter(alias);
+    const sql = `${rawSql} AND ${scope}`;
     const n = await count(sql);
     check(`${name}: 0`, n === 0, `${n}`);
   }
@@ -554,42 +583,42 @@ async function main() {
   }
 
   // ── 7. Counts ────────────────────────────────────────────────────────
-  console.log("\n7. Entity counts");
+  console.log("\n7. Entity counts (seed world, gate fixtures left out; catalog rows are global)");
   const counts: [string, number][] = [
-    ["Organizations", await prisma.organization.count()],
-    ["Centres", await prisma.center.count()],
-    ["Users", await prisma.user.count()],
-    ["Memberships", await prisma.membership.count()],
-    ["Student profiles", await prisma.studentProfile.count()],
+    ["Organizations", await prisma.organization.count({ where: { NOT: { centers: { some: { id: { in: fixtureIds } } } } } })],
+    ["Centres", centers.length],
+    ["Users", await count(`SELECT COUNT(*)::int AS n FROM "User" u WHERE ${notFixtureUser("u")}`)],
+    ["Memberships", await prisma.membership.count({ where: seedCenterWhere })],
+    ["Student profiles", await prisma.studentProfile.count({ where: seedCenterWhere })],
     ["Family links", await prisma.familyLink.count()],
     ["Parent codes (hashed)", await prisma.familyInvitation.count()],
-    ["Permission grant rows", await prisma.permissionGrant.count()],
+    ["Permission grant rows", await prisma.permissionGrant.count({ where: seedCenterWhere })],
     ["Catalog education systems", await prisma.catalogEducationSystem.count()],
     ["  grades", await prisma.catalogGrade.count()],
     ["  subjects", await prisma.catalogSubject.count()],
     ["  subject–grade links", await prisma.catalogSubjectGrade.count()],
-    ["Rooms", await prisma.room.count()],
-    ["Room links", await prisma.roomLink.count()],
-    ["Terms", await prisma.centerTerm.count()],
-    ["Holidays", await prisma.holiday.count()],
-    ["Payment methods", await prisma.centerPaymentMethod.count()],
-    ["Classes", await prisma.classGroup.count()],
-    ["Sessions", await prisma.session.count()],
-    ["  closed", await prisma.session.count({ where: { closedAt: { not: null } } })],
-    ["  cancelled", await prisma.session.count({ where: { status: "CANCELLED" } })],
-    ["  rescheduled", await prisma.session.count({ where: { rescheduledToId: { not: null } } })],
-    ["  manual / one-time", await prisma.session.count({ where: { isManual: true } })],
-    ["Enrolments", await prisma.enrollment.count()],
-    ["Roster rows (attendance)", await prisma.sessionAttendee.count()],
-    ["Attendance changes", await prisma.sessionAttendanceChange.count()],
-    ["Payments", await prisma.payment.count()],
+    ["Rooms", await prisma.room.count({ where: seedCenterWhere })],
+    ["Room links", await prisma.roomLink.count({ where: seedCenterWhere })],
+    ["Terms", await prisma.centerTerm.count({ where: seedCenterWhere })],
+    ["Holidays", await prisma.holiday.count({ where: seedCenterWhere })],
+    ["Payment methods", await prisma.centerPaymentMethod.count({ where: seedCenterWhere })],
+    ["Classes", await prisma.classGroup.count({ where: seedCenterWhere })],
+    ["Sessions", await prisma.session.count({ where: seedCenterWhere })],
+    ["  closed", await prisma.session.count({ where: { closedAt: { not: null }, ...seedCenterWhere } })],
+    ["  cancelled", await prisma.session.count({ where: { status: "CANCELLED", ...seedCenterWhere } })],
+    ["  rescheduled", await prisma.session.count({ where: { rescheduledToId: { not: null }, ...seedCenterWhere } })],
+    ["  manual / one-time", await prisma.session.count({ where: { isManual: true, ...seedCenterWhere } })],
+    ["Enrolments", await prisma.enrollment.count({ where: seedCenterWhere })],
+    ["Roster rows (attendance)", await prisma.sessionAttendee.count({ where: seedCenterWhere })],
+    ["Attendance changes", await prisma.sessionAttendanceChange.count({ where: seedCenterWhere })],
+    ["Payments", await prisma.payment.count({ where: seedCenterWhere })],
     ["  voided", voided],
-    ["Settlements", await prisma.settlement.count()],
-    ["Expenses", await prisma.expense.count()],
-    ["Ratings", await prisma.sessionRating.count()],
-    ["Reservations", await prisma.reservation.count()],
-    ["Change requests", await prisma.changeRequest.count()],
-    ["Audit log rows", await prisma.auditLog.count()],
+    ["Settlements", await prisma.settlement.count({ where: seedCenterWhere })],
+    ["Expenses", await prisma.expense.count({ where: seedCenterWhere })],
+    ["Ratings", await prisma.sessionRating.count({ where: { session: seedCenterWhere } })],
+    ["Reservations", await prisma.reservation.count({ where: seedCenterWhere })],
+    ["Change requests", await prisma.changeRequest.count({ where: seedCenterWhere })],
+    ["Audit log rows", await prisma.auditLog.count({ where: { OR: [{ centerId: null }, seedCenterWhere] } })],
   ];
   for (const [label, value] of counts) console.log(`  ${label.padEnd(36)} ${value}`);
   for (const center of centers) {
@@ -599,7 +628,50 @@ async function main() {
     console.log(`  ${center.slug.padEnd(28)} ${String(center.lifecycleState).padEnd(10)} students=${students} classes=${classes} sessions=${sessions}`);
   }
 
-  console.log(failures === 0 ? "\nAll seed checks passed." : `\n${failures} seed check(s) FAILED.`);
+  // ── 8. Gate fixtures left behind ─────────────────────────────────────
+  // A running gate owns rows of this shape until its `finally` deletes them, so
+  // a young one is a WARN (do not run this while a gate runs); one past the
+  // stale limit was left by an interrupted gate: FAIL. --strict-clean: any is a FAIL.
+  console.log(`\n8. Gate fixtures left behind${STRICT_CLEAN ? " (--strict-clean: none allowed)" : ""}`);
+  const now = Date.now();
+  const likeAny = (column: string, prefixes: string[]) =>
+    prefixes.map((prefix) => `${column} ILIKE '${prefix.replace(/'/g, "''").replace(/[%_]/g, "\\$&")}%'`).join(" OR ");
+  const leftovers = (
+    await Promise.all([
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'centre ' || "slug" AS what, "createdAt" FROM "Center" WHERE ${likeAny('"slug"', gateSlugPrefixes())}`,
+      ),
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'user ' || COALESCE("email", "id") AS what, "createdAt" FROM "User" WHERE ${likeAny('"email"', gateEmailPrefixes())}`,
+      ),
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'catalog subject ' || "nameEn" AS what, "createdAt" FROM "CatalogSubject" WHERE ${likeAny('"nameEn"', gateSlugPrefixes())}`,
+      ),
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'catalog grade ' || "nameEn" AS what, "createdAt" FROM "CatalogGrade" WHERE ${likeAny('"nameEn"', gateSlugPrefixes())}`,
+      ),
+    ])
+  ).flat();
+  let leftBehind = 0;
+  for (const row of leftovers) {
+    const ageMs = now - new Date(row.createdAt).getTime();
+    const minutes = Math.round(ageMs / 60_000);
+    if (fixtureVerdict(ageMs, STRICT_CLEAN) === "FAIL") {
+      leftBehind += 1;
+      check(`${row.what} — ${minutes} min old, left behind (stale after ${FIXTURE_STALE_AFTER_MS / 60_000} min)`, false, "an interrupted gate; re-run it to clean up");
+    } else {
+      warnings += 1;
+      console.log(`  WARN  ${row.what} — ${minutes} min old: a gate may still be running (do not run seed:verify mid-gate)`);
+    }
+  }
+  if (leftovers.length === 0) check("No gate fixture is left in the database", true);
+  else if (leftBehind === 0) console.log(`  ${warnings} young gate fixture(s): a WARN, not a failure`);
+
+  console.log(
+    failures === 0
+      ? `\nAll seed checks passed.${warnings > 0 ? ` (${warnings} warning(s))` : ""}`
+      : `\n${failures} seed check(s) FAILED.`,
+  );
   if (failures > 0) process.exitCode = 1;
 }
 

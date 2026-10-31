@@ -249,7 +249,8 @@ scripts/
                                 #   a stall watchdog that names the blocker, cleanup of the run's orphaned users (SEC-2c)
   wipe-dev-data.ts              # the fenced dev-database wipe the USER runs (P1, npm run db:wipe-dev; mechanics in scripts/lib/wipe.ts)
   seed-preflight.ts             # BEFORE the wipe: password, project refs, service-role key, address clashes, one probe auth user created+deleted (P1, npm run seed:preflight)
-  seed-verify.ts                # read-only: baseline, nav per account, money reconciliation, no orphans, counts (P1, npm run seed:verify)
+  seed-verify.ts                # read-only: baseline, nav per account, money reconciliation, no orphans, counts (P1, npm run seed:verify); sections 1/3/4/7 skip gate fixtures, section 8 reports them; `--strict-clean`
+  gate-fixtures-check.ts        # no DB: every fixture stem in scripts/*-check.ts is registered in scripts/lib/gate-fixtures.ts (npm run check:gate-fixtures)
   seed-docs.ts                  # regenerates the accounts table in docs/dev-accounts.md for the configured SEED_EMAIL_DOMAIN (P1, npm run seed:docs)
   isolation-check.ts            # the cross-center acceptance gate (M1)
   config-check.ts               # the center-configuration acceptance gate (M2)

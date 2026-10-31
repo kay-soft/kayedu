@@ -42,6 +42,8 @@ jobs:
       # F5: the public Explore pages read only lib/db/public-catalog.ts, its
       # selects name nothing private, and ?next= stays on-site. No database.
       - run: npm run check:public
+      # Every gate's fixture stem is registered for seed:verify. No database.
+      - run: npm run check:gate-fixtures
       # SEC-35: no high/critical advisory in what ships to production.
       - run: npm audit --omit=dev --audit-level=high
 

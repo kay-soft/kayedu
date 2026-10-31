@@ -99,6 +99,15 @@ REFUSED: npm run check:payments writes to its database, and this run would write
   There is no override flag.
 ```
 
+## 6b. Gate fixtures: the prefix list, cleanup, and `seed:verify`
+
+Every `check:*` gate creates its own centres (slug), users (email) and a few global catalog rows (`nameEn`) under a stem of the form `<gate>-check` (`branches-check-a`, `student-portal-check-pub-listed`, `people-check-f4-s1@kayedu.test`, `Branches-Check Math`). The **one registry** is `scripts/lib/gate-fixtures.ts` (`GATE_FIXTURE_STEMS`, plus `isolation-family-` for emails). The e2e suite creates no fixtures (it signs in as seeded accounts); the old "e2e fixture prefix" was in fact the `check:student-portal` gate's.
+
+- **Cleanup.** A gate deletes its fixtures at the start of a run and again in a `finally`. A gate that is **killed or crashes before the `finally`** leaves them behind; re-running that gate cleans up (it deletes first). Global catalog rows do not cascade with a centre, so a leftover one is visible to every centre.
+- **`npm run check:gate-fixtures`** (no database; in CI beside `check:public`) scans `scripts/*-check.ts` and **fails on a fixture stem that is not registered**. Adding a gate means adding its stem to the registry, or `seed:verify` would count its rows as seed data. (The gates still spell their own slug literals; this check, not a shared constant, is what keeps them in step.)
+- **`seed:verify` and fixtures.** Sections 1 (baseline), 3 (money), 4 (orphans) and 7 (counts) **leave gate fixtures out**; nothing is weakened for the seed world. Section 8 **"Gate fixtures left behind"** lists them: younger than 30 minutes is a **WARN** (a gate may still be running), 30 minutes or older is a **FAIL** (an interrupted gate left it). `npm run seed:verify -- --strict-clean` fails on *any* fixture, and `check:all` ends with exactly that. Sections 2, 5 and 6 and the SEC-2b invariants stay global: a leftover global catalog row can still fail section 6's name-uniqueness checks until its gate is re-run.
+- **Do not run `seed:verify` while a gate (or `check:all`) is running** — a gate's fixtures are legitimately present, and its catalog rows will trip section 6. Run it alone, after the run.
+
 ## 7. Reset staging
 
 Staging's own wipe ritual — the same fences as dev's, aimed at the staging project. It empties the `public` tables; `_prisma_migrations`, `auth.*` and `storage.*` stay.
