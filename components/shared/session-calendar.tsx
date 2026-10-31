@@ -44,6 +44,12 @@ export type CalendarEntry = {
   href?: string;
   /** Teacher only: present / late / absent on this session. */
   counts?: { present: number; late: number; absent: number };
+  /**
+   * Student only (U8): the row's own undo — "Leave class" on an enrolled
+   * session, "Cancel booking" on a booked one. Never set for a parent or a
+   * teacher; a row with `href` is a link and cannot carry one.
+   */
+  actions?: React.ReactNode;
 };
 
 /**
@@ -312,7 +318,7 @@ function DayRow({
           {countsLabel ? <p className="mt-1 text-xs text-text-muted">{countsLabel}</p> : null}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
         <Badge
           variant={BADGE[entry.tone]}
           className={cn(
@@ -324,6 +330,7 @@ function DayRow({
           {statusLabel}
         </Badge>
         {entry.href ? <span className="sr-only">{openLabel}</span> : null}
+        {!entry.href && entry.actions ? entry.actions : null}
       </div>
     </>
   );

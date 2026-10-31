@@ -661,6 +661,10 @@ All strings live under `Family.*` (plus `Toasts.family*`, `ParentPortal.*`, `Aut
 - **The day's list** sits under the grid on the same page (a card titled with the full date): time (tabular), the class's subject · grade or a one-time session's title, branch, room, and the badge. Teacher rows add "Present n · Late n · Absent n" and are links to the session (44px). Empty day → a compact `EmptyState`.
 - **Teacher Branch filter.** Under All branches, the teacher calendar has the Branch filter above it (§11.29).
 
+### 11.30 Confirm before joining, Leave class, cancel (U8)
+- **Join confirmation.** One narrow `DialogShell` (a bottom sheet below `sm`, 44px Confirm / Cancel), opened by Enrol, Request to join and Attend this session only. The title names the act; the description is the outcome; the body is `JoinSummaryList` — Class, Branch, Teacher, Price, then Weekly schedule and Runs (a class) or Session (one session) — and a muted note that nothing is charged now. No new tokens. After Confirm the dialog closes and the slot shows the existing badge (Enrolled / Pending / Booked / Requested) or the existing inline error.
+- **Leave class / Cancel request / Cancel booking.** The shared `ConfirmAction` (§14.6): an outline 44px trigger, a narrow dialog whose description states the consequence, the destructive confirm; the result is a toast (`StudentActions.*.done`) or an error toast. On the class page the trigger is full-width under the Enrolled / Pending badge; on schedule rows and the calendar's day list it sits beside the status badge (wrapping below it on a phone). A calendar row that is a link (teacher) never carries one, and the parent calendar passes none.
+
 ### 11.29 Routing, the hub and the teacher portal's All branches (U7)
 
 - **Straight in.** A person with one experience never sees the hub: a student (at any number of branches) lands on My schedule, a teacher (at any number) on the teacher dashboard in **All branches**, a parent on the parent portal, a platform admin on the console, one staff branch on its dashboard.

@@ -2,13 +2,14 @@ import { CalendarDays } from "lucide-react";
 import type { SessionBookingMode, SessionBookingStatus } from "@prisma/client";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { BookSessionButton } from "@/app/[locale]/(student)/student/discover/book-session-button";
+import { BookSessionButton, MyBookingSlot } from "@/app/[locale]/(student)/student/discover/book-session-button";
 import { seatBadge } from "@/components/explore/enrol-action";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { UpcomingSession } from "@/lib/db/session-bookings";
 import { formatDate, formatTimeRange } from "@/lib/format";
+import { sessionWhen, type JoinSummary } from "@/lib/join-summary";
 
 /**
  * A class page's "Upcoming sessions" (F6, docs/04 §10): the next sessions
@@ -23,12 +24,15 @@ export async function UpcomingSessions({
   mode,
   enrolled,
   myBookings,
+  summary,
 }: {
   centerId: string;
   sessions: UpcomingSession[];
   mode: SessionBookingMode;
   enrolled: boolean;
-  myBookings: Map<string, SessionBookingStatus>;
+  myBookings: Map<string, { id: string; status: SessionBookingStatus }>;
+  /** The class facts the booking confirmation states; each row adds its own `when`. */
+  summary: JoinSummary;
 }) {
   const locale = await getLocale();
   const t = await getTranslations("StudentDiscover.sessions");
@@ -51,10 +55,19 @@ export async function UpcomingSessions({
                 const mine = myBookings.get(session.id);
                 const badge = await seatBadge(session.seats);
                 let action = null;
-                if (mine === "CONFIRMED") action = <Badge variant="info">{t("booked")}</Badge>;
-                else if (mine === "PENDING") action = <Badge variant="warning">{t("requested")}</Badge>;
-                else if (!enrolled && mode !== "OFF" && session.seats !== "full") {
-                  action = <BookSessionButton centerId={centerId} sessionId={session.id} />;
+                // U8 — the open booking carries its own Cancel (until the session
+                // starts; these rows are only the not-yet-started ones).
+                if (mine && (mine.status === "CONFIRMED" || mine.status === "PENDING")) {
+                  action = <MyBookingSlot centerId={centerId} bookingId={mine.id} status={mine.status} />;
+                } else if (!enrolled && mode !== "OFF" && session.seats !== "full") {
+                  action = (
+                    <BookSessionButton
+                      centerId={centerId}
+                      sessionId={session.id}
+                      mode={mode}
+                      summary={{ ...summary, when: sessionWhen(locale, session) }}
+                    />
+                  );
                 }
                 return (
                   <li

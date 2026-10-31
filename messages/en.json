@@ -654,6 +654,7 @@
       "emptyPrint": "Not enrolled in any class yet.",
       "blocked": "blocked from this class",
       "consecutiveAbsentAlert": "{className}: absent {count} times in a row.",
+      "leftByStudent": "Left {className} on {date}, by the student.",
       "emptyHint": "Enrol them in a class from the class page and it will show here."
     },
     "blockedBy": {
@@ -2391,6 +2392,50 @@
       "subjectNotInGrade": "This subject isn’t taught in that grade. Pick a subject listed under the grade."
     },
     "emptyHint": "No branch on the platform is open to new teachers right now."
+  },
+  "StudentActions": {
+    "leave": {
+      "trigger": "Leave class",
+      "title": "Leave this class?",
+      "description": "You'll stop being expected at this class's sessions. Your attendance and payments stay on record. You can ask to join again later — seats and approval apply.",
+      "confirm": "Leave class",
+      "done": "You left the class.",
+      "errors": {
+        "forbidden": "You need to sign in to do this.",
+        "notFound": "You're not enrolled in this class any more."
+      }
+    },
+    "cancelRequest": {
+      "trigger": "Cancel request",
+      "title": "Cancel this request?",
+      "description": "Your request to join this class will be withdrawn. You can ask to join again later.",
+      "done": "Your request was cancelled."
+    },
+    "cancelBooking": {
+      "trigger": "Cancel booking",
+      "title": "Cancel this booking?",
+      "description": "Your place in this session will be released. You can book it again while it is still open.",
+      "done": "Your booking was cancelled."
+    },
+    "join": {
+      "enrolTitle": "Enrol in this class?",
+      "requestTitle": "Request to join this class?",
+      "bookTitle": "Attend this session only?",
+      "enrolOutcome": "You'll be enrolled straight away.",
+      "requestOutcome": "The branch will review your request.",
+      "bookInstantOutcome": "Your place is booked straight away.",
+      "bookApprovalOutcome": "The branch will review your request.",
+      "class": "Class",
+      "branch": "Branch",
+      "teacher": "Teacher",
+      "price": "Price",
+      "schedule": "Weekly schedule",
+      "period": "Runs",
+      "when": "Session",
+      "noCharge": "Nothing is charged now — you pay at the desk at each session.",
+      "confirm": "Confirm",
+      "cancel": "Cancel"
+    }
   },
   "StudentSchedule": {
     "title": "My schedule",

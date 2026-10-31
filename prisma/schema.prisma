@@ -1049,6 +1049,13 @@ model Enrollment {
   classGroup       ClassGroup       @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
   status           EnrollmentStatus @default(ACTIVE)
   enrolledAt       DateTime         @default(now())
+  // U8 — set only when the STUDENT ended this enrolment themselves ("Leave
+  // class"): the row is then REMOVED exactly as a staff removal leaves it, and
+  // this timestamp is what tells the two apart ("Left <class> on <date>, by the
+  // student"). Null for every other row, and cleared the moment the pair is
+  // reactivated (rejoin, or staff re-enrol), so it never outlives the REMOVED
+  // state it describes.
+  leftByStudentAt  DateTime?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 

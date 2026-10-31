@@ -14,7 +14,10 @@ import { prisma } from "@/lib/db/client";
 import { publicBranchBySlug, publicClassById } from "@/lib/db/public-catalog";
 import { ROUTES } from "@/lib/routes";
 
-type Params = { params: Promise<{ slug: string; classId: string }> };
+type Params = {
+  params: Promise<{ slug: string; classId: string }>;
+  searchParams: Promise<{ join?: string }>;
+};
 
 /** Once per request — the metadata and the page share it. */
 const load = cache(async (slug: string, classId: string) => {
@@ -40,8 +43,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * the existing `reserveOrEnroll` path. An unlisted branch, or an inactive,
  * ended or closed class, is a 404.
  */
-export default async function ExploreClassPage({ params }: Params) {
+export default async function ExploreClassPage({ params, searchParams }: Params) {
   const { slug, classId } = await params;
+  // U8 — a guest's Enrol intent came back through sign-in: reopen the confirmation.
+  const { join } = await searchParams;
   const found = await load(slug, classId);
   if (!found) notFound();
   const { branch, item } = found;
@@ -89,6 +94,9 @@ export default async function ExploreClassPage({ params }: Params) {
             requiresConfirmation={item.requiresConfirmation}
             seats={item.seats}
             returnPath={here}
+            item={item}
+            branchLabel={name}
+            openJoin={join === "1"}
           />
         }
       />

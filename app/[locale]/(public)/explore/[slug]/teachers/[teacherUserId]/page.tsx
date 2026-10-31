@@ -100,6 +100,8 @@ export default async function ExploreTeacherPage({ params }: Params) {
                       requiresConfirmation={item.requiresConfirmation}
                       seats={item.seats}
                       returnPath={href}
+                      item={item}
+                      branchLabel={name}
                     />
                   }
                 />

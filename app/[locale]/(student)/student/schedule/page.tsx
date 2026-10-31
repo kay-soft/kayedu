@@ -1,11 +1,14 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import { CalendarClock, History } from "lucide-react";
 
+import { CancelBookingButton } from "@/app/[locale]/(student)/student/reservations/cancel-booking-button";
+import { LeaveClassButton } from "@/app/[locale]/(student)/student/reservations/leave-class-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getStudentContexts, requireStudentUser } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
+import { isBookableNow } from "@/lib/db/session-seats";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import {
   studentBookedUpcoming,
@@ -31,6 +34,11 @@ type UpcomingRow = {
   centerId: string;
   centerName: string;
   sessionId: string;
+  /** U8 — an enrolled session's class: the student's "Leave class". */
+  classGroupId?: string | null;
+  /** U8 — a booked or requested session's booking, and whether it can still be cancelled. */
+  bookingId?: string;
+  canCancel?: boolean;
   date: Date;
   startTime: string;
   endTime: string;
@@ -85,6 +93,7 @@ async function loadCenterSchedule(
     centerId,
     centerName,
     sessionId: row.id,
+    classGroupId: row.classGroupId,
     date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
@@ -116,7 +125,7 @@ async function loadCenterSchedule(
  * same rows an enrolled session draws — read-only, one `centerId`-scoped
  * teacher-name lookup per branch.
  */
-async function loadBookedRows(booked: BookedUpcomingSession[], locale: string): Promise<UpcomingRow[]> {
+async function loadBookedRows(booked: BookedUpcomingSession[], locale: string, now: Date): Promise<UpcomingRow[]> {
   const centerIds = [...new Set(booked.map((entry) => entry.centerId))];
   const namesByCenter = new Map(
     await Promise.all(
@@ -133,10 +142,12 @@ async function loadBookedRows(booked: BookedUpcomingSession[], locale: string): 
       ),
     ),
   );
-  return booked.map(({ centerId, centerName, bookingStatus, session: row }) => ({
+  return booked.map(({ bookingId, centerId, centerName, bookingStatus, session: row }) => ({
     centerId,
     centerName,
     sessionId: row.id,
+    bookingId,
+    canCancel: isBookableNow(row, now),
     date: row.date,
     startTime: row.startTime,
     endTime: row.endTime,
@@ -190,7 +201,7 @@ export default async function StudentSchedulePage({
     ),
     // F6: single sessions booked or requested. Identity-scoped like My
     // requests, because a PENDING booking can sit at a branch with no profile yet.
-    studentBookedUpcoming(prisma, session.user.id, now).then((booked) => loadBookedRows(booked, locale)),
+    studentBookedUpcoming(prisma, session.user.id, now).then((booked) => loadBookedRows(booked, locale, now)),
   ]);
 
   // The date picker's "today" marker is the one combined value on this page.
@@ -267,13 +278,22 @@ export default async function StudentSchedulePage({
                       </p>
                     ) : null}
                   </div>
-                  <Badge variant={row.bookingStatus === "PENDING" ? "warning" : "info"}>
-                    {row.bookingStatus === "CONFIRMED"
-                      ? t("bookedBadge")
-                      : row.bookingStatus === "PENDING"
-                        ? t("requestedBadge")
-                        : t("upcomingBadge")}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <Badge variant={row.bookingStatus === "PENDING" ? "warning" : "info"}>
+                      {row.bookingStatus === "CONFIRMED"
+                        ? t("bookedBadge")
+                        : row.bookingStatus === "PENDING"
+                          ? t("requestedBadge")
+                          : t("upcomingBadge")}
+                    </Badge>
+                    {/* U8 — each item carries its undo: leave an enrolled class, cancel a booking. */}
+                    {row.bookingId && row.canCancel ? (
+                      <CancelBookingButton centerId={row.centerId} bookingId={row.bookingId} />
+                    ) : null}
+                    {!row.bookingId && row.classGroupId ? (
+                      <LeaveClassButton centerId={row.centerId} classGroupId={row.classGroupId} />
+                    ) : null}
+                  </div>
                 </div>
                 )}
               />

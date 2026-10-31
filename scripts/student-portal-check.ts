@@ -18,6 +18,7 @@ import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.
 import {
   cancelReservation,
   confirmReservation,
+  leaveClass,
   rejectReservation,
   reserveOrEnroll,
 } from "../lib/db/reservations.ts";
@@ -35,7 +36,8 @@ import {
 import { generateFamilyCode, hashFamilyCode } from "../lib/db/parents.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { dateKey, dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
-import { calendarGrid, parseCalendarDay, parseCalendarMonth } from "../lib/calendar.ts";
+import { calendarGrid, calendarMonthRange, parseCalendarDay, parseCalendarMonth } from "../lib/calendar.ts";
+import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import {
   bookedCalendarEntries,
   childBookedUpcoming,
@@ -44,6 +46,7 @@ import {
   studentBlockedRefsByCenter,
   studentBookedUpcoming,
   studentReservationStatusByClass,
+  studentUpcomingSessions,
 } from "../lib/db/student-portal.ts";
 import {
   listPublicBranches,
@@ -401,6 +404,160 @@ async function main() {
   await checkPublicCatalog();
   await checkSessionBookings(centerA, centerB, teacherA);
   await checkCalendar(centerA, centerB, teacherA);
+}
+
+/**
+ * U8 - "Leave class": a student ends only their own ACTIVE enrolment, at their
+ * own branch; the row is REMOVED and marked as the student's doing, audited
+ * with ids only; the schedule drops it; and rejoining goes through the normal
+ * join (instant, or a fresh request that staff confirm), with no cooling-off.
+ */
+async function checkLeaveClass(
+  centerA: { id: string },
+  centerB: { id: string },
+  teacherA: { id: string },
+): Promise<void> {
+  console.log("\nU8 - leave a class");
+
+  const instant = await makeClass(centerA.id, teacherA.id);
+  const approval = await makeClass(centerA.id, teacherA.id, { requiresConfirmation: true });
+  const leaver = await makeStudentUser("u8-leaver");
+  const mate = await makeStudentUser("u8-mate");
+  const outsider = await makeStudentUser("u8-outsider");
+  const removedByStaff = await makeStudentUser("u8-staff-removed");
+
+  const join = (classGroupId: string, studentUserId: string) =>
+    prisma.$transaction((tx) => reserveOrEnroll(tx, { centerId: centerA.id, classGroupId, studentUserId }));
+  const leave = (centerId: string, classGroupId: string, studentUserId: string) =>
+    prisma.$transaction((tx) => leaveClass(tx, { centerId, classGroupId, studentUserId }));
+  const enrollmentOf = (studentUserId: string, classGroupId: string) =>
+    prisma.enrollment.findFirstOrThrow({ where: { classGroupId, studentProfile: { userId: studentUserId } } });
+
+  await join(instant.id, leaver.id);
+  await join(instant.id, mate.id);
+  const session = await prisma.session.create({
+    data: scopedData(centerA.id, {
+      classGroupId: instant.id,
+      teacherId: teacherA.id,
+      date: dayMarker("2027-06-15"),
+      startTime: "16:00",
+      endTime: "17:00",
+      timezone: "Africa/Cairo",
+      priceSnapshot: 10_000,
+    }),
+  });
+  const leaverProfile = await prisma.studentProfile.findFirstOrThrow({ where: { userId: leaver.id, centerId: centerA.id } });
+  const mateProfile = await prisma.studentProfile.findFirstOrThrow({ where: { userId: mate.id, centerId: centerA.id } });
+  const today = dayMarker("2026-11-01");
+  const range = calendarMonthRange(parseCalendarMonth("2027-06", today));
+
+  const calendarBefore = await studentCalendarMonth(prisma, centerA.id, leaverProfile.id, range, today);
+  check(
+    "The calendar entry of an enrolled session names its class (the day list's Leave class)",
+    calendarBefore.some((row) => row.sessionId === session.id && row.status === "UPCOMING" && row.classGroupId === instant.id),
+    JSON.stringify(calendarBefore.map((row) => [row.status, row.classGroupId])),
+  );
+
+  // Only the student's own ACTIVE enrolment, at their own branch.
+  const byOutsider = await leave(centerA.id, instant.id, outsider.id);
+  check("A student with no enrolment in the class cannot end anyone's (notFound)", !byOutsider.ok && byOutsider.error === "notFound", JSON.stringify(byOutsider));
+  const wrongBranch = await leave(centerB.id, instant.id, leaver.id);
+  check("Another branch's centre id finds no enrolment to end (notFound)", !wrongBranch.ok && wrongBranch.error === "notFound", JSON.stringify(wrongBranch));
+  check(
+    "Both enrolments are untouched by the refusals",
+    (await enrollmentOf(leaver.id, instant.id)).status === "ACTIVE" && (await enrollmentOf(mate.id, instant.id)).status === "ACTIVE",
+  );
+
+  // Staff-ended and blocked rows are not the student's to end.
+  await join(instant.id, removedByStaff.id);
+  const staffRow = await enrollmentOf(removedByStaff.id, instant.id);
+  await prisma.enrollment.update({ where: { id: staffRow.id }, data: { status: "REMOVED" } });
+  const onRemoved = await leave(centerA.id, instant.id, removedByStaff.id);
+  await prisma.enrollment.update({ where: { id: staffRow.id }, data: { status: "BLOCKED" } });
+  const onBlocked = await leave(centerA.id, instant.id, removedByStaff.id);
+  const staffRowAfter = await enrollmentOf(removedByStaff.id, instant.id);
+  check(
+    "A removed or blocked enrolment cannot be 'left' (notFound) and is not marked as the student's doing",
+    !onRemoved.ok && !onBlocked.ok && staffRowAfter.status === "BLOCKED" && staffRowAfter.leftByStudentAt === null,
+  );
+
+  // Leaving.
+  const left = await leave(centerA.id, instant.id, leaver.id);
+  const leaverRow = await enrollmentOf(leaver.id, instant.id);
+  check(
+    "Leaving ends the student's own enrolment: REMOVED, marked as left by the student",
+    left.ok && leaverRow.status === "REMOVED" && leaverRow.leftByStudentAt !== null,
+    JSON.stringify(leaverRow),
+  );
+  check("...and leaves the classmate's enrolment alone", (await enrollmentOf(mate.id, instant.id)).status === "ACTIVE");
+  const again = await leave(centerA.id, instant.id, leaver.id);
+  check("Leaving twice is refused (notFound)", !again.ok && again.error === "notFound", JSON.stringify(again));
+
+  const audit = await prisma.auditLog.findMany({ where: { centerId: centerA.id, action: "enrollment.leave" } });
+  check(
+    "Exactly one enrollment.leave audit row, by the student, with ids and statuses only",
+    audit.length === 1 &&
+      audit[0].actorUserId === leaver.id &&
+      audit[0].entityType === "Enrollment" &&
+      audit[0].entityId === leaverRow.id &&
+      forbiddenAuditKey(audit[0].before) === null &&
+      forbiddenAuditKey(audit[0].after) === null,
+    JSON.stringify(audit),
+  );
+
+  const enrolledIds = await studentActiveEnrollmentClassIds(prisma, leaver.id);
+  const leaverSchedule = await studentUpcomingSessions(prisma, centerA.id, leaverProfile.id, today);
+  const mateSchedule = await studentUpcomingSessions(prisma, centerA.id, mateProfile.id, today);
+  const calendarAfter = await studentCalendarMonth(prisma, centerA.id, leaverProfile.id, range, today);
+  check(
+    "The class leaves the student's enrolled set, schedule and calendar; the classmate's stay",
+    !enrolledIds.has(instant.id) &&
+      !leaverSchedule.some((row) => row.id === session.id) &&
+      !calendarAfter.some((row) => row.sessionId === session.id) &&
+      mateSchedule.some((row) => row.id === session.id),
+  );
+
+  // Rejoin: the normal join, no cooling-off.
+  const rejoined = await join(instant.id, leaver.id);
+  const rejoinedRow = await enrollmentOf(leaver.id, instant.id);
+  check(
+    "Rejoining an instant class works at once: ACTIVE again, no longer marked as left, enrolled from now",
+    rejoined.ok &&
+      rejoined.kind === "enrolled" &&
+      rejoinedRow.status === "ACTIVE" &&
+      rejoinedRow.leftByStudentAt === null &&
+      rejoinedRow.enrolledAt.getTime() >= (leaverRow.leftByStudentAt?.getTime() ?? Infinity),
+    JSON.stringify(rejoined),
+  );
+
+  // A class that needs approval: the old CONFIRMED request is finished, so a
+  // fresh request is allowed and is confirmed like any other.
+  const asked = await join(approval.id, leaver.id);
+  const confirmedFirst = await prisma.$transaction((tx) =>
+    confirmReservation(tx, centerA.id, asked.ok && asked.kind === "pending" ? asked.reservationId : "", teacherA.id),
+  );
+  const leftApproval = await leave(centerA.id, approval.id, leaver.id);
+  const askedAgain = await join(approval.id, leaver.id);
+  check(
+    "After leaving an approval class a new request is allowed (not alreadyEnrolled) and reuses the request row",
+    confirmedFirst.ok &&
+      leftApproval.ok &&
+      askedAgain.ok &&
+      askedAgain.kind === "pending" &&
+      asked.ok &&
+      asked.kind === "pending" &&
+      askedAgain.reservationId === asked.reservationId,
+    JSON.stringify(askedAgain),
+  );
+  const confirmedAgain = await prisma.$transaction((tx) =>
+    confirmReservation(tx, centerA.id, askedAgain.ok && askedAgain.kind === "pending" ? askedAgain.reservationId : "", teacherA.id),
+  );
+  const approvalRow = await enrollmentOf(leaver.id, approval.id);
+  check(
+    "...and confirming it reactivates the same enrolment, no longer marked as left",
+    confirmedAgain.ok && approvalRow.status === "ACTIVE" && approvalRow.leftByStudentAt === null,
+    JSON.stringify(confirmedAgain),
+  );
 }
 
 /**
@@ -813,6 +970,7 @@ async function checkAccountSeeding(
       relations.length === 0 && reads.every((count) => count === 0),
     );
   }
+  await checkLeaveClass(centerA, centerB, teacherA);
   await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });
 }
 

@@ -114,6 +114,8 @@ export default async function ExploreBranchPage({
                             requiresConfirmation={item.requiresConfirmation}
                             seats={item.seats}
                             returnPath={href}
+                            item={item}
+                            branchLabel={name}
                           />
                         }
                       />

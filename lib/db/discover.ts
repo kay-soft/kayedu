@@ -34,6 +34,9 @@ export function discoverClassSelect(centerId: string) {
     acceptsNewStudents: true,
     requiresConfirmation: true,
     teacherId: true,
+    // U8 — the join confirmation states the class period.
+    startDate: true,
+    endDate: true,
     // Global catalog ids (M13) — a single subjectId/gradeId now means the
     // same thing at every centre, so filtering can be a real `where` instead
     // of the pre-M13 in-memory name match (see the page's filter logic).
@@ -145,8 +148,6 @@ export function discoverClassById(
   classGroupId: string,
 ): Promise<
   | (DiscoverClassRow & {
-      startDate: Date;
-      endDate: Date;
       sessionBookingMode: SessionBookingMode;
       maxBookingSeats: number | null;
     })
@@ -157,8 +158,6 @@ export function discoverClassById(
     // F6 — the page's "Upcoming sessions" needs the booking settings too.
     select: {
       ...discoverClassSelect(centerId),
-      startDate: true,
-      endDate: true,
       sessionBookingMode: true,
       maxBookingSeats: true,
     },

@@ -1,5 +1,7 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { CancelBookingButton } from "@/app/[locale]/(student)/student/reservations/cancel-booking-button";
+import { LeaveClassButton } from "@/app/[locale]/(student)/student/reservations/leave-class-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionCalendar, type CalendarEntry } from "@/components/shared/session-calendar";
 import { studentCalendarEntry } from "@/components/shared/student-calendar-entry";
@@ -15,6 +17,7 @@ import {
   bookedCalendarEntries,
   studentBookedUpcoming,
   studentCalendarMonth,
+  type StudentCalendarEntry,
 } from "@/lib/db/student-portal";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
@@ -67,12 +70,24 @@ export default async function StudentCalendarPage({
 
   const enrolledIds = new Set(perBranch.flatMap((entry) => entry.entries.map((row) => row.sessionId)));
   const branchName = new Map(booked.map((entry) => [entry.centerId, entry.centerName]));
+  // U8 — the student's own undo on a day-list row: leave an enrolled class,
+  // cancel a booking that has not started. The parent's calendar shares the
+  // entry but never this step.
+  const withActions = (raw: StudentCalendarEntry, entry: CalendarEntry): CalendarEntry => {
+    if (raw.status === "UPCOMING" && raw.classGroupId) {
+      return { ...entry, actions: <LeaveClassButton centerId={raw.centerId} classGroupId={raw.classGroupId} /> };
+    }
+    if ((raw.status === "BOOKED" || raw.status === "REQUESTED") && raw.bookingId && raw.canCancel) {
+      return { ...entry, actions: <CancelBookingButton centerId={raw.centerId} bookingId={raw.bookingId} /> };
+    }
+    return entry;
+  };
   const entries: CalendarEntry[] = [
     ...perBranch.flatMap(({ branch, entries: rows }) =>
-      rows.map((row) => studentCalendarEntry(row, branch, locale, tCommon("none"))),
+      rows.map((row) => withActions(row, studentCalendarEntry(row, branch, locale, tCommon("none")))),
     ),
-    ...bookedCalendarEntries(booked, range, enrolledIds).map((row) =>
-      studentCalendarEntry(row, branchName.get(row.centerId) ?? null, locale, tCommon("none")),
+    ...bookedCalendarEntries(booked, range, enrolledIds, now).map((row) =>
+      withActions(row, studentCalendarEntry(row, branchName.get(row.centerId) ?? null, locale, tCommon("none"))),
     ),
   ];
 

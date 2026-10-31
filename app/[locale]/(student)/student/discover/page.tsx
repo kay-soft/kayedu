@@ -29,6 +29,7 @@ import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { mapWithConcurrency } from "@/lib/concurrency";
+import { buildJoinSummary } from "@/lib/join-summary";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -49,6 +50,9 @@ type CardViewModel = {
   price: number;
   requiresConfirmation: boolean;
   schedules: DiscoverClassRow["schedules"];
+  /** U8 — the class period, for the join confirmation. */
+  startDate: Date;
+  endDate: Date;
   status: DiscoverCardStatus;
   /** U5 — a platform admin's pause covers the branch's today (enrolment stays open). */
   pausedUntil: Date | null;
@@ -158,6 +162,8 @@ export default async function StudentDiscoverPage({
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
         schedules: row.schedules,
+        startDate: row.startDate,
+        endDate: row.endDate,
         status,
       });
     }
@@ -216,30 +222,47 @@ export default async function StudentDiscoverPage({
           <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
         ) : (
           <ClassCardGrid>
-            {pageEntries.map((card) => (
-              <ClassCard
-                key={`${card.centerId}:${card.classGroupId}`}
-                href={ROUTES.studentDiscoverClass(card.centerId, card.classGroupId)}
-                subjectName={card.subjectName}
-                branchName={card.centerName}
-                pausedUntil={card.pausedUntil}
-                teacherName={card.teacherName}
-                teacherRating={card.teacherRating}
-                gradeName={card.gradeName}
-                schedules={card.schedules}
-                price={card.price}
-                badge={{ variant: DISCOVER_STATUS_BADGE[card.status], label: t(`status.${card.status}`) }}
-                action={
-                  <DiscoverAction
-                    status={card.status}
-                    centerId={card.centerId}
-                    classGroupId={card.classGroupId}
-                    requiresConfirmation={card.requiresConfirmation}
-                    labels={{ enrolled: t("card.enrolled"), pending: t("card.pending"), full: t("card.full") }}
+            {await Promise.all(
+              pageEntries.map(async (card) => {
+                // U8 — what Enrol / Request to join confirms.
+                const summary = await buildJoinSummary({
+                  locale,
+                  subjectName: card.subjectName,
+                  gradeName: card.gradeName,
+                  branch: card.centerName,
+                  teacher: card.teacherName,
+                  price: card.price,
+                  schedules: card.schedules,
+                  startDate: card.startDate,
+                  endDate: card.endDate,
+                });
+                return (
+                  <ClassCard
+                    key={`${card.centerId}:${card.classGroupId}`}
+                    href={ROUTES.studentDiscoverClass(card.centerId, card.classGroupId)}
+                    subjectName={card.subjectName}
+                    branchName={card.centerName}
+                    pausedUntil={card.pausedUntil}
+                    teacherName={card.teacherName}
+                    teacherRating={card.teacherRating}
+                    gradeName={card.gradeName}
+                    schedules={card.schedules}
+                    price={card.price}
+                    badge={{ variant: DISCOVER_STATUS_BADGE[card.status], label: t(`status.${card.status}`) }}
+                    action={
+                      <DiscoverAction
+                        status={card.status}
+                        centerId={card.centerId}
+                        classGroupId={card.classGroupId}
+                        requiresConfirmation={card.requiresConfirmation}
+                        labels={{ enrolled: t("card.enrolled"), pending: t("card.pending"), full: t("card.full") }}
+                        summary={summary}
+                      />
+                    }
                   />
-                }
-              />
-            ))}
+                );
+              }),
+            )}
           </ClassCardGrid>
         )}
 

@@ -12,6 +12,7 @@ import type {
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/payments.ts).
 import { seedFromAccount } from "./account-study.ts";
+import { writeAuditRow } from "./audit-row.ts";
 import { claimStudentCode } from "./students.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import { ACCESSIBLE_CENTER } from "./platform.ts";
@@ -165,11 +166,20 @@ export async function claimClassSeat(
 
   // @@unique([studentProfileId, classGroupId]): a removed enrolment still
   // owns this pair's row — reactivate it rather than insert a second one.
+  // U8: a reactivated row starts afresh — `enrolledAt` is the moment they came
+  // back (so a session that closed late, from the gap, never marks them Absent)
+  // and `leftByStudentAt` is cleared (it describes the REMOVED state only).
   const existing = await tx.enrollment.findFirst({
     where: scopedWhere(centerId, { classGroupId, studentProfileId }),
   });
   const enrollment = existing
-    ? await tx.enrollment.update({ where: { id: existing.id }, data: { status: ACTIVE_ENROLLMENT } })
+    ? await tx.enrollment.update({
+        where: { id: existing.id },
+        data:
+          existing.status === ACTIVE_ENROLLMENT
+            ? { status: ACTIVE_ENROLLMENT }
+            : { status: ACTIVE_ENROLLMENT, enrolledAt: new Date(), leftByStudentAt: null },
+      })
     : await tx.enrollment.create({
         data: scopedData(centerId, { classGroupId, studentProfileId, status: ACTIVE_ENROLLMENT }),
       });
@@ -293,9 +303,9 @@ export async function reserveOrEnroll(
   if (existingReservation?.status === "PENDING") {
     return { ok: false, error: "alreadyRequested" };
   }
-  if (existingReservation?.status === "CONFIRMED") {
-    return { ok: false, error: "alreadyEnrolled" };
-  }
+  // A CONFIRMED reservation whose enrolment is no longer live (the student
+  // left, U8, or staff removed them) is just a finished request: the row is
+  // reused below and goes back to PENDING. A live enrolment was refused above.
   // A rejected student cannot re-request the same class for 7 days (M15,
   // spec §5.1 "Approvals & enrolment") — the reused row's own `rejectedAt` is
   // the whole mechanism (docs/01-data-model.md "Workflow layer"). Cancelling
@@ -439,6 +449,63 @@ export async function confirmReservation(
   });
 
   return { ok: true, reservation: updated, enrollment };
+}
+
+export type LeaveClassResult =
+  | { ok: true; enrollment: Enrollment }
+  | { ok: false; error: "notFound" };
+
+/**
+ * U8 — a student leaving a class they are actively enrolled in. Ends the
+ * enrolment exactly as a staff removal does (`REMOVED`), plus
+ * `leftByStudentAt` so staff can read it as the student's own choice.
+ *
+ * Pinned to the caller's identity **and** the branch: the enrolment is found
+ * by (this centre, this class, `studentProfile.userId` = the caller, ACTIVE),
+ * so another student's enrolment, another branch's, or one that is not live is
+ * "not found" — nothing in the request names an enrolment to end. Conditional
+ * on still ACTIVE, so two taps end it once. No money, no attendance row, no
+ * session is touched: a session already recorded keeps its rows, and
+ * `materializeAbsences` only counts ACTIVE enrolments, so no later close
+ * marks them Absent. Audited `enrollment.leave` — ids only (D-20) — in the
+ * caller's transaction.
+ */
+export async function leaveClass(
+  tx: Prisma.TransactionClient,
+  params: { centerId: string; classGroupId: string; studentUserId: string; now?: Date },
+): Promise<LeaveClassResult> {
+  const { centerId, classGroupId, studentUserId } = params;
+  const enrollment = await tx.enrollment.findFirst({
+    where: scopedWhere(centerId, {
+      classGroupId,
+      status: ACTIVE_ENROLLMENT,
+      studentProfile: { userId: studentUserId },
+    }),
+  });
+  if (!enrollment) return { ok: false, error: "notFound" };
+
+  const removed: EnrollmentStatus = "REMOVED";
+  const updated = await tx.enrollment.updateMany({
+    where: scopedWhere(centerId, { id: enrollment.id, status: ACTIVE_ENROLLMENT }),
+    data: { status: removed, leftByStudentAt: params.now ?? new Date() },
+  });
+  if (updated.count === 0) return { ok: false, error: "notFound" };
+
+  await writeAuditRow(tx, {
+    centerId,
+    actorUserId: studentUserId,
+    action: "enrollment.leave",
+    entityType: "Enrollment",
+    entityId: enrollment.id,
+    before: { status: ACTIVE_ENROLLMENT },
+    after: {
+      status: removed,
+      leftBy: "STUDENT",
+      classGroupId,
+      studentProfileId: enrollment.studentProfileId,
+    },
+  });
+  return { ok: true, enrollment: await tx.enrollment.findUniqueOrThrow({ where: { id: enrollment.id } }) };
 }
 
 export type RejectOrCancelResult =

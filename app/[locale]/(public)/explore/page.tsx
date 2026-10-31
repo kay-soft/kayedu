@@ -217,6 +217,8 @@ async function ClassesView({
                         requiresConfirmation={item.requiresConfirmation}
                         seats={item.seats}
                         returnPath={href}
+                        item={item}
+                        branchLabel={branchName(locale, item.branch)}
                       />
                     }
                   />

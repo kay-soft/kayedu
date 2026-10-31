@@ -571,13 +571,15 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       reactivate: (id: string) =>
         prisma.enrollment.updateMany({
           where: scopedWhere(centerId, { id }),
-          data: { status: ACTIVE_ENROLLMENT, enrolledAt: new Date() },
+          data: { status: ACTIVE_ENROLLMENT, enrolledAt: new Date(), leftByStudentAt: null },
         }),
 
+      // `leftByStudentAt` (U8) describes a student-ended REMOVED row only, so
+      // any other status clears it; a staff removal of a live row leaves it null.
       setStatus: (id: string, status: Prisma.EnrollmentUncheckedUpdateManyInput["status"]) =>
         prisma.enrollment.updateMany({
           where: scopedWhere(centerId, { id }),
-          data: { status },
+          data: status === "REMOVED" ? { status } : { status, leftByStudentAt: null },
         }),
     },
 

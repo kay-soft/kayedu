@@ -20,6 +20,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
+import { leaveClass } from "../lib/db/reservations.ts";
 import {
   changeAttendanceStatus,
   consecutiveAbsenceCount,
@@ -1323,6 +1324,7 @@ async function main() {
   }
 
   await checkRescheduleFreesSlot(centerA.id, s6);
+  await checkLeftStudentNotAbsent(centerA.id, teacher.id, staff.id);
 }
 
 /**
@@ -1533,6 +1535,85 @@ async function checkRescheduleFreesSlot(centerId: string, studentProfileId: stri
     "A moved original displays RESCHEDULED; its replacement does not",
     deriveSessionDisplayStatus(original, now, TZ) === "RESCHEDULED" &&
       deriveSessionDisplayStatus(replacement, now, TZ) === "SCHEDULED",
+  );
+}
+
+/**
+ * U8 — a student who left a class is not expected at its sessions any more:
+ * the next close marks no Absent for them (only ACTIVE enrolments are
+ * materialized), while a roster row already written — a check-in at a session
+ * that was live when they left — is left exactly as it was. Staying students
+ * are marked Absent as ever.
+ */
+async function checkLeftStudentNotAbsent(centerId: string, teacherId: string, staffId: string) {
+  console.log("\nU8 — a student who left is not marked Absent");
+
+  const klass = await prisma.classGroup.create({
+    data: scopedData(centerId, {
+      startDate: new Date("2026-01-01"), endDate: new Date("2027-12-31"),
+      teacherId,
+      price: PRICE,
+      centerShareType: "FIXED",
+      centerShareValue: FIXED_CUT,
+      lateThresholdMinutes: CLASS_THRESHOLD,
+    }),
+  });
+  const people: { id: string }[] = [];
+  for (const tag of ["leaver", "stayer"]) {
+    const user = await prisma.user.create({
+      data: { firstName: tag, lastName: "U8", email: `${EMAIL_PREFIX}u8-${tag}@kayedu.test`, locale: "en" },
+    });
+    people.push(
+      await prisma.studentProfile.create({
+        data: scopedData(centerId, { userId: user.id, studentCode: `U8${tag}`, firstName: tag, lastName: "U8" }),
+        select: { id: true },
+      }),
+    );
+  }
+  const [leaver, stayer] = people;
+  const leaverUser = await prisma.studentProfile.findUniqueOrThrow({ where: { id: leaver.id }, select: { userId: true } });
+  const enrollments = await Promise.all(
+    [leaver, stayer].map((p) =>
+      prisma.enrollment.create({ data: scopedData(centerId, { studentProfileId: p.id, classGroupId: klass.id, status: "ACTIVE" }) }),
+    ),
+  );
+  const live = await prisma.session.create({
+    data: scopedData(centerId, { classGroupId: klass.id, teacherId, date: day(21), startTime: "16:00", endTime: "18:00", priceSnapshot: PRICE }),
+  });
+  const later = await prisma.session.create({
+    data: scopedData(centerId, { classGroupId: klass.id, teacherId, date: day(22), startTime: "16:00", endTime: "18:00", priceSnapshot: PRICE }),
+  });
+
+  // The leaver checks in to the session that is live, then leaves.
+  await createAttendance(
+    prisma,
+    { centerId, sessionId: live.id, studentProfileId: leaver.id, enrollmentId: enrollments[0].id, isDropIn: false, recordedBy: staffId },
+    { now: cairo(21, 16, 5) },
+  );
+  const left = await prisma.$transaction((tx) =>
+    leaveClass(tx, { centerId, classGroupId: klass.id, studentUserId: leaverUser.userId }),
+  );
+  check("The student leaves their ACTIVE enrolment (REMOVED, marked as the student's own doing)", left.ok && left.enrollment.status === "REMOVED" && left.enrollment.leftByStudentAt !== null, JSON.stringify(left));
+
+  const afterBoth = cairo(23, 0, 5);
+  await closeSessionIfDayOver(prisma, centerId, live.id, afterBoth);
+  await closeSessionIfDayOver(prisma, centerId, later.id, afterBoth);
+  const liveRows = await prisma.sessionAttendee.findMany({ where: { sessionId: live.id } });
+  const laterRows = await prisma.sessionAttendee.findMany({ where: { sessionId: later.id } });
+  check(
+    "A session that was live when they left keeps their check-in exactly as it was",
+    liveRows.find((row) => row.studentProfileId === leaver.id)?.attendanceStatus === "PRESENT",
+    JSON.stringify(liveRows.map((row) => [row.studentProfileId === leaver.id ? "leaver" : "stayer", row.attendanceStatus])),
+  );
+  check(
+    "No Absent is written for the student who left at a later session's close",
+    !laterRows.some((row) => row.studentProfileId === leaver.id),
+    JSON.stringify(laterRows.map((row) => row.attendanceStatus)),
+  );
+  check(
+    "A student who stayed is still marked Absent at that close",
+    laterRows.some((row) => row.studentProfileId === stayer.id && row.attendanceStatus === "ABSENT") && laterRows.length === 1,
+    JSON.stringify(laterRows.map((row) => row.attendanceStatus)),
   );
 }
 

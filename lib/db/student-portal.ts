@@ -1,4 +1,11 @@
-import type { EnrollmentStatus, Prisma, PrismaClient, SessionBookingStatus, SessionStatus } from "@prisma/client";
+import type {
+  EnrollmentStatus,
+  Prisma,
+  PrismaClient,
+  ReservationStatus,
+  SessionBookingStatus,
+  SessionStatus,
+} from "@prisma/client";
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/discover.ts).
@@ -14,6 +21,7 @@ import type { SessionLabelSource } from "../session-label.ts";
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
 const ACTIVE_ENROLLMENT: EnrollmentStatus = "ACTIVE";
+const PENDING_RESERVATION: ReservationStatus = "PENDING";
 
 /**
  * Cross-center read helpers for the student's own data (M8, mirroring
@@ -61,6 +69,20 @@ export async function studentReservationStatusByClass(
     select: { classGroupId: true, status: true },
   });
   return new Map(rows.map((row) => [row.classGroupId, row.status]));
+}
+
+/** This student's own PENDING request for one class at one centre, or null (U8: cancel on the class page). */
+export async function studentPendingReservationId(
+  db: Db,
+  centerId: string,
+  studentUserId: string,
+  classGroupId: string,
+): Promise<string | null> {
+  const row = await db.reservation.findFirst({
+    where: scopedWhere(centerId, { classGroupId, studentId: studentUserId, status: PENDING_RESERVATION }),
+    select: { id: true },
+  });
+  return row?.id ?? null;
 }
 
 /** Every class this student is actively enrolled in, across every center. */
@@ -437,10 +459,16 @@ export type StudentCalendarEntry = {
   /** The session as `sessionLabelParts` reads it. */
   session: SessionLabelSource;
   roomName: string | null;
+  /** U8 — the class an enrolled session belongs to (the student's "Leave class"). */
+  classGroupId: string | null;
+  /** U8 — a booked or requested session's booking, and whether it can still be cancelled. */
+  bookingId?: string;
+  canCancel?: boolean;
 };
 
 type CalendarSessionRow = SessionLabelSource & {
   id: string;
+  classGroupId: string | null;
   date: Date;
   startTime: string;
   endTime: string;
@@ -485,6 +513,7 @@ export async function studentCalendarMonth(
     status,
     session,
     roomName: session.room?.name ?? session.classGroup?.room?.name ?? null,
+    classGroupId: session.classGroupId,
   });
 
   for (const session of enrolled) {
@@ -505,6 +534,7 @@ export function bookedCalendarEntries(
   booked: BookedUpcomingSession[],
   range: { start: Date; end: Date },
   enrolledSessionIds: Set<string>,
+  now: Date = new Date(),
 ): StudentCalendarEntry[] {
   return booked
     .filter(
@@ -522,5 +552,9 @@ export function bookedCalendarEntries(
       status: entry.bookingStatus === "CONFIRMED" ? "BOOKED" : "REQUESTED",
       session: entry.session,
       roomName: entry.session.room?.name ?? entry.session.classGroup?.room?.name ?? null,
+      classGroupId: entry.session.classGroupId,
+      bookingId: entry.bookingId,
+      // Until the session starts — the same rule `cancelBookingByStudent` re-checks.
+      canCancel: isBookableNow(entry.session, now),
     }));
 }

@@ -30,6 +30,16 @@ export const cancelReservationSchema = z.object({
   reservationId: recordId,
 });
 
+/**
+ * U8 — "Leave class". Names the class, never an enrolment: the action finds
+ * the caller's own ACTIVE enrolment in it, so there is no id to guess.
+ */
+export const leaveClassSchema = z.object({
+  locale: localeSchema,
+  centerId: recordId,
+  classGroupId: recordId,
+});
+
 /** F6 — "Attend this session only": one session, at one branch. */
 export const bookSessionSchema = z.object({
   locale: localeSchema,
@@ -62,7 +72,7 @@ export type StudentActionState = {
   /** Formatted date for the `coolingOff` (M15) and `sessionFull` (F6) error messages. */
   errorDate?: string;
   /** `booked` / `bookingPending` — F6's two booking outcomes. */
-  status?: "enrolled" | "pending" | "cancelled" | "profileCompleted" | "booked" | "bookingPending";
+  status?: "enrolled" | "pending" | "cancelled" | "profileCompleted" | "booked" | "bookingPending" | "left";
   fieldErrors?: Record<string, string>;
 };
 
