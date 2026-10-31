@@ -208,6 +208,9 @@ Blue KPI border; hand-labelled filter grid (in `session-filters.tsx`). **R10a:**
 ### `app/[locale]/(teacher)/teacher/calendar/page.tsx` — **U7 (new)**
 The teacher's month calendar on the shared `SessionCalendar` (docs/04 §11.28): Held green, Upcoming blue, Cancelled grey, a legend, and the tapped day's sessions below with a text badge, branch (under All branches), room, present/late/absent counts and a link to each session. A Branch filter under All branches. Dots only at 375px, 44px day targets.
 
+### `app/[locale]/(teacher)/teacher/profile/page.tsx` — **U9 (new)**
+The teacher's own picture and their classes' covers. A `PageSection` of one card per branch in view (the teacher's `PersonAvatar` with their photo at that branch, the shared `ImageUploadForm`, and — when they teach at more than one branch — a "Use this photo at all my branches" checkbox), then a `PageSection` of the shared `ClassCard`s with the cover controls in the card's action slot, so the teacher sees exactly what a student will. Flag off: each control is replaced by the "Coming soon" note. One column at 375px, two from `lg`; 44px targets.
+
 ### `app/[locale]/(teacher)/teacher/students/page.tsx`
 Consistent. No change.
 

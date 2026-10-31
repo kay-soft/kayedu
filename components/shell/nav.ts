@@ -29,7 +29,8 @@ export type ShellIconName =
   | "catalog"
   | "refunds"
   | "settlements"
-  | "audit";
+  | "audit"
+  | "profile";
 
 export type ShellNavItem = {
   href: string;
@@ -106,6 +107,8 @@ export const TEACHER_NAV: NavDef[] = [
   // docs/03-build-order.md M7 note. R10a removed its "Soon" nav placeholder:
   // the nav lists only what a role can open. Add the item back with the screen.
   { href: ROUTES.teacherSettlements, labelKey: "settlements", icon: "settlements" },
+  // U9: the teacher's own photo per branch, and their classes' covers. Owning the row is the authority.
+  { href: ROUTES.teacherProfile, labelKey: "profile", icon: "profile" },
 ];
 
 const STUDENT_NAV: NavDef[] = [

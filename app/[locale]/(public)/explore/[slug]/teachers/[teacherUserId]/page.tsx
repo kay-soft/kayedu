@@ -6,14 +6,14 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { ClassCard, ClassCardGrid } from "@/components/explore/class-card";
 import { EnrolAction, seatBadge } from "@/components/explore/enrol-action";
 import { PageHeader } from "@/components/shared/page-header";
+import { PersonAvatar } from "@/components/shared/person-avatar";
 import { Badge } from "@/components/ui/badge";
 import { getCurrentUser } from "@/lib/auth/session";
 import { branchName } from "@/lib/branch-name";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
-import { publicBranchBySlug, publicTeacherAt } from "@/lib/db/public-catalog";
+import { publicBranchBySlug, publicTeacherAt, publicTeacherPhotoUrl } from "@/lib/db/public-catalog";
 import { formatRating } from "@/lib/format";
-import { nameInitial } from "@/lib/initials";
 import { ROUTES } from "@/lib/routes";
 
 type Params = { params: Promise<{ slug: string; teacherUserId: string }> };
@@ -23,7 +23,8 @@ const load = cache(async (slug: string, teacherUserId: string) => {
   const branch = await publicBranchBySlug(prisma, decodeURIComponent(slug));
   if (!branch) return null;
   const teacher = await publicTeacherAt(prisma, branch, decodeURIComponent(teacherUserId), new Date());
-  return teacher ? { branch, teacher } : null;
+  if (!teacher) return null;
+  return { branch, teacher, photoUrl: await publicTeacherPhotoUrl(prisma, branch, teacher.teacherUserId) };
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
@@ -43,7 +44,7 @@ export default async function ExploreTeacherPage({ params }: Params) {
   const { slug, teacherUserId } = await params;
   const found = await load(slug, teacherUserId);
   if (!found) notFound();
-  const { branch, teacher } = found;
+  const { branch, teacher, photoUrl } = found;
 
   const locale = await getLocale();
   const t = await getTranslations("Explore");
@@ -56,14 +57,7 @@ export default async function ExploreTeacherPage({ params }: Params) {
         title={teacher.name}
         description={t("teacher.subtitle", { branch: name })}
         back={{ href: ROUTES.exploreBranch(branch.slug), label: t("backToBranch", { branch: name }) }}
-        leading={
-          <span
-            aria-hidden
-            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-brand text-base font-bold text-brand-foreground"
-          >
-            {nameInitial(teacher.name)}
-          </span>
-        }
+        leading={<PersonAvatar name={teacher.name} photoUrl={photoUrl} size="md" tone="brand" />}
         meta={
           teacher.rating !== null ? (
             <Badge variant="neutral">{t("card.rating", { value: formatRating(teacher.rating, locale) })}</Badge>
@@ -87,6 +81,7 @@ export default async function ExploreTeacherPage({ params }: Params) {
                   branchName={name}
                   pausedUntil={branch.pausedUntil}
                   teacherName={item.teacherName}
+                  imageUrl={item.imageUrl}
                   teacherRating={item.teacherRating}
                   gradeName={catalogLabelWithSelection(locale, item.grade)}
                   schedules={item.schedules}

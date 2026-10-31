@@ -143,7 +143,8 @@
     "platform": "Platform",
     "catalog": "Catalog",
     "settings": "Settings",
-    "calendar": "Calendar"
+    "calendar": "Calendar",
+    "profile": "Profile"
   },
   "Roles": {
     "OWNER": "Owner",
@@ -533,6 +534,10 @@
     "toast": {
       "added": "Teacher added.",
       "addedAtBranch": "Teacher added at {branch}."
+    },
+    "photo": {
+      "title": "Photo",
+      "description": "Shown on this teacher's page, on class cards and on the public pages. The teacher can also set it from their portal."
     }
   },
   "Students": {
@@ -962,7 +967,15 @@
       "classFailed": "The class could not be created: {reason}",
       "checkFields": "check the highlighted fields."
     },
-    "deactivateConfirmTitle": "Deactivate {name}?"
+    "deactivateConfirmTitle": "Deactivate {name}?",
+    "cover": {
+      "title": "Cover image",
+      "description": "Shown on the class card and the class page, where students find the class.",
+      "none": "No picture yet",
+      "showingCover": "The card shows this cover.",
+      "showingTeacher": "No cover — the card shows the teacher's photo at this branch.",
+      "showingGenerated": "No cover and no teacher photo — the card keeps its usual look."
+    }
   },
   "RoomSets": {
     "room": "Room",
@@ -3228,10 +3241,6 @@
       "emailChangeDisabled": "Changing email needs email confirmation — coming soon.",
       "rateLimited": "Too many attempts — wait a few minutes, then try again.",
       "failed": "Something went wrong. Try again.",
-      "photoMissing": "Choose a photo first.",
-      "photoType": "Photos must be PNG, JPEG or WebP.",
-      "photoTooLarge": "That photo is larger than 1 MB.",
-      "mediaNotConnected": "Photo storage isn't connected yet, so nothing was saved. It will work once media storage is switched on.",
       "invalidNumber": "Enter a whole number in the allowed range.",
       "forbidden": "This setting is only for teachers."
     },
@@ -3271,20 +3280,6 @@
       "save": "Save",
       "saving": "Saving…",
       "saved": "Your teacher portal history was saved."
-    },
-    "photo": {
-      "title": "Profile photo",
-      "label": "Photo",
-      "hint": "PNG, JPEG or WebP, up to 1 MB. Only you can set it.",
-      "upload": "Upload photo",
-      "remove": "Remove photo",
-      "visibility": "Shown here on your account. Other screens keep showing your initials until profile photos are switched on.",
-      "saved": "Your photo is saved.",
-      "removed": "Your photo is removed.",
-      "removeConfirm": {
-        "title": "Remove your photo?",
-        "body": "Your initials will show instead."
-      }
     }
   },
   "AdminOrganizations": {
@@ -3685,5 +3680,56 @@
       "cancelled": "Cancelled",
       "held": "Held"
     }
+  },
+  "Media": {
+    "comingSoon": "Coming soon",
+    "comingSoonHint": "Uploading pictures isn't switched on yet, so nothing can be saved here.",
+    "errors": {
+      "photoMissing": "Choose a picture first.",
+      "photoType": "Pictures must be PNG, JPEG or WebP.",
+      "photoTooLarge": "That picture is too large. Try a smaller one.",
+      "storage": "The picture couldn't be saved. Try again.",
+      "mediaNotConnected": "Picture storage isn't connected yet, so nothing was saved.",
+      "forbidden": "You can't change this picture.",
+      "notFound": "That record wasn't found.",
+      "failed": "Something went wrong. Try again."
+    },
+    "teacherPhoto": {
+      "label": "Photo",
+      "hint": "PNG, JPEG or WebP, up to 1 MB. A clear head-and-shoulders picture works best.",
+      "upload": "Upload photo",
+      "remove": "Remove photo",
+      "removeConfirm": {
+        "title": "Remove this photo?",
+        "body": "The initial will show instead, at this branch."
+      },
+      "saved": "The photo is saved.",
+      "removed": "The photo is removed."
+    },
+    "classCover": {
+      "label": "Cover image",
+      "hint": "PNG, JPEG or WebP, up to 512 KB. A wide picture works best.",
+      "upload": "Upload cover",
+      "remove": "Remove cover",
+      "removeConfirm": {
+        "title": "Remove this cover?",
+        "body": "The card will show the teacher's photo at this branch, or its usual look."
+      },
+      "saved": "The cover is saved.",
+      "removed": "The cover is removed."
+    }
+  },
+  "TeacherProfile": {
+    "title": "Profile",
+    "description": "Your photo at each branch, and the cover pictures of your classes.",
+    "photoTitle": "Your photo",
+    "photoDescription": "Students see it on your classes and your page. It's kept per branch, and a branch can replace or remove it.",
+    "allBranches": "Use this photo at all my branches",
+    "allBranchesHint": "Copies this picture to every branch you teach at, replacing what each has now.",
+    "classesTitle": "Your classes",
+    "classesDescription": "Add a cover to a class. Without one, the card shows your photo at that branch.",
+    "classesEmpty": "You have no active classes yet.",
+    "classesEmptyHint": "Once a branch adds you to a class, it appears here.",
+    "classActive": "Active"
   }
 }

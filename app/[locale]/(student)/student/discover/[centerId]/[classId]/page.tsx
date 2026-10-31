@@ -12,7 +12,7 @@ import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { currentBranchPause } from "@/lib/db/branch-pauses";
 import { prisma } from "@/lib/db/client";
-import { discoverCenter, discoverClassById, teacherDisplayNames } from "@/lib/db/discover";
+import { discoverCenter, discoverClassById, teacherDisplayNames, teacherPhotoKeys } from "@/lib/db/discover";
 import { teacherRatingAverage } from "@/lib/db/ratings";
 import { buildJoinSummary } from "@/lib/join-summary";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
@@ -23,7 +23,7 @@ import {
   studentPendingReservationId,
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
-import { centerLogoSrc } from "@/lib/storage-paths";
+import { centerLogoSrc, classImageSrc } from "@/lib/storage-paths";
 import { ROUTES } from "@/lib/routes";
 
 /**
@@ -45,12 +45,13 @@ export default async function StudentDiscoverClassPage({
   const row = await discoverClassById(prisma, center.id, classId);
   if (!row) notFound();
 
-  const [blockedByCenter, reservationByClass, enrolledClassIds, names, rating, upcoming, pendingReservationId] =
+  const [blockedByCenter, reservationByClass, enrolledClassIds, names, photoKeys, rating, upcoming, pendingReservationId] =
     await Promise.all([
     studentBlockedRefsByCenter(prisma, session.user.id),
     studentReservationStatusByClass(prisma, session.user.id),
     studentActiveEnrollmentClassIds(prisma, session.user.id),
     teacherDisplayNames(prisma, center.id, [row.teacherId]),
+    teacherPhotoKeys(prisma, center.id, [row.teacherId]),
     teacherRatingAverage(prisma, row.teacherId),
     // F6 — the next sessions still open for booking, seats as a status.
     upcomingBookableSessions(prisma, center.id, row),
@@ -105,6 +106,7 @@ export default async function StudentDiscoverClassPage({
       />
 
       <ClassDetail
+        imageUrl={classImageSrc(center.id, row.id, { coverKey: row.coverKey, teacherPhotoKey: photoKeys.get(row.teacherId) })}
         gradeName={catalogLabelWithSelection(locale, row.grade)}
         branch={{ name, logoUrl: centerLogoSrc(center), themeColor: center.themeColor, pausedUntil: pause?.endDate ?? null }}
         teacher={{ name: names.get(row.teacherId) ?? "—", rating: rating.average }}

@@ -7,35 +7,19 @@ const SIZES = {
 } as const;
 
 /**
- * A person's avatar (docs/04 §5 "Avatar", F8): their profile photo when the
- * caller has one to show, otherwise their initials. The caller decides whether
- * a photo may appear here — outside the Account page that is
- * `profilePhotoForDisplay()` (`lib/media.ts`, the `MEDIA_AVATARS_DISPLAY`
- * flag) — so this component never reads the flag itself and "off" is simply
- * `photoSrc={null}`.
+ * A person's avatar (docs/04 §5 "Avatar"): their initials. Since U9 nobody has
+ * a personal profile photo — only teachers have photos, per branch, and those
+ * show through `PersonAvatar` — so this is the monogram and nothing else.
  */
 export function UserAvatar({
   initials,
-  photoSrc,
   size = "md",
   className,
 }: {
   initials: string;
-  photoSrc?: string | null;
   size?: keyof typeof SIZES;
   className?: string;
 }) {
-  if (photoSrc) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- private-media signed delivery, not optimisable by next/image
-      <img
-        src={photoSrc}
-        alt=""
-        aria-hidden
-        className={cn("shrink-0 rounded-full bg-surface object-cover", SIZES[size], className)}
-      />
-    );
-  }
   return (
     <span
       aria-hidden

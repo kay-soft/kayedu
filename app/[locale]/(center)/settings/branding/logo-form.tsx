@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { removeCenterLogoAction, updateCenterLogoAction } from "@/app/[locale]/(center)/settings/actions";
 import { shrinkImageForUpload } from "@/components/center/resize-image";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
+import { ComingSoonNote } from "@/components/shared/coming-soon-note";
 import { ConfirmAction } from "@/components/shared/confirm-action";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
@@ -24,10 +25,13 @@ export function LogoForm({
   branchName,
   themeColor,
   logoSrc,
+  uploadsEnabled,
 }: {
   branchName: string;
   themeColor: string;
   logoSrc: string | null;
+  /** `MEDIA_UPLOADS_ENABLED`: off, the controls say "Coming soon" and nothing is stored. */
+  uploadsEnabled: boolean;
 }) {
   const t = useTranslations("Settings.branding");
   const tToast = useTranslations("Toasts");
@@ -48,8 +52,11 @@ export function LogoForm({
           <p className="min-w-0 break-words text-sm font-medium text-text-primary">{branchName}</p>
         </div>
 
-        {error ? <FormMessage>{t.has(`errors.${error}`) ? t(`errors.${error}`) : t("errors.failed")}</FormMessage> : null}
+        {!uploadsEnabled ? <ComingSoonNote /> : null}
 
+        {uploadsEnabled && error ? <FormMessage>{t.has(`errors.${error}`) ? t(`errors.${error}`) : t("errors.failed")}</FormMessage> : null}
+
+        {uploadsEnabled ? (
         <form
           action={async (formData) => {
             const logo = formData.get("logo");
@@ -76,8 +83,9 @@ export function LogoForm({
             {t("upload")}
           </SubmitButton>
         </form>
+        ) : null}
 
-        {logoSrc ? (
+        {uploadsEnabled && logoSrc ? (
           <ConfirmAction
             label={t("remove")}
             icon={<Trash2 className="size-4" aria-hidden />}

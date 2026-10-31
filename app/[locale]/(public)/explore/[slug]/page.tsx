@@ -101,6 +101,7 @@ export default async function ExploreBranchPage({
                         branchName={name}
                         pausedUntil={branch.pausedUntil}
                         teacherName={item.teacherName}
+                        imageUrl={item.imageUrl}
                         teacherRating={item.teacherRating}
                         gradeName={catalogLabelWithSelection(locale, item.grade)}
                         schedules={item.schedules}

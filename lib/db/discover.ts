@@ -34,6 +34,8 @@ export function discoverClassSelect(centerId: string) {
     acceptsNewStudents: true,
     requiresConfirmation: true,
     teacherId: true,
+    // U9 — decides whether the card has an image (`classImageSrc`); never rendered as is.
+    coverKey: true,
     // U8 — the join confirmation states the class period.
     startDate: true,
     endDate: true,
@@ -135,6 +137,24 @@ export async function teacherDisplayNames(
   return new Map(
     rows.map((row) => [row.userId, fullName(localName(row, row.user))]),
   );
+}
+
+/**
+ * U9 — each teacher's photo key at this centre (null: none), batched once per
+ * centre like `teacherDisplayNames`. Turned into a `src` by `teacherPhotoSrc` /
+ * `classImageSrc` (`lib/storage-paths.ts`); a key is never rendered.
+ */
+export async function teacherPhotoKeys(
+  db: PrismaClient,
+  centerId: string,
+  teacherUserIds: string[],
+): Promise<Map<string, string | null>> {
+  if (teacherUserIds.length === 0) return new Map();
+  const rows = await db.membership.findMany({
+    where: scopedWhere(centerId, { userId: { in: teacherUserIds }, role: TEACHER }),
+    select: { userId: true, photoKey: true },
+  });
+  return new Map(rows.map((row) => [row.userId, row.photoKey]));
 }
 
 /**

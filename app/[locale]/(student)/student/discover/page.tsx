@@ -17,6 +17,7 @@ import { prisma } from "@/lib/db/client";
 import {
   discoverClassesForCenter,
   teacherDisplayNames,
+  teacherPhotoKeys,
   type DiscoverClassRow,
 } from "@/lib/db/discover";
 import { teacherRatingAverages } from "@/lib/db/ratings";
@@ -31,6 +32,7 @@ import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { buildJoinSummary } from "@/lib/join-summary";
 import { ROUTES } from "@/lib/routes";
+import { classImageSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
 import { listAccessibleCenters } from "@/lib/db/platform";
@@ -44,6 +46,7 @@ type CardViewModel = {
   subjectName: string | null;
   gradeName: string | null;
   teacherName: string;
+  imageUrl: string | null;
   /** Average out of 5, platform-wide, across every centre this teacher works
    * at (M17) — never a count alongside it (spec §5 "Teacher ratings"). */
   teacherRating: number | null;
@@ -113,11 +116,12 @@ export default async function StudentDiscoverPage({
         gradeId: gradeFilter || undefined,
       });
       const teacherIds = [...new Set(classes.map((row) => row.teacherId))];
-      const [teacherNames, pause] = await Promise.all([
+      const [teacherNames, photoKeys, pause] = await Promise.all([
         teacherDisplayNames(prisma, center.id, teacherIds),
+        teacherPhotoKeys(prisma, center.id, teacherIds),
         classes.length > 0 ? currentBranchPause(prisma, center.id) : null,
       ]);
-      return { center, classes, teacherNames, pausedUntil: pause?.endDate ?? null };
+      return { center, classes, teacherNames, photoKeys, pausedUntil: pause?.endDate ?? null };
     },
   );
 
@@ -130,7 +134,7 @@ export default async function StudentDiscoverPage({
   const blockedEverywhere = blockedByCenter;
   const cards: CardViewModel[] = [];
 
-  for (const { center, classes, teacherNames, pausedUntil } of perCenter) {
+  for (const { center, classes, teacherNames, photoKeys, pausedUntil } of perCenter) {
     const blocked = blockedEverywhere.get(center.id);
     for (const row of classes) {
       if (blocked?.teacherIds.has(row.teacherId)) continue;
@@ -158,6 +162,11 @@ export default async function StudentDiscoverPage({
         subjectName: catalogLabelWithSelection(locale, row.subject),
         gradeName: catalogLabelWithSelection(locale, row.grade),
         teacherName: teacherNames.get(row.teacherId) ?? "—",
+        // U9 — cover, else the teacher's photo at this branch, else null (generated look).
+        imageUrl: classImageSrc(center.id, row.id, {
+          coverKey: row.coverKey,
+          teacherPhotoKey: photoKeys.get(row.teacherId),
+        }),
         teacherRating: teacherRatings.get(row.teacherId) ?? null,
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
@@ -244,6 +253,7 @@ export default async function StudentDiscoverPage({
                     branchName={card.centerName}
                     pausedUntil={card.pausedUntil}
                     teacherName={card.teacherName}
+                    imageUrl={card.imageUrl}
                     teacherRating={card.teacherRating}
                     gradeName={card.gradeName}
                     schedules={card.schedules}

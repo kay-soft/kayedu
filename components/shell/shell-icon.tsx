@@ -43,6 +43,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hid
   refunds: Undo2,
   settlements: HandCoins,
   audit: ScrollText,
+  profile: UserRound,
 };
 
 export function ShellIcon({

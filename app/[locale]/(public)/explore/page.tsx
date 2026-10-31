@@ -204,6 +204,7 @@ async function ClassesView({
                     branchName={branchName(locale, item.branch)}
                     pausedUntil={item.branch.pausedUntil}
                     teacherName={item.teacherName}
+                    imageUrl={item.imageUrl}
                     teacherRating={item.teacherRating}
                     gradeName={catalogLabelWithSelection(locale, item.grade)}
                     schedules={item.schedules}

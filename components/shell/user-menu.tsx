@@ -44,7 +44,6 @@ export function UserMenu({
       >
         <UserAvatar
           initials={user.initials}
-          photoSrc={user.photoSrc}
           className={cn(
             "border border-border-strong shadow-card transition-ui",
             "group-hover/account:border-brand group-hover/account:bg-brand/10 group-hover/account:text-brand",

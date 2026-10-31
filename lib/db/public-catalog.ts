@@ -7,7 +7,7 @@ import { enrollmentCap, seatStatus, type SeatStatus } from "../capacity.ts";
 import { mapWithConcurrency } from "../concurrency.ts";
 import { effectiveCapacity } from "../rooms.ts";
 import { centreTimeZone, dateKey, todayInTimezone } from "../scheduling.ts";
-import { centerLogoSrc } from "../storage-paths.ts";
+import { centerLogoSrc, classImageSrc, pickClassImage, teacherPhotoSrc, type ClassImage } from "../storage-paths.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 import { teacherRatingAverages } from "./ratings.ts";
 import { pausedUntilFrom } from "./branch-pauses.ts";
@@ -156,6 +156,9 @@ function publicClassSelect(centerId: string) {
     teacherId: true,
     price: true,
     requiresConfirmation: true,
+    // U9 — read only to decide whether the card has an image; the key itself
+    // never leaves this module (`imageUrl` is the signing route's path).
+    coverKey: true,
     // F6 — a join option: whether one session can be booked online.
     sessionBookingMode: true,
     startDate: true,
@@ -199,6 +202,12 @@ export type PublicClass = {
   teacherName: string;
   /** Platform-wide average out of 5, or null — never a count (spec §5 "Teacher ratings"). */
   teacherRating: number | null;
+  /**
+   * U9 — the card's image: the signing route for the class's cover, else the
+   * teacher's photo at this branch, else null (the generated look). A path
+   * under `/api`, never a storage key; the route re-checks the branch is listed.
+   */
+  imageUrl: string | null;
   subject: CatalogRef;
   grade: CatalogRef;
   schedules: PublicClassRow["schedules"];
@@ -229,34 +238,46 @@ function publicClassWhere(branch: PublicBranch, now: Date, extra: Prisma.ClassGr
   });
 }
 
-async function teacherNamesAt(db: Db, centerId: string, teacherUserIds: string[]) {
-  if (teacherUserIds.length === 0) return new Map<string, string>();
+type TeacherAt = { name: string; photoKey: string | null };
+
+/** The branch's own local name (rule 4) and photo key for each teacher, batched per branch. */
+async function teachersAt(db: Db, centerId: string, teacherUserIds: string[]) {
+  if (teacherUserIds.length === 0) return new Map<string, TeacherAt>();
   const rows = await db.membership.findMany({
     where: scopedWhere(centerId, { userId: { in: teacherUserIds }, role: TEACHER }),
     select: {
       userId: true,
       firstName: true,
       lastName: true,
+      // U9 — decides whether there is a photo; the key never leaves this module.
+      photoKey: true,
       user: { select: { firstName: true, lastName: true } },
     },
   });
-  return new Map(rows.map((row) => [row.userId, fullName(localName(row, row.user))]));
+  return new Map(
+    rows.map((row) => [row.userId, { name: fullName(localName(row, row.user)), photoKey: row.photoKey }]),
+  );
 }
 
 function toPublicClasses(
+  centerId: string,
   rows: PublicClassRow[],
-  names: Map<string, string>,
+  teachers: Map<string, TeacherAt>,
   ratings: Map<string, number>,
 ): PublicClass[] {
   return rows
-    .filter((row) => names.has(row.teacherId))
+    .filter((row) => teachers.has(row.teacherId))
     .map((row) => {
       const rooms = row.room ? [row.room, ...row.extraRooms.map((extra) => extra.room)] : [];
       return {
         id: row.id,
         teacherUserId: row.teacherId,
-        teacherName: names.get(row.teacherId) ?? "",
+        teacherName: teachers.get(row.teacherId)?.name ?? "",
         teacherRating: ratings.get(row.teacherId) ?? null,
+        imageUrl: classImageSrc(centerId, row.id, {
+          coverKey: row.coverKey,
+          teacherPhotoKey: teachers.get(row.teacherId)?.photoKey,
+        }),
         subject: row.subject,
         grade: row.grade,
         schedules: row.schedules,
@@ -296,11 +317,11 @@ export async function publicClassesForBranch(
 ): Promise<PublicClass[]> {
   const rows = (await classRowsAt(db, branch, now, filters)).filter((row) => matchesDay(row, filters.day));
   const teacherIds = [...new Set(rows.map((row) => row.teacherId))];
-  const [names, ratings] = await Promise.all([
-    teacherNamesAt(db, branch.id, teacherIds),
+  const [teachers, ratings] = await Promise.all([
+    teachersAt(db, branch.id, teacherIds),
     teacherRatingAverages(db, teacherIds),
   ]);
-  return toPublicClasses(rows, names, ratings);
+  return toPublicClasses(branch.id, rows, teachers, ratings);
 }
 
 /**
@@ -324,8 +345,8 @@ export async function searchPublicClasses(
     EXPLORE_CENTER_CONCURRENCY,
     async (branch) => {
       const rows = (await classRowsAt(db, branch, now, filters)).filter((row) => matchesDay(row, filters.day));
-      const names = await teacherNamesAt(db, branch.id, [...new Set(rows.map((row) => row.teacherId))]);
-      return { branch, rows, names };
+      const teachers = await teachersAt(db, branch.id, [...new Set(rows.map((row) => row.teacherId))]);
+      return { branch, rows, teachers };
     },
   );
 
@@ -334,8 +355,8 @@ export async function searchPublicClasses(
     ...new Set(perBranch.flatMap(({ rows }) => rows.map((row) => row.teacherId))),
   ]);
 
-  return perBranch.flatMap(({ branch, rows, names }) =>
-    toPublicClasses(rows, names, ratings).map((item) => ({ ...item, branch })),
+  return perBranch.flatMap(({ branch, rows, teachers }) =>
+    toPublicClasses(branch.id, rows, teachers, ratings).map((item) => ({ ...item, branch })),
   );
 }
 
@@ -351,11 +372,11 @@ export async function publicClassById(
     select: publicClassSelect(branch.id),
   });
   if (!row) return null;
-  const [names, ratings] = await Promise.all([
-    teacherNamesAt(db, branch.id, [row.teacherId]),
+  const [teachers, ratings] = await Promise.all([
+    teachersAt(db, branch.id, [row.teacherId]),
     teacherRatingAverages(db, [row.teacherId]),
   ]);
-  return toPublicClasses([row], names, ratings)[0] ?? null;
+  return toPublicClasses(branch.id, [row], teachers, ratings)[0] ?? null;
 }
 
 // ── Teachers ────────────────────────────────────────────────────────────────
@@ -403,14 +424,85 @@ export async function publicTeacherAt(
     take: CLASSES_PER_BRANCH,
   });
   if (rows.length === 0) return null;
-  const [names, ratings] = await Promise.all([
-    teacherNamesAt(db, branch.id, [teacherUserId]),
+  const [teachers, ratings] = await Promise.all([
+    teachersAt(db, branch.id, [teacherUserId]),
     teacherRatingAverages(db, [teacherUserId]),
   ]);
-  const classes = toPublicClasses(rows, names, ratings);
-  const name = names.get(teacherUserId);
+  const classes = toPublicClasses(branch.id, rows, teachers, ratings);
+  const name = teachers.get(teacherUserId)?.name;
   if (!name || classes.length === 0) return null;
-  return { teacherUserId, name, rating: ratings.get(teacherUserId) ?? null, classes };
+  return {
+    teacherUserId,
+    name,
+    rating: ratings.get(teacherUserId) ?? null,
+    classes,
+  };
+}
+
+/**
+ * U9 — the signing-route path for a teacher's photo on their public page, or
+ * null (initial avatar). A separate read on purpose: it leaves the teacher
+ * page's allowlisted shape (`teacherUserId`, `name`, `rating`, `classes`)
+ * exactly as F5 fixed it. Only for a teacher with a listed class at this
+ * listed branch (the page itself 404s otherwise), and the route re-checks.
+ */
+export async function publicTeacherPhotoUrl(db: Db, branch: PublicBranch, teacherUserId: string): Promise<string | null> {
+  const teachers = await teachersAt(db, branch.id, [teacherUserId]);
+  return teacherPhotoSrc(branch.id, teacherUserId, teachers.get(teacherUserId)?.photoKey);
+}
+
+// ── Images (U9) ─────────────────────────────────────────────────────────────
+
+/**
+ * The stored object a guest may be shown for a listed class (`/api/class-images`):
+ * the cover, else the teacher's photo at the branch. `null` unless the branch is
+ * listed (ACTIVE/GRACE with `publicListing`) **and** the class is itself listed —
+ * so unlisting a branch or a class stops its image within the route's cache.
+ */
+export async function publicClassImage(
+  db: Db,
+  centerId: string,
+  classId: string,
+  now: Date,
+): Promise<ClassImage | null> {
+  const row = await db.center.findFirst({
+    where: publicBranchWhere({ id: centerId }),
+    select: PUBLIC_BRANCH_SELECT,
+  });
+  if (!row) return null;
+  const branch = toPublicBranch(row);
+  const cls = await db.classGroup.findFirst({
+    where: publicClassWhere(branch, now, { id: classId }),
+    select: { coverKey: true, teacherId: true },
+  });
+  if (!cls) return null;
+  const teachers = await teachersAt(db, branch.id, [cls.teacherId]);
+  return pickClassImage({ coverKey: cls.coverKey, teacherPhotoKey: teachers.get(cls.teacherId)?.photoKey });
+}
+
+/**
+ * A teacher's photo key at a listed branch for a guest (`/api/teacher-photos`):
+ * only when the teacher has a listed class there — the same rule that keeps
+ * `publicTeacherAt` from being a way to probe who works where.
+ */
+export async function publicTeacherPhotoKey(
+  db: Db,
+  centerId: string,
+  teacherUserId: string,
+  now: Date,
+): Promise<string | null> {
+  const row = await db.center.findFirst({
+    where: publicBranchWhere({ id: centerId }),
+    select: PUBLIC_BRANCH_SELECT,
+  });
+  if (!row) return null;
+  const branch = toPublicBranch(row);
+  const listed = await db.classGroup.findFirst({
+    where: publicClassWhere(branch, now, { teacherId: teacherUserId }),
+    select: { id: true },
+  });
+  if (!listed) return null;
+  return (await teachersAt(db, branch.id, [teacherUserId])).get(teacherUserId)?.photoKey ?? null;
 }
 
 // ── Filter options ──────────────────────────────────────────────────────────

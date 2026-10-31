@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * A person's mark on a detail-page header (docs/04-design-system.md §5
- * "Avatar"): their photo when there is one, otherwise the first letter of the
+ * "Avatar"): their photo when there is one (U9: only teachers have photos), otherwise the first letter of the
  * name as displayed (`lib/initials.ts`). Round, per the shape scale (§4); the
  * initial sits on the neutral subtle surface, not a status colour.
  */
@@ -16,12 +16,15 @@ export function PersonAvatar({
   name,
   photoUrl,
   size = "lg",
+  tone = "neutral",
   className,
 }: {
   name: string;
-  /** A short-lived signed Storage URL, or null/undefined for none. */
+  /** A signing-route path (`/api/teacher-photos/…`) or signed URL, or null/undefined for none. */
   photoUrl?: string | null;
   size?: keyof typeof SIZES;
+  /** `brand` is the public pages' initial on the branch colour (Explore); `neutral` everywhere else. */
+  tone?: "neutral" | "brand";
   className?: string;
 }) {
   if (photoUrl) {
@@ -45,7 +48,10 @@ export function PersonAvatar({
     <span
       aria-hidden
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full border border-border bg-surface-subtle font-semibold text-text-secondary",
+        "flex shrink-0 items-center justify-center rounded-full border font-semibold",
+        tone === "brand"
+          ? "border-transparent bg-brand text-brand-foreground"
+          : "border-border bg-surface-subtle text-text-secondary",
         SIZES[size],
         className,
       )}

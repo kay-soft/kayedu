@@ -83,6 +83,8 @@ export const ROUTES = {
   teacherApprovals: "/teacher/approvals",
   teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",
+  // U9: the teacher's photo (per branch) and their classes' cover images.
+  teacherProfile: "/teacher/profile",
   studentSchedule: "/student/schedule",
   studentCalendar: "/student/calendar",
   studentDiscover: "/student/discover",

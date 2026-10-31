@@ -14,10 +14,13 @@ import {
   type ScheduleSlotRow,
 } from "@/app/[locale]/(center)/classes/[id]/schedule-builder";
 import { searchEnrollCandidatesAction } from "@/app/[locale]/(center)/classes/actions";
+import { removeClassCoverAction, updateClassCoverAction } from "@/app/[locale]/(center)/classes/cover-actions";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { ActionBar } from "@/components/shared/action-bar";
 import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { DetailRow } from "@/components/shared/field";
+import { ImagePreview } from "@/components/shared/image-preview";
+import { ImageUploadForm } from "@/components/shared/image-upload-form";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
@@ -30,7 +33,9 @@ import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { formatDay, formatDayRange, formatMoney, formatNumber, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
+import { mediaUploadsEnabled } from "@/lib/media";
 import { ROUTES } from "@/lib/routes";
+import { MAX_COVER_BYTES, classImageSrc } from "@/lib/storage-paths";
 import { piastresToInputValue } from "@/lib/money";
 import { buildCatalogPicker } from "@/lib/catalog-picker";
 import { catalogLabelWithSelection } from "@/lib/catalog";
@@ -383,6 +388,30 @@ export default async function ClassDetailPage({
                   }
                 />
               ) : null}
+            </DetailCard>
+
+            <DetailCard title={t("cover.title")} description={t("cover.description")}>
+              <ImagePreview
+                src={classImageSrc(ctx.center.id, classGroup.id, {
+                  coverKey: classGroup.coverKey,
+                  teacherPhotoKey: teacher?.photoKey,
+                })}
+                emptyLabel={t("cover.none")}
+              />
+              <p className="text-xs text-text-muted">
+                {classGroup.coverKey ? t("cover.showingCover") : teacher?.photoKey ? t("cover.showingTeacher") : t("cover.showingGenerated")}
+              </p>
+              <ImageUploadForm
+                kind="classCover"
+                enabled={mediaUploadsEnabled()}
+                hasImage={Boolean(classGroup.coverKey)}
+                uploadAction={updateClassCoverAction}
+                removeAction={removeClassCoverAction}
+                fields={{ classGroupId: classGroup.id }}
+                fieldName="cover"
+                maxBytes={MAX_COVER_BYTES}
+                maxEdge={1280}
+              />
             </DetailCard>
 
             <DetailCard

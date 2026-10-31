@@ -67,6 +67,7 @@ export default async function ExploreClassPage({ params, searchParams }: Params)
       />
 
       <ClassDetail
+        imageUrl={item.imageUrl}
         gradeName={catalogLabelWithSelection(locale, item.grade)}
         branch={{
           name,

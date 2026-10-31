@@ -348,6 +348,16 @@
 
 ---
 
+## 35. Drop `User.avatarUrl` after the pilot
+
+**What it is.** A migration that drops the deprecated `User.avatarUrl` column (U9).
+
+**Why deferred.** It has never been written: F8's personal profile photo had no storage destination, and U9 removed that feature (only teachers have photos, per branch, on `Membership.photoKey`). Dropping the column is not backward-compatible with a build that still selects it (any `User` `include` returns it), so it waits until no such build can be running.
+
+**Depends on.** The pilot (M20 → first centre live) on the U9 build; a backup taken before the drop (M20's tested restore). Remove, in the same change: the column and its schema comment in `prisma/schema.prisma`, and the mention in `docs/01-data-model.md` (User).
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

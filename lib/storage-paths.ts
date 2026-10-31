@@ -168,6 +168,82 @@ export function centerLogoSrc(center: { id: string; logoPath: string | null }): 
   return `/api/logos/${encodeURIComponent(center.id)}?v=${encodeURIComponent(version)}`;
 }
 
+/** A class cover (U9): a wide picture, so it shares the logo bucket's 512 KB cap. */
+export const MAX_COVER_BYTES = 512 * 1024;
+
+/**
+ * A teacher's photo at one branch (U9) — in the `avatars` bucket, under the
+ * branch's own folder; the stem is the teacher's Membership id. The version
+ * suffix busts any cached copy when replaced. A teacher who uses one photo at
+ * every branch has one such object per branch: a key is never shared across
+ * centres (`assertPathInCenter` would refuse it).
+ */
+export function teacherPhotoPath(
+  centerId: string,
+  membershipId: string,
+  extension: string,
+  version: string,
+): string {
+  return centerObjectPath(centerId, `teacher.${membershipId}.${version}.${extension}`);
+}
+
+/** A class cover (U9) — in the `logos` bucket, under the branch's own folder. */
+export function classCoverPath(
+  centerId: string,
+  classGroupId: string,
+  extension: string,
+  version: string,
+): string {
+  return centerObjectPath(centerId, `cover.${classGroupId}.${version}.${extension}`);
+}
+
+/** The object's file name — it carries the version suffix, so it busts the cache when replaced. */
+function keyVersion(key: string): string {
+  return key.split("/").pop() ?? "";
+}
+
+/**
+ * The `src` the UI renders for a teacher's photo (U9): the app's own route,
+ * which mints a short-lived signed URL for exactly this branch's object —
+ * never a stored key, never a public bucket (same pattern as `centerLogoSrc`).
+ */
+export function teacherPhotoSrc(
+  centerId: string,
+  teacherUserId: string,
+  photoKey: string | null | undefined,
+): string | null {
+  if (!photoKey) return null;
+  return `/api/teacher-photos/${encodeURIComponent(centerId)}/${encodeURIComponent(teacherUserId)}?v=${encodeURIComponent(keyVersion(photoKey))}`;
+}
+
+/** What a class card / class page shows as its image, in order: cover, then the teacher's photo. */
+export type ClassImage = { kind: "cover" | "teacher"; bucket: StorageBucket; key: string };
+
+export function pickClassImage(source: {
+  coverKey: string | null | undefined;
+  teacherPhotoKey: string | null | undefined;
+}): ClassImage | null {
+  if (source.coverKey) return { kind: "cover", bucket: LOGOS_BUCKET, key: source.coverKey };
+  if (source.teacherPhotoKey) return { kind: "teacher", bucket: AVATARS_BUCKET, key: source.teacherPhotoKey };
+  return null;
+}
+
+/**
+ * The `src` for a class's image (U9): the cover, else the teacher's photo at
+ * that branch, else null (the generated look). The route repeats the same
+ * choice from the database; the version in the query changes with whichever
+ * object is showing, so a replacement is not served from cache.
+ */
+export function classImageSrc(
+  centerId: string,
+  classGroupId: string,
+  source: { coverKey: string | null | undefined; teacherPhotoKey: string | null | undefined },
+): string | null {
+  const image = pickClassImage(source);
+  if (!image) return null;
+  return `/api/class-images/${encodeURIComponent(centerId)}/${encodeURIComponent(classGroupId)}?v=${encodeURIComponent(keyVersion(image.key))}`;
+}
+
 /** A generated ID card. Deterministic: regenerating replaces the same object. */
 export function studentIdCardPath(
   centerId: string,

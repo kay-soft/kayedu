@@ -7,6 +7,7 @@ import { PausedNote } from "@/components/explore/paused-note";
 import { formatMoney, formatRating, formatTimeRange } from "@/lib/format";
 import { nameInitial } from "@/lib/initials";
 import { subjectAccentColor } from "@/lib/subject-accent";
+import { cn } from "@/lib/utils";
 
 export type ClassCardBadge = {
   variant: "success" | "warning" | "neutral" | "info";
@@ -14,11 +15,17 @@ export type ClassCardBadge = {
 };
 
 export type ClassCardProps = {
-  /** The class page — the subject name links to it. */
-  href: string;
+  /** The class page — the subject name links to it. Omitted where there is no class page (the teacher's own list). */
+  href?: string;
   subjectName: string | null;
   branchName: string;
   teacherName: string;
+  /**
+   * U9 — the card's picture: the class cover, else the teacher's photo at this
+   * branch (both come through the signing routes, never a storage key), else
+   * null — the generated look (accent bar + initial) it always had.
+   */
+  imageUrl?: string | null;
   /** Average out of 5, or null — never a count (docs/04 §10, §11.5). */
   teacherRating: number | null;
   gradeName: string | null;
@@ -42,6 +49,7 @@ export async function ClassCard({
   subjectName,
   branchName,
   teacherName,
+  imageUrl,
   teacherRating,
   gradeName,
   schedules,
@@ -57,17 +65,34 @@ export async function ClassCard({
   const accent = subjectAccentColor(subjectName);
 
   return (
-    <div className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pt-5 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover">
-      <div aria-hidden className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: accent }} />
+    <div
+      className={cn(
+        "relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 shadow-card transition-ui hover:border-border-strong hover:shadow-card-hover",
+        !imageUrl && "pt-5",
+      )}
+    >
+      {imageUrl ? (
+        // The picture replaces the accent bar; the accent stays as a thin line beneath it.
+        <div className="-mx-4 -mt-4 border-b-4" style={{ borderBottomColor: accent }}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- private-media signing route, not optimisable by next/image */}
+          <img src={imageUrl} alt="" loading="lazy" className="aspect-[16/9] w-full bg-surface-subtle object-cover object-top" />
+        </div>
+      ) : (
+        <div aria-hidden className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: accent }} />
+      )}
 
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <Link
-            href={href}
-            className="block truncate rounded-sm text-sm font-semibold text-text-primary focus-ring hover:text-brand hover:underline"
-          >
-            {subjectName ?? tClasses("columns.untitled")}
-          </Link>
+          {href ? (
+            <Link
+              href={href}
+              className="block truncate rounded-sm text-sm font-semibold text-text-primary focus-ring hover:text-brand hover:underline"
+            >
+              {subjectName ?? tClasses("columns.untitled")}
+            </Link>
+          ) : (
+            <p className="truncate text-sm font-semibold text-text-primary">{subjectName ?? tClasses("columns.untitled")}</p>
+          )}
           <p className="truncate text-xs text-text-muted">{branchName}</p>
           {pausedUntil ? <PausedNote until={pausedUntil} /> : null}
         </div>

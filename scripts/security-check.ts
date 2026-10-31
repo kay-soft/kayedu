@@ -68,7 +68,7 @@ import { addTeacherMembership } from "../lib/db/teacher-membership.ts";
 import { scopedData } from "../lib/db/tenant-scope.ts";
 import { checkRateLimit, checkRateLimits, pruneRateLimitBuckets, RATE_LIMITS } from "../lib/rate-limit.ts";
 import { safeNextPath } from "../lib/routes.ts";
-import { MAX_PHOTO_BYTES, centerLogoSrc, sniffImageType } from "../lib/storage-paths.ts";
+import { MAX_PHOTO_BYTES, centerLogoSrc, classCoverPath, isPathInCenter, sniffImageType, teacherPhotoPath } from "../lib/storage-paths.ts";
 import { createCenterSchema } from "../lib/validation/admin.ts";
 import { seedPasswordProblems } from "../prisma/seed-data/auth.ts";
 import { productionTargetReason } from "../prisma/seed-data/production-refs.ts";
@@ -959,6 +959,28 @@ async function main() {
     return [
       ["upload writes student.photo.update", /action: "student\.photo\.update"/.test(upload)],
       ["remove writes student.photo.remove", /action: "student\.photo\.remove"/.test(remove)],
+    ];
+  });
+
+  await assertSec("U9", "teacher photos and class covers: centre-namespaced keys, signed delivery, audited changes", () => {
+    const writes = read("lib/db/media-writes.ts");
+    const classRoute = read("app/api/class-images/[centerId]/[classId]/route.ts");
+    const teacherRoute = read("app/api/teacher-photos/[centerId]/[teacherUserId]/route.ts");
+    const profile = read("app/[locale]/(teacher)/teacher/profile/actions.ts");
+    const publicCatalog = read("lib/db/public-catalog.ts");
+    const photo = teacherPhotoPath("c1", "m1", "jpg", "v");
+    const cover = classCoverPath("c1", "k1", "png", "v");
+    const audited = ["teacher.photo.update", "teacher.photo.remove", "classGroup.cover.update", "classGroup.cover.remove"];
+    return [
+      ["a teacher photo path starts with the centre id", photo.startsWith("c1/") && isPathInCenter("c1", photo) && !isPathInCenter("c2", photo)],
+      ["a class cover path starts with the centre id", cover.startsWith("c1/") && isPathInCenter("c1", cover) && !isPathInCenter("c2", cover)],
+      ["both routes refuse a stored key outside the centre's folder", /isPathInCenter\(centerId, /.test(classRoute) && /isPathInCenter\(centerId, key\)/.test(teacherRoute)],
+      ["both routes redirect to a signed URL, never serve the bucket", /signedUrlFor\(/.test(classRoute) && /signedUrlFor\(/.test(teacherRoute)],
+      ["a guest is served only through the listed-branch lookups", /publicClassImage\(/.test(classRoute) && /publicTeacherPhotoKey\(/.test(teacherRoute)],
+      ["the four changes write their audit rows on the change's own transaction", audited.every((action) => writes.includes(`action: "${action}"`)) && (writes.match(/\$transaction\(/g)?.length ?? 0) === 4],
+      ["the teacher's own writes re-resolve the branch and pin the class to the teacher", /teacherBranchContext\(centerId\)/.test(profile) && /classGroup\.teacherId !== ctx\.user\.id/.test(profile)],
+      ["no profile-photo control is left", !existsSync(join(ROOT, "app/[locale]/account/photo-form.tsx")) && !/updateProfilePhotoAction|removeProfilePhotoAction/.test(read("app/[locale]/account/actions.ts")) && !/avatarsDisplayEnabled|profilePhotoForDisplay/.test(read("lib/media.ts"))],
+      ["the public catalog hands out a signing-route path, never a key", /imageUrl: string \| null/.test(publicCatalog) && !/export type PublicClass = \{[^}]*(coverKey|photoKey)/.test(publicCatalog)],
     ];
   });
 

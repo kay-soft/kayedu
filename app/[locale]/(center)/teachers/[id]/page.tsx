@@ -12,11 +12,13 @@ import {
   deleteTeacherAction,
   searchBlockCandidatesAction,
 } from "@/app/[locale]/(center)/teachers/actions";
+import { removeTeacherPhotoAction, updateTeacherPhotoAction } from "@/app/[locale]/(center)/teachers/photo-actions";
 import { DeleteRecordCard } from "@/components/center/delete-record-card";
 import { TypeAheadSearch } from "@/components/center/type-ahead-search";
 import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { DetailRow } from "@/components/shared/field";
+import { ImageUploadForm } from "@/components/shared/image-upload-form";
 import { PageHeader } from "@/components/shared/page-header";
 import { PersonAvatar } from "@/components/shared/person-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +34,9 @@ import { formatRating } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { Link } from "@/lib/i18n/navigation";
 import { formatPhone } from "@/lib/phone";
+import { mediaUploadsEnabled } from "@/lib/media";
 import { ROUTES } from "@/lib/routes";
+import { MAX_PHOTO_BYTES, teacherPhotoSrc } from "@/lib/storage-paths";
 import { ResultsRegion } from "@/components/shared/results-region";
 
 const MAX_BLOCK_CANDIDATES = 8;
@@ -132,6 +136,7 @@ export default async function TeacherDetailPage({
       : [];
 
   const personName = fullName(localName(teacher, teacher.user));
+  const photoSrc = teacherPhotoSrc(ctx.center.id, teacher.userId, teacher.photoKey);
   const canBlock = ctxCan(ctx, "student.block");
 
   return (
@@ -140,7 +145,7 @@ export default async function TeacherDetailPage({
         title={personName}
         description={t("detailSubtitle")}
         back={{ href: ROUTES.centerTeachers, label: t("backToList") }}
-        leading={<PersonAvatar name={personName} />}
+        leading={<PersonAvatar name={personName} photoUrl={photoSrc} />}
         meta={
           <>
             <Badge variant={teacher.active ? "success" : "neutral"}>
@@ -207,6 +212,20 @@ export default async function TeacherDetailPage({
         }
         side={
           <>
+            <DetailCard title={t("photo.title")} description={t("photo.description")}>
+              <ImageUploadForm
+                kind="teacherPhoto"
+                enabled={mediaUploadsEnabled()}
+                hasImage={Boolean(teacher.photoKey)}
+                uploadAction={updateTeacherPhotoAction}
+                removeAction={removeTeacherPhotoAction}
+                fields={{ membershipId: teacher.id }}
+                fieldName="photo"
+                maxBytes={MAX_PHOTO_BYTES}
+                maxEdge={1024}
+              />
+            </DetailCard>
+
             <DetailCard
               title={t("identityTitle")}
               description={t("identityDescription")}

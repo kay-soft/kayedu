@@ -256,5 +256,21 @@ const discover = code("app/[locale]/(student)/student/discover/page.tsx");
 const discoverClass = code("app/[locale]/(student)/student/discover/[centerId]/[classId]/page.tsx");
 check("Discover reuses the shared ClassCard and ClassDetail (no fork)", /<ClassCard\b/.test(discover) && /<ClassDetail\b/.test(discoverClass));
 
+// ── 6. Images (U9) ───────────────────────────────────────────────────────────
+console.log("\nClass and teacher images");
+
+// The allowlist gains exactly one thing: the card's image path (a signing route, never a key).
+check("PublicClass carries imageUrl as a signing-route path", /imageUrl:\s*string\s*\|\s*null/.test(typeBody("PublicClass")));
+check("PublicClass, PublicTeacher and PublicBranch expose no storage key", ["PublicClass", "PublicTeacher", "PublicBranch"].every((name) => !/\b(coverKey|photoKey|logoPath)\b/.test(typeBody(name))));
+check("the teacher page's photo is a separate read, so PublicTeacher keeps its F5 shape", /export async function publicTeacherPhotoUrl/.test(CATALOG) && !/photoUrl/.test(typeBody("PublicTeacher")));
+check("a guest's image lookup requires a listed branch and a listed class", /export async function publicClassImage[\s\S]*?publicBranchWhere\(\{ id: centerId \}\)[\s\S]*?publicClassWhere\(branch, now, \{ id: classId \}\)/.test(CATALOG));
+check("a guest's teacher photo needs a listed class there (no probing who works where)", /export async function publicTeacherPhotoKey[\s\S]*?publicClassWhere\(branch, now, \{ teacherId: teacherUserId \}\)/.test(CATALOG));
+
+const classImages = code("app/api/class-images/[centerId]/[classId]/route.ts");
+const teacherPhotos = code("app/api/teacher-photos/[centerId]/[teacherUserId]/route.ts");
+check("class-image route: a guest goes through publicClassImage, a signed-in user through the accessible-centre lookup, and the key is re-checked against the centre", /publicClassImage\(/.test(classImages) && /accessibleCenterId\(/.test(classImages) && /isPathInCenter\(/.test(classImages));
+check("teacher-photo route: a guest goes through publicTeacherPhotoKey and the key is re-checked against the centre", /publicTeacherPhotoKey\(/.test(teacherPhotos) && /isPathInCenter\(/.test(teacherPhotos));
+check("both routes cache a guest's copy only briefly", /public, max-age=300, s-maxage=300/.test(classImages) && /public, max-age=300, s-maxage=300/.test(teacherPhotos));
+
 console.log(failures === 0 ? "\nAll public checks passed." : `\n${failures} public check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -251,6 +251,10 @@ model User {
   // staff-typed and unique; a self-typed value there would let anyone squat
   // a number (`check:account` asserts the identity modules never read this).
   contactPhone    String?
+  // DEPRECATED (U9): unused and never written. Only teachers have photos now,
+  // and theirs live per branch on `Membership.photoKey`. Kept (not dropped) so
+  // U9 stays additive; the column is dropped after the pilot
+  // (docs/05-phase-2-backlog.md).
   avatarUrl       String?
   // The preferred language: where sign-in lands (F2), editable on Account settings.
   locale          String    @default("ar") // "ar" | "en"
@@ -528,6 +532,11 @@ model Membership {
   email            String?
   phone            String?
   altPhone         String?
+  // Teacher-only (U9): this person's photo AT THIS BRANCH — a key in the
+  // private `avatars` bucket under `{centerId}/`, never a URL. Set by the
+  // teacher (their portal) or by the branch (`teacher.manage`); either can
+  // replace or remove it. Null: the initial avatar.
+  photoKey         String?
   // Teacher-only (M10): gates the "request a new class/session" forms
   // (spec §4.2 items 2 & 4 say "a trusted teacher"). Defaults true so the
   // M7/M9 behavior ("every active TEACHER membership is trusted") is
@@ -875,6 +884,11 @@ model ClassGroup {
   lateThresholdMinutes Int                     @default(10)
   acceptsNewStudents   Boolean                 @default(true)
   requiresConfirmation Boolean                 @default(false)
+  // U9 — an optional cover image: a key in the private `logos` bucket under
+  // `{centerId}/`, never a URL. Set by the branch (`class.manage`) or by the
+  // class's own teacher. Null: the card shows the teacher's photo at this
+  // branch, else the generated look.
+  coverKey             String?
   // F6 — single-session attendance online (see the enum). OFF by default, so
   // every existing class behaves exactly as before.
   sessionBookingMode   SessionBookingMode      @default(OFF)

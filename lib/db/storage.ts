@@ -3,14 +3,17 @@ import {
   AVATARS_BUCKET,
   ID_CARDS_BUCKET,
   LOGOS_BUCKET,
+  MAX_COVER_BYTES,
   MAX_LOGO_BYTES,
   MAX_PHOTO_BYTES,
   assertPathInCenter,
   centerLogoPath,
+  classCoverPath,
   photoExtensionFor,
   sniffImageType,
   studentIdCardPath,
   studentPhotoPath,
+  teacherPhotoPath,
   type StorageBucket,
 } from "@/lib/storage-paths";
 
@@ -86,6 +89,45 @@ export async function uploadCenterLogo(
   const image = await readRasterImage(file, MAX_LOGO_BYTES);
   if (!image.ok) return image;
   const path = centerLogoPath(centerId, image.extension, Date.now().toString(36));
+  const stored = await storage().upload(LOGOS_BUCKET, path, image.bytes, image.type);
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
+}
+
+/**
+ * A teacher's photo at one branch (U9) — into the private `avatars` bucket
+ * under the branch's own folder, raster only by its bytes, about 1 MB. The
+ * stem is the Membership id; the version busts cached copies of a replaced one.
+ */
+export async function uploadTeacherPhoto(
+  centerId: string,
+  membershipId: string,
+  file: File,
+): Promise<{ ok: true; path: string } | { ok: false; error: UploadRefusal }> {
+  const image = await readRasterImage(file, MAX_PHOTO_BYTES);
+  if (!image.ok) return image;
+  return storeTeacherPhoto(centerId, membershipId, image);
+}
+
+/** Writes one already-checked image under a branch's folder — also the "all my branches" copy. */
+export async function storeTeacherPhoto(
+  centerId: string,
+  membershipId: string,
+  image: { bytes: Uint8Array; type: string; extension: string },
+): Promise<{ ok: true; path: string } | { ok: false; error: UploadRefusal }> {
+  const path = teacherPhotoPath(centerId, membershipId, image.extension, Date.now().toString(36));
+  const stored = await storage().upload(AVATARS_BUCKET, path, image.bytes, image.type);
+  return stored ? { ok: true, path } : { ok: false, error: "storage" };
+}
+
+/** A class cover (U9) — into the private `logos` bucket under the branch's folder, 512 KB. */
+export async function uploadClassCover(
+  centerId: string,
+  classGroupId: string,
+  file: File,
+): Promise<{ ok: true; path: string } | { ok: false; error: UploadRefusal }> {
+  const image = await readRasterImage(file, MAX_COVER_BYTES);
+  if (!image.ok) return image;
+  const path = classCoverPath(centerId, classGroupId, image.extension, Date.now().toString(36));
   const stored = await storage().upload(LOGOS_BUCKET, path, image.bytes, image.type);
   return stored ? { ok: true, path } : { ok: false, error: "storage" };
 }

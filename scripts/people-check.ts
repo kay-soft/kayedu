@@ -42,6 +42,7 @@ import { formatPhone, normalizePhone, phoneTelHref, phoneWhatsAppNumber } from "
 import { checkRateLimit } from "../lib/rate-limit.ts";
 import { claimStudentCode } from "../lib/db/students.ts";
 import { createTeacherMembership } from "../lib/db/teacher-membership.ts";
+import { classCoverKeyOf, setClassCoverKey, setTeacherPhotoKey, teacherPhotoKeyById } from "../lib/db/media.ts";
 import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import { confirmGradePromotion, promotionPreview, undoGradePromotion } from "../lib/db/promotion.ts";
 import { PROMOTION_UNDO_DAYS, isWithinUndoWindow } from "../lib/promotion.ts";
@@ -49,7 +50,12 @@ import {
   StoragePathError,
   assertPathInCenter,
   centerObjectPath,
+  classCoverPath,
+  classImageSrc,
   isPathInCenter,
+  pickClassImage,
+  teacherPhotoPath,
+  teacherPhotoSrc,
   photoExtensionFor,
   studentIdCardPath,
   studentPhotoPath,
@@ -1032,6 +1038,88 @@ async function main() {
     "Only the allowed image types get an extension",
     photoExtensionFor("image/png") === "png" &&
       photoExtensionFor("image/svg+xml") === null,
+  );
+
+  // ── 6b. U9: teacher photos and class covers stay inside their centre ───
+  const u9PhotoKey = teacherPhotoPath(centerA.id, teacherInA.id, "jpg", "v1");
+  const u9Class = await prisma.classGroup.create({
+    data: {
+      centerId: centerA.id,
+      teacherId: teacher.id,
+      startDate: new Date("2026-09-01"),
+      endDate: new Date("2027-01-31"),
+    },
+  });
+  const u9CoverKey = classCoverPath(centerA.id, u9Class.id, "png", "v1");
+  check(
+    "A teacher photo and a class cover are namespaced by centerId",
+    u9PhotoKey.startsWith(`${centerA.id}/teacher.`) && u9CoverKey.startsWith(`${centerA.id}/cover.`),
+    `${u9PhotoKey} ${u9CoverKey}`,
+  );
+  check(
+    "A teacher photo / class cover key from centre A is refused by centre B",
+    !isPathInCenter(centerB.id, u9PhotoKey) && !isPathInCenter(centerB.id, u9CoverKey),
+  );
+  let u9Traversal = false;
+  try {
+    teacherPhotoPath(centerA.id, "../other", "jpg", "v1");
+  } catch (error) {
+    u9Traversal = error instanceof StoragePathError;
+  }
+  check("A traversal membership id is refused in a teacher photo path", u9Traversal);
+
+  check(
+    "setTeacherPhotoKey writes the key on this centre's teacher membership",
+    (await setTeacherPhotoKey(prisma, centerA.id, teacherInA.id, u9PhotoKey)) === true &&
+      (await teacherPhotoKeyById(prisma, centerA.id, teacherInA.id))?.photoKey === u9PhotoKey,
+  );
+  check(
+    "Centre B cannot set or read centre A's teacher membership photo (scoped by centerId)",
+    (await setTeacherPhotoKey(prisma, centerB.id, teacherInA.id, "attacker")) === false &&
+      (await teacherPhotoKeyById(prisma, centerB.id, teacherInA.id)) === null &&
+      (await teacherPhotoKeyById(prisma, centerA.id, teacherInA.id))?.photoKey === u9PhotoKey,
+  );
+  check(
+    "The photo is per branch: the same person's other branch is untouched",
+    (await teacherPhotoKeyById(prisma, centerB.id, teacherInB.id))?.photoKey === null,
+  );
+  const staffMembership = await prisma.membership.findFirst({ where: scopedWhere(centerA.id, { role: { not: TEACHER_ROLE } }), select: { id: true } });
+  check(
+    "A staff membership can never be given a teacher photo (role pinned to TEACHER)",
+    !staffMembership || (await setTeacherPhotoKey(prisma, centerA.id, staffMembership.id, "x")) === false,
+  );
+  check(
+    "setClassCoverKey writes the key on this centre's class; centre B cannot touch it",
+    (await setClassCoverKey(prisma, centerA.id, u9Class.id, u9CoverKey)) === true &&
+      (await classCoverKeyOf(prisma, centerA.id, u9Class.id)) === u9CoverKey &&
+      (await setClassCoverKey(prisma, centerB.id, u9Class.id, "attacker")) === false &&
+      (await classCoverKeyOf(prisma, centerB.id, u9Class.id)) === undefined,
+  );
+  check(
+    "Clearing a cover leaves null (the card falls back)",
+    (await setClassCoverKey(prisma, centerA.id, u9Class.id, null)) === true &&
+      (await classCoverKeyOf(prisma, centerA.id, u9Class.id)) === null,
+  );
+  check(
+    "The card shows the cover, else the teacher photo, else nothing",
+    pickClassImage({ coverKey: "c/cover.x", teacherPhotoKey: "c/teacher.x" })?.kind === "cover" &&
+      pickClassImage({ coverKey: null, teacherPhotoKey: "c/teacher.x" })?.kind === "teacher" &&
+      pickClassImage({ coverKey: null, teacherPhotoKey: undefined }) === null,
+  );
+  const u9Src = classImageSrc(centerA.id, u9Class.id, { coverKey: u9CoverKey, teacherPhotoKey: u9PhotoKey });
+  check(
+    "The UI src is the signing route, never a storage key",
+    u9Src?.startsWith(`/api/class-images/${centerA.id}/${u9Class.id}?v=`) === true &&
+      !u9Src.includes(`${centerA.id}/cover`) &&
+      teacherPhotoSrc(centerA.id, teacher.id, null) === null &&
+      teacherPhotoSrc(centerA.id, teacher.id, u9PhotoKey)?.startsWith(`/api/teacher-photos/${centerA.id}/${teacher.id}?v=`) === true,
+    String(u9Src),
+  );
+  check(
+    "An audit payload for a photo or cover change carries ids and flags only",
+    forbiddenAuditKey({ hadPhoto: false }) === null &&
+      forbiddenAuditKey({ hasPhoto: true, by: "teacher" }) === null &&
+      forbiddenAuditKey({ hasCover: true, by: "branch" }) === null,
   );
 
   // The query primitive and the storage primitive fail the same way.

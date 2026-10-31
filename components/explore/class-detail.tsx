@@ -11,6 +11,8 @@ import type { ClassCardBadge } from "@/components/explore/class-card";
 import { formatDate, formatMoney, formatRating, formatTimeRange } from "@/lib/format";
 
 export type ClassDetailProps = {
+  /** U9 — the class cover, else the teacher's photo at this branch (signing-route path), else null. */
+  imageUrl?: string | null;
   gradeName: string | null;
   /** `pausedUntil` (U5): a platform admin's pause covers the branch's today. */
   branch: { name: string; href?: string; logoUrl: string | null; themeColor: string; pausedUntil?: Date | null };
@@ -33,6 +35,7 @@ export type ClassDetailProps = {
  * student or a count: seats arrive as a badge (docs/04 §11.24).
  */
 export async function ClassDetail({
+  imageUrl,
   gradeName,
   branch,
   teacher,
@@ -54,7 +57,11 @@ export async function ClassDetail({
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">
-      <Card className="lg:col-span-2">
+      <Card className="overflow-hidden lg:col-span-2">
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- private-media signing route, not optimisable by next/image
+          <img src={imageUrl} alt="" className="aspect-[16/9] max-h-72 w-full bg-surface-subtle object-cover object-top" />
+        ) : null}
         <CardHeader>
           <CardTitle>{t("detailsTitle")}</CardTitle>
         </CardHeader>

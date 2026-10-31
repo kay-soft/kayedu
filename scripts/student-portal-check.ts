@@ -53,6 +53,7 @@ import {
   publicBranchBySlug,
   publicBranchLogo,
   publicClassById,
+  publicClassImage,
   publicClassesForBranch,
   publicTeacherAt,
   searchPublicClasses,
@@ -809,7 +810,8 @@ async function checkPublicCatalog() {
 
   const ALLOWED_CLASS_KEYS = [
     // G2 (OD-14): F6's sessionBookingMode (OFF / INSTANT / APPROVAL) is the one booking field a public class carries (docs/02).
-    "endDate", "grade", "id", "price", "requiresConfirmation", "schedules", "seats",
+    // U9: imageUrl is the class card's signing-route path (cover, else the teacher's photo) — never a storage key.
+    "endDate", "grade", "id", "imageUrl", "price", "requiresConfirmation", "schedules", "seats",
     "sessionBookingMode", "startDate", "subject", "teacherName", "teacherRating", "teacherUserId",
   ].join(",");
   check(
@@ -817,6 +819,22 @@ async function checkPublicCatalog() {
     classes.every((item) => Object.keys(item).sort().join(",") === ALLOWED_CLASS_KEYS),
     Object.keys(classes[0] ?? {}).sort().join(","),
   );
+
+  // U9: the card's image is null until a cover or the teacher's photo exists, then a path under /api — never the key.
+  check("a class with no cover and no teacher photo has no image", classes.every((item) => item.imageUrl === null));
+  await prisma.classGroup.update({ where: { id: open.id }, data: { coverKey: `${listedBranch.id}/cover.${open.id}.v1.png` } });
+  const withCover = (await publicClassesForBranch(prisma, listedBranch, now)).find((item) => item.id === open.id);
+  check(
+    "a class with a cover gets the signing-route path, not the storage key",
+    withCover?.imageUrl === `/api/class-images/${listedBranch.id}/${open.id}?v=cover.${open.id}.v1.png` && !JSON.stringify(withCover).includes(`${listedBranch.id}/cover`),
+    String(withCover?.imageUrl),
+  );
+  check(
+    "a guest's image lookup resolves for a listed class and refuses an unlisted branch's class",
+    (await publicClassImage(prisma, listedBranch.id, open.id, now))?.kind === "cover" &&
+      (await publicClassImage(prisma, unlisted.id, unlistedClass.id, now)) === null,
+  );
+  await prisma.classGroup.update({ where: { id: open.id }, data: { coverKey: null } });
 
   const search = await searchPublicClasses(prisma, now, {});
   check("the class search never returns an unlisted branch class", !search.some((item) => item.id === unlistedClass.id));
