@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { branchDeleteBlocker } from "@/lib/db/branch-admin";
-import { branchTodayKey, liveBranchPause } from "@/lib/db/branch-pauses";
+import { liveBranchPause } from "@/lib/db/branch-pauses";
 import { prisma } from "@/lib/db/client";
 import { DEFAULT_CENTER_VISIBILITY_DAYS, DEFAULT_TEACHER_VISIBILITY_DAYS } from "@/lib/db/visibility";
 import {
@@ -34,6 +34,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
 import { ROUTES } from "@/lib/routes";
+import { centreTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 
 /**
  * A center's support view (spec §4.4 "controlled privileged support access").
@@ -62,14 +63,16 @@ export default async function AdminCenterDetailPage({
 
   const now = new Date();
   const deleted = center.deletedAt !== null;
-  const [stats, recentAudit, settings, todayKey, livePause, deleteBlocker] = await Promise.all([
+  const [stats, recentAudit, settings, livePause, deleteBlocker] = await Promise.all([
     platformCenterDetailStats(prisma, center.id),
     platformCenterAuditTrail(prisma, center.id),
     centerSettingsFor(prisma, center.id),
-    branchTodayKey(prisma, center.id, now),
     deleted ? null : liveBranchPause(prisma, center.id, now),
     deleted ? null : branchDeleteBlocker(prisma, center, now),
   ]);
+  // The branch's own day (not the admin's, not UTC's): the pause form's date floor and "current".
+  const today = todayInTimezone(centreTimeZone(settings), now);
+  const todayKey = dateKey(today);
   const tBranches = await getTranslations("AdminBranches");
 
   return (
@@ -149,7 +152,7 @@ export default async function AdminCenterDetailPage({
                         id: livePause.id,
                         startDate: livePause.startDate,
                         endDate: livePause.endDate,
-                        current: livePause.startDate.toISOString().slice(0, 10) <= todayKey,
+                        current: livePause.startDate <= today,
                       }
                     : null
                 }

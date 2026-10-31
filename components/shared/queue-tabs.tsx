@@ -34,6 +34,7 @@ export function QueueTabs({
   selectLabel,
   allKey = "all",
   param = "type",
+  keep,
 }: {
   tabs: QueueTab[];
   active: string;
@@ -42,10 +43,22 @@ export function QueueTabs({
   selectLabel: string;
   allKey?: string;
   param?: string;
+  /**
+   * Other query params a tab switch carries over (the teacher portal's
+   * `?branch=`). Empty values are dropped. Only the pill links need this — the
+   * phone `Select` already merges into the live query string.
+   */
+  keep?: Record<string, string | null | undefined>;
 }) {
   const locale = useLocale();
   const filters = useUrlFilters();
-  const hrefFor = (key: string) => (key === allKey ? basePath : `${basePath}?${param}=${key}`);
+  const hrefFor = (key: string) => {
+    const query = new URLSearchParams();
+    for (const [name, value] of Object.entries(keep ?? {})) if (value) query.set(name, value);
+    if (key !== allKey) query.set(param, key);
+    const search = query.toString();
+    return search ? `${basePath}?${search}` : basePath;
+  };
 
   return (
     <>

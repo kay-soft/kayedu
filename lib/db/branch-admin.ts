@@ -8,6 +8,7 @@ import {
   dateKey,
   dayMarker,
   findSessionConflicts,
+  todayInTimezone,
   zonedClock,
   type ExistingSession,
 } from "../scheduling.ts";
@@ -455,7 +456,7 @@ export type BranchDeleteResult = { ok: true; center: Center } | { ok: false; err
 /** A session of the branch that is live right now — started, not closed, not cancelled or moved. */
 async function hasLiveSession(db: Db, centerId: string, now: Date): Promise<boolean> {
   const timeZone = await centerTimeZone(db, centerId);
-  const today = dayMarker(zonedClock(now, timeZone).dayKey);
+  const today = todayInTimezone(timeZone, now);
   const rows = await db.session.findMany({
     where: {
       centerId,

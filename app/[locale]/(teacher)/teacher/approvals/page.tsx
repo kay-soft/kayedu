@@ -109,6 +109,7 @@ export default async function TeacherApprovalsPage({
         label={t("tabsLabel")}
         selectLabel={t("tabsSelectLabel")}
         allKey="enrolments"
+        keep={{ branch: branchFilter }}
       />
 
       {withBranch ? (
