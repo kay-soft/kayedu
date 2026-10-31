@@ -213,10 +213,10 @@ function staticChecks() {
 
   // Terms are a tenant table like any other; classes copy dates, never link.
   const schema = readFileSync("prisma/schema.prisma", "utf8");
-  const classGroupModel = schema.slice(
-    schema.indexOf("model ClassGroup {"),
-    schema.indexOf("}", schema.indexOf("model ClassGroup {")),
-  );
+  // The block ends at the first line that is only "}" — NOT the first "}",
+  // which a field comment can contain (U9's `{centerId}/` cut it short).
+  const classGroupModel = /^model ClassGroup \{[\s\S]*?^\}/m.exec(schema)?.[0];
+  if (!classGroupModel) throw new Error("class-periods-check: could not find `model ClassGroup { … }` in prisma/schema.prisma");
   check(
     "ClassGroup has startDate/endDate and NO term reference (dates are copied, not linked)",
     /^\s*startDate\s+DateTime\s*$/m.test(classGroupModel) &&

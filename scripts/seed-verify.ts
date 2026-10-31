@@ -46,6 +46,7 @@ import { activeChildLinks, hashFamilyCode } from "../lib/db/parents.ts";
 import { baselineGrantKeys, centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
 import { splitShare } from "../lib/money.ts";
 import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
+import { EXPECTED_TEACHER_NAV } from "./lib/expected-nav.ts";
 import { seedSubjectLinkCounts } from "../prisma/seed-data/catalog.ts";
 import { DEFAULT_SEED_EMAIL_DOMAIN, SEED_EMAIL_DOMAIN, mail } from "../prisma/seed-data/domain.ts";
 import { BRANCHES, DEV_FAMILY_CODES, seedAccounts, type StaffRole } from "../prisma/seed-data/plan.ts";
@@ -81,8 +82,7 @@ const EXPECTED_CENTER_NAV: Record<StaffRole, string[]> = {
   RECEPTIONIST: ["dashboard", "reception", "sessions", "students"],
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };
-// U7: Calendar joins the teacher, student and parent nav.
-const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements", "profile"];
+// U7: Calendar joins the teacher, student and parent nav. (Teacher list: scripts/lib/expected-nav.ts.)
 const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "discover", "reservations"];
 const EXPECTED_PARENT_NAV = ["schedule", "calendar"];
 const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog"];

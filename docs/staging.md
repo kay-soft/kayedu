@@ -108,6 +108,8 @@ Every `check:*` gate creates its own centres (slug), users (email) and a few glo
 - **`seed:verify` and fixtures.** Sections 1 (baseline), 3 (money), 4 (orphans) and 7 (counts) **leave gate fixtures out**; nothing is weakened for the seed world. Section 8 **"Gate fixtures left behind"** lists them: younger than 30 minutes is a **WARN** (a gate may still be running), 30 minutes or older is a **FAIL** (an interrupted gate left it). `npm run seed:verify -- --strict-clean` fails on *any* fixture, and `check:all` ends with exactly that. Sections 2, 5 and 6 and the SEC-2b invariants stay global: a leftover global catalog row can still fail section 6's name-uniqueness checks until its gate is re-run.
 - **Do not run `seed:verify` while a gate (or `check:all`) is running** — a gate's fixtures are legitimately present, and its catalog rows will trip section 6. Run it alone, after the run.
 
+- **The expected teacher nav is one hand-written list.** `EXPECTED_TEACHER_NAV` lives in `scripts/lib/expected-nav.ts` and is imported by `seed-verify.ts` and `permissions-check.ts`. It is deliberately **not** derived from `TEACHER_NAV` (an independent oracle). **A change to the teacher nav (`components/shell/nav.ts`) must update that file in the same change**, or both fail.
+
 ## 7. Reset staging
 
 Staging's own wipe ritual — the same fences as dev's, aimed at the staging project. It empties the `public` tables; `_prisma_migrations`, `auth.*` and `storage.*` stay.

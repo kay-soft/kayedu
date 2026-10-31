@@ -69,6 +69,7 @@ import {
   provisionCenterBaseline,
 } from "../lib/db/provision.ts";
 import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
+import { EXPECTED_TEACHER_NAV } from "./lib/expected-nav.ts";
 import { pageGateFor } from "./lib/nav-gates.ts";
 import {
   grantMembershipBranch,
@@ -374,8 +375,6 @@ const EXPECTED_NAV: Record<"OWNER" | "MANAGER" | "RECEPTIONIST" | "ACCOUNTANT", 
   RECEPTIONIST: ["dashboard", "reception", "sessions", "students"],
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };
-// U7: Calendar joins the teacher nav (no permission — the page asserts none).
-const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements"];
 
 async function navFor(centerId: string, userId: string, role: Role): Promise<string[]> {
   const relations = await resolveCenterRelations(prisma, userId);
