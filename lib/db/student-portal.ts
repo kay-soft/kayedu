@@ -2,13 +2,14 @@ import type { EnrollmentStatus, Prisma, PrismaClient, SessionBookingStatus, Sess
 // Relative imports on purpose — `npm run check:student-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/teacher-portal.ts and lib/db/discover.ts).
-import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
+import { EXCLUDE_DROP_IN_NO_SHOWS, attendanceDisplay } from "../attendance-rules.ts";
 import { CATALOG_OVERRIDE_SELECT, type CatalogNameOverride } from "../catalog.ts";
-import { DEFAULT_TIMEZONE, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
+import { DEFAULT_TIMEZONE, addDays, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
 import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
 import { NOT_MOVED_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
+import type { SessionLabelSource } from "../session-label.ts";
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
 const CANCELLED_STATUS: SessionStatus = "CANCELLED";
@@ -251,17 +252,22 @@ function studentUpcomingSessionInclude(centerId: string) {
  * at one center. R4: never a deactivated class's — its enrolments stay
  * ACTIVE so reactivating restores it, but it is off every forward-looking
  * list meanwhile.
+ *
+ * U7: the calendar reads one month — `toDate` bounds it, and
+ * `includeCancelled` keeps that month's cancelled sessions (shown struck
+ * through). Every other rule is the schedule's own.
  */
 export function studentUpcomingSessions(
   db: Db,
   centerId: string,
   studentProfileId: string,
   fromDate: Date,
+  options: { toDate?: Date; includeCancelled?: boolean } = {},
 ) {
   return db.session.findMany({
     where: scopedWhere(centerId, {
-      date: { gte: fromDate },
-      status: { not: CANCELLED_STATUS },
+      date: options.toDate ? { gte: fromDate, lte: options.toDate } : { gte: fromDate },
+      ...(options.includeCancelled ? {} : { status: { not: CANCELLED_STATUS } }),
       // U2 — a session rescheduled away is off the schedule; its replacement is on it.
       ...NOT_MOVED_SESSION,
       classGroup: { active: true, enrollments: { some: { studentProfileId, status: ACTIVE_ENROLLMENT } } },
@@ -388,12 +394,14 @@ export function studentPastAttendance(
   centerId: string,
   studentProfileId: string,
   uptoDate: Date,
+  // U7: the calendar's month start — a bounded read of the same rows.
+  options: { fromDate?: Date } = {},
 ) {
   const withSelection = { include: { selections: { where: { centerId } } } } as const;
   return db.sessionAttendee.findMany({
     where: scopedWhere(centerId, {
       studentProfileId,
-      session: { date: { lt: uptoDate } },
+      session: { date: options.fromDate ? { gte: options.fromDate, lt: uptoDate } : { lt: uptoDate } },
       // T5 — a drop-in's ABSENT row is a "never really came" record, not a
       // past session (lib/attendance-rules.ts).
       ...EXCLUDE_DROP_IN_NO_SHOWS,
@@ -413,4 +421,106 @@ export function studentPastAttendance(
     orderBy: { session: { date: "desc" } },
     take: 100,
   });
+}
+
+// ── Calendar (U7): one branch's month, from the schedule's own reads ────────
+
+export type StudentCalendarStatus = "PRESENT" | "LATE" | "ABSENT" | "UPCOMING" | "BOOKED" | "REQUESTED" | "CANCELLED";
+
+export type StudentCalendarEntry = {
+  sessionId: string;
+  centerId: string;
+  date: Date;
+  startTime: string;
+  endTime: string;
+  status: StudentCalendarStatus;
+  /** The session as `sessionLabelParts` reads it. */
+  session: SessionLabelSource;
+  roomName: string | null;
+};
+
+type CalendarSessionRow = SessionLabelSource & {
+  id: string;
+  date: Date;
+  startTime: string;
+  endTime: string;
+  room: { name: string } | null;
+  classGroup: (SessionLabelSource["classGroup"] & { room?: { name: string } | null }) | null;
+};
+
+/**
+ * One branch's month for a student's (or, through the parent portal, a
+ * child's) calendar — built only from the schedule's own reads and rules:
+ * - an enrolled session from the branch's `today` on is **Upcoming**, and a
+ *   cancelled one in the month is **Cancelled** (`studentUpcomingSessions`,
+ *   bounded to the month, cancelled kept);
+ * - what happened is the attendance row (`studentPastAttendance`, bounded):
+ *   **Present / Late / Absent** — `attendanceDisplay` with the session's own
+ *   closed state, so a live session's "not arrived" stays Upcoming for an
+ *   enrolled student and a drop-in who never came (T5) shows nothing;
+ * - a moved original (U2) never appears — both reads already leave it out
+ *   or it is skipped here — and a cancelled session never reads as attended.
+ * Single sessions booked or requested are the caller's (`studentBookedUpcoming`
+ * / `childBookedUpcoming`): an enrolled session wins over a booking.
+ */
+export async function studentCalendarMonth(
+  db: Db,
+  centerId: string,
+  studentProfileId: string,
+  range: { start: Date; end: Date },
+  today: Date,
+): Promise<StudentCalendarEntry[]> {
+  const [enrolled, attended] = await Promise.all([
+    studentUpcomingSessions(db, centerId, studentProfileId, range.start, { toDate: range.end, includeCancelled: true }),
+    studentPastAttendance(db, centerId, studentProfileId, addDays(range.end, 1), { fromDate: range.start }),
+  ]);
+
+  const bySession = new Map<string, StudentCalendarEntry>();
+  const entry = (session: CalendarSessionRow, status: StudentCalendarStatus): StudentCalendarEntry => ({
+    sessionId: session.id,
+    centerId,
+    date: session.date,
+    startTime: session.startTime,
+    endTime: session.endTime,
+    status,
+    session,
+    roomName: session.room?.name ?? session.classGroup?.room?.name ?? null,
+  });
+
+  for (const session of enrolled) {
+    if (session.status === CANCELLED_STATUS) bySession.set(session.id, entry(session, "CANCELLED"));
+    else if (session.date.getTime() >= today.getTime()) bySession.set(session.id, entry(session, "UPCOMING"));
+  }
+  for (const row of attended) {
+    if (row.session.rescheduledToId !== null || row.session.status === CANCELLED_STATUS) continue;
+    const shown = attendanceDisplay(row, row.session.closedAt !== null);
+    if (shown === "NOT_ARRIVED") continue;
+    bySession.set(row.session.id, entry(row.session, shown));
+  }
+  return [...bySession.values()];
+}
+
+/** A booked or requested single session as a calendar entry — unless the student is enrolled in it. */
+export function bookedCalendarEntries(
+  booked: BookedUpcomingSession[],
+  range: { start: Date; end: Date },
+  enrolledSessionIds: Set<string>,
+): StudentCalendarEntry[] {
+  return booked
+    .filter(
+      (entry) =>
+        !enrolledSessionIds.has(entry.session.id) &&
+        entry.session.date.getTime() >= range.start.getTime() &&
+        entry.session.date.getTime() <= range.end.getTime(),
+    )
+    .map((entry) => ({
+      sessionId: entry.session.id,
+      centerId: entry.centerId,
+      date: entry.session.date,
+      startTime: entry.session.startTime,
+      endTime: entry.session.endTime,
+      status: entry.bookingStatus === "CONFIRMED" ? "BOOKED" : "REQUESTED",
+      session: entry.session,
+      roomName: entry.session.room?.name ?? entry.session.classGroup?.room?.name ?? null,
+    }));
 }

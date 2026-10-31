@@ -159,6 +159,15 @@ export function formatMonthYear(value: Date, locale: string): string {
   }).format(value);
 }
 
+/**
+ * Which weekday a calendar week opens on, per locale: Saturday in Arabic (as
+ * in Egypt), Sunday in English. One rule for every month grid — the date
+ * control's (`components/ui/calendar.tsx`) and the session calendar's (U7).
+ */
+export function calendarWeekStart(locale: string): number {
+  return locale === "ar" ? 6 : 0;
+}
+
 /** The single-letter column heading for a weekday, e.g. "M" / "ن". */
 export function formatWeekdayNarrow(value: Date, locale: string): string {
   return new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {

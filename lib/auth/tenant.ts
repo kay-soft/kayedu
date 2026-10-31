@@ -337,7 +337,7 @@ export const getStudentContexts = cache(
 );
 
 export type TeacherSession =
-  | { hasCenter: true; ctx: TenantContext; relations: CenterRelation[] }
+  | { hasCenter: true; user: User; relations: CenterRelation[] }
   | { hasCenter: false; user: User; relations: CenterRelation[] };
 
 /**
@@ -358,25 +358,16 @@ export async function requireTeacherUser(): Promise<TeacherSession> {
   const relations = await getUserCenterRelations(user.id);
   const hasTeacherCenter = relations.some((relation) => relation.roles.includes("TEACHER"));
 
-  if (!hasTeacherCenter) return { hasCenter: false, user, relations };
-
-  const ctx = await getTenantContext("teacher");
-  return { hasCenter: true, ctx, relations };
+  // U7: which branch(es) the portal reads is `getTeacherScope()`'s concern
+  // (`lib/auth/teacher-scope.ts`) — All branches by default, never the staff
+  // experience's `kayedu_center`.
+  return { hasCenter: hasTeacherCenter, user, relations };
 }
-
-/** The platform default before a student has connected anywhere (docs/04 §2). */
-const DEFAULT_STUDENT_BRAND = {
-  name: "KayEdu",
-  logoUrl: null as string | null,
-  themeColor: "#2563EB",
-};
 
 export type StudentSession = {
   user: User;
-  /** Every center this user is connected to, in any role — for "switch center". */
+  /** Every center this user is connected to, in any role. */
   relations: CenterRelation[];
-  /** The relation to brand the student shell with — the first STUDENT one, if any. */
-  studentRelation: CenterRelation | null;
 };
 
 /**
@@ -387,28 +378,18 @@ export type StudentSession = {
  * user can even reach Discover would make that self-serve path unreachable —
  * `getTenantContext` redirects a zero-relation user to `/select-center`
  * before any role check runs. This only requires a signed-in `User`; a person
- * with zero relations anywhere still gets a `StudentSession` (with
- * `studentRelation: null`), rendered with the platform default brand instead
- * of a center's theme, so they can browse and make their first reservation.
+ * with zero relations anywhere still gets a `StudentSession`, so they can
+ * browse and make their first reservation. Every student shell carries the
+ * platform brand (U7).
  */
 export async function requireStudentUser(): Promise<StudentSession> {
   const user = await getCurrentUser();
   if (!user) return redirectTo(ROUTES.login);
 
   const relations = await getUserCenterRelations(user.id);
-  const studentRelation =
-    relations.find((relation) => relation.roles.includes("STUDENT")) ?? null;
-
-  return { user, relations, studentRelation };
-}
-
-export function studentBrand(session: StudentSession) {
-  if (!session.studentRelation) return DEFAULT_STUDENT_BRAND;
-  return {
-    name: session.studentRelation.center.name,
-    logoUrl: centerLogoSrc(session.studentRelation.center),
-    themeColor: session.studentRelation.center.themeColor,
-  };
+  // U7: the student shell names no branch and offers no switcher — the
+  // portal is the student's own data across every branch.
+  return { user, relations };
 }
 
 export type ParentChildOption = {
@@ -493,6 +474,46 @@ export async function landingWithoutBranch(
   const home = await homeWithoutBranch(user);
   if (home !== ROUTES.selectCenter) return home;
   return onboardingPath(user) ?? home;
+}
+
+export type ExperienceHome = { href: string; centerId?: string };
+
+/**
+ * Where a signed-in person lands (U7, spec §4.3 item 0): straight into their
+ * one experience, or `null` when they hold several and the hub offers them.
+ * An experience is the student portal (a profile at any branch), the teacher
+ * portal (a TEACHER role at any branch — it opens in All branches), the parent
+ * portal (an active family link), the platform console, or **one staff
+ * branch** each (and a Whole Management roll-up). So a student at two
+ * branches or a teacher at two branches has one experience, and a manager who
+ * also teaches has two. `centerId` is the staff branch to make active. With
+ * none at all, `landingWithoutBranch` decides (onboarding or the empty hub).
+ */
+export async function singleExperienceHome(
+  user: Pick<User, "id" | "isPlatformAdmin" | "signupIntent" | "gradeId">,
+): Promise<ExperienceHome | null> {
+  const homes = await experienceHomes(user);
+  if (homes.length === 0) return { href: await landingWithoutBranch(user) };
+  return homes.length === 1 ? homes[0] : null;
+}
+
+/** Every experience this person holds, one home each — see `singleExperienceHome`. */
+export async function experienceHomes(user: Pick<User, "id" | "isPlatformAdmin">): Promise<ExperienceHome[]> {
+  const [relations, orgGroups, children] = await Promise.all([
+    getUserCenterRelations(user.id),
+    getOwnerOrgGroups(user.id),
+    getParentChildren(user.id),
+  ]);
+  return [
+    ...relations
+      .filter((relation) => relation.roles.some((role) => isCenterStaffRole(role)))
+      .map((relation) => ({ href: ROUTES.centerDashboard, centerId: relation.center.id })),
+    ...orgGroups.map(() => ({ href: ROUTES.centerDashboard })),
+    ...(relations.some((relation) => relation.roles.includes("TEACHER")) ? [{ href: ROUTES.teacherDashboard }] : []),
+    ...(relations.some((relation) => relation.roles.includes("STUDENT")) ? [{ href: ROUTES.studentSchedule }] : []),
+    ...(children.linked.length > 0 ? [{ href: ROUTES.parentHome }] : []),
+    ...(user.isPlatformAdmin ? [{ href: ROUTES.adminCenters }] : []),
+  ];
 }
 
 export type ParentSession = {

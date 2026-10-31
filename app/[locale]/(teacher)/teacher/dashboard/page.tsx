@@ -1,12 +1,10 @@
 import { Building2, CalendarClock, CalendarDays, Coins, Star } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatGrid } from "@/components/shared/stat-grid";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -14,7 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan } from "@/lib/auth/tenant";
+import { getTeacherScope } from "@/lib/auth/teacher-scope";
 import { prisma } from "@/lib/db/client";
 import { teacherRatingAverage } from "@/lib/db/ratings";
 import {
@@ -32,16 +31,17 @@ import { LinkButton } from "@/components/shared/link-button";
 
 /**
  * The teacher dashboard (spec §4.2 item 0/1, docs/03 M7): a combined summary
- * across every center this teacher belongs to, plus one card per center with
- * that center's own schedule/earnings — each computed by its own centerId-
- * scoped query (`teacherCenterSummary`) and only *unioned* here in memory
- * (docs/01 §4 "Teacher cross-center visibility"). Switching which center is
- * active reuses the existing `/select-center` cookie flow — the same one the
- * shell's "Switch center" link already drives.
+ * across the branches in view — every branch under All branches (U7, the
+ * default), or the one the switcher picked — plus one card per branch with
+ * that branch's own schedule/earnings, each computed by its own centerId-
+ * scoped query (`teacherCenterSummary`) and only *summed* here in memory
+ * (docs/01 §4 "Teacher cross-center visibility"). A branch card opens that
+ * branch's sessions through the Branch filter — no switching needed.
  */
 export default async function TeacherDashboardPage() {
-  const ctx = await getTenantContext("teacher");
-  const contexts = await getTeacherContexts(ctx.user.id);
+  const scope = await getTeacherScope();
+  const contexts = scope.inView;
+  const user = scope.user;
   const t = await getTranslations("TeacherDashboard");
   const tRoles = await getTranslations("Roles");
   const locale = await getLocale();
@@ -59,12 +59,12 @@ export default async function TeacherDashboardPage() {
       return teacherCenterSummary(
         prisma,
         centerCtx.center.id,
-        ctx.user.id,
+        user.id,
         today,
         week,
         { from: month.start, to: month.end },
         // U6: the teacher's own history preference, per branch calendar.
-        teacherPortalHistoryFloor({ user: ctx.user, settings: centerCtx.settings }, now),
+        teacherPortalHistoryFloor({ user, settings: centerCtx.settings }, now),
       );
     }),
   );
@@ -85,15 +85,19 @@ export default async function TeacherDashboardPage() {
   // every other reader of this aggregate gets — a teacher reading their own
   // rating is never shown a count either, and there is no separate,
   // privileged rating query for this page to call.
-  const rating = await teacherRatingAverage(prisma, ctx.user.id);
+  const rating = await teacherRatingAverage(prisma, user.id);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={t("title")}
-        description={t("subtitle", { center: ctx.center.name })}
+        description={
+          scope.selected
+            ? t("subtitle", { center: scope.selected.center.name })
+            : t("subtitleAll", { count: contexts.length })
+        }
         // A role is a fact, not an action — and not a status (docs/04 §14.1).
-        meta={<Badge variant="neutral">{tRoles(ctx.role)}</Badge>}
+        meta={<Badge variant="neutral">{tRoles("TEACHER")}</Badge>}
       />
 
       <StatGrid count={earningsVisibleAt.size > 0 ? 5 : 4}>
@@ -134,7 +138,6 @@ export default async function TeacherDashboardPage() {
         <CardContent className="flex flex-col gap-3">
           {contexts.map((centerCtx) => {
             const summary = summaryByCenter.get(centerCtx.center.id);
-            const isActive = centerCtx.center.id === ctx.center.id;
 
             return (
               <div
@@ -149,12 +152,7 @@ export default async function TeacherDashboardPage() {
                     size="lg"
                   />
                   <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-text-primary">
-                      {centerCtx.center.name}
-                      {isActive ? (
-                        <Badge variant="brand">{t("centers.active")}</Badge>
-                      ) : null}
-                    </p>
+                    <p className="truncate text-sm font-semibold text-text-primary">{centerCtx.center.name}</p>
                     <p className="mt-1 text-xs text-text-secondary">
                       {t("centers.summary", {
                         // Formatted here: a plain ICU placeholder prints a raw
@@ -169,19 +167,17 @@ export default async function TeacherDashboardPage() {
                   </div>
                 </div>
 
-                {isActive ? (
-                  <LinkButton href={ROUTES.teacherSessions} className="shrink-0">
-                    {t("centers.viewSchedule")}
-                  </LinkButton>
-                ) : (
-                  <form action={selectCenterAction} className="shrink-0">
-                    <input type="hidden" name="locale" value={locale} />
-                    <input type="hidden" name="centerId" value={centerCtx.center.id} />
-                    <Button type="submit" variant="outline" className="h-11 w-full px-4 sm:w-auto">
-                      {t("centers.switchTo")}
-                    </Button>
-                  </form>
-                )}
+                {/* U7: the branch's own sessions, through the Branch filter. */}
+                <LinkButton
+                  href={
+                    contexts.length > 1
+                      ? `${ROUTES.teacherSessions}?branch=${encodeURIComponent(centerCtx.center.id)}`
+                      : ROUTES.teacherSessions
+                  }
+                  className="shrink-0"
+                >
+                  {t("centers.viewSchedule")}
+                </LinkButton>
               </div>
             );
           })}

@@ -48,6 +48,13 @@ const wholeNumber = (max: number) =>
 
 const base = { locale: localeSchema };
 
+/**
+ * U7: the branch a teacher write is for — the row's own branch, or a form's
+ * Branch select. Untrusted: the action re-resolves it through the actor's own
+ * relations (`teacherBranchContext`) and re-finds the row there.
+ */
+const branchRef = { centerId: recordId };
+
 // ── Sessions: list filters, description edit ────────────────────────────────
 
 export const teacherSessionRangeSchema = z.enum(["day", "week", "month"]);
@@ -103,6 +110,7 @@ export const teacherSessionListFilterSchema = teacherSessionDateSchema.extend({
  */
 export const teacherSessionDescriptionSchema = z.object({
   ...base,
+  ...branchRef,
   sessionId: recordId,
   description: optionalText(500),
 });
@@ -111,12 +119,14 @@ export const teacherSessionDescriptionSchema = z.object({
 
 export const teacherBlockStudentSchema = z.object({
   ...base,
+  ...branchRef,
   studentProfileId: recordId,
   reason: optionalText(200),
 });
 
 export const teacherUnblockStudentSchema = z.object({
   ...base,
+  ...branchRef,
   blockId: recordId,
 });
 
@@ -141,6 +151,7 @@ export const MAX_REQUEST_LATE_THRESHOLD_MINUTES = 240;
 export const classRequestSchema = z
   .object({
     ...base,
+    ...branchRef,
     subjectId: optionalRef,
     gradeId: optionalRef,
     dayOfWeek,
@@ -183,6 +194,7 @@ const sessionDate = dateKeyField;
 export const sessionRequestSchema = z
   .object({
     ...base,
+    ...branchRef,
     classGroupId: recordId,
     date: sessionDate,
     startTime: timeValue,
@@ -193,6 +205,13 @@ export const sessionRequestSchema = z
     path: ["endTime"],
     message: "invalidTimeRange",
   });
+
+/** A teacher's decision on one of their own requests or bookings (U7: names its branch). */
+export const teacherApprovalIdSchema = z.object({
+  ...base,
+  ...branchRef,
+  id: recordId,
+});
 
 // ── Action state ────────────────────────────────────────────────────────────
 

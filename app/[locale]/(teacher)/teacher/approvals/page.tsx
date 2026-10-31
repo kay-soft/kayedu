@@ -14,7 +14,9 @@ import { RequestCard } from "@/components/shared/request-card";
 import { ResultsRegion } from "@/components/shared/results-region";
 import { SectionHeader } from "@/components/shared/section-header";
 import { getPendingTeacherApprovalCounts } from "@/lib/auth/approval-counts";
-import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { ctxCan, requirePermission } from "@/lib/auth/tenant";
+import { branchesInView, firstGranting, getTeacherScope } from "@/lib/auth/teacher-scope";
+import { BranchFilter } from "@/components/teacher/branch-filter";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatTimeRange } from "@/lib/format";
@@ -36,31 +38,61 @@ type TeacherApprovalsTab = (typeof TEACHER_APPROVALS_TABS)[number];
  * Renders the same `RequestCard` queue the centre screen does, deliberately
  * (docs/04 §11.3): a teacher and a manager are reading the same kind of
  * request and should not have to learn two layouts.
+ *
+ * U7: across the branches in view that grant `reservation.manage.own` — a
+ * branch that does not grant it contributes no rows, exactly as its own page
+ * gate refused before — one scoped read per branch, unioned oldest first.
+ * Each card names its branch and carries it to the action, which re-resolves
+ * it and re-checks the grant there.
  */
 export default async function TeacherApprovalsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string }>;
+  searchParams: Promise<{ type?: string; branch?: string }>;
 }) {
-  const ctx = await getTenantContext("teacher");
+  const scope = await getTeacherScope();
+  const ctx = firstGranting(scope, "reservation.manage.own");
   await requirePermission(ctx, "reservation.manage.own");
-  const db = scoped(ctx);
+  const granting = scope.inView.filter((branch) => ctxCan(branch, "reservation.manage.own"));
+  const withBranch = granting.length > 1;
 
-  const { type: rawType } = await searchParams;
+  const { type: rawType, branch: rawBranch } = await searchParams;
+  const listed = branchesInView({ ...scope, inView: granting }, rawBranch);
+  const branchFilter = withBranch && listed.length === 1 ? listed[0].center.id : null;
   // F7 — two tabs; Enrolments is the bare URL.
   const tab: TeacherApprovalsTab = rawType === "bookings" ? "bookings" : "enrolments";
 
   const t = await getTranslations("TeacherApprovals");
+  const tScope = await getTranslations("TeacherScope");
   const locale = await getLocale();
 
   // The tabs, the header and the sidebar badge are one `pendingTeacherApprovalCounts`
-  // read — pinned to the classes this teacher teaches, like the rows below.
-  const counts = await getPendingTeacherApprovalCounts(ctx);
-  const [reservations, bookings] = await Promise.all([
-    tab === "enrolments" ? db.reservations.listPendingForTeacher(ctx.user.id) : [],
-    // F6 — pinned to the classes this teacher teaches, like reservations.
-    tab === "bookings" ? db.sessionBookings.listPending({ teacherId: ctx.user.id }) : [],
-  ]);
+  // read per branch — pinned to the classes this teacher teaches, like the rows below.
+  const perBranch = await Promise.all(
+    listed.map(async (branch) => {
+      const db = scoped(branch);
+      const [counts, reservations, bookings] = await Promise.all([
+        getPendingTeacherApprovalCounts(branch),
+        tab === "enrolments" ? db.reservations.listPendingForTeacher(branch.user.id) : [],
+        // F6 — pinned to the classes this teacher teaches, like reservations.
+        tab === "bookings" ? db.sessionBookings.listPending({ teacherId: branch.user.id }) : [],
+      ]);
+      return { branch: branch.center, counts, reservations, bookings };
+    }),
+  );
+  const counts = {
+    total: perBranch.reduce((sum, entry) => sum + entry.counts.total, 0),
+    enrolments: perBranch.reduce((sum, entry) => sum + entry.counts.enrolments, 0),
+    bookings: perBranch.reduce((sum, entry) => sum + entry.counts.bookings, 0),
+  };
+  // Oldest first across branches (F7).
+  const reservations = perBranch
+    .flatMap((entry) => entry.reservations.map((reservation) => ({ ...reservation, branch: entry.branch })))
+    .sort((a, b) => a.requestedAt.getTime() - b.requestedAt.getTime());
+  const bookings = perBranch
+    .flatMap((entry) => entry.bookings.map((booking) => ({ ...booking, branch: entry.branch })))
+    .sort((a, b) => a.requestedAt.getTime() - b.requestedAt.getTime());
+  const branchDetail = (branch: { name: string }) => (withBranch ? [{ label: tScope("branch"), value: branch.name }] : []);
 
   return (
     <div className="flex flex-col gap-6">
@@ -78,6 +110,13 @@ export default async function TeacherApprovalsPage({
         selectLabel={t("tabsSelectLabel")}
         allKey="enrolments"
       />
+
+      {withBranch ? (
+        <BranchFilter
+          branches={granting.map((branch) => ({ id: branch.center.id, name: branch.center.name }))}
+          value={branchFilter ?? ""}
+        />
+      ) : null}
 
       <ResultsRegion className="flex flex-col gap-6">
       {tab === "enrolments" ? (
@@ -114,7 +153,8 @@ export default async function TeacherApprovalsPage({
                 requestedOn={t("requestedOn", {
                   date: formatDate(reservation.requestedAt, locale),
                 })}
-                actions={<TeacherReservationActions id={reservation.id} />}
+                details={branchDetail(reservation.branch)}
+                actions={<TeacherReservationActions id={reservation.id} centerId={reservation.branch.id} />}
               />
             );
           })
@@ -143,6 +183,7 @@ export default async function TeacherApprovalsPage({
                 headline={[t("bookingHeadline"), classLabel].filter(Boolean).join(" — ")}
                 requestedOn={t("requestedOn", { date: formatDate(booking.requestedAt, locale) })}
                 details={[
+                  ...branchDetail(booking.branch),
                   { label: t("bookingDate"), value: formatDate(booking.session.date, locale) },
                   {
                     label: t("bookingTime"),
@@ -153,6 +194,7 @@ export default async function TeacherApprovalsPage({
                 actions={
                   <BookingActions
                     id={booking.id}
+                    centerId={booking.branch.id}
                     approveAction={approveOwnBookingAction}
                     declineAction={declineOwnBookingAction}
                   />

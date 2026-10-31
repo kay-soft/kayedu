@@ -205,6 +205,9 @@ Blue KPI border; hand-labelled filter grid (in `session-filters.tsx`). **R10a:**
 
 **DES:** "Request a new session" is a closed disclosure above the list (docs/04 §14.9); Arabic counts in Arabic-Indic digits with proper plural forms.
 
+### `app/[locale]/(teacher)/teacher/calendar/page.tsx` — **U7 (new)**
+The teacher's month calendar on the shared `SessionCalendar` (docs/04 §11.28): Held green, Upcoming blue, Cancelled grey, a legend, and the tapped day's sessions below with a text badge, branch (under All branches), room, present/late/absent counts and a link to each session. A Branch filter under All branches. Dots only at 375px, 44px day targets.
+
 ### `app/[locale]/(teacher)/teacher/students/page.tsx`
 Consistent. No change.
 
@@ -237,6 +240,9 @@ Consistent. No change.
 
 **DES:** upcoming sessions show eight, then "Show N more" (`CappedList`, docs/04 §14.9).
 
+### `app/[locale]/(student)/student/calendar/page.tsx` — **U7 (new)**
+The student's month calendar on the shared `SessionCalendar` (docs/04 §11.28) across every branch: Present green, Late amber, Absent red, Upcoming blue, Booked blue ring, Requested dashed amber, Cancelled grey struck through; a legend; the tapped day's sessions below, each with a text badge, its branch and room. No branch switcher anywhere in the student shell (U7).
+
 ### `app/[locale]/(student)/student/discover/page.tsx`
 Filter labels hand-built (in `discover-filters.tsx`). **R10a:** `FilterField`. The class card's subject-accent top border is the documented rotating subject palette (docs/04 §2), not a status colour.
 **F4:** the grade filter is pre-selected from the student's account grade; its "All" option posts the explicit `all` when a grade is pre-selected.
@@ -265,6 +271,9 @@ Redirect only. No change.
 **T7:** the selected child's booked and requested single sessions appear in Upcoming with the same Booked / Requested badges (read-only, through the same reads as the student schedule).
 "No children linked" was a bare muted sentence in a padded card. **R10a:** `EmptyState`.
 **F3:** zero linked children → a card with the info `EmptyState` "No child linked yet" whose action is a code field + **Continue** (it writes nothing — it carries the code to `/family/join` in the URL fragment) and the "where to get a code" line under it. Linked children at no branch yet → an info `EmptyState` naming them. Otherwise as before, with a ghost **Link another child** (to Account → Family) as the header action and an info line naming any linked child who has not joined a branch.
+
+### `app/[locale]/(parent)/parent/calendar/page.tsx` — **U7 (new)**
+The selected child's month calendar, read-only, on the shared `SessionCalendar` — the same colours, legend and day list as the student's own. The child selector above it (`?child=`, kept while moving between months); no child at a branch → an info `EmptyState` with a link back to the parent portal.
 
 ---
 

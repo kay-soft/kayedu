@@ -6,9 +6,9 @@ import {
   type PendingRatingSessionView,
 } from "@/app/[locale]/(student)/rating-popup";
 import { ProfileCompletionForm } from "@/app/[locale]/(student)/student/profile/profile-completion-form";
-import { shellScope, shellUser, type ShellFrame } from "@/components/shell/from-context";
+import { PLATFORM_BRAND, shellUser, type ShellFrame } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
-import { requireStudentUser, studentBrand } from "@/lib/auth/tenant";
+import { requireStudentUser } from "@/lib/auth/tenant";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { centerGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
@@ -131,7 +131,7 @@ export async function studentShell({ interruptions = true }: { interruptions?: b
       props: {
         experience: "student",
         nav: navForExperience("student", "STUDENT"),
-        brand: studentBrand(session),
+        brand: PLATFORM_BRAND,
         user: shellUser(session.user, "STUDENT"),
         defaultCollapsed,
       },
@@ -166,9 +166,11 @@ export async function studentShell({ interruptions = true }: { interruptions?: b
     props: {
       experience: "student",
       nav: navForExperience("student", "STUDENT"),
-      brand: studentBrand(session),
+      // U7: the student portal is the student's own data across every branch
+      // — no branch switcher and no branch in the shell; each class, session
+      // and booking names its own branch.
+      brand: PLATFORM_BRAND,
       user: shellUser(session.user, "STUDENT"),
-      scope: shellScope(session.relations, [], session.studentRelation?.center.id ?? null),
       defaultCollapsed,
     },
     lead: interruptions ? <RatingPopup sessions={pendingRatings} /> : null,

@@ -18,7 +18,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan } from "@/lib/auth/tenant";
+import { branchesInView, getTeacherScope, showsBranches } from "@/lib/auth/teacher-scope";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
@@ -28,7 +29,7 @@ import { clampRangeToVisibility } from "@/lib/db/visibility";
 import { formatDate, formatDay, formatNumber, formatTime, formatTimeRange } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
-import { addDays, centreTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
+import { addDays, centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 import { closeEndedSessions } from "@/lib/db/session-lifecycle";
 import { prisma } from "@/lib/db/client";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
@@ -50,18 +51,20 @@ const STATUS_BADGE = {
 const RANGE_SPAN_DAYS = { day: 0, week: 6, month: 29 } as const;
 
 /**
- * The teacher's own session list, across every class they teach at the
- * *active* center only (spec §4.2 item 2: "search by student, filter by
- * date/status/grade... future sessions list"). Switching to a different
- * center is the same `/select-center` flow the dashboard's per-center cards
- * use — this page never queries more than one center at a time.
+ * The teacher's own session list (spec §4.2 item 2: "search by student, filter
+ * by date/status/grade... future sessions list"). U7: across every branch in
+ * view — All branches by default — as a **union of per-branch scoped reads**
+ * (`scoped(ctx).sessions.search` per branch, merged and paged in memory),
+ * never one query spanning branches. Each branch resolves its own "today"
+ * (R7b) and its own history floor (U6); each row names its branch, and the
+ * Branch filter (`?branch=`) narrows to one.
  */
 export default async function TeacherSessionsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const ctx = await getTenantContext("teacher");
+  const scope = await getTeacherScope();
   const rawParams = await searchParams;
   const parsed = teacherSessionListFilterSchema.safeParse(rawParams);
   // Same rule as the centre list: the date the teacher picked survives a
@@ -73,64 +76,91 @@ export default async function TeacherSessionsPage({
   const filters = parsed.success
     ? parsed.data
     : { ...dates, gradeId: null, status: null, q: null };
+  const branches = branchesInView(scope, rawParams.branch);
+  const withBranch = showsBranches(scope);
+  const branchFilter = withBranch && branches.length === 1 ? branches[0].center.id : null;
 
-  // R7b: the active centre's calendar day — the same "today" the centre's own
-  // sessions list and the reception desk use.
-  const now = new Date();
-  const timeZone = centreTimeZone(ctx.settings);
-  const today = todayInTimezone(timeZone, now);
-  const anchor = filters.date ? new Date(`${filters.date}T00:00:00.000Z`) : today;
-  const requestedTo = addDays(anchor, RANGE_SPAN_DAYS[filters.range]);
-  // U6: the teacher's own history preference (0 = all history, the default)
-  // is the only limit here — never a centre window. A range wholly before the
-  // floor reads as empty (start after end).
-  const { start: from, end: to } = clampRangeToVisibility(
-    { start: anchor, end: requestedTo },
-    teacherPortalHistoryFloor(ctx, now),
-  );
-
-  const db = scoped(ctx);
   const t = await getTranslations("TeacherSessions");
   const tCommon = await getTranslations("Settings.common");
   const tStatus = await getTranslations("Sessions.status");
   const tSessions = await getTranslations("Sessions");
   const locale = await getLocale();
+  const now = new Date();
 
-  // R2's lazy end-of-day close for this teacher's sessions in view.
-  // A write, so it covers the whole requested range, not the history view.
-  await closeEndedSessions(prisma, ctx.center.id, now, { from: anchor, to: requestedTo, teacherId: ctx.user.id });
+  const perBranch = await Promise.all(
+    branches.map(async (ctx) => {
+      // R7b: each branch's own calendar day — the same "today" its own
+      // sessions list and reception desk use.
+      const timeZone = centreTimeZone(ctx.settings);
+      const today = todayInTimezone(timeZone, now);
+      const anchor = filters.date ? new Date(`${filters.date}T00:00:00.000Z`) : today;
+      const requestedTo = addDays(anchor, RANGE_SPAN_DAYS[filters.range]);
+      // U6: the teacher's own history preference (0 = all history, the
+      // default) is the only limit here — never a centre window. A range
+      // wholly before the floor reads as empty (start after end).
+      const { start: from, end: to } = clampRangeToVisibility(
+        { start: anchor, end: requestedTo },
+        teacherPortalHistoryFloor(ctx, now),
+      );
+      // R2's lazy end-of-day close for this teacher's sessions in view.
+      // A write, so it covers the whole requested range, not the history view.
+      await closeEndedSessions(prisma, ctx.center.id, now, { from: anchor, to: requestedTo, teacherId: ctx.user.id });
 
-  const [rows, grades, ownClasses] = await Promise.all([
-    db.sessions.search({
-      where: teacherSessionListWhere({
-        teacherId: ctx.user.id,
-        from,
-        to,
-        gradeId: filters.gradeId,
-        studentQuery: filters.q,
-      }),
+      const db = scoped(ctx);
+      const [rows, grades] = await Promise.all([
+        db.sessions.search({
+          where: teacherSessionListWhere({
+            teacherId: ctx.user.id,
+            from,
+            to,
+            gradeId: filters.gradeId,
+            studentQuery: filters.q,
+          }),
+        }),
+        db.grades.list({ active: true }),
+      ]);
+      return {
+        rows: rows.map((row) => ({
+          row,
+          branch: ctx.center,
+          displayStatus: deriveSessionDisplayStatus(row, now, timeZone),
+        })),
+        grades,
+      };
     }),
-    db.grades.list({ active: true }),
-    db.classGroups.list({ teacherId: ctx.user.id, active: true }),
-  ]);
+  );
 
-  const canRequestSession =
-    ctxCan(ctx, "changeRequest.create") && (ctx.membership?.isTrustedTeacher ?? false);
-  const classOptions = ownClasses.map((classGroup) => ({
-    value: classGroup.id,
-    label:
-      [
-        classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
-        classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || tCommon("none"),
-  }));
+  // "Request a session" goes to one branch: only branches that grant
+  // `changeRequest.create` and mark this teacher trusted (M10), each with its
+  // own classes. The action re-resolves the branch it is sent.
+  const requestBranches = scope.inView.filter(
+    (ctx) => ctxCan(ctx, "changeRequest.create") && (ctx.membership?.isTrustedTeacher ?? false),
+  );
+  const requestOptions = await Promise.all(
+    requestBranches.map(async (ctx) => ({
+      id: ctx.center.id,
+      name: ctx.center.name,
+      classes: (await scoped(ctx).classGroups.list({ teacherId: ctx.user.id, active: true })).map((classGroup) => ({
+        value: classGroup.id,
+        label:
+          [
+            classGroup.subject ? catalogLabelWithSelection(locale, classGroup.subject) : null,
+            classGroup.grade ? catalogLabelWithSelection(locale, classGroup.grade) : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || tCommon("none"),
+      })),
+    })),
+  );
 
-  const withStatus = rows.map((row) => ({
-    row,
-    displayStatus: deriveSessionDisplayStatus(row, now, timeZone),
-  }));
+  const withStatus = perBranch
+    .flatMap((entry) => entry.rows)
+    .sort(
+      (a, b) =>
+        a.row.date.getTime() - b.row.date.getTime() ||
+        a.row.startTime.localeCompare(b.row.startTime) ||
+        a.branch.name.localeCompare(b.branch.name),
+    );
   const filtered = filters.status
     ? withStatus.filter((entry) => entry.displayStatus === filters.status)
     : withStatus;
@@ -140,10 +170,17 @@ export default async function TeacherSessionsPage({
   const total = filtered.length;
   const pageEntries = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  // `grades` comes from `scoped(ctx).grades.list()`, which already resolves
-  // `.name` to this centre's own display-name override or the catalog
-  // entry's bilingual name.
-  const gradeOptions = grades.map((grade) => ({ value: grade.id, label: grade.name }));
+  // Each branch's `scoped(ctx).grades.list()` resolves `.name` to that
+  // branch's own display-name override; a catalog grade id means the same
+  // grade everywhere (M13), so the union keeps one option per id.
+  const gradeOptions = [
+    ...new Map(
+      perBranch.flatMap((entry) => entry.grades).map((grade) => [grade.id, { value: grade.id, label: grade.name }]),
+    ).values(),
+  ];
+  // The date picker's "today" marker: the zone every branch in view shares,
+  // else the platform default — cosmetic; each query used its own day.
+  const todayIso = dateKey(todayInTimezone(commonTimeZone(branches.map((ctx) => centreTimeZone(ctx.settings))), now));
   const upcomingCount = withStatus.filter(
     (entry) => entry.displayStatus === "SCHEDULED" || entry.displayStatus === "LIVE",
   ).length;
@@ -155,6 +192,7 @@ export default async function TeacherSessionsPage({
     if (filters.gradeId) params.set("gradeId", filters.gradeId);
     if (filters.status) params.set("status", filters.status);
     if (filters.q) params.set("q", filters.q);
+    if (branchFilter) params.set("branch", branchFilter);
     if (targetPage > 1) params.set("page", String(targetPage));
     const qs = params.toString();
     return qs ? `${ROUTES.teacherSessions}?${qs}` : ROUTES.teacherSessions;
@@ -180,7 +218,7 @@ export default async function TeacherSessionsPage({
       {/* A request is occasional; the list is what a teacher came for. The
           form is a disclosure, closed until asked for (DES, docs/04 §14.9) —
           it had sat fully open above the list. */}
-      {canRequestSession ? (
+      {requestOptions.length > 0 ? (
         <Card className="gap-0 py-0">
           <details className="group">
             <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 focus-ring md:px-5 [&::-webkit-details-marker]:hidden">
@@ -194,7 +232,7 @@ export default async function TeacherSessionsPage({
               />
             </summary>
             <div className="border-t border-border px-4 py-4 md:px-5">
-              <SessionRequestForm classes={classOptions} />
+              <SessionRequestForm branches={requestOptions} />
             </div>
           </details>
         </Card>
@@ -216,6 +254,7 @@ export default async function TeacherSessionsPage({
               date: filters.date ?? undefined,
               gradeId: filters.gradeId ?? undefined,
               status: filters.status ?? undefined,
+              branch: branchFilter ?? undefined,
             }}
             search={searchOwnSessionStudentsTypeAheadAction.bind(
               null,
@@ -224,19 +263,22 @@ export default async function TeacherSessionsPage({
                 ...(filters.date ? { date: filters.date } : {}),
                 ...(filters.gradeId ? { gradeId: filters.gradeId } : {}),
                 ...(filters.status ? { status: filters.status } : {}),
+                ...(branchFilter ? { branch: branchFilter } : {}),
               }).toString(),
             )}
           />
 
           <TeacherSessionFilters
             range={filters.range}
-            date={filters.date ?? dateKey(anchor)}
-            todayIso={dateKey(today)}
+            date={filters.date ?? todayIso}
+            todayIso={todayIso}
             gradeId={filters.gradeId ?? ""}
             status={filters.status ?? ""}
             q={filters.q ?? ""}
             grades={gradeOptions}
             allLabel={t("filters.all")}
+            branches={withBranch ? scope.inView.map((ctx) => ({ id: ctx.center.id, name: ctx.center.name })) : []}
+            branch={branchFilter ?? ""}
           />
 
           <ResultsRegion className="flex flex-col gap-4">
@@ -244,7 +286,7 @@ export default async function TeacherSessionsPage({
               <EmptyState icon={<CalendarSearch />} tone="warning" title={t("empty")} description={t("emptyHint")} />
             ) : (
               <ul className="flex flex-col gap-3">
-                {pageEntries.map(({ row, displayStatus }) => (
+                {pageEntries.map(({ row, branch, displayStatus }) => (
                   <li key={row.id}>
                     <Link
                       href={ROUTES.teacherSession(row.id)}
@@ -256,6 +298,7 @@ export default async function TeacherSessionsPage({
                           <SessionKindBadge kind={sessionKind(row)} />
                         </p>
                         <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                          {withBranch ? <span className="font-medium text-text-secondary">{branch.name}</span> : null}
                           <span>{formatDate(row.date, locale)}</span>
                           <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                           <span>{row.room?.name ?? tCommon("none")}</span>

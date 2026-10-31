@@ -9,13 +9,14 @@ import { clientIp } from "@/lib/auth/request-ip";
 import {
   clearActiveCenterId,
   setActiveCenterId,
+  setTeacherBranchId,
 } from "@/lib/auth/active-center";
 import {
   getOwnerOrgGroups,
+  getTeacherContexts,
   getUserCenterRelations,
-  landingWithoutBranch,
   primaryRole,
-  type CenterRelation,
+  singleExperienceHome,
 } from "@/lib/auth/tenant";
 import { isAccessibleCenter } from "@/lib/db/platform";
 import { checkRateLimits } from "@/lib/rate-limit";
@@ -27,6 +28,7 @@ import {
   localeSchema,
   resendConfirmationSchema,
   selectCenterSchema,
+  selectTeacherBranchSchema,
   signInSchema,
   signUpSchema,
 } from "@/lib/validation/auth";
@@ -61,23 +63,19 @@ function readLocale(formData: FormData): "ar" | "en" {
 }
 
 /**
- * Where a user lands after authenticating. Exactly one center → auto-select it
- * (docs/02 §3); more than one → the /select-center hub.
+ * Where a user lands after authenticating (U7): straight into their one
+ * experience — a staff branch is made active, the teacher portal opens in All
+ * branches — or the hub when they hold several (`singleExperienceHome`). With
+ * none: the admin console, the parent portal, their own onboarding (F4) or the
+ * empty hub, exactly as before.
  */
 async function resolveLandingPath(user: User): Promise<string> {
-  const relations: CenterRelation[] = await getUserCenterRelations(user.id);
-
-  if (relations.length === 1) {
-    const relation = relations[0];
-    await setActiveCenterId(relation.center.id);
-    return homePathForRole(primaryRole(relation));
-  }
-
-  // No branch: the admin console, the parent portal (verified children), the
-  // person's own onboarding when they declared a sign-up intent (F4), or the hub (SYS).
-  if (relations.length === 0) return landingWithoutBranch(user);
-
-  return ROUTES.selectCenter;
+  // Every sign-in starts the teacher portal in All branches.
+  await setTeacherBranchId(null);
+  const home = await singleExperienceHome(user);
+  if (!home) return ROUTES.selectCenter;
+  if (home.centerId) await setActiveCenterId(home.centerId);
+  return home.href;
 }
 
 export async function signInAction(
@@ -228,8 +226,46 @@ export async function signOutAction(formData: FormData): Promise<void> {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();
   await clearActiveCenterId();
+  await setTeacherBranchId(null);
 
   redirect({ href: ROUTES.login, locale });
+}
+
+/** Teacher pages a switch may land back on — a detail page's row may not be in the new scope. */
+const TEACHER_SWITCH_TARGETS: string[] = [
+  ROUTES.teacherDashboard,
+  ROUTES.teacherCalendar,
+  ROUTES.teacherSessions,
+  ROUTES.teacherStudents,
+  ROUTES.teacherClasses,
+  ROUTES.teacherApprovals,
+  ROUTES.teacherSettlements,
+];
+
+/**
+ * The teacher portal's switcher (U7): All branches (an empty `branchId`) or
+ * one branch. The id is never trusted — it must be a branch where this user
+ * holds an active TEACHER role (`getTeacherContexts`), else the choice falls
+ * back to All branches. It writes only the teacher portal's own cookie; the
+ * staff experience's `kayedu_center` is untouched. Lands back on the same
+ * list page (a detail page's row may be out of the new scope: its list).
+ */
+export async function selectTeacherBranchAction(formData: FormData): Promise<void> {
+  const parsed = selectTeacherBranchSchema.safeParse(Object.fromEntries(formData));
+  const locale = readLocale(formData);
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect({ href: ROUTES.login, locale });
+    return;
+  }
+
+  const contexts = parsed.success && parsed.data.branchId ? await getTeacherContexts(user.id) : [];
+  const branch = contexts.find((ctx) => ctx.center.id === parsed.data?.branchId);
+  await setTeacherBranchId(branch ? branch.center.id : null);
+
+  const next = parsed.success ? safeNextPath(parsed.data.next) : null;
+  const target = TEACHER_SWITCH_TARGETS.find((path) => next === path || next?.startsWith(`${path}/`));
+  redirect({ href: target ?? ROUTES.teacherDashboard, locale });
 }
 
 export async function selectCenterAction(formData: FormData): Promise<void> {

@@ -34,9 +34,12 @@ import {
 } from "../lib/db/session-bookings.ts";
 import { generateFamilyCode, hashFamilyCode } from "../lib/db/parents.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
+import { dateKey, dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
+import { calendarGrid, parseCalendarDay, parseCalendarMonth } from "../lib/calendar.ts";
 import {
+  bookedCalendarEntries,
   childBookedUpcoming,
+  studentCalendarMonth,
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
   studentBookedUpcoming,
@@ -397,6 +400,133 @@ async function main() {
   await checkAccountSeeding(centerA, centerB, teacherA, teacherB);
   await checkPublicCatalog();
   await checkSessionBookings(centerA, centerB, teacherA);
+  await checkCalendar(centerA, centerB, teacherA);
+}
+
+/**
+ * U7 — the student (and parent) calendar: the month rules, and every status
+ * `studentCalendarMonth` reads from the schedule's own data — attended,
+ * absent, a drop-in who never came, cancelled, upcoming, a live session not
+ * yet arrived, a moved original — plus "an enrolled session wins over a
+ * booking" and branch isolation.
+ */
+async function checkCalendar(
+  centerA: { id: string },
+  centerB: { id: string },
+  teacherA: { id: string },
+): Promise<void> {
+  console.log("\nU7 — the calendar");
+
+  check(
+    "?month=YYYY-MM parses; a malformed month falls back to today's",
+    dateKey(parseCalendarMonth("2026-05", dayMarker("2026-10-31"))) === "2026-05-01" &&
+      dateKey(parseCalendarMonth("2026-13", dayMarker("2026-10-31"))) === "2026-10-01",
+  );
+  const november = calendarGrid(dayMarker("2026-11-01"), 6);
+  check(
+    "The grid holds whole weeks opening on the week start (Saturday in Arabic, Sunday in English)",
+    november[0].getUTCDay() === 6 &&
+      november.length % 7 === 0 &&
+      november.some((day) => dateKey(day) === "2026-11-30") &&
+      calendarGrid(dayMarker("2026-11-01"), 0)[0].getUTCDay() === 0,
+  );
+  check(
+    "?day= must be inside the month shown; else today when today is in it, else none",
+    parseCalendarDay("2026-11-20", dayMarker("2026-11-01"), dayMarker("2026-11-15")) === "2026-11-20" &&
+      parseCalendarDay("2026-12-01", dayMarker("2026-11-01"), dayMarker("2026-11-15")) === "2026-11-15" &&
+      parseCalendarDay("2026-11-31", dayMarker("2026-11-01"), dayMarker("2026-10-15")) === null,
+  );
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const utcDay = (offset: number) => {
+    const d = new Date(Date.now() + offset * DAY);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  };
+  const today = utcDay(0);
+  const range = { start: utcDay(-10), end: utcDay(10) };
+
+  const enrolledClass = await makeClass(centerA.id, teacherA.id);
+  const otherClass = await makeClass(centerA.id, teacherA.id);
+  const student = await makeStudentUser("u7-calendar");
+  const enrol = await prisma.$transaction((tx) =>
+    reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: enrolledClass.id, studentUserId: student.id }),
+  );
+  check("fixture: the calendar student is enrolled", enrol.ok);
+  const profile = await prisma.studentProfile.findFirstOrThrow({ where: { centerId: centerA.id, userId: student.id } });
+
+  let hour = 7;
+  const session = (classGroupId: string, offset: number, extra: { status?: "CANCELLED"; closedAt?: Date; rescheduledToId?: string } = {}) => {
+    hour += 1;
+    return prisma.session.create({
+      data: scopedData(centerA.id, {
+        classGroupId,
+        teacherId: teacherA.id,
+        date: utcDay(offset),
+        startTime: `${String(hour).padStart(2, "0")}:00`,
+        endTime: `${String(hour).padStart(2, "0")}:45`,
+        priceSnapshot: 10_000,
+        ...extra,
+      }),
+    });
+  };
+  const attend = (sessionId: string, attendanceStatus: "PRESENT" | "LATE" | "ABSENT", isDropIn = false) =>
+    prisma.sessionAttendee.create({
+      data: scopedData(centerA.id, { sessionId, studentProfileId: profile.id, attendanceStatus, isDropIn, recordedBy: teacherA.id }),
+    });
+
+  const closed = new Date();
+  const present = await session(enrolledClass.id, -3, { closedAt: closed });
+  await attend(present.id, "PRESENT");
+  const late = await session(enrolledClass.id, -2, { closedAt: closed });
+  await attend(late.id, "LATE");
+  const absent = await session(enrolledClass.id, -1, { closedAt: closed });
+  await attend(absent.id, "ABSENT");
+  const dropInCame = await session(otherClass.id, -2, { closedAt: closed });
+  await attend(dropInCame.id, "PRESENT", true);
+  const dropInNoShow = await session(otherClass.id, -1, { closedAt: closed });
+  await attend(dropInNoShow.id, "ABSENT", true);
+  const live = await session(enrolledClass.id, 0);
+  await attend(live.id, "ABSENT");
+  const cancelled = await session(enrolledClass.id, 2, { status: "CANCELLED" });
+  const upcoming = await session(enrolledClass.id, 3);
+  const replacement = await session(enrolledClass.id, 5);
+  const moved = await session(enrolledClass.id, 4, { rescheduledToId: replacement.id });
+
+  const entries = await studentCalendarMonth(prisma, centerA.id, profile.id, range, today);
+  const status = new Map(entries.map((entry) => [entry.sessionId, entry.status]));
+  check("A past session attended is Present; a late one Late", status.get(present.id) === "PRESENT" && status.get(late.id) === "LATE");
+  check("An enrolled student's closed absence is Absent", status.get(absent.id) === "ABSENT");
+  check("A drop-in who came shows Present; a drop-in who never came shows nothing (T5)", status.get(dropInCame.id) === "PRESENT" && !status.has(dropInNoShow.id));
+  check("A live session the enrolled student has not arrived at is still Upcoming", status.get(live.id) === "UPCOMING");
+  check("A cancelled session is Cancelled; a future one Upcoming", status.get(cancelled.id) === "CANCELLED" && status.get(upcoming.id) === "UPCOMING");
+  check("A moved original never shows; its replacement does (U2)", !status.has(moved.id) && status.get(replacement.id) === "UPCOMING");
+  check("Every entry names its own branch", entries.every((entry) => entry.centerId === centerA.id));
+  check(
+    "Another branch's read of this profile returns nothing (centerId-scoped)",
+    (await studentCalendarMonth(prisma, centerB.id, profile.id, range, today)).length === 0,
+  );
+
+  const enrolledIds = new Set(entries.map((entry) => entry.sessionId));
+  const fakeBooking = (sessionRow: typeof upcoming, bookingStatus: "PENDING" | "CONFIRMED") => ({
+    bookingId: `b-${sessionRow.id}`,
+    bookingStatus,
+    centerId: centerA.id,
+    centerName: "Student Portal A",
+    session: { ...sessionRow, classGroup: null, subject: null, grade: null, room: null, rescheduledFrom: null },
+  });
+  const otherFuture = await session(otherClass.id, 6);
+  const booked = bookedCalendarEntries(
+    [fakeBooking(upcoming, "CONFIRMED"), fakeBooking(otherFuture, "CONFIRMED"), fakeBooking(otherFuture, "PENDING")],
+    range,
+    enrolledIds,
+  );
+  check(
+    "A booking reads Booked (CONFIRMED) or Requested (PENDING); an enrolled session wins over a booking",
+    booked.length === 2 &&
+      booked.every((entry) => entry.sessionId === otherFuture.id) &&
+      booked.some((entry) => entry.status === "BOOKED") &&
+      booked.some((entry) => entry.status === "REQUESTED"),
+  );
 }
 
 /**

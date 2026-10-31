@@ -23,6 +23,8 @@ export function TeacherSessionFilters({
   q,
   grades,
   allLabel,
+  branches = [],
+  branch = "",
 }: {
   range: "day" | "week" | "month";
   date: string;
@@ -33,15 +35,19 @@ export function TeacherSessionFilters({
   q: string;
   grades: SelectOption[];
   allLabel: string;
+  /** U7: the branches in view — a Branch filter shows only under All branches, with two or more. */
+  branches?: { id: string; name: string }[];
+  branch?: string;
 }) {
   const t = useTranslations("TeacherSessions.filters");
+  const tScope = useTranslations("TeacherScope");
   const tStatus = useTranslations("Sessions.status");
 
   return (
     <UrlFilterForm className="flex flex-col gap-3">
       {/* Keeps the active student search when a filter control re-submits. */}
       {q ? <input type="hidden" name="q" value={q} /> : null}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={branches.length > 1 ? "grid gap-3 sm:grid-cols-2 lg:grid-cols-5" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
         <FilterField label={t("date")} htmlFor="filter-date">
           <DatePicker
             id="filter-date"
@@ -96,6 +102,19 @@ export function TeacherSessionFilters({
             ))}
           </Select>
         </FilterField>
+
+        {branches.length > 1 ? (
+          <FilterField label={tScope("branch")} htmlFor="filter-branch">
+            <Select id="filter-branch" name="branch" defaultValue={branch} submitOnChange>
+              <option value="">{tScope("allBranches")}</option>
+              {branches.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </Select>
+          </FilterField>
+        ) : null}
       </div>
     </UrlFilterForm>
   );

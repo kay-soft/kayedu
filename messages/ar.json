@@ -113,7 +113,9 @@
     "accountSettings": "إعدادات الحساب",
     "backToHub": "العودة إلى فروعي",
     "pendingNavLabel": "{label}، {count} قيد الانتظار",
-    "pendingCapped": "{max}+"
+    "pendingCapped": "{max}+",
+    "allBranches": "كل الفروع",
+    "allBranchesHint": "{count, plural, one {فرع واحد} two {فرعان معًا} few {{count, number, arab} فروع معًا} many {{count, number, arab} فرعًا معًا} other {{count, number, arab} فرع معًا}}"
   },
   "NavGroups": {
     "frontDesk": "المكتب الأمامي",
@@ -140,7 +142,8 @@
     "centers": "الفروع",
     "platform": "المنصة",
     "catalog": "الكتالوج",
-    "settings": "الإعدادات"
+    "settings": "الإعدادات",
+    "calendar": "التقويم"
   },
   "Roles": {
     "OWNER": "المالك",
@@ -212,7 +215,16 @@
       "wholeManagementHint": "{count, plural, one {فرع واحد، مجمّع} two {فرعان، مجمّعان} few {{count, number, arab} فروع، مجمّعة} many {{count, number, arab} فرعًا، مجمّعًا} other {{count, number, arab} فرع، مجمّع}}",
       "emptyTitle": "لست مرتبطًا بأي فرع بعد",
       "linkMyChild": "أنا وليّ أمر: اربط ابني",
-      "parentViewLink": "أبناؤك (عرض وليّ الأمر)"
+      "titleExperiences": "إلى أين تريد الذهاب؟",
+      "subtitleExperiences": "كل بوابة تشمل جميع فروعك. والفروع التي تعمل بها موظفًا مدرجة أدناه.",
+      "portalsLabel": "بواباتك",
+      "branchesHeading": "الفروع التي تعمل بها",
+      "studentPortal": "بوابة الطالب",
+      "studentPortalHint": "مجموعاتك وحصصك في كل الفروع",
+      "teacherPortal": "بوابة المدرّس",
+      "teacherPortalHint": "حصصك وطلابك في كل الفروع",
+      "parentPortal": "بوابة وليّ الأمر",
+      "parentPortalHint": "جداول أبنائك"
     },
     "invite": {
       "title": "دعوة للانضمام",
@@ -2125,11 +2137,10 @@
     "centers": {
       "title": "فروعك",
       "description": "جدول وأرباح كل فرع، مقتصرة على هذا الفرع فقط.",
-      "active": "نشط",
       "summary": "{today} اليوم · {week} هذا الأسبوع · {earnings} هذا الشهر",
-      "viewSchedule": "عرض الجدول",
-      "switchTo": "التبديل إلى هذا الفرع"
-    }
+      "viewSchedule": "عرض الجدول"
+    },
+    "subtitleAll": "عملك في كل الفروع التي تُدرّس بها."
   },
   "TeacherSessions": {
     "title": "حصصي",
@@ -2260,7 +2271,8 @@
       "alreadyBlocked": "لقد حظرت هذا الطالب بالفعل."
     },
     "emptyHint": "يظهر هنا الطلاب الملتحقون بالفصول التي تدرّسها.",
-    "noMatchesHint": "راجع الإملاء، أو ابحث برقم الطالب."
+    "noMatchesHint": "راجع الإملاء، أو ابحث برقم الطالب.",
+    "subtitleAll": "{count, plural, =0 {لم تُدرّس أي طالب بعد.} one {طالب واحد درّسته في فروعك.} two {طالبان درّستهما في فروعك.} few {{count, number, arab} طلاب درّستهم في فروعك.} many {{count, number, arab} طالبًا درّستهم في فروعك.} other {{count, number, arab} طالب درّستهم في فروعك.}}"
   },
   "TeacherClasses": {
     "title": "مجموعاتي",
@@ -2300,7 +2312,8 @@
       "notFound": "هذا الخيار لم يعد متاحًا.",
       "subjectNotInGrade": "هذه المادة لا تُدرَّس في هذا الصف. اختر مادة من مواد الصف."
     },
-    "emptyHint": "تظهر هنا الفصول التي يُسندها إليك أي فرع. ويمكنك أيضًا طلب فصل جديد بالأسفل."
+    "emptyHint": "تظهر هنا الفصول التي يُسندها إليك أي فرع. ويمكنك أيضًا طلب فصل جديد بالأسفل.",
+    "subtitleAll": "اطلب مجموعة جديدة في أحد فروعك."
   },
   "TeacherApprovals": {
     "tabsLabel": "أنواع الطلبات",
@@ -3587,5 +3600,45 @@
   "BranchPause": {
     "banner": "متوقف حتى {date} — تواصل مع KayEdu لتغيير ذلك.",
     "pausedUntil": "متوقف حتى {date}"
+  },
+  "TeacherScope": {
+    "branch": "الفرع",
+    "allBranches": "كل الفروع",
+    "branchPlaceholder": "اختر الفرع"
+  },
+  "Calendar": {
+    "studentTitle": "التقويم",
+    "studentSubtitle": "حصصك في كل الفروع، شهرًا بشهر.",
+    "studentEmpty": "لا شيء هذا الشهر. تظهر هنا مجموعاتك وحضورك والحصص التي حجزتها.",
+    "teacherTitle": "التقويم",
+    "teacherSubtitle": "حصصك شهرًا بشهر. اضغط على يوم لعرض حصصه.",
+    "teacherEmpty": "لا حصص هذا الشهر.",
+    "parentTitle": "التقويم",
+    "parentSubtitle": "حصص ابنك شهرًا بشهر، للعرض فقط.",
+    "parentEmpty": "لا شيء هذا الشهر لهذا الابن.",
+    "parentNoChild": "اربط ابنًا يدرس في فرع لعرض تقويمه.",
+    "parentBack": "الانتقال إلى بوابة وليّ الأمر",
+    "previousMonth": "الشهر السابق",
+    "nextMonth": "الشهر التالي",
+    "today": "اليوم",
+    "todayMarker": "اليوم",
+    "sessionCount": "{count, plural, =0 {لا حصص} one {حصة واحدة} two {حصتان} few {{count, number, arab} حصص} many {{count, number, arab} حصة} other {{count, number, arab} حصة}}",
+    "more": "+{count, number, arab}",
+    "legend": "معنى الألوان",
+    "pickDayTitle": "حصص يوم",
+    "pickDay": "اضغط على يوم لعرض حصصه.",
+    "noSessions": "لا حصص في هذا اليوم.",
+    "counts": "حاضر {present} · متأخر {late} · غائب {absent}",
+    "openSession": "فتح الحصة",
+    "tone": {
+      "present": "حاضر",
+      "late": "متأخر",
+      "absent": "غائب",
+      "upcoming": "قادمة",
+      "booked": "محجوزة",
+      "requested": "مطلوبة",
+      "cancelled": "ملغاة",
+      "held": "انعقدت"
+    }
   }
 }

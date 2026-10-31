@@ -613,6 +613,7 @@ function checkActionsReport() {
 const VOID_ACTION_ALLOWLIST: Record<string, string> = {
   signOutAction: "ends in redirect() to the sign-in page",
   selectCenterAction: "ends in redirect() into the chosen branch",
+  selectTeacherBranchAction: "ends in redirect() back into the teacher portal (U7)",
 };
 
 function checkActionsReturnResults() {

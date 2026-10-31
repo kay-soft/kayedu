@@ -36,20 +36,21 @@ const ROLES: RoleCase[] = [
   { account: "ownerOnboarding", nav: STAFF_FULL, home: "/dashboard" },
   {
     account: "teacherDowntown",
-    nav: ["dashboard", "sessions", "students", "classes", "approvals", "settlements"],
+    nav: ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements"],
     home: "/teacher/dashboard",
   },
+  // U7: a teacher at two branches has one experience — straight into the
+  // teacher portal, in All branches, never the hub.
   {
     account: "teacherShared",
-    nav: ["dashboard", "sessions", "students", "classes", "approvals", "settlements"],
+    nav: ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements"],
     home: "/teacher/dashboard",
-    picksBranch: true,
   },
   // No relation yet: the root shows the hub (with "Find a branch to teach at");
   // any teacher route sends them to the directory (M15) — never to Discover.
   { account: "teacherNew", nav: ["centers"], home: "/teacher/centers", entry: "/teacher/dashboard" },
-  { account: "studentDowntown", nav: ["schedule", "discover", "reservations"], home: "/student/schedule" },
-  { account: "parentFamily", nav: ["schedule"], home: "/parent" },
+  { account: "studentDowntown", nav: ["schedule", "calendar", "discover", "reservations"], home: "/student/schedule" },
+  { account: "parentFamily", nav: ["schedule", "calendar"], home: "/parent" },
   { account: "admin", nav: ["centers", "platform", "catalog"], home: "/admin/centers" },
 ];
 

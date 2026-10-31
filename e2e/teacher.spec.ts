@@ -1,6 +1,5 @@
 import { SEED } from "./support/accounts";
 import { expect, expectHealthy, primaryNav, test } from "./support/fixtures";
-import { selectBranch } from "./support/ui";
 
 /**
  * Journey 6 — the teacher at one centre, at two centres and at none (SYS
@@ -8,6 +7,9 @@ import { selectBranch } from "./support/ui";
  * schedule, a session's detail and its note (the edit deadline), students,
  * the class/session request forms, their own approvals queue, settlements,
  * the branch switcher, and the centre directory for a teacher with no centre.
+ *
+ * U7 old → new: a teacher at two branches no longer picks one on the hub —
+ * they land in All branches and narrow it from the header switcher.
  */
 
 test("one centre: every teacher page renders; a session opens with its note card", async ({ as, appLocale, msg }) => {
@@ -41,16 +43,30 @@ test("one centre: every teacher page renders; a session opens with its note card
   }
 });
 
-test("two centres: the hub lists both branches and switching changes the active branch", async ({ as, appLocale }) => {
+test("two centres: lands in All branches; the switcher narrows to one branch and back", async ({ as, appLocale, msg }) => {
   const page = await as("teacherShared");
-  await selectBranch(page, appLocale, SEED.downtown);
+  await page.goto(`/${appLocale}`);
   await expect(page).toHaveURL(new RegExp(`/${appLocale}/teacher/dashboard$`));
   await expectHealthy(page, appLocale);
-  await selectBranch(page, appLocale, SEED.nasrCity);
+  // All branches: the dashboard breaks the totals down per branch.
+  const main = page.locator("main");
+  await expect(main.getByText(SEED.downtown).first()).toBeVisible();
+  await expect(main.getByText(SEED.nasrCity).first()).toBeVisible();
+
+  // Narrow to Nasr City from the header switcher; the shell then names it.
+  await page.locator("header").getByRole("button", { name: new RegExp(msg("Shell.allBranches")) }).click();
+  await page.getByRole("button", { name: new RegExp(SEED.nasrCity) }).click();
   await expect(page).toHaveURL(new RegExp(`/${appLocale}/teacher/dashboard$`));
-  // The active branch is named in the shell — in the drawer on a phone.
+  await expectHealthy(page, appLocale);
   const nav = await primaryNav(page, appLocale);
   await expect(nav.locator("xpath=ancestor::*[self::aside or @role='dialog'][1]").getByText(SEED.nasrCity).first()).toBeVisible();
+  await expect(main.getByText(SEED.downtown)).toHaveCount(0);
+
+  // And back to All branches.
+  await page.keyboard.press("Escape");
+  await page.locator("header").getByRole("button", { name: new RegExp(SEED.nasrCity) }).click();
+  await page.getByRole("button", { name: new RegExp(`^${msg("Shell.allBranches")}`) }).click();
+  await expect(main.getByText(SEED.downtown).first()).toBeVisible();
 });
 
 test("zero centres: the teacher lands on the centre directory, never on student Discover", async ({ as, appLocale, msg }) => {

@@ -374,7 +374,8 @@ const EXPECTED_NAV: Record<"OWNER" | "MANAGER" | "RECEPTIONIST" | "ACCOUNTANT", 
   RECEPTIONIST: ["dashboard", "reception", "sessions", "students"],
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };
-const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "students", "classes", "approvals", "settlements"];
+// U7: Calendar joins the teacher nav (no permission — the page asserts none).
+const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements"];
 
 async function navFor(centerId: string, userId: string, role: Role): Promise<string[]> {
   const relations = await resolveCenterRelations(prisma, userId);

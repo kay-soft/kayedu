@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createClassRequestAction } from "@/app/[locale]/(teacher)/teacher/classes/actions";
@@ -19,8 +20,19 @@ export type SelectOption = { value: string; label: string };
 
 const DAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
-export function ClassRequestForm({ catalog }: { catalog: CatalogPickerData }) {
+export type ClassRequestBranch = { id: string; name: string; catalog: CatalogPickerData };
+
+/**
+ * U7: the request names its branch. `branches` lists only the branches where
+ * this teacher may request (trusted, `changeRequest.create`), each with its
+ * own catalog picks; with more than one, a Branch select comes first and the
+ * catalog follows it. The action re-resolves the posted branch.
+ */
+export function ClassRequestForm({ branches }: { branches: ClassRequestBranch[] }) {
   const t = useTranslations("TeacherClasses.request");
+  const tScope = useTranslations("TeacherScope");
+  const [branchId, setBranchId] = useState(branches.length === 1 ? branches[0].id : "");
+  const catalog = branches.find((branch) => branch.id === branchId)?.catalog ?? null;
   const tClasses = useTranslations("Classes");
   const tErrors = useTranslations("TeacherClasses.errors");
   const locale = useLocale();
@@ -31,16 +43,34 @@ export function ClassRequestForm({ catalog }: { catalog: CatalogPickerData }) {
   return (
     <form action={formAction} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
+      {branches.length === 1 ? <input type="hidden" name="centerId" value={branchId} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
       {state.status === "created" ? (
         <FormMessage tone="success">{t("submitted")}</FormMessage>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      {branches.length > 1 ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field id="request-centerId" label={tScope("branch")}>
+            <Select
+              id="request-centerId"
+              name="centerId"
+              value={branchId}
+              onValueChange={setBranchId}
+              placeholder={tScope("branchPlaceholder")}
+              required
+              options={branches.map((branch) => ({ value: branch.id, label: branch.name }))}
+            />
+          </Field>
+        </div>
+      ) : null}
+
+      {/* Keyed by branch: each branch offers its own catalog picks. */}
+      <div key={branchId} className="grid gap-4 sm:grid-cols-3">
         <CatalogPickerFields
           idPrefix="request"
-          data={catalog}
+          data={catalog ?? { systems: [], grades: [], subjects: [] }}
           systemName={null}
           noneLabel={t("none")}
           errors={{

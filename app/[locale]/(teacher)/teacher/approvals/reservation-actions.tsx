@@ -14,7 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { IDLE_APPROVALS_STATE } from "@/lib/validation/approvals";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
-export function TeacherReservationActions({ id }: { id: string }) {
+/** U7: `centerId` is the reservation's branch — the action re-resolves it, never trusts it. */
+export function TeacherReservationActions({ id, centerId }: { id: string; centerId: string }) {
   const t = useTranslations("TeacherApprovals");
   const tErrors = useTranslations("TeacherApprovals.errors");
   const locale = useLocale();
@@ -52,11 +53,12 @@ export function TeacherReservationActions({ id }: { id: string }) {
           title={t("declineConfirm.title")}
           description={t("declineConfirm.body")}
           action={declineAction}
-          fields={{ locale, id }}
+          fields={{ locale, id, centerId }}
         />
         <form action={approveAction}>
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="id" value={id} />
+          <input type="hidden" name="centerId" value={centerId} />
           <SubmitButton className="w-full">
             <Check className="size-4" />
             {t("approve")}

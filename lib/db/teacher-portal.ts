@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:teacher-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/sessions.ts).
-import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
+import { EXCLUDE_DROP_IN_NO_SHOWS, attendanceDisplay } from "../attendance-rules.ts";
 import { centreTimeZone, monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
 import { type DateRange, revenueTotals } from "./analytics.ts";
 import { teacherHistoryFloor } from "./visibility.ts";
@@ -286,4 +286,40 @@ export function studentSessionsWithTeacher(
       payments: { where: { voided: false }, orderBy: { recordedAt: "desc" }, take: 1 },
     },
   });
+}
+
+// ── Calendar (U7): a day's present / late / absent per session ──────────────
+
+export type SessionAttendanceCounts = { present: number; late: number; absent: number };
+
+/**
+ * Present / late / absent per session for the teacher calendar's day list
+ * (U7) — one branch's sessions, one `centerId`-scoped read, counted with the
+ * same rule every roster uses (`attendanceDisplay`): an ABSENT row on a live
+ * session, or a drop-in's, is "not arrived" and is not counted as absent.
+ * The caller passes only this teacher's own sessions.
+ */
+export async function sessionAttendanceCounts(
+  db: Db,
+  centerId: string,
+  sessions: { id: string; closedAt: Date | null }[],
+): Promise<Map<string, SessionAttendanceCounts>> {
+  const counts = new Map<string, SessionAttendanceCounts>(
+    sessions.map((session) => [session.id, { present: 0, late: 0, absent: 0 }]),
+  );
+  if (sessions.length === 0) return counts;
+  const closed = new Map(sessions.map((session) => [session.id, session.closedAt !== null]));
+  const rows = await db.sessionAttendee.findMany({
+    where: scopedWhere(centerId, { sessionId: { in: sessions.map((session) => session.id) }, studentProfileId: { not: null } }),
+    select: { sessionId: true, attendanceStatus: true, isDropIn: true },
+  });
+  for (const row of rows) {
+    const tally = counts.get(row.sessionId);
+    if (!tally) continue;
+    const shown = attendanceDisplay(row, closed.get(row.sessionId) ?? false);
+    if (shown === "PRESENT") tally.present += 1;
+    else if (shown === "LATE") tally.late += 1;
+    else if (shown === "ABSENT") tally.absent += 1;
+  }
+  return counts;
 }

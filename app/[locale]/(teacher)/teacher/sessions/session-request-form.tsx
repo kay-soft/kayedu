@@ -1,6 +1,7 @@
 "use client";
 
 import { BookOpen } from "lucide-react";
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createSessionRequestAction } from "@/app/[locale]/(teacher)/teacher/sessions/actions";
@@ -15,40 +16,68 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 export type TeacherClassOption = { value: string; label: string };
+export type RequestBranchOption = { id: string; name: string; classes: TeacherClassOption[] };
 
 /**
  * "Request new session" (spec §4.2 item 2, M10): a one-off session on one of
- * the teacher's own classes at this center — free room/time is a center
+ * the teacher's own classes at one branch — free room/time is a center
  * manager's call at `/approvals`, same shape as the class-request form.
+ *
+ * U7: the form names its branch. `branches` lists only the branches where
+ * this teacher may request (trusted, `changeRequest.create`); with more than
+ * one, a Branch select comes first and the class list follows it. The action
+ * re-resolves the posted branch and re-checks the class there.
  */
-export function SessionRequestForm({ classes }: { classes: TeacherClassOption[] }) {
+export function SessionRequestForm({ branches }: { branches: RequestBranchOption[] }) {
   const t = useTranslations("TeacherSessions.request");
+  const tScope = useTranslations("TeacherScope");
   const tErrors = useTranslations("TeacherSessions.errors");
   const locale = useLocale();
+  const [branchId, setBranchId] = useState(branches.length === 1 ? branches[0].id : "");
+  const classes = branches.find((branch) => branch.id === branchId)?.classes ?? [];
 
   const [state, formAction] = useGuardedActionState(
     createSessionRequestAction,
     IDLE_TEACHER_STATE,
   );
 
-  if (classes.length === 0) {
+  if (branches.every((branch) => branch.classes.length === 0)) {
     return <EmptyState compact icon={<BookOpen />} title={t("noClasses")} description={t("noClassesHint")} />;
   }
 
   return (
     <form action={formAction} className="flex flex-col gap-3" noValidate>
       <input type="hidden" name="locale" value={locale} />
+      {branches.length === 1 ? <input type="hidden" name="centerId" value={branchId} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
       {state.status === "created" ? (
         <FormMessage tone="success">{t("submitted")}</FormMessage>
       ) : null}
 
+      {branches.length > 1 ? (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="session-request-branch" className="text-xs font-medium text-text-secondary">
+            {tScope("branch")}
+          </label>
+          <Select
+            id="session-request-branch"
+            name="centerId"
+            value={branchId}
+            onValueChange={setBranchId}
+            placeholder={tScope("branchPlaceholder")}
+            required
+            options={branches.map((branch) => ({ value: branch.id, label: branch.name }))}
+          />
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-1.5">
         <label htmlFor="session-request-class" className="text-xs font-medium text-text-secondary">
           {t("class")}
         </label>
-        <Select id="session-request-class" name="classGroupId" required>
+        {/* Keyed by branch: picking another branch clears the class. */}
+        <Select key={branchId} id="session-request-class" name="classGroupId" required disabled={!branchId}>
           <option value="" disabled>
             {t("classPlaceholder")}
           </option>

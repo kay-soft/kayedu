@@ -11,7 +11,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan } from "@/lib/auth/tenant";
+import { findInBranches, getTeacherScope, showsBranches } from "@/lib/auth/teacher-scope";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
@@ -38,18 +39,22 @@ const ATTENDANCE_BADGE = {
  * sessions. Access itself is scoped the same way: a student profile id this
  * teacher has never had an attendance record with 404s here, exactly like a
  * foreign center's id would.
+ *
+ * U7: a student profile belongs to one branch; it is found by the same scoped
+ * lookup at each branch in view, and everything below reads at that branch.
  */
 export default async function TeacherStudentDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const ctx = await getTenantContext("teacher");
+  const scope = await getTeacherScope();
   const { id } = await params;
 
+  const hit = await findInBranches(scope.inView, (branch) => scoped(branch).students.findDetailById(id));
+  if (!hit) notFound();
+  const { ctx, found: student } = hit!;
   const db = scoped(ctx);
-  const student = await db.students.findDetailById(id);
-  if (!student) notFound();
 
   // U6: a student taught only before the teacher's history floor reads as not found.
   const sessions = await studentSessionsWithTeacher(prisma, ctx.center.id, ctx.user.id, id, teacherPortalHistoryFloor(ctx));
@@ -76,6 +81,7 @@ export default async function TeacherStudentDetailPage({
         description={t("detailSubtitle")}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            {showsBranches(scope) ? <span className="text-sm text-text-secondary">{ctx.center.name}</span> : null}
             <span className="text-sm text-text-muted" dir="ltr">
               {student.studentCode}
             </span>
@@ -140,7 +146,7 @@ export default async function TeacherStudentDetailPage({
                 <CardDescription>{t("block.description")}</CardDescription>
               </CardHeader>
               <CardContent>
-                <StudentBlockForm studentProfileId={student.id} block={activeBlock} />
+                <StudentBlockForm centerId={ctx.center.id} studentProfileId={student.id} block={activeBlock} />
               </CardContent>
             </Card>
           ) : null}

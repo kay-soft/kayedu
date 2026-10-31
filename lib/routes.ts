@@ -72,6 +72,8 @@ export const ROUTES = {
   // F1: the organization's branches and an Owner's Add branch.
   centerStaff: "/settings/staff",
   teacherDashboard: "/teacher/dashboard",
+  // U7: the month calendar — teacher, student and parent (the selected child).
+  teacherCalendar: "/teacher/calendar",
   teacherSessions: "/teacher/sessions",
   teacherSession: (id: string) => `/teacher/sessions/${id}`,
   teacherSessionPrint: (id: string) => `/teacher/sessions/${id}/print`,
@@ -82,6 +84,7 @@ export const ROUTES = {
   teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",
   studentSchedule: "/student/schedule",
+  studentCalendar: "/student/calendar",
   studentDiscover: "/student/discover",
   // F5: a Discover class, on the same class page component Explore uses.
   studentDiscoverClass: (centerId: string, classId: string) =>
@@ -91,6 +94,7 @@ export const ROUTES = {
   // F4: "Your studies" — a new student's grade, then an optional parent invite.
   studentOnboarding: "/student/onboarding",
   parentHome: "/parent",
+  parentCalendar: "/parent/calendar",
   adminCenters: "/admin/centers",
   adminCenter: (id: string) => `/admin/centers/${id}`,
   // F1: reached from a button on /admin/centers, not from the sidebar.

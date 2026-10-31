@@ -722,20 +722,32 @@ async function main() {
     ];
   });
 
-  await assertSec("SEC-44", "teacher actions require an active TEACHER role at the active centre", () => {
+  // U7 old → new: "an active TEACHER role at the active centre" → "at the row's
+  // branch". A teacher write names its branch (the row's, or a form's Branch)
+  // and re-resolves it through the actor's own relations — `teacherBranchContext`
+  // (`getTenantContextForBranch(centerId, "teacher")`) — or, for a read across
+  // branches, `teacherActionScope()`; never the active-centre cookie.
+  await assertSec("SEC-44", "teacher actions require an active TEACHER role at the row's branch", () => {
     const files = walk("app/[locale]/(teacher)").filter((path) => /actions\.ts$/.test(path));
     const bad: string[] = [];
     for (const file of files) {
       for (const { name, body } of exportedFunctions(file)) {
         const tenantContext = /getTenantContext\(/.test(body);
-        const guarded = /actionContext\("teacher"\)/.test(body) || /getCurrentUser\(\)/.test(body);
+        const guarded =
+          /actionContext\("teacher"\)/.test(body) ||
+          /teacherBranchContext\(/.test(body) ||
+          /teacherActionScope\(\)/.test(body) ||
+          /getCurrentUser\(\)/.test(body);
         if (tenantContext || !guarded) bad.push(`${file}#${name}`);
       }
     }
     const tenant = read("lib/auth/tenant.ts");
+    const scope = read("lib/auth/teacher-scope.ts");
     return [
-      [`every teacher action resolves through actionContext("teacher") (${bad.join(", ") || "all"})`, bad.length === 0],
+      [`every teacher action resolves an active TEACHER role through its guard (${bad.join(", ") || "all"})`, bad.length === 0],
       ["actionContext refuses a denied experience and a missing role", /if \(ctx\.experienceDenied \|\| !hasExperience\(ctx, experience\)\) return null/.test(tenant)],
+      ["getTenantContextForBranch refuses a branch the actor does not hold, or holds no TEACHER role at", /if \(!relation\) return null;[\s\S]*if \(ctx\.experienceDenied \|\| !hasExperience\(ctx, experience\)\) return null/.test(tenant)],
+      ["teacherBranchContext re-resolves the posted branch for the teacher experience", /return getTenantContextForBranch\(centerId, "teacher"\)/.test(scope)],
     ];
   });
 

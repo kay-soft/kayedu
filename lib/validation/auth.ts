@@ -83,6 +83,17 @@ export const selectCenterSchema = z.object({
 });
 
 /**
+ * The teacher portal's switcher (U7): an empty `branchId` is All branches.
+ * The id is untrusted — the action keeps it only when it names a branch the
+ * user teaches at.
+ */
+export const selectTeacherBranchSchema = z.object({
+  branchId: z.union([z.literal(""), z.string().uuid("invalidCenter")]).optional(),
+  locale: localeSchema,
+  next: z.string().max(512).optional(),
+});
+
+/**
  * The roles Users & Roles may hand out (R9): centre staff only. A TEACHER is a
  * `Membership` too, but teachers are added and managed on the Teachers page —
  * so this list, which both the invitation and the role-change schemas parse

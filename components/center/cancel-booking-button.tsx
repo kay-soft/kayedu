@@ -18,7 +18,16 @@ type CancelAction = (state: ApprovalsActionState, formData: FormData) => Promise
  * pin; this only draws the button. It asks first (§14.6): the seat is freed at
  * once and the student sees "Cancelled by the branch".
  */
-export function CancelBookingButton({ id, action }: { id: string; action: CancelAction }) {
+export function CancelBookingButton({
+  id,
+  centerId,
+  action,
+}: {
+  id: string;
+  /** U7: the teacher's session page names the booking's branch; the action re-resolves it. */
+  centerId?: string;
+  action: CancelAction;
+}) {
   const t = useTranslations("Sessions.booked.cancel");
   const locale = useLocale();
   const [state, cancel] = useGuardedActionState(action, IDLE_APPROVALS_STATE);
@@ -40,7 +49,7 @@ export function CancelBookingButton({ id, action }: { id: string; action: Cancel
         title={t("title")}
         description={t("body")}
         action={cancel}
-        fields={{ locale, id }}
+        fields={centerId ? { locale, id, centerId } : { locale, id }}
       />
     </div>
   );

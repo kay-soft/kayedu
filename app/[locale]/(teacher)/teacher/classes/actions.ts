@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, actionContext } from "@/lib/auth/tenant";
+import { ctxCan } from "@/lib/auth/tenant";
+import { teacherBranchContext } from "@/lib/auth/teacher-scope";
 import { isPairLinked } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
@@ -12,7 +13,7 @@ import { classRequestSchema, type TeacherActionState } from "@/lib/validation/te
 
 /**
  * "Request a new class" (spec §4.2 item 4): writes a `ChangeRequest` at the
- * teacher's active center. Gated on `Membership.isTrustedTeacher` (M10,
+ * branch the form names (U7 — re-resolved here, its own grant and trust). Gated on `Membership.isTrustedTeacher` (M10,
  * closing the gap flagged at M7 — every active TEACHER membership was
  * treated as trusted until a manager could flip the flag off for one).
  *
@@ -27,16 +28,16 @@ export async function createClassRequestAction(
   _state: TeacherActionState,
   formData: FormData,
 ): Promise<TeacherActionState> {
-  const ctx = await actionContext("teacher");
+  const parsed = classRequestSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const { locale, centerId, ...payload } = parsed.data;
+
+  const ctx = await teacherBranchContext(centerId);
   if (!ctx) return { error: "forbidden" };
   if (!ctxCan(ctx, "changeRequest.create")) return FORBIDDEN;
   if (!(ctx.membership?.isTrustedTeacher ?? false)) return NOT_TRUSTED;
   const db = scoped(ctx);
-
-  const parsed = classRequestSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-
-  const { locale, ...payload } = parsed.data;
 
   // A request names only entries this branch has picked and the platform
   // still offers — a deactivated one is no more requestable than it is

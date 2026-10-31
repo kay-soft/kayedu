@@ -113,7 +113,9 @@
     "accountSettings": "Account settings",
     "backToHub": "Back to my branches",
     "pendingNavLabel": "{label}, {count} pending",
-    "pendingCapped": "{max}+"
+    "pendingCapped": "{max}+",
+    "allBranches": "All branches",
+    "allBranchesHint": "{count, plural, one {# branch} other {# branches, together}}"
   },
   "NavGroups": {
     "frontDesk": "Front desk",
@@ -140,7 +142,8 @@
     "centers": "Branches",
     "platform": "Platform",
     "catalog": "Catalog",
-    "settings": "Settings"
+    "settings": "Settings",
+    "calendar": "Calendar"
   },
   "Roles": {
     "OWNER": "Owner",
@@ -212,7 +215,16 @@
       "wholeManagementHint": "{count, plural, one {# branch, summed} other {# branches, summed}}",
       "emptyTitle": "You’re not in a branch yet",
       "linkMyChild": "I'm a parent: link my child",
-      "parentViewLink": "Your children (parent view)"
+      "titleExperiences": "Where would you like to go?",
+      "subtitleExperiences": "Each portal covers all your branches. The branches you work at as staff are listed below.",
+      "portalsLabel": "Your portals",
+      "branchesHeading": "Branches you work at",
+      "studentPortal": "Student portal",
+      "studentPortalHint": "Your classes and sessions at every branch",
+      "teacherPortal": "Teacher portal",
+      "teacherPortalHint": "Your sessions and students at every branch",
+      "parentPortal": "Parent portal",
+      "parentPortalHint": "Your children's schedules"
     },
     "invite": {
       "title": "Staff invitation",
@@ -2125,11 +2137,10 @@
     "centers": {
       "title": "Your branches",
       "description": "Each branch's schedule and earnings, scoped to that branch only.",
-      "active": "Active",
       "summary": "{today} today · {week} this week · {earnings} this month",
-      "viewSchedule": "View schedule",
-      "switchTo": "Switch to this branch"
-    }
+      "viewSchedule": "View schedule"
+    },
+    "subtitleAll": "Your work at every branch you teach at."
   },
   "TeacherSessions": {
     "title": "My sessions",
@@ -2260,7 +2271,8 @@
       "alreadyBlocked": "You have already blocked this student."
     },
     "emptyHint": "Students enrolled in the classes you teach appear here.",
-    "noMatchesHint": "Check the spelling, or search by student code."
+    "noMatchesHint": "Check the spelling, or search by student code.",
+    "subtitleAll": "{count, plural, =0 {You have not taught any students yet.} one {# student you have taught, across your branches.} other {# students you have taught, across your branches.}}"
   },
   "TeacherClasses": {
     "title": "My classes",
@@ -2300,7 +2312,8 @@
       "notFound": "That option is no longer available.",
       "subjectNotInGrade": "This subject isn’t taught in that grade. Pick a subject listed under the grade."
     },
-    "emptyHint": "Classes a branch assigns to you appear here. You can also request a new one below."
+    "emptyHint": "Classes a branch assigns to you appear here. You can also request a new one below.",
+    "subtitleAll": "Request a new class at one of your branches."
   },
   "TeacherApprovals": {
     "tabsLabel": "Request types",
@@ -3587,5 +3600,45 @@
   "BranchPause": {
     "banner": "Paused until {date} — contact KayEdu to change this.",
     "pausedUntil": "Paused until {date}"
+  },
+  "TeacherScope": {
+    "branch": "Branch",
+    "allBranches": "All branches",
+    "branchPlaceholder": "Choose a branch"
+  },
+  "Calendar": {
+    "studentTitle": "Calendar",
+    "studentSubtitle": "Your sessions at every branch, month by month.",
+    "studentEmpty": "Nothing this month. Your classes, attendance and booked sessions appear here.",
+    "teacherTitle": "Calendar",
+    "teacherSubtitle": "Your sessions month by month. Tap a day to see its sessions.",
+    "teacherEmpty": "No sessions this month.",
+    "parentTitle": "Calendar",
+    "parentSubtitle": "Your child's sessions, month by month. Read-only.",
+    "parentEmpty": "Nothing this month for this child.",
+    "parentNoChild": "Link a child who studies at a branch to see their calendar.",
+    "parentBack": "Go to the parent portal",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month",
+    "today": "Today",
+    "todayMarker": "today",
+    "sessionCount": "{count, plural, =0 {no sessions} one {# session} other {# sessions}}",
+    "more": "+{count}",
+    "legend": "What the colours mean",
+    "pickDayTitle": "Sessions on a day",
+    "pickDay": "Tap a day to see its sessions.",
+    "noSessions": "No sessions on this day.",
+    "counts": "Present {present} · Late {late} · Absent {absent}",
+    "openSession": "Open session",
+    "tone": {
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent",
+      "upcoming": "Upcoming",
+      "booked": "Booked",
+      "requested": "Requested",
+      "cancelled": "Cancelled",
+      "held": "Held"
+    }
   }
 }

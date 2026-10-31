@@ -20,10 +20,13 @@ type DecisionAction = (state: ApprovalsActionState, formData: FormData) => Promi
  */
 export function BookingActions({
   id,
+  centerId,
   approveAction,
   declineAction,
 }: {
   id: string;
+  /** U7: the teacher's queue names the booking's branch; the action re-resolves it. */
+  centerId?: string;
   approveAction: DecisionAction;
   declineAction: DecisionAction;
 }) {
@@ -55,11 +58,12 @@ export function BookingActions({
           title={t("bookings.declineConfirm.title")}
           description={t("bookings.declineConfirm.body")}
           action={decline}
-          fields={{ locale, id }}
+          fields={centerId ? { locale, id, centerId } : { locale, id }}
         />
         <form action={approve}>
           <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="id" value={id} />
+          {centerId ? <input type="hidden" name="centerId" value={centerId} /> : null}
           <SubmitButton className="w-full">
             <Check className="size-4" />
             {t("approve")}

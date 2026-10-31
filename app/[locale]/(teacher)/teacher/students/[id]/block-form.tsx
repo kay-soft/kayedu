@@ -20,9 +20,12 @@ import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedba
  * value this form can influence.
  */
 export function StudentBlockForm({
+  centerId,
   studentProfileId,
   block,
 }: {
+  /** U7: the student's branch — re-resolved by the action, never trusted. */
+  centerId: string;
   studentProfileId: string;
   block: { id: string; reason: string | null } | null;
 }) {
@@ -50,6 +53,7 @@ export function StudentBlockForm({
         </p>
         <form action={unblockAction}>
           <input type="hidden" name="locale" value={locale} />
+          <input type="hidden" name="centerId" value={centerId} />
           <input type="hidden" name="blockId" value={block.id} />
           <SubmitButton variant="outline">
             <UserMinus className="size-4" />
@@ -64,6 +68,7 @@ export function StudentBlockForm({
     <form action={blockAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
       {error ? <FormMessage className="sm:basis-full">{tErrors(error)}</FormMessage> : null}
       <input type="hidden" name="locale" value={locale} />
+      <input type="hidden" name="centerId" value={centerId} />
       <input type="hidden" name="studentProfileId" value={studentProfileId} />
 
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">

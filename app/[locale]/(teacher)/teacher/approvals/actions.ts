@@ -2,17 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ctxCan, actionContext } from "@/lib/auth/tenant";
+import { ctxCan } from "@/lib/auth/tenant";
+import { teacherBranchContext } from "@/lib/auth/teacher-scope";
 import { prisma } from "@/lib/db/client";
 import { confirmReservation, rejectReservation } from "@/lib/db/reservations";
 import { cancelBookingByStaff, confirmBooking, rejectBooking } from "@/lib/db/session-bookings";
 import { writeAuditLog } from "@/lib/db/audit";
 import { formatDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import {
-  approvalIdSchema,
-  type ApprovalsActionState,
-} from "@/lib/validation/approvals";
+import type { ApprovalsActionState } from "@/lib/validation/approvals";
+import { teacherApprovalIdSchema } from "@/lib/validation/teacher";
 import { runInTransaction } from "@/lib/db/session-lifecycle";
 
 /**
@@ -24,6 +23,10 @@ import { runInTransaction } from "@/lib/db/session-lifecycle";
  * (the reservation's own class must belong to this teacher) is what stops a
  * teacher from acting on another teacher's request at the same centre, since
  * the permission alone only proves "some teacher may use this queue."
+ *
+ * U7: every decision names the row's branch; it is re-resolved through the
+ * actor's own relations (`teacherBranchContext`), the grant is checked at that
+ * branch, and the row is re-found there — a forged branch finds nothing.
  */
 
 const FORBIDDEN: ApprovalsActionState = { error: "forbidden" };
@@ -43,13 +46,14 @@ export async function approveOwnReservationAction(
   _state: ApprovalsActionState,
   formData: FormData,
 ): Promise<ApprovalsActionState> {
-  const ctx = await actionContext("teacher");
-  if (!ctx) return { error: "forbidden" };
-  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
-
-  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  const parsed = teacherApprovalIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
   const { locale, id } = parsed.data;
+
+  // U7: the row's branch, re-resolved — its own `reservation.manage.own`.
+  const ctx = await teacherBranchContext(parsed.data.centerId);
+  if (!ctx) return { error: "forbidden" };
+  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
 
   if (!(await ownReservation(ctx.center.id, ctx.user.id, id))) return NOT_FOUND;
 
@@ -79,13 +83,14 @@ export async function declineOwnReservationAction(
   _state: ApprovalsActionState,
   formData: FormData,
 ): Promise<ApprovalsActionState> {
-  const ctx = await actionContext("teacher");
-  if (!ctx) return { error: "forbidden" };
-  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
-
-  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  const parsed = teacherApprovalIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
   const { locale, id } = parsed.data;
+
+  // U7: the row's branch, re-resolved — its own `reservation.manage.own`.
+  const ctx = await teacherBranchContext(parsed.data.centerId);
+  if (!ctx) return { error: "forbidden" };
+  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
 
   if (!(await ownReservation(ctx.center.id, ctx.user.id, id))) return NOT_FOUND;
 
@@ -116,13 +121,14 @@ export async function approveOwnBookingAction(
   _state: ApprovalsActionState,
   formData: FormData,
 ): Promise<ApprovalsActionState> {
-  const ctx = await actionContext("teacher");
-  if (!ctx) return { error: "forbidden" };
-  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
-
-  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  const parsed = teacherApprovalIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
   const { locale, id } = parsed.data;
+
+  // U7: the row's branch, re-resolved — its own `reservation.manage.own`.
+  const ctx = await teacherBranchContext(parsed.data.centerId);
+  if (!ctx) return { error: "forbidden" };
+  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
 
   const result = await runInTransaction(prisma, (tx) =>
     confirmBooking(tx, ctx.center.id, id, ctx.user.id, { teacherId: ctx.user.id, via: "teacher" }),
@@ -137,13 +143,14 @@ export async function declineOwnBookingAction(
   _state: ApprovalsActionState,
   formData: FormData,
 ): Promise<ApprovalsActionState> {
-  const ctx = await actionContext("teacher");
-  if (!ctx) return { error: "forbidden" };
-  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
-
-  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  const parsed = teacherApprovalIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
   const { locale, id } = parsed.data;
+
+  // U7: the row's branch, re-resolved — its own `reservation.manage.own`.
+  const ctx = await teacherBranchContext(parsed.data.centerId);
+  if (!ctx) return { error: "forbidden" };
+  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
 
   const result = await runInTransaction(prisma, (tx) =>
     rejectBooking(tx, ctx.center.id, id, ctx.user.id, { teacherId: ctx.user.id, via: "teacher" }),
@@ -165,13 +172,14 @@ export async function cancelOwnBookingAction(
   _state: ApprovalsActionState,
   formData: FormData,
 ): Promise<ApprovalsActionState> {
-  const ctx = await actionContext("teacher");
-  if (!ctx) return { error: "forbidden" };
-  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
-
-  const parsed = approvalIdSchema.safeParse(Object.fromEntries(formData));
+  const parsed = teacherApprovalIdSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return NOT_FOUND;
   const { locale, id } = parsed.data;
+
+  // U7: the row's branch, re-resolved — its own `reservation.manage.own`.
+  const ctx = await teacherBranchContext(parsed.data.centerId);
+  if (!ctx) return { error: "forbidden" };
+  if (!ctxCan(ctx, "reservation.manage.own")) return FORBIDDEN;
 
   const result = await runInTransaction(prisma, (tx) =>
     cancelBookingByStaff(tx, ctx.center.id, id, ctx.user.id, { teacherId: ctx.user.id, via: "teacher" }),
