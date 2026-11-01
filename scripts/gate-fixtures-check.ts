@@ -19,6 +19,7 @@ import {
   fixtureVerdict,
   isGateFixtureEmail,
   isGateFixtureSlug,
+  otherGateEmailPrefixes,
 } from "./lib/gate-fixtures.ts";
 
 let failures = 0;
@@ -73,6 +74,17 @@ check("A fixture slug is recognised by its stem", isGateFixtureSlug("branches-ch
 check("A seed slug is not a fixture", !isGateFixtureSlug("center-60-downtown") && !isGateFixtureSlug("al-nokhba-academy"));
 check("A fixture email is recognised", isGateFixtureEmail("people-check-f4-s1@kayedu.test") && isGateFixtureEmail("isolation-family-x@kayedu.test"));
 check("A seed email is not a fixture", !isGateFixtureEmail("owner.center60@example.com") && !isGateFixtureEmail(null));
+
+// The orphan sweep leaves a concurrent gate's actor users alone.
+const othersOfPeriods = otherGateEmailPrefixes("class-periods-check");
+check(
+  "A gate's own stem is not one of the 'other gates' prefixes; every other stem is",
+  !othersOfPeriods.includes("class-periods-check") && othersOfPeriods.includes("classes-check") && othersOfPeriods.includes("payments-check"),
+);
+check(
+  "isolation-check owns isolation-family-; every other gate treats it as another gate's",
+  !otherGateEmailPrefixes("isolation-check").includes("isolation-family-") && othersOfPeriods.includes("isolation-family-"),
+);
 
 // The "left behind" verdict, with a faked age instead of a faked clock.
 const MIN = 60_000;

@@ -61,6 +61,21 @@ export const FIXTURE_STALE_AFTER_MS = 30 * 60_000;
 export const gateSlugPrefixes = (): string[] => [...GATE_FIXTURE_STEMS];
 export const gateEmailPrefixes = (): string[] => [...GATE_FIXTURE_STEMS, ...GATE_FIXTURE_EXTRA_EMAIL_PREFIXES];
 
+/**
+ * The email prefixes every gate EXCEPT `gate` (a stem such as
+ * `class-periods-check`) creates users under. `gate-db`'s orphan sweep uses it
+ * to leave another gate's fixtures alone: two gates overlapping on one database
+ * must never sweep each other's (still relation-less) actor users.
+ */
+export function otherGateEmailPrefixes(gate: string): string[] {
+  const own = gate.toLowerCase();
+  return gateEmailPrefixes().filter((prefix) => {
+    if (prefix === own) return false;
+    // `isolation-family-` is isolation-check's, though it is not of the `<gate>-check` shape.
+    return !(own === "isolation-check" && (GATE_FIXTURE_EXTRA_EMAIL_PREFIXES as readonly string[]).includes(prefix));
+  });
+}
+
 export function isGateFixtureSlug(slug: string): boolean {
   const lower = slug.toLowerCase();
   return GATE_FIXTURE_STEMS.some((stem) => lower.startsWith(stem));
