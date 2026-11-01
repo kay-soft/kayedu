@@ -57,6 +57,7 @@
     "check:all": "node scripts/with-env.ts scripts/run-gates.ts",
     "gates:users": "node scripts/with-env.ts scripts/gate-users.ts",
     "e2e": "playwright test",
+    "e2e:clean-users": "node scripts/with-env.ts scripts/e2e-users-clean.ts",
     "e2e:report": "playwright show-report e2e/.report",
     "perf:queries": "node scripts/with-env.ts scripts/query-count.ts",
     "perf:db": "node scripts/with-env.ts scripts/db-timing.ts",

@@ -1,4 +1,4 @@
-import { uniqueTag } from "./support/accounts";
+import { e2eEmail } from "../scripts/lib/e2e-users";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import { signUp, signUpProjectOnly } from "./support/signup";
 import { choose, field } from "./support/ui";
@@ -34,10 +34,9 @@ test("a student with no centre sees their pending and declined requests", async 
   await expect(page.getByText(msg("StudentReservations.status.PENDING")).first()).toBeVisible();
 });
 
-test("@write a new sign-up onboards, enrols instantly, completes the profile once, sees the schedule", async ({ page, appLocale, msg }, testInfo) => {
+test("@write a new sign-up onboards, enrols instantly, completes the profile once, sees the schedule", async ({ page, appLocale, msg, e2eTag: tag }, testInfo) => {
   signUpProjectOnly(testInfo);
-  const tag = uniqueTag("e2e").toLowerCase();
-  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Student ${tag}`, email: `${tag}-student@example.com` });
+  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Student ${tag}`, email: e2eEmail(tag, "student") });
   // A Student sign-up with no branch lands on "Your studies" (F4): the account
   // grade, then an optional parent invite (skipped here), then Discover.
   await expect(page).toHaveURL(/\/student\/onboarding/);

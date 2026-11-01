@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-import { uniqueTag } from "./support/accounts";
+import { e2eEmail } from "../scripts/lib/e2e-users";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import { t, type AppLocale } from "./support/i18n";
 import { E2E_PASSWORD, signInWith, signUp, signUpProjectOnly } from "./support/signup";
@@ -36,10 +36,9 @@ async function claimCard(manager: Page, locale: AppLocale, email: string) {
 }
 
 for (const outcome of ["approve", "decline"] as const) {
-  test(`@write account claim — ${outcome}`, async ({ page, as, appLocale, msg }, testInfo) => {
+  test(`@write account claim — ${outcome}`, async ({ page, as, appLocale, msg, e2eTag: tag }, testInfo) => {
     signUpProjectOnly(testInfo);
-    const tag = uniqueTag("e2e").toLowerCase();
-    const email = `${tag}-claim@example.com`;
+    const email = e2eEmail(tag, "claim");
     const desk = await as("receptionist");
     await registerStudentWithEmail(desk, appLocale, `Claim ${tag}`, email);
 
