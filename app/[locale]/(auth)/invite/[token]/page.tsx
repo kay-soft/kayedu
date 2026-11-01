@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
-import { ACCESSIBLE_LIFECYCLE_STATES, invitationByToken } from "@/lib/db/platform";
+import { invitationByToken, isAccessibleCenter } from "@/lib/db/platform";
 import { Link } from "@/lib/i18n/navigation";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -39,7 +39,7 @@ export default async function InvitePage({
       ? "inviteNotFound"
       : invitation.status === "ACCEPTED"
         ? "inviteAlreadyAccepted"
-        : !ACCESSIBLE_LIFECYCLE_STATES.includes(invitation.center.lifecycleState)
+        : !isAccessibleCenter(invitation.center)
           ? "centerInactive"
           : invitation.status === "EXPIRED" || invitation.expiresAt < new Date()
             ? "inviteExpired"

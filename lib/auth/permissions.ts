@@ -21,7 +21,6 @@ export const PERMISSIONS = [
   "permission.manage", // edit the permission matrix (M12)
   "membership.role.assign", // grant/change a member's role (M12)
   "membership.branch.grant", // widen a member's branch access (M12)
-  "organization.branch.create", // add a branch to the organization, within its limit (F1)
   // Center-level
   "center.settings.edit",
   "center.branding.edit",
@@ -94,9 +93,8 @@ const OWNER_ONLY_ACTIONS: readonly Permission[] = [
   "permission.manage",
   "membership.role.assign",
   "membership.branch.grant",
-  // F1: adding a branch creates a tenant the organization pays for, so it is
-  // the Owner's alone — never a matrix cell, never grantable to anyone else.
-  "organization.branch.create",
+  // U5: there is no centre-side branch action at all — `organization.branch.create`
+  // (F1) was removed from the catalogue. Branches are a platform admin's alone.
 ];
 
 /**

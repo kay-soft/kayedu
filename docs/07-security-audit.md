@@ -296,7 +296,8 @@ Paths are relative to `app/[locale]/`. In the "lib/db calls" column, `scoped.<mo
 | 124 | `(teacher)/teacher/students/actions.ts:59` | `teacherBlockStudentAction` | getTenantContext("teacher") | NONE | teacherBlockStudentSchema | audit.writeAuditLog, teacher-portal.teacherStudentProfileIds, scoped.students.findById, scoped.studentBlocks.isBlocked, scoped.studentBlocks.create |
 | 125 | `(teacher)/teacher/students/actions.ts:102` | `teacherUnblockStudentAction` | getTenantContext("teacher") | NONE | teacherUnblockStudentSchema | audit.writeAuditLog, scoped.studentBlocks.findById, scoped.studentBlocks.remove, scoped.students.list |
 | 126 | `(admin)/admin/organizations/actions.ts` | `updateOrganizationBranchLimitAction` (F1) | requirePlatformAdmin() | NONE | organizationBranchLimitSchema | platform.updateOrganizationBranchLimit (audits `platform.organization.limit.update` on its transaction) |
-| 127 | `(center)/settings/branches/actions.ts` | `addBranchAction` (F1) | getTenantContext("center") | organization.branch.create (OWNER-only ceiling) | addBranchSchema | branches.addBranchAsOwner (re-resolves the actor; audits `organization.branch.create` on its transaction) |
+| 127 | ~~`(center)/settings/branches/actions.ts`~~ | ~~`addBranchAction` (F1)~~ — **removed at U5** (no centre role manages branches; `organization.branch.create` is gone) | — | — | — | — |
+| 127a | `(admin)/admin/centers/branch-actions.ts` | `updateBranchAction`, `pauseBranchAction`, `endBranchPauseAction`, `deleteBranchAction`, `restoreBranchAction` (U5) | requirePlatformAdmin() | NONE (platform admin only) | branchEditSchema, branchPauseSchema, branchPauseEndSchema, branchDeleteSchema, branchRestoreSchema | branch-admin.* (each audits `platform.branch.update / pause / pause.end / delete / restore` on its transaction) |
 
 **Facts that apply to the whole table:**
 - 24 `"use server"` files, **125 exported Server Actions** (all under `app/`; none in `lib/` or `components/`).
@@ -1233,7 +1234,7 @@ Low findings use a compact form. Every field is still present.
 - Exploit: direct GoTrue sign-up stores an un-normalised phone or a 10k-character name.
 - Fix: zod-validate the metadata and normalise it, or drop the phone (SEC-02); don't overwrite linked rows.
 - Behaviour: no.
-- Gate: metadata phone `+20 10 1234 5678` is stored as `01012345678` or null.
+- Gate: metadata phone `+20 10 1234 5678` is stored as `+201012345678` (E.164 since U4; `01012345678` before) or null.
 - Repro: none.
 
 **SEC-42 — Invitation acceptance is check-then-act; invitations outlive the inviter's authority; revoke is gated more loosely than create.**

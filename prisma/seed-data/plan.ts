@@ -7,7 +7,7 @@
  * RFC 2606 — never a real mailbox; `./domain.ts`) and every account's password
  * is `SEED_PASSWORD`.
  */
-import type { ShareType } from "@prisma/client";
+import type { SessionBookingMode, ShareType } from "@prisma/client";
 import type { SystemKey } from "./catalog.ts";
 import { mail } from "./domain.ts";
 
@@ -51,6 +51,10 @@ export type ClassDef = {
   term: TermKey;
   requiresConfirmation?: boolean;
   acceptsNewStudents?: boolean;
+  /** F6 single-session booking (U3 seeds three bookable classes); OFF when omitted. */
+  sessionBookingMode?: SessionBookingMode;
+  /** F6 per-session booking cap; none when omitted. */
+  maxBookingSeats?: number;
   /** Deactivated at the end of the seed, after its history exists. */
   deactivate?: boolean;
 };
@@ -81,7 +85,8 @@ export type BranchDef = {
   lifecycle: "ACTIVE" | "ONBOARDING" | "SUSPENDED";
   /** Catalog systems this centre picks (every grade and subject under them). */
   systems: SystemKey[];
-  dataVisibilityDays: number;
+  /** U6: the centre window; the teacher window is seeded as min(this, 30). */
+  centerDataVisibilityDays: number;
   staff: StaffDef[];
   /** Teacher keys (see TEACHERS) with a membership at this branch. */
   teachers: string[];
@@ -182,7 +187,7 @@ const DOWNTOWN: BranchDef = {
   themeColor: "#2563EB",
   lifecycle: "ACTIVE",
   systems: ["EG", "US", "IG"],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   customMethod: "Bank transfer",
   staff: [
     { key: "owner-c60", role: "OWNER", first: "Tarek", last: "Hegazy", email: mail("owner.center60"), locale: "en" },
@@ -209,8 +214,10 @@ const DOWNTOWN: BranchDef = {
     // Asks the centre to confirm every request.
     { key: "dt-arabic-s3", system: "EG", grade: "Secondary 3", subject: "Arabic", teacher: "mona", room: 1, day: 0, start: "17:00", end: "19:00", price: 16_000, share: { type: "PERCENTAGE", value: 20 }, term: "FULL", requiresConfirmation: true },
     { key: "dt-arabic-p6", system: "EG", grade: "Primary 6", subject: "Arabic", teacher: "mona", room: 0, day: 2, start: "14:00", end: "15:30", price: 9_000, share: { type: "PERCENTAGE", value: 15 }, term: "T1" },
-    { key: "dt-english-p6", system: "EG", grade: "Primary 6", subject: "English", teacher: "karim", room: 1, day: 3, start: "16:00", end: "17:30", price: 10_000, share: { type: "FIXED", value: 3_000 }, term: "FULL" },
-    { key: "dt-english-us10", system: "US", grade: "Grade 10", subject: "English", teacher: "karim", room: 0, day: 4, start: "17:00", end: "19:00", price: 20_000, share: { type: "FIXED", value: 4_000 }, term: "FULL" },
+    // U3 — the two bookable Downtown classes (single-session attendance, F6):
+    // INSTANT capped at 3 bookings per session, and INSTANT with no cap.
+    { key: "dt-english-p6", system: "EG", grade: "Primary 6", subject: "English", teacher: "karim", room: 1, day: 3, start: "16:00", end: "17:30", price: 10_000, share: { type: "FIXED", value: 3_000 }, term: "FULL", sessionBookingMode: "INSTANT", maxBookingSeats: 3 },
+    { key: "dt-english-us10", system: "US", grade: "Grade 10", subject: "English", teacher: "karim", room: 0, day: 4, start: "17:00", end: "19:00", price: 20_000, share: { type: "FIXED", value: 4_000 }, term: "FULL", sessionBookingMode: "INSTANT" },
     { key: "dt-physics-s3", system: "EG", grade: "Secondary 3", subject: "Physics", teacher: "yasser", room: 2, day: 6, start: "18:30", end: "20:30", price: 18_000, share: { type: "PERCENTAGE", value: 15 }, term: "FULL" },
     // Full: takes no new students.
     { key: "dt-physics-ig10", system: "IG", grade: "Year 10", subject: "Physics", teacher: "yasser", room: 1, day: 1, start: "18:00", end: "19:30", price: 25_000, share: { type: "FIXED", value: 5_000 }, term: "FULL", acceptsNewStudents: false },
@@ -251,7 +258,7 @@ const NASR_CITY: BranchDef = {
   themeColor: "#0D9488",
   lifecycle: "ACTIVE",
   systems: ["EG", "US", "IG"],
-  dataVisibilityDays: 60,
+  centerDataVisibilityDays: 60,
   staff: [
     { key: "mgr-nc", role: "MANAGER", first: "Wael", last: "Shaker", email: mail("manager.nasrcity"), locale: "en" },
     { key: "rec-nc", role: "RECEPTIONIST", first: "Noha", last: "Fouad", email: mail("receptionist.nasrcity"), locale: "en" },
@@ -271,7 +278,8 @@ const NASR_CITY: BranchDef = {
   ],
   classes: [
     // Combined Studio 1 + Studio 2 (60 seats).
-    { key: "nc-math-s3", system: "EG", grade: "Secondary 3", subject: "Mathematics", teacher: "hesham", room: 3, extraRooms: [4], day: 0, start: "15:00", end: "17:00", price: 17_000, share: { type: "PERCENTAGE", value: 15 }, term: "FULL" },
+    // U3 — the bookable Nasr City class: each booking waits for approval (F6).
+    { key: "nc-math-s3", system: "EG", grade: "Secondary 3", subject: "Mathematics", teacher: "hesham", room: 3, extraRooms: [4], day: 0, start: "15:00", end: "17:00", price: 17_000, share: { type: "PERCENTAGE", value: 15 }, term: "FULL", sessionBookingMode: "APPROVAL" },
     { key: "nc-math-us11", system: "US", grade: "Grade 11", subject: "Mathematics", teacher: "hesham", room: 0, day: 3, start: "18:00", end: "19:30", price: 20_000, share: { type: "FIXED", value: 4_000 }, term: "FULL" },
     { key: "nc-english-ig10", system: "IG", grade: "Year 10", subject: "English", teacher: "salma", room: 0, day: 6, start: "16:00", end: "17:30", price: 24_000, share: { type: "FIXED", value: 5_000 }, term: "FULL", acceptsNewStudents: false },
     { key: "nc-english-s2", system: "EG", grade: "Secondary 2", subject: "English", teacher: "salma", room: 1, day: 2, start: "16:00", end: "17:30", price: 12_000, share: { type: "PERCENTAGE", value: 15 }, term: "T1" },
@@ -309,7 +317,7 @@ const NOKHBA: BranchDef = {
   themeColor: "#7C3AED",
   lifecycle: "ACTIVE",
   systems: ["EG", "IG"],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   staff: [
     { key: "owner-nk", role: "OWNER", first: "Hisham", last: "Badawy", email: mail("owner.nokhba"), locale: "en" },
     { key: "rec-nk", role: "RECEPTIONIST", first: "Rasha", last: "Younes", email: mail("receptionist.nokhba"), locale: "en" },
@@ -346,7 +354,7 @@ const ONBOARDING: BranchDef = {
   themeColor: "#F59E0B",
   lifecycle: "ONBOARDING",
   systems: [],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   staff: [
     { key: "owner-ob", role: "OWNER", first: "Mervat", last: "Salah", email: mail("owner.onboarding"), locale: "en" },
   ],
@@ -367,7 +375,7 @@ const SUSPENDED: BranchDef = {
   themeColor: "#DC2626",
   lifecycle: "SUSPENDED",
   systems: [],
-  dataVisibilityDays: 30,
+  centerDataVisibilityDays: 30,
   staff: [
     { key: "owner-sp", role: "OWNER", first: "Kamal", last: "Osman", email: mail("owner.suspended"), locale: "en" },
   ],

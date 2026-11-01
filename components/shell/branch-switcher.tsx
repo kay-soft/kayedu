@@ -3,8 +3,9 @@
 import { Check, ChevronDown, Layers } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
+import { selectCenterAction, selectTeacherBranchAction } from "@/app/[locale]/(auth)/actions";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
+import { NextPathInput } from "@/components/shell/next-path-input";
 import {
   Popover,
   PopoverContent,
@@ -42,6 +43,10 @@ export type RollupOption = {
  *
  * "Whole Management" is pinned above a divider with its own icon, because it
  * is a scope rather than a place and must not read as one more branch name.
+ *
+ * U7: the teacher portal's mode pins **All branches** the same way (the
+ * default — `activeId` null) and submits `selectTeacherBranchAction`, which
+ * writes only the teacher portal's own choice and lands back on the page.
  */
 export function BranchSwitcher({
   activeName,
@@ -50,6 +55,7 @@ export function BranchSwitcher({
   activeId,
   branches,
   rollups,
+  mode = "center",
 }: {
   activeName: string;
   activeLogoUrl: string | null;
@@ -58,11 +64,15 @@ export function BranchSwitcher({
   activeId: string | null;
   branches: BranchOption[];
   rollups: RollupOption[];
+  mode?: "center" | "teacher";
 }) {
   const t = useTranslations("Shell");
   const locale = useLocale();
 
   if (branches.length <= 1 && rollups.length === 0) return null;
+  if (mode === "teacher") {
+    return <TeacherSwitcher activeName={activeName} activeLogoUrl={activeLogoUrl} activeThemeColor={activeThemeColor} activeId={activeId} branches={branches} />;
+  }
 
   // Under "Whole Management" `activeId` is the organization's id: the trigger
   // shows the scope (icon + "Whole Management" + the organization), never a
@@ -190,6 +200,101 @@ export function BranchSwitcher({
                 {activeId === branch.id ? (
                   <Check className="size-4" aria-hidden />
                 ) : null}
+              </span>
+            </button>
+          </form>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const TRIGGER = cn(
+  "group flex h-11 max-w-[14rem] min-w-0 items-center gap-2 rounded-lg border border-transparent px-2",
+  "text-sm font-medium text-text-primary transition-ui outline-none",
+  "hover:border-border hover:bg-surface-hover active:bg-surface-active",
+  "focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/25",
+  "data-[popup-open]:border-border data-[popup-open]:bg-surface-hover",
+);
+
+const ROW = cn(
+  "flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 py-2 text-start",
+  "text-text-primary transition-ui-fast focus-ring",
+  "hover:bg-surface-hover active:bg-surface-active",
+  "aria-[current=true]:bg-brand/10 aria-[current=true]:font-medium aria-[current=true]:text-brand",
+);
+
+/** The teacher portal's switcher (U7): All branches, then each branch. */
+function TeacherSwitcher({
+  activeName,
+  activeLogoUrl,
+  activeThemeColor,
+  activeId,
+  branches,
+}: {
+  activeName: string;
+  activeLogoUrl: string | null;
+  activeThemeColor: string;
+  activeId: string | null;
+  branches: BranchOption[];
+}) {
+  const t = useTranslations("Shell");
+  const locale = useLocale();
+  const all = activeId === null;
+
+  return (
+    <Popover>
+      <PopoverTrigger className={TRIGGER}>
+        {all ? (
+          <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+            <Layers className="size-4" />
+          </span>
+        ) : (
+          <BrandAvatar name={activeName} logoUrl={activeLogoUrl} themeColor={activeThemeColor} size="sm" />
+        )}
+        <span className="hidden min-w-0 flex-col text-start sm:flex">
+          <span className="truncate text-[11px] leading-tight font-medium text-text-muted">{t("branchLabel")}</span>
+          <span className="truncate text-sm leading-tight">{all ? t("allBranches") : activeName}</span>
+        </span>
+        {/* Below sm the label is hidden; the button still says what it holds. */}
+        <span className="sr-only sm:hidden">{all ? t("allBranches") : activeName}</span>
+        <ChevronDown
+          className="size-4 shrink-0 text-text-muted transition-transform duration-[var(--motion-fast)] group-data-[popup-open]:rotate-180"
+          aria-hidden
+        />
+      </PopoverTrigger>
+
+      <PopoverContent align="end" className="w-64">
+        <div className="border-b border-border pb-1">
+          <form action={selectTeacherBranchAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="branchId" value="" />
+            <NextPathInput />
+            <button type="submit" aria-current={all ? true : undefined} className={ROW}>
+              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+                <Layers className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{t("allBranches")}</span>
+                <span className="block truncate text-xs text-text-muted">{t("allBranchesHint", { count: branches.length })}</span>
+              </span>
+              {all ? <Check className="size-4 shrink-0" aria-hidden /> : null}
+            </button>
+          </form>
+        </div>
+
+        <p className="px-2 pt-2 pb-1 text-[11px] font-medium text-text-muted">{t("branchesLabel")}</p>
+
+        {branches.map((branch) => (
+          <form key={branch.id} action={selectTeacherBranchAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="branchId" value={branch.id} />
+            <NextPathInput />
+            <button type="submit" aria-current={activeId === branch.id ? true : undefined} className={ROW}>
+              <BrandAvatar name={branch.name} logoUrl={branch.logoUrl} themeColor={branch.themeColor} size="sm" />
+              <span className="min-w-0 flex-1 truncate text-sm">{branch.name}</span>
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                {activeId === branch.id ? <Check className="size-4" aria-hidden /> : null}
               </span>
             </button>
           </form>

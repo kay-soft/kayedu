@@ -11,7 +11,7 @@ import type {
 import { FAMILY_CODE_ALPHABET, FAMILY_CODE_LENGTH, normalizeFamilyCode } from "../family-code.ts";
 import { normalizePhone } from "../phone.ts";
 import { checkRateLimits } from "../rate-limit.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { writeAuditRow } from "./audit-row.ts";
 
 /**
@@ -507,7 +507,7 @@ export function activeChildLinks(db: Db, parentUserId: string) {
       studentUser: {
         include: {
           studentProfiles: {
-            where: { active: true, center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } } },
+            where: { active: true, center: ACCESSIBLE_CENTER },
             orderBy: { createdAt: "asc" },
             include: { center: true },
           },
@@ -614,7 +614,7 @@ export type AccountFamily = {
  * gets both, since nothing says yet which one they are.
  */
 export async function familyForAccount(db: Db, userId: string): Promise<AccountFamily> {
-  const accessible = { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } };
+  const accessible = ACCESSIBLE_CENTER;
   const [user, childLinks, parentRows, invitations, studentAccount, membership] = await Promise.all([
     db.user.findUnique({ where: { id: userId }, select: { isPlatformAdmin: true } }),
     db.familyLink.findMany({

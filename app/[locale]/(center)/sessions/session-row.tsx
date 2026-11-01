@@ -25,6 +25,10 @@ export type SessionRowData = {
   attendeeCount: number;
   enrolledCount: number;
   displayStatus: SessionDisplayStatus;
+  /** U2 — set on a session rescheduled away ("Show moved"): its replacement's slot. */
+  movedTo: { date: string; time: string } | null;
+  /** U2 — set on a replacement: the slot it was moved from. */
+  movedFrom: { date: string; time: string } | null;
 };
 
 const STATUS_BADGE = {
@@ -70,7 +74,13 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
   );
 
   return (
-    <li className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border p-3 md:flex md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3 md:transition-ui md:hover:bg-surface-hover">
+    <li
+      className={cn(
+        "grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border p-3 md:flex md:items-center md:gap-4 md:rounded-none md:border-0 md:border-b md:px-2 md:py-3 md:transition-ui md:hover:bg-surface-hover",
+        // U2 — a moved original is history: listed greyed, only under "Show moved".
+        session.movedTo && "bg-surface-subtle text-text-secondary opacity-70",
+      )}
+    >
       <div className={cn("col-span-2 flex min-w-0 items-start justify-between gap-2 md:order-2", SESSION_COLUMNS.name)}>
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <Link
@@ -80,6 +90,11 @@ export function SessionRow({ session, locale }: { session: SessionRowData; local
             {session.className}
           </Link>
           <SessionKindBadge kind={session.kind} />
+          {session.movedTo ? (
+            <span className="basis-full text-xs text-text-secondary">{t("movedTo", session.movedTo)}</span>
+          ) : session.movedFrom ? (
+            <span className="basis-full text-xs text-text-secondary">{t("movedFrom", session.movedFrom)}</span>
+          ) : null}
         </div>
         <span className="shrink-0 md:hidden">{status}</span>
       </div>

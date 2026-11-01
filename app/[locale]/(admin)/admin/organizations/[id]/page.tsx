@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { Building2 } from "lucide-react";
 
 import { LIFECYCLE_BADGE_VARIANT } from "@/app/[locale]/(admin)/admin/centers/lifecycle-badge";
+import { DeletedBranches } from "@/app/[locale]/(admin)/admin/centers/branch-tools";
 import { BranchLimitForm } from "@/app/[locale]/(admin)/admin/organizations/branch-limit-form";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -12,6 +13,7 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
+import { platformDeletedBranches } from "@/lib/db/branch-admin";
 import { prisma } from "@/lib/db/client";
 import { platformCenterList, platformOrganizationById } from "@/lib/db/platform";
 import { formatNumber } from "@/lib/format";
@@ -38,7 +40,14 @@ export default async function AdminOrganizationDetailPage({
   const t = await getTranslations("AdminOrganizations");
   const tCenters = await getTranslations("AdminCenters");
 
-  const branches = await platformCenterList(prisma, organization.id);
+  const tBranches = await getTranslations("AdminBranches");
+  const now = new Date();
+  // U5: deleted branches are not listed with the others (and do not count);
+  // they have their own section below, with Restore while their window lasts.
+  const [branches, deletedBranches] = await Promise.all([
+    platformCenterList(prisma, organization.id),
+    platformDeletedBranches(prisma, organization.id),
+  ]);
   const used = branches.filter((branch) => branch.lifecycleState !== "ARCHIVED").length;
   const name = locale === "en" && organization.nameEn ? organization.nameEn : organization.name;
 
@@ -91,7 +100,7 @@ export default async function AdminOrganizationDetailPage({
                   </div>
                   <div className="mt-auto pt-1">
                     <LinkButton href={ROUTES.adminCenter(branch.id)} variant="outline" size="sm">
-                      {tCenters("openDetail")}
+                      {tBranches("manage")}
                     </LinkButton>
                   </div>
                 </CardContent>
@@ -100,6 +109,17 @@ export default async function AdminOrganizationDetailPage({
           ))}
         </ul>
       )}
+
+      <DeletedBranches
+        rows={deletedBranches.map((branch) => ({
+          id: branch.id,
+          name: branch.name,
+          themeColor: branch.themeColor,
+          deletedAt: branch.deletedAt!,
+          restorableUntil: branch.restorableUntil,
+          restorable: branch.restorableUntil !== null && branch.restorableUntil.getTime() >= now.getTime(),
+        }))}
+      />
     </div>
   );
 }

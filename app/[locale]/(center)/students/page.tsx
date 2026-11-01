@@ -32,6 +32,7 @@ import { isWithinUndoWindow, undoDeadline } from "@/lib/promotion";
 import { scoped } from "@/lib/db/scoped";
 import { studentSearchWhere } from "@/lib/db/students";
 import { fullName, localName } from "@/lib/identity";
+import { formatPhone } from "@/lib/phone";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { ResultsRegion } from "@/components/shared/results-region";
@@ -89,7 +90,7 @@ export default async function StudentsPage({
     name: fullName(localName(student, student.user)),
     studentCode: student.studentCode,
     gradeName: student.grade ? catalogLabelWithSelection(locale, student.grade) : null,
-    contact: student.parentPhone ?? student.phone ?? student.email,
+    contact: formatPhone(student.parentPhone ?? student.phone) || student.email,
     active: student.active,
   }));
 

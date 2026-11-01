@@ -6,7 +6,8 @@ import type { Center, CenterLifecycleState, Prisma, PrismaClient, Role } from "@
 import { provisionCenterBaseline } from "./provision.ts";
 import { runInTransaction } from "./session-lifecycle.ts";
 import { writeAuditRow } from "./audit-row.ts";
-import { MAX_BRANCH_LIMIT } from "../branch-setup.ts";
+import { MAX_BRANCH_LIMIT, type BranchCopyKey } from "../branch-setup.ts";
+import { copyBranchSetup } from "./branches.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -50,6 +51,27 @@ export const ACCESSIBLE_LIFECYCLE_STATES: readonly CenterLifecycleState[] = [
   "ACTIVE",
   "GRACE",
 ];
+
+/**
+ * **The one "may this branch be resolved, listed or counted" filter** (U5):
+ * an accessible lifecycle state *and* not deleted by a platform admin. Every
+ * place a branch is resolved (`resolveCenterRelations`, branch grants), listed
+ * (switcher, hub, Discover, the teacher directory, every portal) or rolled up
+ * (Analytics) spreads this — a soft-deleted branch must vanish from all of
+ * them at once, so there is no second spelling of it.
+ */
+export const ACCESSIBLE_CENTER = {
+  lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] },
+  deletedAt: null,
+} satisfies Prisma.CenterWhereInput;
+
+/** The same rule for a centre row already in hand (an invitation's, say). */
+export function isAccessibleCenter(center: {
+  lifecycleState: CenterLifecycleState;
+  deletedAt: Date | null;
+}): boolean {
+  return ACCESSIBLE_LIFECYCLE_STATES.includes(center.lifecycleState) && center.deletedAt === null;
+}
 
 /**
  * The valid lifecycle transition graph. Two rules, stated once and enforced
@@ -243,9 +265,13 @@ export async function createCenterWithSettings(
 
 // ── Organizations and their branch limit (F1, OD-12 (a)+(b)) ────────────
 
-/** Branches that count against `Organization.maxBranches`: every non-ARCHIVED centre. */
+/**
+ * Branches that count against `Organization.maxBranches`: every non-ARCHIVED
+ * centre that is not deleted (U5 — a soft delete frees its slot).
+ */
 export const COUNTED_BRANCHES = {
   lifecycleState: { not: "ARCHIVED" },
+  deletedAt: null,
 } satisfies Prisma.CenterWhereInput;
 
 export type BranchLimitLock = { maxBranches: number; used: number };
@@ -275,17 +301,29 @@ export type AddBranchInput = {
   nameEn?: string | null;
   slug: string;
   themeColor: string;
+  /**
+   * "Copy setup from <branch>" (moved here from the Owner's retired Settings →
+   * Branches, U5): a non-deleted branch of the **same** organization, and the
+   * ticked parts. Omitted or `null`: the provisioning baseline only.
+   */
+  copyFrom?: { centerId: string; keys: readonly BranchCopyKey[] } | null;
 };
 
 export type AddBranchResult =
-  | { ok: true; center: Center }
-  | { ok: false; error: "slugTaken" | "organizationNotFound" | "branchLimitReached" };
+  | { ok: true; center: Center; copied: BranchCopyKey[] }
+  | {
+      ok: false;
+      error: "slugTaken" | "organizationNotFound" | "branchLimitReached" | "sourceNotFound";
+    };
 
 /**
- * Super Admin's "Add to an existing organization" (F1, OD-12 (a)). Respects
- * the limit — refused with `branchLimitReached` until the admin raises it —
- * and creates no Owner invitation: the organization's Owner already resolves
- * every branch under it through the read-time widening (docs/02 §4).
+ * Super Admin's "Add to an existing organization" (F1, OD-12 (a)) — since U5
+ * the **only** way a branch joins an existing organization: no centre role can
+ * create one. Respects the limit — refused with `branchLimitReached` until the
+ * admin raises it — and creates no Owner invitation: the organization's Owner
+ * already resolves every branch under it through the read-time widening
+ * (docs/02 §4). The copy source is re-checked under the organization lock: it
+ * must belong to this organization and not be deleted (`sourceNotFound`).
  */
 export async function addBranchToOrganization(
   db: Db,
@@ -297,6 +335,13 @@ export async function addBranchToOrganization(
   return runInTransaction(db, async (tx): Promise<AddBranchResult> => {
     const lock = await lockOrganizationBranches(tx, input.organizationId);
     if (!lock) return { ok: false, error: "organizationNotFound" };
+    if (input.copyFrom) {
+      const source = await tx.center.findFirst({
+        where: { id: input.copyFrom.centerId, organizationId: input.organizationId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!source) return { ok: false, error: "sourceNotFound" };
+    }
     if (lock.used >= lock.maxBranches) return { ok: false, error: "branchLimitReached" };
     const center = await provisionBranch(tx, {
       organizationId: input.organizationId,
@@ -306,7 +351,10 @@ export async function addBranchToOrganization(
       themeColor: input.themeColor,
       lifecycleState: "ONBOARDING",
     });
-    return { ok: true, center };
+    const copied = input.copyFrom
+      ? await copyBranchSetup(tx, input.copyFrom.centerId, center.id, input.copyFrom.keys)
+      : [];
+    return { ok: true, center, copied };
   });
 }
 
@@ -357,9 +405,9 @@ export type PlatformOrganizationRow = {
   name: string;
   nameEn: string | null;
   maxBranches: number;
-  /** Non-ARCHIVED branches — what the limit counts. */
+  /** Non-ARCHIVED, non-deleted branches — what the limit counts. */
   usedBranches: number;
-  /** Every branch, archived included. */
+  /** Every non-deleted branch, archived included. */
   totalBranches: number;
   createdAt: Date;
 };
@@ -371,7 +419,11 @@ export async function platformOrganizationList(db: Db): Promise<PlatformOrganiza
       orderBy: { name: "asc" },
       select: { id: true, name: true, nameEn: true, maxBranches: true, createdAt: true },
     }),
-    db.center.groupBy({ by: ["organizationId", "lifecycleState"], _count: { _all: true } }),
+    db.center.groupBy({
+      by: ["organizationId", "lifecycleState"],
+      where: { deletedAt: null },
+      _count: { _all: true },
+    }),
   ]);
   const used = new Map<string, number>();
   const total = new Map<string, number>();
@@ -398,6 +450,8 @@ export function platformOrganizationById(db: Db, id: string) {
 export type PlatformCenterRow = {
   id: string;
   name: string;
+  nameEn: string | null;
+  organizationId: string;
   slug: string;
   lifecycleState: CenterLifecycleState;
   themeColor: string;
@@ -420,14 +474,18 @@ export async function platformCenterList(
   /** F1: one organization's branches only — `/admin/organizations/[id]`. */
   organizationId?: string,
 ): Promise<PlatformCenterRow[]> {
-  const inOrganization = organizationId ? { center: { organizationId } } : {};
+  // U5: a deleted branch is listed only in its organization's own "Deleted
+  // branches" section (`lib/db/branch-admin.ts`), never here.
+  const inOrganization = { center: { deletedAt: null, ...(organizationId ? { organizationId } : {}) } };
   const [centers, membershipCounts, studentCounts] = await Promise.all([
     db.center.findMany({
-      where: organizationId ? { organizationId } : undefined,
+      where: { deletedAt: null, ...(organizationId ? { organizationId } : {}) },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
         name: true,
+        nameEn: true,
+        organizationId: true,
         slug: true,
         lifecycleState: true,
         themeColor: true,
@@ -480,9 +538,10 @@ export type PlatformCenterCounts = {
 };
 
 export async function platformCenterCounts(db: Db): Promise<PlatformCenterCounts> {
+  // U5: a deleted branch is not a tenant any more — counted nowhere.
   const [total, grouped] = await Promise.all([
-    db.center.count(),
-    db.center.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
+    db.center.count({ where: { deletedAt: null } }),
+    db.center.groupBy({ by: ["lifecycleState"], where: { deletedAt: null }, _count: { _all: true } }),
   ]);
 
   const byState = Object.fromEntries(
@@ -499,15 +558,15 @@ export async function platformCenterCounts(db: Db): Promise<PlatformCenterCounts
 }
 
 export async function platformTeacherCount(db: Db): Promise<number> {
-  return db.membership.count({ where: { role: TEACHER_ROLE, active: true } });
+  return db.membership.count({ where: { role: TEACHER_ROLE, active: true, center: { deletedAt: null } } });
 }
 
 export async function platformStudentCount(db: Db): Promise<number> {
-  return db.studentProfile.count({ where: { active: true } });
+  return db.studentProfile.count({ where: { active: true, center: { deletedAt: null } } });
 }
 
 export async function platformSessionCount(db: Db): Promise<number> {
-  return db.session.count();
+  return db.session.count({ where: { center: { deletedAt: null } } });
 }
 
 export type AdoptionTrendPoint = { monthKey: string; count: number };
@@ -527,7 +586,7 @@ export async function platformAdoptionTrend(
   db: Db,
   months = 6,
 ): Promise<AdoptionTrendPoint[]> {
-  const centers = await db.center.findMany({ select: { createdAt: true } });
+  const centers = await db.center.findMany({ where: { deletedAt: null }, select: { createdAt: true } });
 
   const counts = new Map<string, number>();
   for (const { createdAt } of centers) {
@@ -618,10 +677,10 @@ export function centerSettingsFor(db: Db, centerId: string) {
   return db.centerSettings.findUnique({ where: { centerId } });
 }
 
-/** Every centre that may operate (ONBOARDING/ACTIVE/GRACE), for the public directories. */
+/** Every centre that may operate (ONBOARDING/ACTIVE/GRACE, not deleted), for the directories. */
 export function listAccessibleCenters(db: Db) {
   return db.center.findMany({
-    where: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    where: ACCESSIBLE_CENTER,
     select: { id: true, name: true, logoPath: true, themeColor: true },
     orderBy: { name: "asc" },
   });

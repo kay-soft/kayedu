@@ -75,6 +75,14 @@ export const SYSTEM_ACTOR_ID = "system";
 export type SessionClosedReason = "sessionCancelled" | "sessionRescheduled" | "sessionClosed";
 
 /**
+ * What `SessionClosedError` can carry: the session's own state, or (U5)
+ * `branchPaused` — not a state of the session but of its branch: a platform
+ * admin's pause covers today, so `createAttendance` refuses every check-in
+ * (lib/db/branch-pauses.ts). The session gate below never returns it.
+ */
+export type CheckInRefusalReason = SessionClosedReason | "branchPaused";
+
+/**
  * Thrown by the attendance write path when a session no longer accepts a
  * write: CANCELLED, already rescheduled (M15), or closed (R2). The M15 class,
  * moved here and extended with `sessionClosed` — there is exactly one
@@ -85,9 +93,9 @@ export type SessionClosedReason = "sessionCancelled" | "sessionRescheduled" | "s
  * reasons as `{ ok: false, error }` instead.
  */
 export class SessionClosedError extends Error {
-  reason: SessionClosedReason;
+  reason: CheckInRefusalReason;
 
-  constructor(reason: SessionClosedReason) {
+  constructor(reason: CheckInRefusalReason) {
     super(`Session is ${reason}.`);
     this.name = "SessionClosedError";
     this.reason = reason;

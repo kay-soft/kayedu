@@ -1,4 +1,4 @@
-import { uniqueTag } from "./support/accounts";
+import { e2eEmail } from "../scripts/lib/e2e-users";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import { signUp, signUpProjectOnly } from "./support/signup";
 import { field, firstDetailLink, openDialog } from "./support/ui";
@@ -35,16 +35,15 @@ test("a parent whose one child studies at two branches sees both", async ({ as, 
   await expectHealthy(page, appLocale);
 });
 
-test("@write a new parent sign-up links nothing; it links with the branch's printed code, then unlinks", async ({ page, as, appLocale, msg }, testInfo) => {
+test("@write a new parent sign-up links nothing; it links with the branch's printed code, then unlinks", async ({ page, as, appLocale, msg, e2eTag: tag }, testInfo) => {
   signUpProjectOnly(testInfo);
   // A seeded student's page, where the branch prints the code.
   const manager = await as("manager");
   await manager.goto(`/${appLocale}/students`);
   await (await firstDetailLink(manager, "/students")).click();
 
-  const tag = uniqueTag("e2e").toLowerCase();
   // F4: a Parent sign-up lands on the parent portal's "Link your child".
-  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Parent ${tag}`, email: `${tag}-parent@example.com` }, "PARENT");
+  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Parent ${tag}`, email: e2eEmail(tag, "parent") }, "PARENT");
   await expect(page).toHaveURL(new RegExp(`/${appLocale}/parent`));
   await page.goto(`/${appLocale}/parent`);
   await expectHealthy(page, appLocale);

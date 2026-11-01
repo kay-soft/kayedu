@@ -77,6 +77,8 @@ npm run e2e -- e2e/parent.spec.ts:38 --project=en-1280                     # one
 npm run e2e -- e2e/navigation.spec.ts -g "owner: lands home" --project=en-1280
 ```
 
+**The expected teacher nav (one list).** `scripts/lib/expected-nav.ts` (`EXPECTED_TEACHER_NAV`) is the single hand-written oracle for the teacher sidebar. `seed:verify`, `check:permissions` and `e2e/navigation.spec.ts` (both teacher accounts) all import it, so they cannot drift apart. It is deliberately not derived from `TEACHER_NAV`: **a change to the teacher nav must update that file**, and all three then pass or fail together. The other roles' lists are still written out in `seed-verify.ts`, `permissions-check.ts` and `navigation.spec.ts`.
+
 Projects are `en-1280`, `ar-1280`, `en-375`, `ar-375` (`setup` runs first on its own — its sessions are reused when still valid). Start with one project; widen only to confirm a fix. The account-creating journeys (`signUpProjectOnly`) run in `en-1280` only — sign-up is limited to 10 an hour per IP — so they skip in the other three. Each `npm run e2e` starts a fresh dev server (compile cold), so the first test to reach a route can be slow; a one-off timeout on a cold route is worth one re-run alone before it is treated as a bug.
 
 **What `check:all` prints (G2).**
@@ -98,6 +100,20 @@ REFUSED: npm run check:payments writes to its database, and this run would write
   or against a throwaway local Postgres (DATABASE_URL on localhost).
   There is no override flag.
 ```
+
+## 6b. Gate fixtures: the prefix list, cleanup, and `seed:verify`
+
+Every `check:*` gate creates its own centres (slug), users (email) and a few global catalog rows (`nameEn`) under a stem of the form `<gate>-check` (`branches-check-a`, `student-portal-check-pub-listed`, `people-check-f4-s1@kayedu.test`, `Branches-Check Math`). The **one registry** is `scripts/lib/gate-fixtures.ts` (`GATE_FIXTURE_STEMS`, plus `isolation-family-` for emails). The e2e suite creates no fixtures (it signs in as seeded accounts); the old "e2e fixture prefix" was in fact the `check:student-portal` gate's.
+
+**e2e accounts.** The three `@write` journeys that sign an account up (`parent.spec.ts`, `claim.spec.ts`, `student.spec.ts`) take a fresh tag from the `e2eTag` fixture (`e2e…`, defined once as `E2E_USER_PREFIX` in `scripts/lib/e2e-users.ts`) and build the email as `<tag>-<kind>@example.com` and the surname as `<Kind> <tag>`. The fixture deletes everything that tag names when the test ends, pass or fail: the User (cascading its profile, enrolments, family links and claims), its Supabase login, and a desk-registered record under the same surname. Audit rows keep their ids (`actorUserId` is `ON DELETE SET NULL`). A killed run can still leave accounts; `KAYEDU_ENV=staging npm run e2e:clean-users` sweeps every `e2e…@example.com` / ` e2e…` surname (seed `@…` and gate `<gate>-check…` accounts cannot match). `seed:verify` section 4 stays strict for the seed world: a relationship-less user there is a failure, e2e leftovers are cleaned at the source rather than excused.
+
+- **Cleanup.** A gate deletes its fixtures at the start of a run and again in a `finally`. A gate that is **killed or crashes before the `finally`** leaves them behind; re-running that gate cleans up (it deletes first). Global catalog rows do not cascade with a centre, so a leftover one is visible to every centre.
+- **`npm run check:gate-fixtures`** (no database; in CI beside `check:public`) scans `scripts/*-check.ts` and **fails on a fixture stem that is not registered**. Adding a gate means adding its stem to the registry, or `seed:verify` would count its rows as seed data. (The gates still spell their own slug literals; this check, not a shared constant, is what keeps them in step.)
+- **`seed:verify` and fixtures.** Sections 1 (baseline), 3 (money), 4 (orphans) and 7 (counts) **leave gate fixtures out**; nothing is weakened for the seed world. Section 8 **"Gate fixtures left behind"** lists them: younger than 30 minutes is a **WARN** (a gate may still be running), 30 minutes or older is a **FAIL** (an interrupted gate left it). `npm run seed:verify -- --strict-clean` fails on *any* fixture, and `check:all` ends with exactly that. Sections 2, 5 and 6 and the SEC-2b invariants stay global: a leftover global catalog row can still fail section 6's name-uniqueness checks until its gate is re-run.
+- **Do not run two gates (or a gate and `check:all`) at the same time against one database.** Each gate sweeps, on exit, the relation-less users created since it started (`scripts/lib/gate-db.ts`, `orphanedUsersSince`). A gate that was already running and finishes mid-way through another used to delete that gate's actor user (e.g. `class-periods-check-staff`, which has no membership), so its next audit row failed on the `AuditLog.actorUserId` foreign key. Since the fix the time-window sweep skips users under another registered gate's stem (`otherGateEmailPrefixes`), but overlapping runs still contend for locks and cleanup — run one at a time.
+- **Do not run `seed:verify` while a gate (or `check:all`) is running** — a gate's fixtures are legitimately present, and its catalog rows will trip section 6. Run it alone, after the run.
+
+- **The expected teacher nav is one hand-written list.** `EXPECTED_TEACHER_NAV` lives in `scripts/lib/expected-nav.ts` and is imported by `seed-verify.ts` and `permissions-check.ts`. It is deliberately **not** derived from `TEACHER_NAV` (an independent oracle). **A change to the teacher nav (`components/shell/nav.ts`) must update that file in the same change**, or both fail.
 
 ## 7. Reset staging
 

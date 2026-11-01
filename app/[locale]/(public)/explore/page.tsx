@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PausedNote } from "@/components/explore/paused-note";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Building2, SearchX } from "lucide-react";
 
@@ -117,7 +118,11 @@ async function BranchesView({ page }: { page: number }) {
                   <BrandAvatar name={name} logoUrl={branch.logoUrl} themeColor={branch.themeColor} size="lg" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-semibold text-text-primary">{name}</span>
-                    <span className="block truncate text-sm text-text-muted">{t("branchCardHint")}</span>
+                    {branch.pausedUntil ? (
+                      <PausedNote until={branch.pausedUntil} />
+                    ) : (
+                      <span className="block truncate text-sm text-text-muted">{t("branchCardHint")}</span>
+                    )}
                   </span>
                 </Link>
               </li>
@@ -155,7 +160,7 @@ async function ClassesView({
   const pageEntries = classes.slice((page - 1) * EXPLORE_CLASS_PAGE_SIZE, page * EXPLORE_CLASS_PAGE_SIZE);
 
   const subjectOptions = options.subjects
-    .map((entry) => ({ value: entry.id, label: catalogLabel(locale, entry) }))
+    .map((entry) => ({ value: entry.id, label: catalogLabel(locale, entry), gradeIds: entry.gradeIds }))
     .sort((a, b) => a.label.localeCompare(b.label));
   const gradeOptions = options.grades
     .map((entry) => ({ value: entry.id, label: catalogLabel(locale, entry) }))
@@ -197,7 +202,9 @@ async function ClassesView({
                     href={href}
                     subjectName={catalogLabelWithSelection(locale, item.subject)}
                     branchName={branchName(locale, item.branch)}
+                    pausedUntil={item.branch.pausedUntil}
                     teacherName={item.teacherName}
+                    imageUrl={item.imageUrl}
                     teacherRating={item.teacherRating}
                     gradeName={catalogLabelWithSelection(locale, item.grade)}
                     schedules={item.schedules}
@@ -211,6 +218,8 @@ async function ClassesView({
                         requiresConfirmation={item.requiresConfirmation}
                         seats={item.seats}
                         returnPath={href}
+                        item={item}
+                        branchLabel={branchName(locale, item.branch)}
                       />
                     }
                   />

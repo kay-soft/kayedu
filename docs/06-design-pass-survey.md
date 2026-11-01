@@ -162,8 +162,8 @@ Hand-copied list header. **R10a:** `ListHeader`. **T1:** the members list is the
 
 **F1:** with more than one branch where the Owner may invite, the invite form opens with a **Branch** select (default: the active branch); an invitation for another branch confirms with that branch's name. Hidden for a one-branch Owner.
 
-### `app/[locale]/(center)/settings/branches/page.tsx` — **F1**
-New. OWNER only (`organization.branch.create`). A usage card ("2 of 3 branches used") holding **Add branch** — disabled at the limit, with the reason under it — and the branch list (name, English name, "You're here", lifecycle badge; a card per branch below `md`). The Add branch dialog is the shared `DialogShell`: Branch (Arabic name, English name, timezone), Theme colour (native picker + swatches, 44px), Copy setup (source select + six ticks, all on, and a "never copied" note); a full-screen sheet on a phone.
+### `app/[locale]/(center)/settings/branches/page.tsx` — **F1, removed at U5**
+**Removed at U5** (only KayEdu manages branches — the admin's tools are on `/admin/centers/[id]` and `/admin/organizations/[id]`, `04-design-system.md` §11.21). The F1 entry, kept as the record: New. OWNER only (`organization.branch.create`). A usage card ("2 of 3 branches used") holding **Add branch** — disabled at the limit, with the reason under it — and the branch list (name, English name, "You're here", lifecycle badge; a card per branch below `md`). The Add branch dialog is the shared `DialogShell`: Branch (Arabic name, English name, timezone), Theme colour (native picker + swatches, 44px), Copy setup (source select + six ticks, all on, and a "never copied" note); a full-screen sheet on a phone.
 
 ### `app/[locale]/(center)/classes/[id]/page.tsx` — **R10b**
 *Wrong now (at `ea7f645`):* the header's action slot is a loose flex row holding the Edit dialog button, an Active badge and the "All classes" link — three different heights and three different jobs, so the one verb on the page does not read as an action bar. The body is `xl:grid-cols-2` over a `display: contents` wrapper, so three cards of very different heights (key facts, the weekly-schedule builder, sessions) are dealt into two columns by the browser: the schedule builder is a tall card beside a 3-row facts card, leaving a blank block under it. Below `xl` (1024–1279px — a laptop with the sidebar open) it is a single column of full-width, mostly-empty cards. The roster, the most-used part of the page, is a full-width card *below* both. There is no upcoming-sessions list and no centre-cut figure on the page today, and the kept-sessions warning is buried inside the "Sessions" card.
@@ -205,6 +205,12 @@ Blue KPI border; hand-labelled filter grid (in `session-filters.tsx`). **R10a:**
 
 **DES:** "Request a new session" is a closed disclosure above the list (docs/04 §14.9); Arabic counts in Arabic-Indic digits with proper plural forms.
 
+### `app/[locale]/(teacher)/teacher/calendar/page.tsx` — **U7 (new)**
+The teacher's month calendar on the shared `SessionCalendar` (docs/04 §11.28): Held green, Upcoming blue, Cancelled grey, a legend, and the tapped day's sessions below with a text badge, branch (under All branches), room, present/late/absent counts and a link to each session. A Branch filter under All branches. Dots only at 375px, 44px day targets.
+
+### `app/[locale]/(teacher)/teacher/profile/page.tsx` — **U9 (new)**
+The teacher's own picture and their classes' covers. A `PageSection` of one card per branch in view (the teacher's `PersonAvatar` with their photo at that branch, the shared `ImageUploadForm`, and — when they teach at more than one branch — a "Use this photo at all my branches" checkbox), then a `PageSection` of the shared `ClassCard`s with the cover controls in the card's action slot, so the teacher sees exactly what a student will. Flag off: each control is replaced by the "Coming soon" note. One column at 375px, two from `lg`; 44px targets.
+
 ### `app/[locale]/(teacher)/teacher/students/page.tsx`
 Consistent. No change.
 
@@ -237,6 +243,9 @@ Consistent. No change.
 
 **DES:** upcoming sessions show eight, then "Show N more" (`CappedList`, docs/04 §14.9).
 
+### `app/[locale]/(student)/student/calendar/page.tsx` — **U7 (new)**
+The student's month calendar on the shared `SessionCalendar` (docs/04 §11.28) across every branch: Present green, Late amber, Absent red, Upcoming blue, Booked blue ring, Requested dashed amber, Cancelled grey struck through; a legend; the tapped day's sessions below, each with a text badge, its branch and room. No branch switcher anywhere in the student shell (U7).
+
 ### `app/[locale]/(student)/student/discover/page.tsx`
 Filter labels hand-built (in `discover-filters.tsx`). **R10a:** `FilterField`. The class card's subject-accent top border is the documented rotating subject palette (docs/04 §2), not a status colour.
 **F4:** the grade filter is pre-selected from the student's account grade; its "All" option posts the explicit `all` when a grade is pre-selected.
@@ -265,6 +274,9 @@ Redirect only. No change.
 **T7:** the selected child's booked and requested single sessions appear in Upcoming with the same Booked / Requested badges (read-only, through the same reads as the student schedule).
 "No children linked" was a bare muted sentence in a padded card. **R10a:** `EmptyState`.
 **F3:** zero linked children → a card with the info `EmptyState` "No child linked yet" whose action is a code field + **Continue** (it writes nothing — it carries the code to `/family/join` in the URL fragment) and the "where to get a code" line under it. Linked children at no branch yet → an info `EmptyState` naming them. Otherwise as before, with a ghost **Link another child** (to Account → Family) as the header action and an info line naming any linked child who has not joined a branch.
+
+### `app/[locale]/(parent)/parent/calendar/page.tsx` — **U7 (new)**
+The selected child's month calendar, read-only, on the shared `SessionCalendar` — the same colours, legend and day list as the student's own. The child selector above it (`?child=`, kept while moving between months); no child at a branch → an info `EmptyState` with a link back to the parent portal.
 
 ---
 

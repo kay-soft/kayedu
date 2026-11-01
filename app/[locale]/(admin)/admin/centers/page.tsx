@@ -60,6 +60,10 @@ export default async function AdminCentersPage() {
           nameEn: organization.nameEn,
           usedBranches: organization.usedBranches,
           maxBranches: organization.maxBranches,
+          // U5: what "Copy setup from" may offer — this organization's branches.
+          branches: centers
+            .filter((center) => center.organizationId === organization.id)
+            .map((center) => ({ id: center.id, name: center.name })),
         }))}
       />
 

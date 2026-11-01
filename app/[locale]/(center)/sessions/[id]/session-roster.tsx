@@ -238,7 +238,7 @@ function AttendeeRow({
         </p>
       ) : null}
 
-      {readOnly || (!alreadyMarked && !canRecord) || (row.notArrived && !canRecord && !canCorrect) ? (
+      {readOnly || (!alreadyMarked && !canRecord) || (row.notArrived && !canRecord) ? (
         // Present / late / absent keep their colours on a closed roster too
         // (they had all been grey) — docs/04 §2. "Not arrived" is neutral.
         <Badge variant={row.status && !row.notArrived ? STATUS_VARIANT[row.status] : "neutral"}>
@@ -270,21 +270,10 @@ function AttendeeRow({
               {t("checkIn")}
             </Button>
           ) : null}
-          {row.notArrived && canCorrect ? (
-            <>
-              <p className="text-xs text-text-muted">{t("notArrivedCorrectHint")}</p>
-              <AttendanceControl
-                formAction={attendanceFormAction}
-                value={null}
-                pending={attendancePending}
-                hiddenFields={hiddenRowFields}
-                statuses={["PRESENT", "LATE"]}
-              />
-              {attendanceState.error ? (
-                <FormMessage>{tErrors(attendanceState.error)}</FormMessage>
-              ) : null}
-            </>
-          ) : null}
+          {/* U2 — a Not-arrived row offers only Check in, which records the
+              payment. The old "correct the mark — they were here all along"
+              shortcut marked them present without one; corrections stay on
+              checked-in rows (Present ↔ Late), below. */}
         </div>
       ) : (
         <>
@@ -390,8 +379,13 @@ function AttendeeRow({
                   voidOpen ? (
                     <form
                       action={voidFormAction}
-                      className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
+                      className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap"
                     >
+                      {/* U2 — what this does, before the reason is typed. */}
+                      <div id={`${row.studentProfileId}-void-help`} className="flex basis-full flex-col gap-1 text-xs text-text-secondary">
+                        <p>{t("voidHelp")}</p>
+                        <p>{t("reversalResets")}</p>
+                      </div>
                       <input type="hidden" name="locale" value={locale} />
                       <input type="hidden" name="paymentId" value={row.payment.id} />
                       <Input
@@ -403,6 +397,7 @@ function AttendeeRow({
                         autoComplete="off"
                         // A labelled field (it had been a bare input with a placeholder).
                         aria-label={t("voidReasonPlaceholder")}
+                        aria-describedby={`${row.studentProfileId}-void-help`}
                         placeholder={t("voidReasonPlaceholder")}
                         className="min-w-0 flex-1"
                       />
@@ -429,8 +424,13 @@ function AttendeeRow({
                   refundOpen ? (
                     <form
                       action={refundFormAction}
-                      className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
+                      className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap"
                     >
+                      {/* U2 — what this does, before the reason is typed. */}
+                      <div id={`${row.studentProfileId}-refund-help`} className="flex basis-full flex-col gap-1 text-xs text-text-secondary">
+                        <p>{t("refundHelp")}</p>
+                        <p>{t("reversalResets")}</p>
+                      </div>
                       <input type="hidden" name="locale" value={locale} />
                       <input type="hidden" name="paymentId" value={row.payment.id} />
                       <Input
@@ -442,6 +442,7 @@ function AttendeeRow({
                         autoComplete="off"
                         // A labelled field (it had been a bare input with a placeholder).
                         aria-label={t("refundReasonPlaceholder")}
+                        aria-describedby={`${row.studentProfileId}-refund-help`}
                         placeholder={t("refundReasonPlaceholder")}
                         className="min-w-0 flex-1"
                       />

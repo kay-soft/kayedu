@@ -4,6 +4,7 @@ import { Loader2, UserCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ROUTES } from "@/lib/routes";
+import { formatPhone } from "@/lib/phone";
 import { Button } from "@/components/ui/button";
 import type { MatchCandidate } from "@/lib/validation/people";
 import { LinkButton } from "@/components/shared/link-button";
@@ -94,7 +95,7 @@ export function MatchPanel({
               {t("matchedOn.phone")}
             </dt>
             <dd className="text-text-secondary" dir="ltr">
-              {match.phone}
+              {formatPhone(match.phone)}
             </dd>
           </div>
         ) : null}

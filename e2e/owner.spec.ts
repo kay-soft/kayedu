@@ -27,11 +27,13 @@ const SETTINGS = [
   ["/settings/terms", "terms"],
   ["/settings/catalog", "catalog"],
   ["/settings/card", "card"],
+  ["/settings/branding", "branding"],
   ["/settings/permissions", "permissions"],
   ["/settings/staff", "staff"],
 ] as const;
 
-test("every settings screen renders, and its sub-nav lists all eight", async ({ as, appLocale, msg }) => {
+// U5: Settings → Branches is gone — only a platform admin manages branches.
+test("every settings screen renders, and its sub-nav lists all nine (no Branches)", async ({ as, appLocale, msg }) => {
   const page = await as("owner");
   await selectBranch(page, appLocale);
   for (const [route] of SETTINGS) {
@@ -43,6 +45,10 @@ test("every settings screen renders, and its sub-nav lists all eight", async ({ 
   for (const [, key] of SETTINGS) {
     await expect(subNav.getByRole("link", { name: msg(`Settings.nav.${key}`), exact: true })).toBeVisible();
   }
+  await expect(subNav.getByRole("link")).toHaveCount(SETTINGS.length);
+  // The old URL is no settings screen any more.
+  await page.goto(`/${appLocale}/settings/branches`);
+  await expect(page.getByRole("navigation", { name: msg("Settings.nav.label") })).toHaveCount(0);
   // The permission matrix: every matrix role is a column, every action a row.
   await page.goto(`/${appLocale}/settings/permissions`);
   await expect(page.getByRole("button", { name: msg("Settings.permissions.saveMatrix") })).toBeVisible();
@@ -61,13 +67,15 @@ test("a manager is refused the owner-only permissions matrix, by nav and by URL"
   await expect(page).not.toHaveURL(/\/settings\/permissions$/);
 });
 
-test("@write general settings save as they are (conflict policy, late threshold, window)", async ({ as, appLocale, msg }) => {
+test("@write general settings save as they are (conflict policy, late threshold, both windows)", async ({ as, appLocale, msg }) => {
   const page = await as("owner");
   await selectBranch(page, appLocale);
   await page.goto(`/${appLocale}/settings`);
   await expect(page.getByText(msg("Settings.general.schedulingTitle"), { exact: true })).toBeVisible();
   await expect(page.getByLabel(msg("Settings.general.lateThreshold"))).toBeVisible();
-  await expect(page.getByLabel(msg("Settings.general.visibilityDays"))).toBeVisible();
+  // U6: two windows, each with its cap.
+  await expect(page.getByLabel(msg("Settings.general.visibilityCenter.label"))).toHaveAttribute("max", "365");
+  await expect(page.getByLabel(msg("Settings.general.visibilityTeacher.label"))).toHaveAttribute("max", "30");
   await page.getByRole("button", { name: msg("Settings.common.save"), exact: true }).first().click();
   await expect(page.getByText(msg("Settings.common.saved"))).toBeVisible();
 });

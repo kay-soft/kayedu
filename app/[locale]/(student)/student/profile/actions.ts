@@ -59,7 +59,8 @@ export async function completeStudentProfileAction(
       id: studentProfileId,
       userId: user.id,
       active: true,
-      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+      // U5: the same rule as `ACCESSIBLE_CENTER` — a deleted branch is not one.
+      center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] }, deletedAt: null },
     }),
   });
   if (!profile) return NOT_FOUND;

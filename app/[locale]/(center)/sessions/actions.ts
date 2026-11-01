@@ -877,6 +877,7 @@ const NEW_SESSION_FIELD_ERRORS: Record<string, string> = {
   teacherRequired: "teacherId",
   subjectNotFound: "subjectId",
   gradeNotFound: "gradeId",
+  subjectNotInGrade: "subjectId",
   invalidTitle: "title",
   titleRequired: "title",
   invalidPrice: "price",

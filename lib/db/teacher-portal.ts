@@ -3,10 +3,11 @@ import type { Prisma, PrismaClient, SessionStatus } from "@prisma/client";
 // Relative imports on purpose — `npm run check:teacher-portal` exercises this
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/analytics.ts and lib/db/sessions.ts).
-import { EXCLUDE_DROP_IN_NO_SHOWS } from "../attendance-rules.ts";
-import { monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
+import { EXCLUDE_DROP_IN_NO_SHOWS, attendanceDisplay } from "../attendance-rules.ts";
+import { centreTimeZone, monthRangeUtc, todayInTimezone, weekRangeUtc } from "../scheduling.ts";
 import { type DateRange, revenueTotals } from "./analytics.ts";
-import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
+import { teacherHistoryFloor } from "./visibility.ts";
+import { NOT_MOVED_SESSION, OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 import { likeSearchToken } from "../like.ts";
 
@@ -25,6 +26,35 @@ const CANCELLED_STATUS: SessionStatus = "CANCELLED";
  */
 
 type Db = PrismaClient | Prisma.TransactionClient;
+
+// ── History preference (U6) ─────────────────────────────────────────────────
+
+/**
+ * The teacher portal's own history floor (U6, docs/01 §7): the oldest session
+ * date this teacher's portal shows at this branch, from their own
+ * `User.teacherHistoryDays` counted back from the branch's today — `null`
+ * (all history) at 0, the default. No centre window is ever applied in the
+ * teacher portal; this is the teacher's preference alone. Applied to the
+ * portal's reads (dashboard, session list, students, student history,
+ * session detail) — never to a write's integrity check, and never to
+ * settlements (carved out).
+ */
+export function teacherPortalHistoryFloor(
+  ctx: { user: { teacherHistoryDays: number }; settings: { timezone: string } | null },
+  now: Date = new Date(),
+): Date | null {
+  return teacherHistoryFloor(ctx.user.teacherHistoryDays, centreTimeZone(ctx.settings), now);
+}
+
+/** `{ date: { gte: floor } }` on a session, or nothing when unbounded. */
+function sessionSince(floor: Date | null): Prisma.SessionWhereInput {
+  return floor ? { date: { gte: floor } } : {};
+}
+
+/** Raises a range's start to the history floor; never narrows otherwise. */
+function rangeSince<T extends { start: Date; end: Date }>(range: T, floor: Date | null): T {
+  return floor && range.start < floor ? { ...range, start: floor } : range;
+}
 
 // ── Dashboard: per-center summary, unioned into a combined view ────────────
 
@@ -65,7 +95,13 @@ export async function teacherCenterSummary(
   today: Date,
   weekRange: { start: Date; end: Date },
   earningsRange: DateRange,
+  // U6: the teacher's own history floor (`teacherPortalHistoryFloor`) — a
+  // week or month reaching past it counts from the floor instead.
+  historyFloor: Date | null = null,
 ): Promise<TeacherCenterSummary> {
+  const week = rangeSince(weekRange, historyFloor);
+  const earningsFrom =
+    historyFloor && (!earningsRange.from || earningsRange.from < historyFloor) ? historyFloor : earningsRange.from;
   const [sessionsToday, sessionsThisWeek, earnings] = await Promise.all([
     // R4: a deactivated class's sessions count only once they are closed
     // records (`OPEN_CLASS_SESSION`).
@@ -74,18 +110,20 @@ export async function teacherCenterSummary(
         teacherId,
         date: today,
         status: { not: CANCELLED_STATUS },
+        ...NOT_MOVED_SESSION,
         ...OPEN_CLASS_SESSION,
       }),
     }),
     db.session.count({
       where: scopedWhere(centerId, {
         teacherId,
-        date: { gte: weekRange.start, lte: weekRange.end },
+        date: { gte: week.start, lte: week.end },
         status: { not: CANCELLED_STATUS },
+        ...NOT_MOVED_SESSION,
         ...OPEN_CLASS_SESSION,
       }),
     }),
-    revenueTotals(db, centerId, earningsRange, teacherId),
+    revenueTotals(db, centerId, { from: earningsFrom, to: earningsRange.to }, teacherId),
   ]);
 
   return {
@@ -185,10 +223,12 @@ export async function teacherStudentProfileIds(
   db: Db,
   centerId: string,
   teacherId: string,
+  // U6: the portal's history floor; a write's integrity check passes none.
+  historyFloor: Date | null = null,
 ): Promise<string[]> {
   const rows = await db.sessionAttendee.findMany({
     where: scopedWhere(centerId, {
-      session: { teacherId },
+      session: { teacherId, ...sessionSince(historyFloor) },
       studentProfileId: { not: null },
     }),
     distinct: ["studentProfileId"],
@@ -205,8 +245,12 @@ export async function teacherStudentProfileIds(
  * filters in the database instead of loading the teacher's all-history roster
  * on every keystroke.
  */
-export function taughtByTeacherWhere(centerId: string, teacherId: string): Prisma.StudentProfileWhereInput {
-  return { attendees: { some: scopedWhere(centerId, { session: { teacherId } }) } };
+export function taughtByTeacherWhere(
+  centerId: string,
+  teacherId: string,
+  historyFloor: Date | null = null,
+): Prisma.StudentProfileWhereInput {
+  return { attendees: { some: scopedWhere(centerId, { session: { teacherId, ...sessionSince(historyFloor) } }) } };
 }
 
 /**
@@ -219,12 +263,13 @@ export function studentSessionsWithTeacher(
   centerId: string,
   teacherId: string,
   studentProfileId: string,
+  historyFloor: Date | null = null,
 ) {
   const withSelection = { include: { selections: { where: { centerId } } } } as const;
   return db.sessionAttendee.findMany({
     where: scopedWhere(centerId, {
       studentProfileId,
-      session: { teacherId },
+      session: { teacherId, ...sessionSince(historyFloor) },
       // T5 — a drop-in's ABSENT row is not a session they had with this teacher.
       ...EXCLUDE_DROP_IN_NO_SHOWS,
     }),
@@ -241,4 +286,40 @@ export function studentSessionsWithTeacher(
       payments: { where: { voided: false }, orderBy: { recordedAt: "desc" }, take: 1 },
     },
   });
+}
+
+// ── Calendar (U7): a day's present / late / absent per session ──────────────
+
+export type SessionAttendanceCounts = { present: number; late: number; absent: number };
+
+/**
+ * Present / late / absent per session for the teacher calendar's day list
+ * (U7) — one branch's sessions, one `centerId`-scoped read, counted with the
+ * same rule every roster uses (`attendanceDisplay`): an ABSENT row on a live
+ * session, or a drop-in's, is "not arrived" and is not counted as absent.
+ * The caller passes only this teacher's own sessions.
+ */
+export async function sessionAttendanceCounts(
+  db: Db,
+  centerId: string,
+  sessions: { id: string; closedAt: Date | null }[],
+): Promise<Map<string, SessionAttendanceCounts>> {
+  const counts = new Map<string, SessionAttendanceCounts>(
+    sessions.map((session) => [session.id, { present: 0, late: 0, absent: 0 }]),
+  );
+  if (sessions.length === 0) return counts;
+  const closed = new Map(sessions.map((session) => [session.id, session.closedAt !== null]));
+  const rows = await db.sessionAttendee.findMany({
+    where: scopedWhere(centerId, { sessionId: { in: sessions.map((session) => session.id) }, studentProfileId: { not: null } }),
+    select: { sessionId: true, attendanceStatus: true, isDropIn: true },
+  });
+  for (const row of rows) {
+    const tally = counts.get(row.sessionId);
+    if (!tally) continue;
+    const shown = attendanceDisplay(row, closed.get(row.sessionId) ?? false);
+    if (shown === "PRESENT") tally.present += 1;
+    else if (shown === "LATE") tally.late += 1;
+    else if (shown === "ABSENT") tally.absent += 1;
+  }
+  return counts;
 }

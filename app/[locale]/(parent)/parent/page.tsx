@@ -8,7 +8,7 @@ import { requireParentUser } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { teacherDisplayNames } from "@/lib/db/discover";
 import { childBookedUpcoming, studentPastAttendance, studentUpcomingSessions } from "@/lib/db/student-portal";
-import { formatDate, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
+import { formatDate, formatDay, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
 import { centerTimeZone } from "@/lib/db/session-lifecycle";
 import { dateKey, todayInTimezone } from "@/lib/scheduling";
 import { ChildSelector } from "./child-selector";
@@ -39,6 +39,8 @@ type UpcomingRow = {
   teacherName: string;
   /** F6: set on a single-session booking — "Booked" (CONFIRMED) or "Requested" (PENDING). */
   bookingStatus?: "PENDING" | "CONFIRMED";
+  /** U2 — a replacement's original slot ("Moved from …"). */
+  movedFrom: { date: Date; startTime: string } | null;
 };
 
 type PastRow = {
@@ -94,6 +96,7 @@ async function loadChildSchedule(
     roomName: row.room?.name ?? row.classGroup?.room?.name ?? null,
     teacherName: names.get(row.teacherId) ?? "—",
     bookingStatus,
+    movedFrom: row.rescheduledFrom,
   });
   const upcoming = [
     ...futureSessions.map((row) => toUpcoming(row)),
@@ -135,6 +138,7 @@ export default async function ParentPage({
   const t = await getTranslations("ParentPortal");
   const tAttendance = await getTranslations("Sessions.attendance");
   const tCommon = await getTranslations("Settings.common");
+  const tSessions = await getTranslations("Sessions");
   const locale = await getLocale();
 
   const tErrors = await getTranslations("Family.errors");
@@ -267,6 +271,15 @@ export default async function ParentPage({
                       <span>{formatTimeRange(row.startTime, row.endTime, locale)}</span>
                       {row.roomName ? <span>{row.roomName}</span> : null}
                     </p>
+                    {/* U2 — a replacement says where it came from. */}
+                    {row.movedFrom ? (
+                      <p className="mt-1 text-xs text-text-secondary">
+                        {tSessions("movedFrom", {
+                          date: formatDay(row.movedFrom.date, locale),
+                          time: formatTime(row.movedFrom.startTime, locale),
+                        })}
+                      </p>
+                    ) : null}
                   </div>
                   <Badge variant={row.bookingStatus === "PENDING" ? "warning" : "info"}>
                     {row.bookingStatus === "CONFIRMED"

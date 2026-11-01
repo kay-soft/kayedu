@@ -26,7 +26,7 @@ import {
 import type { TypeAheadResult } from "@/components/center/type-ahead-search";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
-import { normalizePhone } from "@/lib/phone";
+import { formatPhone, normalizePhone } from "@/lib/phone";
 import { ROUTES } from "@/lib/routes";
 import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
@@ -110,7 +110,7 @@ export async function searchTeachersTypeAheadAction(
   return rows.map((row) => ({
     id: row.id,
     primary: fullName(localName(row, row.user)),
-    secondary: row.phone ?? row.email ?? undefined,
+    secondary: row.phone ? formatPhone(row.phone) : (row.email ?? undefined),
     href: ROUTES.centerTeacher(row.id),
   }));
 }
@@ -202,7 +202,7 @@ export async function createTeacherAction(
   const parsed = teacherCreateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
 
-  const { locale, firstName, lastName, email, phone, altPhone, linkUserId, branchId } =
+  const { locale, firstName, lastName, email, phone, altPhone, linkUserId, branchId, isTrustedTeacher } =
     parsed.data;
 
   // F1: the teacher lands at the branch the form names — only where the
@@ -225,6 +225,7 @@ export async function createTeacherAction(
       linkUserId,
       via: "teacher.add",
       refusePrivileged: false,
+      isTrustedTeacher,
     },
   );
 

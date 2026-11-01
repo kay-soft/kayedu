@@ -4,6 +4,7 @@ import { z } from "zod";
 // parse with the real schemas outside the Next.js runtime.
 import { email, localeSchema, password, personName } from "./auth.ts";
 import { optionalPhone } from "./phone-schema.ts";
+import { MAX_TEACHER_HISTORY_DAYS } from "../db/visibility.ts";
 
 /**
  * Account settings (F2). Message keys resolve under `Account.errors`, which
@@ -71,3 +72,32 @@ export type StudyDetailsState = {
 };
 
 export const IDLE_STUDY_STATE: StudyDetailsState = {};
+
+/**
+ * Account → "History shown in my teacher portal" (U6): "all" (stored as 0,
+ * the default) or a number of days, 1 to `MAX_TEACHER_HISTORY_DAYS`. The cap
+ * is enforced here, server-side.
+ */
+export const teacherHistorySchema = z
+  .object({
+    locale: localeSchema,
+    historyMode: z.enum(["all", "days"], { error: "invalidNumber" }),
+    historyDays: z.string().trim().max(8, "invalidNumber").optional(),
+  })
+  .transform((value, ctx) => {
+    if (value.historyMode === "all") return { locale: value.locale, teacherHistoryDays: 0 };
+    const days = Number(value.historyDays ?? "");
+    if (!value.historyDays || !Number.isInteger(days) || days < 1 || days > MAX_TEACHER_HISTORY_DAYS) {
+      ctx.addIssue({ code: "custom", path: ["historyDays"], message: "invalidNumber" });
+      return z.NEVER;
+    }
+    return { locale: value.locale, teacherHistoryDays: days };
+  });
+
+export type TeacherHistoryState = {
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  status?: "saved";
+};
+
+export const IDLE_TEACHER_HISTORY_STATE: TeacherHistoryState = {};

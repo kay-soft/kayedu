@@ -281,12 +281,12 @@ async function main() {
     plaintextRefused = true;
   }
   check("The database refuses a plaintext code (codeHash must be a sha256 — CHECK constraint)", plaintextRefused);
-  check("The declared parent phone is normalized by lib/phone.ts", invitation.declaredParentPhone === "01055555555");
+  check("The declared parent phone is normalized by lib/phone.ts", invitation.declaredParentPhone === "+201055555555");
 
   console.log("\n2. A phone match writes nothing");
   // A number no seeded person holds (User.phone is unique).
   let PHONE = "";
-  do PHONE = `010${String(Math.floor(Math.random() * 1e8)).padStart(8, "0")}`;
+  do PHONE = `+2010${String(Math.floor(Math.random() * 1e8)).padStart(8, "0")}`;
   while (await prisma.user.findUnique({ where: { phone: PHONE } }));
   const { user: phoneKid } = await makeStudent(centerA.id, "phonekid", PHONE);
   const phoneParent = await makeUser("phoneparent", { phone: PHONE, contactPhone: PHONE });
@@ -499,10 +499,10 @@ async function main() {
   const branchParentLink = await prisma.familyLink.findFirstOrThrow({ where: { parentUserId: branchParent.id } });
   const byAdminRevoke = await revokeFamilyLink(prisma, { by: "admin", linkId: branchParentLink.id, actorUserId: admin.id });
   check("A platform admin revokes; reads stop", byAdminRevoke.ok && (await activeChildLinks(prisma, branchParent.id)).length === 0);
-  const { user: phoneChild, profile: phoneChildProfile } = await makeStudent(centerA.id, "phone-change", "01088888888");
+  const { user: phoneChild, profile: phoneChildProfile } = await makeStudent(centerA.id, "phone-change", "+201088888888");
   const phoneChildParent = await makeUser("phone-change-parent");
   const phoneChildLink = await accept(phoneChildParent.id, await inviteCode(phoneChild.id));
-  await prisma.studentProfile.update({ where: { id: phoneChildProfile.id }, data: { parentPhone: "01077777777", parentAltPhone: null } });
+  await prisma.studentProfile.update({ where: { id: phoneChildProfile.id }, data: { parentPhone: "+201077777777", parentAltPhone: null } });
   check(
     "Only explicit, audited revocation ends a link: a parent-phone change on the record leaves the link ACTIVE and readable",
     phoneChildLink.ok &&

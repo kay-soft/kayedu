@@ -3,8 +3,10 @@
 import { useTranslations } from "next-intl";
 
 import { FilterField } from "@/components/shared/filter-bar";
+import { GradeSubjectFilterFields } from "@/components/shared/grade-subject-filter";
 import { Select } from "@/components/ui/select";
 import { UrlFilterForm } from "@/components/shared/url-filters";
+import type { CatalogSubjectOption } from "@/lib/catalog-picker";
 
 export type DiscoverFilterOption = { value: string; label: string };
 
@@ -14,8 +16,8 @@ export type DiscoverFilterOption = { value: string; label: string };
  * app (`TeacherSessionFilters`, `SessionFilters`). Subject/grade options carry
  * the global catalog id as of M13 (`CatalogSubject`/`CatalogGrade` — a single
  * id now means the same thing at every centre, docs/02-architecture.md §14),
- * with a locale-resolved label; the page derives them from what's actually
- * present in the combined result set.
+ * with a locale-resolved label. Grade comes first and narrows the subjects to
+ * the ones linked to it; with no grade every subject appears once (U3).
  */
 export function DiscoverFilters({
   subject,
@@ -36,7 +38,7 @@ export function DiscoverFilters({
    */
   allGradesValue?: string;
   day: string;
-  subjects: DiscoverFilterOption[];
+  subjects: CatalogSubjectOption[];
   grades: DiscoverFilterOption[];
   dayNames: string[];
   allLabel: string;
@@ -45,39 +47,19 @@ export function DiscoverFilters({
 
   return (
     <UrlFilterForm className="grid gap-3 sm:grid-cols-3">
-      <FilterField label={t("subject")} htmlFor="filter-subject">
-        <Select
-          id="filter-subject"
-          name="subject"
-          defaultValue={subject}
-          className="rounded-full"
-          submitOnChange
-        >
-          <option value="">{allLabel}</option>
-          {subjects.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </FilterField>
-
-      <FilterField label={t("grade")} htmlFor="filter-grade">
-        <Select
-          id="filter-grade"
-          name="grade"
-          defaultValue={grade}
-          className="rounded-full"
-          submitOnChange
-        >
-          <option value={allGradesValue}>{allLabel}</option>
-          {grades.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </FilterField>
+      <GradeSubjectFilterFields
+        gradeParam="grade"
+        subjectParam="subject"
+        gradeId={grade}
+        subjectId={subject}
+        grades={grades}
+        subjects={subjects}
+        allLabel={allLabel}
+        allGradesValue={allGradesValue}
+        gradeLabel={t("grade")}
+        subjectLabel={t("subject")}
+        selectClassName="rounded-full"
+      />
 
       <FilterField label={t("day")} htmlFor="filter-day">
         <Select

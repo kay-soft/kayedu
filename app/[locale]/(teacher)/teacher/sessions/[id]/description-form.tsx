@@ -15,9 +15,12 @@ import { useGuardedActionState } from "@/lib/ui/action-feedback";
  * unconditional when the center leaves that setting off.
  */
 export function SessionDescriptionForm({
+  centerId,
   sessionId,
   description,
 }: {
+  /** U7: the session's branch — re-resolved by the action, never trusted. */
+  centerId: string;
   sessionId: string;
   description: string;
 }) {
@@ -33,6 +36,7 @@ export function SessionDescriptionForm({
   return (
     <form action={formAction} className="flex flex-col gap-3">
       <input type="hidden" name="locale" value={locale} />
+      <input type="hidden" name="centerId" value={centerId} />
       <input type="hidden" name="sessionId" value={sessionId} />
 
       <div className="flex flex-col gap-1.5">

@@ -26,7 +26,6 @@ import {
 } from "@/lib/db/payment-methods";
 import {
   countCenterGradeSelectionsUnderSystem,
-  countCenterSubjectSelectionsUnderGrade,
   findSelectionById,
   removeCatalogSelection,
   selectCatalogEntry,
@@ -307,12 +306,13 @@ export async function deselectCatalogEntryAction(
     ]);
     inUse = grades + classes;
   } else if (existing.kind === "GRADE" && existing.gradeId) {
-    const [subjects, classes, students] = await Promise.all([
-      countCenterSubjectSelectionsUnderGrade(prisma, scope.ctx.center.id, existing.gradeId),
+    // U3: a subject is no longer "under" a grade, so the centre's subject
+    // picks never block a grade's deselect — only what uses the grade itself.
+    const [classes, students] = await Promise.all([
       scope.db.classGroups.count({ gradeId: existing.gradeId }),
       scope.db.students.count({ gradeId: existing.gradeId }),
     ]);
-    inUse = subjects + classes + students;
+    inUse = classes + students;
   } else if (existing.kind === "SUBJECT" && existing.subjectId) {
     inUse = await scope.db.classGroups.count({ subjectId: existing.subjectId });
   }
@@ -733,7 +733,8 @@ export async function saveGeneralSettingsAction(
     timezone,
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
-    dataVisibilityDays,
+    centerDataVisibilityDays,
+    teacherDataVisibilityDays,
     publicListing,
   } = parsed.data;
 
@@ -746,7 +747,8 @@ export async function saveGeneralSettingsAction(
     timezone,
     scheduleConflictPolicy,
     teacherEditDeadlineHours,
-    dataVisibilityDays,
+    centerDataVisibilityDays,
+    teacherDataVisibilityDays,
     publicListing,
   });
 
@@ -767,7 +769,8 @@ export async function saveGeneralSettingsAction(
           defaultLateThreshold: before.defaultLateThreshold,
           timezone: before.timezone,
           scheduleConflictPolicy: before.scheduleConflictPolicy,
-          dataVisibilityDays: before.dataVisibilityDays,
+          centerDataVisibilityDays: before.centerDataVisibilityDays,
+          teacherDataVisibilityDays: before.teacherDataVisibilityDays,
           teacherEditDeadlineHours: before.teacherEditDeadlineHours,
           publicListing: before.publicListing,
         }
@@ -779,7 +782,8 @@ export async function saveGeneralSettingsAction(
       defaultLateThreshold,
       timezone,
       scheduleConflictPolicy,
-      dataVisibilityDays,
+      centerDataVisibilityDays,
+      teacherDataVisibilityDays,
       // SEC-74: the edit deadline is a setting too — it was missing here.
       teacherEditDeadlineHours,
       // F5: listing on the public Explore pages.

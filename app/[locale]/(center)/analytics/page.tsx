@@ -39,7 +39,11 @@ import {
   teacherCountsRollup,
 } from "@/lib/db/organizations";
 import { scoped } from "@/lib/db/scoped";
-import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
+import {
+  clampRangeToVisibility,
+  teacherVisibilityWindowFloor,
+  visibilityWindowFloor,
+} from "@/lib/db/visibility";
 import { formatDayRange, formatMoney, formatNumber } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import {
@@ -86,11 +90,22 @@ export default async function AnalyticsPage({
   const now = new Date();
   const timeZone = centreTimeZone(ctx.settings);
   // Clamped to the data-visibility window (M19, docs/01 §7) before it ever
-  // reaches a query — covers the rollup path below too, since both branches
-  // share this same `range`.
+  // reaches a query. U6: with a teacher selected the **whole page** reads
+  // under the teacher window (1–30 days) — net is that teacher's centre share
+  // minus branch-wide expenses, so mixing two periods on one page would make
+  // it meaningless. Unfiltered, the page reads under the centre window.
+  const requested = resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now);
+  const teacherSelected = filters.teacherId !== null;
   const { start: from, end: to } = clampRangeToVisibility(
-    resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
-    visibilityWindowFloor(ctx, now),
+    requested,
+    teacherSelected ? teacherVisibilityWindowFloor(ctx, now) : visibilityWindowFloor(ctx, now),
+  );
+  // The by-teacher breakdown is a read about individual teachers, so it is
+  // clamped to the teacher window even on the unfiltered page — its own
+  // period line says which days it covers.
+  const { start: breakdownFrom, end: breakdownTo } = clampRangeToVisibility(
+    requested,
+    teacherVisibilityWindowFloor(ctx, now),
   );
 
   const t = await getTranslations("Analytics");
@@ -131,8 +146,10 @@ export default async function AnalyticsPage({
             if (!can(role, "analytics.center.view", grants)) return null;
             const settings = await centerSettingsFor(prisma, branch.id);
             const { start, end } = clampRangeToVisibility(
-              resolveSharedDateFilter(toSharedDateFilterInput(filters), timeZone, now),
-              visibilityWindowFloor({ isPlatformAdmin: ctx.isPlatformAdmin, settings }, now),
+              requested,
+              teacherSelected
+                ? teacherVisibilityWindowFloor({ isPlatformAdmin: ctx.isPlatformAdmin, settings }, now)
+                : visibilityWindowFloor({ isPlatformAdmin: ctx.isPlatformAdmin, settings }, now),
             );
             return { branch, range: { from: start, to: end } };
           }),
@@ -158,7 +175,7 @@ export default async function AnalyticsPage({
         : teacherCounts(prisma, centerId, range),
       filters.teacherId || rollupBranchIds
         ? Promise.resolve([])
-        : revenueByTeacher(prisma, centerId, range),
+        : revenueByTeacher(prisma, centerId, { from: breakdownFrom, to: breakdownTo }),
       scoped(ctx).teachers.list({ active: true }),
       rollupBranchIds
         ? revenueByBranch(prisma, rollupBranches!.map((row) => row.branch), rollupRanges)
@@ -353,7 +370,10 @@ export default async function AnalyticsPage({
         ) : null}
 
         {!filters.teacherId && !orgGroup ? (
-          <PageSection title={t("byTeacher.title")} description={t("byTeacher.description")}>
+          <PageSection
+            title={t("byTeacher.title")}
+            description={t("byTeacher.description", { period: formatDayRange(breakdownFrom, breakdownTo, locale) })}
+          >
             <Card>
               <CardContent>
                 <TeacherRevenueTable rows={breakdownRows} showProfit={showProfit} locale={locale} />

@@ -6,9 +6,10 @@ import { TeachAtCenterCard } from "@/app/[locale]/(teacher)/teacher/centers/teac
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireTeacherUser } from "@/lib/auth/tenant";
-import { listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
+import { listCatalogEducationSystems, listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
 import { catalogLabel } from "@/lib/catalog";
+import { buildCatalogPicker } from "@/lib/catalog-picker";
 import { ROUTES } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -32,18 +33,31 @@ export default async function TeacherCentersPage() {
   const t = await getTranslations("TeacherCenters");
   const locale = await getLocale();
 
-  const [centers, subjects, grades] = await Promise.all([
+  const [centers, systems, subjects, grades] = await Promise.all([
     listAccessibleCenters(prisma),
+    listCatalogEducationSystems(prisma),
     listCatalogSubjects(prisma),
     listCatalogGrades(prisma),
   ]);
 
-  const subjectOptions = subjects
-    .map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  const gradeOptions = grades
-    .map((grade) => ({ value: grade.id, label: catalogLabel(locale, grade) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  // The active global catalog (no branch's picks — this teacher belongs to
+  // none), system → grade → subject with each subject under its linked
+  // grades (U3). The action re-checks the pair against the catalog.
+  const byLabel = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+  const pick = <T extends { nameAr: string; nameEn: string }>(row: T) => ({
+    ...row,
+    name: catalogLabel(locale, row),
+    active: true,
+    catalogActive: true,
+  });
+  const catalog = buildCatalogPicker(
+    {
+      systems: systems.map(pick).sort(byLabel),
+      grades: grades.map(pick).sort(byLabel),
+      subjects: subjects.map(pick).sort(byLabel),
+    },
+    (name) => name,
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -66,8 +80,7 @@ export default async function TeacherCentersPage() {
                 themeColor: center.themeColor,
                 logoUrl: centerLogoSrc(center),
               }}
-              subjects={subjectOptions}
-              grades={gradeOptions}
+              catalog={catalog}
             />
           ))}
         </div>

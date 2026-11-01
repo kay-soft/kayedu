@@ -12,7 +12,6 @@ import {
 import {
   ClassFields,
   type ClassPlacementInputs,
-  type SelectOption,
 } from "@/components/center/class-fields";
 import type { TermOption } from "@/components/center/class-period-fields";
 import { NewTeacherFields } from "@/components/center/new-teacher-fields";
@@ -27,6 +26,7 @@ import { DialogShell } from "@/components/shared/dialog-shell";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
 import { Button } from "@/components/ui/button";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 import { piastresToInputValue } from "@/lib/money";
 import type { RoomLinkPair } from "@/lib/rooms";
 import { weeklySlotsError, type WeeklySlotRow } from "@/lib/scheduling";
@@ -71,9 +71,7 @@ export function NewClassDialogContent({
   open,
   onOpenChange,
   teachers,
-  subjects,
-  grades,
-  educationSystems,
+  catalog,
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
@@ -84,9 +82,8 @@ export function NewClassDialogContent({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   teachers: TeacherOption[];
-  subjects: SelectOption[];
-  grades: SelectOption[];
-  educationSystems: SelectOption[];
+  /** The centre's offered systems → grades → subjects (U3). */
+  catalog: CatalogPickerData;
   educationSystemDefaultFixedShare: Record<string, number>;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
@@ -288,9 +285,7 @@ export function NewClassDialogContent({
             startDate: "",
             endDate: "",
           }}
-          subjects={subjects}
-          grades={grades}
-          educationSystems={educationSystems}
+          catalog={catalog}
           educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
           rooms={rooms}
           roomLinks={roomLinks}

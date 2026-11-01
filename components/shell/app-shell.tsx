@@ -30,8 +30,6 @@ export type ShellUser = {
   name: string;
   email: string | null;
   initials: string;
-  /** Profile photo, only when `MEDIA_AVATARS_DISPLAY` is on (F8) — otherwise null and initials show. */
-  photoSrc?: string | null;
   roleKey: string;
 };
 
@@ -45,6 +43,12 @@ export type ShellScope = {
   activeId: string | null;
   branches: BranchOption[];
   rollups: RollupOption[];
+  /**
+   * U7: the teacher portal's switcher — "All branches" (`activeId` null, the
+   * default) above each branch, written to the teacher portal's own cookie.
+   * Absent: the staff switcher (`kayedu_center`).
+   */
+  mode?: "center" | "teacher";
 };
 
 export type AppShellProps = {
@@ -405,6 +409,7 @@ export function AppShell({
                 activeId={scope.activeId}
                 branches={scope.branches}
                 rollups={scope.rollups}
+                mode={scope.mode}
               />
             ) : null}
 

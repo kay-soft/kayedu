@@ -45,6 +45,9 @@ export async function firstDetailLink(page: Page, list: string): Promise<Locator
 /** Chooses `option` in the shared Select / Combobox labelled `label` (both open a listbox). */
 export async function choose(scope: Page | Locator, label: string | RegExp, option: string | RegExp) {
   const page = "page" in scope ? scope.page() : scope;
+  // A previous picker's popup unmounts only after its exit animation; until then its (selected,
+  // fading) options also match `option`, so a second choose() could click a detached one.
+  await expect(page.getByRole("listbox").filter({ visible: true })).toHaveCount(0);
   await scope.getByLabel(typeof label === "string" ? field(label) : label).first().click();
   // The first *enabled* option — a placeholder row ("Choose a room") is disabled.
   await page.getByRole("option", { name: option, exact: typeof option === "string", disabled: false }).first().click();

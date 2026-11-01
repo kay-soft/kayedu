@@ -6,6 +6,7 @@ import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
 import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
 import { scoped } from "@/lib/db/scoped";
+import { DEFAULT_CENTER_VISIBILITY_DAYS, DEFAULT_TEACHER_VISIBILITY_DAYS } from "@/lib/db/visibility";
 
 /**
  * General center configuration: the default center cut, teacher timeout,
@@ -35,7 +36,8 @@ export default async function GeneralSettingsPage() {
           timezone: settings?.timezone ?? "Africa/Cairo",
           scheduleConflictPolicy: settings?.scheduleConflictPolicy ?? "WARN",
           teacherEditDeadlineHours: settings?.teacherEditDeadlineHours ?? null,
-          dataVisibilityDays: settings?.dataVisibilityDays ?? 30,
+          centerDataVisibilityDays: settings?.centerDataVisibilityDays ?? DEFAULT_CENTER_VISIBILITY_DAYS,
+          teacherDataVisibilityDays: settings?.teacherDataVisibilityDays ?? DEFAULT_TEACHER_VISIBILITY_DAYS,
           publicListing: settings?.publicListing ?? true,
         }}
       />

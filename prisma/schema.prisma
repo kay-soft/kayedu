@@ -240,6 +240,8 @@ model User {
   // A staff-typed (never self-typed) contact, seeded once at creation. Phone
   // is never an identity key (SEC-2a, D-02): nothing links on it, and sign-up
   // never writes it.
+  // U4: every phone column in this schema stores E.164 `+20XXXXXXXXXX`, only
+  // ever written through lib/phone.ts's `normalizePhone` (docs/01 "Phone numbers").
   phone           String?   @unique
   altPhone        String?
   // F2: the person's own self-declared phone, set on Account settings and
@@ -249,6 +251,10 @@ model User {
   // staff-typed and unique; a self-typed value there would let anyone squat
   // a number (`check:account` asserts the identity modules never read this).
   contactPhone    String?
+  // DEPRECATED (U9): unused and never written. Only teachers have photos now,
+  // and theirs live per branch on `Membership.photoKey`. Kept (not dropped) so
+  // U9 stays additive; the column is dropped after the pilot
+  // (docs/05-phase-2-backlog.md).
   avatarUrl       String?
   // The preferred language: where sign-in lands (F2), editable on Account settings.
   locale          String    @default("ar") // "ar" | "en"
@@ -262,6 +268,11 @@ model User {
   // profile (`ensureStudentProfile`) — and never changes a branch record.
   gradeId         String?
   grade           CatalogGrade? @relation("UserGrade", fields: [gradeId], references: [id])
+  // U6: how many days back this person's own teacher portal shows (dashboard,
+  // session history, student history, past calendar days). 0 = all history,
+  // the default; 1–3650 otherwise. The teacher's own preference only — it
+  // never widens any centre window and no centre-side read consults it.
+  teacherHistoryDays Int    @default(0)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -383,6 +394,15 @@ model Center {
   // additive parent, not a rewrite of scoping (docs/01-data-model.md §4).
   organizationId String
   organization   Organization         @relation(fields: [organizationId], references: [id])
+  // U5 — a platform admin's soft delete. A deleted branch is excluded wherever
+  // a branch is resolved, listed or counted (`ACCESSIBLE_CENTER`,
+  // `COUNTED_BRANCHES`, lib/db/platform.ts), frees its slot under
+  // `Organization.maxBranches`, and is restorable until `restorableUntil`
+  // (deletedAt + 30 days). Nothing is hard-deleted; purge waits on OD-2
+  // (backlog). Separate from `lifecycleState`, which a delete never changes.
+  deletedAt       DateTime?
+  deletedBy       String?
+  restorableUntil DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -421,8 +441,37 @@ model Center {
   familyInvitations FamilyInvitation[]
   // F4 — this branch's bulk grade promotions (and their undo ledger).
   gradePromotions   GradePromotionBatch[]
+  // U5 — the platform admin's pauses of this branch.
+  pauses            BranchPause[]
 
   @@index([organizationId])
+}
+
+// U5 — a platform admin pauses a branch for a date range (docs/00 §5.1
+// "Branch pause and delete"). Creating it cancels every SCHEDULED, not yet
+// started session of the branch dated in the range through `cancelSession`
+// (tagged `Session.pauseId`), in one transaction. It ends by itself after
+// `endDate` — no cron: "current" is `startDate <= today <= endDate` in the
+// branch's timezone, read on every request — or early, by the admin, which
+// restores the untouched tagged sessions still in the future. At most one
+// current or future pause per branch, checked under the Center row lock
+// (lib/db/branch-admin.ts). `startDate`/`endDate` are UTC-midnight day
+// markers, inclusive, like `Session.date` and `Holiday.date`.
+model BranchPause {
+  id           String    @id @default(uuid())
+  centerId     String
+  center       Center    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  startDate    DateTime
+  endDate      DateTime
+  reason       String?
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  endedEarlyAt DateTime?
+  endedEarlyBy String?
+
+  sessions Session[]
+
+  @@index([centerId, endDate])
 }
 
 model CenterSettings {
@@ -443,12 +492,20 @@ model CenterSettings {
   // after the session date (M10, closing the gap flagged at M5/M7). Null =
   // no deadline, editable any time — the M7 default.
   teacherEditDeadlineHours Int?
-  // M19: how many days back a centre-side role (OWNER/MANAGER/RECEPTIONIST/
-  // ACCOUNTANT) may read analytics/money/sessions/attendance — a rolling
-  // window ending today, not a calendar-month anchor (docs/01-data-model.md
-  // §7). Platform admin bypasses this entirely; Settlement/payout and
-  // AuditLog reads are carved out and never consult it (lib/db/visibility.ts).
+  // DEPRECATED (U6): the single M19 window, replaced by the two fields below
+  // and backfilled into them. No code reads it; it stays only so the live
+  // site keeps working until the U6 code deploys (backlog: drop after the pilot).
   dataVisibilityDays       Int            @default(30)
+  // U6: how many days back a centre-side role (OWNER/MANAGER/RECEPTIONIST/
+  // ACCOUNTANT) may read the centre's own analytics, money, sessions and
+  // attendance — a rolling window ending today (docs/01-data-model.md §7).
+  // 1–365. Platform admin bypasses it; Settlement/payout and AuditLog reads
+  // are carved out and never consult it (lib/db/visibility.ts).
+  centerDataVisibilityDays Int            @default(365)
+  // U6: how many days back a centre-side role may read about one teacher —
+  // the Analytics teacher breakdown and every Analytics view filtered to a
+  // teacher. 1–30, independent of the centre window above.
+  teacherDataVisibilityDays Int           @default(30)
   // F5: whether this branch appears on the public Explore pages (guests, no
   // sign-in). Only ACTIVE/GRACE branches are ever listed, whatever this says
   // (lib/db/public-catalog.ts). It never affects the signed-in student Discover.
@@ -475,6 +532,11 @@ model Membership {
   email            String?
   phone            String?
   altPhone         String?
+  // Teacher-only (U9): this person's photo AT THIS BRANCH — a key in the
+  // private `avatars` bucket under `{centerId}/`, never a URL. Set by the
+  // teacher (their portal) or by the branch (`teacher.manage`); either can
+  // replace or remove it. Null: the initial avatar.
+  photoKey         String?
   // Teacher-only (M10): gates the "request a new class/session" forms
   // (spec §4.2 items 2 & 4 say "a trusted teacher"). Defaults true so the
   // M7/M9 behavior ("every active TEACHER membership is trusted") is
@@ -608,7 +670,9 @@ model CatalogGrade {
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
 
-  subjects        CatalogSubject[]
+  // U3 — the subjects taught in this grade (a subject exists once and links
+  // to every grade that teaches it, across any education system).
+  subjectLinks    CatalogSubjectGrade[]
   selections      CenterCatalogSelection[]
   classGroups     ClassGroup[]
   studentProfiles StudentProfile[]
@@ -622,20 +686,43 @@ model CatalogGrade {
   @@index([educationSystemId])
 }
 
+// U3 — a subject exists ONCE, grade-independent: its names are unique across
+// the whole catalog (case-insensitive, English and Arabic each), and it links
+// to the grades that teach it through CatalogSubjectGrade (any education
+// system). A (grade, subject) pair is offered at a centre when the grade and
+// the subject are both picked and active there and the pair is linked
+// (lib/db/catalog.ts `isPairOffered`).
 model CatalogSubject {
-  id        String        @id @default(uuid())
+  id        String   @id @default(uuid())
   nameAr    String
   nameEn    String
+  // DEPRECATED (U3) — the subject's old single parent grade. Kept, nullable and
+  // unread, only so the code deployed before U3 keeps working until the new
+  // code ships (expand-only); no FK, no index, never written. Dropped after the
+  // pilot — docs/05-phase-2-backlog.md "Drop CatalogSubject.gradeId".
   gradeId   String?
-  grade     CatalogGrade? @relation(fields: [gradeId], references: [id])
-  active    Boolean       @default(true)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  gradeLinks  CatalogSubjectGrade[]
   selections  CenterCatalogSelection[]
   classGroups ClassGroup[]
   sessions    Session[] // R5 — one-time sessions
+}
 
+/// U3 — "this subject is taught in this grade". Platform-owned like the rest of
+/// the catalog (no centerId); written only by lib/db/catalog-admin.ts. Removing
+/// a link is refused while an active class anywhere uses the pair; deleting a
+/// subject takes its links with it; a grade with links cannot be deleted.
+model CatalogSubjectGrade {
+  subjectId String
+  subject   CatalogSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  gradeId   String
+  grade     CatalogGrade   @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  createdAt DateTime       @default(now())
+
+  @@id([subjectId, gradeId])
   @@index([gradeId])
 }
 
@@ -797,6 +884,11 @@ model ClassGroup {
   lateThresholdMinutes Int                     @default(10)
   acceptsNewStudents   Boolean                 @default(true)
   requiresConfirmation Boolean                 @default(false)
+  // U9 — an optional cover image: a key in the private `logos` bucket under
+  // `{centerId}/`, never a URL. Set by the branch (`class.manage`) or by the
+  // class's own teacher. Null: the card shows the teacher's photo at this
+  // branch, else the generated look.
+  coverKey             String?
   // F6 — single-session attendance online (see the enum). OFF by default, so
   // every existing class behaves exactly as before.
   sessionBookingMode   SessionBookingMode      @default(OFF)
@@ -971,6 +1063,13 @@ model Enrollment {
   classGroup       ClassGroup       @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
   status           EnrollmentStatus @default(ACTIVE)
   enrolledAt       DateTime         @default(now())
+  // U8 — set only when the STUDENT ended this enrolment themselves ("Leave
+  // class"): the row is then REMOVED exactly as a staff removal leaves it, and
+  // this timestamp is what tells the two apart ("Left <class> on <date>, by the
+  // student"). Null for every other row, and cleared the moment the pair is
+  // reactivated (rejoin, or staff re-enrol), so it never outlives the REMOVED
+  // state it describes.
+  leftByStudentAt  DateTime?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
@@ -1077,6 +1176,10 @@ model Session {
   // `20261018090000_sec2b_money_integrity`. Nullable in the schema only so
   // writers need not pass it; every row has one.
   timezone         String?
+  // U5 — the branch pause that cancelled this session (null otherwise).
+  // "End pause now" restores only sessions still tagged with it.
+  pauseId          String?
+  pause            BranchPause?      @relation(fields: [pauseId], references: [id], onDelete: SetNull)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -1097,13 +1200,21 @@ model Session {
 
   // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
   // lib/db/class-sessions.ts): materializing a class's range is a
-  // `createMany({ skipDuplicates: true })` against this constraint, so a
-  // class's own slot is never duplicated, however often its range is resynced.
-  @@unique([classGroupId, date, startTime])
+  // `createMany({ skipDuplicates: true })` against a unique index on these
+  // columns, so a class's own slot is never duplicated, however often its
+  // range is resynced. U2: that unique index is PARTIAL —
+  // `"Session_classGroupId_date_startTime_live_key" … WHERE "rescheduledToId"
+  // IS NULL` (migration `20261030120000_u2_session_slot_partial_unique`) — so a
+  // rescheduled-away original no longer holds its slot. Prisma 6 cannot
+  // express a partial index, so it is hand-written SQL and this is a plain
+  // index: every future `prisma migrate diff` emits a DROP INDEX for it, which
+  // must be deleted from the generated migration (docs/02 §11, CLAUDE.md rule 7).
+  @@index([classGroupId, date, startTime])
   @@index([centerId])
   @@index([centerId, date])
   @@index([centerId, teacherId, date])
   @@index([centerId, roomId, date])
+  @@index([pauseId])
 }
 
 model SessionAttendee {
@@ -1674,7 +1785,7 @@ model ParentLink {
   centerId         String
   center           Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
   status           ParentLinkStatus @default(PENDING)
-  // The normalized phone that produced this link. Re-checked on every read
+  // The normalized (E.164, U4) phone that produced this link. Re-checked on every read
   // (SEC-2a, D-04): a link whose phone is no longer the student's parent
   // phone or alt phone reads as nothing, and is revoked when staff change it.
   matchedPhone     String

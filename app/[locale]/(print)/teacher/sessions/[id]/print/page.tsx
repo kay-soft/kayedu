@@ -4,10 +4,12 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { PrintToolbar } from "@/components/shared/print-toolbar";
 import { SessionPrintSheet } from "@/components/shared/session-print-sheet";
-import { getTenantContext } from "@/lib/auth/tenant";
+import { findInBranches, getTeacherScope } from "@/lib/auth/teacher-scope";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
+import { teacherPortalHistoryFloor } from "@/lib/db/teacher-portal";
+import { isWithinVisibilityWindow } from "@/lib/db/visibility";
 import { closeSessionIfDayOver } from "@/lib/db/session-lifecycle";
 import { sessionDisplayName } from "@/lib/session-label";
 import { attendanceDisplay } from "@/lib/attendance-rules";
@@ -29,12 +31,19 @@ export default async function TeacherSessionPrintPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const ctx = await getTenantContext("teacher");
+  // U7: the session's branch, found among the branches in view.
+  const scope = await getTeacherScope();
   const { id } = await params;
 
+  const hit = await findInBranches(scope.inView, async (branch) => {
+    const row = await scoped(branch).sessions.findById(id);
+    return row && row.teacherId === branch.user.id ? row : null;
+  });
+  if (!hit) notFound();
+  const { ctx, found: owned } = hit!;
   const db = scoped(ctx);
-  const owned = await db.sessions.findById(id);
-  if (!owned || owned.teacherId !== ctx.user.id) notFound();
+  // U6: a session older than the teacher's own history preference is out of view.
+  if (!isWithinVisibilityWindow(owned.date, teacherPortalHistoryFloor(ctx))) notFound();
   // R2's lazy end-of-day close, on read.
   await closeSessionIfDayOver(prisma, ctx.center.id, id);
   const session = await db.sessions.findDetailById(id);

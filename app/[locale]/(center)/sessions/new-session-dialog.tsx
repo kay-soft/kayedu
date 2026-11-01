@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import type { ShareType } from "@prisma/client";
 
 import { createSessionAction } from "@/app/[locale]/(center)/sessions/actions";
-import type { SelectOption } from "@/components/center/class-fields";
+import { CatalogPickerFields } from "@/components/center/catalog-picker-fields";
 import { RoomSetPicker, type RoomOption } from "@/components/center/room-set-picker";
 import {
   SlotConflictNotice,
@@ -27,6 +27,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 import { formatMoney } from "@/lib/format";
 import { useRouter } from "@/lib/i18n/navigation";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -65,8 +66,8 @@ function slotFor(option: NewSessionClassOption | undefined, isoDate: string) {
 type NewSessionProps = {
   classes: NewSessionClassOption[];
   teachers: TeacherOption[];
-  subjects: SelectOption[];
-  grades: SelectOption[];
+  /** U3 — the centre's offered systems → grades → subjects; the system only narrows (a session stores none). */
+  catalog: CatalogPickerData;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
   defaultCut: { centerShareType: ShareType; centerShareValue: number };
@@ -113,8 +114,7 @@ function NewSessionDialogContent({
   onOpenChange,
   classes,
   teachers,
-  subjects,
-  grades,
+  catalog,
   rooms,
   roomLinks,
   defaultCut,
@@ -305,26 +305,13 @@ function NewSessionDialogContent({
                     aria-invalid={state.fieldErrors?.title ? true : undefined}
                   />
                 </Field>
-                <Field id="new-session-subject" label={tClasses("fields.subject")} optional error={error("subjectId")}>
-                  <Select id="new-session-subject" name="subjectId" defaultValue="">
-                    <option value="">{noneLabel}</option>
-                    {subjects.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field id="new-session-grade" label={tClasses("fields.grade")} optional error={error("gradeId")}>
-                  <Select id="new-session-grade" name="gradeId" defaultValue="">
-                    <option value="">{noneLabel}</option>
-                    {grades.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                <CatalogPickerFields
+                  idPrefix="new-session"
+                  data={catalog}
+                  systemName={null}
+                  noneLabel={noneLabel}
+                  errors={{ gradeId: error("gradeId"), subjectId: error("subjectId") }}
+                />
               </div>
             )}
           </FormSection>

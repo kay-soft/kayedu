@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { createClassRequestAction } from "@/app/[locale]/(teacher)/teacher/classes/actions";
+import { CatalogPickerFields } from "@/components/center/catalog-picker-fields";
 import { TimeRangeFields } from "@/components/center/time-range-fields";
 import { Field } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
@@ -10,6 +12,7 @@ import { SubmitButton } from "@/components/shared/submit-button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 import { IDLE_TEACHER_STATE } from "@/lib/validation/teacher";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
@@ -17,14 +20,19 @@ export type SelectOption = { value: string; label: string };
 
 const DAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
-export function ClassRequestForm({
-  subjects,
-  grades,
-}: {
-  subjects: SelectOption[];
-  grades: SelectOption[];
-}) {
+export type ClassRequestBranch = { id: string; name: string; catalog: CatalogPickerData };
+
+/**
+ * U7: the request names its branch. `branches` lists only the branches where
+ * this teacher may request (trusted, `changeRequest.create`), each with its
+ * own catalog picks; with more than one, a Branch select comes first and the
+ * catalog follows it. The action re-resolves the posted branch.
+ */
+export function ClassRequestForm({ branches }: { branches: ClassRequestBranch[] }) {
   const t = useTranslations("TeacherClasses.request");
+  const tScope = useTranslations("TeacherScope");
+  const [branchId, setBranchId] = useState(branches.length === 1 ? branches[0].id : "");
+  const catalog = branches.find((branch) => branch.id === branchId)?.catalog ?? null;
   const tClasses = useTranslations("Classes");
   const tErrors = useTranslations("TeacherClasses.errors");
   const locale = useLocale();
@@ -35,34 +43,41 @@ export function ClassRequestForm({
   return (
     <form action={formAction} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
+      {branches.length === 1 ? <input type="hidden" name="centerId" value={branchId} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}
       {state.status === "created" ? (
         <FormMessage tone="success">{t("submitted")}</FormMessage>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field id="request-subjectId" label={t("subject")} optional error={state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined}>
-          <Select id="request-subjectId" name="subjectId" defaultValue="">
-            <option value="">{t("none")}</option>
-            {subjects.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+      {branches.length > 1 ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field id="request-centerId" label={tScope("branch")}>
+            <Select
+              id="request-centerId"
+              name="centerId"
+              value={branchId}
+              onValueChange={setBranchId}
+              placeholder={tScope("branchPlaceholder")}
+              required
+              options={branches.map((branch) => ({ value: branch.id, label: branch.name }))}
+            />
+          </Field>
+        </div>
+      ) : null}
 
-        <Field id="request-gradeId" label={t("grade")} optional error={state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined}>
-          <Select id="request-gradeId" name="gradeId" defaultValue="">
-            <option value="">{t("none")}</option>
-            {grades.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+      {/* Keyed by branch: each branch offers its own catalog picks. */}
+      <div key={branchId} className="grid gap-4 sm:grid-cols-3">
+        <CatalogPickerFields
+          idPrefix="request"
+          data={catalog ?? { systems: [], grades: [], subjects: [] }}
+          systemName={null}
+          noneLabel={t("none")}
+          errors={{
+            gradeId: state.fieldErrors?.gradeId ? tErrors(state.fieldErrors.gradeId) : undefined,
+            subjectId: state.fieldErrors?.subjectId ? tErrors(state.fieldErrors.subjectId) : undefined,
+          }}
+        />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">

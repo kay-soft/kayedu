@@ -20,7 +20,10 @@
  *      session…), no class without a real teacher at its centre, no user with
  *      no relationship at all;
  *   5. every seed account is listed in docs/dev-accounts.md;
- *   6. the entity counts, printed.
+ *   6. the catalog shape (U3) — each subject once with its grade links, no
+ *      two subjects sharing a name, every class's (grade, subject) pair
+ *      linked — and the three bookable test classes;
+ *   7. the entity counts, printed.
  *
  * SEC-2b adds the money-integrity invariants to 3: one active payment per
  * roster row, never voided-and-refunded, one live claim per payment, every
@@ -32,7 +35,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PrismaClient, type Role } from "@prisma/client";
+import { PrismaClient, type Role, type SessionBookingMode } from "@prisma/client";
 import { DEFAULT_ROLE_GRANTS, can, type PermissionGrants } from "../lib/auth/permissions.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { expenseTotals, revenueTotals } from "../lib/db/analytics.ts";
@@ -43,14 +46,26 @@ import { activeChildLinks, hashFamilyCode } from "../lib/db/parents.ts";
 import { baselineGrantKeys, centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
 import { splitShare } from "../lib/money.ts";
 import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
+import { EXPECTED_TEACHER_NAV } from "./lib/expected-nav.ts";
+import { seedSubjectLinkCounts } from "../prisma/seed-data/catalog.ts";
 import { DEFAULT_SEED_EMAIL_DOMAIN, SEED_EMAIL_DOMAIN, mail } from "../prisma/seed-data/domain.ts";
 import { BRANCHES, DEV_FAMILY_CODES, seedAccounts, type StaffRole } from "../prisma/seed-data/plan.ts";
 import { pageGateFor } from "./lib/nav-gates.ts";
+import {
+  FIXTURE_STALE_AFTER_MS,
+  fixtureVerdict,
+  gateEmailPrefixes,
+  gateSlugPrefixes,
+  isGateFixtureSlug,
+} from "./lib/gate-fixtures.ts";
 
 const prisma = new PrismaClient();
 const ROOT = join(import.meta.dirname, "..");
 
 let failures = 0;
+let warnings = 0;
+/** `--strict-clean`: any gate fixture left in the database fails the run (the last step of check:all). */
+const STRICT_CLEAN = process.argv.includes("--strict-clean");
 
 function check(name: string, passed: boolean, detail = "") {
   if (passed) console.log(`  PASS  ${name}`);
@@ -67,10 +82,22 @@ const EXPECTED_CENTER_NAV: Record<StaffRole, string[]> = {
   RECEPTIONIST: ["dashboard", "reception", "sessions", "students"],
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };
-const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "students", "classes", "approvals", "settlements"];
-const EXPECTED_STUDENT_NAV = ["schedule", "discover", "reservations"];
-const EXPECTED_PARENT_NAV = ["schedule"];
+// U7: Calendar joins the teacher, student and parent nav. (Teacher list: scripts/lib/expected-nav.ts.)
+const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "discover", "reservations"];
+const EXPECTED_PARENT_NAV = ["schedule", "calendar"];
 const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog"];
+
+/**
+ * U3 — the bookable test classes (single-session attendance, F6) per branch
+ * key, written out by hand: mode and per-session booking cap (null = none).
+ */
+const EXPECTED_BOOKABLE: Record<string, { mode: SessionBookingMode; cap: number | null }[]> = {
+  downtown: [
+    { mode: "INSTANT", cap: 3 },
+    { mode: "INSTANT", cap: null },
+  ],
+  nasrcity: [{ mode: "APPROVAL", cap: null }],
+};
 
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((value, i) => value === b[i]);
 
@@ -82,7 +109,20 @@ async function count(sql: string): Promise<number> {
 async function main() {
   console.log("Seed verification (read-only)");
 
-  const centers = await prisma.center.findMany({ orderBy: { slug: "asc" } });
+  // Gate fixtures (scripts/lib/gate-fixtures.ts) are not the seed world: sections
+  // 1, 3, 4 and 7 leave them out, section 8 reports them.
+  const allCenters = await prisma.center.findMany({ orderBy: { slug: "asc" } });
+  const centers = allCenters.filter((center) => !isGateFixtureSlug(center.slug));
+  const fixtureCenters = allCenters.filter((center) => isGateFixtureSlug(center.slug));
+  const fixtureIds = fixtureCenters.map((center) => center.id);
+  const seedCenterWhere = { centerId: { notIn: fixtureIds } };
+  /** SQL list of the fixture centre ids; a sentinel keeps `NOT IN ()` valid when there are none. */
+  const fixtureIdList = fixtureIds.length > 0 ? fixtureIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(", ") : "''";
+  const seedCenter = (alias: string, column = "centerId") => `${alias}."${column}" NOT IN (${fixtureIdList})`;
+  const notFixtureUser = (alias: string) =>
+    gateEmailPrefixes()
+      .map((prefix) => `COALESCE(LOWER(${alias}."email"), '') NOT LIKE '${prefix.replace(/'/g, "''")}%'`)
+      .join(" AND ");
   const accounts = seedAccounts();
   const localDatabase = (() => {
     try {
@@ -197,8 +237,8 @@ async function main() {
     const profiles = await prisma.studentProfile.findMany({ where: { userId: both.id }, include: { center: true } });
     check("The shared student studies in two organizations", new Set(profiles.map((p) => p.center.organizationId)).size === 2);
   }
-  check("Student nav is the 3 student items", same(navForExperience("student", "STUDENT").map((i) => i.labelKey), EXPECTED_STUDENT_NAV));
-  check("Parent nav is the 1 parent item", same(navForExperience("parent", "PARENT").map((i) => i.labelKey), EXPECTED_PARENT_NAV));
+  check("Student nav is the 4 student items", same(navForExperience("student", "STUDENT").map((i) => i.labelKey), EXPECTED_STUDENT_NAV));
+  check("Parent nav is the 2 parent items", same(navForExperience("parent", "PARENT").map((i) => i.labelKey), EXPECTED_PARENT_NAV));
 
   // F3: families are FamilyLinks (a real code issued and accepted, or the
   // migration's LEGACY_VERIFIED copy of a verified ParentLink).
@@ -292,11 +332,12 @@ async function main() {
     check(`${center.slug}: centre share + teacher share = collected`, analytics.centerShare + analytics.teacherShare === analytics.collected);
   }
 
-  const badSplit = await count(`SELECT COUNT(*)::int AS n FROM "Payment" WHERE "centerShareSnapshot" + "teacherShareSnapshot" <> "amount" OR "amount" <> "priceSnapshot"`);
+  const badSplit = await count(`SELECT COUNT(*)::int AS n FROM "Payment" p WHERE (p."centerShareSnapshot" + p."teacherShareSnapshot" <> p."amount" OR p."amount" <> p."priceSnapshot") AND ${seedCenter("p")}`);
   check("Every payment: centre share + teacher share = amount = price snapshot", badSplit === 0, `${badSplit} violate`);
 
   // Each snapshot is what lib/money.ts computes for the cut that was in force.
   const payments = await prisma.payment.findMany({
+    where: seedCenterWhere,
     select: {
       amount: true,
       centerShareSnapshot: true,
@@ -330,10 +371,10 @@ async function main() {
         rollup.teacherShare === center60[0].teacherShare + center60[1].teacherShare,
     );
   }
-  const voided = await prisma.payment.count({ where: { voided: true } });
-  const changes = await prisma.sessionAttendanceChange.count();
+  const voided = await prisma.payment.count({ where: { voided: true, ...seedCenterWhere } });
+  const changes = await prisma.sessionAttendanceChange.count({ where: seedCenterWhere });
   check("The live absent-switch voids left change-log rows", voided === 0 || changes >= voided, `${voided} voided, ${changes} change rows`);
-  const settlementStates = await prisma.settlement.groupBy({ by: ["status"], _count: { _all: true } });
+  const settlementStates = await prisma.settlement.groupBy({ by: ["status"], where: seedCenterWhere, _count: { _all: true } });
   check(
     "Settlements cover PAID, APPROVED and DRAFT",
     ["PAID", "APPROVED", "DRAFT"].every((status) => settlementStates.some((row) => row.status === status)),
@@ -437,7 +478,12 @@ async function main() {
          AND NOT EXISTS (SELECT 1 FROM "ChangeRequest" q WHERE q."requestedBy" = u."id")`,
     ],
   ];
-  for (const [name, sql] of orphanChecks) {
+  for (const [name, rawSql] of orphanChecks) {
+    // Gate fixtures are left out: every query ends in its WHERE, and names its primary table first.
+    const [, table, alias] = /FROM "(\w+)" (\w+)/.exec(rawSql) ?? [];
+    const scope =
+      table === "User" ? notFixtureUser(alias) : table === "FamilyInvitation" ? seedCenter(alias, "issuingCenterId") : seedCenter(alias);
+    const sql = `${rawSql} AND ${scope}`;
     const n = await count(sql);
     check(`${name}: 0`, n === 0, `${n}`);
   }
@@ -461,42 +507,118 @@ async function main() {
   );
   check("The doc never prints the password", !/SEED_PASSWORD\s*=\s*\S/.test(doc));
 
-  // ── 6. Counts ────────────────────────────────────────────────────────
-  console.log("\n6. Entity counts");
+  // ── 6. Catalog shape and the bookable classes (U3) ──────────────────
+  console.log("\n6. Catalog: each subject once, linked to its grades (U3); the bookable classes");
+  const nameKey = (column: string) => `lower(regexp_replace(btrim(${column}), '\\s+', ' ', 'g'))`;
+  check(
+    "No two subjects share an English name (case-insensitive, across the catalog)",
+    (await count(`SELECT COUNT(*)::int AS n FROM (SELECT ${nameKey('"nameEn"')} FROM "CatalogSubject" GROUP BY 1 HAVING COUNT(*) > 1) d`)) === 0,
+  );
+  check(
+    "No two subjects share an Arabic name (across the catalog)",
+    (await count(`SELECT COUNT(*)::int AS n FROM (SELECT ${nameKey('"nameAr"')} FROM "CatalogSubject" GROUP BY 1 HAVING COUNT(*) > 1) d`)) === 0,
+  );
+  for (const [subjectEn, links] of Object.entries(seedSubjectLinkCounts())) {
+    const rows = await prisma.catalogSubject.findMany({
+      where: { nameEn: subjectEn },
+      select: { _count: { select: { gradeLinks: true } } },
+    });
+    check(
+      `${subjectEn}: one subject row, linked to ${links} grades`,
+      rows.length === 1 && rows[0]._count.gradeLinks === links,
+      `${rows.length} row(s)${rows[0] ? `, ${rows[0]._count.gradeLinks} link(s)` : ""}`,
+    );
+  }
+  const unlinkedPairs = `NOT EXISTS (SELECT 1 FROM "CatalogSubjectGrade" l WHERE l."subjectId" = x."subjectId" AND l."gradeId" = x."gradeId")`;
+  check(
+    "Every class with a subject has a grade, and the pair is linked: 0 unlinked",
+    (await count(`SELECT COUNT(*)::int AS n FROM "ClassGroup" x WHERE x."subjectId" IS NOT NULL AND (x."gradeId" IS NULL OR ${unlinkedPairs})`)) === 0,
+  );
+  check(
+    "Every one-time session with a subject and a grade names a linked pair: 0 unlinked",
+    (await count(`SELECT COUNT(*)::int AS n FROM "Session" x WHERE x."classGroupId" IS NULL AND x."subjectId" IS NOT NULL AND x."gradeId" IS NOT NULL AND ${unlinkedPairs}`)) === 0,
+  );
+
+  const today = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+  const inTwoWeeks = new Date(today.getTime() + 14 * 86_400_000);
+  for (const [branchKey, expected] of Object.entries(EXPECTED_BOOKABLE)) {
+    const branch = BRANCHES.find((row) => row.key === branchKey);
+    const center = centers.find((row) => row.name === branch?.name);
+    check(`${branchKey}: the branch exists`, Boolean(center));
+    if (!center) continue;
+    const bookable = await prisma.classGroup.findMany({
+      where: { centerId: center.id, active: true, sessionBookingMode: { not: "OFF" } },
+      include: {
+        room: { select: { capacity: true } },
+        extraRooms: { select: { room: { select: { capacity: true } } } },
+        _count: { select: { enrollments: { where: { status: "ACTIVE" } } } },
+      },
+    });
+    const shape = (rows: { mode: SessionBookingMode; cap: number | null }[]) =>
+      rows.map((row) => `${row.mode}/${row.cap ?? "none"}`).sort().join(", ");
+    const found = bookable.map((row) => ({ mode: row.sessionBookingMode, cap: row.maxBookingSeats }));
+    check(
+      `${branchKey}: bookable classes are ${shape(expected)}`,
+      shape(found) === shape(expected),
+      shape(found) || "none",
+    );
+    for (const row of bookable) {
+      const upcoming = await prisma.session.count({
+        where: {
+          classGroupId: row.id,
+          status: "SCHEDULED",
+          rescheduledToId: null,
+          date: { gte: today, lt: inTwoWeeks },
+        },
+      });
+      const capacities = [row.room?.capacity ?? 0, ...row.extraRooms.map((extra) => extra.room.capacity)];
+      const seats = capacities.includes(0) ? 0 : capacities.reduce((sum, value) => sum + value, 0);
+      const enrolled = row._count.enrollments;
+      check(
+        `${branchKey} ${row.sessionBookingMode}/${row.maxBookingSeats ?? "none"}: sessions in the coming two weeks, seats partly used`,
+        upcoming > 0 && enrolled > 0 && (seats === 0 || enrolled < seats) && row.acceptsNewStudents,
+        `upcoming=${upcoming}, enrolled=${enrolled}, seats=${seats || "unlimited"}, accepts=${row.acceptsNewStudents}`,
+      );
+    }
+  }
+
+  // ── 7. Counts ────────────────────────────────────────────────────────
+  console.log("\n7. Entity counts (seed world, gate fixtures left out; catalog rows are global)");
   const counts: [string, number][] = [
-    ["Organizations", await prisma.organization.count()],
-    ["Centres", await prisma.center.count()],
-    ["Users", await prisma.user.count()],
-    ["Memberships", await prisma.membership.count()],
-    ["Student profiles", await prisma.studentProfile.count()],
+    ["Organizations", await prisma.organization.count({ where: { NOT: { centers: { some: { id: { in: fixtureIds } } } } } })],
+    ["Centres", centers.length],
+    ["Users", await count(`SELECT COUNT(*)::int AS n FROM "User" u WHERE ${notFixtureUser("u")}`)],
+    ["Memberships", await prisma.membership.count({ where: seedCenterWhere })],
+    ["Student profiles", await prisma.studentProfile.count({ where: seedCenterWhere })],
     ["Family links", await prisma.familyLink.count()],
     ["Parent codes (hashed)", await prisma.familyInvitation.count()],
-    ["Permission grant rows", await prisma.permissionGrant.count()],
+    ["Permission grant rows", await prisma.permissionGrant.count({ where: seedCenterWhere })],
     ["Catalog education systems", await prisma.catalogEducationSystem.count()],
     ["  grades", await prisma.catalogGrade.count()],
     ["  subjects", await prisma.catalogSubject.count()],
-    ["Rooms", await prisma.room.count()],
-    ["Room links", await prisma.roomLink.count()],
-    ["Terms", await prisma.centerTerm.count()],
-    ["Holidays", await prisma.holiday.count()],
-    ["Payment methods", await prisma.centerPaymentMethod.count()],
-    ["Classes", await prisma.classGroup.count()],
-    ["Sessions", await prisma.session.count()],
-    ["  closed", await prisma.session.count({ where: { closedAt: { not: null } } })],
-    ["  cancelled", await prisma.session.count({ where: { status: "CANCELLED" } })],
-    ["  rescheduled", await prisma.session.count({ where: { rescheduledToId: { not: null } } })],
-    ["  manual / one-time", await prisma.session.count({ where: { isManual: true } })],
-    ["Enrolments", await prisma.enrollment.count()],
-    ["Roster rows (attendance)", await prisma.sessionAttendee.count()],
-    ["Attendance changes", await prisma.sessionAttendanceChange.count()],
-    ["Payments", await prisma.payment.count()],
+    ["  subject–grade links", await prisma.catalogSubjectGrade.count()],
+    ["Rooms", await prisma.room.count({ where: seedCenterWhere })],
+    ["Room links", await prisma.roomLink.count({ where: seedCenterWhere })],
+    ["Terms", await prisma.centerTerm.count({ where: seedCenterWhere })],
+    ["Holidays", await prisma.holiday.count({ where: seedCenterWhere })],
+    ["Payment methods", await prisma.centerPaymentMethod.count({ where: seedCenterWhere })],
+    ["Classes", await prisma.classGroup.count({ where: seedCenterWhere })],
+    ["Sessions", await prisma.session.count({ where: seedCenterWhere })],
+    ["  closed", await prisma.session.count({ where: { closedAt: { not: null }, ...seedCenterWhere } })],
+    ["  cancelled", await prisma.session.count({ where: { status: "CANCELLED", ...seedCenterWhere } })],
+    ["  rescheduled", await prisma.session.count({ where: { rescheduledToId: { not: null }, ...seedCenterWhere } })],
+    ["  manual / one-time", await prisma.session.count({ where: { isManual: true, ...seedCenterWhere } })],
+    ["Enrolments", await prisma.enrollment.count({ where: seedCenterWhere })],
+    ["Roster rows (attendance)", await prisma.sessionAttendee.count({ where: seedCenterWhere })],
+    ["Attendance changes", await prisma.sessionAttendanceChange.count({ where: seedCenterWhere })],
+    ["Payments", await prisma.payment.count({ where: seedCenterWhere })],
     ["  voided", voided],
-    ["Settlements", await prisma.settlement.count()],
-    ["Expenses", await prisma.expense.count()],
-    ["Ratings", await prisma.sessionRating.count()],
-    ["Reservations", await prisma.reservation.count()],
-    ["Change requests", await prisma.changeRequest.count()],
-    ["Audit log rows", await prisma.auditLog.count()],
+    ["Settlements", await prisma.settlement.count({ where: seedCenterWhere })],
+    ["Expenses", await prisma.expense.count({ where: seedCenterWhere })],
+    ["Ratings", await prisma.sessionRating.count({ where: { session: seedCenterWhere } })],
+    ["Reservations", await prisma.reservation.count({ where: seedCenterWhere })],
+    ["Change requests", await prisma.changeRequest.count({ where: seedCenterWhere })],
+    ["Audit log rows", await prisma.auditLog.count({ where: { OR: [{ centerId: null }, seedCenterWhere] } })],
   ];
   for (const [label, value] of counts) console.log(`  ${label.padEnd(36)} ${value}`);
   for (const center of centers) {
@@ -506,7 +628,50 @@ async function main() {
     console.log(`  ${center.slug.padEnd(28)} ${String(center.lifecycleState).padEnd(10)} students=${students} classes=${classes} sessions=${sessions}`);
   }
 
-  console.log(failures === 0 ? "\nAll seed checks passed." : `\n${failures} seed check(s) FAILED.`);
+  // ── 8. Gate fixtures left behind ─────────────────────────────────────
+  // A running gate owns rows of this shape until its `finally` deletes them, so
+  // a young one is a WARN (do not run this while a gate runs); one past the
+  // stale limit was left by an interrupted gate: FAIL. --strict-clean: any is a FAIL.
+  console.log(`\n8. Gate fixtures left behind${STRICT_CLEAN ? " (--strict-clean: none allowed)" : ""}`);
+  const now = Date.now();
+  const likeAny = (column: string, prefixes: string[]) =>
+    prefixes.map((prefix) => `${column} ILIKE '${prefix.replace(/'/g, "''").replace(/[%_]/g, "\\$&")}%'`).join(" OR ");
+  const leftovers = (
+    await Promise.all([
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'centre ' || "slug" AS what, "createdAt" FROM "Center" WHERE ${likeAny('"slug"', gateSlugPrefixes())}`,
+      ),
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'user ' || COALESCE("email", "id") AS what, "createdAt" FROM "User" WHERE ${likeAny('"email"', gateEmailPrefixes())}`,
+      ),
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'catalog subject ' || "nameEn" AS what, "createdAt" FROM "CatalogSubject" WHERE ${likeAny('"nameEn"', gateSlugPrefixes())}`,
+      ),
+      prisma.$queryRawUnsafe<{ what: string; createdAt: Date }[]>(
+        `SELECT 'catalog grade ' || "nameEn" AS what, "createdAt" FROM "CatalogGrade" WHERE ${likeAny('"nameEn"', gateSlugPrefixes())}`,
+      ),
+    ])
+  ).flat();
+  let leftBehind = 0;
+  for (const row of leftovers) {
+    const ageMs = now - new Date(row.createdAt).getTime();
+    const minutes = Math.round(ageMs / 60_000);
+    if (fixtureVerdict(ageMs, STRICT_CLEAN) === "FAIL") {
+      leftBehind += 1;
+      check(`${row.what} — ${minutes} min old, left behind (stale after ${FIXTURE_STALE_AFTER_MS / 60_000} min)`, false, "an interrupted gate; re-run it to clean up");
+    } else {
+      warnings += 1;
+      console.log(`  WARN  ${row.what} — ${minutes} min old: a gate may still be running (do not run seed:verify mid-gate)`);
+    }
+  }
+  if (leftovers.length === 0) check("No gate fixture is left in the database", true);
+  else if (leftBehind === 0) console.log(`  ${warnings} young gate fixture(s): a WARN, not a failure`);
+
+  console.log(
+    failures === 0
+      ? `\nAll seed checks passed.${warnings > 0 ? ` (${warnings} warning(s))` : ""}`
+      : `\n${failures} seed check(s) FAILED.`,
+  );
   if (failures > 0) process.exitCode = 1;
 }
 

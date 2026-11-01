@@ -18,6 +18,7 @@ import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.
 import {
   cancelReservation,
   confirmReservation,
+  leaveClass,
   rejectReservation,
   reserveOrEnroll,
 } from "../lib/db/reservations.ts";
@@ -34,19 +35,25 @@ import {
 } from "../lib/db/session-bookings.ts";
 import { generateFamilyCode, hashFamilyCode } from "../lib/db/parents.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
+import { dateKey, dayMarker, zonedDateTimeToUtc } from "../lib/scheduling.ts";
+import { calendarGrid, calendarMonthRange, parseCalendarDay, parseCalendarMonth } from "../lib/calendar.ts";
+import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import {
+  bookedCalendarEntries,
   childBookedUpcoming,
+  studentCalendarMonth,
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
   studentBookedUpcoming,
   studentReservationStatusByClass,
+  studentUpcomingSessions,
 } from "../lib/db/student-portal.ts";
 import {
   listPublicBranches,
   publicBranchBySlug,
   publicBranchLogo,
   publicClassById,
+  publicClassImage,
   publicClassesForBranch,
   publicTeacherAt,
   searchPublicClasses,
@@ -397,6 +404,287 @@ async function main() {
   await checkAccountSeeding(centerA, centerB, teacherA, teacherB);
   await checkPublicCatalog();
   await checkSessionBookings(centerA, centerB, teacherA);
+  await checkCalendar(centerA, centerB, teacherA);
+}
+
+/**
+ * U8 - "Leave class": a student ends only their own ACTIVE enrolment, at their
+ * own branch; the row is REMOVED and marked as the student's doing, audited
+ * with ids only; the schedule drops it; and rejoining goes through the normal
+ * join (instant, or a fresh request that staff confirm), with no cooling-off.
+ */
+async function checkLeaveClass(
+  centerA: { id: string },
+  centerB: { id: string },
+  teacherA: { id: string },
+): Promise<void> {
+  console.log("\nU8 - leave a class");
+
+  const instant = await makeClass(centerA.id, teacherA.id);
+  const approval = await makeClass(centerA.id, teacherA.id, { requiresConfirmation: true });
+  const leaver = await makeStudentUser("u8-leaver");
+  const mate = await makeStudentUser("u8-mate");
+  const outsider = await makeStudentUser("u8-outsider");
+  const removedByStaff = await makeStudentUser("u8-staff-removed");
+
+  const join = (classGroupId: string, studentUserId: string) =>
+    prisma.$transaction((tx) => reserveOrEnroll(tx, { centerId: centerA.id, classGroupId, studentUserId }));
+  const leave = (centerId: string, classGroupId: string, studentUserId: string) =>
+    prisma.$transaction((tx) => leaveClass(tx, { centerId, classGroupId, studentUserId }));
+  const enrollmentOf = (studentUserId: string, classGroupId: string) =>
+    prisma.enrollment.findFirstOrThrow({ where: { classGroupId, studentProfile: { userId: studentUserId } } });
+
+  await join(instant.id, leaver.id);
+  await join(instant.id, mate.id);
+  const session = await prisma.session.create({
+    data: scopedData(centerA.id, {
+      classGroupId: instant.id,
+      teacherId: teacherA.id,
+      date: dayMarker("2027-06-15"),
+      startTime: "16:00",
+      endTime: "17:00",
+      timezone: "Africa/Cairo",
+      priceSnapshot: 10_000,
+    }),
+  });
+  const leaverProfile = await prisma.studentProfile.findFirstOrThrow({ where: { userId: leaver.id, centerId: centerA.id } });
+  const mateProfile = await prisma.studentProfile.findFirstOrThrow({ where: { userId: mate.id, centerId: centerA.id } });
+  const today = dayMarker("2026-11-01");
+  const range = calendarMonthRange(parseCalendarMonth("2027-06", today));
+
+  const calendarBefore = await studentCalendarMonth(prisma, centerA.id, leaverProfile.id, range, today);
+  check(
+    "The calendar entry of an enrolled session names its class (the day list's Leave class)",
+    calendarBefore.some((row) => row.sessionId === session.id && row.status === "UPCOMING" && row.classGroupId === instant.id),
+    JSON.stringify(calendarBefore.map((row) => [row.status, row.classGroupId])),
+  );
+
+  // Only the student's own ACTIVE enrolment, at their own branch.
+  const byOutsider = await leave(centerA.id, instant.id, outsider.id);
+  check("A student with no enrolment in the class cannot end anyone's (notFound)", !byOutsider.ok && byOutsider.error === "notFound", JSON.stringify(byOutsider));
+  const wrongBranch = await leave(centerB.id, instant.id, leaver.id);
+  check("Another branch's centre id finds no enrolment to end (notFound)", !wrongBranch.ok && wrongBranch.error === "notFound", JSON.stringify(wrongBranch));
+  check(
+    "Both enrolments are untouched by the refusals",
+    (await enrollmentOf(leaver.id, instant.id)).status === "ACTIVE" && (await enrollmentOf(mate.id, instant.id)).status === "ACTIVE",
+  );
+
+  // Staff-ended and blocked rows are not the student's to end.
+  await join(instant.id, removedByStaff.id);
+  const staffRow = await enrollmentOf(removedByStaff.id, instant.id);
+  await prisma.enrollment.update({ where: { id: staffRow.id }, data: { status: "REMOVED" } });
+  const onRemoved = await leave(centerA.id, instant.id, removedByStaff.id);
+  await prisma.enrollment.update({ where: { id: staffRow.id }, data: { status: "BLOCKED" } });
+  const onBlocked = await leave(centerA.id, instant.id, removedByStaff.id);
+  const staffRowAfter = await enrollmentOf(removedByStaff.id, instant.id);
+  check(
+    "A removed or blocked enrolment cannot be 'left' (notFound) and is not marked as the student's doing",
+    !onRemoved.ok && !onBlocked.ok && staffRowAfter.status === "BLOCKED" && staffRowAfter.leftByStudentAt === null,
+  );
+
+  // Leaving.
+  const left = await leave(centerA.id, instant.id, leaver.id);
+  const leaverRow = await enrollmentOf(leaver.id, instant.id);
+  check(
+    "Leaving ends the student's own enrolment: REMOVED, marked as left by the student",
+    left.ok && leaverRow.status === "REMOVED" && leaverRow.leftByStudentAt !== null,
+    JSON.stringify(leaverRow),
+  );
+  check("...and leaves the classmate's enrolment alone", (await enrollmentOf(mate.id, instant.id)).status === "ACTIVE");
+  const again = await leave(centerA.id, instant.id, leaver.id);
+  check("Leaving twice is refused (notFound)", !again.ok && again.error === "notFound", JSON.stringify(again));
+
+  const audit = await prisma.auditLog.findMany({ where: { centerId: centerA.id, action: "enrollment.leave" } });
+  check(
+    "Exactly one enrollment.leave audit row, by the student, with ids and statuses only",
+    audit.length === 1 &&
+      audit[0].actorUserId === leaver.id &&
+      audit[0].entityType === "Enrollment" &&
+      audit[0].entityId === leaverRow.id &&
+      forbiddenAuditKey(audit[0].before) === null &&
+      forbiddenAuditKey(audit[0].after) === null,
+    JSON.stringify(audit),
+  );
+
+  const enrolledIds = await studentActiveEnrollmentClassIds(prisma, leaver.id);
+  const leaverSchedule = await studentUpcomingSessions(prisma, centerA.id, leaverProfile.id, today);
+  const mateSchedule = await studentUpcomingSessions(prisma, centerA.id, mateProfile.id, today);
+  const calendarAfter = await studentCalendarMonth(prisma, centerA.id, leaverProfile.id, range, today);
+  check(
+    "The class leaves the student's enrolled set, schedule and calendar; the classmate's stay",
+    !enrolledIds.has(instant.id) &&
+      !leaverSchedule.some((row) => row.id === session.id) &&
+      !calendarAfter.some((row) => row.sessionId === session.id) &&
+      mateSchedule.some((row) => row.id === session.id),
+  );
+
+  // Rejoin: the normal join, no cooling-off.
+  const rejoined = await join(instant.id, leaver.id);
+  const rejoinedRow = await enrollmentOf(leaver.id, instant.id);
+  check(
+    "Rejoining an instant class works at once: ACTIVE again, no longer marked as left, enrolled from now",
+    rejoined.ok &&
+      rejoined.kind === "enrolled" &&
+      rejoinedRow.status === "ACTIVE" &&
+      rejoinedRow.leftByStudentAt === null &&
+      rejoinedRow.enrolledAt.getTime() >= (leaverRow.leftByStudentAt?.getTime() ?? Infinity),
+    JSON.stringify(rejoined),
+  );
+
+  // A class that needs approval: the old CONFIRMED request is finished, so a
+  // fresh request is allowed and is confirmed like any other.
+  const asked = await join(approval.id, leaver.id);
+  const confirmedFirst = await prisma.$transaction((tx) =>
+    confirmReservation(tx, centerA.id, asked.ok && asked.kind === "pending" ? asked.reservationId : "", teacherA.id),
+  );
+  const leftApproval = await leave(centerA.id, approval.id, leaver.id);
+  const askedAgain = await join(approval.id, leaver.id);
+  check(
+    "After leaving an approval class a new request is allowed (not alreadyEnrolled) and reuses the request row",
+    confirmedFirst.ok &&
+      leftApproval.ok &&
+      askedAgain.ok &&
+      askedAgain.kind === "pending" &&
+      asked.ok &&
+      asked.kind === "pending" &&
+      askedAgain.reservationId === asked.reservationId,
+    JSON.stringify(askedAgain),
+  );
+  const confirmedAgain = await prisma.$transaction((tx) =>
+    confirmReservation(tx, centerA.id, askedAgain.ok && askedAgain.kind === "pending" ? askedAgain.reservationId : "", teacherA.id),
+  );
+  const approvalRow = await enrollmentOf(leaver.id, approval.id);
+  check(
+    "...and confirming it reactivates the same enrolment, no longer marked as left",
+    confirmedAgain.ok && approvalRow.status === "ACTIVE" && approvalRow.leftByStudentAt === null,
+    JSON.stringify(confirmedAgain),
+  );
+}
+
+/**
+ * U7 — the student (and parent) calendar: the month rules, and every status
+ * `studentCalendarMonth` reads from the schedule's own data — attended,
+ * absent, a drop-in who never came, cancelled, upcoming, a live session not
+ * yet arrived, a moved original — plus "an enrolled session wins over a
+ * booking" and branch isolation.
+ */
+async function checkCalendar(
+  centerA: { id: string },
+  centerB: { id: string },
+  teacherA: { id: string },
+): Promise<void> {
+  console.log("\nU7 — the calendar");
+
+  check(
+    "?month=YYYY-MM parses; a malformed month falls back to today's",
+    dateKey(parseCalendarMonth("2026-05", dayMarker("2026-10-31"))) === "2026-05-01" &&
+      dateKey(parseCalendarMonth("2026-13", dayMarker("2026-10-31"))) === "2026-10-01",
+  );
+  const november = calendarGrid(dayMarker("2026-11-01"), 6);
+  check(
+    "The grid holds whole weeks opening on the week start (Saturday in Arabic, Sunday in English)",
+    november[0].getUTCDay() === 6 &&
+      november.length % 7 === 0 &&
+      november.some((day) => dateKey(day) === "2026-11-30") &&
+      calendarGrid(dayMarker("2026-11-01"), 0)[0].getUTCDay() === 0,
+  );
+  check(
+    "?day= must be inside the month shown; else today when today is in it, else none",
+    parseCalendarDay("2026-11-20", dayMarker("2026-11-01"), dayMarker("2026-11-15")) === "2026-11-20" &&
+      parseCalendarDay("2026-12-01", dayMarker("2026-11-01"), dayMarker("2026-11-15")) === "2026-11-15" &&
+      parseCalendarDay("2026-11-31", dayMarker("2026-11-01"), dayMarker("2026-10-15")) === null,
+  );
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const utcDay = (offset: number) => {
+    const d = new Date(Date.now() + offset * DAY);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  };
+  const today = utcDay(0);
+  const range = { start: utcDay(-10), end: utcDay(10) };
+
+  const enrolledClass = await makeClass(centerA.id, teacherA.id);
+  const otherClass = await makeClass(centerA.id, teacherA.id);
+  const student = await makeStudentUser("u7-calendar");
+  const enrol = await prisma.$transaction((tx) =>
+    reserveOrEnroll(tx, { centerId: centerA.id, classGroupId: enrolledClass.id, studentUserId: student.id }),
+  );
+  check("fixture: the calendar student is enrolled", enrol.ok);
+  const profile = await prisma.studentProfile.findFirstOrThrow({ where: { centerId: centerA.id, userId: student.id } });
+
+  let hour = 7;
+  const session = (classGroupId: string, offset: number, extra: { status?: "CANCELLED"; closedAt?: Date; rescheduledToId?: string } = {}) => {
+    hour += 1;
+    return prisma.session.create({
+      data: scopedData(centerA.id, {
+        classGroupId,
+        teacherId: teacherA.id,
+        date: utcDay(offset),
+        startTime: `${String(hour).padStart(2, "0")}:00`,
+        endTime: `${String(hour).padStart(2, "0")}:45`,
+        priceSnapshot: 10_000,
+        ...extra,
+      }),
+    });
+  };
+  const attend = (sessionId: string, attendanceStatus: "PRESENT" | "LATE" | "ABSENT", isDropIn = false) =>
+    prisma.sessionAttendee.create({
+      data: scopedData(centerA.id, { sessionId, studentProfileId: profile.id, attendanceStatus, isDropIn, recordedBy: teacherA.id }),
+    });
+
+  const closed = new Date();
+  const present = await session(enrolledClass.id, -3, { closedAt: closed });
+  await attend(present.id, "PRESENT");
+  const late = await session(enrolledClass.id, -2, { closedAt: closed });
+  await attend(late.id, "LATE");
+  const absent = await session(enrolledClass.id, -1, { closedAt: closed });
+  await attend(absent.id, "ABSENT");
+  const dropInCame = await session(otherClass.id, -2, { closedAt: closed });
+  await attend(dropInCame.id, "PRESENT", true);
+  const dropInNoShow = await session(otherClass.id, -1, { closedAt: closed });
+  await attend(dropInNoShow.id, "ABSENT", true);
+  const live = await session(enrolledClass.id, 0);
+  await attend(live.id, "ABSENT");
+  const cancelled = await session(enrolledClass.id, 2, { status: "CANCELLED" });
+  const upcoming = await session(enrolledClass.id, 3);
+  const replacement = await session(enrolledClass.id, 5);
+  const moved = await session(enrolledClass.id, 4, { rescheduledToId: replacement.id });
+
+  const entries = await studentCalendarMonth(prisma, centerA.id, profile.id, range, today);
+  const status = new Map(entries.map((entry) => [entry.sessionId, entry.status]));
+  check("A past session attended is Present; a late one Late", status.get(present.id) === "PRESENT" && status.get(late.id) === "LATE");
+  check("An enrolled student's closed absence is Absent", status.get(absent.id) === "ABSENT");
+  check("A drop-in who came shows Present; a drop-in who never came shows nothing (T5)", status.get(dropInCame.id) === "PRESENT" && !status.has(dropInNoShow.id));
+  check("A live session the enrolled student has not arrived at is still Upcoming", status.get(live.id) === "UPCOMING");
+  check("A cancelled session is Cancelled; a future one Upcoming", status.get(cancelled.id) === "CANCELLED" && status.get(upcoming.id) === "UPCOMING");
+  check("A moved original never shows; its replacement does (U2)", !status.has(moved.id) && status.get(replacement.id) === "UPCOMING");
+  check("Every entry names its own branch", entries.every((entry) => entry.centerId === centerA.id));
+  check(
+    "Another branch's read of this profile returns nothing (centerId-scoped)",
+    (await studentCalendarMonth(prisma, centerB.id, profile.id, range, today)).length === 0,
+  );
+
+  const enrolledIds = new Set(entries.map((entry) => entry.sessionId));
+  const fakeBooking = (sessionRow: typeof upcoming, bookingStatus: "PENDING" | "CONFIRMED") => ({
+    bookingId: `b-${sessionRow.id}`,
+    bookingStatus,
+    centerId: centerA.id,
+    centerName: "Student Portal A",
+    session: { ...sessionRow, classGroup: null, subject: null, grade: null, room: null, rescheduledFrom: null },
+  });
+  const otherFuture = await session(otherClass.id, 6);
+  const booked = bookedCalendarEntries(
+    [fakeBooking(upcoming, "CONFIRMED"), fakeBooking(otherFuture, "CONFIRMED"), fakeBooking(otherFuture, "PENDING")],
+    range,
+    enrolledIds,
+  );
+  check(
+    "A booking reads Booked (CONFIRMED) or Requested (PENDING); an enrolled session wins over a booking",
+    booked.length === 2 &&
+      booked.every((entry) => entry.sessionId === otherFuture.id) &&
+      booked.some((entry) => entry.status === "BOOKED") &&
+      booked.some((entry) => entry.status === "REQUESTED"),
+  );
 }
 
 /**
@@ -522,7 +810,8 @@ async function checkPublicCatalog() {
 
   const ALLOWED_CLASS_KEYS = [
     // G2 (OD-14): F6's sessionBookingMode (OFF / INSTANT / APPROVAL) is the one booking field a public class carries (docs/02).
-    "endDate", "grade", "id", "price", "requiresConfirmation", "schedules", "seats",
+    // U9: imageUrl is the class card's signing-route path (cover, else the teacher's photo) — never a storage key.
+    "endDate", "grade", "id", "imageUrl", "price", "requiresConfirmation", "schedules", "seats",
     "sessionBookingMode", "startDate", "subject", "teacherName", "teacherRating", "teacherUserId",
   ].join(",");
   check(
@@ -530,6 +819,22 @@ async function checkPublicCatalog() {
     classes.every((item) => Object.keys(item).sort().join(",") === ALLOWED_CLASS_KEYS),
     Object.keys(classes[0] ?? {}).sort().join(","),
   );
+
+  // U9: the card's image is null until a cover or the teacher's photo exists, then a path under /api — never the key.
+  check("a class with no cover and no teacher photo has no image", classes.every((item) => item.imageUrl === null));
+  await prisma.classGroup.update({ where: { id: open.id }, data: { coverKey: `${listedBranch.id}/cover.${open.id}.v1.png` } });
+  const withCover = (await publicClassesForBranch(prisma, listedBranch, now)).find((item) => item.id === open.id);
+  check(
+    "a class with a cover gets the signing-route path, not the storage key",
+    withCover?.imageUrl === `/api/class-images/${listedBranch.id}/${open.id}?v=cover.${open.id}.v1.png` && !JSON.stringify(withCover).includes(`${listedBranch.id}/cover`),
+    String(withCover?.imageUrl),
+  );
+  check(
+    "a guest's image lookup resolves for a listed class and refuses an unlisted branch's class",
+    (await publicClassImage(prisma, listedBranch.id, open.id, now))?.kind === "cover" &&
+      (await publicClassImage(prisma, unlisted.id, unlistedClass.id, now)) === null,
+  );
+  await prisma.classGroup.update({ where: { id: open.id }, data: { coverKey: null } });
 
   const search = await searchPublicClasses(prisma, now, {});
   check("the class search never returns an unlisted branch class", !search.some((item) => item.id === unlistedClass.id));
@@ -618,13 +923,13 @@ async function checkAccountSeeding(
 
   // a. grade + declared parent -> seeded, and whole: no second form.
   const u1 = await user("whole", { gradeId: gSeed.id });
-  await invite(u1.id, "01000000001", "ACCEPTED", new Date(Date.now() - 2 * day), "Older");
-  await invite(u1.id, "01000000002", "PENDING", new Date(Date.now() - day), "Newer");
+  await invite(u1.id, "+201000000001", "ACCEPTED", new Date(Date.now() - 2 * day), "Older");
+  await invite(u1.id, "+201000000002", "PENDING", new Date(Date.now() - day), "Newer");
   await join(centerA.id, classA.id, u1.id);
   const whole = await profileAt(centerA.id, u1.id);
   check(
     "A new profile takes the account grade and the latest declared parent, and is stamped complete",
-    whole?.gradeId === gSeed.id && whole.parentPhone === "01000000002" && whole.parentFirstName === "Newer" &&
+    whole?.gradeId === gSeed.id && whole.parentPhone === "+201000000002" && whole.parentFirstName === "Newer" &&
       whole.parentLastName === "Parent" && whole.profileCompletedAt !== null,
     JSON.stringify(whole),
   );
@@ -637,21 +942,21 @@ async function checkAccountSeeding(
 
   // c. parent only -> the form stays.
   const u3 = await user("parent-only");
-  await invite(u3.id, "01000000003", "PENDING", new Date());
+  await invite(u3.id, "+201000000003", "PENDING", new Date());
   await join(centerA.id, classA.id, u3.id);
   const parentOnly = await profileAt(centerA.id, u3.id);
-  check("Parent without a grade: seeded, but the one-time form still stands", parentOnly?.gradeId === null && parentOnly.parentPhone === "01000000003" && parentOnly.profileCompletedAt === null);
+  check("Parent without a grade: seeded, but the one-time form still stands", parentOnly?.gradeId === null && parentOnly.parentPhone === "+201000000003" && parentOnly.profileCompletedAt === null);
 
   // d. a grade this branch does not offer is not seeded (SEC-49).
   const u4 = await user("unoffered", { gradeId: gNotOffered.id });
-  await invite(u4.id, "01000000004", "PENDING", new Date());
+  await invite(u4.id, "+201000000004", "PENDING", new Date());
   await join(centerA.id, classA.id, u4.id);
   const unoffered = await profileAt(centerA.id, u4.id);
   check("A grade the branch does not offer is left empty, so the form stays", unoffered?.gradeId === null && unoffered.profileCompletedAt === null);
 
   // e. a cancelled invitation declares nobody.
   const u5 = await user("cancelled", { gradeId: gSeed.id });
-  await invite(u5.id, "01000000005", "REVOKED", new Date());
+  await invite(u5.id, "+201000000005", "REVOKED", new Date());
   await join(centerA.id, classA.id, u5.id);
   const cancelled = await profileAt(centerA.id, u5.id);
   check("A cancelled invitation seeds no parent", cancelled?.parentPhone === null && cancelled.profileCompletedAt === null);
@@ -667,7 +972,7 @@ async function checkAccountSeeding(
   );
   await join(centerB.id, classB.id, u1.id);
   const atB = await profileAt(centerB.id, u1.id);
-  check("A second branch seeds from the account as it is now, independently of the first", atB?.gradeId === gOther.id && atB.parentPhone === "01000000002");
+  check("A second branch seeds from the account as it is now, independently of the first", atB?.gradeId === gOther.id && atB.parentPhone === "+201000000002");
 
   // g. a sign-up intent grants nothing.
   for (const intent of ["STUDENT", "PARENT", "TEACHER"] as const) {
@@ -683,6 +988,7 @@ async function checkAccountSeeding(
       relations.length === 0 && reads.every((count) => count === 0),
     );
   }
+  await checkLeaveClass(centerA, centerB, teacherA);
   await deleteAuditRows(prisma, { centerId: { in: [centerA.id, centerB.id] } });
 }
 

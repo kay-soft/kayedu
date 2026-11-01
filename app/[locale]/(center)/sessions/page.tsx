@@ -1,5 +1,6 @@
 import { CalendarClock, CalendarSearch, ClipboardCheck, Radio, Wallet } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
+import { buildCatalogPicker } from "@/lib/catalog-picker";
 
 import {
   NewSessionDialog,
@@ -32,7 +33,7 @@ import { scoped } from "@/lib/db/scoped";
 import { deriveSessionDisplayStatus, sessionListWhere } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { clampRangeToVisibility, visibilityWindowFloor } from "@/lib/db/visibility";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatDay, formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import {
@@ -84,6 +85,7 @@ export default async function SessionsPage({
         subjectId: null,
         classGroupId: null,
         status: null,
+        moved: false,
       };
 
   // R7b: the filter's "today", the visibility floor and the picker's today
@@ -122,7 +124,7 @@ export default async function SessionsPage({
   const canCreate = ctxCan(ctx, "session.manage");
 
   const [rows, teachers, subjects, classes, revenue, newSession] = await Promise.all([
-    db.sessions.search({ where }),
+    db.sessions.search({ where, includeMoved: filters.moved }),
     db.teachers.list({ active: true }),
     db.subjects.list(),
     db.classGroups.list(),
@@ -132,11 +134,12 @@ export default async function SessionsPage({
     canCreate
       ? Promise.all([
             db.classGroups.listForNewSession(),
-            db.subjects.list({ active: true }),
-            db.grades.list({ active: true }),
+            db.educationSystems.list(),
+            db.grades.list(),
+            db.subjects.list(),
             db.rooms.list(),
             db.roomLinks.list(),
-          ]).then(([activeClasses, activeSubjects, activeGrades, rooms, roomLinks]) => ({
+          ]).then(([activeClasses, catalogSystems, catalogGrades, catalogSubjects, rooms, roomLinks]) => ({
             classes: activeClasses.map((classGroup): NewSessionClassOption => {
               const label = sessionDisplayName(locale, { classGroup });
               return {
@@ -148,8 +151,11 @@ export default async function SessionsPage({
                 slots: classGroup.schedules,
               };
             }),
-            subjects: activeSubjects.map((subject) => ({ value: subject.id, label: subject.name })),
-            grades: activeGrades.map((grade) => ({ value: grade.id, label: grade.name })),
+            // U3 — system → grade → subject; only what is on offer here.
+            catalog: buildCatalogPicker(
+              { systems: catalogSystems, grades: catalogGrades, subjects: catalogSubjects },
+              (name) => `${name} · ${tCommon("inactive")}`,
+            ),
             rooms: rooms.map((room) => ({
               id: room.id,
               name: room.name,
@@ -178,6 +184,11 @@ export default async function SessionsPage({
     teachers.map((teacher) => [teacher.userId, fullName(localName(teacher, teacher.user))]),
   );
 
+  const slotLabel = (slot: { date: Date; startTime: string }) => ({
+    date: formatDay(slot.date, locale),
+    time: formatTime(slot.startTime, locale),
+  });
+
   const tableRows: SessionRowData[] = pageEntries.map(({ row, displayStatus }) => ({
     sessionId: row.id,
     className: sessionDisplayName(locale, row),
@@ -192,6 +203,9 @@ export default async function SessionsPage({
     // A one-time session (R5) has no class, so nobody is enrolled in it.
     enrolledCount: row.classGroup?._count.enrollments ?? 0,
     displayStatus,
+    // U2 — "Moved to …" on a moved original (greyed), "Moved from …" on its replacement.
+    movedTo: row.rescheduledTo ? slotLabel(row.rescheduledTo) : null,
+    movedFrom: row.rescheduledFrom ? slotLabel(row.rescheduledFrom) : null,
   }));
 
   const liveCount = filtered.filter((entry) => entry.displayStatus === "LIVE").length;
@@ -228,6 +242,7 @@ export default async function SessionsPage({
     if (filters.subjectId) params.set("subjectId", filters.subjectId);
     if (filters.classGroupId) params.set("classGroupId", filters.classGroupId);
     if (filters.status) params.set("status", filters.status);
+    if (filters.moved) params.set("moved", "on");
     if (targetPage > 1) params.set("page", String(targetPage));
     const qs = params.toString();
     return qs ? `${ROUTES.centerSessions}?${qs}` : ROUTES.centerSessions;
@@ -243,8 +258,7 @@ export default async function SessionsPage({
             <NewSessionDialog
               classes={newSession.classes}
               teachers={teacherOptions}
-              subjects={newSession.subjects}
-              grades={newSession.grades}
+              catalog={newSession.catalog}
               rooms={newSession.rooms}
               roomLinks={newSession.roomLinks}
               defaultCut={{
@@ -302,6 +316,7 @@ export default async function SessionsPage({
             subjectId={filters.subjectId ?? ""}
             classGroupId={filters.classGroupId ?? ""}
             status={filters.status ?? ""}
+            moved={filters.moved}
             teachers={teacherOptions}
             subjects={subjectOptions}
             classes={classOptions}

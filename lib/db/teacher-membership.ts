@@ -14,6 +14,7 @@ import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 import type { MatchCandidate } from "../validation/people.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { normalizePhone } from "../phone.ts";
 
 /**
  * **The one place a teacher is added to a centre** (CLAUDE.md rule 4; spec §5
@@ -80,6 +81,12 @@ export type TeacherMembershipOptions = {
    * match panel with the "already a staff member" notice, does not.
    */
   refusePrivileged: boolean;
+  /**
+   * U1: written on a **newly created** membership, in the same transaction.
+   * Omitted = the column default (trusted). A re-activated membership keeps its
+   * own flag.
+   */
+  isTrustedTeacher?: boolean;
 };
 
 /**
@@ -103,6 +110,9 @@ export function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
 }
 
+const trustedData = (options: TeacherMembershipOptions) =>
+  options.isTrustedTeacher === undefined ? {} : { isTrustedTeacher: options.isTrustedTeacher };
+
 const fail = (error: TeacherRefusal | "matchFound", match?: MatchCandidate) =>
   ({ ok: false, error, ...(match ? { match } : {}) }) as const;
 
@@ -112,7 +122,11 @@ export async function addTeacherMembership(
   input: PersonInput,
   options: TeacherMembershipOptions,
 ): Promise<TeacherMembershipResult> {
-  const { email, phone, altPhone } = input;
+  // The one normalizer at the write itself, not only in the form schema: a
+  // caller that skips zod (the seed, a gate) still stores the E.164 form (U4).
+  const { email } = input;
+  const phone = normalizePhone(input.phone);
+  const altPhone = normalizePhone(input.altPhone);
   const contact = { email, phone };
   const resolution = await resolveContact(
     { centerId, actorUserId: options.actorUserId, adding: "teacher" },
@@ -152,7 +166,13 @@ export async function addTeacherMembership(
     if (options.linkUserId) return fail("matchGone");
     const person = await createPerson(input, tx);
     const membership = await tx.membership.create({
-      data: scopedData(centerId, { userId: person.id, role: TEACHER, joinedAt: new Date(), ...local }),
+      data: scopedData(centerId, {
+        userId: person.id,
+        role: TEACHER,
+        joinedAt: new Date(),
+        ...local,
+        ...trustedData(options),
+      }),
     });
     await writeAuditRow(tx, {
       centerId,
@@ -198,7 +218,13 @@ export async function addTeacherMembership(
   }
 
   const membership = await tx.membership.create({
-    data: scopedData(centerId, { userId: matched.id, role: TEACHER, joinedAt: new Date(), ...local }),
+    data: scopedData(centerId, {
+      userId: matched.id,
+      role: TEACHER,
+      joinedAt: new Date(),
+      ...local,
+      ...trustedData(options),
+    }),
   });
   await writeAuditRow(tx, {
     centerId,

@@ -1,9 +1,12 @@
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { ReserveButton } from "@/app/[locale]/(student)/student/discover/reserve-button";
 import type { ClassCardBadge } from "@/components/explore/class-card";
 import { LinkButton } from "@/components/shared/link-button";
 import { Badge } from "@/components/ui/badge";
+import { catalogLabelWithSelection } from "@/lib/catalog";
+import type { PublicClass } from "@/lib/db/public-catalog";
+import { buildJoinSummary } from "@/lib/join-summary";
 import type { SeatStatus } from "@/lib/capacity";
 import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -24,6 +27,11 @@ export async function seatBadge(seats: SeatStatus): Promise<ClassCardBadge> {
  * `reserveOrEnroll` path and the same messages. An instant class that is full
  * offers nothing, like Discover; a class that needs approval can still be
  * requested.
+ *
+ * **U8 — confirm first.** A signed-in click opens the confirmation dialog
+ * (built here from the class) and never joins by itself. A guest's link
+ * carries `join=1` through sign-in, so coming back signed in reopens that
+ * dialog (`openJoin`, read by the class page) — it still waits for Confirm.
  */
 export async function EnrolAction({
   signedIn,
@@ -31,7 +39,10 @@ export async function EnrolAction({
   classId,
   requiresConfirmation,
   seats,
-  returnPath,
+  returnPath: page,
+  item,
+  branchLabel,
+  openJoin = false,
 }: {
   signedIn: boolean;
   centerId: string;
@@ -39,8 +50,15 @@ export async function EnrolAction({
   requiresConfirmation: boolean;
   seats: SeatStatus;
   returnPath: string;
+  /** The class being joined — what the confirmation states. */
+  item: Pick<PublicClass, "subject" | "grade" | "teacherName" | "price" | "schedules" | "startDate" | "endDate">;
+  branchLabel: string;
+  /** Reopen the confirmation (a guest's sign-in intent came back). */
+  openJoin?: boolean;
 }) {
   const t = await getTranslations("StudentDiscover.card");
+  // The class page is where the dialog reopens, so the sign-in intent rides on it.
+  const returnPath = `${page}${page.includes("?") ? "&" : "?"}join=1`;
 
   if (!requiresConfirmation && seats === "full") {
     return (
@@ -51,7 +69,27 @@ export async function EnrolAction({
   }
 
   if (signedIn) {
-    return <ReserveButton centerId={centerId} classGroupId={classId} requiresConfirmation={requiresConfirmation} />;
+    const locale = await getLocale();
+    const summary = await buildJoinSummary({
+      locale,
+      subjectName: catalogLabelWithSelection(locale, item.subject),
+      gradeName: catalogLabelWithSelection(locale, item.grade),
+      branch: branchLabel,
+      teacher: item.teacherName,
+      price: item.price,
+      schedules: item.schedules,
+      startDate: item.startDate,
+      endDate: item.endDate,
+    });
+    return (
+      <ReserveButton
+        centerId={centerId}
+        classGroupId={classId}
+        requiresConfirmation={requiresConfirmation}
+        summary={summary}
+        defaultOpen={openJoin}
+      />
+    );
   }
 
   return (

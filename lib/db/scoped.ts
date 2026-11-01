@@ -25,6 +25,7 @@ import {
 } from "./classes.ts";
 import {
   sessionDetailInclude,
+  SESSION_MOVE_LINKS_SELECT,
   sessionListSelect,
 } from "./sessions.ts";
 import {
@@ -34,7 +35,7 @@ import {
   scopedWhere,
 } from "./tenant-scope.ts";
 import { staffInvitationFilter, staffMembershipFilter } from "./staff-filter.ts";
-import { centreReadFloor } from "./visibility.ts";
+import { centreReadFloor, type VisibilitySettings } from "./visibility.ts";
 import { consecutiveAbsenceCount } from "./attendance.ts";
 import {
   PAYMENT_METHOD_ORDER,
@@ -42,7 +43,7 @@ import {
 } from "./payment-methods.ts";
 import { listSessionAttendanceChanges } from "./session-lifecycle.ts";
 import { loadRoomLinks } from "./room-sets.ts";
-import { OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
+import { NOT_MOVED_SESSION, OPEN_CLASS_SESSION } from "./slot-conflicts.ts";
 import { listCenterTerms } from "./terms.ts";
 import { BOOKABLE_SESSION, isBookableNow } from "./session-seats.ts";
 import { centreTimeZone, todayInTimezone } from "../scheduling.ts";
@@ -57,7 +58,7 @@ export type ScopeContext = {
   user: { locale: string | null };
   role: string;
   isPlatformAdmin: boolean;
-  settings: { dataVisibilityDays: number; timezone: string } | null;
+  settings: VisibilitySettings | null;
 };
 
 /** Typed so a spread into a Prisma `where` keeps the enum, not `string`. */
@@ -570,13 +571,15 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       reactivate: (id: string) =>
         prisma.enrollment.updateMany({
           where: scopedWhere(centerId, { id }),
-          data: { status: ACTIVE_ENROLLMENT, enrolledAt: new Date() },
+          data: { status: ACTIVE_ENROLLMENT, enrolledAt: new Date(), leftByStudentAt: null },
         }),
 
+      // `leftByStudentAt` (U8) describes a student-ended REMOVED row only, so
+      // any other status clears it; a staff removal of a live row leaves it null.
       setStatus: (id: string, status: Prisma.EnrollmentUncheckedUpdateManyInput["status"]) =>
         prisma.enrollment.updateMany({
           where: scopedWhere(centerId, { id }),
-          data: { status },
+          data: status === "REMOVED" ? { status } : { status, leftByStudentAt: null },
         }),
     },
 
@@ -989,12 +992,18 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
        * a defensive cap, not the real page size; the date-range filter
        * already bounds this to "one center's day/week/month", never the
        * whole table (docs/02-architecture.md §14).
+       *
+       * U2: a session rescheduled away (`NOT_MOVED_SESSION`) is left out
+       * unless `includeMoved` — the staff list's "Show moved" toggle.
        */
-      search: (args: { where?: Prisma.SessionWhereInput }) =>
+      search: (args: { where?: Prisma.SessionWhereInput; includeMoved?: boolean }) =>
         prisma.session.findMany({
-          where: scopedWhere(centerId, sessionInWindow(args.where)),
+          where: scopedWhere(
+            centerId,
+            sessionInWindow(args.includeMoved ? args.where : { ...args.where, ...NOT_MOVED_SESSION }),
+          ),
           orderBy: [{ date: "asc" }, { startTime: "asc" }],
-          select: sessionListSelect(centerId),
+          select: { ...sessionListSelect(centerId), ...SESSION_MOVE_LINKS_SELECT },
           take: 1000,
         }),
 
@@ -1027,7 +1036,8 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       /**
        * Today's non-cancelled sessions — the Reception Desk's live rail and
        * the dashboard's today list. R4: a deactivated class's sessions are
-       * not on it unless they are closed records (`OPEN_CLASS_SESSION`).
+       * not on it unless they are closed records (`OPEN_CLASS_SESSION`). U2:
+       * nor is a session rescheduled away (`NOT_MOVED_SESSION`).
        */
       listForDay: (date: Date) =>
         prisma.session.findMany({
@@ -1036,6 +1046,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
             sessionInWindow({
               date,
               status: { not: CANCELLED_STATUS },
+              ...NOT_MOVED_SESSION,
               ...OPEN_CLASS_SESSION,
             }),
           ),

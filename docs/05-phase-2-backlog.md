@@ -318,6 +318,46 @@
 
 ---
 
+## 32. Drop `CatalogSubject.gradeId` after the pilot
+
+**What it is.** A migration that drops the deprecated `CatalogSubject.gradeId` column (U3) — the subject's old single parent grade.
+
+**Why deferred.** U3 made a subject grade-independent (links live in `CatalogSubjectGrade`) and its migration was expand-only, so the build deployed before U3 kept working on the migrated database until the new code shipped. Nothing reads or writes the column since U3, and its FK and index are already gone; dropping it is the one step that is not backward-compatible, so it waits until no build that reads it can be running and nobody needs the old values to look back at.
+
+**Depends on.** The pilot (M20 → first centre live) on the U3 build; a backup taken before the drop (M20's tested restore). Remove the column and its schema comment in the same change.
+
+---
+
+## 33. Purge a deleted branch
+
+**What it is.** Permanently removing a branch a platform admin soft-deleted (U5) — its `Center` row and everything that hangs off it: classes, sessions, attendance, payments, settlements, students' records there, staff memberships, pauses — after its 30-day `restorableUntil` has passed. Today the row stays in the database for good once deleted: it is invisible everywhere (`ACCESSIBLE_CENTER`, `COUNTED_BRANCHES`), the admin's Restore is refused after the window, and bringing it back later is a manual database fix.
+
+**Why deferred.** It deletes minors' records and money history, so what may be erased, after how long, and with what export first is exactly the retention question **OD-2** (legal review for minors' data, D-20's retention half) is open on. Building an eraser before that answer would either erase what the law requires us to keep or keep what it requires us to erase. A soft delete is reversible and harmless meanwhile.
+
+**Depends on.** OD-2 answered (retention and erasure rules); OD-4 (data export scope — a centre may be owed an export before its data goes); a tested backup/restore (M20). The audit log is append-only by trigger, so a purge also needs a decided answer for the branch's own audit rows.
+
+---
+
+## 34. Drop `CenterSettings.dataVisibilityDays` after the pilot
+
+**What it is.** A migration that drops the deprecated `CenterSettings.dataVisibilityDays` column (U6) — the single M19 window, replaced by `centerDataVisibilityDays` and `teacherDataVisibilityDays`.
+
+**Why deferred.** U6's migration was additive and backfilled both new fields from it, so the build deployed before U6 kept working on the migrated database until the new code shipped. Since U6 the only code touching it is the branch-copy carry-over in `lib/db/branches.ts` (kept so `check:branches`' existing copy assertion still holds); dropping the column is the one step that is not backward-compatible, so it waits until no build that reads it can be running.
+
+**Depends on.** The pilot (M20 → first centre live) on the U6 build; a backup taken before the drop (M20's tested restore). Remove, in the same change: the column and its schema comment, the carry-over line in `copyBranchSetup`, the `dataVisibilityDays` fixture/assertion in `check:branches` (moved to the two new fields), and the allowance for it in `check:visibility`'s "no file reads the deprecated column" assertion.
+
+---
+
+## 35. Drop `User.avatarUrl` after the pilot
+
+**What it is.** A migration that drops the deprecated `User.avatarUrl` column (U9).
+
+**Why deferred.** It has never been written: F8's personal profile photo had no storage destination, and U9 removed that feature (only teachers have photos, per branch, on `Membership.photoKey`). Dropping the column is not backward-compatible with a build that still selects it (any `User` `include` returns it), so it waits until no such build can be running.
+
+**Depends on.** The pilot (M20 → first centre live) on the U9 build; a backup taken before the drop (M20's tested restore). Remove, in the same change: the column and its schema comment in `prisma/schema.prisma`, and the mention in `docs/01-data-model.md` (User).
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

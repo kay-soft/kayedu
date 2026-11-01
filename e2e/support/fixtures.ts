@@ -1,6 +1,9 @@
+import { PrismaClient } from "@prisma/client";
 import { expect, test as base, type Page } from "@playwright/test";
 
-import { ACCOUNTS, passwordFor, storageStatePath, type AccountKey } from "./accounts";
+import { E2E_USER_PREFIX, removeE2eUsers } from "../../scripts/lib/e2e-users";
+
+import { ACCOUNTS, passwordFor, storageStatePath, uniqueTag, type AccountKey } from "./accounts";
 import { namespaces, t, type AppLocale } from "./i18n";
 
 export type TestOptions = { appLocale: AppLocale };
@@ -14,6 +17,12 @@ type Fixtures = {
   msg: (key: string, values?: Record<string, string | number>) => string;
   /** A browser page signed in as a seed account (a fresh context per call). */
   as: (account: AccountKey) => Promise<Page>;
+  /**
+   * A fresh tag (`e2e…`) for a journey that signs an account up. Everything that
+   * tag created - the sign-up, a desk-registered record under it - is deleted
+   * when the test ends, pass or fail (idempotent; scripts/lib/e2e-users.ts).
+   */
+  e2eTag: string;
 };
 
 /** Console noise that is not the app's: dev tooling, the browser's own favicon miss. */
@@ -47,6 +56,17 @@ export const test = base.extend<TestOptions & Fixtures>({
 
   msg: async ({ appLocale }, provide) => {
     await provide((key: string, values?: Record<string, string | number>) => t(appLocale, key, values));
+  },
+
+  e2eTag: async ({}, provide) => {
+    const tag = uniqueTag(E2E_USER_PREFIX).toLowerCase();
+    await provide(tag);
+    const db = new PrismaClient();
+    try {
+      await removeE2eUsers(db, tag);
+    } finally {
+      await db.$disconnect();
+    }
   },
 
   as: async ({ browser, problems }, provide, testInfo) => {

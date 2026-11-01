@@ -29,7 +29,7 @@ import {
   type ExistingSession,
   type WeeklySlotsError,
 } from "../scheduling.ts";
-import { centerGradeById, centerSubjectById } from "./catalog.ts";
+import { centerGradeById, centerSubjectById, isPairLinked } from "./catalog.ts";
 import { resolveRoomSet, writeClassExtraRooms, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
 import {
   cancelSession,
@@ -39,6 +39,7 @@ import {
   type OneOffShapeError,
 } from "./sessions.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { branchPauseRefusal } from "./branch-pauses.ts";
 
 export type { ConflictRefusal, DatedConflict };
 import type { PersonInput } from "./identity.ts";
@@ -50,7 +51,12 @@ import {
   type TeacherRefusal,
 } from "./teacher-membership.ts";
 import type { MatchCandidate } from "../validation/people.ts";
-import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
+import {
+  loadSessionOccupancy,
+  NOT_MOVED_SESSION,
+  slotTakenError,
+  writeConfirmedConflictAudit,
+} from "./slot-conflicts.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -430,7 +436,11 @@ async function computeSync(
     futureSessions(db, centerId, plan.classGroupId, clock),
     plannedOccurrences(db, centerId, plan, clock),
     // Every key this class already holds from today on (any status, started
-    // or not) — the unique constraint would refuse a second row there.
+    // or not). U2: this deliberately includes a slot that was rescheduled
+    // away or cancelled — the partial unique index would now accept a new row
+    // at a moved slot, but the engine never recreates one: a moved or
+    // cancelled occurrence stays moved or cancelled, however often the class
+    // is resynced (check:session-lifecycle asserts it).
     db.session.findMany({
       where: scopedWhere(centerId, { classGroupId: plan.classGroupId, date: { gte: clock.today } }),
       select: { date: true, startTime: true },
@@ -865,6 +875,8 @@ export type NewTeacherClassInput = {
   teacher: PersonInput;
   /** Set only after staff confirmed a match ("Use this person"). */
   linkUserId: string | null;
+  /** U1: the new membership's trusted flag; omitted = the column default (trusted). */
+  isTrustedTeacher?: boolean;
   /** The class, without its teacher — the teacher is created first. */
   class: Omit<ClassInput, "teacherId">;
   slots: ClassSlot[];
@@ -948,6 +960,7 @@ export async function createClassWithNewTeacher(
         linkUserId: input.linkUserId,
         via: "class.create",
         refusePrivileged: true,
+        isTrustedTeacher: input.isTrustedTeacher,
       });
       if (!teacher.ok) throw new TeacherStepRefusedError(teacher);
 
@@ -1630,7 +1643,10 @@ export async function previewClassSessions(
   };
 }
 
-/** How many sessions a class has, cancelled ones aside — for list and detail. */
+/**
+ * How many sessions a class has, cancelled ones aside — for list and detail.
+ * U2: a session rescheduled away is not counted; its replacement is.
+ */
 export async function classSessionCounts(
   db: Db,
   centerId: string,
@@ -1639,7 +1655,11 @@ export async function classSessionCounts(
   if (classGroupIds.length === 0) return new Map();
   const rows = await db.session.groupBy({
     by: ["classGroupId"],
-    where: scopedWhere(centerId, { classGroupId: { in: classGroupIds }, status: { not: CANCELLED } }),
+    where: scopedWhere(centerId, {
+      classGroupId: { in: classGroupIds },
+      status: { not: CANCELLED },
+      ...NOT_MOVED_SESSION,
+    }),
     _count: { _all: true },
   });
   return new Map(
@@ -1700,11 +1720,14 @@ export type ManualSessionError =
   | "teacherNotFound"
   | "subjectNotFound"
   | "gradeNotFound"
+  | "subjectNotInGrade"
   | "invalidTitle"
   | "invalidPrice"
   | "invalidCut"
   | "fixedAbovePrice"
   | "duplicateSlot"
+  | "duplicateSlotCancelled"
+  | "branchPaused"
   | OneOffShapeError
   | RoomSetError;
 
@@ -1750,6 +1773,11 @@ async function checkManualSlot(
   const { timeZone, policy } = await centreScheduling(db, centerId);
   const clock = centreClock(options.now ?? new Date(), timeZone);
   if (dateKey(slot.date) < clock.todayKey) return { ok: false, error: "pastDate" };
+  // U5: no extra or one-time session while the branch is paused today, nor
+  // dated inside a current or upcoming pause.
+  if (await branchPauseRefusal(db, centerId, { date: slot.date, whilePausedToday: true, now: options.now })) {
+    return { ok: false, error: "branchPaused" };
+  }
 
   const teacher = await db.membership.findFirst({
     where: scopedWhere(centerId, { userId: slot.teacherId, role: TEACHER, active: true }),
@@ -1761,12 +1789,9 @@ async function checkManualSlot(
   const rooms = await resolveRoomSet(db, centerId, slot.roomId, slot.extraRoomIds);
   if (!rooms.ok) return { ok: false, error: rooms.error };
 
-  if (classGroupId) {
-    const held = await db.session.count({
-      where: scopedWhere(centerId, { classGroupId, date: slot.date, startTime: slot.startTime }),
-    });
-    if (held > 0) return { ok: false, error: "duplicateSlot" };
-  }
+  // U2: a session rescheduled away no longer holds its slot; a cancelled one does.
+  const taken = await slotTakenError(db, centerId, classGroupId, slot.date, slot.startTime);
+  if (taken) return { ok: false, error: taken };
 
   const [occupancy, holiday] = await Promise.all([
     loadSessionOccupancy(db, centerId, options.locale ?? "en", slot.date, slot.date),
@@ -1882,7 +1907,8 @@ async function writeManualSession(
     }, WRITE_TRANSACTION_OPTIONS);
   } catch (error) {
     if (error instanceof ManualSessionRefusal) return error.result;
-    // The (classGroupId, date, startTime) backstop: a concurrent create won.
+    // The partial (classGroupId, date, startTime) unique index — U2: every
+    // session there but one rescheduled away — backstops a concurrent create.
     if (isP2002(error)) return { ok: false, error: "duplicateSlot" };
     throw error;
   }
@@ -1969,6 +1995,10 @@ export async function createOneOffSession(
       if (input.gradeId) {
         const grade = await centerGradeById(tx, centerId, input.gradeId);
         if (!grade || !grade.active || !grade.catalogActive) return { ok: false, error: "gradeNotFound" };
+      }
+      // U3: both picked and active (above) and linked in the catalog.
+      if (input.subjectId && input.gradeId && !(await isPairLinked(tx, input.gradeId, input.subjectId))) {
+        return { ok: false, error: "subjectNotInGrade" };
       }
       return {
         ok: true,

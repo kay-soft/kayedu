@@ -22,13 +22,15 @@ export type ShellIconName =
   | "approvals"
   | "settings"
   | "schedule"
+  | "calendar"
   | "discover"
   | "centers"
   | "platform"
   | "catalog"
   | "refunds"
   | "settlements"
-  | "audit";
+  | "audit"
+  | "profile";
 
 export type ShellNavItem = {
   href: string;
@@ -82,6 +84,8 @@ export const CENTER_NAV: NavDef[] = [
 export const TEACHER_NAV: NavDef[] = [
   { href: ROUTES.teacherDashboard, labelKey: "dashboard", icon: "dashboard" },
   { href: ROUTES.teacherSessions, labelKey: "sessions", icon: "sessions" },
+  // U7: the month calendar of the teacher's own sessions.
+  { href: ROUTES.teacherCalendar, labelKey: "calendar", icon: "calendar" },
   { href: ROUTES.teacherStudents, labelKey: "students", icon: "students" },
   // P1: the classes page asserts `changeRequest.create` (it is the request
   // form's page); the item used to carry no permission, so a teacher without
@@ -103,20 +107,24 @@ export const TEACHER_NAV: NavDef[] = [
   // docs/03-build-order.md M7 note. R10a removed its "Soon" nav placeholder:
   // the nav lists only what a role can open. Add the item back with the screen.
   { href: ROUTES.teacherSettlements, labelKey: "settlements", icon: "settlements" },
+  // U9: the teacher's own photo per branch, and their classes' covers. Owning the row is the authority.
+  { href: ROUTES.teacherProfile, labelKey: "profile", icon: "profile" },
 ];
 
 const STUDENT_NAV: NavDef[] = [
   { href: ROUTES.studentSchedule, labelKey: "schedule", icon: "schedule" },
+  { href: ROUTES.studentCalendar, labelKey: "calendar", icon: "calendar" },
   { href: ROUTES.studentDiscover, labelKey: "discover", icon: "discover" },
   { href: ROUTES.studentReservations, labelKey: "reservations", icon: "sessions" },
 ];
 
-// The parent portal has exactly one screen (M16, spec §4.5) — a read-only
-// mirror of the student schedule, per selected child. No permission gate: a
-// parent's `can()` is unconditionally false (lib/auth/permissions.ts), so
-// there is nothing this nav needs to hide beyond "there's only one page".
+// The parent portal is a read-only mirror of the student schedule (M16, spec
+// §4.5) and, since U7, its calendar — per selected child. No permission gate:
+// a parent's `can()` is unconditionally false (lib/auth/permissions.ts), so
+// there is nothing this nav needs to hide.
 const PARENT_NAV: NavDef[] = [
   { href: ROUTES.parentHome, labelKey: "schedule", icon: "schedule" },
+  { href: ROUTES.parentCalendar, labelKey: "calendar", icon: "calendar" },
 ];
 
 const ADMIN_NAV: NavDef[] = [
@@ -152,6 +160,26 @@ function visible(
       icon: item.icon,
       group: item.group,
     }));
+}
+
+/**
+ * The teacher nav under All branches (U7): an item shows when **any** branch
+ * in view would show it — each branch's own grants, never a merged grant set —
+ * in `TEACHER_NAV`'s order. A page reached this way still gates on the
+ * branches that grant it (`firstGranting`), and each row on its own branch.
+ */
+export function teacherNavAcross(
+  grantsByBranch: { role: TenantRole; grants?: PermissionGrants }[],
+): ShellNavItem[] {
+  const shown = new Set(
+    grantsByBranch.flatMap(({ role, grants }) => visible(TEACHER_NAV, role, grants).map((item) => item.href)),
+  );
+  return TEACHER_NAV.filter((item) => shown.has(item.href)).map((item) => ({
+    href: item.href,
+    labelKey: item.labelKey,
+    icon: item.icon,
+    group: item.group,
+  }));
 }
 
 export function navForExperience(

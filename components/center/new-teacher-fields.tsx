@@ -9,6 +9,7 @@ import { MatchPanel } from "@/components/center/match-panel";
 import { PersonFields } from "@/components/center/person-fields";
 import { PhoneLookupField } from "@/components/center/phone-lookup-field";
 import { SectionHeader } from "@/components/shared/section-header";
+import { ToggleRow } from "@/components/settings/toggle-row";
 import type { MatchCandidate } from "@/lib/validation/people";
 
 /**
@@ -55,6 +56,10 @@ export function NewTeacherFields({
 
   const match = serverMatch && serverMatch.userId !== dismissedMatch ? serverMatch : null;
   const linkUserId = linkedMatch?.userId ?? match?.userId ?? null;
+  const [trusted, setTrusted] = useState(true);
+  // The flag is written only when a membership is created; someone who already
+  // teaches here keeps theirs, so the switch is not offered (U1).
+  const linksExistingTeacher = (linkedMatch ?? match)?.existingHere === "teacher";
 
   useEffect(() => {
     onPendingChange?.(match !== null);
@@ -107,6 +112,20 @@ export function NewTeacherFields({
           ) : null
         }
       />
+
+      {linksExistingTeacher ? null : (
+        <>
+          {/* An explicit value, so an untouched form posts "true", not nothing. */}
+          <input type="hidden" name="isTrustedTeacher" value={trusted ? "true" : "false"} />
+          <ToggleRow
+            name={`${idPrefix}-trusted`}
+            label={t("trusted.createLabel")}
+            description={t("trusted.createDescription")}
+            checked={trusted}
+            onCheckedChange={setTrusted}
+          />
+        </>
+      )}
     </div>
   );
 }

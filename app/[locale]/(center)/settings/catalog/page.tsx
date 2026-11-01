@@ -84,19 +84,33 @@ export default async function CatalogPage() {
     catalogActive: g.catalogActive,
     parentName: catalogLabelWithSelection(locale, g.educationSystem),
   }));
-  const subjectItems: CatalogSelectionItem[] = centerSubjects.map((s) => ({
-    selectionId: s.selectionId,
-    catalogId: s.id,
-    name: s.name,
-    canonicalName: catalogLabel(locale, s),
-    nameAr: s.nameAr,
-    nameEn: s.nameEn,
-    displayNameAr: s.displayNameAr,
-    displayNameEn: s.displayNameEn,
-    active: s.active,
-    catalogActive: s.catalogActive,
-    parentName: catalogLabelWithSelection(locale, s.grade),
-  }));
+  // U3 — a subject is listed once; its row names which of THIS branch's
+  // grades it covers (the catalog links it to, the branch picked).
+  const gradeNameById = new Map(centerGrades.map((g) => [g.id, g.name]));
+  const coveredGrades = (gradeIds: string[]) =>
+    gradeIds.flatMap((id) => {
+      const name = gradeNameById.get(id);
+      return name ? [name] : [];
+    });
+  const subjectItems: CatalogSelectionItem[] = centerSubjects.map((s) => {
+    const covered = coveredGrades(s.gradeIds);
+    return {
+      selectionId: s.selectionId,
+      catalogId: s.id,
+      name: s.name,
+      canonicalName: catalogLabel(locale, s),
+      nameAr: s.nameAr,
+      nameEn: s.nameEn,
+      displayNameAr: s.displayNameAr,
+      displayNameEn: s.displayNameEn,
+      active: s.active,
+      catalogActive: s.catalogActive,
+      parentName:
+        covered.length > 0
+          ? t("subjects.covers", { grades: covered.join(locale === "ar" ? "، " : ", ") })
+          : t("subjects.coversNone"),
+    };
+  });
 
   const systemPickOptions: CatalogPickOption[] = allSystems
     .filter((s) => !selectedSystemIds.has(s.id))

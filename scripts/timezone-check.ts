@@ -28,7 +28,12 @@ import { fileURLToPath } from "node:url";
 
 import { attendedSessionsToRate } from "../lib/db/ratings.ts";
 import { teacherDashboardAnchors } from "../lib/db/teacher-portal.ts";
-import { clampRangeToVisibility, visibilityWindowFloor } from "../lib/db/visibility.ts";
+import {
+  clampRangeToVisibility,
+  teacherHistoryFloor,
+  teacherVisibilityWindowFloor,
+  visibilityWindowFloor,
+} from "../lib/db/visibility.ts";
 import {
   DEFAULT_TIMEZONE,
   centreTimeZone,
@@ -263,7 +268,11 @@ function checkSharedFilter() {
 function checkVisibilityFloor() {
   console.log("\n3. visibilityWindowFloor — anchored on the centre's day");
 
-  const cairo30 = { isPlatformAdmin: false, settings: { dataVisibilityDays: 30, timezone: CAIRO } };
+  // U6: the centre window at 30 days (the teacher window does not move this floor).
+  const cairo30 = {
+    isPlatformAdmin: false,
+    settings: { centerDataVisibilityDays: 30, teacherDataVisibilityDays: 7, timezone: CAIRO },
+  };
   const early = at("2026-07-14T21:30:00.000Z"); // 00:30 Cairo, 15 Jul
   const late = at("2026-07-15T20:30:00.000Z"); // 23:30 Cairo, 15 Jul
 
@@ -287,16 +296,26 @@ function checkVisibilityFloor() {
   );
   check(
     "A second centre on another timezone gets its own floor from the same instant",
-    key(visibilityWindowFloor({ isPlatformAdmin: false, settings: { dataVisibilityDays: 30, timezone: DUBAI } }, late) as Date) ===
+    key(visibilityWindowFloor({ isPlatformAdmin: false, settings: { ...cairo30.settings, timezone: DUBAI } }, late) as Date) ===
       "2026-06-16",
   );
   check(
-    "A centre with no CenterSettings row falls back to the default zone (and the 30-day window)",
-    key(visibilityWindowFloor({ isPlatformAdmin: false, settings: null }, early) as Date) === "2026-06-15",
+    "A centre with no CenterSettings row falls back to the default zone (and each window's default: centre 365, teacher 30)",
+    key(visibilityWindowFloor({ isPlatformAdmin: false, settings: null }, early) as Date) === "2025-07-15" &&
+      key(teacherVisibilityWindowFloor({ isPlatformAdmin: false, settings: null }, early) as Date) === "2026-06-15",
   );
   check(
     "Platform admin still bypasses the window",
     visibilityWindowFloor({ isPlatformAdmin: true, settings: cairo30.settings }, early) === null,
+  );
+
+  check(
+    "U6: the teacher window is anchored on the centre's day too (7 days back from 15 Jul Cairo = 8 Jul)",
+    key(teacherVisibilityWindowFloor(cairo30, early) as Date) === "2026-07-08",
+  );
+  check(
+    "U6: the teacher portal's own floor is anchored on the branch's day (10 days back from 15 Jul Cairo = 5 Jul); 0 = none",
+    key(teacherHistoryFloor(10, CAIRO, early) as Date) === "2026-07-05" && teacherHistoryFloor(0, CAIRO, early) === null,
   );
 
   const floor = visibilityWindowFloor(cairo30, early) as Date;

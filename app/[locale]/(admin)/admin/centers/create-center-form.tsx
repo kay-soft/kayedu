@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Copy } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { IDLE_ADMIN_ACTION_STATE } from "@/app/[locale]/(admin)/admin/centers/action-state";
@@ -15,10 +16,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MAX_BRANCH_LIMIT } from "@/lib/branch-setup";
+import { Select } from "@/components/ui/select";
+import { BRANCH_COPY_KEYS, MAX_BRANCH_LIMIT, type BranchCopyKey } from "@/lib/branch-setup";
 import { formatNumber } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
@@ -33,9 +36,90 @@ export type OrganizationOption = {
   nameEn: string | null;
   usedBranches: number;
   maxBranches: number;
+  /** Its non-deleted branches — what "Copy setup from" offers (U5). */
+  branches: { id: string; name: string }[];
 };
 
 type Mode = "new" | "existing";
+
+/**
+ * "Copy setup from <branch>" (U5 — moved here from the Owner's retired
+ * Settings → Branches, same ticks, same never-copied list): the source is one
+ * of the picked organization's branches (default: its first), or "Don't copy".
+ * Everything is ticked by default; the server re-checks the source.
+ */
+function CopySetupSection({
+  organization,
+  error,
+}: {
+  organization: OrganizationOption | null;
+  error?: string;
+}) {
+  const t = useTranslations("AdminCenters.create.copySetup");
+  const tErrors = useTranslations("AdminCenters.errors");
+  const branches = organization?.branches ?? [];
+  const [source, setSource] = useState<string>(branches[0]?.id ?? "");
+  const [copy, setCopy] = useState<Set<BranchCopyKey>>(() => new Set(BRANCH_COPY_KEYS));
+
+  function toggle(key: BranchCopyKey, on: boolean) {
+    setCopy((current) => {
+      const next = new Set(current);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-xl border border-border p-4">
+      <legend className="flex items-center gap-2 px-1 text-sm font-semibold text-text-primary">
+        <Copy className="size-4 text-text-muted" aria-hidden />
+        {t("title")}
+      </legend>
+      <p className="text-xs text-text-muted">{t("description")}</p>
+      {[...copy].map((key) => (source ? <input key={key} type="hidden" name={`copy_${key}`} value="on" /> : null))}
+
+      <div className="flex flex-col gap-1.5 sm:max-w-md">
+        <Label htmlFor="create-copy-from">{t("from")}</Label>
+        <Select
+          id="create-copy-from"
+          name="copyFromCenterId"
+          value={source}
+          onValueChange={setSource}
+          disabled={!organization}
+          options={[
+            { value: "", label: t("none") },
+            ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
+          ]}
+          aria-invalid={error ? true : undefined}
+        />
+        {error ? <FieldError>{tErrors(error)}</FieldError> : null}
+      </div>
+
+      {source ? (
+        <ul className="grid gap-1 sm:grid-cols-2">
+          {BRANCH_COPY_KEYS.map((key) => (
+            <li key={key}>
+              <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg px-2 py-2 hover:bg-surface-hover">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={copy.has(key)}
+                  onCheckedChange={(next) => toggle(key, Boolean(next))}
+                />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm font-medium text-text-primary">{t(`keys.${key}.label`)}</span>
+                  <span className="text-xs text-text-muted">{t(`keys.${key}.hint`)}</span>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <p className="rounded-lg bg-surface-subtle p-3 text-xs text-text-secondary">{t("neverCopied")}</p>
+    </fieldset>
+  );
+}
 
 function InviteLink({ token }: { token: string }) {
   const t = useTranslations("AdminCenters");
@@ -75,6 +159,8 @@ export function CreateCenterForm({ organizations }: { organizations: Organizatio
   const tErrors = useTranslations("AdminCenters.errors");
   const locale = useLocale();
   const [mode, setMode] = useState<Mode>("new");
+  const [organizationId, setOrganizationId] = useState("");
+  const pickedOrganization = organizations.find((organization) => organization.id === organizationId) ?? null;
   const [state, formAction] = useGuardedActionState(
     createCenterAction,
     IDLE_ADMIN_ACTION_STATE,
@@ -190,6 +276,8 @@ export function CreateCenterForm({ organizations }: { organizations: Organizatio
               <Combobox
                 id="create-organization-existing"
                 name="organizationId"
+                value={organizationId}
+                onValueChange={setOrganizationId}
                 options={organizationOptions}
                 placeholder={t("create.organizationPicker.placeholder")}
                 emptyLabel={t("create.organizationPicker.empty")}
@@ -204,6 +292,15 @@ export function CreateCenterForm({ organizations }: { organizations: Organizatio
               ) : null}
             </div>
           )}
+
+          {mode === "existing" ? (
+            // Remounted per organization, so the source defaults to that organization's first branch.
+            <CopySetupSection
+              key={organizationId || "none"}
+              organization={pickedOrganization}
+              error={state.fieldErrors?.copyFromCenterId}
+            />
+          ) : null}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">

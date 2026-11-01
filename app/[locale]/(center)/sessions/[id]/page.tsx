@@ -35,8 +35,10 @@ import { signedUrlFor } from "@/lib/db/storage";
 import {
   formatDate,
   formatDateTime,
+  formatDay,
   formatMoney,
   formatNumber,
+  formatTime,
   formatTimeRange,
 } from "@/lib/format";
 import { effectiveCapacity } from "@/lib/rooms";
@@ -455,8 +457,12 @@ export default async function SessionDetailPage({
         </div>
       ) : null}
 
+      {/* U2 — not `stickySide`: a sticky side column is capped at the viewport
+          height and scrolls inside itself, which left the receipt's lower
+          sections (voided, refunds, change log) reachable only by an inner
+          scroll and cut off when printed. Every section now flows with the
+          page, and the column stacks under the roster below `lg`. */}
       <DetailLayout
-        stickySide
         main={
           <SessionCheckInProvider
             sessionId={session.id}
@@ -510,14 +516,30 @@ export default async function SessionDetailPage({
             {/* Once closed, the receipt is the record — it leads the column. */}
             {closed ? receiptCard : null}
             <DetailCard title={t("context.title")} contentClassName="gap-0">
-              <DetailRow label={t("fields.date")} value={formatDate(session.date, locale)} />
+              {/* `stacked`: in the one-third column a side label left the value
+                  too narrow, so a combined room set or a long time range wrapped
+                  word by word; label over value, every value wraps in full. */}
+              <DetailRow stacked label={t("fields.date")} value={formatDate(session.date, locale)} />
               <DetailRow
+                stacked
                 label={t("fields.time")}
                 value={formatTimeRange(session.startTime, session.endTime, locale)}
               />
-              <DetailRow label={t("fields.room")} value={sessionRoomNames || tCommon("none")} />
+              <DetailRow stacked label={t("fields.room")} value={sessionRoomNames || tCommon("none")} />
+              <DetailRow stacked label={t("fields.status")} value={tStatus(displayStatus)} />
+              {session.rescheduledFrom ? (
+                <DetailRow
+                  stacked
+                  label={t("fields.movedFrom")}
+                  value={t("slot", {
+                    date: formatDay(session.rescheduledFrom.date, locale),
+                    time: formatTime(session.rescheduledFrom.startTime, locale),
+                  })}
+                />
+              ) : null}
               {sessionRooms.length > 0 ? (
                 <DetailRow
+                  stacked
                   label={t("fields.seats")}
                   value={
                     sessionSeats > 0
@@ -526,7 +548,7 @@ export default async function SessionDetailPage({
                   }
                 />
               ) : null}
-              <DetailRow label={t("fields.price")} value={formatMoney(session.priceSnapshot, locale)} />
+              <DetailRow stacked label={t("fields.price")} value={formatMoney(session.priceSnapshot, locale)} />
             </DetailCard>
             {closed ? null : receiptCard}
           </>

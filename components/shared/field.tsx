@@ -8,6 +8,7 @@ import { Ltr } from "@/components/shared/ltr";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { formatPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -83,16 +84,20 @@ export function DetailRow({
   label,
   value,
   ltr,
+  phone,
   stacked,
 }: {
   label: string;
   value: string | null | undefined;
   /** Phone numbers and emails stay LTR in both locales (docs/04 §7). */
   ltr?: boolean;
+  /** A phone: shown in the one display form, `+20 101 234 5678`, LTR (U4). */
+  phone?: boolean;
   /** Keep the label over the value at every width — for a half-width column,
    *  where a side label left an email too narrow to fit (DES, docs/04 §14.10). */
   stacked?: boolean;
 }) {
+  const shown = phone ? formatPhone(value) : value;
   return (
     <div
       className={cn(
@@ -104,7 +109,7 @@ export function DetailRow({
         {label}
       </span>
       <span className="min-w-0 text-sm break-words text-text-primary">
-        {value && value.length > 0 ? ltr ? <Ltr>{value}</Ltr> : value : "—"}
+        {shown && shown.length > 0 ? ltr || phone ? <Ltr>{shown}</Ltr> : shown : "—"}
       </span>
     </div>
   );

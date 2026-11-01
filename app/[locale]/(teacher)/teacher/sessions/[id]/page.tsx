@@ -17,16 +17,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ctxCan, getTenantContext } from "@/lib/auth/tenant";
+import { ctxCan } from "@/lib/auth/tenant";
+import { findInBranches, getTeacherScope, showsBranches } from "@/lib/auth/teacher-scope";
 import { catalogLabelWithSelection } from "@/lib/catalog";
 import { consecutiveAbsenceCount } from "@/lib/db/attendance";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
+import { teacherPortalHistoryFloor } from "@/lib/db/teacher-portal";
+import { isWithinVisibilityWindow } from "@/lib/db/visibility";
 import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecycle";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 import { attendanceDisplay } from "@/lib/attendance-rules";
-import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
+import { formatDate, formatDay, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
 import { fullName, localName } from "@/lib/identity";
 import { ROUTES } from "@/lib/routes";
 import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
@@ -59,18 +62,26 @@ const ATTENDANCE_BADGE = {
  * The id resolves through `findDetailById` (centerId-scoped) and is then
  * re-checked against `teacherId` — a session belonging to another teacher at
  * the same center must 404 here exactly like a foreign center's id would.
+ * U7: the session's branch is found by the same scoped lookup at each branch
+ * in view (`findInBranches`); everything below reads and acts at that branch.
  */
 export default async function TeacherSessionDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const ctx = await getTenantContext("teacher");
+  const scope = await getTeacherScope();
   const { id } = await params;
 
+  const hit = await findInBranches(scope.inView, async (branch) => {
+    const row = await scoped(branch).sessions.findById(id);
+    return row && row.teacherId === branch.user.id ? row : null;
+  });
+  if (!hit) notFound();
+  const { ctx, found: owned } = hit!;
   const db = scoped(ctx);
-  const owned = await db.sessions.findById(id);
-  if (!owned || owned.teacherId !== ctx.user.id) notFound();
+  // U6: a session older than the teacher's own history preference is out of view.
+  if (!isWithinVisibilityWindow(owned.date, teacherPortalHistoryFloor(ctx))) notFound();
   // R2's lazy end-of-day close, on read (lib/db/session-lifecycle.ts).
   await closeSessionIfDayOver(prisma, ctx.center.id, id);
   const session = await db.sessions.findDetailById(id);
@@ -79,7 +90,9 @@ export default async function TeacherSessionDetailPage({
   const t = await getTranslations("TeacherSessions");
   const tAttendance = await getTranslations("Sessions.attendance");
   const tStatus = await getTranslations("Sessions.status");
+  const tSessions = await getTranslations("Sessions");
   const tCommon = await getTranslations("Settings.common");
+  const tScope = await getTranslations("TeacherScope");
   const locale = await getLocale();
 
   // D-14 — the session's own frozen timezone.
@@ -237,7 +250,7 @@ export default async function TeacherSessionDetailPage({
                         <Badge variant="info">{tBooked("badge")}</Badge>
                       </div>
                       {canCancelBooking ? (
-                        <CancelBookingButton id={student.bookingId} action={cancelOwnBookingAction} />
+                        <CancelBookingButton id={student.bookingId} centerId={ctx.center.id} action={cancelOwnBookingAction} />
                       ) : null}
                     </li>
                   ))}
@@ -258,6 +271,7 @@ export default async function TeacherSessionDetailPage({
             </CardHeader>
             <CardContent>
               <SessionDescriptionForm
+                centerId={ctx.center.id}
                 sessionId={session.id}
                 description={session.description ?? ""}
               />
@@ -272,6 +286,12 @@ export default async function TeacherSessionDetailPage({
               <CardTitle>{t("context.title")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2 text-sm">
+              {showsBranches(scope) ? (
+                <div className="flex justify-between gap-3">
+                  <span className="text-text-secondary">{tScope("branch")}</span>
+                  <span className="min-w-0 text-end font-medium break-words text-text-primary">{ctx.center.name}</span>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.date")}</span>
                 <span className="font-medium text-text-primary">
@@ -284,6 +304,18 @@ export default async function TeacherSessionDetailPage({
                   {formatTimeRange(session.startTime, session.endTime, locale)}
                 </span>
               </div>
+              {/* U2 — a replacement says where it came from. */}
+              {session.rescheduledFrom ? (
+                <div className="flex justify-between gap-3">
+                  <span className="text-text-secondary">{tSessions("fields.movedFrom")}</span>
+                  <span className="min-w-0 text-end font-medium break-words text-text-primary">
+                    {tSessions("slot", {
+                      date: formatDay(session.rescheduledFrom.date, locale),
+                      time: formatTime(session.rescheduledFrom.startTime, locale),
+                    })}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-3">
                 <span className="text-text-secondary">{t("fields.room")}</span>
                 <span className="font-medium text-text-primary">

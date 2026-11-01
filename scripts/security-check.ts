@@ -30,7 +30,9 @@ import { AuthMisconfiguredError, productionAuthProblems } from "../lib/auth/auth
 import { profileFromMetadata, resolveAppIdentity } from "../lib/auth/identity-link.ts";
 import { changeEmail, changePassword, type AccountAuthPort } from "../lib/auth/account.ts";
 import { updateAccountProfile } from "../lib/db/account.ts";
-import { accountProfileSchema } from "../lib/validation/account.ts";
+import { accountProfileSchema, changePasswordSchema } from "../lib/validation/account.ts";
+import { signInSchema, signUpSchema } from "../lib/validation/auth.ts";
+import { PASSWORD_MIN_LENGTH } from "../lib/password-policy.ts";
 import { enforceProductionAuthSettings } from "../lib/auth/production-guard.ts";
 import {
   DEFAULT_ROLE_GRANTS,
@@ -66,7 +68,7 @@ import { addTeacherMembership } from "../lib/db/teacher-membership.ts";
 import { scopedData } from "../lib/db/tenant-scope.ts";
 import { checkRateLimit, checkRateLimits, pruneRateLimitBuckets, RATE_LIMITS } from "../lib/rate-limit.ts";
 import { safeNextPath } from "../lib/routes.ts";
-import { MAX_PHOTO_BYTES, centerLogoSrc, sniffImageType } from "../lib/storage-paths.ts";
+import { MAX_PHOTO_BYTES, centerLogoSrc, classCoverPath, isPathInCenter, sniffImageType, teacherPhotoPath } from "../lib/storage-paths.ts";
 import { createCenterSchema } from "../lib/validation/admin.ts";
 import { seedPasswordProblems } from "../prisma/seed-data/auth.ts";
 import { productionTargetReason } from "../prisma/seed-data/production-refs.ts";
@@ -242,7 +244,7 @@ async function makeUser(tag: string, data: { authId?: string | null; phone?: str
 
 async function freePhone(): Promise<string> {
   for (let i = 0; i < 50; i++) {
-    const phone = `015${String(randomInt(0, 99_999_999)).padStart(8, "0")}`;
+    const phone = `+2015${String(randomInt(0, 99_999_999)).padStart(8, "0")}`; // the stored E.164 form (U4)
     const [users, profiles, memberships] = await Promise.all([
       prisma.user.count({ where: { OR: [{ phone }, { altPhone: phone }] } }),
       prisma.studentProfile.count({
@@ -553,7 +555,7 @@ async function main() {
           profileAfter.firstName === profile.firstName &&
           profileAfter.lastName === profile.lastName,
       ],
-      ["contactPhone is normalized by lib/phone.ts and User.phone is untouched", renamed.contactPhone === "01012345678" && renamed.phone === self.phone],
+      ["contactPhone is normalized by lib/phone.ts and User.phone is untouched", renamed.contactPhone === "+201012345678" && renamed.phone === self.phone],
     ];
   });
 
@@ -720,20 +722,32 @@ async function main() {
     ];
   });
 
-  await assertSec("SEC-44", "teacher actions require an active TEACHER role at the active centre", () => {
+  // U7 old → new: "an active TEACHER role at the active centre" → "at the row's
+  // branch". A teacher write names its branch (the row's, or a form's Branch)
+  // and re-resolves it through the actor's own relations — `teacherBranchContext`
+  // (`getTenantContextForBranch(centerId, "teacher")`) — or, for a read across
+  // branches, `teacherActionScope()`; never the active-centre cookie.
+  await assertSec("SEC-44", "teacher actions require an active TEACHER role at the row's branch", () => {
     const files = walk("app/[locale]/(teacher)").filter((path) => /actions\.ts$/.test(path));
     const bad: string[] = [];
     for (const file of files) {
       for (const { name, body } of exportedFunctions(file)) {
         const tenantContext = /getTenantContext\(/.test(body);
-        const guarded = /actionContext\("teacher"\)/.test(body) || /getCurrentUser\(\)/.test(body);
+        const guarded =
+          /actionContext\("teacher"\)/.test(body) ||
+          /teacherBranchContext\(/.test(body) ||
+          /teacherActionScope\(\)/.test(body) ||
+          /getCurrentUser\(\)/.test(body);
         if (tenantContext || !guarded) bad.push(`${file}#${name}`);
       }
     }
     const tenant = read("lib/auth/tenant.ts");
+    const scope = read("lib/auth/teacher-scope.ts");
     return [
-      [`every teacher action resolves through actionContext("teacher") (${bad.join(", ") || "all"})`, bad.length === 0],
+      [`every teacher action resolves an active TEACHER role through its guard (${bad.join(", ") || "all"})`, bad.length === 0],
       ["actionContext refuses a denied experience and a missing role", /if \(ctx\.experienceDenied \|\| !hasExperience\(ctx, experience\)\) return null/.test(tenant)],
+      ["getTenantContextForBranch refuses a branch the actor does not hold, or holds no TEACHER role at", /if \(!relation\) return null;[\s\S]*if \(ctx\.experienceDenied \|\| !hasExperience\(ctx, experience\)\) return null/.test(tenant)],
+      ["teacherBranchContext re-resolves the posted branch for the teacher experience", /return getTenantContextForBranch\(centerId, "teacher"\)/.test(scope)],
     ];
   });
 
@@ -945,6 +959,28 @@ async function main() {
     return [
       ["upload writes student.photo.update", /action: "student\.photo\.update"/.test(upload)],
       ["remove writes student.photo.remove", /action: "student\.photo\.remove"/.test(remove)],
+    ];
+  });
+
+  await assertSec("U9", "teacher photos and class covers: centre-namespaced keys, signed delivery, audited changes", () => {
+    const writes = read("lib/db/media-writes.ts");
+    const classRoute = read("app/api/class-images/[centerId]/[classId]/route.ts");
+    const teacherRoute = read("app/api/teacher-photos/[centerId]/[teacherUserId]/route.ts");
+    const profile = read("app/[locale]/(teacher)/teacher/profile/actions.ts");
+    const publicCatalog = read("lib/db/public-catalog.ts");
+    const photo = teacherPhotoPath("c1", "m1", "jpg", "v");
+    const cover = classCoverPath("c1", "k1", "png", "v");
+    const audited = ["teacher.photo.update", "teacher.photo.remove", "classGroup.cover.update", "classGroup.cover.remove"];
+    return [
+      ["a teacher photo path starts with the centre id", photo.startsWith("c1/") && isPathInCenter("c1", photo) && !isPathInCenter("c2", photo)],
+      ["a class cover path starts with the centre id", cover.startsWith("c1/") && isPathInCenter("c1", cover) && !isPathInCenter("c2", cover)],
+      ["both routes refuse a stored key outside the centre's folder", /isPathInCenter\(centerId, /.test(classRoute) && /isPathInCenter\(centerId, key\)/.test(teacherRoute)],
+      ["both routes redirect to a signed URL, never serve the bucket", /signedUrlFor\(/.test(classRoute) && /signedUrlFor\(/.test(teacherRoute)],
+      ["a guest is served only through the listed-branch lookups", /publicClassImage\(/.test(classRoute) && /publicTeacherPhotoKey\(/.test(teacherRoute)],
+      ["the four changes write their audit rows on the change's own transaction", audited.every((action) => writes.includes(`action: "${action}"`)) && (writes.match(/\$transaction\(/g)?.length ?? 0) === 4],
+      ["the teacher's own writes re-resolve the branch and pin the class to the teacher", /teacherBranchContext\(centerId\)/.test(profile) && /classGroup\.teacherId !== ctx\.user\.id/.test(profile)],
+      ["no profile-photo control is left", !existsSync(join(ROOT, "app/[locale]/account/photo-form.tsx")) && !/updateProfilePhotoAction|removeProfilePhotoAction/.test(read("app/[locale]/account/actions.ts")) && !/avatarsDisplayEnabled|profilePhotoForDisplay/.test(read("lib/media.ts"))],
+      ["the public catalog hands out a signing-route path, never a key", /imageUrl: string \| null/.test(publicCatalog) && !/export type PublicClass = \{[^}]*(coverKey|photoKey)/.test(publicCatalog)],
     ];
   });
 
@@ -1199,6 +1235,38 @@ async function main() {
       ["two distinct ≥6-character passwords pass", seedPasswordProblems({ SEED_PASSWORD: same, SEED_ADMIN_PASSWORD: "y".repeat(16) }).length === 0],
       ["the platform admin is created with the admin password", /admin: isPlatformAdmin/.test(read("prisma/seed.ts")) && /account\.admin \? this\.adminPassword : this\.password/.test(read("prisma/seed-data/auth.ts"))],
       [".env.example documents SEED_ADMIN_PASSWORD", /SEED_ADMIN_PASSWORD=/.test(read(".env.example"))],
+    ];
+  });
+
+  await assertSec("U1", "the password policy is refused server-side on sign-up and change — never on sign-in", () => {
+    const signUp = (password: string) =>
+      signUpSchema.safeParse({
+        signupIntent: "STUDENT",
+        firstName: "A",
+        lastName: "B",
+        email: "u1@kayedu.test",
+        password,
+        confirmPassword: password,
+        locale: "en",
+      });
+    const change = (newPassword: string) =>
+      changePasswordSchema.safeParse({ currentPassword: "old", newPassword, confirmPassword: newPassword, signOutOthers: "true", locale: "en" });
+    const message = (result: { success: boolean; error?: { issues: { message: string }[] } }) =>
+      result.success ? "ok" : (result.error?.issues[0]?.message ?? "?");
+    const good = "abcdef12";
+    return [
+      [`the minimum length is one constant (${PASSWORD_MIN_LENGTH})`, PASSWORD_MIN_LENGTH === 8],
+      ["sign-up refuses 7 characters", message(signUp("abcde12")) === "passwordTooShort"],
+      ["sign-up refuses no digit", message(signUp("abcdefgh")) === "passwordNeedsDigit"],
+      ["sign-up refuses no letter", message(signUp("12345678")) === "passwordNeedsLetter"],
+      ["sign-up accepts 8 characters with a letter and a digit", signUp(good).success],
+      ["change password refuses 7 characters, no digit and no letter",
+        message(change("abcde12")) === "passwordTooShort" &&
+          message(change("abcdefgh")) === "passwordNeedsDigit" &&
+          message(change("12345678")) === "passwordNeedsLetter"],
+      ["change password accepts a compliant password", change(good).success],
+      ["sign-in still accepts an old short password (existing accounts keep working)",
+        signInSchema.safeParse({ email: "old@kayedu.test", password: "abc", locale: "en" }).success],
     ];
   });
 
@@ -1820,7 +1888,7 @@ async function sec2bAssertions(deskA: PrismaClient, deskB: PrismaClient) {
       data: { centerId, type: "NEW_SESSION", requestedBy: teacher.id, status: "PENDING", payload: { classGroupId: cls.id, date: dateKey(daysAgo(1)), startTime: "10:00", endTime: "11:00", note: null } },
     });
     const approve = await resolveSessionRequest(prisma, centerId, request.id, "APPROVED", managerA.id, "WARN", "en", { confirmConflicts: true });
-    const vctx = { isPlatformAdmin: false, settings: { dataVisibilityDays: 30, timezone: TZ } };
+    const vctx = { isPlatformAdmin: false, settings: { centerDataVisibilityDays: 30, teacherDataVisibilityDays: 30, timezone: TZ } };
     const expenses = read("app/[locale]/(center)/expenses/actions.ts");
     return [
       ["rescheduling into the past is refused (pastDate)", !back.ok && back.error === "pastDate"],

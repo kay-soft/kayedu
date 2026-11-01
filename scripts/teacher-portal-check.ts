@@ -22,8 +22,10 @@ import {
   ensureDefaultPaymentMethods,
   listActivePaymentMethods,
 } from "../lib/db/payment-methods.ts";
+import { teacherCalendarTone } from "../lib/calendar.ts";
 import {
   combineTeacherSummaries,
+  sessionAttendanceCounts,
   studentSessionsWithTeacher,
   teacherCenterSummary,
   teacherSessionListWhere,
@@ -309,6 +311,27 @@ async function main() {
     JSON.stringify(combined),
   );
 
+  // ── 2b. U6: the teacher's own history preference ───────────────────────
+  // No floor (0 = all history, the default) reads exactly what the summary
+  // above read; a floor after every fixture hides them — the clamp, not the
+  // fixtures, is what changes. The portal never takes a centre window.
+  const tomorrow = new Date(today.getTime() + 86_400_000);
+  const unlimited = await teacherCenterSummary(prisma, centerA.id, teacher.id, today, week, { from: week.start, to: week.end }, null);
+  const floored = await teacherCenterSummary(prisma, centerA.id, teacher.id, today, week, { from: week.start, to: week.end }, tomorrow);
+  check(
+    "U6: with no history floor the dashboard summary is unchanged; a floor past the fixtures drops their week count and earnings",
+    JSON.stringify(unlimited) === JSON.stringify(summaryA) &&
+      floored.earnings.paymentCount === 0 &&
+      floored.sessionsThisWeek < summaryA.sessionsThisWeek,
+    JSON.stringify({ unlimited, floored }),
+  );
+  check(
+    "U6: the roster and a student's history honour the floor, and are whole without one",
+    (await teacherStudentProfileIds(prisma, centerA.id, teacher.id, null)).length === 2 &&
+      (await teacherStudentProfileIds(prisma, centerA.id, teacher.id, tomorrow)).length === 0 &&
+      (await studentSessionsWithTeacher(prisma, centerA.id, teacher.id, studentA1.profile.id, tomorrow)).length === 0,
+  );
+
   // ── 3. Student rosters and per-student history never cross ──────────────
   const rosterA = await teacherStudentProfileIds(prisma, centerA.id, teacher.id);
   const rosterB = await teacherStudentProfileIds(prisma, centerB.id, teacher.id);
@@ -411,6 +434,43 @@ async function main() {
     "The same teacher's ChangeRequest list at Center A is not visible from Center B's scope",
     listA.length === 1 && listB.length === 0,
     JSON.stringify({ listA: listA.length, listB: listB.length }),
+  );
+
+  // ── U7: the calendar's day list — present / late / absent per session ──
+  await createAttendance(prisma, {
+    centerId: centerA.id,
+    sessionId: sessionA1.id,
+    studentProfileId: studentA2.profile.id,
+    enrollmentId: null,
+    isDropIn: false,
+    recordedBy: teacher.id,
+  }, { historicalBackfill: true, status: "ABSENT" });
+  const countsOf = async (centerId: string, sessionId: string, closedAt: Date | null) =>
+    (await sessionAttendanceCounts(prisma, centerId, [{ id: sessionId, closedAt }])).get(sessionId);
+  const liveA1 = await countsOf(centerA.id, sessionA1.id, null);
+  const closedA1 = await countsOf(centerA.id, sessionA1.id, new Date());
+  check(
+    "U7: the calendar counts an enrolled absence only once the session is closed (live = not arrived)",
+    liveA1?.present === 1 && liveA1.absent === 0 && closedA1?.present === 1 && closedA1.absent === 1,
+    JSON.stringify({ liveA1, closedA1 }),
+  );
+  const closedB1 = await countsOf(centerB.id, sessionB1.id, new Date());
+  check(
+    "U7: a drop-in who never came is never counted absent (T5)",
+    closedB1?.present === 1 && closedB1.absent === 0,
+    JSON.stringify(closedB1),
+  );
+  const foreign = await countsOf(centerA.id, sessionB1.id, new Date());
+  check(
+    "U7: counts are centerId-scoped — Center A's read of Center B's session counts nothing",
+    foreign?.present === 0 && foreign.late === 0 && foreign.absent === 0,
+    JSON.stringify(foreign),
+  );
+  check(
+    "U7: a teacher's calendar tone is Held once closed, Cancelled, else Upcoming",
+    teacherCalendarTone({ status: "SCHEDULED", closedAt: new Date() }) === "held" &&
+      teacherCalendarTone({ status: "CANCELLED", closedAt: null }) === "cancelled" &&
+      teacherCalendarTone({ status: "SCHEDULED", closedAt: null }) === "upcoming",
   );
 }
 

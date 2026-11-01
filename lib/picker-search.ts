@@ -1,4 +1,4 @@
-import { phoneMatchesQuery } from "./phone.ts";
+import { looksLikePhone, phoneMatchesQuery } from "./phone.ts";
 
 /**
  * How the searchable pickers (`components/ui/combobox.tsx`) decide an entry
@@ -23,9 +23,6 @@ export function foldPickerText(value: string): string {
   return value.normalize("NFKD").replace(IGNORED_MARKS, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-/** Digits (either script), spaces and the punctuation a phone is written with — and nothing else. */
-const PHONE_ONLY = /^[\d\s+\-().٠-٩۰-۹]+$/;
-
 /**
  * Empty query matches everything. A query written like a phone (digits,
  * spaces, `+`, dashes — `+20 100 123 4567`) is matched as a whole against the
@@ -36,7 +33,7 @@ const PHONE_ONLY = /^[\d\s+\-().٠-٩۰-۹]+$/;
 export function matchesPicker(query: string, item: PickerSearchable): boolean {
   const folded = foldPickerText(query);
   if (folded === "") return true;
-  if (PHONE_ONLY.test(query.trim())) return phoneMatchesQuery(item.phone, query);
+  if (looksLikePhone(query)) return phoneMatchesQuery(item.phone, query);
   const name = foldPickerText(item.label);
   return folded
     .split(" ")

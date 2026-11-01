@@ -10,17 +10,20 @@ import { requireStudentUser } from "@/lib/auth/tenant";
 import { branchName } from "@/lib/branch-name";
 import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { catalogLabelWithSelection } from "@/lib/catalog";
+import { currentBranchPause } from "@/lib/db/branch-pauses";
 import { prisma } from "@/lib/db/client";
-import { discoverCenter, discoverClassById, teacherDisplayNames } from "@/lib/db/discover";
+import { discoverCenter, discoverClassById, teacherDisplayNames, teacherPhotoKeys } from "@/lib/db/discover";
 import { teacherRatingAverage } from "@/lib/db/ratings";
+import { buildJoinSummary } from "@/lib/join-summary";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { studentBookingsBySession, upcomingBookableSessions } from "@/lib/db/session-bookings";
 import {
   studentActiveEnrollmentClassIds,
   studentBlockedRefsByCenter,
+  studentPendingReservationId,
   studentReservationStatusByClass,
 } from "@/lib/db/student-portal";
-import { centerLogoSrc } from "@/lib/storage-paths";
+import { centerLogoSrc, classImageSrc } from "@/lib/storage-paths";
 import { ROUTES } from "@/lib/routes";
 
 /**
@@ -42,14 +45,18 @@ export default async function StudentDiscoverClassPage({
   const row = await discoverClassById(prisma, center.id, classId);
   if (!row) notFound();
 
-  const [blockedByCenter, reservationByClass, enrolledClassIds, names, rating, upcoming] = await Promise.all([
+  const [blockedByCenter, reservationByClass, enrolledClassIds, names, photoKeys, rating, upcoming, pendingReservationId] =
+    await Promise.all([
     studentBlockedRefsByCenter(prisma, session.user.id),
     studentReservationStatusByClass(prisma, session.user.id),
     studentActiveEnrollmentClassIds(prisma, session.user.id),
     teacherDisplayNames(prisma, center.id, [row.teacherId]),
+    teacherPhotoKeys(prisma, center.id, [row.teacherId]),
     teacherRatingAverage(prisma, row.teacherId),
     // F6 — the next sessions still open for booking, seats as a status.
     upcomingBookableSessions(prisma, center.id, row),
+    // U8 — the request's own cancel, on the class page.
+    studentPendingReservationId(prisma, center.id, session.user.id, row.id),
   ]);
   const myBookings = await studentBookingsBySession(
     prisma,
@@ -73,7 +80,22 @@ export default async function StudentDiscoverClassPage({
     requiresConfirmation: row.requiresConfirmation,
   });
   const name = branchName(locale, center);
+  // U5: "Paused until <date>" — enrolment stays open while it is paused.
+  const pause = await currentBranchPause(prisma, center.id);
   const subject = catalogLabelWithSelection(locale, row.subject) ?? tExplore("class.untitled");
+  // U8 — what the join dialogs confirm. Sessions state the class facts plus
+  // their own date and time (UpcomingSessions adds `when`).
+  const summary = await buildJoinSummary({
+    locale,
+    subjectName: catalogLabelWithSelection(locale, row.subject),
+    gradeName: catalogLabelWithSelection(locale, row.grade),
+    branch: name,
+    teacher: names.get(row.teacherId) ?? "—",
+    price: row.price,
+    schedules: row.schedules,
+    startDate: row.startDate,
+    endDate: row.endDate,
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -84,8 +106,9 @@ export default async function StudentDiscoverClassPage({
       />
 
       <ClassDetail
+        imageUrl={classImageSrc(center.id, row.id, { coverKey: row.coverKey, teacherPhotoKey: photoKeys.get(row.teacherId) })}
         gradeName={catalogLabelWithSelection(locale, row.grade)}
-        branch={{ name, logoUrl: centerLogoSrc(center), themeColor: center.themeColor }}
+        branch={{ name, logoUrl: centerLogoSrc(center), themeColor: center.themeColor, pausedUntil: pause?.endDate ?? null }}
         teacher={{ name: names.get(row.teacherId) ?? "—", rating: rating.average }}
         schedules={row.schedules}
         startDate={row.startDate}
@@ -100,6 +123,9 @@ export default async function StudentDiscoverClassPage({
             classGroupId={row.id}
             requiresConfirmation={row.requiresConfirmation}
             labels={{ enrolled: t("card.enrolled"), pending: t("card.pending"), full: t("card.full") }}
+            summary={summary}
+            canLeave={isEnrolled}
+            pendingReservationId={pendingReservationId}
           />
         }
       />
@@ -110,6 +136,7 @@ export default async function StudentDiscoverClassPage({
         mode={row.sessionBookingMode}
         enrolled={isEnrolled}
         myBookings={myBookings}
+        summary={{ ...summary, schedule: undefined, period: undefined }}
       />
     </div>
   );

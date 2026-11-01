@@ -70,9 +70,10 @@ export const ROUTES = {
   centerSettingsBranding: "/settings/branding",
   centerSettingsPermissions: "/settings/permissions",
   // F1: the organization's branches and an Owner's Add branch.
-  centerSettingsBranches: "/settings/branches",
   centerStaff: "/settings/staff",
   teacherDashboard: "/teacher/dashboard",
+  // U7: the month calendar — teacher, student and parent (the selected child).
+  teacherCalendar: "/teacher/calendar",
   teacherSessions: "/teacher/sessions",
   teacherSession: (id: string) => `/teacher/sessions/${id}`,
   teacherSessionPrint: (id: string) => `/teacher/sessions/${id}/print`,
@@ -82,7 +83,10 @@ export const ROUTES = {
   teacherApprovals: "/teacher/approvals",
   teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",
+  // U9: the teacher's photo (per branch) and their classes' cover images.
+  teacherProfile: "/teacher/profile",
   studentSchedule: "/student/schedule",
+  studentCalendar: "/student/calendar",
   studentDiscover: "/student/discover",
   // F5: a Discover class, on the same class page component Explore uses.
   studentDiscoverClass: (centerId: string, classId: string) =>
@@ -92,6 +96,7 @@ export const ROUTES = {
   // F4: "Your studies" — a new student's grade, then an optional parent invite.
   studentOnboarding: "/student/onboarding",
   parentHome: "/parent",
+  parentCalendar: "/parent/calendar",
   adminCenters: "/admin/centers",
   adminCenter: (id: string) => `/admin/centers/${id}`,
   // F1: reached from a button on /admin/centers, not from the sidebar.
@@ -124,10 +129,19 @@ export const SHELL_EXPERIENCES = ["center", "teacher", "student", "parent", "adm
 export type ShellExperience = (typeof SHELL_EXPERIENCES)[number];
 
 /**
+ * U1: Account settings opened from the branch hub (`/select-center`), where no
+ * branch is active — rendered in a neutral hub shell (header + user menu, no
+ * branch sidebar), whose back link returns to the hub. Not a `ShellExperience`:
+ * it has no nav, no branch scope and no tenant context.
+ */
+export const ACCOUNT_HUB_HINT = "hub";
+export type AccountOrigin = ShellExperience | typeof ACCOUNT_HUB_HINT;
+
+/**
  * Account settings, asked for from inside `experience` (F2) — the page renders
  * that experience's shell. Only a hint: the page re-checks it server-side.
  */
-export function accountPath(experience: ShellExperience): string {
+export function accountPath(experience: AccountOrigin): string {
   return `${ROUTES.account}?from=${experience}`;
 }
 

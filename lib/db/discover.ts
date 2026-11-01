@@ -5,7 +5,7 @@ import type { Prisma, PrismaClient, Role, SessionBookingMode } from "@prisma/cli
 import { fullName, localName } from "../identity.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 
 /**
  * Discover/Browse read helpers (M8, docs/04-design-system.md §10). A class
@@ -34,6 +34,11 @@ export function discoverClassSelect(centerId: string) {
     acceptsNewStudents: true,
     requiresConfirmation: true,
     teacherId: true,
+    // U9 — decides whether the card has an image (`classImageSrc`); never rendered as is.
+    coverKey: true,
+    // U8 — the join confirmation states the class period.
+    startDate: true,
+    endDate: true,
     // Global catalog ids (M13) — a single subjectId/gradeId now means the
     // same thing at every centre, so filtering can be a real `where` instead
     // of the pre-M13 in-memory name match (see the page's filter logic).
@@ -135,6 +140,24 @@ export async function teacherDisplayNames(
 }
 
 /**
+ * U9 — each teacher's photo key at this centre (null: none), batched once per
+ * centre like `teacherDisplayNames`. Turned into a `src` by `teacherPhotoSrc` /
+ * `classImageSrc` (`lib/storage-paths.ts`); a key is never rendered.
+ */
+export async function teacherPhotoKeys(
+  db: PrismaClient,
+  centerId: string,
+  teacherUserIds: string[],
+): Promise<Map<string, string | null>> {
+  if (teacherUserIds.length === 0) return new Map();
+  const rows = await db.membership.findMany({
+    where: scopedWhere(centerId, { userId: { in: teacherUserIds }, role: TEACHER }),
+    select: { userId: true, photoKey: true },
+  });
+  return new Map(rows.map((row) => [row.userId, row.photoKey]));
+}
+
+/**
  * One Discover class (F5's class page, on the same component Explore uses):
  * Discover's own rule — active and `acceptsNewStudents`, at an accessible
  * centre (checked by the caller with `discoverCenter`) — scoped to `centerId`.
@@ -145,8 +168,6 @@ export function discoverClassById(
   classGroupId: string,
 ): Promise<
   | (DiscoverClassRow & {
-      startDate: Date;
-      endDate: Date;
       sessionBookingMode: SessionBookingMode;
       maxBookingSeats: number | null;
     })
@@ -157,8 +178,6 @@ export function discoverClassById(
     // F6 — the page's "Upcoming sessions" needs the booking settings too.
     select: {
       ...discoverClassSelect(centerId),
-      startDate: true,
-      endDate: true,
       sessionBookingMode: true,
       maxBookingSeats: true,
     },
@@ -168,7 +187,7 @@ export function discoverClassById(
 /** A centre Discover may show (the same lifecycle rule as `listAccessibleCenters`), or null. */
 export function discoverCenter(db: PrismaClient, centerId: string) {
   return db.center.findFirst({
-    where: { id: centerId, lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } },
+    where: { id: centerId, ...ACCESSIBLE_CENTER },
     select: { id: true, name: true, nameEn: true, logoPath: true, themeColor: true },
   });
 }

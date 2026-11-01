@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import {
+  calendarWeekStart,
   formatDayOfMonth,
   formatFullDate,
   formatMonthYear,
@@ -31,8 +32,6 @@ import { cn } from "@/lib/utils";
  * previous/next chevrons mirror, because they mean direction (docs/04 §7).
  */
 
-/** Which weekday a calendar week opens on, per locale. Saturday in Egypt. */
-const WEEK_START: Record<string, number> = { ar: 6, en: 0 };
 
 function parseIso(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -76,7 +75,7 @@ export function Calendar({
 }) {
   const locale = useLocale();
   const t = useTranslations("Shared.calendar");
-  const weekStart = WEEK_START[locale] ?? 0;
+  const weekStart = calendarWeekStart(locale);
 
   const from = parseIso(value.from);
   const to = parseIso(value.to);

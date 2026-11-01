@@ -17,6 +17,7 @@ import { prisma } from "@/lib/db/client";
 import {
   discoverClassesForCenter,
   teacherDisplayNames,
+  teacherPhotoKeys,
   type DiscoverClassRow,
 } from "@/lib/db/discover";
 import { teacherRatingAverages } from "@/lib/db/ratings";
@@ -29,10 +30,13 @@ import { enrollmentCap, isAtCapacity } from "@/lib/capacity";
 import { classRoomSetFrom } from "@/lib/db/room-sets";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { mapWithConcurrency } from "@/lib/concurrency";
+import { buildJoinSummary } from "@/lib/join-summary";
 import { ROUTES } from "@/lib/routes";
+import { classImageSrc } from "@/lib/storage-paths";
 import { DEFAULT_PAGE_SIZE, parsePageParam } from "@/lib/validation/people";
 import { EmptyState } from "@/components/shared/empty-state";
 import { listAccessibleCenters } from "@/lib/db/platform";
+import { currentBranchPause } from "@/lib/db/branch-pauses";
 import { ResultsRegion } from "@/components/shared/results-region";
 
 type CardViewModel = {
@@ -42,13 +46,19 @@ type CardViewModel = {
   subjectName: string | null;
   gradeName: string | null;
   teacherName: string;
+  imageUrl: string | null;
   /** Average out of 5, platform-wide, across every centre this teacher works
    * at (M17) — never a count alongside it (spec §5 "Teacher ratings"). */
   teacherRating: number | null;
   price: number;
   requiresConfirmation: boolean;
   schedules: DiscoverClassRow["schedules"];
+  /** U8 — the class period, for the join confirmation. */
+  startDate: Date;
+  endDate: Date;
   status: DiscoverCardStatus;
+  /** U5 — a platform admin's pause covers the branch's today (enrolment stays open). */
+  pausedUntil: Date | null;
 };
 
 /** Centres whose classes load in parallel on one Discover page load (SEC-32). */
@@ -106,8 +116,12 @@ export default async function StudentDiscoverPage({
         gradeId: gradeFilter || undefined,
       });
       const teacherIds = [...new Set(classes.map((row) => row.teacherId))];
-      const teacherNames = await teacherDisplayNames(prisma, center.id, teacherIds);
-      return { center, classes, teacherNames };
+      const [teacherNames, photoKeys, pause] = await Promise.all([
+        teacherDisplayNames(prisma, center.id, teacherIds),
+        teacherPhotoKeys(prisma, center.id, teacherIds),
+        classes.length > 0 ? currentBranchPause(prisma, center.id) : null,
+      ]);
+      return { center, classes, teacherNames, photoKeys, pausedUntil: pause?.endDate ?? null };
     },
   );
 
@@ -120,7 +134,7 @@ export default async function StudentDiscoverPage({
   const blockedEverywhere = blockedByCenter;
   const cards: CardViewModel[] = [];
 
-  for (const { center, classes, teacherNames } of perCenter) {
+  for (const { center, classes, teacherNames, photoKeys, pausedUntil } of perCenter) {
     const blocked = blockedEverywhere.get(center.id);
     for (const row of classes) {
       if (blocked?.teacherIds.has(row.teacherId)) continue;
@@ -141,23 +155,31 @@ export default async function StudentDiscoverPage({
       });
 
       cards.push({
+        pausedUntil,
         centerId: center.id,
         centerName: center.name,
         classGroupId: row.id,
         subjectName: catalogLabelWithSelection(locale, row.subject),
         gradeName: catalogLabelWithSelection(locale, row.grade),
         teacherName: teacherNames.get(row.teacherId) ?? "—",
+        // U9 — cover, else the teacher's photo at this branch, else null (generated look).
+        imageUrl: classImageSrc(center.id, row.id, {
+          coverKey: row.coverKey,
+          teacherPhotoKey: photoKeys.get(row.teacherId),
+        }),
         teacherRating: teacherRatings.get(row.teacherId) ?? null,
         price: row.price,
         requiresConfirmation: row.requiresConfirmation,
         schedules: row.schedules,
+        startDate: row.startDate,
+        endDate: row.endDate,
         status,
       });
     }
   }
 
   const subjectOptions = allSubjects
-    .map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject) }))
+    .map((subject) => ({ value: subject.id, label: catalogLabel(locale, subject), gradeIds: subject.gradeIds }))
     .sort((a, b) => a.label.localeCompare(b.label));
   const gradeOptions = allGrades
     .map((grade) => ({ value: grade.id, label: catalogLabel(locale, grade) }))
@@ -209,29 +231,48 @@ export default async function StudentDiscoverPage({
           <EmptyState icon={<SearchX />} tone="warning" title={t("empty")} description={t("emptyHint")} />
         ) : (
           <ClassCardGrid>
-            {pageEntries.map((card) => (
-              <ClassCard
-                key={`${card.centerId}:${card.classGroupId}`}
-                href={ROUTES.studentDiscoverClass(card.centerId, card.classGroupId)}
-                subjectName={card.subjectName}
-                branchName={card.centerName}
-                teacherName={card.teacherName}
-                teacherRating={card.teacherRating}
-                gradeName={card.gradeName}
-                schedules={card.schedules}
-                price={card.price}
-                badge={{ variant: DISCOVER_STATUS_BADGE[card.status], label: t(`status.${card.status}`) }}
-                action={
-                  <DiscoverAction
-                    status={card.status}
-                    centerId={card.centerId}
-                    classGroupId={card.classGroupId}
-                    requiresConfirmation={card.requiresConfirmation}
-                    labels={{ enrolled: t("card.enrolled"), pending: t("card.pending"), full: t("card.full") }}
+            {await Promise.all(
+              pageEntries.map(async (card) => {
+                // U8 — what Enrol / Request to join confirms.
+                const summary = await buildJoinSummary({
+                  locale,
+                  subjectName: card.subjectName,
+                  gradeName: card.gradeName,
+                  branch: card.centerName,
+                  teacher: card.teacherName,
+                  price: card.price,
+                  schedules: card.schedules,
+                  startDate: card.startDate,
+                  endDate: card.endDate,
+                });
+                return (
+                  <ClassCard
+                    key={`${card.centerId}:${card.classGroupId}`}
+                    href={ROUTES.studentDiscoverClass(card.centerId, card.classGroupId)}
+                    subjectName={card.subjectName}
+                    branchName={card.centerName}
+                    pausedUntil={card.pausedUntil}
+                    teacherName={card.teacherName}
+                    imageUrl={card.imageUrl}
+                    teacherRating={card.teacherRating}
+                    gradeName={card.gradeName}
+                    schedules={card.schedules}
+                    price={card.price}
+                    badge={{ variant: DISCOVER_STATUS_BADGE[card.status], label: t(`status.${card.status}`) }}
+                    action={
+                      <DiscoverAction
+                        status={card.status}
+                        centerId={card.centerId}
+                        classGroupId={card.classGroupId}
+                        requiresConfirmation={card.requiresConfirmation}
+                        labels={{ enrolled: t("card.enrolled"), pending: t("card.pending"), full: t("card.full") }}
+                        summary={summary}
+                      />
+                    }
                   />
-                }
-              />
-            ))}
+                );
+              }),
+            )}
           </ClassCardGrid>
         )}
 

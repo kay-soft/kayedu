@@ -1,4 +1,4 @@
-import { uniqueTag } from "./support/accounts";
+import { e2eEmail } from "../scripts/lib/e2e-users";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import { signUp, signUpProjectOnly } from "./support/signup";
 import { choose, field } from "./support/ui";
@@ -34,10 +34,9 @@ test("a student with no centre sees their pending and declined requests", async 
   await expect(page.getByText(msg("StudentReservations.status.PENDING")).first()).toBeVisible();
 });
 
-test("@write a new sign-up onboards, enrols instantly, completes the profile once, sees the schedule", async ({ page, appLocale, msg }, testInfo) => {
+test("@write a new sign-up onboards, enrols instantly, completes the profile once, sees the schedule", async ({ page, appLocale, msg, e2eTag: tag }, testInfo) => {
   signUpProjectOnly(testInfo);
-  const tag = uniqueTag("e2e").toLowerCase();
-  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Student ${tag}`, email: `${tag}-student@example.com` });
+  await signUp(page, appLocale, { firstName: "Eetoo", lastName: `Student ${tag}`, email: e2eEmail(tag, "student") });
   // A Student sign-up with no branch lands on "Your studies" (F4): the account
   // grade, then an optional parent invite (skipped here), then Discover.
   await expect(page).toHaveURL(/\/student\/onboarding/);
@@ -52,7 +51,11 @@ test("@write a new sign-up onboards, enrols instantly, completes the profile onc
   await page.goto(`/${appLocale}/student/discover?grade=all`);
   await expectHealthy(page, appLocale);
 
+  // U8: Enrol opens a confirmation first; nothing is joined until Confirm.
   await page.getByRole("button", { name: msg("StudentDiscover.card.enroll"), exact: true }).first().click();
+  const confirm = page.getByRole("dialog");
+  await expect(confirm.getByText(msg("StudentActions.join.noCharge"))).toBeVisible();
+  await confirm.getByRole("button", { name: msg("StudentActions.join.confirm"), exact: true }).click();
   // Once a seat is claimed the (student) layout substitutes the one-time
   // profile form for whatever page is shown (M18) — no redirect involved.
   await expect(page.getByRole("heading", { name: msg("StudentProfile.title") })).toBeVisible();
@@ -63,4 +66,14 @@ test("@write a new sign-up onboards, enrols instantly, completes the profile onc
   await page.getByRole("button", { name: msg("StudentProfile.submit"), exact: true }).click();
   await expect(page.getByRole("heading", { name: msg("StudentSchedule.title") })).toBeVisible();
   await expectHealthy(page, appLocale);
+
+  // U8: leave the class again from its page - behind a confirmation, and the
+  // Enrol button is back afterwards.
+  await page.goto(`/${appLocale}/student/discover?grade=all`);
+  const card = page.locator("div.relative", { has: page.getByText(msg("StudentDiscover.card.enrolled"), { exact: true }) }).last();
+  await card.getByRole("link").first().click();
+  await page.getByRole("button", { name: msg("StudentActions.leave.trigger"), exact: true }).click();
+  await expect(page.getByRole("dialog").getByText(msg("StudentActions.leave.description"))).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: msg("StudentActions.leave.confirm"), exact: true }).click();
+  await expect(page.getByRole("button", { name: msg("StudentDiscover.card.enroll"), exact: true }).first()).toBeVisible();
 });

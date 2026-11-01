@@ -23,9 +23,11 @@ import { cn } from "@/lib/utils";
  * `below` is a full-width row under both columns for a card that is a long
  * list of its own (a class's roster): it would otherwise make `main` several
  * times taller than `side` and strand the right third blank. `stickySide`
- * keeps the side column in view beside a long `main` (the session page, whose
- * receipt should stay visible while the roster is worked down); the column
- * scrolls itself if it is ever taller than the viewport.
+ * keeps the side column in view beside a long `main` (the class page); the column
+ * scrolls itself if it is ever taller than the viewport. U2: that inner
+ * scroll is why the session page no longer uses it — its receipt's lower
+ * sections must be reachable by the page's own scroll. Use `stickySide` only
+ * for a side column that is short.
  */
 export function DetailLayout({
   main,
@@ -51,6 +53,9 @@ export function DetailLayout({
             // scroll box, which would otherwise clip it.
             stickySide &&
               "lg:sticky lg:top-24 lg:-m-1 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:p-1",
+            // U2 — printed, the column is never a capped scroll box: a page
+            // prints every card in full.
+            stickySide && "print:static print:m-0 print:max-h-none print:overflow-visible print:p-0",
           )}
         >
           {side}

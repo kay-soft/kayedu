@@ -7,20 +7,18 @@ import {
   NewClassDialogContent,
   type ClassFormDefaults,
 } from "@/app/[locale]/(center)/classes/class-form";
-import type { SelectOption } from "@/components/center/class-fields";
 import type { TermOption } from "@/components/center/class-period-fields";
 import type { RoomOption } from "@/components/center/room-set-picker";
 import type { TeacherOption } from "@/components/center/teacher-picker";
 import { DialogLauncher } from "@/components/shared/dialog-shell";
 import { Button } from "@/components/ui/button";
+import type { CatalogPickerData } from "@/lib/catalog-picker";
 import type { RoomLinkPair } from "@/lib/rooms";
 
 /** The list-first pattern (docs/04 §5 "Dialog"), same as students/teachers. */
 export function AddClassDialog({
   teachers,
-  subjects,
-  grades,
-  educationSystems,
+  catalog,
   educationSystemDefaultFixedShare,
   rooms,
   roomLinks,
@@ -29,9 +27,8 @@ export function AddClassDialog({
   defaults,
 }: {
   teachers: TeacherOption[];
-  subjects: SelectOption[];
-  grades: SelectOption[];
-  educationSystems: SelectOption[];
+  /** The centre's offered systems → grades → subjects (U3). */
+  catalog: CatalogPickerData;
   educationSystemDefaultFixedShare: Record<string, number>;
   rooms: RoomOption[];
   roomLinks: RoomLinkPair[];
@@ -53,9 +50,7 @@ export function AddClassDialog({
         <NewClassDialogContent
           {...dialog}
           teachers={teachers}
-          subjects={subjects}
-          grades={grades}
-          educationSystems={educationSystems}
+          catalog={catalog}
           educationSystemDefaultFixedShare={educationSystemDefaultFixedShare}
           rooms={rooms}
           roomLinks={roomLinks}

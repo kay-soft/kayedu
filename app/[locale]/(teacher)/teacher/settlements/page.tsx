@@ -5,7 +5,8 @@ import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { getTeacherContexts, getTenantContext } from "@/lib/auth/tenant";
+import { branchesInView, getTeacherScope, showsBranches } from "@/lib/auth/teacher-scope";
+import { BranchFilter } from "@/components/teacher/branch-filter";
 import { scoped } from "@/lib/db/scoped";
 import { formatDate, formatMoney } from "@/lib/format";
 import { sessionDisplayName } from "@/lib/session-label";
@@ -24,10 +25,20 @@ const STATUS_BADGE = {
  * teacher portal already uses (docs/01-data-model.md §4). Deliberately
  * outside any data-visibility window (spec §5 "Teacher settlements" —
  * carved out so a teacher can always verify they were paid).
+ *
+ * U7: the branches in view (All branches by default), each card naming its
+ * branch, and a Branch filter under All branches.
  */
-export default async function TeacherSettlementsPage() {
-  const ctx = await getTenantContext("teacher");
-  const contexts = await getTeacherContexts(ctx.user.id);
+export default async function TeacherSettlementsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const scope = await getTeacherScope();
+  const rawParams = await searchParams;
+  const contexts = branchesInView(scope, rawParams.branch);
+  const withBranch = showsBranches(scope);
+  const branchFilter = withBranch && contexts.length === 1 ? contexts[0].center.id : null;
 
   const t = await getTranslations("Settlements");
   const tStatus = await getTranslations("Settlements.status");
@@ -36,7 +47,7 @@ export default async function TeacherSettlementsPage() {
   const perCenter = await Promise.all(
     contexts.map(async (centerCtx) => ({
       center: centerCtx.center,
-      settlements: await scoped(centerCtx).settlements.list({ teacherId: ctx.user.id }),
+      settlements: await scoped(centerCtx).settlements.list({ teacherId: centerCtx.user.id }),
     })),
   );
 
@@ -48,6 +59,13 @@ export default async function TeacherSettlementsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={t("teacherTitle")} description={t("teacherSubtitle")} />
+
+      {withBranch ? (
+        <BranchFilter
+          branches={scope.inView.map((centerCtx) => ({ id: centerCtx.center.id, name: centerCtx.center.name }))}
+          value={branchFilter ?? ""}
+        />
+      ) : null}
 
       <Card>
         <CardContent className="flex flex-col gap-3">

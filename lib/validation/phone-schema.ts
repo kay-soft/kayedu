@@ -11,8 +11,9 @@ import { normalizePhone } from "../phone.ts";
  * lib/validation/people.ts and lib/validation/sessions.ts — a second
  * implementation of the same rule is exactly what this file exists to stop.
  *
- * Normalizes to `01XXXXXXXXX` so the duplicate match cannot be dodged by
- * typing `+20…` instead (spec §5).
+ * Normalizes to the stored E.164 form `+20XXXXXXXXXX` (U4) so the duplicate
+ * match cannot be dodged by typing `+20…`, `0…` or Arabic digits instead
+ * (spec §5).
  */
 export const optionalPhone = z
   .string()

@@ -58,19 +58,33 @@ export function listCatalogGrades(
   });
 }
 
-export function listCatalogSubjects(
+/** The grade links every subject read carries (U3) — flattened to `gradeIds`. */
+const GRADE_LINKS = { gradeLinks: { select: { gradeId: true } } } as const;
+
+function withGradeIds<T extends { gradeLinks: { gradeId: string }[] }>(row: T) {
+  const { gradeLinks, ...rest } = row;
+  return { ...rest, gradeIds: gradeLinks.map((link) => link.gradeId) };
+}
+
+/**
+ * Every subject once (U3 — a subject is grade-independent), each with the
+ * grades it links to. `gradeId` narrows to the subjects linked to that grade.
+ */
+export async function listCatalogSubjects(
   db: Db,
   gradeId?: string,
   activeOnly = true,
 ) {
-  return db.catalogSubject.findMany({
+  const rows = await db.catalogSubject.findMany({
     where: {
       ...(activeOnly ? { active: true } : {}),
-      ...(gradeId ? { gradeId } : {}),
+      ...(gradeId ? { gradeLinks: { some: { gradeId } } } : {}),
     },
-    include: { grade: true },
+    omit: { gradeId: true },
+    include: GRADE_LINKS,
     orderBy: [{ active: "desc" }, { nameEn: "asc" }],
   });
+  return rows.map(withGradeIds);
 }
 
 // ── A centre's own selections, joined with the catalog entry ──────────────
@@ -193,13 +207,12 @@ export async function centerGradeById(
 
 export type CenterSubjectView = CenterEntryBase & {
   id: string; // CatalogSubject id
-  gradeId: string | null;
-  /** The parent grade, resolvable with `catalogLabelWithSelection` (this centre's rename of it included). */
-  grade: CatalogWithSelection | null;
+  /** Every grade the subject links to in the catalog (U3) — not only this centre's picks. */
+  gradeIds: string[];
 };
 
 type SubjectRow = Prisma.CenterCatalogSelectionGetPayload<{
-  include: { subject: { include: { grade: { include: { selections: { select: typeof CATALOG_OVERRIDE_SELECT } } } } } };
+  include: { subject: { include: typeof GRADE_LINKS } };
 }>;
 
 function subjectView(row: SubjectRow): CenterSubjectView {
@@ -210,8 +223,7 @@ function subjectView(row: SubjectRow): CenterSubjectView {
     nameEn: row.subject!.nameEn,
     displayNameAr: row.displayNameAr,
     displayNameEn: row.displayNameEn,
-    gradeId: row.subject!.gradeId,
-    grade: row.subject!.grade,
+    gradeIds: row.subject!.gradeLinks.map((link) => link.gradeId),
     active: row.active,
     catalogActive: row.subject!.active,
   };
@@ -223,7 +235,7 @@ export async function centerSubjects(
 ): Promise<CenterSubjectView[]> {
   const rows = await db.centerCatalogSelection.findMany({
     where: { centerId, kind: KIND.SUBJECT },
-    include: { subject: { include: { grade: PARENT_WITH_OVERRIDE(centerId) } } },
+    include: { subject: { include: GRADE_LINKS } },
     orderBy: [{ active: "desc" }, { createdAt: "asc" }],
   });
   return rows.filter((row) => row.subject).map((row) => subjectView(row as SubjectRow));
@@ -236,9 +248,45 @@ export async function centerSubjectById(
 ): Promise<CenterSubjectView | null> {
   const row = await db.centerCatalogSelection.findFirst({
     where: { centerId, kind: KIND.SUBJECT, subjectId: catalogId },
-    include: { subject: { include: { grade: PARENT_WITH_OVERRIDE(centerId) } } },
+    include: { subject: { include: GRADE_LINKS } },
   });
   return row?.subject ? subjectView(row as SubjectRow) : null;
+}
+
+// ── The (grade, subject) pair rule (U3) ────────────────────────────────────
+
+/** Is the subject linked to the grade in the global catalog? */
+export async function isPairLinked(db: Db, gradeId: string, subjectId: string): Promise<boolean> {
+  const link = await db.catalogSubjectGrade.findUnique({
+    where: { subjectId_gradeId: { subjectId, gradeId } },
+    select: { subjectId: true },
+  });
+  return link !== null;
+}
+
+/**
+ * A (grade, subject) pair is **offered** at a centre when the grade is picked
+ * and active there (and not deactivated by the platform), the subject is too,
+ * and the pair is linked (docs/00 §5.1 R8 rules, U3). The one rule every class,
+ * one-time session and teacher request that sets or changes a pair passes —
+ * refused as `subjectNotInGrade` otherwise.
+ */
+export async function isPairOffered(
+  db: Db,
+  centerId: string,
+  gradeId: string,
+  subjectId: string,
+): Promise<boolean> {
+  const [grade, subject, linked] = await Promise.all([
+    centerGradeById(db, centerId, gradeId),
+    centerSubjectById(db, centerId, subjectId),
+    isPairLinked(db, gradeId, subjectId),
+  ]);
+  return (
+    linked &&
+    grade !== null && grade.active && grade.catalogActive &&
+    subject !== null && subject.active && subject.catalogActive
+  );
 }
 
 // ── Selecting / renaming / deselecting a catalog entry ────────────────────
@@ -340,17 +388,6 @@ export function countCenterGradeSelectionsUnderSystem(
 ) {
   return db.centerCatalogSelection.count({
     where: { centerId, kind: KIND.GRADE, grade: { educationSystemId } },
-  });
-}
-
-/** Blocks deselecting a grade while the centre still has subject picks under it. */
-export function countCenterSubjectSelectionsUnderGrade(
-  db: Db,
-  centerId: string,
-  gradeId: string,
-) {
-  return db.centerCatalogSelection.count({
-    where: { centerId, kind: KIND.SUBJECT, subject: { gradeId } },
   });
 }
 

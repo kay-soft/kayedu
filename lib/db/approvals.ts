@@ -19,8 +19,9 @@ import {
 } from "../scheduling.ts";
 import { effectiveRoomIds } from "../rooms.ts";
 import { writeSessionExtraRooms } from "./room-sets.ts";
+import { branchPauseRefusal } from "./branch-pauses.ts";
 import { centerTimeZone, runInTransaction } from "./session-lifecycle.ts";
-import { loadSessionOccupancy, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
+import { loadSessionOccupancy, slotTakenError, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -108,7 +109,15 @@ export type ResolveSessionRequestResult =
     }
   | {
       ok: false;
-      error: "notFound" | "notPending" | "classNotFound" | "duplicateSlot" | "pastDate" | "invalidDate";
+      error:
+        | "notFound"
+        | "notPending"
+        | "classNotFound"
+        | "duplicateSlot"
+        | "duplicateSlotCancelled"
+        | "pastDate"
+        | "invalidDate"
+        | "branchPaused";
     };
 
 /**
@@ -160,6 +169,10 @@ export async function resolveSessionRequest(
     if (dateKey(date) < zonedClock(options.now ?? new Date(), centreZone).dayKey) {
       return { ok: false, error: "pastDate" };
     }
+    // U5: an approval never creates a session inside a branch pause.
+    if (await branchPauseRefusal(tx, centerId, { date, now: options.now })) {
+      return { ok: false, error: "branchPaused" };
+    }
     const classGroup = await tx.classGroup.findFirst({
       where: scopedWhere(centerId, { id: payload.classGroupId, active: true }),
       include: { extraRooms: { select: { roomId: true } } },
@@ -187,6 +200,12 @@ export async function resolveSessionRequest(
     if (conflictDecision === "needsConfirmation") {
       return { ok: false, error: "conflictsNeedConfirmation", conflicts };
     }
+
+    // U2: a cancelled session still holds its slot (own message); one
+    // rescheduled away does not. Read before the create — a P2002 inside the
+    // transaction would abort it.
+    const taken = await slotTakenError(tx, centerId, classGroup.id, date, payload.startTime);
+    if (taken) return { ok: false, error: taken };
 
     let session: Session;
     try {

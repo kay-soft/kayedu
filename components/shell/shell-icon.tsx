@@ -5,6 +5,7 @@ import {
   BookOpen,
   Building2,
   CalendarDays,
+  CalendarRange,
   ClipboardCheck,
   ConciergeBell,
   GraduationCap,
@@ -34,6 +35,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hid
   approvals: ClipboardCheck,
   settings: Settings,
   schedule: CalendarDays,
+  calendar: CalendarRange,
   discover: BookOpen,
   centers: Building2,
   platform: ShieldCheck,
@@ -41,6 +43,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hid
   refunds: Undo2,
   settlements: HandCoins,
   audit: ScrollText,
+  profile: UserRound,
 };
 
 export function ShellIcon({

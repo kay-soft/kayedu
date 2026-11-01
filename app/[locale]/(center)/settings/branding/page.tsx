@@ -5,6 +5,7 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { PickBranchScreen } from "@/components/shell/pick-branch-screen";
 import { requireBranchScope } from "@/lib/auth/branch-scope";
 import { getTenantContext, requirePermission } from "@/lib/auth/tenant";
+import { mediaUploadsEnabled } from "@/lib/media";
 import { centerLogoSrc } from "@/lib/storage-paths";
 
 export default async function BrandingPage() {
@@ -20,6 +21,7 @@ export default async function BrandingPage() {
         branchName={ctx.center.name}
         themeColor={ctx.center.themeColor}
         logoSrc={centerLogoSrc(ctx.center)}
+        uploadsEnabled={mediaUploadsEnabled()}
       />
     </div>
   );

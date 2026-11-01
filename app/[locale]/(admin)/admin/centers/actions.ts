@@ -21,6 +21,7 @@ import { fieldErrorsFrom } from "@/lib/validation/form";
 import {
   centerLifecycleTransitionSchema,
   centerVisibilityWindowSchema,
+  copyKeysFrom,
   createCenterSchema,
 } from "@/lib/validation/admin";
 import type { AdminActionState } from "@/app/[locale]/(admin)/admin/centers/action-state";
@@ -95,10 +96,19 @@ export async function createCenterAction(
         : { name: data.name, nameEn: data.organizationNameEn ?? data.nameEn, maxBranches: data.maxBranches },
     });
   } else {
-    result = await addBranchToOrganization(prisma, { ...branch, organizationId: data.organizationId });
+    // U5: "Copy setup from <branch>" — moved here from the Owner's retired
+    // Settings → Branches; the data layer checks the source is this
+    // organization's and not deleted.
+    const keys = copyKeysFrom(data);
+    result = await addBranchToOrganization(prisma, {
+      ...branch,
+      organizationId: data.organizationId,
+      copyFrom: data.copyFromCenterId ? { centerId: data.copyFromCenterId, keys } : null,
+    });
   }
   if (!result.ok) {
     if (result.error === "organizationNotFound") return { fieldErrors: { organizationId: result.error } };
+    if (result.error === "sourceNotFound") return { fieldErrors: { copyFromCenterId: result.error } };
     if (result.error === "slugTaken") return { fieldErrors: { slug: result.error } };
     return { error: result.error };
   }
@@ -127,11 +137,17 @@ export async function createCenterAction(
       lifecycleState: result.center.lifecycleState,
       organizationId: result.center.organizationId,
       newOrganization: data.organizationMode === "new",
+      ...(data.organizationMode === "existing" && data.copyFromCenterId
+        ? { sourceCenterId: data.copyFromCenterId, copied: "copied" in result ? result.copied : [] }
+        : {}),
     },
   });
 
   revalidatePath(centersPath(locale));
   revalidatePath(`/${locale}${ROUTES.adminOrganizations}`);
+  revalidatePath(`/${locale}${ROUTES.adminOrganization(result.center.organizationId)}`);
+  // The organization's Owner sees the new branch in the switcher at once.
+  revalidatePath(`/${locale}`, "layout");
   return {
     status: invite ? "created" : "branchAdded",
     ...(invite ? { invitationToken: invite.token } : {}),
@@ -178,10 +194,11 @@ export async function transitionCenterLifecycleAction(
 }
 
 /**
- * The per-centre override of the data-visibility window (M19, docs/01 §7) —
- * the same `CenterSettings.dataVisibilityDays` column a centre's own
- * `/settings` screen edits, writable here too since the spec calls for both
- * "per-centre configurable ... AND adjustable by a platform admin".
+ * The per-centre override of the data-visibility windows (M19, U6, docs/01
+ * §7) — the same `CenterSettings.centerDataVisibilityDays` and
+ * `teacherDataVisibilityDays` columns a centre's own `/settings` screen
+ * edits, under the same caps, writable here too since the spec calls for
+ * both "per-centre configurable ... AND adjustable by a platform admin".
  */
 export async function updateCenterVisibilityWindowAction(
   _prevState: AdminActionState,
@@ -191,12 +208,12 @@ export async function updateCenterVisibilityWindowAction(
 
   const parsed = centerVisibilityWindowSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
-  const { locale, id, dataVisibilityDays } = parsed.data;
+  const { locale, id, centerDataVisibilityDays, teacherDataVisibilityDays } = parsed.data;
 
   const before = await prisma.centerSettings.findUnique({ where: { centerId: id } });
   if (!before) return { error: "notFound" };
 
-  await prisma.centerSettings.update({ where: { centerId: id }, data: { dataVisibilityDays } });
+  await prisma.centerSettings.update({ where: { centerId: id }, data: { centerDataVisibilityDays, teacherDataVisibilityDays } });
 
   await writeAuditLog({
     centerId: id,
@@ -204,8 +221,11 @@ export async function updateCenterVisibilityWindowAction(
     action: "platform.center.visibilityWindow.update",
     entityType: "CenterSettings",
     entityId: before.id,
-    before: { dataVisibilityDays: before.dataVisibilityDays },
-    after: { dataVisibilityDays },
+    before: {
+      centerDataVisibilityDays: before.centerDataVisibilityDays,
+      teacherDataVisibilityDays: before.teacherDataVisibilityDays,
+    },
+    after: { centerDataVisibilityDays, teacherDataVisibilityDays },
   });
 
   revalidatePath(centerPath(locale, id));

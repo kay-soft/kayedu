@@ -183,6 +183,10 @@ export default async function StudentDetailPage({
   const gradeLabel = gradeOptions.find((option) => option.value === student.gradeId)?.label ?? null;
   const parentName = [student.parentFirstName, student.parentLastName].filter(Boolean).join(" ");
   const visibleEnrollments = enrollments.filter((e) => e.status !== "REMOVED");
+  // U8 — classes the student left themselves (a staff removal is not listed).
+  const leftEnrollments = enrollments
+    .filter((e) => e.status === "REMOVED" && e.leftByStudentAt !== null)
+    .sort((a, b) => b.leftByStudentAt!.getTime() - a.leftByStudentAt!.getTime());
 
   return (
     <div className="flex flex-col gap-6">
@@ -293,6 +297,28 @@ export default async function StudentDetailPage({
                   ))}
                 </ul>
               )}
+              {leftEnrollments.length > 0 ? (
+                <ul className="flex flex-col gap-1 border-t border-border pt-3">
+                  {leftEnrollments.map((enrollment) => (
+                    <li key={enrollment.id} className="text-xs text-text-secondary">
+                      {t("enrollments.leftByStudent", {
+                        className:
+                          [
+                            enrollment.classGroup.subject
+                              ? catalogLabelWithSelection(locale, enrollment.classGroup.subject)
+                              : null,
+                            enrollment.classGroup.grade
+                              ? catalogLabelWithSelection(locale, enrollment.classGroup.grade)
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || tCommon("none"),
+                        date: formatDate(enrollment.leftByStudentAt!, locale),
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </DetailCard>
 
             <DetailCard title={t("blockedBy.title")} description={t("blockedBy.description")}>
@@ -387,8 +413,8 @@ export default async function StudentDetailPage({
               contentClassName="gap-0"
             >
               <DetailRow label={t("fields.parentName")} value={parentName} />
-              <DetailRow label={t("fields.parentPhone")} value={student.parentPhone} ltr />
-              <DetailRow label={t("fields.parentAltPhone")} value={student.parentAltPhone} ltr />
+              <DetailRow label={t("fields.parentPhone")} value={student.parentPhone} phone />
+              <DetailRow label={t("fields.parentAltPhone")} value={student.parentAltPhone} phone />
               <DetailRow label={t("fields.otherCenters")} value={formatNumber(otherRelations, locale)} />
             </DetailCard>
 

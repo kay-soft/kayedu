@@ -58,6 +58,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { WRITE_TRANSACTION_OPTIONS } from "../../lib/db/session-lifecycle.ts";
 import { GATE_DESK_CONNECTION_LIMIT, lowerConnectionLimit } from "./connection-limit.ts";
 import { assertSafeToWrite } from "./env.ts";
+import { otherGateEmailPrefixes } from "./gate-fixtures.ts";
 
 /** A gate transaction never waits longer than this for a lock. */
 export const GATE_LOCK_TIMEOUT = "15s";
@@ -98,9 +99,24 @@ type GateOptions = {
  * Users this run created — after `since`, or by id when a fixture backdated
  * `createdAt` (check:analytics does) — with no login and no relation left.
  */
-export function orphanedUsersSince(since: Date, createdIds: readonly string[] = []): Prisma.UserWhereInput {
+export function orphanedUsersSince(
+  since: Date,
+  createdIds: readonly string[] = [],
+  otherGatePrefixes: readonly string[] = [],
+): Prisma.UserWhereInput {
+  // The time window alone cannot tell this run's users from a concurrent gate's:
+  // another gate's actor user (no relation yet) would be swept out from under it
+  // and its audit row would hit the actor FK. Users of other registered gates are
+  // left out of the window; this run's own are still found by id.
+  const notAnotherGates: Prisma.UserWhereInput =
+    otherGatePrefixes.length === 0
+      ? {}
+      : { OR: [{ email: null }, { NOT: { OR: otherGatePrefixes.map((prefix) => ({ email: { startsWith: prefix } })) } }] };
   return {
-    OR: [{ createdAt: { gte: since } }, ...(createdIds.length > 0 ? [{ id: { in: [...createdIds] } }] : [])],
+    OR: [
+      { createdAt: { gte: since }, ...notAnotherGates },
+      ...(createdIds.length > 0 ? [{ id: { in: [...createdIds] } }] : []),
+    ],
     authId: null,
     isPlatformAdmin: false,
     memberships: { none: {} },
@@ -229,7 +245,7 @@ export async function gatePrisma(options: GateOptions = {}): Promise<PrismaClien
 
   const sweep = async () => {
     if (options.sweepUsers === false) return;
-    const where = orphanedUsersSince(startedAt, [...createdUserIds]);
+    const where = orphanedUsersSince(startedAt, [...createdUserIds], otherGateEmailPrefixes(gateName));
     const orphans = await base.user.findMany({ where, select: { id: true } });
     if (orphans.length === 0) return;
     const { count } = await base.user.deleteMany({

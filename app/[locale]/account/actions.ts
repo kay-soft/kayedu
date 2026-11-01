@@ -8,8 +8,6 @@ import { getAuthUser, getCurrentUser } from "@/lib/auth/session";
 import { clientIp } from "@/lib/auth/request-ip";
 import { updateAccountProfile } from "@/lib/db/account";
 import { prisma } from "@/lib/db/client";
-import { readRasterImage } from "@/lib/db/storage";
-import { MAX_PHOTO_BYTES } from "@/lib/storage-paths";
 import { redirect } from "@/lib/i18n/navigation";
 import { logBestEffort } from "@/lib/log";
 import { ROUTES, authConfirmUrl } from "@/lib/routes";
@@ -159,37 +157,4 @@ export async function changeEmailAction(
   if (!result.ok) return { error: result.error, fieldErrors: result.fieldErrors };
   revalidateAccount(locale);
   return { status: result.status };
-}
-
-// ── Profile photo (F8) ─────────────────────────────────────────────────────
-
-/**
- * The caller's own profile photo. Validated exactly as it will be once stored
- * (typed by bytes, PNG/JPEG/WebP, `MAX_PHOTO_BYTES`), then refused as
- * `mediaNotConnected`: no storage destination exists yet — the media provider
- * is not connected and no column holds a profile-photo key — so nothing is
- * written anywhere. Only ever the caller's own photo; staff never set anyone's.
- */
-export async function updateProfilePhotoAction(
-  _prev: AccountFormState,
-  formData: FormData,
-): Promise<AccountFormState> {
-  const locale = readLocale(formData);
-  await caller(locale);
-
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) return { error: "photoMissing" };
-  const image = await readRasterImage(file, MAX_PHOTO_BYTES);
-  if (!image.ok) return { error: image.error };
-
-  return { error: "mediaNotConnected" };
-}
-
-/** Remove the caller's own photo. Nothing is stored yet, so there is nothing to remove. */
-export async function removeProfilePhotoAction(
-  _prev: AccountFormState,
-  formData: FormData,
-): Promise<AccountFormState> {
-  await caller(readLocale(formData));
-  return { error: "mediaNotConnected" };
 }

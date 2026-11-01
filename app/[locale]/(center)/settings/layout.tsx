@@ -56,11 +56,8 @@ export default async function SettingsLayout({
     items.push({ href: ROUTES.centerStaff, labelKey: "staff" });
   }
 
-  // F1: the page asserts `organization.branch.create` (OWNER-only) and
-  // nothing else, so that is the one gate that shows its link.
-  if (ctxCan(ctx, "organization.branch.create")) {
-    items.push({ href: ROUTES.centerSettingsBranches, labelKey: "branches" });
-  }
+  // U5: there is no Settings → Branches. Only a platform admin creates,
+  // edits, pauses or deletes a branch (`/admin/organizations/[id]`).
 
   // Nothing here is open to this role — send them back to their own home.
   if (items.length === 0) {

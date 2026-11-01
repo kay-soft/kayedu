@@ -22,14 +22,24 @@ import {
   ensureDefaultPaymentMethods,
   listActivePaymentMethods,
 } from "../lib/db/payment-methods.ts";
-import { revenueTotals } from "../lib/db/analytics.ts";
+import { revenueByTeacher, revenueTotals } from "../lib/db/analytics.ts";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import {
-  DEFAULT_VISIBILITY_WINDOW_DAYS,
+  DEFAULT_CENTER_VISIBILITY_DAYS,
+  DEFAULT_TEACHER_VISIBILITY_DAYS,
+  MAX_CENTER_VISIBILITY_DAYS,
+  MAX_TEACHER_HISTORY_DAYS,
+  MAX_TEACHER_VISIBILITY_DAYS,
   clampRangeToVisibility,
   isWithinVisibilityWindow,
+  teacherHistoryFloor,
+  teacherVisibilityWindowFloor,
   visibilityWindowFloor,
 } from "../lib/db/visibility.ts";
+import { teacherPortalHistoryFloor, teacherStudentProfileIds } from "../lib/db/teacher-portal.ts";
+import { generalSettingsSchema } from "../lib/validation/settings.ts";
+import { centerVisibilityWindowSchema } from "../lib/validation/admin.ts";
+import { teacherHistorySchema } from "../lib/validation/account.ts";
 import { startOfUtcDay } from "../lib/scheduling.ts";
 import { scopedIgnoringVisibilityWindow, scopedWith } from "../lib/db/scoped.ts";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -79,6 +89,14 @@ async function cleanup() {
 
 const NOW = new Date("2026-06-15T12:00:00Z");
 const WINDOW_DAYS = 14;
+/** U6: the teacher window in this fixture — narrower than the centre's 14. */
+const TEACHER_WINDOW_DAYS = 7;
+/** The two windows as a context's settings carry them (U6). */
+const windows = (center: number, teacher = TEACHER_WINDOW_DAYS) => ({
+  centerDataVisibilityDays: center,
+  teacherDataVisibilityDays: teacher,
+  timezone: "Africa/Cairo",
+});
 const OLD_SESSION_DATE = new Date("2026-04-01T00:00:00Z"); // ~75 days before NOW
 const RECENT_SESSION_DATE = new Date("2026-06-10T00:00:00Z"); // 5 days before NOW
 
@@ -94,19 +112,21 @@ async function main() {
   );
 
   const defaultFloor = visibilityWindowFloor({ isPlatformAdmin: false, settings: null }, NOW);
+  const defaultTeacherFloor = teacherVisibilityWindowFloor({ isPlatformAdmin: false, settings: null }, NOW);
   check(
-    "A centre with no CenterSettings row falls back to the default 30-day window, not unbounded",
-    defaultFloor !== null &&
-      defaultFloor.getTime() === startOfUtcDay(NOW).getTime() - DEFAULT_VISIBILITY_WINDOW_DAYS * 86_400_000,
-    String(defaultFloor),
+    "A centre with no CenterSettings row falls back to each window's default (centre 365, teacher 30), not unbounded",
+    DEFAULT_CENTER_VISIBILITY_DAYS === 365 &&
+      DEFAULT_TEACHER_VISIBILITY_DAYS === 30 &&
+      defaultFloor !== null &&
+      defaultFloor.getTime() === startOfUtcDay(NOW).getTime() - DEFAULT_CENTER_VISIBILITY_DAYS * 86_400_000 &&
+      defaultTeacherFloor !== null &&
+      defaultTeacherFloor.getTime() === startOfUtcDay(NOW).getTime() - DEFAULT_TEACHER_VISIBILITY_DAYS * 86_400_000,
+    `${String(defaultFloor)} / ${String(defaultTeacherFloor)}`,
   );
 
-  const floor14 = visibilityWindowFloor(
-    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
-    NOW,
-  );
+  const floor14 = visibilityWindowFloor({ isPlatformAdmin: false, settings: windows(WINDOW_DAYS) }, NOW);
   check(
-    "A centre's own dataVisibilityDays drives the floor — a rolling window ending today, not a calendar-month anchor",
+    "A centre's own centerDataVisibilityDays drives the centre floor — a rolling window ending today, not a calendar-month anchor",
     floor14 !== null &&
       floor14.getTime() === startOfUtcDay(NOW).getTime() - WINDOW_DAYS * 86_400_000,
     String(floor14),
@@ -154,7 +174,7 @@ async function main() {
       slug: SLUG,
       name: "Visibility Check",
       organization: { create: { name: "Visibility Check" } },
-      settings: { create: { dataVisibilityDays: WINDOW_DAYS } },
+      settings: { create: { centerDataVisibilityDays: WINDOW_DAYS, teacherDataVisibilityDays: TEACHER_WINDOW_DAYS } },
     },
   });
 
@@ -287,10 +307,7 @@ async function main() {
     },
   });
 
-  const floor = visibilityWindowFloor(
-    { isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
-    NOW,
-  ) as Date;
+  const floor = visibilityWindowFloor({ isPlatformAdmin: false, settings: windows(WINDOW_DAYS) }, NOW) as Date;
 
   // Simulate a manipulated `?from=`/`?range=all` request reaching all the way
   // back — clamped exactly the way Sessions/Analytics/Expenses clamp it.
@@ -376,7 +393,7 @@ async function main() {
         user: { locale: "en" },
         role,
         isPlatformAdmin: extra.isPlatformAdmin ?? false,
-        settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" },
+        settings: windows(WINDOW_DAYS),
       },
       { now: NOW },
     );
@@ -443,7 +460,7 @@ async function main() {
     (await scopeFor("OWNER", { isPlatformAdmin: true }).sessions.findById(oldFixture.session.id)) !== null,
   );
   const integrity = scopedIgnoringVisibilityWindow(
-    { center: { id: center.id }, user: { locale: "en" }, role: "MANAGER", isPlatformAdmin: false, settings: { dataVisibilityDays: WINDOW_DAYS, timezone: "Africa/Cairo" } },
+    { center: { id: center.id }, user: { locale: "en" }, role: "MANAGER", isPlatformAdmin: false, settings: windows(WINDOW_DAYS) },
     "integrity",
     prisma,
   );
@@ -499,12 +516,9 @@ async function main() {
 
   await prisma.centerSettings.update({
     where: { centerId: center.id },
-    data: { dataVisibilityDays: 200 },
+    data: { centerDataVisibilityDays: 200 },
   });
-  const widenedFloor = visibilityWindowFloor(
-    { isPlatformAdmin: false, settings: { dataVisibilityDays: 200, timezone: "Africa/Cairo" } },
-    NOW,
-  ) as Date;
+  const widenedFloor = visibilityWindowFloor({ isPlatformAdmin: false, settings: windows(200) }, NOW) as Date;
   const widenedRange = clampRangeToVisibility({ start: OLD_SESSION_DATE, end: NOW }, widenedFloor);
   const revenueAfterWidening = await revenueTotals(prisma, center.id, {
     from: widenedRange.start,
@@ -514,6 +528,160 @@ async function main() {
     "Widening the window restores full visibility on the very next read, with zero backfill — nothing was ever lost",
     revenueAfterWidening.paymentCount === 4,
     JSON.stringify(revenueAfterWidening),
+  );
+
+  // ── 4. U6: two windows, each read on its own; caps; the teacher's own ───
+  //      portal preference                                                ─
+  console.log("\nU6 — the centre window, the teacher window and the teacher portal preference");
+
+  // Independent windows (decided 29 Oct): the teacher window neither caps nor is capped by the centre's.
+  const wideCentre = windows(200, TEACHER_WINDOW_DAYS);
+  const centreFloor200 = visibilityWindowFloor({ isPlatformAdmin: false, settings: wideCentre }, NOW) as Date;
+  const teacherFloor7 = teacherVisibilityWindowFloor({ isPlatformAdmin: false, settings: wideCentre }, NOW) as Date;
+  check(
+    "The teacher window reads teacherDataVisibilityDays, the centre window centerDataVisibilityDays",
+    centreFloor200.getTime() === startOfUtcDay(NOW).getTime() - 200 * 86_400_000 &&
+      teacherFloor7.getTime() === startOfUtcDay(NOW).getTime() - TEACHER_WINDOW_DAYS * 86_400_000,
+  );
+  const narrowCentre = windows(3, 30);
+  check(
+    "The windows are independent: a teacher window wider than the centre's is not narrowed to it",
+    (teacherVisibilityWindowFloor({ isPlatformAdmin: false, settings: narrowCentre }, NOW) as Date).getTime() <
+      (visibilityWindowFloor({ isPlatformAdmin: false, settings: narrowCentre }, NOW) as Date).getTime(),
+  );
+  check(
+    "A platform admin bypasses the teacher window too",
+    teacherVisibilityWindowFloor({ isPlatformAdmin: true, settings: wideCentre }, NOW) === null,
+  );
+
+  // Each read uses its window, by direct call: with the centre at 200 days and
+  // the teacher window at 7, the branch total reaches the old payments, the
+  // per-teacher breakdown and the teacher-filtered total do not.
+  const teacherRange = clampRangeToVisibility({ start: OLD_SESSION_DATE, end: NOW }, teacherFloor7);
+  const breakdown = await revenueByTeacher(prisma, center.id, { from: teacherRange.start, to: teacherRange.end });
+  const filtered = await revenueTotals(prisma, center.id, { from: teacherRange.start, to: teacherRange.end }, teacherUser.id);
+  check(
+    "Teacher window: the by-teacher breakdown and the teacher-filtered total count only the last 7 days (2 payments), while the centre window counts all 4",
+    breakdown.length === 1 && breakdown[0]?.paymentCount === 2 && filtered.paymentCount === 2 && revenueAfterWidening.paymentCount === 4,
+    JSON.stringify({ breakdown, filtered: filtered.paymentCount }),
+  );
+
+  const analyticsPage = readFileSync("app/[locale]/(center)/analytics/page.tsx", "utf8");
+  check(
+    "Static: Analytics clamps to the teacher window when a teacher is selected, the centre window otherwise",
+    /teacherSelected \? teacherVisibilityWindowFloor\(ctx, now\) : visibilityWindowFloor\(ctx, now\)/.test(analyticsPage),
+  );
+  check(
+    "Static: the Analytics by-teacher breakdown reads under the teacher window even on the unfiltered page",
+    /revenueByTeacher\(prisma, centerId, \{ from: breakdownFrom, to: breakdownTo \}\)/.test(analyticsPage) &&
+      /breakdownFrom, end: breakdownTo \} = clampRangeToVisibility\(\s*requested,\s*teacherVisibilityWindowFloor\(ctx, now\)/.test(analyticsPage),
+  );
+  check(
+    "Static: the roll-up applies each branch's own teacher window when a teacher is selected",
+    /teacherSelected\s*\?\s*teacherVisibilityWindowFloor\(\{ isPlatformAdmin: ctx\.isPlatformAdmin, settings \}, now\)/.test(analyticsPage),
+  );
+  check(
+    "Static: Sessions, Expenses and the audit unpaid list read under the centre window only",
+    ["app/[locale]/(center)/sessions/page.tsx", "app/[locale]/(center)/expenses/page.tsx", "app/[locale]/(center)/audit/page.tsx"].every((file) => {
+      const source = readFileSync(file, "utf8");
+      return /visibilityWindowFloor\(ctx/.test(source) && !/teacherVisibilityWindowFloor/.test(source);
+    }),
+  );
+  check(
+    "Static: the floor the scoped helpers inject is the centre window",
+    /return visibilityWindowFloor\(ctx, now\);/.test(readFileSync("lib/db/visibility.ts", "utf8").split("export function centreReadFloor")[1] ?? ""),
+  );
+  check(
+    "Static: no file reads the deprecated dataVisibilityDays except the branch-copy carry-over (backlog: drop it)",
+    listTs("app").concat(listTs("lib")).every((file) => {
+      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      const uses = source.match(/\bdataVisibilityDays\b/g)?.length ?? 0;
+      return uses === 0 || (file.endsWith("lib/db/branches.ts") && uses === 2);
+    }),
+  );
+
+  // Caps refused server-side — the schemas the actions parse with.
+  const general = (centre: string, teacher: string) =>
+    generalSettingsSchema.safeParse({
+      locale: "en",
+      defaultShareType: "PERCENTAGE",
+      shareValue: "15",
+      defaultLateThreshold: "10",
+      timezone: "Africa/Cairo",
+      centerDataVisibilityDays: centre,
+      teacherDataVisibilityDays: teacher,
+    });
+  const admin = (centre: string, teacher: string) =>
+    centerVisibilityWindowSchema.safeParse({ locale: "en", id: center.id, centerDataVisibilityDays: centre, teacherDataVisibilityDays: teacher });
+  check(
+    "Caps: Settings → General accepts 365/30 and refuses 366, 31 and 0 (server-side, not only the form's max)",
+    MAX_CENTER_VISIBILITY_DAYS === 365 &&
+      MAX_TEACHER_VISIBILITY_DAYS === 30 &&
+      general("365", "30").success &&
+      !general("366", "30").success &&
+      !general("365", "31").success &&
+      !general("0", "30").success &&
+      !general("365", "0").success,
+  );
+  check(
+    "Caps: the platform admin's override is held to the same caps",
+    admin("365", "30").success && !admin("366", "30").success && !admin("365", "31").success && !admin("1.5", "30").success,
+  );
+  check(
+    "Caps: a missing field means that field's default (365 / 30)",
+    general("", "").data?.centerDataVisibilityDays === 365 && general("", "").data?.teacherDataVisibilityDays === 30,
+  );
+
+  // The teacher portal: unlimited at 0, limited when set, never a centre window.
+  check(
+    "Teacher portal: 0 means all history (no floor)",
+    teacherHistoryFloor(0, "Africa/Cairo", NOW) === null,
+  );
+  check(
+    "Teacher portal: a set preference floors at that many days back from the branch's today",
+    (teacherHistoryFloor(10, "Africa/Cairo", NOW) as Date).getTime() === startOfUtcDay(NOW).getTime() - 10 * 86_400_000,
+  );
+  check(
+    "Teacher portal: the preference is the only input — the branch's windows do not change it",
+    teacherPortalHistoryFloor({ user: { teacherHistoryDays: 0 }, settings: windows(1, 1) }, NOW) === null,
+  );
+  const fresh = await prisma.user.findUniqueOrThrow({ where: { id: teacherUser.id } });
+  const allIds = await teacherStudentProfileIds(prisma, center.id, teacherUser.id, teacherPortalHistoryFloor({ user: fresh, settings: windows(1, 1) }, NOW));
+  const limitedIds = await teacherStudentProfileIds(
+    prisma,
+    center.id,
+    teacherUser.id,
+    teacherPortalHistoryFloor({ user: { teacherHistoryDays: 1 }, settings: windows(365, 30) }, NOW),
+  );
+  check(
+    "Teacher portal: a new account defaults to all history, and a 1-day preference hides a student last taught 5 days ago",
+    fresh.teacherHistoryDays === 0 && allIds.includes(student.id) && !limitedIds.includes(student.id),
+    JSON.stringify({ default: fresh.teacherHistoryDays, all: allIds.length, limited: limitedIds.length }),
+  );
+  check(
+    "Teacher portal: the preference accepts All or 1–3650 days and refuses anything else (server-side)",
+    MAX_TEACHER_HISTORY_DAYS === 3650 &&
+      teacherHistorySchema.safeParse({ locale: "en", historyMode: "all" }).data?.teacherHistoryDays === 0 &&
+      teacherHistorySchema.safeParse({ locale: "en", historyMode: "days", historyDays: "3650" }).data?.teacherHistoryDays === 3650 &&
+      !teacherHistorySchema.safeParse({ locale: "en", historyMode: "days", historyDays: "3651" }).success &&
+      !teacherHistorySchema.safeParse({ locale: "en", historyMode: "days", historyDays: "0" }).success &&
+      !teacherHistorySchema.safeParse({ locale: "en", historyMode: "days" }).success,
+  );
+  check(
+    "Static: no teacher-portal file applies a centre window",
+    listTs("app/[locale]/(teacher)").concat(listTs("app/[locale]/(print)/teacher")).every(
+      (file) => !/visibilityWindowFloor|centreReadFloor/.test(readFileSync(file, "utf8")),
+    ),
+  );
+
+  // Backfill: the migration copies today's window into both fields, clamped to each cap.
+  const migrationDir = readdirSync("prisma/migrations").find((name) => name.endsWith("_u6_split_visibility_windows"));
+  const migration = migrationDir ? readFileSync(join("prisma/migrations", migrationDir, "migration.sql"), "utf8") : "";
+  check(
+    "Backfill: the U6 migration sets each field from dataVisibilityDays, clamped to 1–365 and 1–30",
+    /"centerDataVisibilityDays"\s*=\s*LEAST\(GREATEST\("dataVisibilityDays", 1\), 365\)/.test(migration) &&
+      /"teacherDataVisibilityDays"\s*=\s*LEAST\(GREATEST\("dataVisibilityDays", 1\), 30\)/.test(migration) &&
+      !/DROP COLUMN/.test(migration),
   );
 }
 

@@ -13,6 +13,12 @@ import {
 } from "../card-layout.ts";
 import { CATALOG_NAME_MAX } from "../catalog.ts";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres } from "../money.ts";
+import {
+  DEFAULT_CENTER_VISIBILITY_DAYS,
+  DEFAULT_TEACHER_VISIBILITY_DAYS,
+  MAX_CENTER_VISIBILITY_DAYS,
+  MAX_TEACHER_VISIBILITY_DAYS,
+} from "../db/visibility.ts";
 import { extraRoomIdsField } from "./room-set.ts";
 import { dateOnlyField, withPeriodRule } from "./class-period.ts";
 
@@ -159,18 +165,19 @@ export const catalogSelectionToggleSchema = z.object({
 export const MAX_TIMEOUT_DAYS = 3650;
 export const MAX_LATE_THRESHOLD = 240;
 export const MAX_EDIT_DEADLINE_HOURS = 24 * 365;
-/** M19 — the data-visibility window (docs/01 §7); 1 is the floor, not 0, since a 0-day window is not a meaningful setting. */
-export const MAX_VISIBILITY_WINDOW_DAYS = 3650;
-
-const visibilityWindowDays = z
-  .string()
-  .trim()
-  .default("30")
-  .transform((value) => (value === "" ? 30 : Number(value)))
-  .refine(
-    (value) => Number.isInteger(value) && value >= 1 && value <= MAX_VISIBILITY_WINDOW_DAYS,
-    "invalidNumber",
-  );
+/**
+ * U6 — the two data-visibility windows (docs/01 §7), each 1 to its cap: 1 is
+ * the floor, not 0, since a 0-day window is not a meaningful setting. The cap
+ * is enforced here, server-side — the form's `max` is only a hint. A missing
+ * or blank field means the field's default.
+ */
+export const visibilityWindowField = (fallback: number, max: number) =>
+  z
+    .string()
+    .trim()
+    .default(String(fallback))
+    .transform((value) => (value === "" ? fallback : Number(value)))
+    .refine((value) => Number.isInteger(value) && value >= 1 && value <= max, "invalidNumber");
 
 export const generalSettingsSchema = z
   .object({
@@ -193,7 +200,8 @@ export const generalSettingsSchema = z
     // default — editable any time, the M7 behavior.
     teacherEditDeadlineEnabled: checkbox,
     teacherEditDeadlineHours: z.string().trim().optional(),
-    dataVisibilityDays: visibilityWindowDays,
+    centerDataVisibilityDays: visibilityWindowField(DEFAULT_CENTER_VISIBILITY_DAYS, MAX_CENTER_VISIBILITY_DAYS),
+    teacherDataVisibilityDays: visibilityWindowField(DEFAULT_TEACHER_VISIBILITY_DAYS, MAX_TEACHER_VISIBILITY_DAYS),
     // F5: whether this branch appears on the public Explore pages.
     publicListing: checkbox,
   })
@@ -267,7 +275,8 @@ export const generalSettingsSchema = z
         ? ("DENY" as const)
         : ("WARN" as const),
       teacherEditDeadlineHours,
-      dataVisibilityDays: value.dataVisibilityDays,
+      centerDataVisibilityDays: value.centerDataVisibilityDays,
+      teacherDataVisibilityDays: value.teacherDataVisibilityDays,
       publicListing: value.publicListing,
     };
   });

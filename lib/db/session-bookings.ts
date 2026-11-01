@@ -12,7 +12,7 @@ import type {
 import { bookingSeatError, bookingSeatStatus, enrollmentCap, type SeatStatus } from "../capacity.ts";
 import { centreTimeZone, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
 import { writeAuditRow } from "./audit-row.ts";
-import { ACCESSIBLE_LIFECYCLE_STATES } from "./platform.ts";
+import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { ensureStudentProfile, isBlockedFromClass, lockClassRow, lockSelfService } from "./reservations.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
 import {
@@ -105,7 +105,7 @@ function loadSession(db: Db, centerId: string, sessionId: string, accessibleOnly
   return db.session.findFirst({
     where: scopedWhere(centerId, {
       id: sessionId,
-      ...(accessibleOnly ? { center: { lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] } } } : {}),
+      ...(accessibleOnly ? { center: ACCESSIBLE_CENTER } : {}),
     }),
     select: SESSION_FOR_BOOKING,
   });
@@ -614,19 +614,19 @@ export async function upcomingBookableSessions(
   }));
 }
 
-/** This student's own bookings on the given sessions (status by session id). */
+/** This student's own bookings on the given sessions (id and status by session id). */
 export async function studentBookingsBySession(
   db: Db,
   centerId: string,
   studentUserId: string,
   sessionIds: string[],
-): Promise<Map<string, SessionBookingStatus>> {
+): Promise<Map<string, { id: string; status: SessionBookingStatus }>> {
   if (sessionIds.length === 0) return new Map();
   const rows = await db.sessionBooking.findMany({
     where: scopedWhere(centerId, { studentId: studentUserId, sessionId: { in: sessionIds } }),
-    select: { sessionId: true, status: true },
+    select: { id: true, sessionId: true, status: true },
   });
-  return new Map(rows.map((row) => [row.sessionId, row.status]));
+  return new Map(rows.map((row) => [row.sessionId, { id: row.id, status: row.status }]));
 }
 
 /** What a student-facing booking row reads as, given the clock. */
