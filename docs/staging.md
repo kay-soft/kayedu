@@ -77,6 +77,8 @@ npm run e2e -- e2e/parent.spec.ts:38 --project=en-1280                     # one
 npm run e2e -- e2e/navigation.spec.ts -g "owner: lands home" --project=en-1280
 ```
 
+**The expected teacher nav (one list).** `scripts/lib/expected-nav.ts` (`EXPECTED_TEACHER_NAV`) is the single hand-written oracle for the teacher sidebar. `seed:verify`, `check:permissions` and `e2e/navigation.spec.ts` (both teacher accounts) all import it, so they cannot drift apart. It is deliberately not derived from `TEACHER_NAV`: **a change to the teacher nav must update that file**, and all three then pass or fail together. The other roles' lists are still written out in `seed-verify.ts`, `permissions-check.ts` and `navigation.spec.ts`.
+
 Projects are `en-1280`, `ar-1280`, `en-375`, `ar-375` (`setup` runs first on its own — its sessions are reused when still valid). Start with one project; widen only to confirm a fix. The account-creating journeys (`signUpProjectOnly`) run in `en-1280` only — sign-up is limited to 10 an hour per IP — so they skip in the other three. Each `npm run e2e` starts a fresh dev server (compile cold), so the first test to reach a route can be slow; a one-off timeout on a cold route is worth one re-run alone before it is treated as a bug.
 
 **What `check:all` prints (G2).**
