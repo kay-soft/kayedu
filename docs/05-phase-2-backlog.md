@@ -50,9 +50,11 @@
 
 ---
 
-## 5. Learning content: materials, homework, exams, question bank, grades, progress, teacher notes
+## 5. Learning content: materials, question bank, richer assessments, grades, progress, teacher notes
 
-**What it is.** The LMS half of an education platform — uploading materials, assigning and collecting homework, building and marking exams, a reusable question bank, gradebooks, per-student progress tracking, and private teacher notes on a student.
+> **Narrowed by the W-batch (3 Nov 2026, W-C1).** Teacher-built **multiple-choice exams and homework** — one correct option, text only, one attempt, auto-graded, in centre classes and PERSONAL workspaces — moved into `03-build-order.md` W2–W4 and W9 (`00-master-product-spec.md` D-W01…D-W11, D-W26), so they are no longer listed here. What stays deferred is everything else below. That includes **images in questions** (wait for Cloudinary, M20), **any other question type** (multi-select, free text, file answers, manual marking), **more than one attempt**, **assessments seen by centre staff or parents** (D-W11), a **gradebook** across assessments, and a **reusable question bank**.
+
+**What it is.** The LMS half of an education platform — uploading materials, a reusable question bank, question types beyond single-answer multiple choice (and their manual marking), gradebooks, per-student progress tracking, and private teacher notes on a student.
 
 **Why deferred.** This is a second product, not a feature. KayEdu Phase 1 is an **operations** system: who came, who paid, who gets what share. Every item here is content and pedagogy, needs its own storage/permission/ownership model (who owns a question a teacher wrote at a center they later leave?), and none of it is what a center pays for on day one.
 
@@ -97,6 +99,8 @@
 **Why deferred.** `Center.plan` was a free-text field with an editor and no behavior behind it; it **was removed entirely at M19** rather than left to imply a billing system that does not exist (`00-master-product-spec.md` §5 "Center lifecycle"). Module entitlements are explicitly rejected for Phase 1 — one product, configured, never forked per center (§8) — and a plan flag that switches features on and off is the first step toward that fork. Support tickets and announcements both need the messaging entity this app has nowhere: the Approvals screen's "contact" action was punted for exactly this reason (`03-build-order.md`, Approvals).
 
 **Depends on.** A real billing relationship with more than one paying customer (the `Organization` model at M11 is the entity that would carry it); and one messaging/notification substrate serving tickets, announcements and Approvals-contact together, rather than three one-off inboxes.
+
+**W-batch note (3 Nov 2026, W-C2 / W-C5).** Two things nearby are now in the build and are **not** this entry. (1) **Premium teachers** (`03-build-order.md` W6, D-W14): a platform admin sets an end date on a *teacher's* account, with no payment flow. It is not a centre plan and switches nothing on or off for a centre, so "module entitlements" for centres stay rejected. (2) **The in-app inbox** (W1, D-W12) is the notification substrate this entry depends on, and it carries system notices only. Support tickets, announcements and Approvals-contact stay here and would build on it.
 
 ---
 
