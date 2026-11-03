@@ -8,6 +8,7 @@ import {
   CalendarRange,
   ClipboardCheck,
   ConciergeBell,
+  FileQuestion,
   GraduationCap,
   HandCoins,
   LayoutDashboard,
@@ -44,6 +45,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hid
   settlements: HandCoins,
   audit: ScrollText,
   profile: UserRound,
+  assessments: FileQuestion,
 };
 
 export function ShellIcon({

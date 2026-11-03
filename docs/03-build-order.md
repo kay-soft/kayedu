@@ -806,16 +806,61 @@ Every Critical and High was re-confirmed by the lead with `file:line` evidence.
 **Gates (staging, 3 Nov, one at a time):** new **`check:notifications`** (registered in CI, so in `check:all`, and in the gate-fixtures registry — stem `notifications-check`; it needs no seeded fixture, so `staging.md` is unchanged): every producer writes one row per recipient and nobody unrelated gets one; a rolled-back approval, decline, booking approval or cancellation leaves no row, and every producer call passes the event's `tx` (static); dedupe; own rows only (list, open by id, mark all); the access re-check hides on a deactivated profile, a suspended and a deleted branch, deletes nothing, and restores; ids-only payloads, refused by the writer and by the CHECK; RLS on, zero policies; `EMAIL_ENABLED` off sends nothing and no cron exists — **passed**. `check:rls`, `check:approvals`, `check:isolation`, `check:gate-fixtures` — passed. `check:session-lifecycle` — passed on the re-run; the first run hit the known same-millisecond ordering flake (U8 note above), unrelated. `check:branches` — **one static failure, pre-existing and environmental, not W1**: "requirePlatformAdmin() is its first statement" regex-matches `{\n` in `app/[locale]/(admin)/admin/centers/branch-actions.ts`, untouched here; this Windows checkout (`core.autocrlf=true`) has CRLF endings, so it matches 0 of 5 actions — with LF endings all 5 match. Statics: `tsc`, `eslint`, `prisma validate`, `check:design`, `check:rtl`, `check:public`. **E2E (staging):** `navigation.spec` en-1280 and ar-375 — **71 passed** (the setup project, plus every role and the hub in both projects — 24 of the runs are the new bell tests). **No existing assertion was edited**; `navigation.spec` gains a per-role "the header's bell opens the notification inbox" test and a hub-bell test.
 **Docs:** 00 (D-W12 producers list), 01 ("Notifications layer"), 02 §18, 03 (this entry), 04 §5 App bar and §11.31, 05 (entries 36–38, entry 30 note), 06 (the inbox page), `deploy-vercel.md` (`EMAIL_ENABLED`).
 
-### W2 — Assessment model + builder (planned)
-**Build:** `Assessment` / `AssessmentQuestion` / `AssessmentOption`; `lib/assessments.ts` (pure: defaults, the default homework deadline, time-left, reveal moment, grading) and `lib/db/assessments.ts`; the teacher's **builder** for EXAM (class, optional session, window, duration, one sitting) and HOMEWORK (session, deadline defaulted per D-W03), questions with 2–5 options and one correct, points 1–100, shuffle and reveal toggles with the per-type defaults; DRAFT → PUBLISHED; the lock at the first attempt (D-W08 — enforced in the writer now, exercised in W3). Centre classes only; authority = the class's own teacher at the row's branch (D-W11).
-**DB:** yes — the three tables, CHECKs and the one-correct partial unique index.
-**Done when:** a teacher builds and publishes an exam and a homework at either of two branches; no centre role reaches the builder or its actions by direct call; every default matches D-W02–D-W06.
-**Gates:** new **`check:assessments`** (shape invariants, defaults, the deadline rule incl. no next session, one correct option, points range, publish, authority at the row's branch, no `(center)` import); `check:teacher-portal`, `check:isolation`, `check:design`, `check:rtl`.
-**Docs:** 01, 02 §18, 04 §11.33, this entry.
+### W2 — Assessment model + builder (delivered 4 Nov 2026)
+**Build:**
+- **Data:** the three tables (`01-data-model.md` "Assessments layer").
+- **`lib/assessments.ts`** (pure): the per-type defaults; the D-W03 deadline; the save limits (`draftErrors`); "Ready to publish" (`readiness`); the shuffled order (`drawOrder`); the **student serializer** (`STUDENT_ASSESSMENT_SELECT` + `toStudentAssessment`, never `isCorrect`).
+- **`lib/db/assessments.ts`:** `resolveAssessmentTeacher`, create / save / delete (actor and owning teacher as separate parameters, audited), the owner's reads, `homeworkDeadlineFor`, and `isAssessmentLocked` (false until W3, asked by every question/option write).
+- **The new permission `assessment.manage.own`** (D-W30): in TEACHER's baseline (70 → 71 rows), with a hard ceiling for the other staff roles.
+- **Teacher portal:**
+  - the nav item **Exams & homework** (`assessments`);
+  - the list `/teacher/assessments`, filtered by type, class and branch;
+  - `/teacher/assessments/new` (choose a class, or the builder in create mode — nothing is written until the first save);
+  - the builder `/teacher/assessments/[id]`;
+  - the student-view preview `/teacher/assessments/[id]/preview`;
+  - **a new class page** `/teacher/classes/[id]`, with "New exam" and the class's assessments. The prompt assumed this page existed. Recommended option (a), taken because the reply gave no other instruction.
+  - The session page gains a **Homework** card with "Add homework", and a link to the class page.
+
+**Scope moved:** publishing (DRAFT → PUBLISHED) moved to **W3** with the student side, per the W2 prompt. W2 writes DRAFT only.
+
+**DB:** yes — migration `20261104090000_w2_assessments`.
+- The two enums and the three tables, plus RLS on with zero policies.
+- CHECKs: type fields, window order, duration 1–600, points 1–100, text lengths.
+- The partial unique index `AssessmentOption_one_correct_per_question`.
+- The idempotent backfill of the TEACHER `assessment.manage.own` row for every existing branch.
+
+Additive. It was generated with the read-only `migrate diff --from-url`, and produced no `DROP INDEX` to remove. Applied with `migrate deploy` to staging and dev.
+
+**Done when:**
+- A teacher creates an exam from the list or a class page, and a homework from a session page, with the D-W02–D-W06 defaults.
+- They edit questions and options within the limits, see the Ready checklist, preview the draft, and delete it.
+- These are refused by direct call: another teacher, another centre, centre staff (a stray grant row included), and a teacher whose grant the Owner switched off.
+- The student serializer never contains correctness.
+
+**Gates (staging, 4 Nov, one at a time):**
+- New **`check:assessments`** — **passed**. It is registered in CI (so in `check:all`) and in the gate-fixtures registry (stem `assessments-check`; it needs no seeded fixture, so `staging.md` is unchanged). It covers:
+  - the defaults per type, and a new question;
+  - the deadline with and without a next session, across a cancelled and a rescheduled next session, and in the session's frozen timezone;
+  - every save limit and the database CHECKs and index behind them;
+  - readiness;
+  - who can: the class's or session's teacher, a per-session cover, a one-time or cancelled session, another teacher, another branch, MANAGER, RECEPTIONIST, ACCOUNTANT (with a stray row) and OWNER, a denied experience, an inactive membership, and the Owner's switch-off and back on;
+  - the serializer and the student select never carrying `isCorrect`;
+  - the lock helper asked by every question/option writer (static), and nothing else writing the tables;
+  - audit rows with ids and counts only;
+  - RLS and zero policies, the backfill and the ceiling;
+  - no centre, student, parent or admin import.
+- `check:permissions`, `check:rls`, `check:isolation`, `check:teacher-portal`, `check:timezone`, `check:gate-fixtures` — passed.
+- `seed:verify` — passed ("settings + 71 grant rows").
+- Statics: `tsc`, `eslint`, `prisma validate`, `check:design`, `check:rtl`, `check:public`.
+- **E2E (staging):** `navigation.spec` and `teacher.spec`, en-1280 and ar-375 — **77 passed** (the setup project, plus every role and the hub in both projects; the teacher nav now includes Exams & homework). It ran on `PORT=3005 E2E_PORT=3005` because another local app held port 3000.
+
+**Old → new assertions (allowed by the prompt):** the baseline grows 70 → 71 rows (`check:permissions` and `seed:verify` derive the count from `DEFAULT_ROLE_GRANTS`, so no literal changed). `EXPECTED_TEACHER_NAV` gains `assessments`; it is shared by `seed:verify`, `check:permissions` and `navigation.spec`. No other assertion was edited.
+
+**Docs:** 00 (D-W30, W-C10, OD-18), 01 ("Assessments layer"), 02 §6, §11 and §18, 03 (this entry and W3), 04 §11.33–§11.34, 06 (the five new pages), and CLAUDE.md rules 6 and 7.
 
 ### W3 — Student taking + calendar + notices (planned)
-**Build:** `AssessmentAttempt` / `AssessmentAnswer`; start (eligibility at start, D-W07; order drawn once, D-W05), autosave, submit, one-sitting close, server time (D-W02, D-W09), lazy finalisation (D-W10); the student's assessment list, taking screen and post-submit view (score per showScore; correct answers only after close, D-W06); assessments on the **student** calendar (not the parent's — D-W11); the `ASSESSMENT_PUBLISHED` notice and computed "due soon" notices (W1).
-**DB:** yes — the two tables.
+**Build:** **publish** (DRAFT → PUBLISHED, moved here from W2: refused unless `readiness` is all done; a confirmation states who is notified) and `Assessment.lockedAt`; `AssessmentAttempt` / `AssessmentAnswer`; `isAssessmentLocked` given its body (any attempt exists); start (eligibility at start, D-W07; order drawn once, D-W05), autosave, submit, one-sitting close, server time (D-W02, D-W09), lazy finalisation (D-W10); the student's assessment list, taking screen and post-submit view (score per showScore; correct answers only after close, D-W06); assessments on the **student** calendar (not the parent's — D-W11); the `ASSESSMENT_PUBLISHED` notice and computed "due soon" notices (W1).
+**DB:** yes — the two tables and `lockedAt`. **Blocked by OD-18** (a homework cascades with a pristine session the engine deletes).
 **Done when:** no response a student receives before reveal contains a correct option or per-answer correctness (by direct call and by a static sweep); a past-due unsubmitted attempt reads as submitted, graded once under two concurrent readers; a student who left the class cannot start; re-entry keeps the order and the timer.
 **Gates:** `check:assessments` (new sections: the reveal sweep, time from `startedAt`, lazy finalisation race, eligibility, one attempt, lock after first attempt, extension only later); `check:notifications`, `check:student-portal`, `check:parent` (nothing new reaches a parent), `check:isolation`, `check:design`, `check:rtl`.
 **Docs:** 00 §4.3 (calendar line), 02 §18, 04 §11.28, §11.34, this entry.

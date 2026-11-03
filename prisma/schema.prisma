@@ -457,6 +457,10 @@ model Center {
   pauses            BranchPause[]
   // W1 — notices about this branch (hidden when the reader no longer reaches it).
   notifications     Notification[]
+  // W2 — teachers' exams and homework, with their questions and options.
+  assessments         Assessment[]
+  assessmentQuestions AssessmentQuestion[]
+  assessmentOptions   AssessmentOption[]
 
   @@index([organizationId])
 }
@@ -562,6 +566,8 @@ model Membership {
   updatedAt        DateTime  @updatedAt
 
   branchGrants MembershipBranchGrant[]
+  // W2 — the exams and homework this TEACHER membership owns (D-W30).
+  assessments  Assessment[]
 
   @@unique([userId, centerId, role])
   @@index([centerId])
@@ -926,6 +932,8 @@ model ClassGroup {
   reservations Reservation[]
   // R3 — rooms combined with the primary `roomId` (each linked to it).
   extraRooms   ClassGroupRoom[]
+  // W2 — the class's exams and homework (D-W02, D-W03).
+  assessments  Assessment[]
 
   @@index([centerId])
   @@index([centerId, teacherId])
@@ -1211,6 +1219,8 @@ model Session {
   ratingSkips       SessionRatingSkip[]
   // F6 — students who booked this one session online without enrolling.
   bookings          SessionBooking[]
+  // W2 — homework set from this session, and exams linked to it (D-W02/D-W03).
+  assessments       Assessment[]
 
   // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
   // lib/db/class-sessions.ts): materializing a class's range is a
@@ -1941,4 +1951,103 @@ model Notification {
   @@unique([userId, dedupeKey])
   @@index([userId, readAt, createdAt])
   @@index([centerId])
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// ASSESSMENTS (W2, D-W01–D-W11, D-W30) — tenant tables, centerId-scoped
+// ─────────────────────────────────────────────────────────────
+
+enum AssessmentType {
+  EXAM
+  HOMEWORK
+}
+
+// W2 writes DRAFT only; PUBLISHED is W3's (D-W01).
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+// A teacher's multiple-choice exam (a class, a window, a duration) or homework
+// (a session, a deadline). Written only by lib/db/assessments.ts and authorised
+// by owning the row: an ACTIVE TEACHER membership at this branch that holds
+// `assessment.manage.own` (D-W30). Centre staff never read it (D-W11). Times
+// are UTC instants, shown and typed in the session's frozen timezone, else the
+// branch's. CHECKs in the migration: the type says which fields apply,
+// windowEnd > windowStart, durationMinutes 1–600, one sitting is EXAM-only.
+model Assessment {
+  id                  String           @id @default(uuid())
+  centerId            String
+  center              Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  classGroupId        String
+  classGroup          ClassGroup       @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  // Required for HOMEWORK, optional for EXAM. Cascade: a homework goes with
+  // its session if the R4 engine deletes a pristine one (OD-18).
+  sessionId           String?
+  session             Session?         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // The owning teacher — the authority. Separate from the actor columns below,
+  // so W7's on-behalf writes fit without reshaping anything (D-W18).
+  teacherMembershipId String
+  teacherMembership   Membership       @relation(fields: [teacherMembershipId], references: [id], onDelete: Cascade)
+  type                AssessmentType
+  status              AssessmentStatus @default(DRAFT)
+  title               String
+  instructions        String?
+  windowStart         DateTime?
+  windowEnd           DateTime?
+  deadline            DateTime?
+  durationMinutes     Int?
+  oneSitting          Boolean          @default(false)
+  shuffle             Boolean          @default(false)
+  showScore           Boolean          @default(false)
+  showCorrectAnswers  Boolean          @default(false)
+  createdByUserId     String
+  updatedByUserId     String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  publishedAt         DateTime?
+
+  questions AssessmentQuestion[]
+
+  @@index([centerId])
+  @@index([centerId, teacherMembershipId])
+  @@index([centerId, classGroupId])
+  @@index([centerId, sessionId])
+}
+
+// Text only in v1 (D-W04). Points 1–100 (a CHECK).
+model AssessmentQuestion {
+  id           String     @id @default(uuid())
+  centerId     String
+  center       Center     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  position     Int
+  text         String
+  points       Int        @default(1)
+
+  options AssessmentOption[]
+
+  @@index([centerId])
+  @@index([assessmentId, position])
+}
+
+// At most one correct option per question: a hand-written partial unique index
+// `AssessmentOption_one_correct_per_question … WHERE "isCorrect"`. Prisma
+// cannot express it, so delete its DROP INDEX from every generated diff
+// (CLAUDE.md rule 7). `isCorrect` never reaches a student before reveal — the
+// student shape is lib/assessments.ts's `toStudentAssessment` (D-W09).
+model AssessmentOption {
+  id         String             @id @default(uuid())
+  centerId   String
+  center     Center             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  questionId String
+  question   AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  position   Int
+  text       String
+  isCorrect  Boolean            @default(false)
+
+  @@index([centerId])
+  @@index([questionId, position])
 }

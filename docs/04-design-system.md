@@ -685,17 +685,36 @@ All strings live under `Family.*` (plus `Toasts.family*`, `ParentPortal.*`, `Aut
 ### 11.32 Role switcher (W-batch, planned W5 — D-W13)
 - One **experience switcher** in every shell's header, the `BranchSwitcher` recipe (§11.29): a trigger showing the current experience (role over place, e.g. "Teacher" over "All branches"), and a list grouped as **Portals** (Student, Teacher, Parent), **Assistant of <teacher>** rows, **Branches you work at** (each staff branch, Whole Management) and **Admin**. The last-used experience is first and marked current with a check **and** text, never colour alone. Rows are 44px. Below `sm` the list opens as a bottom sheet. Hidden for a person with one experience. It replaces neither the teacher's branch switcher nor the hub. Landing stays U7's (§11.29).
 
-### 11.33 Assessment builder (W-batch, planned W2 — D-W01–D-W06, D-W08)
-- **Teacher portal → Assessments** (list) and the builder page (not a dialog — it can be long). The list uses the shared list → stacked cards below `md`, with a **Type** badge (Exam / Homework, neutral), a **Status** badge (Draft neutral, Published `info`), the class, the window or deadline, and "n of m submitted".
-- **Builder sections** (§11.15 section recipe): *Details* (type as two choice tiles, title, class, session — required for Homework — and instructions), *Timing* (Exam: window start / end with the shared date control and `TimePicker`, duration — default 30 — and the **One sitting** switch with a one-line consequence; Homework: the deadline, pre-filled per D-W03 with a muted line saying how it was chosen, and an optional duration), *Settings* (Shuffle questions and options; Show score; Show correct answers after it closes — each a switch with its per-type default and a hint), *Questions*.
-- **A question card**: number, the question text (textarea), points (number, LTR, 1–100), and 2–5 option rows — a radio marks the one correct option, each row has a text field and a 44px remove button. "Add option" hides at 5, and remove is disabled at 2 with its reason. Cards reorder with up/down buttons (44px, mirrored in RTL), not drag-only. Total points sit in a sticky footer with **Save draft** and **Publish** (a confirmation states who is notified).
-- **Locked** (after the first attempt): every question control is read-only with a banner "Students have started — questions are locked. You can still extend the time." Only the end field stays editable, and it refuses an earlier value.
+### 11.33 Assessment builder (W-batch, W2 delivered — D-W01–D-W06, D-W08, D-W30)
+- **Teacher portal → Exams & homework** (`/teacher/assessments`, nav key `assessments`, gated on `assessment.manage.own`).
+  - A `PageHeader` with **New exam**, a filter row (Type, Class, and Branch under All branches, on the soft `UrlFilterForm`), and the list as stacked link cards at every width.
+  - Each card shows: the title (`dir="auto"`); the class; the branch under All branches; the window or deadline in its own timezone; the question count; and a **Type** badge (Exam / Homework, neutral) and a **Status** badge (Draft neutral, Published `info`), both with text. W3 adds "n of m submitted".
+  - **New exam** with no class opens a "choose the class" list first.
+  - A **class page** (`/teacher/classes/[id]`) has **New exam** and lists its assessments. A session page's **Homework** card has **Add homework** and lists that session's assessments; a one-time session's card says why it takes none.
+- **The builder is a page, not a dialog.** Below `lg` it is one column; from `lg`, an aside (Settings and the checklist, sticky) sits at the inline end.
+  - *Details:* title, and instructions (optional), both `dir="auto"`. The class, the session and the branch are the page description; they cannot be changed in the builder.
+  - *Timing:* the zone is named in the card's description.
+    - **Exam:** Opens and Closes, each the shared `DatePicker` plus `TimePicker`; the duration (LTR, default 30); and the **One sitting** switch with a one-line consequence.
+    - **Homework:** the deadline, pre-filled per D-W03, with a muted line saying how it was chosen; and an optional duration ("leave empty for no time limit").
+  - *Settings:* Shuffle questions and options; Show score; Show correct answers after it closes. Each is a switch with its per-type default and a one-line hint.
+  - *Questions:* see the question card below. "Add question" is replaced by a note at 200 questions.
+- **A question card:**
+  - its number, the question text (textarea, `dir="auto"`), and points (LTR, 1–100);
+  - 2–5 option rows. Each row has a 44px radio marking the one correct option, a text field (`dir="auto"`) and a 44px remove button. The correct row also reads "Correct answer" **in text**, never colour alone;
+  - "Add option" hides at 5; remove is disabled at 2, with its reason shown as text and in its label;
+  - up, down and delete as 44px icon buttons with accessible labels. Up and down are vertical arrows, so they need no mirroring.
+- **Errors** from the server's `draftErrors` sit beside the field, question or option they name.
+- **Ready to publish:** a checklist with a check or circle icon **and** text (plus a screen-reader "done / not yet"), computed live from the same pure `readiness` W3 will enforce. Publishing is W3's.
+- **The sticky save bar** spans the content width at the bottom of the form. It holds the total points, "Unsaved changes" / "Draft saved" / "No unsaved changes" (polite live region), **Preview** (edit only) and **Save draft**. With unsaved changes the browser asks before the tab closes or reloads. A first save creates the draft and lands on its edit page.
+- **Delete draft** is its own card below the form, behind a confirmation that says the questions go too.
+- **Locked** (W3, after the first attempt): every question control is read-only, with a banner "Students have started — questions are locked. You can still extend the time." Only the end field stays editable, and it refuses an earlier value.
 
 ### 11.34 Taking an assessment (W-batch, planned W3 — D-W02, D-W05–D-W10)
 - **Student → Assessments**: a list (stacked cards) with To do / Done tabs (the T4 URL tabs), each card showing type, class, branch and the deadline or window, plus a badge — Not started (`info`), In progress (`warning`), Submitted (`success`), Missed (`danger`, closed with no attempt).
 - **Start screen**: what, the end time, the duration, "One attempt", the One-sitting warning when set ("Leaving this page submits your exam"), and a 44px **Start**.
 - **Taking**: one question per screen at 375px, with question n of m, the options as 44px radio tiles (the F4 tile recipe) and Previous / Next. From `lg` a question navigator sits at the inline end (answered vs not, by fill **and** a check). A **timer** pinned in the top bar shows the server's end time counting down, `text-secondary` normally, `warning` under 5 minutes and `danger` under 1 minute, always with text. A saved/saving indicator ("Saved", "Saving…", "Not saved — retrying") never blocks input. **Submit** shows a confirmation listing unanswered questions.
 - **After submit**: the score and percentage if shown (D-W06), else "Submitted". Correct answers appear only after it closes, marked per option with an icon **and** text ("Your answer", "Correct answer") using `success` / `danger`.
+- **The teacher's preview (W2, delivered)** — `/teacher/assessments/[id]/preview` renders this screen's shape from the student serializer (`toStudentAssessment`, never a correct mark): the details, the times, total points, a timer box showing the duration with "Not running in preview", the One-sitting warning, a muted "shuffled" note (a fresh order each load when shuffle is on), every question in one column (max width 2xl) with 44px option tiles, and a disabled **Start**. Nothing is recorded.
 - **Calendar** (§11.28): an assessment entry is a row in the day list with a Homework / Exam text badge and the deadline or window. Its dot uses `info` — no new colour.
 
 ### 11.35 Results (W-batch, planned W4 — D-W11)

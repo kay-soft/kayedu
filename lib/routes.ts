@@ -82,6 +82,13 @@ export const ROUTES = {
   teacherStudents: "/teacher/students",
   teacherStudent: (id: string) => `/teacher/students/${id}`,
   teacherClasses: "/teacher/classes",
+  // W2: one class the teacher teaches — its exams and homework.
+  teacherClass: (id: string) => `/teacher/classes/${id}`,
+  // W2 (D-W30): the teacher's exams and homework, the builder and its preview.
+  teacherAssessments: "/teacher/assessments",
+  teacherAssessmentNew: "/teacher/assessments/new",
+  teacherAssessment: (id: string) => `/teacher/assessments/${id}`,
+  teacherAssessmentPreview: (id: string) => `/teacher/assessments/${id}/preview`,
   teacherApprovals: "/teacher/approvals",
   teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",

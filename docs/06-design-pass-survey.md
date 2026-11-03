@@ -232,9 +232,25 @@ Decline/Approve buttons unequal. **R10a:** equal-width pair (shared pattern with
 ### `app/[locale]/(teacher)/teacher/sessions/[id]/page.tsx` — **R10b**
 Teacher session detail. Marked R10b but not among the four centre detail pages this pass covered — not touched.
 **T7:** a "Booked — not arrived (n)" card appears under the roster when students booked this session online and have not arrived (name, code LTR, Booked badge, and for `reservation.manage.own` the same **Cancel booking** button as the centre page, pinned to the teacher's own classes); nothing else on the page changed.
+**W2:** a **Class** row in the session's context card links to the new class page (only for the class's own teacher), and a **Homework** card under the description lists this session's assessments with **Add homework** (docs/04 §11.33).
 
 ### `app/[locale]/(teacher)/teacher/students/[id]/page.tsx` — **R10b**
 Teacher view of a student. Marked R10b but not among the four centre detail pages this pass covered — not touched.
+
+### `app/[locale]/(teacher)/teacher/assessments/page.tsx` — **W2 (new)**
+Exams & homework: `PageHeader` with **New exam**, a filter row (Type, Class, and Branch under All branches — the soft `UrlFilterForm`), and the list as stacked link cards — title (`dir="auto"`), class, branch, window or deadline in its own timezone, question count, and neutral Type / Status badges with text (Published will be `info`). One column at 375px; 44px rows.
+
+### `app/[locale]/(teacher)/teacher/assessments/new/page.tsx` — **W2 (new)**
+"New exam" with no class: a list of the teacher's active classes (one link card each, the branch under All branches). With a class or a session: the builder in create mode — nothing is written until the first **Save draft**.
+
+### `app/[locale]/(teacher)/teacher/assessments/[id]/page.tsx` — **W2 (new)**
+The builder (docs/04 §11.33): Details, Timing (shared `DatePicker` + `TimePicker`, the zone named), stacked question cards (text, LTR points, 2–5 option rows with a 44px radio and a 44px remove, up/down/delete as 44px icon buttons with labels), and an aside with Settings switches and the **Ready to publish** checklist (icon **and** text). A sticky save bar (total points, saved / unsaved text, Preview, **Save draft**); a Delete draft card with a confirmation. One column below `lg`, aside beside from `lg`.
+
+### `app/[locale]/(teacher)/teacher/assessments/[id]/preview/page.tsx` — **W2 (new)**
+The draft as a student sees it, from the student serializer: title, instructions, times, total points, a timer box showing the duration (not running), the one-sitting warning, then each question with 44px option tiles. No correct marks; Start is disabled. Max width 2xl, one column.
+
+### `app/[locale]/(teacher)/teacher/classes/[id]/page.tsx` — **W2 (new)**
+One class the teacher teaches: `PageHeader` (the class name, the branch under All branches, an Inactive badge), its **Exams and homework** card with **New exam**, and a Schedule card (weekly slots, the period). One column below `xl`.
 
 ---
 

@@ -4,4 +4,4 @@
  * `check:permissions` and `seed:verify` fail until this list is updated too.
  * Shared so the two cannot drift apart (they did, at U9 — `profile`).
  */
-export const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "approvals", "settlements", "profile"];
+export const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "assessments", "approvals", "settlements", "profile"];

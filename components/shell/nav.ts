@@ -30,7 +30,8 @@ export type ShellIconName =
   | "refunds"
   | "settlements"
   | "audit"
-  | "profile";
+  | "profile"
+  | "assessments";
 
 export type ShellNavItem = {
   href: string;
@@ -95,6 +96,14 @@ export const TEACHER_NAV: NavDef[] = [
     labelKey: "classes",
     icon: "classes",
     permission: "changeRequest.create",
+  },
+  // W2 (D-W30): the teacher's own exams and homework — the page asserts
+  // `assessment.manage.own`, in TEACHER's baseline.
+  {
+    href: ROUTES.teacherAssessments,
+    labelKey: "assessments",
+    icon: "assessments",
+    permission: "assessment.manage.own",
   },
   {
     href: ROUTES.teacherApprovals,

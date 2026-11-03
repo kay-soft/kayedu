@@ -49,6 +49,7 @@
     "check:timezone": "node scripts/with-env.ts scripts/timezone-check.ts",
     "check:card-layout": "node scripts/with-env.ts scripts/card-layout-check.ts",
     "check:notifications": "node scripts/with-env.ts scripts/notifications-check.ts",
+    "check:assessments": "node scripts/with-env.ts scripts/assessments-check.ts",
     "check:design": "node scripts/design-check.ts",
     "check:account": "node scripts/account-check.ts",
     "check:gate-fixtures": "node scripts/gate-fixtures-check.ts",

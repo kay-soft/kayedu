@@ -19,6 +19,7 @@ export const GATE_FIXTURE_STEMS = [
   "admin-check",
   "analytics-check",
   "approvals-check",
+  "assessments-check",
   "branches-check",
   "card-layout-check",
   "catalog-check",
