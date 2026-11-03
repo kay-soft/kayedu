@@ -706,9 +706,16 @@ All strings live under `Family.*` (plus `Toasts.family*`, `ParentPortal.*`, `Aut
 - **Branch setting**: Settings → General gains the switch "Allow teacher assistants" (on), with a one-line hint.
 
 ### 11.37 PERSONAL workspaces (W-batch, planned W8 — D-W20–D-W26)
-- The UI word is **"workspace"** (never "branch"). The teacher portal gains **Workspaces** (a list with "n of 100 active" and **New workspace**). Inside one, the teacher uses the same class, session, roster, check-in and payment screens as a branch, with these differences: no cut field anywhere (a muted line "You keep 100% of every payment"), no settlements, and a read-only banner while premium is lapsed ("Premium ended — this workspace is read-only. Nothing has been deleted.") with every write control disabled and its reason.
-- **Add student by phone**: one phone field (`PhoneLookupField` styling, LTR) and the name fields. The result is "Invitation sent" or the new student — never another account's name. The student sees the invitation in their hub's inbox, with Accept / Decline at 44px.
+- The UI word is **"workspace"** (never "branch"). The teacher portal gains **Workspaces** (a list with "n of 100 active", Active / Archived tabs and **New workspace**). Inside one, the teacher uses the same class, session, roster, check-in and payment screens as a branch, with these differences: no cut field anywhere (a muted line "You keep 100% of every payment"), no settlements, and a read-only banner while premium is lapsed ("Premium ended — this workspace is read-only. Nothing has been deleted.") with every write control disabled and its reason.
+- **Add student by phone** (D-W27): one phone field (`PhoneLookupField` styling, LTR) and the name fields. The result is **always the same**: "Student added" and the new student's page. There is no message, delay or badge that differs when an account exists, and never another account's name. The student page and the roster show a neutral **"Not linked"** badge until the invitation is accepted, then **"Linked"** (text, never colour alone). The student sees the invitation in their hub's inbox, with Accept / Decline at 44px.
+- **Archive** (D-W28): on the workspace's settings, **Archive workspace** through `ConfirmAction`. The dialog states the consequence: read-only, future sessions with nothing recorded are removed, sessions with records are cancelled, history and payments stay, and it frees a slot. An archived workspace is listed under an **Archived** tab, with a read-only banner and **Unarchive** (disabled with its reason at 100 active). There is no pause control.
 - A workspace's classes appear in the student's schedule and calendar like any branch's, named by the workspace; they never appear in Explore or Discover.
+
+### 11.38 Earnings (W-batch, planned W8 — D-W29)
+- **Teacher → Earnings** (`/teacher/earnings`, nav item *Earnings*). It has the shared `DateFilter` (§11.7) in the filter bar, and under All branches the Branch filter (§11.29), which lists workspaces too, each labelled "Workspace".
+- **Summary**: stat tiles with no accent colour (§14.4) for Teacher share collected, Sessions, Attendance (Present + Late) and Late, plus the period line and "Showing your last n days" when `teacherHistoryDays` limits it.
+- **Breakdown**: one card per branch or workspace with its own totals, then its classes as rows (stacked cards below `md`, a table from `md` with tabular numbers): class (subject · grade), sessions, attendance, late, teacher share. Money goes through `lib/format.ts`. A workspace card adds the muted line "You keep 100%". One-time sessions group under "One-time sessions".
+- An assistant without the Full preset never sees the nav item. Empty period → `EmptyState`.
 
 ## 14. The professional pass (DES)
 
