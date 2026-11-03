@@ -3731,5 +3731,33 @@
     "classesEmpty": "You have no active classes yet.",
     "classesEmptyHint": "Once a branch adds you to a class, it appears here.",
     "classActive": "Active"
+  },
+  "Notifications": {
+    "title": "Notifications",
+    "description": "Updates about your requests and your sessions.",
+    "bell": "Notifications",
+    "bellUnread": "Notifications, {count} unread",
+    "capped": "{max}+",
+    "loading": "Loading…",
+    "loadFailed": "Couldn't load your notifications.",
+    "retry": "Try again",
+    "seeAll": "See all notifications",
+    "markAllRead": "Mark all as read",
+    "markedAllRead": "All notifications marked as read.",
+    "markAllFailed": "Couldn't mark your notifications as read. Sign in and try again.",
+    "unread": "Unread",
+    "fallback": "—",
+    "empty": {
+      "title": "No notifications yet",
+      "description": "When a branch answers one of your requests or changes one of your sessions, you'll see it here."
+    },
+    "kinds": {
+      "ENROLLMENT_APPROVED": "{branch} approved your request to join {className}.",
+      "ENROLLMENT_DECLINED": "{branch} declined your request to join {className}.",
+      "BOOKING_APPROVED": "{branch} approved your booking for {className} on {date}, {time}.",
+      "BOOKING_DECLINED": "{branch} declined your booking for {className} on {date}, {time}.",
+      "SESSION_CANCELLED": "{className} at {branch} on {date}, {time} was cancelled.",
+      "SESSION_RESCHEDULED": "{className} at {branch} moved from {oldDate}, {oldTime} to {newDate}, {newTime}."
+    }
   }
 }

@@ -12,6 +12,7 @@ import {
   type RollupOption,
 } from "@/components/shell/branch-switcher";
 import { NavItem } from "@/components/shell/nav-item";
+import { NotificationBell } from "@/components/shell/notification-bell";
 import { RollupNavItem } from "@/components/shell/rollup-nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
@@ -63,6 +64,8 @@ export type AppShellProps = {
   disabledHrefs?: string[];
   /** Read server-side from the cookie, so the first paint is already correct. */
   defaultCollapsed: boolean;
+  /** W1: the bell's count — server-rendered on every navigation, never polled. */
+  unreadNotifications: number;
   children: ReactNode;
 };
 
@@ -241,6 +244,7 @@ export function AppShell({
   scope,
   disabledHrefs,
   defaultCollapsed,
+  unreadNotifications,
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -428,6 +432,7 @@ export function AppShell({
 
             <div className="content-edge-end ms-auto flex items-center gap-2">
               <LocaleToggle />
+              <NotificationBell unread={unreadNotifications} from={experience} />
               <UserMenu user={user} experience={experience} />
             </div>
           </div>

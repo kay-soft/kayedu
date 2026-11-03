@@ -14,6 +14,8 @@ export const ROUTES = {
   accountPending: "/account-pending",
   /** Account settings (F2): every signed-in person, inside the shell they came from. */
   account: "/account",
+  /** The notification inbox (W1): every signed-in person, inside the shell they came from. */
+  notifications: "/notifications",
   /** Where Supabase's confirmation link lands (SEC-66). */
   authConfirm: "/auth/confirm",
   selectCenter: "/select-center",
@@ -143,6 +145,11 @@ export type AccountOrigin = ShellExperience | typeof ACCOUNT_HUB_HINT;
  */
 export function accountPath(experience: AccountOrigin): string {
   return `${ROUTES.account}?from=${experience}`;
+}
+
+/** The notification inbox, asked for from inside `experience` (W1) — the same `?from=` hint as Account settings. */
+export function notificationsPath(experience: AccountOrigin): string {
+  return `${ROUTES.notifications}?from=${experience}`;
 }
 
 export function homePathForRole(role: TenantRole): string {

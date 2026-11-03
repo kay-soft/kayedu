@@ -12,6 +12,7 @@ import type {
 import { bookingSeatError, bookingSeatStatus, enrollmentCap, type SeatStatus } from "../capacity.ts";
 import { centreTimeZone, earliestTodayAnywhere, todayInTimezone } from "../scheduling.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { notifyBookingResolved } from "./notifications.ts";
 import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { ensureStudentProfile, isBlockedFromClass, lockClassRow, lockSelfService } from "./reservations.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
@@ -392,6 +393,8 @@ export async function confirmBooking(
     before: { status: PENDING },
     after: { status: CONFIRMED, sessionId: booking.sessionId, ...(options.via ? { via: options.via } : {}) },
   });
+  // W1: the student's notice commits with the approval (D-W12).
+  await notifyBookingResolved(tx, booking, "approved");
   return { ok: true, booking: await tx.sessionBooking.findUniqueOrThrow({ where: { id: booking.id } }) };
 }
 
@@ -422,6 +425,7 @@ export async function rejectBooking(
     before: { status: PENDING },
     after: { status: "REJECTED", sessionId: booking.sessionId, ...(options.via ? { via: options.via } : {}) },
   });
+  await notifyBookingResolved(tx, booking, "declined");
   return { ok: true, booking: await tx.sessionBooking.findUniqueOrThrow({ where: { id: booking.id } }) };
 }
 

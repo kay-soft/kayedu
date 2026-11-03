@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { PLATFORM_BRAND, shellUser, type ShellFrame } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireParentUser } from "@/lib/auth/tenant";
+import { unreadNotificationCount } from "@/lib/notifications/reach";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 
 /**
@@ -15,9 +16,11 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  */
 export async function parentShell(): Promise<ShellFrame> {
   const session = await requireParentUser();
-  const defaultCollapsed = await cookies().then(
-    (store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1",
-  );
+  const [defaultCollapsed, unreadNotifications] = await Promise.all([
+    cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
+    // W1: the bell's count (parents are not notified in v1 — backlog).
+    unreadNotificationCount(session.user.id),
+  ]);
 
   return {
     props: {
@@ -26,6 +29,7 @@ export async function parentShell(): Promise<ShellFrame> {
       brand: PLATFORM_BRAND,
       user: shellUser(session.user, "PARENT"),
       defaultCollapsed,
+      unreadNotifications,
     },
   };
 }

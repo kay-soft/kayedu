@@ -222,6 +222,17 @@ enum AccountClaimStatus {
   REJECTED
 }
 
+// W1 (D-W12): what an in-app notice is about. Each kind declares, in
+// lib/notifications/kinds.ts, its text keys, its deep link and its payload ids.
+enum NotificationKind {
+  ENROLLMENT_APPROVED
+  ENROLLMENT_DECLINED
+  BOOKING_APPROVED
+  BOOKING_DECLINED
+  SESSION_CANCELLED
+  SESSION_RESCHEDULED
+}
+
 // ─────────────────────────────────────────────────────────────
 // IDENTITY (global — no centerId)
 // ─────────────────────────────────────────────────────────────
@@ -305,6 +316,7 @@ model User {
   sessionRatingSkips   SessionRatingSkip[] @relation("SessionRatingSkipStudent")
   // SEC-2a (D-01) — sign-ups claiming this staff-created person.
   accountClaims        AccountClaim[]      @relation("AccountClaimTarget")
+  notifications        Notification[]
 }
 
 /**
@@ -443,6 +455,8 @@ model Center {
   gradePromotions   GradePromotionBatch[]
   // U5 — the platform admin's pauses of this branch.
   pauses            BranchPause[]
+  // W1 — notices about this branch (hidden when the reader no longer reaches it).
+  notifications     Notification[]
 
   @@index([organizationId])
 }
@@ -1899,4 +1913,32 @@ model AuditLog {
   @@index([entityType, entityId])
   // SYS: the audit screen reads a centre's newest rows.
   @@index([centerId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// NOTIFICATIONS (W1, D-W12) — per person, not a tenant table
+// ─────────────────────────────────────────────────────────────
+
+// One notice in a person's in-app inbox. Written in the transaction of the
+// event that causes it (lib/db/notifications.ts), read only by `userId` = the
+// signed-in person. `payload` holds ids only (D-20) — the text is rendered
+// from next-intl at read time, names loaded then. `centerId` is the branch the
+// notice concerns: a notice whose branch the reader no longer reaches is
+// hidden, never deleted. `dedupeKey` makes a producer that fires twice write
+// one row. No retention in v1 (backlog).
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      NotificationKind
+  centerId  String?
+  center    Center?          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  payload   Json
+  dedupeKey String
+  createdAt DateTime         @default(now())
+  readAt    DateTime?
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@index([centerId])
 }

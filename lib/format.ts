@@ -47,6 +47,34 @@ export function formatDay(value: Date, locale: string): string {
   }).format(value);
 }
 
+const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["minute", 60],
+  ["hour", 60 * 60],
+  ["day", 24 * 60 * 60],
+];
+
+/**
+ * How long ago something happened, for the notification inbox (W1): "just
+ * now", "5 minutes ago", "3 hours ago", "2 days ago" — and from a week on the
+ * plain date, which no longer reads better as a count. Arabic-Indic digits in
+ * Arabic, like every number here.
+ */
+export function formatRelativeTime(value: Date, now: Date, locale: string): string {
+  const seconds = Math.max(0, Math.round((now.getTime() - value.getTime()) / 1000));
+  if (seconds >= 7 * 24 * 60 * 60) return formatDate(value, locale);
+  const format = new Intl.RelativeTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", { numeric: "auto" });
+  if (seconds < 60) return format.format(0, "second");
+  let unit: Intl.RelativeTimeFormatUnit = "minute";
+  let size = 60;
+  for (const [stepUnit, stepSize] of RELATIVE_STEPS) {
+    if (seconds >= stepSize) {
+      unit = stepUnit;
+      size = stepSize;
+    }
+  }
+  return format.format(-Math.floor(seconds / size), unit);
+}
+
 /** A class period or a term: "9 Oct 2026 – 1 Apr 2027", day markers in UTC. */
 export function formatDayRange(start: Date, end: Date, locale: string): string {
   const format = new Intl.DateTimeFormat(NUMBER_LOCALE[locale] ?? "en-US", {

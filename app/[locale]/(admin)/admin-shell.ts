@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { PLATFORM_BRAND, shellUser, type ShellFrame } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
+import { unreadNotificationCount } from "@/lib/notifications/reach";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 
 /**
@@ -16,6 +17,9 @@ export async function adminShell(): Promise<ShellFrame> {
     cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
   ]);
 
+  // W1: the bell's count — the admin's own notices (none are produced for them in v1).
+  const unreadNotifications = await unreadNotificationCount(user.id);
+
   return {
     props: {
       experience: "admin",
@@ -23,6 +27,7 @@ export async function adminShell(): Promise<ShellFrame> {
       brand: PLATFORM_BRAND,
       user: shellUser(user, "PLATFORM_ADMIN"),
       defaultCollapsed,
+      unreadNotifications,
     },
   };
 }

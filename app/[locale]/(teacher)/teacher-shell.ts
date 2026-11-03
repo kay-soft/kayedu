@@ -11,6 +11,7 @@ import { teacherNavAcross, withPendingCount } from "@/components/shell/nav";
 import { getPendingTeacherApprovalCounts } from "@/lib/auth/approval-counts";
 import { ctxCan, requireTeacherUser } from "@/lib/auth/tenant";
 import { getTeacherScope } from "@/lib/auth/teacher-scope";
+import { unreadNotificationCount } from "@/lib/notifications/reach";
 import { ROUTES } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 
@@ -31,9 +32,11 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  */
 export async function teacherShell(): Promise<ShellFrame> {
   const session = await requireTeacherUser();
-  const defaultCollapsed = await cookies().then(
-    (store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1",
-  );
+  const [defaultCollapsed, unreadNotifications] = await Promise.all([
+    cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
+    // W1: the bell's count.
+    unreadNotificationCount(session.user.id),
+  ]);
 
   if (!session.hasCenter) {
     return {
@@ -43,6 +46,7 @@ export async function teacherShell(): Promise<ShellFrame> {
         brand: PLATFORM_BRAND,
         user: shellUser(session.user, "TEACHER"),
         defaultCollapsed,
+        unreadNotifications,
       },
     };
   }
@@ -68,6 +72,7 @@ export async function teacherShell(): Promise<ShellFrame> {
       user: shellUser(scope.user, "TEACHER"),
       scope: { ...shellScope(teacherRelations, [], scope.selected?.center.id ?? null), mode: "teacher" },
       defaultCollapsed,
+      unreadNotifications,
     },
   };
 }

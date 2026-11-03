@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 import { LocaleToggle } from "@/components/shared/locale-toggle";
 import { ProductMark } from "@/components/shared/product-mark";
+import { HubBell } from "@/components/shell/hub-bell";
 
 /**
  * The signed-out shell (docs/04-design-system.md §5 "Auth layout").
@@ -51,7 +52,11 @@ export default async function AuthLayout({
         <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
           {/* The mark is on the panel from lg; keep its space so the toggle stays put. */}
           <ProductMark className="lg:invisible" />
-          <LocaleToggle />
+          <div className="flex items-center gap-2">
+            <LocaleToggle />
+            {/* W1: the hub's bell — rendered only for a signed-in person. */}
+            <HubBell />
+          </div>
         </header>
 
         <main className="flex flex-1 items-start justify-center px-4 pb-10 sm:items-center sm:px-6">

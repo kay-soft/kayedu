@@ -9,6 +9,7 @@ import { ProfileCompletionForm } from "@/app/[locale]/(student)/student/profile/
 import { PLATFORM_BRAND, shellUser, type ShellFrame } from "@/components/shell/from-context";
 import { navForExperience } from "@/components/shell/nav";
 import { requireStudentUser } from "@/lib/auth/tenant";
+import { unreadNotificationCount } from "@/lib/notifications/reach";
 import { catalogLabel, catalogLabelWithSelection } from "@/lib/catalog";
 import { centerGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
@@ -97,10 +98,12 @@ async function pendingRatingViews(
  */
 export async function studentShell({ interruptions = true }: { interruptions?: boolean } = {}): Promise<ShellFrame> {
   const session = await requireStudentUser();
-  const defaultCollapsed = await cookies().then(
-    (store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1",
-  );
-  const locale = await getLocale();
+  const [defaultCollapsed, locale, unreadNotifications] = await Promise.all([
+    cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
+    getLocale(),
+    // W1: the bell's count.
+    unreadNotificationCount(session.user.id),
+  ]);
 
   // M18 (spec §4.3 item 4): a self-registered student's `StudentProfile` is
   // an auto-seeded stub (name/email/phone/altPhone only, from
@@ -134,6 +137,7 @@ export async function studentShell({ interruptions = true }: { interruptions?: b
         brand: PLATFORM_BRAND,
         user: shellUser(session.user, "STUDENT"),
         defaultCollapsed,
+        unreadNotifications,
       },
       replace: (
         <ProfileCompletionForm
@@ -172,6 +176,7 @@ export async function studentShell({ interruptions = true }: { interruptions?: b
       brand: PLATFORM_BRAND,
       user: shellUser(session.user, "STUDENT"),
       defaultCollapsed,
+      unreadNotifications,
     },
     lead: interruptions ? <RatingPopup sessions={pendingRatings} /> : null,
   };

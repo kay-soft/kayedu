@@ -28,6 +28,7 @@ export const GATE_FIXTURE_STEMS = [
   "config-check",
   "enrollment-check",
   "isolation-check",
+  "notifications-check",
   "one-off-sessions-check",
   "parent-check",
   "payment-methods-check",

@@ -310,6 +310,8 @@
 
 **Depends on.** A realtime transport (Supabase Realtime or server-sent events) that carries only "a request landed for branch X" — never the rows — and re-reads `pendingApprovalCounts` on receipt, subscribed per branch so `center_id` stays the sole isolation key; a decision on the load it adds against the connection budget.
 
+**W1 note (3 Nov 2026).** The notification bell's unread count (D-W12) is in the same position, for the same reason: server-rendered on every navigation, never polled. The same transport would serve it, carrying "a notice landed for user X" only.
+
 ---
 
 ## 31. A note on a staff-cancelled booking
@@ -359,6 +361,36 @@
 **Why deferred.** It has never been written: F8's personal profile photo had no storage destination, and U9 removed that feature (only teachers have photos, per branch, on `Membership.photoKey`). Dropping the column is not backward-compatible with a build that still selects it (any `User` `include` returns it), so it waits until no such build can be running.
 
 **Depends on.** The pilot (M20 → first centre live) on the U9 build; a backup taken before the drop (M20's tested restore). Remove, in the same change: the column and its schema comment in `prisma/schema.prisma`, and the mention in `docs/01-data-model.md` (User).
+
+---
+
+## 36. Notify parents
+
+**What it is.** A parent gets the notices their linked child gets — an enrolment or booking decision, a session cancelled or moved — in the parent portal's bell, one per child, naming the child.
+
+**Why deferred.** W1 decided parents are not notified in v1 (decision 10 of the W1 prompt). A parent's reach is through `FamilyLink` (a per-child view, M16/F3), not a relation of their own, so the read-time access re-check needs a second rule ("the child is still linked, and the child still reaches the branch"), and the text would name a child — a person's name rendered in a notice, which needs its own decision on what a parent may see after a link ends.
+
+**Depends on.** A `PARENT`-audience rule in `lib/notifications/kinds.ts` and `visibleWhere` that re-checks the active `FamilyLink` at read time; fan-out at the producer (one row per linked parent, in the event's transaction); a decision on whether a revoked link hides the parent's past notices.
+
+---
+
+## 37. Prune old notifications
+
+**What it is.** A retention rule for `Notification` rows — for example, read notices older than 90 days removed.
+
+**Why deferred.** W1 keeps every notice (decision 11 of the W1 prompt): volumes are small at pilot scale, the inbox is paged, and a deletion needs a scheduled job, which the product does not run anywhere (the R4 / D-W10 / D-W12 rule — no cron).
+
+**Depends on.** A decision on the retention period and whether unread notices are kept longer; a place to run it without a cron — lazily on the owner's own inbox read (delete that person's expired rows, D-W10's shape) is the likely answer; the `(userId, readAt, createdAt)` index already serves it.
+
+---
+
+## 38. A notice when "End pause now" restores a session
+
+**What it is.** When a platform admin ends a branch pause early and a session the pause cancelled is restored to SCHEDULED (U5), the students who were told it was cancelled are told it is back on.
+
+**Why deferred.** W1's producers are the four events the prompt named; a restore is a fifth. Until then a student who got "cancelled" sees the session reappear on their schedule with no notice, and the old "cancelled" notice stays in their inbox (it is history, not a status).
+
+**Depends on.** A `SESSION_RESTORED` kind and a producer inside `endBranchPause`'s per-session write; a decision on whether restoring also notifies bookers (bookings are not restored — U5).
 
 ---
 

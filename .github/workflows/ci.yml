@@ -108,5 +108,6 @@ jobs:
       - run: npm run check:reception
       - run: npm run check:timezone
       - run: npm run check:card-layout
+      - run: npm run check:notifications
       - run: npm run check:security
       - run: npm run gates:users -- verify

@@ -80,6 +80,9 @@ Branch cards had hover but **no selected state** — the branch you are already 
 
 **F4 (new section):** Account → **Study details** (a `PageSection` between Profile and Family, only for a student account): one card with the education-system → grade picker, a muted note that a branch's record is never changed, and **Save**.
 
+### `app/[locale]/notifications/page.tsx`
+**W1 (new).** The notification inbox (D-W12; docs/04 §11.31), reached from the bell's **See all notifications** in every shell and the hub, rendered inside the shell it was opened from (`?from=`, as Account settings). `PageHeader` (title + description) with **Mark all as read** in the action slot while anything is unread; one `Card` of whole-row 44px notice buttons (kind icon tile, sentence, relative time; unread bold + brand dot + "Unread:" for screen readers); `Pagination` at 20 per page inside `ResultsRegion`; `EmptyState` (`info`) when there is nothing. Same rows at 375px and 1280px — they already stack.
+
 ---
 
 ## Center experience (route group `(center)`)

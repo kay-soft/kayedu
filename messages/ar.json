@@ -3731,5 +3731,33 @@
     "classesEmpty": "ليس لديك حصص نشطة بعد.",
     "classesEmptyHint": "عندما يضيفك فرع إلى حصة ستظهر هنا.",
     "classActive": "نشطة"
+  },
+  "Notifications": {
+    "title": "الإشعارات",
+    "description": "تحديثات طلباتك وحصصك.",
+    "bell": "الإشعارات",
+    "bellUnread": "الإشعارات، {count} غير مقروءة",
+    "capped": "{max}+",
+    "loading": "جارٍ التحميل…",
+    "loadFailed": "تعذّر تحميل إشعاراتك.",
+    "retry": "إعادة المحاولة",
+    "seeAll": "عرض كل الإشعارات",
+    "markAllRead": "تعليم الكل كمقروء",
+    "markedAllRead": "عُلِّمت كل الإشعارات كمقروءة.",
+    "markAllFailed": "تعذّر تعليم إشعاراتك كمقروءة. سجّل الدخول وحاول مرة أخرى.",
+    "unread": "غير مقروء",
+    "fallback": "—",
+    "empty": {
+      "title": "لا توجد إشعارات بعد",
+      "description": "عندما يرد فرع على أحد طلباتك أو يغيّر إحدى حصصك، ستجد ذلك هنا."
+    },
+    "kinds": {
+      "ENROLLMENT_APPROVED": "وافق {branch} على طلب انضمامك إلى {className}.",
+      "ENROLLMENT_DECLINED": "رفض {branch} طلب انضمامك إلى {className}.",
+      "BOOKING_APPROVED": "وافق {branch} على حجزك في {className} يوم {date}، {time}.",
+      "BOOKING_DECLINED": "رفض {branch} حجزك في {className} يوم {date}، {time}.",
+      "SESSION_CANCELLED": "أُلغيت حصة {className} في {branch} يوم {date}، {time}.",
+      "SESSION_RESCHEDULED": "نُقلت حصة {className} في {branch} من {oldDate}، {oldTime} إلى {newDate}، {newTime}."
+    }
   }
 }

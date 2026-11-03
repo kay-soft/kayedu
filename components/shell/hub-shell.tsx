@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 
 import { LocaleToggle } from "@/components/shared/locale-toggle";
 import type { ShellUser } from "@/components/shell/app-shell";
+import { NotificationBell } from "@/components/shell/notification-bell";
 import { UserMenu } from "@/components/shell/user-menu";
 import { Link } from "@/lib/i18n/navigation";
 import { ACCOUNT_HUB_HINT, ROUTES } from "@/lib/routes";
@@ -12,9 +13,19 @@ import { ACCOUNT_HUB_HINT, ROUTES } from "@/lib/routes";
  * The neutral shell for pages opened from the branch hub (U1, docs/04 §5): the
  * app bar (platform name, language, user menu) and a back link to the hub — no
  * sidebar, no branch switcher, because no branch is active there. Used by
- * Account settings when it is opened from `/select-center`.
+ * Account settings and the notification inbox (W1) when opened from
+ * `/select-center`.
  */
-export async function HubShell({ user, children }: { user: ShellUser; children: ReactNode }) {
+export async function HubShell({
+  user,
+  unreadNotifications,
+  children,
+}: {
+  user: ShellUser;
+  /** W1: the bell's count, server-rendered (the hub has a bell too). */
+  unreadNotifications: number;
+  children: ReactNode;
+}) {
   const t = await getTranslations("Shell");
 
   return (
@@ -24,6 +35,7 @@ export async function HubShell({ user, children }: { user: ShellUser; children: 
           <span className="min-w-0 flex-1 truncate text-sm font-semibold">{t("productName")}</span>
           <div className="content-edge-end ms-auto flex items-center gap-2">
             <LocaleToggle />
+            <NotificationBell unread={unreadNotifications} from={ACCOUNT_HUB_HINT} />
             <UserMenu user={user} experience={ACCOUNT_HUB_HINT} />
           </div>
         </div>
