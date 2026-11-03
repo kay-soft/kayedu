@@ -12,6 +12,7 @@
  * under its summary row.
  */
 import { readFileSync } from "node:fs";
+import { readSource } from "./source.ts";
 
 /** A gate that fails faster than this died on startup; its first error line goes in the summary. */
 export const FAST_FAIL_MS = 5_000;
@@ -69,7 +70,7 @@ export function gateIsDatabaseBacked(name: string, packageJsonPath = "package.js
   const scripts = (JSON.parse(readFileSync(packageJsonPath, "utf8")) as { scripts: Record<string, string> }).scripts;
   const file = gateScriptFile(scripts[name]);
   // A gate this cannot classify is treated as database-backed: waiting for a database it does not use costs a second, skipping the wait costs a diagnosis.
-  return file === null ? true : isDatabaseBacked(readFileSync(file, "utf8"));
+  return file === null ? true : isDatabaseBacked(readSource(file));
 }
 
 const firstLine = (text: string) => text.split(/\r?\n/).find((line) => line.trim() !== "")?.trim() ?? "";

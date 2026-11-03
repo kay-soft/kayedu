@@ -47,7 +47,7 @@
  * Needs a reachable database and cleans up after itself.
  */
 import { gatePrisma } from "./lib/gate-db.ts";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type Role } from "@prisma/client";
 import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
@@ -78,6 +78,7 @@ import {
   revokeMembershipBranch,
   savePermissionGrants,
 } from "../lib/db/permissions.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -341,7 +342,7 @@ function checkBranchCreatePermission() {
   );
 
   // No centre screen or action exists to call (P1: the page gate is the authority).
-  const read = (...segments: string[]) => readFileSync(join(ROOT, ...segments), "utf8");
+  const read = (...segments: string[]) => readSource(join(ROOT, ...segments));
   const layout = read("app", "[locale]", "(center)", "settings", "layout.tsx").replace(/\/\/.*$/gm, "");
   check(
     "Settings → Branches is gone: no page, no actions, no sub-nav item (static)",
@@ -448,8 +449,8 @@ async function checkProvisioningBaseline() {
   );
 
   // (c) Static: every centre-creating path goes through the one function.
-  const platformSource = readFileSync(join(ROOT, "lib", "db", "platform.ts"), "utf8");
-  const seedSource = readFileSync(join(ROOT, "prisma", "seed.ts"), "utf8");
+  const platformSource = readSource(join(ROOT, "lib", "db", "platform.ts"));
+  const seedSource = readSource(join(ROOT, "prisma", "seed.ts"));
   check(
     "createCenterWithSettings calls provisionCenterBaseline (static)",
     /provisionCenterBaseline\(/.test(platformSource) && /from "\.\/provision\.ts"/.test(platformSource),

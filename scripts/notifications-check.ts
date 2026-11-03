@@ -29,7 +29,7 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
-import { readFileSync } from "node:fs";
+
 
 import type { NotificationKind, Prisma } from "@prisma/client";
 
@@ -53,6 +53,7 @@ import { confirmBooking, rejectBooking } from "../lib/db/session-bookings.ts";
 import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
 import { NOTIFICATION_KIND_LIST, isIdsOnlyPayload } from "../lib/notifications/kinds.ts";
 import { emailEnabled, queueNotificationEmails } from "../lib/notify/email.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -157,7 +158,7 @@ function checkStatic() {
   console.log("Static: producers, email, cron");
   const writers = ["lib/db/reservations.ts", "lib/db/session-bookings.ts", "lib/db/sessions.ts"];
   const calls = writers.flatMap((file) =>
-    [...readFileSync(`${ROOT}/${file}`, "utf8").matchAll(/\bnotify\w+\(\s*(\w+)\s*,/g)].map((match) => ({
+    [...readSource(`${ROOT}/${file}`).matchAll(/\bnotify\w+\(\s*(\w+)\s*,/g)].map((match) => ({
       file,
       arg: match[1],
     })),
@@ -173,9 +174,9 @@ function checkStatic() {
     JSON.stringify(calls.filter((call) => call.arg !== "tx")),
   );
 
-  const email = readFileSync(`${ROOT}/lib/notify/email.ts`, "utf8");
+  const email = readSource(`${ROOT}/lib/notify/email.ts`);
   check("lib/notify/email.ts imports nothing and calls no network — no sender exists yet", !/^import /m.test(email) && !/fetch\(/.test(email));
-  const vercel = JSON.parse(readFileSync(`${ROOT}/vercel.json`, "utf8")) as Record<string, unknown>;
+  const vercel = JSON.parse(readSource(`${ROOT}/vercel.json`)) as Record<string, unknown>;
   check("No cron is configured (vercel.json has no `crons`)", !("crons" in vercel));
 
   const before = process.env.EMAIL_ENABLED;

@@ -8,7 +8,6 @@
  * same ones lib/db/scoped.ts is built on), creates two throwaway centers,
  * asserts the cross-center reads are denied, and cleans up after itself.
  */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { gatePrisma } from "./lib/gate-db.ts";
@@ -42,6 +41,7 @@ import {
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
 import { scopedWith } from "../lib/db/scoped.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -435,9 +435,9 @@ async function checkBranchTargetedAdds(centerAId: string, centerBId: string, own
   );
 
   // Static: the actions never trust the posted id.
-  const tenant = readFileSync(join(ROOT, "lib", "auth", "tenant.ts"), "utf8");
-  const staffActions = readFileSync(join(ROOT, "app", "[locale]", "(center)", "settings", "staff", "actions.ts"), "utf8");
-  const teacherActions = readFileSync(join(ROOT, "app", "[locale]", "(center)", "teachers", "actions.ts"), "utf8");
+  const tenant = readSource(join(ROOT, "lib", "auth", "tenant.ts"));
+  const staffActions = readSource(join(ROOT, "app", "[locale]", "(center)", "settings", "staff", "actions.ts"));
+  const teacherActions = readSource(join(ROOT, "app", "[locale]", "(center)", "teachers", "actions.ts"));
   check(
     "getTenantContextForBranch looks the id up among the actor's own relations and builds the context the usual way (static)",
     /export async function getTenantContextForBranch[\s\S]{0,600}getUserCenterRelations\(user\.id\)[\s\S]{0,300}buildContext\(user, relation, experience\)/.test(tenant),
@@ -459,8 +459,8 @@ async function checkBranchTargetedAdds(centerAId: string, centerBId: string, own
   // T6: "Whole Management" is refused above the data layer (the branch-scope
   // guard in every centre action and page); the scoping primitives never see
   // a roll-up, so `centerId` stays the sole isolation key.
-  const scopedSource = readFileSync(join(ROOT, "lib", "db", "scoped.ts"), "utf8");
-  const tenantScopeSource = readFileSync(join(ROOT, "lib", "db", "tenant-scope.ts"), "utf8");
+  const scopedSource = readSource(join(ROOT, "lib", "db", "scoped.ts"));
+  const tenantScopeSource = readSource(join(ROOT, "lib", "db", "tenant-scope.ts"));
   check(
     "The scoped data layer never reads rollupOrganizationId or the branch-scope guard (static)",
     !/rollupOrganizationId|branch-scope|requireBranchScope/.test(scopedSource) &&

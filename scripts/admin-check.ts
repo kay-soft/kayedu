@@ -55,9 +55,9 @@ import {
 } from "../lib/db/platform.ts";
 import { centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
 import { centerVisibilityWindowSchema, createCenterSchema } from "../lib/validation/admin.ts";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -338,7 +338,7 @@ async function main() {
   check(
     "The override action writes both windows and audits both, before and after",
     (() => {
-      const source = readFileSync(join(process.cwd(), "app/[locale]/(admin)/admin/centers/actions.ts"), "utf8");
+      const source = readSource(join(process.cwd(), "app/[locale]/(admin)/admin/centers/actions.ts"));
       return (
         /data: \{ centerDataVisibilityDays, teacherDataVisibilityDays \}/.test(source) &&
         /after: \{ centerDataVisibilityDays, teacherDataVisibilityDays \}/.test(source)

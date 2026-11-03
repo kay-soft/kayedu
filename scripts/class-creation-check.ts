@@ -19,7 +19,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { PrismaClient } from "@prisma/client";
@@ -46,6 +46,7 @@ import { matchesPicker } from "../lib/picker-search.ts";
 import { phoneMatchesQuery, phoneSearchDigits } from "../lib/phone.ts";
 import { fromTimeParts, minutesBetween, parseTimeInput, suggestEndTime, timeParts } from "../lib/time-input.ts";
 import { toAsciiDigits } from "../lib/digits.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -109,7 +110,7 @@ function listFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const read = (file: string) => readFileSync(file, "utf8");
+const read = (file: string) => readSource(file);
 const norm = (file: string) => file.replaceAll("\\", "/");
 
 function staticChecks() {

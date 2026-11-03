@@ -14,7 +14,7 @@
  * The behaviour against a database (wrong password, collisions, a
  * staff-created email, the flag off) is `check:security`'s F2 block.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { profileFromMetadata } from "../lib/auth/identity-link.ts";
@@ -26,6 +26,7 @@ import {
   emailChangeMode,
   productionAuthProblems,
 } from "../lib/auth/auth-config.ts";
+import { readSource } from "./lib/source.ts";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
 
@@ -41,7 +42,7 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 function read(path: string): string {
-  return readFileSync(join(ROOT, path), "utf8");
+  return readSource(join(ROOT, path));
 }
 
 /** Comments blanked — a doc comment may *name* the field; code may not read it. */

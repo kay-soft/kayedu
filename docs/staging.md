@@ -101,6 +101,15 @@ REFUSED: npm run check:payments writes to its database, and this run would write
   There is no override flag.
 ```
 
+### Line endings and the static gates
+
+Source is **LF** in the index and in every checkout: `.gitattributes` pins `* text=auto eol=lf` (images, fonts and PDFs are binary), which overrides `core.autocrlf=true` on Windows. Several static gates match source text with `\n`, `^`/`$` anchors or `[\s\S]` (for example `check:branches`' "`requirePlatformAdmin()` is its first statement"); on a CRLF checkout those stop matching silently. Two defences:
+
+1. `.gitattributes` — a fresh checkout is LF. An existing CRLF working tree is converted once (`sed -i 's/\r$//'` over the files `git ls-files --eol` reports as `w/crlf`); `git status` stays clean because the index was already LF.
+2. **`scripts/lib/source.ts`** — `readSource(path)` reads a file and normalises `\r\n` to `\n`. Every `*-check.ts` gate and `scripts/lib/nav-gates.ts` / `gate-runner.ts` read source through it; a gate never calls `readFileSync(path, "utf8")` on source directly. New gates must do the same.
+
+Gate queries that pick a row by position order totally: `createdAt`/`recordedAt`, then `id` as the tiebreaker, because rows written in the same millisecond tie (`check:session-lifecycle` asserts this order).
+
 ## 6b. Gate fixtures: the prefix list, cleanup, and `seed:verify`
 
 Every `check:*` gate creates its own centres (slug), users (email) and a few global catalog rows (`nameEn`) under a stem of the form `<gate>-check` (`branches-check-a`, `student-portal-check-pub-listed`, `people-check-f4-s1@kayedu.test`, `Branches-Check Math`). The **one registry** is `scripts/lib/gate-fixtures.ts` (`GATE_FIXTURE_STEMS`, plus `isolation-family-` for emails). The e2e suite creates no fixtures (it signs in as seeded accounts); the old "e2e fixture prefix" was in fact the `check:student-portal` gate's.

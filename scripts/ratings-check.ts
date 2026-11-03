@@ -37,7 +37,7 @@
  * Needs a reachable database and cleans up after itself.
  */
 import { gatePrisma } from "./lib/gate-db.ts";
-import { readFileSync } from "node:fs";
+
 import {
   attendedSessionsToRate,
   skipSessionRating,
@@ -45,6 +45,7 @@ import {
   teacherRatingAverage,
   teacherRatingAverages,
 } from "../lib/db/ratings.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -120,7 +121,7 @@ function daysAgo(n: number): Date {
 
 function checkExportedSurface() {
   console.log("Static sweep: lib/db/ratings.ts exports");
-  const source = readFileSync(`${ROOT}/lib/db/ratings.ts`, "utf8");
+  const source = readSource(`${ROOT}/lib/db/ratings.ts`);
   const exported = [...source.matchAll(/export (?:async )?function (\w+)/g)].map((m) => m[1]);
   const expected = [
     "attendedSessionsToRate",

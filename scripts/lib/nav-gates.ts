@@ -7,7 +7,8 @@
  * Static on purpose (CLAUDE.md rule 1 — no browser): the page file's
  * `requirePermission(ctx, "<action>")` call IS the gate.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readSource } from "./source.ts";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -38,7 +39,7 @@ export type PageGate = { found: false } | { found: true; permission: string | nu
 export function pageGateFor(experience: NavExperience, href: string): PageGate {
   const file = pageFileFor(experience, href);
   if (!file) return { found: false };
-  const source = readFileSync(file, "utf8");
+  const source = readSource(file);
   const match = source.match(/requirePermission\(\s*ctx\s*,\s*"([^"]+)"\s*\)/);
   return { found: true, permission: match ? match[1] : null, file };
 }

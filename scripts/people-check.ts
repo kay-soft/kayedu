@@ -20,7 +20,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { type BlockScope, type Role } from "@prisma/client";
 import {
@@ -74,6 +74,7 @@ import {
   studentCreateSchema,
   teacherCreateSchema,
 } from "../lib/validation/people.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -146,7 +147,7 @@ function checkSingleNormalizer(): void {
   const offenders: string[] = [];
   for (const file of files) {
     if (file === phoneTs || file === selfPath) continue;
-    const contents = readFileSync(file, "utf8");
+    const contents = readSource(file);
     if (normalizerDefinitionPattern.test(contents)) {
       offenders.push(`${relative(root, file)} (defines normalizePhone)`);
     }
@@ -167,7 +168,7 @@ function checkSingleNormalizer(): void {
   const importPattern = /normalizePhone.*from\s+["']([^"']+)["']/;
   const badImports: string[] = [];
   for (const file of files) {
-    const contents = readFileSync(file, "utf8");
+    const contents = readSource(file);
     const match = contents.match(importPattern);
     if (!match) continue;
     const specifier = match[1];
@@ -192,7 +193,7 @@ function checkSingleNormalizer(): void {
 
 /** The body of `export async function <name>(` up to the next top-level export (as in check:security). */
 function exportedBody(path: string, name: string): string {
-  const source = readFileSync(path, "utf8");
+  const source = readSource(path);
   const start = source.search(new RegExp(`export (async )?function ${name}\\(`));
   if (start < 0) throw new Error(`${name} not found in ${path}`);
   const next = source.indexOf("\nexport ", start + 10);
@@ -231,10 +232,8 @@ async function checkPhoneLookupShape(): Promise<void> {
     );
   }
 
-  const peopleValidation = readFileSync(
-    join(root, "lib", "validation", "people.ts"),
-    "utf8",
-  );
+  const peopleValidation = readSource(
+    join(root, "lib", "validation", "people.ts"));
   check(
     "PhoneLookupResult's found case is a MatchCandidate — minimum fields, same shape the match panel already renders",
     /found";\s*match:\s*MatchCandidate/.test(
@@ -473,7 +472,7 @@ async function checkGradePromotion(
   check("Inside the window the same undo succeeds", inTime?.ok === true && inTime.reverted === 1 && (await gradeOf(s1.profileId)) === gFrom.id);
 
   // ── The old one-click path is gone ──────────────────────────────────────
-  const scopedSource = readFileSync(join(process.cwd(), "lib", "db", "scoped.ts"), "utf8");
+  const scopedSource = readSource(join(process.cwd(), "lib", "db", "scoped.ts"));
   check("scoped students has no one-click promoteGrade any more", !/promoteGrade\s*:/.test(scopedSource));
 
   // The audit trail is append-only and a deleted centre only nulls its rows'

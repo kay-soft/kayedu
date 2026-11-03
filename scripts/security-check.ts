@@ -22,7 +22,7 @@
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
 
@@ -108,6 +108,7 @@ import { likeSearchToken } from "../lib/like.ts";
 import { studentSearchWhere } from "../lib/db/students.ts";
 import { writeRefusal } from "./lib/env.ts";
 import { boundSearchArgs, parseActionArgs, SEARCH_QUERY_MAX, searchArgs } from "../lib/validation/action-args.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
@@ -140,7 +141,7 @@ async function assertSec(id: string, title: string, run: () => Promise<Step[]> |
 // ── Static helpers ─────────────────────────────────────────────────────────
 
 function read(path: string): string {
-  return readFileSync(join(ROOT, path), "utf8");
+  return readSource(join(ROOT, path));
 }
 
 /** The body of `export async function <name>(` up to the next top-level export. */
@@ -1127,7 +1128,7 @@ async function main() {
   });
 
   await assertSec("SEC-34", "next is at or above 16.3.8", () => {
-    const version = JSON.parse(readFileSync(join(ROOT, "node_modules", "next", "package.json"), "utf8")).version as string;
+    const version = JSON.parse(readSource(join(ROOT, "node_modules", "next", "package.json"))).version as string;
     const [major, minor, patch] = version.split(".").map((part) => Number.parseInt(part, 10));
     const ok = major > 16 || (major === 16 && (minor > 3 || (minor === 3 && patch >= 8)));
     return [[`installed next ${version}`, ok]];

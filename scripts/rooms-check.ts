@@ -20,7 +20,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { Prisma } from "@prisma/client";
@@ -64,6 +64,7 @@ import {
   findSessionConflicts,
   type SessionCandidate,
 } from "../lib/scheduling.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -149,7 +150,7 @@ function staticChecks() {
 
   // ClassGroup.capacity is gone — from the schema, the generated client and
   // every reader (R3 reverses M15's min(class, room)).
-  const schema = readFileSync("prisma/schema.prisma", "utf8");
+  const schema = readSource("prisma/schema.prisma");
   const classGroupModel = schema.slice(
     schema.indexOf("model ClassGroup {"),
     schema.indexOf("}", schema.indexOf("model ClassGroup {")),
@@ -166,7 +167,7 @@ function staticChecks() {
   const sources = ["app", "lib", "components"].flatMap((dir) => listFiles(dir));
   sources.push("prisma/seed.ts");
   const classCapacityReaders = sources.filter((file) => {
-    const text = readFileSync(file, "utf8");
+    const text = readSource(file);
     return /\bclass(?:Group|A|Row|Instant)?\??\.capacity\b/.test(text);
   });
   check(
@@ -175,7 +176,7 @@ function staticChecks() {
     classCapacityReaders.join(", "),
   );
   const twoArgCaps = sources.filter((file) =>
-    callArguments(readFileSync(file, "utf8"), "enrollmentCap").some((args) =>
+    callArguments(readSource(file), "enrollmentCap").some((args) =>
       /,/.test(args.replace(/\([^()]*\)/g, "")),
     ),
   );
@@ -185,7 +186,7 @@ function staticChecks() {
     twoArgCaps.join(", "),
   );
   for (const locale of ["en", "ar"]) {
-    const messages = JSON.parse(readFileSync(`messages/${locale}.json`, "utf8"));
+    const messages = JSON.parse(readSource(`messages/${locale}.json`));
     check(
       `messages/${locale}.json has no class/request capacity field`,
       messages.Classes.fields.capacity === undefined &&
@@ -211,7 +212,7 @@ function staticChecks() {
   const missing: string[] = [];
   let calls = 0;
   for (const file of appFiles) {
-    const text = readFileSync(file, "utf8");
+    const text = readSource(file);
     for (const writer of writers) {
       for (const args of callArguments(text, writer)) {
         // Declining a session request writes no slot at all.
@@ -230,7 +231,7 @@ function staticChecks() {
   // decision lives in the single engine, lib/db/class-sessions.ts — assert
   // it there (every decision takes the caller's confirmation flag) instead of
   // counting decideConflicts calls in the class actions.
-  const engine = readFileSync("lib/db/class-sessions.ts", "utf8");
+  const engine = readSource("lib/db/class-sessions.ts");
   const engineDecisions = callArguments(engine, "decideConflicts");
   check(
     "Class schedule/class-edit conflicts are decided inside lib/db/class-sessions.ts with the confirmation flag",
@@ -1081,8 +1082,8 @@ async function main() {
   await prisma.classGroup.update({ where: { id: auditClass.id }, data: { active: false } });
 
   // Static: the data layer owns the audit rows; the action no longer writes them.
-  const roomSetsSource = readFileSync(join(process.cwd(), "lib/db/room-sets.ts"), "utf8");
-  const settingsActions = readFileSync(join(process.cwd(), "app/[locale]/(center)/settings/actions.ts"), "utf8");
+  const roomSetsSource = readSource(join(process.cwd(), "lib/db/room-sets.ts"));
+  const settingsActions = readSource(join(process.cwd(), "app/[locale]/(center)/settings/actions.ts"));
   check(
     "Audit (static): saveRoomWithLinks writes room.link / room.unlink with writeAuditRow(tx, …) and the settings action writes neither",
     /writeAuditRow\(tx,\s*\{[\s\S]*?action,[\s\S]*?\}\)/.test(roomSetsSource) &&

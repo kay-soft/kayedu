@@ -18,7 +18,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
@@ -55,6 +55,7 @@ import { discoverClassesForCenter } from "../lib/db/discover.ts";
 import { reserveOrEnroll } from "../lib/db/reservations.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
 import { sessionDisplayName, sessionKind, sessionLabelParts } from "../lib/session-label.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -119,7 +120,7 @@ const norm = (file: string) => file.replace(/\\/g, "/");
 
 function staticChecks() {
   console.log("Static assertions (no database needed)");
-  const schema = readFileSync("prisma/schema.prisma", "utf8");
+  const schema = readSource("prisma/schema.prisma");
   const sessionModel = schema.slice(schema.indexOf("model Session {"), schema.indexOf("model SessionAttendee {"));
   check("Session.classGroupId is nullable (a one-time session has no class)", /\n\s*classGroupId\s+String\?/.test(sessionModel));
   check(
@@ -133,10 +134,8 @@ function staticChecks() {
   // away — a hand-written partial unique index, since Prisma 6 cannot declare
   // one; the schema keeps a plain index (check:session-lifecycle asserts the
   // live database's index and its WHERE clause).
-  const u2Migration = readFileSync(
-    "prisma/migrations/20261030120000_u2_session_slot_partial_unique/migration.sql",
-    "utf8",
-  );
+  const u2Migration = readSource(
+    "prisma/migrations/20261030120000_u2_session_slot_partial_unique/migration.sql");
   check(
     "(classGroupId, date, startTime) is unique among sessions not rescheduled away (partial index; NULLs are distinct in Postgres)",
     sessionModel.includes("@@index([classGroupId, date, startTime])") &&
@@ -153,7 +152,7 @@ function staticChecks() {
   const unguarded: string[] = [];
   for (const file of readers) {
     if (norm(file).endsWith("lib/session-label.ts")) continue;
-    const text = readFileSync(file, "utf8");
+    const text = readSource(file);
     text.split("\n").forEach((line, index) => {
       if (/\bsession\.classGroup\.(?!\?)/.test(line) && !/session\.classGroup \?/.test(line)) {
         unguarded.push(`${norm(file)}:${index + 1}`);
@@ -164,31 +163,31 @@ function staticChecks() {
   }
   check("No reader dereferences a session's classGroup unguarded", unguarded.length === 0, unguarded.join(", "));
 
-  const labelOwners = readers.filter((file) => /function sessionDisplayName\b/.test(readFileSync(file, "utf8")));
+  const labelOwners = readers.filter((file) => /function sessionDisplayName\b/.test(readSource(file)));
   check(
     "lib/session-label.ts is the single owner of sessionDisplayName",
     labelOwners.length === 1 && norm(labelOwners[0]).endsWith("lib/session-label.ts"),
     labelOwners.map(norm).join(", "),
   );
   const staleImports = readers.filter((file) =>
-    /import\s*\{[^}]*\bsessionDisplayName\b[^}]*\}\s*from\s*"@\/lib\/db\/sessions"/.test(readFileSync(file, "utf8")),
+    /import\s*\{[^}]*\bsessionDisplayName\b[^}]*\}\s*from\s*"@\/lib\/db\/sessions"/.test(readSource(file)),
   );
   check("Nobody imports sessionDisplayName from lib/db/sessions any more", staleImports.length === 0, staleImports.join(", "));
 
-  const slotConflicts = readFileSync("lib/db/slot-conflicts.ts", "utf8");
+  const slotConflicts = readSource("lib/db/slot-conflicts.ts");
   check(
     "OPEN_CLASS_SESSION keeps one-time sessions (classGroupId: null) on every forward reader",
     /OPEN_CLASS_SESSION = \{\s*OR: \[\{ classGroupId: null \}/.test(slotConflicts),
   );
-  const lifecycle = readFileSync("lib/db/session-lifecycle.ts", "utf8");
+  const lifecycle = readSource("lib/db/session-lifecycle.ts");
   check(
     "The closure guard LEFT JOINs the class (a one-time session is never 'missing')",
     !/\n\s*JOIN "ClassGroup"/.test(lifecycle) && lifecycle.includes('LEFT JOIN "ClassGroup"'),
   );
 
-  const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { scripts: Record<string, string> };
+  const pkg = JSON.parse(readSource("package.json")) as { scripts: Record<string, string> };
   check("package.json wires check:one-off-sessions", (pkg.scripts["check:one-off-sessions"] ?? "").includes("scripts/one-off-sessions-check.ts"));
-  const ci = existsSync(".github/workflows/ci.yml") ? readFileSync(".github/workflows/ci.yml", "utf8") : "";
+  const ci = existsSync(".github/workflows/ci.yml") ? readSource(".github/workflows/ci.yml") : "";
   check("CI runs check:one-off-sessions", ci.includes("check:one-off-sessions"));
 }
 

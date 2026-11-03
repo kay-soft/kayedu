@@ -21,13 +21,14 @@
  * ARCHIVED branches and inactive or ended classes hidden; the teacher page
  * exposing no count) is `check:student-portal`'s F5 block.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { FEW_SEATS_LEFT, seatStatus } from "../lib/capacity.ts";
 import { noIndexDemo } from "../lib/auth/auth-config.ts";
 import { safeNextPath } from "../lib/routes.ts";
 import { EXPLORE_BRANCH_PAGE_SIZE, EXPLORE_CLASS_PAGE_SIZE, PUBLIC_LIFECYCLE_STATES } from "../lib/db/public-catalog.ts";
+import { readSource } from "./lib/source.ts";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
 
@@ -43,7 +44,7 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 function read(path: string): string {
-  return readFileSync(join(ROOT, path), "utf8");
+  return readSource(join(ROOT, path));
 }
 
 /** Comments blanked — a doc comment may *name* a field; code may not select it. */
