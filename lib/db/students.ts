@@ -182,31 +182,37 @@ export function teacherSearchWhere(
 
 /**
  * Money and attendance history are append-only (CLAUDE.md rule 2), so a
- * student who has ever been on a roster is deactivated, never deleted.
+ * student who has ever been on a roster is deactivated, never deleted. D-W31:
+ * the same for a student with an exam or homework attempt, which the delete
+ * would otherwise take with it.
  */
 export async function studentDeleteBlockers(
   db: ScopedDb,
   studentProfileId: string,
 ): Promise<number> {
-  const [attendees, payments] = await Promise.all([
+  const [attendees, payments, attempts] = await Promise.all([
     db.attendees.count({ studentProfileId }),
     db.payments.count({ studentProfileId }),
+    db.assessmentAttempts.countForStudent(studentProfileId),
   ]);
-  return attendees + payments;
+  return attendees + payments + attempts;
 }
 
 /**
  * A teacher who already carries classes or sessions here is deactivated, not
- * deleted — the schedule and its history must keep resolving.
+ * deleted — the schedule and its history must keep resolving. D-W31: the same
+ * for a teacher who owns an exam or homework, which the delete would otherwise
+ * take with it, students' attempts included.
  */
 export async function teacherDeleteBlockers(
   db: ScopedDb,
   teacherUserId: string,
 ): Promise<number> {
-  const [classes, sessions] = await Promise.all([
+  const [classes, sessions, assessments] = await Promise.all([
     db.classGroups.count({ teacherId: teacherUserId }),
     db.sessions.count({ teacherId: teacherUserId }),
+    db.assessmentAttempts.countOwnedByTeacher(teacherUserId),
   ]);
-  return classes + sessions;
+  return classes + sessions + assessments;
 }
 

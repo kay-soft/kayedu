@@ -50,7 +50,7 @@ const ROLES: RoleCase[] = [
   // No relation yet: the root shows the hub (with "Find a branch to teach at");
   // any teacher route sends them to the directory (M15) — never to Discover.
   { account: "teacherNew", nav: ["centers"], home: "/teacher/centers", entry: "/teacher/dashboard" },
-  { account: "studentDowntown", nav: ["schedule", "calendar", "discover", "reservations"], home: "/student/schedule" },
+  { account: "studentDowntown", nav: ["schedule", "calendar", "assessments", "discover", "reservations"], home: "/student/schedule" },
   { account: "parentFamily", nav: ["schedule", "calendar"], home: "/parent" },
   { account: "admin", nav: ["centers", "platform", "catalog"], home: "/admin/centers" },
 ];

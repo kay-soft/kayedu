@@ -123,6 +123,7 @@ export const TEACHER_NAV: NavDef[] = [
 const STUDENT_NAV: NavDef[] = [
   { href: ROUTES.studentSchedule, labelKey: "schedule", icon: "schedule" },
   { href: ROUTES.studentCalendar, labelKey: "calendar", icon: "calendar" },
+  { href: ROUTES.studentAssessments, labelKey: "assessments", icon: "assessments" },
   { href: ROUTES.studentDiscover, labelKey: "discover", icon: "discover" },
   { href: ROUTES.studentReservations, labelKey: "reservations", icon: "sessions" },
 ];

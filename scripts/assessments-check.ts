@@ -1,6 +1,6 @@
 /**
- * Assessments check — the W2 acceptance gate (docs/03-build-order.md W2
- * "Gates"; D-W01–D-W06, D-W08, D-W11, D-W30 in docs/00 §5.1 "W-batch").
+ * Assessments check — the W2 and W3a acceptance gate (docs/03-build-order.md W2
+ * and W3a "Gates"; D-W01–D-W11, D-W30, D-W31 in docs/00 §5.1 "W-batch").
  *
  * Run with:  npm run check:assessments   (staging or a local database only — S1)
  *
@@ -27,6 +27,16 @@
  *     existing branch holds the TEACHER grant) and the permission ceiling.
  *  9. Statics: no centre, student or parent file imports the module; every
  *     builder action re-resolves the branch and the owning teacher.
+ * 10. W3a, pure: end-time derivation, due, state, reveal, grading, shuffle.
+ * 11. Publish, unpublish, delete.
+ * 12. Start and eligibility: the window, one attempt, a double start, left /
+ *     blocked / not enrolled / another centre / staff / parent / inactive class.
+ * 13. Locking after the first attempt; extend forwards only, before it has
+ *     passed, finalising what is overdue.
+ * 14. Autosave validation. 15. Lazy finalisation, under two concurrent calls.
+ * 16. One sitting. 17. Reveal, score, and every student payload (rule 11).
+ * 18. Homework and the class engine (D-W31). 19. Audit rows, ids only.
+ * 20. RLS on the two tables and the W3a statics.
  *
  * Needs a reachable database and cleans up after itself.
  */
@@ -41,8 +51,18 @@ import { gateSlugPrefixes } from "./lib/gate-fixtures.ts";
 import { readSource } from "./lib/source.ts";
 import {
   ASSESSMENT_LIMITS,
+  ONE_SITTING_GRACE_SECONDS,
   STUDENT_ASSESSMENT_SELECT,
   assessmentDefaults,
+  attemptEnd,
+  attemptOrder,
+  finalisationDue,
+  gradeAnswers,
+  percentage,
+  revealAllowed,
+  startRefusal,
+  studentAssessmentState,
+  type AssessmentTiming,
   defaultHomeworkDeadline,
   drawOrder,
   draftErrors,
@@ -66,14 +86,33 @@ import {
 import {
   createAssessment,
   deleteAssessment,
+  extendAssessment,
   findTeacherAssessment,
   homeworkDeadlineFor,
   isAssessmentLocked,
   listTeacherAssessments,
+  publishAssessment,
   resolveAssessmentTeacher,
   saveAssessmentDraft,
+  unpublishAssessment,
   type AssessmentTeacher,
 } from "../lib/db/assessments.ts";
+import {
+  attemptHeartbeat,
+  finaliseIfDue,
+  listStudentAssessments,
+  readAttemptReveal,
+  readStudentAssessment,
+  resolveAssessmentStudent,
+  saveAnswer,
+  startAttempt,
+  submitAttempt,
+  type AssessmentStudent,
+  type StudentAssessmentView,
+} from "../lib/db/assessment-attempts.ts";
+import { loadAuditFeed } from "../lib/db/audit-feed.ts";
+import { cancelSession } from "../lib/db/sessions.ts";
+import { deleteClass, deleteManualSession, sessionDisqualifiers } from "../lib/db/class-sessions.ts";
 import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import { loadPermissionGrants, savePermissionGrants } from "../lib/db/permissions.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
@@ -755,10 +794,706 @@ function checkStatics() {
   check("No builder action reads a teacher id from the form", !/formData\.get\("teacher|teacherMembershipId:\s*parsed/.test(actions));
 }
 
+// ── 10–19. Publishing and taking (W3a, D-W02, D-W05–D-W11, D-W31) ───────────
+
+const HOUR = 60 * MINUTE;
+
+let studentSeq = 0;
+async function makeStudent(centerId: string, tag: string, classGroupId?: string) {
+  studentSeq += 1;
+  const user = await prisma.user.create({
+    data: { firstName: "S", lastName: tag, email: `${STEM}-${tag}-${studentSeq}@kayedu.test`, locale: "en" },
+  });
+  const profile = await prisma.studentProfile.create({
+    data: scopedData(centerId, { userId: user.id, studentCode: `${tag}-${studentSeq}`, firstName: "S", lastName: tag }),
+  });
+  if (classGroupId) {
+    await prisma.enrollment.create({ data: scopedData(centerId, { studentProfileId: profile.id, classGroupId }) });
+  }
+  const student: AssessmentStudent = { centerId, studentProfileId: profile.id, userId: user.id };
+  return { user, profile, student };
+}
+
+/** 2 + 3 + 5 points; the first option of each question is the correct one. */
+function scoredQuestions(): DraftQuestion[] {
+  return [question(4, 0, { points: 2 }), question(4, 0, { points: 3 }), question(4, 0, { points: 5 })];
+}
+
+type Fixture = { teacher: AssessmentTeacher; actor: { userId: string }; classGroupId: string };
+
+async function publishedExam(fx: Fixture, now: Date, extra: Partial<AssessmentDraft> = {}) {
+  const created = await createAssessment(prisma, fx.actor, fx.teacher, {
+    type: "EXAM",
+    classGroupId: fx.classGroupId,
+    draft: examDraft({
+      windowStart: new Date(now.getTime() - 3 * HOUR),
+      windowEnd: new Date(now.getTime() + 3 * HOUR),
+      durationMinutes: 30,
+      questions: scoredQuestions(),
+      ...extra,
+    }),
+  });
+  if (!created.ok) throw new Error(`fixture exam: ${JSON.stringify(created)}`);
+  const published = await publishAssessment(prisma, fx.actor, fx.teacher, created.id, now);
+  if (!published.ok) throw new Error(`fixture publish: ${JSON.stringify(published)}`);
+  return created.id;
+}
+
+async function optionsOf(assessmentId: string) {
+  const questions = await prisma.assessmentQuestion.findMany({
+    where: { assessmentId },
+    orderBy: { position: "asc" },
+    include: { options: { orderBy: { position: "asc" } } },
+  });
+  return questions.map((row) => ({
+    id: row.id,
+    right: row.options.find((option) => option.isCorrect)!.id,
+    wrong: row.options.find((option) => !option.isCorrect)!.id,
+    points: row.points,
+  }));
+}
+
+function checkTimeRules() {
+  console.log("\n10. End-time derivation, due, state, reveal, grading (pure)");
+  const start = new Date("2026-11-10T10:00:00Z");
+  const at = (minutes: number) => new Date(start.getTime() + minutes * MINUTE);
+  const exam: AssessmentTiming = { type: "EXAM", windowStart: at(-60), windowEnd: at(120), deadline: null, durationMinutes: 30, oneSitting: false };
+  const lateStart: AssessmentTiming = { ...exam, windowEnd: at(10) };
+  const untimed: AssessmentTiming = { type: "HOMEWORK", windowStart: null, windowEnd: null, deadline: at(600), durationMinutes: null, oneSitting: false };
+  const timedHomework: AssessmentTiming = { ...untimed, durationMinutes: 45 };
+  const tightHomework: AssessmentTiming = { ...untimed, durationMinutes: 45, deadline: at(5) };
+  check("EXAM end = startedAt + duration when the window is later", attemptEnd(exam, start).getTime() === at(30).getTime());
+  check("EXAM end = windowEnd when the window closes first", attemptEnd(lateStart, start).getTime() === at(10).getTime());
+  check("HOMEWORK untimed end = the deadline", attemptEnd(untimed, start).getTime() === at(600).getTime());
+  check("HOMEWORK timed end = startedAt + duration", attemptEnd(timedHomework, start).getTime() === at(45).getTime());
+  check("HOMEWORK timed end = the deadline when it comes first", attemptEnd(tightHomework, start).getTime() === at(5).getTime());
+
+  const seen = { startedAt: start, lastSeenAt: at(5) };
+  check("Before its end an attempt is not due", finalisationDue(exam, seen, at(29)) === null);
+  const due = finalisationDue(exam, seen, at(500));
+  check("Past its end: DEADLINE, stamped at the end, not at the read", due?.finalisedBy === "DEADLINE" && due.submittedAt.getTime() === at(30).getTime(), JSON.stringify(due));
+  const sitting: AssessmentTiming = { ...exam, oneSitting: true };
+  check("One sitting, silent within the grace: not due", finalisationDue(sitting, seen, new Date(at(5).getTime() + ONE_SITTING_GRACE_SECONDS * 1_000)) === null);
+  const gap = finalisationDue(sitting, seen, new Date(at(5).getTime() + (ONE_SITTING_GRACE_SECONDS + 1) * 1_000));
+  check("One sitting, silent past the grace: ONE_SITTING_GAP, stamped at lastSeenAt", gap?.finalisedBy === "ONE_SITTING_GAP" && gap.submittedAt.getTime() === at(5).getTime(), JSON.stringify(gap));
+  const presentToEnd = finalisationDue(sitting, { startedAt: start, lastSeenAt: at(29) }, at(500));
+  check("One sitting, still there within the grace of its end: an ordinary DEADLINE", presentToEnd?.finalisedBy === "DEADLINE", JSON.stringify(presentToEnd));
+  check("The grace is the one constant, 120 seconds", ONE_SITTING_GRACE_SECONDS === 120);
+
+  check("Start before the exam window → notOpenYet", startRefusal(exam, at(-61)) === "notOpenYet");
+  check("Start after the exam window → closed", startRefusal(exam, at(120)) === "closed");
+  check("Start inside the window → allowed", startRefusal(exam, at(0)) === null);
+  check("Start after the homework deadline → closed", startRefusal(untimed, at(600)) === "closed");
+
+  const state = (attempt: { submittedAt: Date | null } | null, now: Date, row: AssessmentTiming = exam) => studentAssessmentState(row, attempt, now);
+  check("State: Upcoming before the window", state(null, at(-61)) === "UPCOMING");
+  check("State: Open inside it", state(null, at(0)) === "OPEN");
+  check("State: In progress with an open attempt", state({ submittedAt: null }, at(0)) === "IN_PROGRESS");
+  check("State: Submitted when final and still open", state({ submittedAt: at(1) }, at(2)) === "SUBMITTED");
+  check("State: Missed when closed with no attempt", state(null, at(121)) === "MISSED");
+  check("State: Closed when final and closed", state({ submittedAt: at(1) }, at(121)) === "CLOSED");
+
+  const revealRow = { type: "EXAM" as const, windowEnd: at(120), deadline: null, showCorrectAnswers: true };
+  const final = { submittedAt: at(1) };
+  check("Reveal: all three hold → allowed", revealAllowed(revealRow, final, at(120)));
+  check("Reveal: the attempt not final → refused", !revealAllowed(revealRow, { submittedAt: null }, at(121)));
+  check("Reveal: not yet closed → refused", !revealAllowed(revealRow, final, at(119)));
+  check("Reveal: showCorrectAnswers off → refused", !revealAllowed({ ...revealRow, showCorrectAnswers: false }, final, at(121)));
+
+  const gradeQuestions = [
+    { id: "a", points: 2, options: [{ id: "a1", isCorrect: true }, { id: "a2", isCorrect: false }] },
+    { id: "b", points: 3, options: [{ id: "b1", isCorrect: true }, { id: "b2", isCorrect: false }] },
+    { id: "c", points: 5, options: [{ id: "c1", isCorrect: true }, { id: "c2", isCorrect: false }] },
+  ];
+  const graded = gradeAnswers(gradeQuestions, [{ questionId: "a", optionId: "a1" }, { questionId: "b", optionId: "b2" }]);
+  check("Grading: right scores its points, wrong and unanswered score 0", graded.score === 2 && graded.maxScore === 10 && graded.answers[2].pointsAwarded === 0 && graded.answers[2].optionId === null, JSON.stringify(graded));
+  check("Grading: an option from another question scores 0", gradeAnswers(gradeQuestions, [{ questionId: "a", optionId: "b1" }]).score === 0);
+  check("Percentage is derived", percentage(2, 10) === 20 && percentage(0, 0) === 0);
+
+  const source = {
+    questions: Array.from({ length: 10 }, (_, q) => ({
+      id: `q${q}`,
+      position: q,
+      options: Array.from({ length: 5 }, (_, o) => ({ id: `q${q}o${o}`, position: o, text: "x" })),
+      text: "x",
+      points: 1,
+    })),
+  };
+  check("Shuffle: the same attempt gets the same order", JSON.stringify(attemptOrder("attempt-a", source)) === JSON.stringify(attemptOrder("attempt-a", source)));
+  check("Shuffle: another attempt gets another order", JSON.stringify(attemptOrder("attempt-a", source)) !== JSON.stringify(attemptOrder("attempt-b", source)));
+  check("Shuffle: stable whatever order the rows arrive in", JSON.stringify(attemptOrder("attempt-a", source)) === JSON.stringify(attemptOrder("attempt-a", { questions: [...source.questions].reverse() })));
+  check("Readiness: an exam whose window has closed is not ready", !isReady(readiness("EXAM", examDraft({ windowStart: at(-120), windowEnd: at(-60) }), start)));
+  check("Readiness: an exam whose window is open now is ready", isReady(readiness("EXAM", examDraft({ windowStart: at(-60), windowEnd: at(60) }), start)));
+}
+
+async function checkPublishRules(fx: Fixture, otherTeacher: AssessmentTeacher, inactiveClassId: string) {
+  console.log("\n11. Publish, unpublish, delete");
+  const now = new Date();
+  const later = new Date(now.getTime() + DAY);
+  const earlier = new Date(now.getTime() - DAY);
+  const draftOf = async (extra: Partial<AssessmentDraft>, classGroupId = fx.classGroupId) => {
+    const created = await createAssessment(prisma, fx.actor, fx.teacher, { type: "EXAM", classGroupId, draft: examDraft(extra) });
+    if (!created.ok) throw new Error(JSON.stringify(created));
+    return created.id;
+  };
+
+  const empty = await draftOf({ questions: [], windowStart: now, windowEnd: later });
+  const notReady = await publishAssessment(prisma, fx.actor, fx.teacher, empty, now);
+  check("Publish is refused with no questions", !notReady.ok && notReady.error === "notReady", JSON.stringify(notReady));
+  const noCorrect = await draftOf({ questions: [question(4, -1)], windowStart: now, windowEnd: later });
+  const noCorrectResult = await publishAssessment(prisma, fx.actor, fx.teacher, noCorrect, now);
+  check("Publish is refused with a question that has no correct option", !noCorrectResult.ok && noCorrectResult.error === "notReady");
+  const past = await draftOf({ windowStart: new Date(earlier.getTime() - HOUR), windowEnd: earlier });
+  const pastResult = await publishAssessment(prisma, fx.actor, fx.teacher, past, now);
+  check("Publish is refused once the exam window has closed", !pastResult.ok && pastResult.error === "notReady");
+
+  const open = await draftOf({ windowStart: earlier, windowEnd: later });
+  const foreign = await publishAssessment(prisma, { userId: otherTeacher.userId }, otherTeacher, open, now);
+  check("Another teacher cannot publish it", !foreign.ok && foreign.error === "notFound");
+  const published = await publishAssessment(prisma, fx.actor, fx.teacher, open, now);
+  const openRow = await prisma.assessment.findUniqueOrThrow({ where: { id: open } });
+  check("An exam can be published while its window is already open", published.ok && openRow.status === "PUBLISHED" && openRow.publishedAt !== null, JSON.stringify(published));
+  const again = await publishAssessment(prisma, fx.actor, fx.teacher, open, now);
+  check("Publishing twice is refused", !again.ok && again.error === "notDraft");
+  const edit = await saveAssessmentDraft(prisma, fx.actor, fx.teacher, open, examDraft({ windowStart: earlier, windowEnd: later }));
+  check("A published assessment cannot be saved as a draft", !edit.ok && edit.error === "notDraft");
+
+  const inactive = await draftOf({ windowStart: earlier, windowEnd: later });
+  await prisma.assessment.update({ where: { id: inactive }, data: { classGroupId: inactiveClassId } });
+  const inactiveResult = await publishAssessment(prisma, fx.actor, fx.teacher, inactive, now);
+  check("Publish is refused on an inactive class", !inactiveResult.ok && inactiveResult.error === "classInactive", JSON.stringify(inactiveResult));
+
+  const session = await makeSession(fx.teacher.centerId, fx.classGroupId, fx.teacher.userId, 40, "09:00");
+  const pastHomework = await createAssessment(prisma, fx.actor, fx.teacher, { type: "HOMEWORK", sessionId: session.id, draft: homeworkDraft(earlier) });
+  const pastHomeworkResult = pastHomework.ok ? await publishAssessment(prisma, fx.actor, fx.teacher, pastHomework.id, now) : pastHomework;
+  check("Publish is refused with a homework deadline in the past", !pastHomeworkResult.ok && pastHomeworkResult.error === "notReady", JSON.stringify(pastHomeworkResult));
+
+  const foreignBack = await unpublishAssessment(prisma, { userId: otherTeacher.userId }, otherTeacher, open);
+  check("Another teacher cannot unpublish it", !foreignBack.ok && foreignBack.error === "notFound");
+  const back = await unpublishAssessment(prisma, fx.actor, fx.teacher, open);
+  const backRow = await prisma.assessment.findUniqueOrThrow({ where: { id: open } });
+  check("Unpublish with no attempt returns it to DRAFT", back.ok && backRow.status === "DRAFT" && backRow.publishedAt === null);
+  const backAgain = await unpublishAssessment(prisma, fx.actor, fx.teacher, open);
+  check("Unpublishing a draft is refused", !backAgain.ok && backAgain.error === "notPublished");
+
+  await publishAssessment(prisma, fx.actor, fx.teacher, open, now);
+  const removed = await deleteAssessment(prisma, fx.actor, fx.teacher, open);
+  check("A published assessment with no attempt can be deleted", removed.ok && (await prisma.assessment.count({ where: { id: open } })) === 0, JSON.stringify(removed));
+  const removedDraft = await deleteAssessment(prisma, fx.actor, fx.teacher, empty);
+  check("A draft can be deleted", removedDraft.ok);
+  for (const id of [noCorrect, past, inactive]) await prisma.assessment.delete({ where: { id } });
+  if (pastHomework.ok) await prisma.assessment.delete({ where: { id: pastHomework.id } });
+  await prisma.session.delete({ where: { id: session.id } });
+}
+
+async function checkStartAndEligibility(fx: Fixture, centerB: string, now: Date) {
+  console.log("\n12. Start, eligibility, one attempt");
+  const { centerId } = fx.teacher;
+  const examId = await publishedExam(fx, now);
+  const enrolled = await makeStudent(centerId, "enrolled", fx.classGroupId);
+
+  const before = await startAttempt(prisma, enrolled.student, examId, new Date(now.getTime() - 4 * HOUR));
+  check("Start is refused before the window", !before.ok && before.error === "notOpenYet", JSON.stringify(before));
+  const after = await startAttempt(prisma, enrolled.student, examId, new Date(now.getTime() + 4 * HOUR));
+  check("Start is refused after the window", !after.ok && after.error === "closed", JSON.stringify(after));
+  check("A refused start writes no row", (await prisma.assessmentAttempt.count({ where: { assessmentId: examId } })) === 0);
+
+  const [one, two] = await Promise.all([
+    startAttempt(prisma, enrolled.student, examId, now),
+    startAttempt(prisma, enrolled.student, examId, now),
+  ]);
+  check("A double start: both answer with the same attempt", one.ok && two.ok && one.attemptId === two.attemptId, JSON.stringify([one, two]));
+  check("…and exactly one row exists", (await prisma.assessmentAttempt.count({ where: { assessmentId: examId } })) === 1);
+  check("…and one attempt.start audit row", one.ok && (await prisma.auditLog.count({ where: { action: "attempt.start", entityId: one.attemptId } })) === 1);
+  const resumed = await startAttempt(prisma, enrolled.student, examId, new Date(now.getTime() + MINUTE));
+  check("Starting again resumes the same attempt", resumed.ok && one.ok && resumed.attemptId === one.attemptId && resumed.resumed);
+  const row = await prisma.assessmentAttempt.findFirstOrThrow({ where: { assessmentId: examId } });
+  check("A resume never moves startedAt", row.startedAt.getTime() === now.getTime());
+
+  const stranger = await makeStudent(centerId, "stranger");
+  const strangerStart = await startAttempt(prisma, stranger.student, examId, now);
+  check("A student not enrolled is refused by direct call", !strangerStart.ok && strangerStart.error === "notEligible", JSON.stringify(strangerStart));
+  check("…and reads nothing", (await readStudentAssessment(prisma, stranger.student, examId, now)) === null);
+
+  const left = await makeStudent(centerId, "left", fx.classGroupId);
+  await prisma.enrollment.updateMany({ where: { studentProfileId: left.profile.id }, data: { status: "REMOVED", leftByStudentAt: now } });
+  const leftStart = await startAttempt(prisma, left.student, examId, now);
+  check("A student who left is refused", !leftStart.ok && leftStart.error === "notEligible", JSON.stringify(leftStart));
+  check("…and no longer lists it", !(await listStudentAssessments(prisma, left.student, now)).some((item) => item.id === examId));
+
+  const blocked = await makeStudent(centerId, "blocked", fx.classGroupId);
+  await prisma.enrollment.updateMany({ where: { studentProfileId: blocked.profile.id }, data: { status: "BLOCKED" } });
+  const blockedStart = await startAttempt(prisma, blocked.student, examId, now);
+  check("A blocked student is refused", !blockedStart.ok && blockedStart.error === "notEligible");
+
+  const keeper = await makeStudent(centerId, "keeper", fx.classGroupId);
+  const kept = await startAttempt(prisma, keeper.student, examId, now);
+  await prisma.enrollment.updateMany({ where: { studentProfileId: keeper.profile.id }, data: { status: "REMOVED" } });
+  const keptResume = await startAttempt(prisma, keeper.student, examId, new Date(now.getTime() + MINUTE));
+  check("Eligibility is checked at start only: leaving keeps the attempt", kept.ok && keptResume.ok && keptResume.attemptId === kept.attemptId, JSON.stringify(keptResume));
+
+  const other = await makeStudent(centerB, "other-centre");
+  const otherStart = await startAttempt(prisma, other.student, examId, now);
+  check("Another centre's student is refused", !otherStart.ok && otherStart.error === "notFound", JSON.stringify(otherStart));
+  check("…and reads nothing", (await readStudentAssessment(prisma, other.student, examId, now)) === null);
+  check("A profile from one centre resolves nothing at another", (await resolveAssessmentStudent(prisma, centerB, enrolled.user.id)) === null);
+
+  const staff = await prisma.membership.findFirstOrThrow({ where: { centerId, role: "RECEPTIONIST" }, select: { userId: true } });
+  check("Centre staff have no student identity", (await resolveAssessmentStudent(prisma, centerId, staff.userId)) === null);
+  const parent = await prisma.user.create({ data: { firstName: "P", lastName: "parent", email: `${STEM}-parent@kayedu.test`, locale: "en" } });
+  check("A parent has no student identity", (await resolveAssessmentStudent(prisma, centerId, parent.id)) === null);
+  await prisma.studentProfile.updateMany({ where: { id: stranger.profile.id }, data: { active: false } });
+  check("An inactive profile has no student identity", (await resolveAssessmentStudent(prisma, centerId, stranger.user.id)) === null);
+
+  const draft = await createAssessment(prisma, fx.actor, fx.teacher, { type: "EXAM", classGroupId: fx.classGroupId, draft: examDraft({ windowStart: new Date(now.getTime() - HOUR), windowEnd: new Date(now.getTime() + HOUR) }) });
+  if (draft.ok) {
+    const draftStart = await startAttempt(prisma, enrolled.student, draft.id, now);
+    check("A draft cannot be started", !draftStart.ok && draftStart.error === "notFound");
+    check("…or read", (await readStudentAssessment(prisma, enrolled.student, draft.id, now)) === null);
+  }
+
+  const inactive = await makeClass(centerId, fx.teacher.userId);
+  const inactiveFx = { ...fx, classGroupId: inactive.id };
+  const inactiveExam = await publishedExam(inactiveFx, now);
+  const inactiveStudent = await makeStudent(centerId, "inactive-class", inactive.id);
+  const inactiveKeeper = await makeStudent(centerId, "inactive-keeper", inactive.id);
+  const startedBefore = await startAttempt(prisma, inactiveKeeper.student, inactiveExam, now);
+  await prisma.classGroup.update({ where: { id: inactive.id }, data: { active: false } });
+  const inactiveStart = await startAttempt(prisma, inactiveStudent.student, inactiveExam, now);
+  check("An inactive class blocks new attempts", !inactiveStart.ok && inactiveStart.error === "notFound", JSON.stringify(inactiveStart));
+  check("…and hides the assessment from its students", (await readStudentAssessment(prisma, inactiveStudent.student, inactiveExam, now)) === null && !(await listStudentAssessments(prisma, inactiveKeeper.student, now)).some((item) => item.id === inactiveExam));
+  check("…and the teacher keeps it and its attempts", startedBefore.ok && (await findTeacherAssessment(prisma, fx.teacher, inactiveExam))?._count.attempts === 1);
+
+  return { examId, enrolled };
+}
+
+async function checkLocking(fx: Fixture, otherTeacher: AssessmentTeacher, examId: string, now: Date) {
+  console.log("\n13. Locking after the first attempt, and extending");
+  const { centerId } = fx.teacher;
+  check("isAssessmentLocked is true once an attempt exists", await isAssessmentLocked(prisma, centerId, examId));
+  const del = await deleteAssessment(prisma, fx.actor, fx.teacher, examId);
+  check("Delete is refused once an attempt exists", !del.ok && del.error === "locked", JSON.stringify(del));
+  const back = await unpublishAssessment(prisma, fx.actor, fx.teacher, examId);
+  check("Unpublish is refused once an attempt exists", !back.ok && back.error === "locked", JSON.stringify(back));
+  check("…and it stays published", (await prisma.assessment.findUniqueOrThrow({ where: { id: examId } })).status === "PUBLISHED");
+
+  const row = await prisma.assessment.findUniqueOrThrow({ where: { id: examId } });
+  const end = row.windowEnd!;
+  const shorter = await extendAssessment(prisma, fx.actor, fx.teacher, examId, new Date(end.getTime() - MINUTE), now);
+  check("Extend is refused to an earlier time", !shorter.ok && shorter.error === "notLater", JSON.stringify(shorter));
+  const same = await extendAssessment(prisma, fx.actor, fx.teacher, examId, end, now);
+  check("Extend is refused to the same time", !same.ok && same.error === "notLater");
+  const passed = await extendAssessment(prisma, fx.actor, fx.teacher, examId, new Date(end.getTime() + HOUR), new Date(end.getTime() + MINUTE));
+  check("Extend is refused once it has passed", !passed.ok && passed.error === "passed", JSON.stringify(passed));
+  const foreign = await extendAssessment(prisma, { userId: otherTeacher.userId }, otherTeacher, examId, new Date(end.getTime() + HOUR), now);
+  check("Another teacher cannot extend it", !foreign.ok && foreign.error === "notFound");
+  const later = new Date(end.getTime() + HOUR);
+  const forward = await extendAssessment(prisma, fx.actor, fx.teacher, examId, later, now);
+  check("Extend moves the end later", forward.ok && (await prisma.assessment.findUniqueOrThrow({ where: { id: examId } })).windowEnd?.getTime() === later.getTime(), JSON.stringify(forward));
+  const stillDraft = await createAssessment(prisma, fx.actor, fx.teacher, { type: "EXAM", classGroupId: fx.classGroupId, draft: examDraft() });
+  if (stillDraft.ok) {
+    const draftExtend = await extendAssessment(prisma, fx.actor, fx.teacher, stillDraft.id, new Date(now.getTime() + 9 * DAY), now);
+    check("A draft cannot be extended", !draftExtend.ok && draftExtend.error === "notPublished");
+  }
+
+  // Overdue: a 30-minute attempt started 2 hours ago, in a window still open.
+  const overdueExam = await publishedExam(fx, now);
+  const overdue = await makeStudent(centerId, "overdue", fx.classGroupId);
+  const startedAt = new Date(now.getTime() - 2 * HOUR);
+  const started = await startAttempt(prisma, overdue.student, overdueExam, startedAt);
+  const overdueQuestions = await optionsOf(overdueExam);
+  if (started.ok) await saveAnswer(prisma, overdue.student, started.attemptId, { questionId: overdueQuestions[0].id, optionId: overdueQuestions[0].right }, startedAt);
+  const overdueRow = await prisma.assessment.findUniqueOrThrow({ where: { id: overdueExam } });
+  const extended = await extendAssessment(prisma, fx.actor, fx.teacher, overdueExam, new Date(overdueRow.windowEnd!.getTime() + 2 * DAY), now);
+  const attempt = await prisma.assessmentAttempt.findFirstOrThrow({ where: { assessmentId: overdueExam } });
+  check(
+    "Extending first finalises an attempt already past its end, at its old end, so it cannot be revived",
+    extended.ok && attempt.submittedAt?.getTime() === startedAt.getTime() + 30 * MINUTE && attempt.finalisedBy === "DEADLINE" && attempt.score === 2,
+    JSON.stringify(attempt),
+  );
+  const revived = started.ok ? await saveAnswer(prisma, overdue.student, started.attemptId, { questionId: overdueQuestions[1].id, optionId: overdueQuestions[1].right }, now) : null;
+  check("…and an autosave after the extension is refused", revived !== null && !revived.ok && revived.error === "submitted");
+  const extendAudit = await prisma.auditLog.findFirstOrThrow({ where: { action: "assessment.extend", entityId: overdueExam } });
+  check("assessment.extend records the actor, the owning teacher and the count", extendAudit.actorUserId === fx.actor.userId && (extendAudit.after as { teacherMembershipId: string; finalisedAttempts: number }).teacherMembershipId === fx.teacher.membershipId && (extendAudit.after as { finalisedAttempts: number }).finalisedAttempts === 1, JSON.stringify(extendAudit.after));
+}
+
+async function checkAutosave(fx: Fixture, now: Date) {
+  console.log("\n14. Autosave");
+  const { centerId } = fx.teacher;
+  const examId = await publishedExam(fx, now);
+  const otherExamId = await publishedExam(fx, now);
+  const student = await makeStudent(centerId, "autosave", fx.classGroupId);
+  const intruder = await makeStudent(centerId, "intruder", fx.classGroupId);
+  const started = await startAttempt(prisma, student.student, examId, now);
+  if (!started.ok) {
+    check("Autosave fixture started", false, JSON.stringify(started));
+    return;
+  }
+  const questions = await optionsOf(examId);
+  const otherQuestions = await optionsOf(otherExamId);
+  const save = (questionId: string, optionId: string | null, at = now, who = student.student) =>
+    saveAnswer(prisma, who, started.attemptId, { questionId, optionId }, at);
+
+  const saved = await save(questions[0].id, questions[0].wrong);
+  check("An answer saves", saved.ok && (await prisma.assessmentAnswer.count({ where: { attemptId: started.attemptId } })) === 1, JSON.stringify(saved));
+  check("The autosave answer says nothing about correctness", !/correct|score|points/i.test(JSON.stringify(saved)), JSON.stringify(saved));
+  const stored = await prisma.assessmentAnswer.findFirstOrThrow({ where: { attemptId: started.attemptId } });
+  check("isCorrect and pointsAwarded stay null until finalisation", stored.isCorrect === null && stored.pointsAwarded === null);
+  await save(questions[0].id, questions[0].right);
+  check("A second save overwrites its own row", (await prisma.assessmentAnswer.findMany({ where: { attemptId: started.attemptId } })).length === 1);
+  const cleared = await save(questions[0].id, null);
+  check("Null clears the answer", cleared.ok && (await prisma.assessmentAnswer.findFirstOrThrow({ where: { attemptId: started.attemptId } })).optionId === null);
+  const crossOption = await save(questions[0].id, questions[1].right);
+  check("An option from another question is refused", !crossOption.ok && crossOption.error === "invalidOption", JSON.stringify(crossOption));
+  const crossQuestion = await save(otherQuestions[0].id, otherQuestions[0].right);
+  check("A question from another assessment is refused", !crossQuestion.ok && crossQuestion.error === "invalidOption", JSON.stringify(crossQuestion));
+  const stranger = await save(questions[0].id, questions[0].right, now, intruder.student);
+  check("Another student's attempt is not found", !stranger.ok && stranger.error === "notFound", JSON.stringify(stranger));
+  const heartbeat = await attemptHeartbeat(prisma, intruder.student, started.attemptId, now);
+  check("…for a heartbeat too", !heartbeat.ok && heartbeat.error === "notFound");
+  const foreignSubmit = await submitAttempt(prisma, intruder.student, started.attemptId, now);
+  check("…and a submit", !foreignSubmit.ok && foreignSubmit.error === "notFound");
+
+  const submitted = await submitAttempt(prisma, student.student, started.attemptId, new Date(now.getTime() + MINUTE));
+  check("The student's submit finalises as STUDENT", submitted.ok && submitted.finalisedBy === "STUDENT", JSON.stringify(submitted));
+  const final = await save(questions[1].id, questions[1].right, new Date(now.getTime() + 2 * MINUTE));
+  check("An autosave on a final attempt is refused with \"submitted\"", !final.ok && final.error === "submitted", JSON.stringify(final));
+  const again = await submitAttempt(prisma, student.student, started.attemptId, new Date(now.getTime() + 2 * MINUTE));
+  const row = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
+  check("A second submit changes nothing", again.ok && row.submittedAt?.getTime() === now.getTime() + MINUTE);
+  check("…and one attempt.submit audit row, with the student as actor", (await prisma.auditLog.findMany({ where: { action: "attempt.submit", entityId: started.attemptId } })).every((audit) => audit.actorUserId === student.user.id) && (await prisma.auditLog.count({ where: { action: "attempt.submit", entityId: started.attemptId } })) === 1);
+
+  const dueStudent = await makeStudent(centerId, "autosave-due", fx.classGroupId);
+  const dueStart = await startAttempt(prisma, dueStudent.student, examId, now);
+  if (dueStart.ok) {
+    const late = new Date(now.getTime() + 31 * MINUTE);
+    const dueSave = await saveAnswer(prisma, dueStudent.student, dueStart.attemptId, { questionId: questions[0].id, optionId: questions[0].right }, late);
+    const dueRow = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: dueStart.attemptId } });
+    check("An autosave past the end is refused and finalises the attempt", !dueSave.ok && dueSave.error === "submitted" && dueRow.finalisedBy === "DEADLINE" && dueRow.score === 0, JSON.stringify(dueRow));
+  }
+}
+
+async function checkLazyFinalisation(fx: Fixture, now: Date) {
+  console.log("\n15. Lazy finalisation");
+  const { centerId } = fx.teacher;
+  const examId = await publishedExam(fx, now);
+  const student = await makeStudent(centerId, "lazy", fx.classGroupId);
+  const started = await startAttempt(prisma, student.student, examId, now);
+  if (!started.ok) {
+    check("Lazy fixture started", false);
+    return;
+  }
+  const questions = await optionsOf(examId);
+  await saveAnswer(prisma, student.student, started.attemptId, { questionId: questions[0].id, optionId: questions[0].right }, now);
+  await saveAnswer(prisma, student.student, started.attemptId, { questionId: questions[1].id, optionId: questions[1].wrong }, now);
+
+  check("Before its end nothing happens", (await finaliseIfDue(prisma, centerId, started.attemptId, new Date(now.getTime() + 29 * MINUTE))) === false);
+  const read = new Date(now.getTime() + 2 * HOUR);
+  const [a, b] = await Promise.all([
+    finaliseIfDue(prisma, centerId, started.attemptId, read),
+    finaliseIfDue(prisma, centerId, started.attemptId, read),
+  ]);
+  check("Two concurrent calls: exactly one finalises", [a, b].filter(Boolean).length === 1, JSON.stringify([a, b]));
+  const row = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
+  check("Grades the saved answers; unanswered scores 0", row.score === 2 && row.maxScore === 10, JSON.stringify(row));
+  check("Time taken is capped: stamped at the end, not the read", row.submittedAt?.getTime() === now.getTime() + 30 * MINUTE && row.finalisedBy === "DEADLINE");
+  const answers = await prisma.assessmentAnswer.findMany({ where: { attemptId: started.attemptId } });
+  const byQuestion = new Map(answers.map((answer) => [answer.questionId, answer]));
+  check(
+    "isCorrect and pointsAwarded freeze per answer, the unanswered one included",
+    answers.length === 3 &&
+      byQuestion.get(questions[0].id)?.isCorrect === true && byQuestion.get(questions[0].id)?.pointsAwarded === 2 &&
+      byQuestion.get(questions[1].id)?.isCorrect === false && byQuestion.get(questions[1].id)?.pointsAwarded === 0 &&
+      byQuestion.get(questions[2].id)?.optionId === null && byQuestion.get(questions[2].id)?.pointsAwarded === 0,
+    JSON.stringify(answers),
+  );
+  const audits = await prisma.auditLog.findMany({ where: { action: "attempt.submit", entityId: started.attemptId } });
+  check("One audit row, with no invented actor", audits.length === 1 && audits[0].actorUserId === null && (audits[0].after as { finalisedBy: string }).finalisedBy === "DEADLINE", JSON.stringify(audits));
+  check("Idempotent afterwards", (await finaliseIfDue(prisma, centerId, started.attemptId, new Date(read.getTime() + HOUR))) === false);
+
+  // Frozen: the questions are locked and the score is never recomputed.
+  const refused = await saveAssessmentDraft(prisma, fx.actor, fx.teacher, examId, examDraft());
+  check("The questions can't change after attempts", !refused.ok);
+  await prisma.assessmentOption.updateMany({ where: { id: questions[0].right }, data: { isCorrect: false } });
+  await finaliseIfDue(prisma, centerId, started.attemptId, new Date(read.getTime() + 2 * HOUR));
+  const frozen = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
+  check("A frozen score does not move even if a correct mark did", frozen.score === 2 && frozen.maxScore === 10);
+  await prisma.assessmentOption.updateMany({ where: { id: questions[0].right }, data: { isCorrect: true } });
+
+  // Every read that touches attempts finalises: the list, and the page.
+  const listStudent = await makeStudent(centerId, "lazy-list", fx.classGroupId);
+  const listStart = await startAttempt(prisma, listStudent.student, examId, now);
+  const listed = await listStudentAssessments(prisma, listStudent.student, read);
+  check("The student's list finalises what is due, and reads it as submitted", listStart.ok && listed.find((item) => item.id === examId)?.state === "SUBMITTED", JSON.stringify(listed.map((item) => item.state)));
+  const pageStudent = await makeStudent(centerId, "lazy-page", fx.classGroupId);
+  await startAttempt(prisma, pageStudent.student, examId, now);
+  const page = await readStudentAssessment(prisma, pageStudent.student, examId, read);
+  check("The assessment page finalises too", page?.state === "SUBMITTED" && page.finished?.finalisedBy === "DEADLINE" && page.taking === null, JSON.stringify(page?.state));
+}
+
+async function checkOneSitting(fx: Fixture, now: Date) {
+  console.log("\n16. One sitting");
+  const { centerId } = fx.teacher;
+  const examId = await publishedExam(fx, now, { oneSitting: true });
+  const defaultExam = await publishedExam(fx, now);
+  const student = await makeStudent(centerId, "sitting", fx.classGroupId);
+  const started = await startAttempt(prisma, student.student, examId, now);
+  if (!started.ok) {
+    check("One-sitting fixture started", false);
+    return;
+  }
+  const inGrace = new Date(now.getTime() + 60_000);
+  const beat = await attemptHeartbeat(prisma, student.student, started.attemptId, inGrace);
+  check("A heartbeat within the grace keeps it open and answers the clock", beat.ok && beat.endsAtMs === now.getTime() + 30 * MINUTE && beat.serverNowMs === inGrace.getTime(), JSON.stringify(beat));
+  check("…and refreshes lastSeenAt", (await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: started.attemptId } })).lastSeenAt.getTime() === inGrace.getTime());
+  const rejoin = await startAttempt(prisma, student.student, examId, new Date(inGrace.getTime() + 100_000));
+  check("Re-entry within the grace resumes", rejoin.ok && rejoin.resumed);
+
+  const seen = new Date(inGrace.getTime() + 100_000);
+  const gapRead = new Date(seen.getTime() + 121_000);
+  const gone = await attemptHeartbeat(prisma, student.student, started.attemptId, gapRead);
+  const row = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
+  check("The next request past the grace is refused", !gone.ok && gone.error === "submitted", JSON.stringify(gone));
+  check("…finalised at lastSeenAt as ONE_SITTING_GAP", row.finalisedBy === "ONE_SITTING_GAP" && row.submittedAt?.getTime() === seen.getTime(), JSON.stringify(row));
+  const back = await startAttempt(prisma, student.student, examId, new Date(gapRead.getTime() + MINUTE));
+  check("…and the server never reopens it", !back.ok && back.error === "submitted", JSON.stringify(back));
+
+  const closer = await makeStudent(centerId, "closer", fx.classGroupId);
+  const closeStart = await startAttempt(prisma, closer.student, examId, now);
+  if (closeStart.ok) {
+    const closed = await submitAttempt(prisma, closer.student, closeStart.attemptId, new Date(now.getTime() + MINUTE), { onlyOneSitting: true });
+    check("The close signal submits a one-sitting exam as STUDENT", closed.ok && closed.finalisedBy === "STUDENT");
+  }
+  const defaultStudent = await makeStudent(centerId, "default-close", fx.classGroupId);
+  const defaultStart = await startAttempt(prisma, defaultStudent.student, defaultExam, now);
+  if (defaultStart.ok) {
+    const closed = await submitAttempt(prisma, defaultStudent.student, defaultStart.attemptId, new Date(now.getTime() + MINUTE), { onlyOneSitting: true });
+    const stillOpen = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: defaultStart.attemptId } });
+    check("The close signal does nothing to a default exam, which allows re-entry", !closed.ok && closed.error === "notOneSitting" && stillOpen.submittedAt === null);
+    const longGap = await startAttempt(prisma, defaultStudent.student, defaultExam, new Date(now.getTime() + 10 * MINUTE));
+    check("A default exam ignores a long gap and resumes", longGap.ok && longGap.resumed);
+  }
+}
+
+async function checkRevealAndPayloads(fx: Fixture, now: Date) {
+  console.log("\n17. Reveal, score and the student payloads (rule 11)");
+  const { centerId } = fx.teacher;
+  const closes = new Date(now.getTime() + 3 * HOUR);
+  const afterClose = new Date(closes.getTime() + MINUTE);
+  const noLeak = (value: unknown) => !/isCorrect|correctOptionId|pointsAwarded/.test(JSON.stringify(value));
+
+  const showing = await publishedExam(fx, now, { showScore: true, showCorrectAnswers: true });
+  const student = await makeStudent(centerId, "reveal", fx.classGroupId);
+
+  const beforeStart = await readStudentAssessment(prisma, student.student, showing, now);
+  const questionText = (await prisma.assessmentQuestion.findFirstOrThrow({ where: { assessmentId: showing } })).text;
+  check("Before start the page read carries no question", beforeStart?.taking === null && !JSON.stringify(beforeStart).includes(questionText) && beforeStart?.canStart === true);
+
+  const started = await startAttempt(prisma, student.student, showing, now);
+  if (!started.ok) {
+    check("Reveal fixture started", false);
+    return;
+  }
+  const questions = await optionsOf(showing);
+  const saved = await saveAnswer(prisma, student.student, started.attemptId, { questionId: questions[0].id, optionId: questions[0].right }, now);
+  const take = await readStudentAssessment(prisma, student.student, showing, now);
+  const allOptionIds = take?.taking?.questions.flatMap((q) => q.options.map((o) => o.id)) ?? [];
+  check("The taking payload has its questions and options", take?.taking?.questions.length === 3 && allOptionIds.length === 12);
+  check("The taking payload never contains isCorrect or a correct option id", noLeak(take), JSON.stringify(take?.taking).slice(0, 300));
+  check("Its option objects carry only id and text", take?.taking?.questions.every((q) => q.options.every((o) => Object.keys(o).sort().join() === "id,text")) === true);
+  check("It names the saved option, and nothing about it", take?.taking?.answers[questions[0].id] === questions[0].right);
+  check("The autosave answer never contains isCorrect", noLeak(saved));
+  check("The heartbeat answer never contains isCorrect", noLeak(await attemptHeartbeat(prisma, student.student, started.attemptId, now)));
+  check("The list never contains isCorrect", noLeak(await listStudentAssessments(prisma, student.student, now)));
+
+  const inProgressReveal = await readAttemptReveal(prisma, student.student, started.attemptId, now);
+  check("Reveal is refused while in progress", inProgressReveal === null);
+  await submitAttempt(prisma, student.student, started.attemptId, new Date(now.getTime() + MINUTE));
+  const submittedView = await readStudentAssessment(prisma, student.student, showing, new Date(now.getTime() + 2 * MINUTE));
+  check("After submit, showScore on: the score and percentage show", submittedView?.finished?.score?.score === 2 && submittedView.finished.score.maxScore === 10 && submittedView.finished.score.percentage === 20, JSON.stringify(submittedView?.finished));
+  check("…and the state is Submitted", submittedView?.state === "SUBMITTED");
+  check("After submit, before close: still no correctness", noLeak(submittedView));
+  check("Reveal is refused before it closes", (await readAttemptReveal(prisma, student.student, started.attemptId, new Date(now.getTime() + 2 * MINUTE))) === null);
+
+  const revealed = await readAttemptReveal(prisma, student.student, started.attemptId, afterClose);
+  const first = revealed?.find((row) => row.id === questions[0].id);
+  check(
+    "After close, with showCorrectAnswers on: isCorrect and the correct option",
+    first?.isCorrect === true && first.correctOptionId === questions[0].right && first.chosenOptionId === questions[0].right && first.pointsAwarded === 2 && revealed?.length === 3,
+    JSON.stringify(first),
+  );
+  const unanswered = revealed?.find((row) => row.id === questions[1].id);
+  check("An unanswered question reveals as not correct, with its correct option", unanswered?.isCorrect === false && unanswered.chosenOptionId === null && unanswered.correctOptionId === questions[1].right);
+  check("The state after close is Closed", (await readStudentAssessment(prisma, student.student, showing, afterClose))?.state === "CLOSED");
+
+  const intruder = await makeStudent(centerId, "reveal-intruder", fx.classGroupId);
+  check("Another student's attempt reveals nothing", (await readAttemptReveal(prisma, intruder.student, started.attemptId, afterClose)) === null);
+
+  const extendTo = new Date(afterClose.getTime() + HOUR);
+  await extendAssessment(prisma, fx.actor, fx.teacher, showing, extendTo, now);
+  check("An extension moves the reveal", (await readAttemptReveal(prisma, student.student, started.attemptId, afterClose)) === null && (await readAttemptReveal(prisma, student.student, started.attemptId, new Date(extendTo.getTime() + MINUTE))) !== null);
+
+  const hidden = await publishedExam(fx, now, { showScore: false, showCorrectAnswers: false });
+  const hiddenStudent = await makeStudent(centerId, "reveal-hidden", fx.classGroupId);
+  const hiddenStart = await startAttempt(prisma, hiddenStudent.student, hidden, now);
+  if (hiddenStart.ok) {
+    await submitAttempt(prisma, hiddenStudent.student, hiddenStart.attemptId, new Date(now.getTime() + MINUTE));
+    const hiddenView = await readStudentAssessment(prisma, hiddenStudent.student, hidden, afterClose);
+    check("showScore off: no score in the page read", hiddenView?.finished !== null && hiddenView?.finished?.score === null, JSON.stringify(hiddenView?.finished));
+    check("showScore off: no score in the list", (await listStudentAssessments(prisma, hiddenStudent.student, afterClose)).find((item) => item.id === hidden)?.score === null);
+    check("showCorrectAnswers off: no reveal even after close", (await readAttemptReveal(prisma, hiddenStudent.student, hiddenStart.attemptId, afterClose)) === null);
+  }
+
+  // The order the page uses: stable per attempt, different between attempts.
+  const many = Array.from({ length: 8 }, () => question());
+  const shuffled = await publishedExam(fx, now, { shuffle: true, questions: many });
+  const a = await makeStudent(centerId, "shuffle-a", fx.classGroupId);
+  const b = await makeStudent(centerId, "shuffle-b", fx.classGroupId);
+  await startAttempt(prisma, a.student, shuffled, now);
+  await startAttempt(prisma, b.student, shuffled, now);
+  const order = (view: StudentAssessmentView | null) => JSON.stringify(view?.taking?.questions.map((q) => [q.id, q.options.map((o) => o.id)]));
+  const firstRead = order(await readStudentAssessment(prisma, a.student, shuffled, now));
+  const secondRead = order(await readStudentAssessment(prisma, a.student, shuffled, new Date(now.getTime() + MINUTE)));
+  check("The shuffled order survives a refresh", firstRead === secondRead && firstRead !== undefined);
+  check("…and differs between attempts", firstRead !== order(await readStudentAssessment(prisma, b.student, shuffled, now)));
+  const plain = await publishedExam(fx, now, { shuffle: false, questions: many });
+  await startAttempt(prisma, a.student, plain, now);
+  const stored = await optionsOf(plain);
+  const plainView = await readStudentAssessment(prisma, a.student, plain, now);
+  check("With shuffle off the stored order stands", plainView?.taking?.questions.map((q) => q.id).join() === stored.map((q) => q.id).join());
+}
+
+async function checkHomework(fx: Fixture, now: Date) {
+  console.log("\n18. Homework, and the class engine (OD-18 → D-W31)");
+  const { centerId } = fx.teacher;
+  const session = await makeSession(centerId, fx.classGroupId, fx.teacher.userId, 45, "09:00");
+  const deadline = new Date(now.getTime() + 2 * DAY);
+  const created = await createAssessment(prisma, fx.actor, fx.teacher, { type: "HOMEWORK", sessionId: session.id, draft: homeworkDraft(deadline) });
+  if (!created.ok) {
+    check("Homework fixture created", false, JSON.stringify(created));
+    return;
+  }
+
+  // A draft is enough: any assessment makes its session non-pristine.
+  const state = await prisma.session.findUniqueOrThrow({ where: { id: session.id }, select: { isManual: true, status: true, closedAt: true, teacherId: true, centerShareType: true, centerShareValue: true, description: true, rescheduledToId: true, rescheduledFrom: { select: { id: true } }, _count: { select: { attendees: true, payments: true, settlements: true, ratings: true, assessments: true } } } });
+  check("A draft homework makes its session non-pristine, reason `assessments`", sessionDisqualifiers(state, [], { teacherId: fx.teacher.userId, roomIds: [] }).includes("assessments"));
+  await prisma.session.update({ where: { id: session.id }, data: { isManual: true } });
+  const sessionDelete = await deleteManualSession(prisma, centerId, session.id, { now });
+  check("Deleting that session by direct call is refused", !sessionDelete.ok && sessionDelete.error === "sessionInUse" && sessionDelete.blockers.includes("assessments") && (await prisma.session.count({ where: { id: session.id } })) === 1, JSON.stringify(sessionDelete));
+  await prisma.session.update({ where: { id: session.id }, data: { isManual: false } });
+
+  const classDelete = await deleteClass(prisma, centerId, fx.classGroupId, { now });
+  check("Deleting the class by direct call is refused", !classDelete.ok && classDelete.error === "classInUse" && classDelete.blockers.assessments > 0 && (await prisma.classGroup.count({ where: { id: fx.classGroupId } })) === 1, JSON.stringify(classDelete));
+
+  const published = await publishAssessment(prisma, fx.actor, fx.teacher, created.id, now);
+  check("A homework with a future deadline publishes", published.ok, JSON.stringify(published));
+  const student = await makeStudent(centerId, "homework", fx.classGroupId);
+  const started = await startAttempt(prisma, student.student, created.id, now);
+  const view = await readStudentAssessment(prisma, student.student, created.id, now);
+  check("An untimed homework ends at its deadline", started.ok && view?.taking?.clock.endsAtMs === deadline.getTime());
+  const reentry = await startAttempt(prisma, student.student, created.id, new Date(now.getTime() + DAY));
+  check("Homework allows re-entry after a long gap", reentry.ok && reentry.resumed);
+  const late = await makeStudent(centerId, "homework-late", fx.classGroupId);
+  const lateStart = await startAttempt(prisma, late.student, created.id, new Date(deadline.getTime() + MINUTE));
+  check("Start is refused after the deadline", !lateStart.ok && lateStart.error === "closed");
+
+  const cancelled = await cancelSession(prisma, centerId, session.id, { now });
+  check(
+    "Cancelling the session does not touch its homework",
+    cancelled.ok && (await prisma.assessment.findUniqueOrThrow({ where: { id: created.id } })).status === "PUBLISHED",
+    JSON.stringify(cancelled),
+  );
+  const afterCancel = await startAttempt(prisma, late.student, created.id, now);
+  check("…students can still start it", afterCancel.ok);
+}
+
+async function checkAttemptAudit(centerId: string) {
+  console.log("\n19. Audit rows: ids only");
+  const rows = await prisma.auditLog.findMany({
+    where: { centerId, action: { in: ["assessment.publish", "assessment.unpublish", "assessment.extend", "attempt.start", "attempt.submit"] } },
+  });
+  const actions = new Set(rows.map((row) => row.action));
+  check("Every new action wrote rows", ["assessment.publish", "assessment.unpublish", "assessment.extend", "attempt.start", "attempt.submit"].every((action) => actions.has(action)), [...actions].join(", "));
+  check(`No row carries a name, contact or free text (${rows.length} rows)`, rows.every((row) => forbiddenAuditKey(row.before) === null && forbiddenAuditKey(row.after) === null));
+  const start = rows.find((row) => row.action === "attempt.start");
+  check("attempt.start names only ids", start !== undefined && Object.keys(start.after as object).sort().join() === "assessmentId,studentProfileId", JSON.stringify(start?.after));
+  const feed = await loadAuditFeed(prisma, centerId, "all", { take: 200, skip: 0 });
+  check("The centre's audit trail shows none of it (D-W11)", !feed.entries.some((entry) => entry.entityType === "Assessment" || entry.entityType === "AssessmentAttempt"));
+}
+
+async function checkAttemptTablesAndStatics() {
+  console.log("\n20. RLS and statics (W3a)");
+  const tables = await prisma.$queryRaw<{ relname: string; relrowsecurity: boolean }[]>`
+    SELECT c.relname, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname IN ('AssessmentAttempt', 'AssessmentAnswer')`;
+  const policies = await prisma.$queryRaw<{ count: bigint }[]>`
+    SELECT count(*)::bigint AS count FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('AssessmentAttempt', 'AssessmentAnswer')`;
+  check("RLS is on for AssessmentAttempt and AssessmentAnswer", tables.length === 2 && tables.every((t) => t.relrowsecurity), JSON.stringify(tables));
+  check("…with zero policies", Number(policies[0]?.count ?? -1) === 0);
+
+  const attempts = readSource(join(ROOT, "lib/db/assessment-attempts.ts"));
+  // Code only: no comments, and not the reveal's own result type.
+  const attemptsCode = attempts
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/^export type RevealedQuestion = \{[\s\S]*?^\};$/m, "");
+  const readers = functionBodies(attemptsCode).filter((fn) => /isCorrect/.test(fn.body)).map((fn) => fn.name).sort();
+  check("Only finaliseAttemptTx and revealOf name isCorrect in the attempts module", readers.join() === "finaliseAttemptTx,revealOf", readers.join());
+  check("revealOf is called only behind revealAllowed", /revealAllowed\([\s\S]*?\)\) return null;\s*return revealOf\(/.test(attempts) && (attempts.match(/revealOf\(/g) ?? []).length === 2);
+
+  const studentDir = join(ROOT, "app/[locale]/(student)/student/assessments");
+  const taker = readSource(join(studentDir, "taker.tsx"));
+  const actions = readSource(join(studentDir, "actions.ts"));
+  check("The taking screen and the student actions never name isCorrect", !/isCorrect/.test(taker) && !/isCorrect/.test(actions) && !/isCorrect/.test(readSource(join(studentDir, "start-attempt.tsx"))));
+  check("Only the student page's reveal branch reads correctness", (readSource(join(studentDir, "[id]/page.tsx")).match(/readAttemptReveal\(/g) ?? []).length === 1);
+  const studentActions = functionBodies(actions).filter((fn) => /Action$/.test(fn.name));
+  check(
+    `Every student action resolves the person's own profiles (${studentActions.map((fn) => fn.name).join(", ")})`,
+    studentActions.length === 4 && studentActions.every((fn) => /getCurrentUser\(\)/.test(fn.body) && /studentBranches\(user\.id\)/.test(fn.body)),
+  );
+  check("No student action takes a centre, profile or time from the client", !/centerId|studentProfileId|startedAt|parsed\.data\.now/.test(actions));
+  check("Autosave and start use the rate limiter", /withinLimit\(user\.id\)/.test(functionBodies(actions).find((fn) => fn.name === "saveAnswerAction")?.body ?? "") && /withinLimit\(user\.id\)/.test(functionBodies(actions).find((fn) => fn.name === "startAttemptAction")?.body ?? ""));
+
+  const publishActions = functionBodies(readSource(join(ROOT, "app/[locale]/(teacher)/teacher/assessments/publish-actions.ts"))).filter((fn) => /Action$/.test(fn.name));
+  check(
+    `Every publish action re-resolves the branch, then the owning teacher (${publishActions.map((fn) => fn.name).join(", ")})`,
+    publishActions.length === 3 && publishActions.every((fn) => fn.body.indexOf("teacherBranchContext(") > -1 && fn.body.indexOf("resolveAssessmentTeacher(") > fn.body.indexOf("teacherBranchContext(")),
+  );
+
+  const groups = ["(center)", "(parent)", "(admin)"];
+  const offenders = groups.flatMap((group) => walk(join(ROOT, "app", "[locale]", group)).filter((file) => /assessment-attempts|student\/assessments/.test(readSource(file))));
+  check("No centre, parent or admin file reaches the attempts module (D-W11)", offenders.length === 0, offenders.map((f) => relative(ROOT, f)).join(", "));
+
+  const route = readSource(join(ROOT, "app/api/assessment-attempts/[attemptId]/close/route.ts"));
+  check("The close route checks the origin and submits only the signed-in student's own one-sitting attempt", /request\.headers\.get\("origin"\)/.test(route) && /studentBranches\(user\.id\)/.test(route) && /onlyOneSitting: true/.test(route) && !/export (async )?function GET/.test(route));
+  const vercel = readSource(join(ROOT, "vercel.json"));
+  check("No cron exists for assessments (D-W10, rule 12)", !/assessment|attempt/i.test(vercel));
+  const routes = walk(join(ROOT, "app", "api")).filter((file) => /assessment|attempt/i.test(relative(ROOT, file)));
+  check("The close route is the only assessment route handler", routes.length === 1, routes.map((f) => relative(ROOT, f)).join(", "));
+  check("One grace constant: it is named once, in lib/assessments.ts", walk(join(ROOT, "lib")).concat(walk(join(ROOT, "app"))).filter((file) => /ONE_SITTING_GRACE_SECONDS\s*=/.test(readSource(file))).length === 1);
+}
+
+async function checkTaking(ids: { fx: Fixture; otherTeacher: AssessmentTeacher; centerB: string }) {
+  const { fx, otherTeacher, centerB } = ids;
+  const inactive = await makeClass(fx.teacher.centerId, fx.teacher.userId);
+  await prisma.classGroup.update({ where: { id: inactive.id }, data: { active: false } });
+  await checkPublishRules(fx, otherTeacher, inactive.id);
+  const now = new Date();
+  const started = await checkStartAndEligibility(fx, centerB, now);
+  await checkLocking(fx, otherTeacher, started.examId, now);
+  await checkAutosave(fx, now);
+  await checkLazyFinalisation(fx, now);
+  await checkOneSitting(fx, now);
+  await checkRevealAndPayloads(fx, now);
+  await checkHomework(fx, now);
+  await checkAttemptAudit(fx.teacher.centerId);
+}
+
 async function main() {
   await cleanup();
   checkDefaults();
   checkLimits();
+  checkTimeRules();
 
   const centerA = await makeCenter(SLUG_A);
   const centerB = await makeCenter(SLUG_B);
@@ -787,11 +1522,17 @@ async function main() {
     await checkSerializer(who.teacher, who.examId, who.actor);
     await checkLock(who.teacher, who.examId);
     await checkAudit(who.teacher, who.actor, constraintClass.id);
+    await checkTaking({
+      fx: { teacher: who.teacher, actor: who.actor, classGroupId: (await makeClass(centerA.id, teacherA.user.id)).id },
+      otherTeacher: { centerId: centerA.id, membershipId: teacherA2.membership.id, userId: teacherA2.user.id },
+      centerB: centerB.id,
+    });
   } else {
     check("Who-can fixtures resolved (later sections depend on them)", false);
   }
   await checkRlsAndGrants();
   checkStatics();
+  await checkAttemptTablesAndStatics();
 }
 
 main()

@@ -243,11 +243,17 @@ Exams & homework: `PageHeader` with **New exam**, a filter row (Type, Class, and
 ### `app/[locale]/(teacher)/teacher/assessments/new/page.tsx` — **W2 (new)**
 "New exam" with no class: a list of the teacher's active classes (one link card each, the branch under All branches). With a class or a session: the builder in create mode — nothing is written until the first **Save draft**.
 
-### `app/[locale]/(teacher)/teacher/assessments/[id]/page.tsx` — **W2 (new)**
-The builder (docs/04 §11.33): Details, Timing (shared `DatePicker` + `TimePicker`, the zone named), stacked question cards (text, LTR points, 2–5 option rows with a 44px radio and a 44px remove, up/down/delete as 44px icon buttons with labels), and an aside with Settings switches and the **Ready to publish** checklist (icon **and** text). A sticky save bar (total points, saved / unsaved text, Preview, **Save draft**); a Delete draft card with a confirmation. One column below `lg`, aside beside from `lg`.
+### `app/[locale]/(teacher)/teacher/assessments/[id]/page.tsx` — **W2 (new); W3a**
+**W3a:** a draft gains a **Publish** card under the builder. A published row opens read-only instead: details and questions in the main column; **Extend**, Preview, and while no student has started **Back to draft** and **Delete** in the side column, which stacks under the questions below `lg`. W2 entry: The builder (docs/04 §11.33): Details, Timing (shared `DatePicker` + `TimePicker`, the zone named), stacked question cards (text, LTR points, 2–5 option rows with a 44px radio and a 44px remove, up/down/delete as 44px icon buttons with labels), and an aside with Settings switches and the **Ready to publish** checklist (icon **and** text). A sticky save bar (total points, saved / unsaved text, Preview, **Save draft**); a Delete draft card with a confirmation. One column below `lg`, aside beside from `lg`.
 
 ### `app/[locale]/(teacher)/teacher/assessments/[id]/preview/page.tsx` — **W2 (new)**
 The draft as a student sees it, from the student serializer: title, instructions, times, total points, a timer box showing the duration (not running), the one-sitting warning, then each question with 44px option tiles. No correct marks; Start is disabled. Max width 2xl, one column.
+
+### `app/[locale]/(student)/student/assessments/page.tsx` — **W3a (new)**
+Exams & homework for a student: `PageHeader`, then one card per state (In progress, Open, Upcoming, Submitted, Missed, Closed), and under each the student's branches, each with stacked 44px link rows: title (`dir="auto"`), a semantic state badge, type and class, the times in the session's frozen timezone or the branch's, and the score when the teacher left it on. One-column at every width; never a table. docs/04 §11.34.
+
+### `app/[locale]/(student)/student/assessments/[id]/page.tsx` — **W3a (new)**
+One assessment, the face chosen by the server: details and **Start** (a `DialogShell` confirmation); the taking screen (sticky header with the countdown and saved indicator, one question, 44px option tiles, a question grid with answered markers, sticky Previous / Next, a review screen and a confirmation with the unanswered count); or the result and, once allowed, the reveal, each option marked by icon and text. Max width 2xl; 375px and RTL correct. docs/04 §11.34.
 
 ### `app/[locale]/(teacher)/teacher/classes/[id]/page.tsx` — **W2 (new)**
 One class the teacher teaches: `PageHeader` (the class name, the branch under All branches, an Inactive badge), its **Exams and homework** card with **New exam**, and a Schedule card (weekly slots, the period). One column below `xl`.

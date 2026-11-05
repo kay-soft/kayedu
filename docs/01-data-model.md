@@ -111,9 +111,9 @@ A `SessionAttendee` can exist **with** an enrollment (regular student) or **with
 ### Assessments layer *(W2, delivered — tenant tables, `centerId`-scoped)*
 A teacher's multiple-choice exams and homework (D-W01–D-W06, D-W30). Written only by `lib/db/assessments.ts`. Centre staff and parents read none of it (D-W11). Migration `20261104090000_w2_assessments`: additive, RLS on with zero policies.
 - **Assessment**
-  - `centerId`, `classGroupId` (required, cascade), `sessionId?` (cascade — required for HOMEWORK, optional for EXAM; a homework goes with its session if the R4 engine deletes a pristine one, **OD-18**).
+  - `centerId`, `classGroupId` (required, cascade), `sessionId?` (cascade — required for HOMEWORK, optional for EXAM. An assessment makes its session non-pristine and session and class deletes are refused while one exists, so the cascade only serves a whole branch's removal, D-W31).
   - **`teacherMembershipId`** (the owning TEACHER `Membership`, cascade) — the authority after creation.
-  - `type` (`AssessmentType`: `EXAM | HOMEWORK`), `status` (`AssessmentStatus`: `DRAFT | PUBLISHED` — W2 writes DRAFT only), `title`, `instructions?`.
+  - `type` (`AssessmentType`: `EXAM | HOMEWORK`), `status` (`AssessmentStatus`: `DRAFT | PUBLISHED`, D-W31), `title`, `instructions?`.
   - `windowStart?` / `windowEnd?` (EXAM), `deadline?` (HOMEWORK), `durationMinutes?`, `oneSitting`, `shuffle`, `showScore`, `showCorrectAnswers`.
   - **`createdByUserId` / `updatedByUserId`** (the actor, plain ids — an assistant from W7), `createdAt`, `updatedAt`, `publishedAt?`.
   - Times are UTC instants, typed and shown in the session's frozen timezone, else the branch's.
@@ -124,20 +124,24 @@ A teacher's multiple-choice exams and homework (D-W01–D-W06, D-W30). Written o
     - `Assessment_duration_range_check` — 1–600.
 - **AssessmentQuestion** — `centerId`, `assessmentId` (cascade), `position`, `text` (CHECK ≤ 2,000), `points` (CHECK 1–100, default 1). Text only (D-W04).
 - **AssessmentOption** — `centerId`, `questionId` (cascade), `position`, `text` (CHECK ≤ 500), `isCorrect`.
-  - **At most one correct option per question** is enforced by the hand-written partial unique index `AssessmentOption_one_correct_per_question … WHERE "isCorrect"`. Prisma cannot express it, so delete its generated `DROP INDEX` (CLAUDE.md rule 7). "Exactly one" is the publish rule (W3).
+  - **At most one correct option per question** is enforced by the hand-written partial unique index `AssessmentOption_one_correct_per_question … WHERE "isCorrect"`. Prisma cannot express it, so delete its generated `DROP INDEX` (CLAUDE.md rule 7). "Exactly one" is the publish rule (W3a).
   - 2–5 options per question and ≤ 200 questions per assessment are the writer's rule (`draftErrors`).
-  - **`isCorrect` never reaches a student before reveal.** The student shape is `STUDENT_ASSESSMENT_SELECT` + `toStudentAssessment`, which never names it (D-W09). Only the teacher's builder read includes it.
-- **Writes** replace the whole question set (`replaceQuestions`), behind `isAssessmentLocked` (D-W08; it always answers false until W3's attempts). Audited `assessment.create` / `.update` / `.delete`, ids and counts only (D-20).
+  - **`isCorrect` never reaches a student before reveal.** The student shape is `STUDENT_ASSESSMENT_SELECT` + `toStudentAssessment`, which never names it (D-W09). Only the teacher's own read, grading and the post-close reveal read it.
+- **Writes** replace the whole question set (`replaceQuestions`), behind `isAssessmentLocked` (D-W08: true once any attempt exists; there is no `lockedAt` column, D-W31). Audited `assessment.create` / `.update` / `.delete` / `.publish` / `.unpublish` / `.extend`, ids and counts only (D-20).
+- **AssessmentAttempt** (W3a, migration `20261105090000_w3a_assessment_attempts`: additive, RLS on with zero policies) — one student's one attempt (D-W07). Written only by `lib/db/assessment-attempts.ts`.
+  - `centerId`, `assessmentId` (cascade), `studentProfileId` (cascade), `startedAt`, `lastSeenAt`, `submittedAt?`, `finalisedBy?` (`AssessmentFinalisedBy`: `STUDENT | DEADLINE | ONE_SITTING_GAP`), `score?`, `maxScore?` (frozen at finalisation, D-W09).
+  - Unique `(assessmentId, studentProfileId)`: starting again resumes. The percentage is never stored. The **end** is derived, never stored (`attemptEnd`). Neither is the **shuffled order** (`attemptOrder`, from the attempt's id).
+  - CHECK `AssessmentAttempt_final_check`: `submittedAt` and `finalisedBy` are both set or both null. Final means `submittedAt` is set; a deadline finalisation stamps the derived end, a gap finalisation `lastSeenAt`.
+- **AssessmentAnswer** (W3a) — `centerId`, `attemptId` (cascade), `questionId` (cascade), `optionId?` (`SET NULL`), `isCorrect?`, `pointsAwarded?`, `updatedAt`. Unique `(attemptId, questionId)`: an autosave overwrites its own row. `isCorrect` and `pointsAwarded` are set only at finalisation, and every question has a row from then on, an unanswered one with `optionId` null and 0 points. They never reach a student before reveal (CLAUDE.md rule 11).
+- **Delete guards.** The foreign keys cascade for a whole branch's removal; nothing else may take an attempt with it. `deleteAssessment`, `deleteClass`, `deleteManualSession`, and the student and teacher delete blockers all refuse (D-W31).
 - **Permission:** `assessment.manage.own`, a TEACHER baseline row (the baseline is 71 rows). It was backfilled for every existing branch by the same migration (D-W30).
 
 ### Planned — W-batch (not migrated)
 > **Planned, W-batch.** None of this is in `prisma/schema.prisma` or a migration yet. Each milestone that adds a field writes its own **additive** migration and moves its bullet into the layer it belongs to (`03-build-order.md` W1–W9). The decisions are `00-master-product-spec.md` §5.1 "W-batch" (D-W01…D-W26). Names are working names. **Every new tenant row carries `centerId`** and is read through `scoped(ctx)`, the same as everything else. The global rows (no `centerId`) are noted, and each is read only by its owner's own id.
 
-**Notifications (W1)** — *delivered; moved to "Notifications layer" above.* W3 and W7 add their kinds (`ASSESSMENT_PUBLISHED`, `WORKSPACE_INVITATION`, `ASSISTANT_INVITATION`) to the same enum, each an additive migration; notices **computed on read** (D-W12 — "due soon", an unsubmitted attempt) have no row.
+**Notifications (W1)** — *delivered; moved to "Notifications layer" above.* W3b and W7 add their kinds (`ASSESSMENT_PUBLISHED`, `WORKSPACE_INVITATION`, `ASSISTANT_INVITATION`) to the same enum, each an additive migration; notices **computed on read** (D-W12 — "due soon", an unsubmitted attempt) have no row.
 
-**Assessments (W3–W4, W9).** *The three W2 tables are delivered and moved to "Assessments layer" above.* W3 adds `lockedAt` (stamped by the first attempt — D-W08; after it, `windowEnd`/`deadline` only ever move **later**) and the two tables below, all `centerId`-scoped and covered by the Data API lockdown.
-- **AssessmentAttempt** — `centerId`, `assessmentId`, `studentProfileId`, `startedAt`, `submittedAt?`, `submitMode?` (`STUDENT | ONE_SITTING_CLOSED | LAZY_DEADLINE`, D-W02/D-W10), `order` (JSON: the question and option ids in the order drawn at start, D-W05), `pointsEarned?`/`pointsPossible?` (**frozen at submit**, D-W09). The percentage is never stored. Unique on `(assessmentId, studentProfileId)` — one attempt (D-W07). The end time is **derived**, never stored: min(`startedAt` + duration, `windowEnd`), or the deadline. A lazy finalisation is one conditional update `WHERE submittedAt IS NULL` (D-W10).
-- **AssessmentAnswer** — `centerId`, `attemptId` (cascade), `questionId`, `optionId?`, `savedAt`, `correct?` (set at grading, frozen with the score). Unique on `(attemptId, questionId)` — an autosave overwrites its own row until submit and refuses after it.
+**Assessments (W4, W9).** *The W2 tables and W3a's attempts and answers are delivered and moved to "Assessments layer" above. W3a replaced the planned `lockedAt`, `submitMode`, stored `order` and `pointsEarned`/`pointsPossible` (D-W31).* W4 adds no table.
 
 **Premium (W6).**
 - **`User.premiumUntil`** (`DateTime?`, null = never premium): the end of premium, set only by a platform admin and audited `platform.premium.update` (before/after dates, no `centerId`). "Premium now" = `premiumUntil` not yet passed, worked out on every request (D-W14/D-W15). A global field on a global row — not a centre plan (W-C5).

@@ -821,7 +821,7 @@ Every Critical and High was re-confirmed by the lead with `file:line` evidence.
   - **a new class page** `/teacher/classes/[id]`, with "New exam" and the class's assessments. The prompt assumed this page existed. Recommended option (a), taken because the reply gave no other instruction.
   - The session page gains a **Homework** card with "Add homework", and a link to the class page.
 
-**Scope moved:** publishing (DRAFT → PUBLISHED) moved to **W3** with the student side, per the W2 prompt. W2 writes DRAFT only.
+**Scope moved:** publishing (DRAFT → PUBLISHED) moved to **W3a** with the student side, per the W2 prompt. W2 writes DRAFT only.
 
 **DB:** yes — migration `20261104090000_w2_assessments`.
 - The two enums and the three tables, plus RLS on with zero policies.
@@ -858,12 +858,26 @@ Additive. It was generated with the read-only `migrate diff --from-url`, and pro
 
 **Docs:** 00 (D-W30, W-C10, OD-18), 01 ("Assessments layer"), 02 §6, §11 and §18, 03 (this entry and W3), 04 §11.33–§11.34, 06 (the five new pages), and CLAUDE.md rules 6 and 7.
 
-### W3 — Student taking + calendar + notices (planned)
-**Build:** **publish** (DRAFT → PUBLISHED, moved here from W2: refused unless `readiness` is all done; a confirmation states who is notified) and `Assessment.lockedAt`; `AssessmentAttempt` / `AssessmentAnswer`; `isAssessmentLocked` given its body (any attempt exists); start (eligibility at start, D-W07; order drawn once, D-W05), autosave, submit, one-sitting close, server time (D-W02, D-W09), lazy finalisation (D-W10); the student's assessment list, taking screen and post-submit view (score per showScore; correct answers only after close, D-W06); assessments on the **student** calendar (not the parent's — D-W11); the `ASSESSMENT_PUBLISHED` notice and computed "due soon" notices (W1).
-**DB:** yes — the two tables and `lockedAt`. **Blocked by OD-18** (a homework cascades with a pristine session the engine deletes).
-**Done when:** no response a student receives before reveal contains a correct option or per-answer correctness (by direct call and by a static sweep); a past-due unsubmitted attempt reads as submitted, graded once under two concurrent readers; a student who left the class cannot start; re-entry keeps the order and the timer.
-**Gates:** `check:assessments` (new sections: the reveal sweep, time from `startedAt`, lazy finalisation race, eligibility, one attempt, lock after first attempt, extension only later); `check:notifications`, `check:student-portal`, `check:parent` (nothing new reaches a parent), `check:isolation`, `check:design`, `check:rtl`.
-**Docs:** 00 §4.3 (calendar line), 02 §18, 04 §11.28, §11.34, this entry.
+### W3a — Publishing + student taking (delivered 5 Nov 2026)
+**Scope split:** W3 became W3a (this entry) and W3b (below), per the W3a prompt.
+**Built:**
+- **Publish** (DRAFT → PUBLISHED, moved here from W2), **unpublish** while no attempt exists, **extend** only later and only before it has passed, and **delete** for a draft or a published row with no attempt. A published row opens read-only on the teacher's page.
+- **`AssessmentAttempt` / `AssessmentAnswer`** and `isAssessmentLocked` given its body (any attempt exists; no `lockedAt`, D-W31).
+- **Student side:** the `assessments` nav item, the list grouped by state and branch, start with a confirmation, autosave (rate-limited), one question at a time with a question grid, a server-driven countdown, a review screen, submit with the unanswered count, one-sitting heartbeat and close signal, the result, and the reveal after close.
+- **Server rules:** derived end, lazy finalisation (`finaliseIfDue`), grading, the seeded shuffle, and correctness read only by grading and the reveal.
+- **OD-18 decided (D-W31):** an assessment makes its session non-pristine (kept reason `assessments`), and session and class deletes are refused while one exists.
+- **Also:** teacher and student delete blockers count assessments and attempts, and the centre audit screen omits both (D-W11).
+- **Tooling:** the e2e title prefix and its staging-guarded teardown (`npm run e2e:clean-assessments`). `E2E_PORT` already existed.
+**DB:** migration `20261105090000_w3a_assessment_attempts`: additive, RLS on both tables, plus `AssessmentAttempt_final_check`.
+**Gates:** `check:assessments` sections 10–20; `check:class-periods` gains the `assessments` reason, the kept report and the delete blocker; e2e `assessments.spec.ts` (`@write`); the student nav list in `seed:verify` and `navigation.spec`.
+**Docs:** 00 (D-W31, §4.3 item 1b, OD-18 closed), 01 ("Assessments layer"), 02 §18, 03 (this entry and W3b), 04 §11.33–§11.34, 05 (entry 39), 06 (two new pages), `staging.md`.
+
+### W3b — Notices + calendar (planned)
+**Build:** assessments on the **student** calendar (not the parent's — D-W11); the `ASSESSMENT_PUBLISHED` notice at publish and computed "due soon" notices (W1, D-W12). The publish confirmation then states who is notified.
+**DB:** an additive enum value for the notice kind.
+**Done when:** publishing notifies every student who is eligible at that moment, once; a "due soon" notice is computed on read, with no job; a calendar entry sits on a homework's deadline day and an exam's window; nothing reaches a parent.
+**Gates:** `check:assessments`, `check:notifications`, `check:student-portal`, `check:parent` (nothing new reaches a parent), `check:isolation`, `check:design`, `check:rtl`.
+**Docs:** 00 §4.3 (calendar line), 02 §18, 04 §11.28 and §11.31, this entry.
 
 ### W4 — Results (planned)
 **Build:** the teacher's results page per assessment: eligible / started / submitted, score, percentage (derived), time taken, each student's answers; the reveal toggles editable afterwards (D-W06, D-W11).

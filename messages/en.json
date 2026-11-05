@@ -857,7 +857,8 @@
       "enrollments": "{count, plural, one {# student enrolment} other {# student enrolments}}",
       "reservations": "{count, plural, one {# enrolment request} other {# enrolment requests}}",
       "deactivateHint": "Deactivate it instead: its upcoming sessions are removed and its history is kept.",
-      "bookings": "{count, plural, one {# single-session booking} other {# single-session bookings}}"
+      "bookings": "{count, plural, one {# single-session booking} other {# single-session bookings}}",
+      "assessments": "{count, plural, one {# exam or homework} other {# exams and homework}}"
     },
     "holidays": {
       "title": "Holiday calendar",
@@ -2255,7 +2256,7 @@
   },
   "TeacherAssessments": {
     "title": "Exams & homework",
-    "subtitle": "Build exams and homework as drafts and preview them. Students can't see a draft.",
+    "subtitle": "Build exams and homework, preview them and publish when they're ready. Students can't see a draft.",
     "newExam": "New exam",
     "addHomework": "Add homework",
     "empty": "No exams or homework yet",
@@ -2363,11 +2364,13 @@
         "label": "Delete draft",
         "title": "Delete this draft?",
         "body": "The draft and all its questions will be deleted. This can't be undone."
-      }
+      },
+      "viewExamTitle": "Exam",
+      "viewHomeworkTitle": "Homework"
     },
     "ready": {
       "title": "Ready to publish",
-      "description": "Publishing arrives in a later update. This list shows what's still missing.",
+      "description": "What publishing asks for. It reads your last saved version.",
       "hasQuestions": "At least one question",
       "allTextFilled": "Every question and option has text",
       "oneCorrectEach": "Each question has exactly one correct option",
@@ -2376,7 +2379,8 @@
       "done": "done",
       "missing": "not yet",
       "allDone": "Everything is ready.",
-      "notYet": "Some items still need attention."
+      "notYet": "Some items still need attention.",
+      "windowEndInFuture": "The closing time is in the future"
     },
     "errors": {
       "forbidden": "You can't manage exams and homework at this branch.",
@@ -2385,7 +2389,12 @@
       "locked": "Students have started, so the questions are locked.",
       "invalid": "Some fields need fixing. See the messages below.",
       "badTime": "Enter both a valid date and a valid time, or leave both empty.",
-      "pickBranch": "Pick a branch first."
+      "pickBranch": "Pick a branch first.",
+      "notReady": "It isn't ready yet. Finish the list under Ready to publish and save first.",
+      "classInactive": "This class is inactive, so no student could take it.",
+      "notPublished": "Only something published can be changed here.",
+      "passed": "It has already closed, so it can no longer be extended.",
+      "notLater": "Choose a time later than the current one."
     },
     "draftErrors": {
       "titleRequired": "Enter a title.",
@@ -2422,6 +2431,46 @@
       "empty": "This draft has no questions yet.",
       "start": "Start",
       "startDisabled": "Students can start once it's published."
+    },
+    "publish": {
+      "sectionTitle": "Publish",
+      "sectionHint": "Publishes the last saved version. Students enrolled in the class can then see it and start it when it opens.",
+      "label": "Publish",
+      "title": "Publish this now?",
+      "body": "Students enrolled in the class will see it. You can unpublish until the first student starts. After that the questions are locked, and you can only extend the time.",
+      "notReadyHint": "Finish the Ready to publish list and save your draft first.",
+      "done": "Published."
+    },
+    "unpublish": {
+      "label": "Back to draft",
+      "title": "Unpublish this?",
+      "body": "Students will no longer see it, and you can edit it again.",
+      "done": "Back to draft."
+    },
+    "extend": {
+      "sectionTitle": "Extend",
+      "sectionHint": "Give students longer. The time can only move later.",
+      "passedHint": "It has closed, so it can no longer be extended.",
+      "label": "Extend",
+      "saving": "Saving…",
+      "zone": "Times are in {zone}.",
+      "date": "New date",
+      "time": "New time",
+      "done": "Extended."
+    },
+    "published": {
+      "lockedHint": "Published. To change the questions, unpublish it first. Once a student has started they're locked.",
+      "minutes": "{count, plural, one {# minute} other {# minutes}}",
+      "started": "Students who started",
+      "manageTitle": "While no one has started",
+      "manageHint": "You can go back to a draft or delete it until the first student starts.",
+      "delete": {
+        "sectionTitle": "Delete",
+        "sectionHint": "Only until the first student starts.",
+        "label": "Delete",
+        "title": "Delete this?",
+        "body": "Students will no longer see it, and all its questions will be deleted. This can't be undone."
+      }
     }
   },
   "TeacherClass": {
@@ -3939,6 +3988,103 @@
       "BOOKING_DECLINED": "{branch} declined your booking for {className} on {date}, {time}.",
       "SESSION_CANCELLED": "{className} at {branch} on {date}, {time} was cancelled.",
       "SESSION_RESCHEDULED": "{className} at {branch} moved from {oldDate}, {oldTime} to {newDate}, {newTime}."
+    }
+  },
+  "StudentAssessments": {
+    "title": "Exams & homework",
+    "subtitle": "Everything your teachers have set for your classes, at every branch.",
+    "empty": "Nothing here yet",
+    "emptyHint": "When a teacher publishes an exam or homework for your class, it appears here.",
+    "type": {
+      "EXAM": "Exam",
+      "HOMEWORK": "Homework"
+    },
+    "state": {
+      "UPCOMING": "Upcoming",
+      "OPEN": "Open",
+      "IN_PROGRESS": "In progress",
+      "SUBMITTED": "Submitted",
+      "MISSED": "Missed",
+      "CLOSED": "Closed"
+    },
+    "dueOn": "Due {date}",
+    "windowLine": "{start} – {end}",
+    "scoreLine": "{score} / {max} ({percent}%)",
+    "windowLabel": "Open",
+    "deadlineLabel": "Deadline",
+    "durationLabel": "Time limit",
+    "questionsLabel": "Questions",
+    "pointsLabel": "Total points",
+    "noTimer": "No time limit",
+    "minutes": "{count, plural, one {# minute} other {# minutes}}",
+    "questionOf": "Question {n} of {total}",
+    "upcomingHint": "It has not opened yet. Come back when it opens.",
+    "missedHint": "This closed before you started it.",
+    "start": {
+      "label": "Start",
+      "title": "Start now?",
+      "confirm": "Start",
+      "cancel": "Not yet",
+      "noPause": "The timer starts now and does not pause, even if you leave the page.",
+      "resumable": "Your answers save as you go. You can leave and come back until the deadline.",
+      "oneSitting": "One sitting: closing or reloading the page submits it."
+    },
+    "take": {
+      "autosaves": "Answers save as you pick them",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "saveFailed": "Not saved. Tap to try again",
+      "daysShort": "d",
+      "timeLeft": "Time left",
+      "timeUntilDeadline": "Time until the deadline",
+      "oneSittingReminder": "One sitting: closing or reloading this page submits it.",
+      "questionOf": "Question {n} of {total}",
+      "pointsLabel": "{count, plural, one {# point} other {# points}}",
+      "clearAnswer": "Clear my answer",
+      "gridLabel": "All questions",
+      "gridAnswered": "Question {n}, answered",
+      "gridUnanswered": "Question {n}, not answered",
+      "previous": "Previous",
+      "next": "Next",
+      "review": "Review",
+      "reviewTitle": "Review your answers",
+      "reviewCounts": "You answered {answered} of {total}. Pick a number to go back to that question.",
+      "backToQuestions": "Back to questions",
+      "submit": "Submit",
+      "keepGoing": "Keep going",
+      "confirmTitle": "Submit your answers?",
+      "confirmUnanswered": "{count, plural, one {# question is not answered and scores 0.} other {# questions are not answered and score 0.}}",
+      "confirmAllAnswered": "You answered every question.",
+      "confirmFinal": "You can't change your answers after this."
+    },
+    "result": {
+      "title": "Your result",
+      "submitted": "Submitted",
+      "at": "Submitted {date}",
+      "by": {
+        "STUDENT": "You submitted it.",
+        "DEADLINE": "Time ran out, so what you had saved was submitted.",
+        "ONE_SITTING_GAP": "You left this one-sitting exam, so what you had saved was submitted."
+      },
+      "revealLater": "Correct answers appear after it closes on {date}."
+    },
+    "reveal": {
+      "right": "Right",
+      "wrong": "Wrong",
+      "unanswered": "Not answered",
+      "correct": "Correct answer",
+      "yours": "Your answer",
+      "points": "{awarded} of {points} points"
+    },
+    "errors": {
+      "forbidden": "You are not a student at this branch.",
+      "notFound": "This exam or homework couldn't be found.",
+      "notEligible": "You can't start this because you're no longer enrolled in the class.",
+      "notOpenYet": "It has not opened yet.",
+      "closed": "It has closed.",
+      "submitted": "This has already been submitted.",
+      "rateLimited": "Too many requests. Wait a moment and try again.",
+      "network": "Couldn't reach the server. Check your connection and try again."
     }
   }
 }

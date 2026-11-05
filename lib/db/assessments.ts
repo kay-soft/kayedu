@@ -3,10 +3,14 @@ import type { AssessmentType, Prisma, PrismaClient } from "@prisma/client";
 // Relative imports on purpose — `npm run check:assessments` calls this module
 // directly, outside Next (the lib/db/notifications.ts discipline).
 import {
+  assessmentClosesAt,
   assessmentDefaults,
   defaultHomeworkDeadline,
   draftErrors,
+  hasClosed,
+  isReady,
   pickNextSessionStart,
+  readiness,
   sessionInstant,
   type AssessmentDraft,
   type DraftError,
@@ -14,6 +18,7 @@ import {
 } from "../assessments.ts";
 import { canInContext, type PermissionGrants, type TenantRole } from "../auth/permissions.ts";
 import { sessionLabelSelect } from "../session-label.ts";
+import { finaliseDueAttempts } from "./assessment-attempts.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
@@ -64,14 +69,12 @@ export async function resolveAssessmentTeacher(db: Db, ctx: AssessmentAuthorityC
 }
 
 /**
- * D-W08: true once any student has started. W2 has no attempts, so it is
- * always false — but every question/option writer below already asks it, so
- * W3 only fills in the body.
+ * D-W08: true once any student has started (W3a): from then on the questions,
+ * options and points are fixed, and only an extension may change the row.
  */
 export async function isAssessmentLocked(db: Db, centerId: string, assessmentId: string): Promise<boolean> {
-  void db;
-  void scopedWhere(centerId, { id: assessmentId });
-  return false;
+  const attempts = await db.assessmentAttempt.count({ where: scopedWhere(centerId, { assessmentId }) });
+  return attempts > 0;
 }
 
 // ── Reads (the owning teacher's own rows) ──────────────────────────────────
@@ -136,6 +139,7 @@ export function findTeacherAssessment(db: Db, teacher: AssessmentTeacher, assess
         orderBy: { position: "asc" },
         include: { options: { orderBy: { position: "asc" } } },
       },
+      _count: { select: { attempts: true } },
     },
   });
 }
@@ -219,7 +223,17 @@ export type AssessmentWriteError =
   | "notFound"
   | "notDraft"
   | "locked"
-  | "invalid";
+  | "invalid"
+  /** W3a: publish refused — "Ready to publish" is not all done. */
+  | "notReady"
+  /** W3a: publish refused — nobody could take it on an inactive class. */
+  | "classInactive"
+  /** W3a: an unpublish or extend on a row that is not published. */
+  | "notPublished"
+  /** W3a: extend refused — the window or deadline has already passed. */
+  | "passed"
+  /** W3a: extend refused — the new end is not later than the current one. */
+  | "notLater";
 
 export type AssessmentWriteResult =
   | { ok: true; id: string }
@@ -412,7 +426,12 @@ export async function saveAssessmentDraft(
   });
 }
 
-/** Deletes a DRAFT (questions and options cascade). Refused once locked (D-W08). */
+/** Locks the row, so a start cannot slip in between the check and the write (D-W08). */
+async function lockAssessment(tx: Prisma.TransactionClient, centerId: string, assessmentId: string) {
+  await tx.$queryRaw`SELECT "id" FROM "Assessment" WHERE "id" = ${assessmentId} AND "centerId" = ${centerId} FOR UPDATE`;
+}
+
+/** Deletes a DRAFT, or a PUBLISHED row no student has started (questions and options cascade). Refused once locked (D-W08). */
 export async function deleteAssessment(
   db: PrismaClient,
   actor: AssessmentActor,
@@ -427,11 +446,11 @@ export async function deleteAssessment(
       select: { id: true, type: true, status: true, classGroupId: true, sessionId: true, _count: { select: { questions: true } } },
     });
     if (!current) return { ok: false, error: "notFound" } as const;
-    if (current.status !== "DRAFT") return { ok: false, error: "notDraft" } as const;
+    await lockAssessment(tx, centerId, assessmentId);
     if (await isAssessmentLocked(tx, centerId, assessmentId)) return { ok: false, error: "locked" } as const;
 
     const removed = await tx.assessment.deleteMany({
-      where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId, status: "DRAFT" as const }),
+      where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
     });
     if (removed.count === 0) return { ok: false, error: "notFound" } as const;
     await writeAuditRow(tx, {
@@ -448,6 +467,143 @@ export async function deleteAssessment(
         teacherMembershipId: teacher.membershipId,
         questionCount: current._count.questions,
       },
+    });
+    return { ok: true, id: assessmentId } as const;
+  });
+}
+
+// ── Publishing (W3a, D-W01, D-W08, D-W31) ──────────────────────────────────
+
+/**
+ * DRAFT → PUBLISHED. Refused unless "Ready to publish" is all done (D-W30, with
+ * the closing time in the future) and the class is active. Students can see and
+ * start it from now on. The notices and calendar entries are W3b's.
+ */
+export async function publishAssessment(
+  db: PrismaClient,
+  actor: AssessmentActor,
+  teacher: AssessmentTeacher,
+  assessmentId: string,
+  now: Date,
+): Promise<AssessmentWriteResult> {
+  const { centerId } = teacher;
+  return db.$transaction(async (tx) => {
+    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    await lockAssessment(tx, centerId, assessmentId);
+    const current = await tx.assessment.findFirst({
+      where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
+      include: {
+        classGroup: { select: { active: true } },
+        questions: { include: { options: true } },
+      },
+    });
+    if (!current) return { ok: false, error: "notFound" } as const;
+    if (current.status !== "DRAFT") return { ok: false, error: "notDraft" } as const;
+    if (!current.classGroup.active) return { ok: false, error: "classInactive" } as const;
+    if (!isReady(readiness(current.type, current, now)) || draftErrors(current.type, current).length > 0) {
+      return { ok: false, error: "notReady" } as const;
+    }
+    await tx.assessment.updateMany({
+      where: scopedWhere(centerId, { id: assessmentId, status: "DRAFT" as const }),
+      data: { status: "PUBLISHED", publishedAt: now, updatedByUserId: actor.userId },
+    });
+    await writeAuditRow(tx, {
+      centerId,
+      actorUserId: actor.userId,
+      action: "assessment.publish",
+      entityType: "Assessment",
+      entityId: assessmentId,
+      before: { status: "DRAFT" },
+      after: {
+        status: "PUBLISHED",
+        type: current.type,
+        classGroupId: current.classGroupId,
+        sessionId: current.sessionId,
+        teacherMembershipId: teacher.membershipId,
+        questionCount: current.questions.length,
+      },
+    });
+    return { ok: true, id: assessmentId } as const;
+  });
+}
+
+/** PUBLISHED → DRAFT, only while no attempt exists. */
+export async function unpublishAssessment(
+  db: PrismaClient,
+  actor: AssessmentActor,
+  teacher: AssessmentTeacher,
+  assessmentId: string,
+): Promise<AssessmentWriteResult> {
+  const { centerId } = teacher;
+  return db.$transaction(async (tx) => {
+    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    await lockAssessment(tx, centerId, assessmentId);
+    const current = await tx.assessment.findFirst({
+      where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
+      select: { status: true },
+    });
+    if (!current) return { ok: false, error: "notFound" } as const;
+    if (current.status !== "PUBLISHED") return { ok: false, error: "notPublished" } as const;
+    if (await isAssessmentLocked(tx, centerId, assessmentId)) return { ok: false, error: "locked" } as const;
+    await tx.assessment.updateMany({
+      where: scopedWhere(centerId, { id: assessmentId, status: "PUBLISHED" as const }),
+      data: { status: "DRAFT", publishedAt: null, updatedByUserId: actor.userId },
+    });
+    await writeAuditRow(tx, {
+      centerId,
+      actorUserId: actor.userId,
+      action: "assessment.unpublish",
+      entityType: "Assessment",
+      entityId: assessmentId,
+      before: { status: "PUBLISHED" },
+      after: { status: "DRAFT", teacherMembershipId: teacher.membershipId },
+    });
+    return { ok: true, id: assessmentId } as const;
+  });
+}
+
+/**
+ * Moves windowEnd or the deadline later — the only change allowed once attempts
+ * exist (D-W08). Only forwards, and only before it has passed. It first finalises
+ * every in-progress attempt already past its old end, in this transaction, so an
+ * extension cannot revive one. The row lock makes a start or another extension wait.
+ */
+export async function extendAssessment(
+  db: PrismaClient,
+  actor: AssessmentActor,
+  teacher: AssessmentTeacher,
+  assessmentId: string,
+  newEnd: Date,
+  now: Date,
+): Promise<AssessmentWriteResult> {
+  const { centerId } = teacher;
+  return db.$transaction(async (tx) => {
+    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    await lockAssessment(tx, centerId, assessmentId);
+    const current = await tx.assessment.findFirst({
+      where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
+      select: { status: true, type: true, windowEnd: true, deadline: true },
+    });
+    if (!current) return { ok: false, error: "notFound" } as const;
+    if (current.status !== "PUBLISHED") return { ok: false, error: "notPublished" } as const;
+    const oldEnd = assessmentClosesAt(current);
+    if (!oldEnd || hasClosed(current, now)) return { ok: false, error: "passed" } as const;
+    if (newEnd.getTime() <= oldEnd.getTime()) return { ok: false, error: "notLater" } as const;
+
+    const finalisedAttempts = await finaliseDueAttempts(tx, centerId, assessmentId, now);
+    const column = current.type === "EXAM" ? "windowEnd" : "deadline";
+    await tx.assessment.updateMany({
+      where: scopedWhere(centerId, { id: assessmentId }),
+      data: { [column]: newEnd, updatedByUserId: actor.userId },
+    });
+    await writeAuditRow(tx, {
+      centerId,
+      actorUserId: actor.userId,
+      action: "assessment.extend",
+      entityType: "Assessment",
+      entityId: assessmentId,
+      before: { [column]: oldEnd.toISOString() },
+      after: { [column]: newEnd.toISOString(), finalisedAttempts, teacherMembershipId: teacher.membershipId },
     });
     return { ok: true, id: assessmentId } as const;
   });

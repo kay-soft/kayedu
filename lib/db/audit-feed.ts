@@ -43,6 +43,9 @@ const FILTER_WHERE: Record<Exclude<AuditFilter, "unpaid">, Prisma.AuditLogWhereI
   pricing: { action: { in: PRICING_ACTIONS } },
 };
 
+/** Rows that belong to a teacher's own assessments, never to the centre's trail. */
+const TEACHER_ONLY_ENTITIES = ["Assessment", "AssessmentAttempt"];
+
 type Name = { firstName: string; lastName: string };
 
 export type AuditEntry = {
@@ -80,7 +83,12 @@ export async function loadAuditFeed(
   filter: Exclude<AuditFilter, "unpaid">,
   page: { take: number; skip: number },
 ): Promise<{ entries: AuditEntry[]; total: number }> {
-  const where: Prisma.AuditLogWhereInput = { centerId, ...FILTER_WHERE[filter] };
+  // D-W11: centre staff read nothing about assessments, the trail included.
+  const where: Prisma.AuditLogWhereInput = {
+    centerId,
+    entityType: { notIn: TEACHER_ONLY_ENTITIES },
+    ...FILTER_WHERE[filter],
+  };
   const [rows, total] = await Promise.all([
     db.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: page.take, skip: page.skip }),
     db.auditLog.count({ where }),

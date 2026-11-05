@@ -394,6 +394,16 @@
 
 ---
 
+## 39. Parents seeing exams, homework and results
+
+**What it is.** A parent seeing what their child has been set, whether it was submitted, and the score, in the per-child mirror of the student portal.
+
+**Why deferred.** W3a decided parents see nothing in v1 (D-W11, D-W31). Reveal rules were designed around the student: a parent's view needs its own answer to whether a score hidden from the student is hidden from the parent too, and before reveal it must carry the same guarantee (CLAUDE.md rule 11).
+
+**Depends on.** A decision on what a parent may see against `showScore` and `showCorrectAnswers`; W4's results read; `check:assessments` extending its sweep to `(parent)` for anything it starts reading.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

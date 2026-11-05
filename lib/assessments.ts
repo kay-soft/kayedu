@@ -4,10 +4,14 @@
  * lib/money.ts discipline). Data access lives in lib/db/assessments.ts.
  *
  * Also the ONE student-facing shape of an assessment (`toStudentAssessment`,
- * D-W09): it never carries `isCorrect` or any per-option correctness. W3's
- * student reads must go through it.
+ * D-W09): it never carries `isCorrect` or any per-option correctness. The
+ * student reads in lib/db/assessment-attempts.ts all go through it.
+ *
+ * W3a adds what an attempt derives and never stores (D-W31): its end, when it
+ * is due, the student-facing state, the reveal moment, grading and the seeded
+ * shuffle.
  */
-import type { AssessmentType } from "@prisma/client";
+import type { AssessmentFinalisedBy, AssessmentType } from "@prisma/client";
 
 import { dateKey, parseTimeToMinutes, zonedDateTimeToUtc } from "./scheduling.ts";
 
@@ -201,9 +205,9 @@ export function draftErrors(type: AssessmentType, draft: AssessmentDraft): Draft
   return errors;
 }
 
-// ── "Ready to publish" (computed; enforced at publish in W3) ───────────────
+// ── "Ready to publish" (computed; enforced at publish, W3a) ────────────────
 
-export type ReadinessKey = "hasQuestions" | "allTextFilled" | "oneCorrectEach" | "windowSet" | "deadlineInFuture";
+export type ReadinessKey = "hasQuestions" | "allTextFilled" | "oneCorrectEach" | "windowSet" | "windowEndInFuture" | "deadlineInFuture";
 export type ReadinessItem = { key: ReadinessKey; ok: boolean };
 
 export function readiness(
@@ -223,8 +227,11 @@ export function readiness(
       ok: questions.length > 0 && questions.every((q) => q.options.filter((o) => o.isCorrect).length === 1),
     },
   ];
-  if (type === "EXAM") items.push({ key: "windowSet", ok: draft.windowStart !== null && draft.windowEnd !== null });
-  else items.push({ key: "deadlineInFuture", ok: draft.deadline !== null && draft.deadline.getTime() > now.getTime() });
+  if (type === "EXAM") {
+    items.push({ key: "windowSet", ok: draft.windowStart !== null && draft.windowEnd !== null });
+    // An exam may be published while its window is already open, never after it closed.
+    items.push({ key: "windowEndInFuture", ok: draft.windowEnd !== null && draft.windowEnd.getTime() > now.getTime() });
+  } else items.push({ key: "deadlineInFuture", ok: draft.deadline !== null && draft.deadline.getTime() > now.getTime() });
   return items;
 }
 
@@ -304,9 +311,9 @@ export type StudentAssessmentSource = {
 
 /**
  * Builds the student view field by field — never a spread — so a correctness
- * flag on the source row cannot ride along. `order` (W3: the order drawn at
- * the attempt's start, D-W05; the preview: a fresh draw) lists question ids
- * and, per question, option ids; omitted = stored order.
+ * flag on the source row cannot ride along. `order` (an attempt's seeded
+ * order, D-W05; the preview: a fresh draw) lists question ids and, per
+ * question, option ids; omitted = stored order.
  */
 export function toStudentAssessment(
   source: StudentAssessmentSource,
@@ -344,8 +351,9 @@ export function toStudentAssessment(
 
 /**
  * A shuffled order of questions and of each question's options (D-W05) —
- * Fisher–Yates with an injected `random`, so a gate can pin it. W3 draws it
- * once per attempt and stores it; the preview draws a fresh one per view.
+ * Fisher–Yates with an injected `random`, so a gate can pin it. An attempt
+ * derives its order from its own id (`attemptOrder`); the preview draws a
+ * fresh one per view.
  */
 export function drawOrder(
   source: Pick<StudentAssessmentSource, "questions">,
@@ -365,4 +373,178 @@ export function drawOrder(
       source.questions.map((question) => [question.id, shuffled(question.options.map((option) => option.id))]),
     ),
   };
+}
+
+// ── An attempt's time (D-W02, D-W03, D-W09, D-W10, D-W31) ──────────────────
+
+/** One constant: a one-sitting attempt silent for longer than this was left (D-W31). */
+export const ONE_SITTING_GRACE_SECONDS = 120;
+/** How often an open one-sitting exam tells the server it is still there. */
+export const ONE_SITTING_HEARTBEAT_SECONDS = 15;
+
+/** The fields every time rule reads — never a question, never a correct mark. */
+export type AssessmentTiming = {
+  type: AssessmentType;
+  windowStart: Date | null;
+  windowEnd: Date | null;
+  deadline: Date | null;
+  durationMinutes: number | null;
+  oneSitting: boolean;
+};
+
+/** When the assessment itself closes: an exam's window end, a homework's deadline. */
+export function assessmentClosesAt(assessment: Pick<AssessmentTiming, "type" | "windowEnd" | "deadline">): Date | null {
+  return assessment.type === "EXAM" ? assessment.windowEnd : assessment.deadline;
+}
+
+export function hasClosed(assessment: Pick<AssessmentTiming, "type" | "windowEnd" | "deadline">, now: Date): boolean {
+  const closes = assessmentClosesAt(assessment);
+  return closes !== null && now.getTime() >= closes.getTime();
+}
+
+/**
+ * The attempt's end — derived, never stored. EXAM: min(startedAt + duration,
+ * windowEnd). HOMEWORK: the deadline when untimed, else min(startedAt +
+ * duration, deadline). A published row always has its window or deadline
+ * (`readiness`); were one missing, the attempt ends at once rather than never.
+ */
+export function attemptEnd(assessment: AssessmentTiming, startedAt: Date): Date {
+  const closes = assessmentClosesAt(assessment) ?? startedAt;
+  if (assessment.durationMinutes === null) return closes;
+  const timed = startedAt.getTime() + assessment.durationMinutes * MINUTE_MS;
+  return new Date(Math.min(timed, closes.getTime()));
+}
+
+export type DueDecision = { finalisedBy: Extract<AssessmentFinalisedBy, "DEADLINE" | "ONE_SITTING_GAP">; submittedAt: Date };
+
+/**
+ * Is this open attempt already over, and how? A one-sitting attempt silent for
+ * longer than the grace ended when it was last seen — unless the student was
+ * still there within the grace of its end, which is an ordinary deadline. Any
+ * other attempt past its end stops at its end, not at this read, so the time
+ * taken is capped (D-W10).
+ */
+export function finalisationDue(
+  assessment: AssessmentTiming,
+  attempt: { startedAt: Date; lastSeenAt: Date },
+  now: Date,
+): DueDecision | null {
+  const end = attemptEnd(assessment, attempt.startedAt);
+  if (assessment.oneSitting) {
+    const silentUntil = attempt.lastSeenAt.getTime() + ONE_SITTING_GRACE_SECONDS * 1_000;
+    if (silentUntil < Math.min(now.getTime(), end.getTime())) {
+      return { finalisedBy: "ONE_SITTING_GAP", submittedAt: attempt.lastSeenAt };
+    }
+  }
+  if (now.getTime() >= end.getTime()) return { finalisedBy: "DEADLINE", submittedAt: end };
+  return null;
+}
+
+export type StartRefusal = "notOpenYet" | "closed";
+
+/** Start is refused before an exam's window, and after the window or deadline. */
+export function startRefusal(assessment: AssessmentTiming, now: Date): StartRefusal | null {
+  if (hasClosed(assessment, now)) return "closed";
+  if (assessment.type === "EXAM" && assessment.windowStart && now.getTime() < assessment.windowStart.getTime()) {
+    return "notOpenYet";
+  }
+  return null;
+}
+
+/**
+ * Upcoming: an exam before its window. Open: startable. In progress: an attempt
+ * not yet final. Submitted: final while the assessment is still open. Closed:
+ * final and the assessment has closed, which is when a reveal can follow.
+ * Missed: closed with no attempt.
+ */
+export type StudentAssessmentState = "UPCOMING" | "OPEN" | "IN_PROGRESS" | "SUBMITTED" | "MISSED" | "CLOSED";
+
+export function studentAssessmentState(
+  assessment: AssessmentTiming,
+  attempt: { submittedAt: Date | null } | null,
+  now: Date,
+): StudentAssessmentState {
+  if (attempt) {
+    if (attempt.submittedAt === null) return "IN_PROGRESS";
+    return hasClosed(assessment, now) ? "CLOSED" : "SUBMITTED";
+  }
+  const refusal = startRefusal(assessment, now);
+  if (refusal === "closed") return "MISSED";
+  return refusal === "notOpenYet" ? "UPCOMING" : "OPEN";
+}
+
+// ── The reveal moment (D-W06, CLAUDE.md rule 11) ───────────────────────────
+
+/**
+ * Correctness may leave the server only when ALL hold: the attempt is final,
+ * the assessment has closed, and the teacher left showCorrectAnswers on. An
+ * extension moves the close, so it moves this too.
+ */
+export function revealAllowed(
+  assessment: Pick<AssessmentTiming, "type" | "windowEnd" | "deadline"> & { showCorrectAnswers: boolean },
+  attempt: { submittedAt: Date | null },
+  now: Date,
+): boolean {
+  return attempt.submittedAt !== null && hasClosed(assessment, now) && assessment.showCorrectAnswers;
+}
+
+/** The percentage is always derived from the frozen points, never stored (D-W04). */
+export function percentage(score: number, maxScore: number): number {
+  return maxScore > 0 ? Math.round((score * 100) / maxScore) : 0;
+}
+
+// ── Grading (D-W09) ────────────────────────────────────────────────────────
+
+export type GradableQuestion = { id: string; points: number; options: readonly { id: string; isCorrect: boolean }[] };
+export type GradedAnswer = { questionId: string; optionId: string | null; isCorrect: boolean; pointsAwarded: number };
+
+/** Grades the saved answers. A question with no saved option scores 0. */
+export function gradeAnswers(
+  questions: readonly GradableQuestion[],
+  saved: readonly { questionId: string; optionId: string | null }[],
+): { score: number; maxScore: number; answers: GradedAnswer[] } {
+  const chosen = new Map(saved.map((answer) => [answer.questionId, answer.optionId]));
+  const answers = questions.map((question): GradedAnswer => {
+    const optionId = chosen.get(question.id) ?? null;
+    const isCorrect = optionId !== null && question.options.some((option) => option.id === optionId && option.isCorrect);
+    return { questionId: question.id, optionId, isCorrect, pointsAwarded: isCorrect ? question.points : 0 };
+  });
+  return {
+    score: answers.reduce((sum, answer) => sum + answer.pointsAwarded, 0),
+    maxScore: totalPoints(questions),
+    answers,
+  };
+}
+
+// ── The shuffled order of one attempt (D-W05) ──────────────────────────────
+
+/** A small seeded generator (FNV-1a into mulberry32): the same seed, the same sequence. */
+function seededRandom(seed: string): () => number {
+  let state = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    state ^= seed.charCodeAt(i);
+    state = Math.imul(state, 0x01000193);
+  }
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/**
+ * An attempt's order, computed on the server from its own id and stored
+ * nowhere: stable on refresh, because the questions are locked from the first
+ * attempt (D-W08), and different from another attempt's.
+ */
+export function attemptOrder(
+  attemptId: string,
+  source: Pick<StudentAssessmentSource, "questions">,
+): { questions: string[]; options: Record<string, string[]> } {
+  const byPosition = <T extends { position: number }>(rows: readonly T[]) => [...rows].sort((a, b) => a.position - b.position);
+  return drawOrder(
+    { questions: byPosition(source.questions).map((question) => ({ ...question, options: byPosition(question.options) })) },
+    seededRandom(attemptId),
+  );
 }

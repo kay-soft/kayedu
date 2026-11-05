@@ -48,6 +48,12 @@ export const GATE_FIXTURE_STEMS = [
   "visibility-check",
 ] as const;
 
+/**
+ * The one title prefix of every assessment the e2e suite creates (W3a). Not a
+ * gate fixture: `scripts/lib/e2e-assessments.ts` deletes by it.
+ */
+export const E2E_ASSESSMENT_PREFIX = "E2E-assessment-";
+
 /** Other email prefixes a gate creates users under (not of the `<gate>-check` shape). */
 export const GATE_FIXTURE_EXTRA_EMAIL_PREFIXES = ["isolation-family-"] as const;
 

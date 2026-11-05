@@ -319,7 +319,7 @@ function pureChecks() {
     description: null as string | null,
     rescheduledToId: null as string | null,
     rescheduledFrom: null as { id: string } | null,
-    _count: { attendees: 0, payments: 0, settlements: 0, ratings: 0 },
+    _count: { attendees: 0, payments: 0, settlements: 0, ratings: 0, assessments: 0 },
   };
   const baseline = { teacherId: "t1", roomIds: ["r1", "r2"] };
   const only = (patch: Partial<typeof pristine>, rooms = ["r1", "r2"]) =>
@@ -331,6 +331,7 @@ function pureChecks() {
   check("a payment → payments", only({ _count: { ...pristine._count, payments: 1 } }) === "payments");
   check("a settlement → settlement", only({ _count: { ...pristine._count, settlements: 1 } }) === "settlement");
   check("a rating → ratings", only({ _count: { ...pristine._count, ratings: 1 } }) === "ratings");
+  check("an exam or homework on it → assessments", only({ _count: { ...pristine._count, assessments: 1 } }) === "assessments");
   check("a per-session share override → shareOverride", only({ centerShareType: "FIXED", centerShareValue: 500 }) === "shareOverride");
   check("a description → description", only({ description: "Bring the past paper" }) === "description");
   check("rescheduled to → rescheduled", only({ rescheduledToId: "x" }) === "rescheduled");
@@ -723,6 +724,45 @@ async function main() {
     JSON.stringify([...keptIds.keys()].sort()) ===
       JSON.stringify((await keptClassSessions(prisma, A, classZ.classGroupId, NOW)).map((k) => k.sessionId).sort()),
   );
+  // D-W31 (OD-18): any assessment keeps its session and is reported; the rest follow the class.
+  const t6h = await makeTeacher(A, "t6h");
+  const r6h = await makeRoom(A, "R6h");
+  const classHw = await createClass(A, classInput(t6h.id, r6h.id, day("2026-10-12"), day("2026-11-16")), tueMorning);
+  const hwSessions = (await sessionsOf(classHw.classGroupId)).map((s) => s.id);
+  const hwMembership = await prisma.membership.findFirstOrThrow({ where: { centerId: A, userId: t6h.id, role: "TEACHER" }, select: { id: true } });
+  await prisma.assessment.create({
+    data: scopedData(A, {
+      classGroupId: classHw.classGroupId,
+      sessionId: hwSessions[0],
+      teacherMembershipId: hwMembership.id,
+      type: "HOMEWORK",
+      title: "Class-periods homework",
+      deadline: day("2026-12-01"),
+      createdByUserId: t6h.id,
+      updatedByUserId: t6h.id,
+    }),
+  });
+  const hwSchedule = await prisma.classSchedule.findFirstOrThrow({ where: { classGroupId: classHw.classGroupId } });
+  const hwMove = await writeClassSlot(
+    prisma,
+    A,
+    { kind: "update", scheduleId: hwSchedule.id, classGroupId: classHw.classGroupId, slot: { dayOfWeek: 3, startTime: "10:00", endTime: "11:00" } },
+    { confirmConflicts: false, now: NOW },
+  );
+  const hwKept = hwMove.ok ? hwMove.report?.kept ?? [] : [];
+  check(
+    "A resync keeps a session that has homework, and reports it with the reason `assessments`",
+    hwMove.ok && (await prisma.session.count({ where: { id: hwSessions[0] } })) === 1 &&
+      hwKept.find((k) => k.sessionId === hwSessions[0])?.reasons.includes("assessments") === true,
+    JSON.stringify(hwKept),
+  );
+  check("…the class page's kept list reports it too", (await keptClassSessions(prisma, A, classHw.classGroupId, NOW)).some((k) => k.sessionId === hwSessions[0] && k.reasons.includes("assessments")));
+  check(
+    "…while the class's other, pristine sessions are deleted",
+    (await prisma.session.count({ where: { id: { in: hwSessions.slice(1) } } })) === 0,
+  );
+  check("…and the homework still has its session", (await prisma.assessment.count({ where: { sessionId: hwSessions[0] } })) === 1);
+
   const zRerun = await inClassTransaction(prisma, (tx) =>
     materializeClassSessions(tx, A, classZ.classGroupId, { from: NOW, confirmConflicts: false }),
   );
@@ -938,6 +978,19 @@ async function main() {
   await blocked("a session has a settlement", "settlements", (c) =>
     prisma.settlement.create({ data: scopedData(A, { teacherId: c.teacherId, sessionId: c.sessions[0].id, totalAmount: 0, createdBy: staff.id }) }),
   );
+  await blocked("it has an exam or homework", "assessments", async (c) => {
+    const membership = await prisma.membership.findFirstOrThrow({ where: { centerId: A, userId: c.teacherId, role: "TEACHER" }, select: { id: true } });
+    return prisma.assessment.create({
+      data: scopedData(A, {
+        classGroupId: c.id,
+        teacherMembershipId: membership.id,
+        type: "EXAM",
+        title: "Class-periods exam",
+        createdByUserId: c.teacherId,
+        updatedByUserId: c.teacherId,
+      }),
+    });
+  });
   await blocked("a session has ratings", "ratings", (c) =>
     prisma.sessionRating.create({ data: { studentUserId: student.user.id, sessionId: c.sessions[0].id, teacherId: c.teacherId, score: 4 } }),
   );

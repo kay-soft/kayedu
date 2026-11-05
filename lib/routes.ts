@@ -101,6 +101,10 @@ export const ROUTES = {
   studentDiscoverClass: (centerId: string, classId: string) =>
     `/student/discover/${encodeURIComponent(centerId)}/${encodeURIComponent(classId)}`,
   studentReservations: "/student/reservations",
+  studentAssessments: "/student/assessments",
+  studentAssessment: (id: string) => `/student/assessments/${id}`,
+  /** Not a page: the beacon a one-sitting exam sends when it closes (no locale prefix). */
+  assessmentAttemptClose: (attemptId: string) => `/api/assessment-attempts/${attemptId}/close`,
   studentProfile: "/student/profile",
   // F4: "Your studies" — a new student's grade, then an optional parent invite.
   studentOnboarding: "/student/onboarding",

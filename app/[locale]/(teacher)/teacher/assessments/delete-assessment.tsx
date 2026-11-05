@@ -9,9 +9,20 @@ import { FormMessage } from "@/components/shared/form-message";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
 import { IDLE_ASSESSMENT_STATE } from "@/lib/validation/assessments";
 
-/** Delete a draft, after a confirmation that says what goes with it (docs/04 §14.6). */
-export function DeleteAssessment({ centerId, assessmentId }: { centerId: string; assessmentId: string }) {
-  const t = useTranslations("TeacherAssessments.builder.delete");
+/**
+ * Delete a draft, or a published row no student has started, after a confirmation
+ * that says what goes with it (docs/04 §14.6).
+ */
+export function DeleteAssessment({
+  centerId,
+  assessmentId,
+  published,
+}: {
+  centerId: string;
+  assessmentId: string;
+  published?: boolean;
+}) {
+  const t = useTranslations(published ? "TeacherAssessments.published.delete" : "TeacherAssessments.builder.delete");
   const tErrors = useTranslations("TeacherAssessments.errors");
   const locale = useLocale();
   const [state, action] = useGuardedActionState(deleteAssessmentAction, IDLE_ASSESSMENT_STATE);

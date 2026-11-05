@@ -40,6 +40,15 @@ export const assessmentDeleteSchema = z.object({
   assessmentId: recordId,
 });
 
+/** Publish and unpublish carry the same identity as a delete. */
+export const assessmentPublishSchema = assessmentDeleteSchema;
+
+/** An extension: the new end, typed as a date and a time in the row's timezone. */
+export const assessmentExtendSchema = assessmentDeleteSchema.extend({
+  date: z.string().max(10),
+  time: z.string().max(5),
+});
+
 const text = (max: number) => z.string().max(max);
 
 /** A date + time pair as the builder holds it: "YYYY-MM-DD" and "HH:mm", either may be "". */
@@ -143,7 +152,7 @@ export type AssessmentActionState = {
   error?: string;
   fieldErrors?: Record<string, string>;
   draftErrors?: DraftError[];
-  status?: "saved" | "deleted";
+  status?: "saved" | "deleted" | "published" | "unpublished" | "extended";
   /** Bumped on every successful save, so the form can mark itself clean. */
   savedAt?: number;
 };

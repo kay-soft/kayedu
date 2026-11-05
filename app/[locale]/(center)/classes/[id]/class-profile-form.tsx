@@ -34,6 +34,7 @@ import { useGuardedActionState } from "@/lib/ui/action-feedback";
 
 /** The delete blockers, in the order the refusal lists them (R4). */
 const BLOCKER_KEYS = [
+  "assessments",
   "started",
   "attendees",
   "payments",

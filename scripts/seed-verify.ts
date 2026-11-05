@@ -83,7 +83,7 @@ const EXPECTED_CENTER_NAV: Record<StaffRole, string[]> = {
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };
 // U7: Calendar joins the teacher, student and parent nav. (Teacher list: scripts/lib/expected-nav.ts.)
-const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "discover", "reservations"];
+const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "assessments", "discover", "reservations"];
 const EXPECTED_PARENT_NAV = ["schedule", "calendar"];
 const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog"];
 
@@ -237,7 +237,7 @@ async function main() {
     const profiles = await prisma.studentProfile.findMany({ where: { userId: both.id }, include: { center: true } });
     check("The shared student studies in two organizations", new Set(profiles.map((p) => p.center.organizationId)).size === 2);
   }
-  check("Student nav is the 4 student items", same(navForExperience("student", "STUDENT").map((i) => i.labelKey), EXPECTED_STUDENT_NAV));
+  check("Student nav is the 5 student items", same(navForExperience("student", "STUDENT").map((i) => i.labelKey), EXPECTED_STUDENT_NAV));
   check("Parent nav is the 2 parent items", same(navForExperience("parent", "PARENT").map((i) => i.labelKey), EXPECTED_PARENT_NAV));
 
   // F3: families are FamilyLinks (a real code issued and accepted, or the

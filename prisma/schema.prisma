@@ -461,6 +461,9 @@ model Center {
   assessments         Assessment[]
   assessmentQuestions AssessmentQuestion[]
   assessmentOptions   AssessmentOption[]
+  // W3a — students' attempts and their saved answers.
+  assessmentAttempts  AssessmentAttempt[]
+  assessmentAnswers   AssessmentAnswer[]
 
   @@index([organizationId])
 }
@@ -1004,6 +1007,8 @@ model StudentProfile {
   parentLinks       ParentLink[]
   // F4 — the promotion batches that moved this student (undo reads these).
   promotionItems    GradePromotionItem[]
+  // W3a — this student's exam and homework attempts (one per assessment).
+  assessmentAttempts AssessmentAttempt[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
@@ -1018,7 +1023,6 @@ model StudentProfile {
  * batch is both the audit anchor (`student.grade.promote`: batch id + count)
  * and the undo ledger. Tenant-scoped: `centerId` is the sole key (CLAUDE.md
  * rule 1), reached only through `scoped(ctx).gradePromotions`.
- *
  * It touches a branch's own `StudentProfile.gradeId` and nothing else —
  * never an enrolment, class, session, money row, another branch, or
  * `User.gradeId`. `undoneAt`/`undoneBy` are both set or both null (CHECK in
@@ -1953,7 +1957,6 @@ model Notification {
   @@index([centerId])
 }
 
-
 // ─────────────────────────────────────────────────────────────
 // ASSESSMENTS (W2, D-W01–D-W11, D-W30) — tenant tables, centerId-scoped
 // ─────────────────────────────────────────────────────────────
@@ -1963,7 +1966,8 @@ enum AssessmentType {
   HOMEWORK
 }
 
-// W2 writes DRAFT only; PUBLISHED is W3's (D-W01).
+// DRAFT → PUBLISHED, nothing else in v1 (D-W01). Published while no attempt
+// exists can go back to DRAFT (W3a).
 enum AssessmentStatus {
   DRAFT
   PUBLISHED
@@ -1982,8 +1986,9 @@ model Assessment {
   center              Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
   classGroupId        String
   classGroup          ClassGroup       @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
-  // Required for HOMEWORK, optional for EXAM. Cascade: a homework goes with
-  // its session if the R4 engine deletes a pristine one (OD-18).
+  // Required for HOMEWORK, optional for EXAM. Cascade stays for a centre's own
+  // removal only: an assessment makes its session non-pristine, and session and
+  // class deletes are refused while one exists (D-W31, closes OD-18).
   sessionId           String?
   session             Session?         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   // The owning teacher — the authority. Separate from the actor columns below,
@@ -2009,6 +2014,7 @@ model Assessment {
   publishedAt         DateTime?
 
   questions AssessmentQuestion[]
+  attempts  AssessmentAttempt[]
 
   @@index([centerId])
   @@index([centerId, teacherMembershipId])
@@ -2028,6 +2034,7 @@ model AssessmentQuestion {
   points       Int        @default(1)
 
   options AssessmentOption[]
+  answers AssessmentAnswer[]
 
   @@index([centerId])
   @@index([assessmentId, position])
@@ -2048,6 +2055,69 @@ model AssessmentOption {
   text       String
   isCorrect  Boolean            @default(false)
 
+  answers AssessmentAnswer[]
+
   @@index([centerId])
   @@index([questionId, position])
+}
+
+// How an attempt became final (W3a). STUDENT: their own submit, or the best-
+// effort submit on page close. DEADLINE: past its derived end when something
+// read it (D-W10). ONE_SITTING_GAP: a one-sitting exam the student left.
+enum AssessmentFinalisedBy {
+  STUDENT
+  DEADLINE
+  ONE_SITTING_GAP
+}
+
+// One student's one attempt (D-W07): a second start resumes this row. Its end
+// is derived from startedAt, never stored (lib/assessments.ts, attemptEnd).
+// Final = submittedAt set; a deadline finalisation stamps the derived end, so
+// time taken is capped. score/maxScore are frozen at finalisation and never
+// recomputed (D-W09). The shuffled order is derived from the attempt id, not
+// stored. CHECK in the migration: submittedAt and finalisedBy are both set or
+// both null. Written only by lib/db/assessment-attempts.ts.
+model AssessmentAttempt {
+  id               String                 @id @default(uuid())
+  centerId         String
+  center           Center                 @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  assessmentId     String
+  assessment       Assessment             @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile         @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  startedAt        DateTime
+  lastSeenAt       DateTime
+  submittedAt      DateTime?
+  finalisedBy      AssessmentFinalisedBy?
+  score            Int?
+  maxScore         Int?
+
+  answers AssessmentAnswer[]
+
+  @@unique([assessmentId, studentProfileId])
+  @@index([centerId])
+  @@index([centerId, studentProfileId])
+}
+
+// One saved answer per question (autosave overwrites it until the attempt is
+// final). isCorrect and pointsAwarded are set only at finalisation and are
+// never selected by a student read before reveal (D-W09, CLAUDE.md rule 11).
+model AssessmentAnswer {
+  id            String             @id @default(uuid())
+  centerId      String
+  center        Center             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  attemptId     String
+  attempt       AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId    String
+  question      AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  optionId      String?
+  option        AssessmentOption?  @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  isCorrect     Boolean?
+  pointsAwarded Int?
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([attemptId, questionId])
+  @@index([centerId])
+  @@index([questionId])
+  @@index([optionId])
 }

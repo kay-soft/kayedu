@@ -323,6 +323,18 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         }),
     },
 
+    /**
+     * D-W31 — counts only, for the delete guards: a hard delete of a student or
+     * a teacher must not cascade attempts away. Centre staff read nothing else
+     * about assessments (D-W11).
+     */
+    assessmentAttempts: {
+      countForStudent: (studentProfileId: string) =>
+        prisma.assessmentAttempt.count({ where: scopedWhere(centerId, { studentProfileId }) }),
+      countOwnedByTeacher: (teacherUserId: string) =>
+        prisma.assessment.count({ where: scopedWhere(centerId, { teacherMembership: { userId: teacherUserId } }) }),
+    },
+
     students: {
       count: (where?: Prisma.StudentProfileWhereInput) =>
         prisma.studentProfile.count({ where: scopedWhere(centerId, where) }),
