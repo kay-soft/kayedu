@@ -480,7 +480,7 @@ export async function platformCenterList(
   const [centers, membershipCounts, studentCounts] = await Promise.all([
     db.center.findMany({
       where: { deletedAt: null, ...(organizationId ? { organizationId } : {}) },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: {
         id: true,
         name: true,
@@ -666,7 +666,7 @@ export function platformCenterById(db: Db, id: string) {
 export function platformCenterAuditTrail(db: Db, centerId: string, take = 20) {
   return db.auditLog.findMany({
     where: { centerId },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take,
     include: { actor: true },
   });

@@ -901,6 +901,35 @@ async function main() {
     JSON.stringify(changeRows.map((row) => [row.studentName.firstName, row.fromStatus, row.toStatus])),
   );
 
+  // Rows written in one transaction share a `changedAt`; `id` breaks the tie, so the
+  // order is the same on every read. Ids are chosen against insertion order on purpose.
+  const tieAt = cairo(11, 16, 59);
+  const tieIds = ["00000000-0000-4000-8000-0000000000c3", "00000000-0000-4000-8000-0000000000a1", "00000000-0000-4000-8000-0000000000b2"];
+  await prisma.sessionAttendanceChange.createMany({
+    data: tieIds.map((id) => ({
+      id,
+      centerId: centerA.id,
+      sessionId: sessionVoid.id,
+      studentProfileId: s1,
+      fromStatus: "PRESENT" as const,
+      toStatus: "ABSENT" as const,
+      changedBy: staff.id,
+      changedAt: tieAt,
+    })),
+  });
+  try {
+    const tied = (await listSessionAttendanceChanges(prisma, centerA.id, sessionVoid.id)).filter((row) => tieIds.includes(row.id));
+    check(
+      "Changes with an identical changedAt list in id order, the same on every read",
+      tied.map((row) => row.id).join() === [...tieIds].sort().join(),
+      JSON.stringify(tied.map((row) => row.id)),
+    );
+    const again = (await listSessionAttendanceChanges(prisma, centerA.id, sessionVoid.id)).filter((row) => tieIds.includes(row.id));
+    check("…and a second read returns the identical order", again.map((row) => row.id).join() === tied.map((row) => row.id).join());
+  } finally {
+    await prisma.sessionAttendanceChange.deleteMany({ where: { id: { in: tieIds } } });
+  }
+
   // ── 5. Settlements need a closed session ───────────────────────────────
   const settleLive = await prisma.$transaction((tx) =>
     createSessionSettlement(tx, centerA.id, sessionVoid.id, staff.id, { now: cairo(11, 17, 0) }),

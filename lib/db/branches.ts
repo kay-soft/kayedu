@@ -58,7 +58,7 @@ export async function copyBranchSetup(
     // somehow has none the defaults stay.
     const methods = await tx.centerPaymentMethod.findMany({
       where: { centerId: fromCenterId, active: true },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { name: true },
     });
     if (methods.length > 0) {

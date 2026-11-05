@@ -168,7 +168,7 @@ async function claimablePayments(
       ...scopeWhere,
     },
     select: { id: true, teacherShareSnapshot: true },
-    orderBy: { recordedAt: "asc" },
+    orderBy: [{ recordedAt: "asc" }, { id: "asc" }],
   });
 }
 

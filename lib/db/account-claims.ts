@@ -59,7 +59,7 @@ export async function pendingClaimsForCenter(
 ): Promise<PendingAccountClaim[]> {
   const claims = await db.accountClaim.findMany({
     where: { status: "PENDING", targetUser: targetKnownHere(centerId) },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 100,
     select: {
       id: true,

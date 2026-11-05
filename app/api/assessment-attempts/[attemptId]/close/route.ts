@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { submitAttempt } from "@/lib/db/assessment-attempts";
 import { prisma } from "@/lib/db/client";
 import { logBestEffort } from "@/lib/log";
+import { allowedOrigins, isSameOriginRequest } from "@/lib/same-origin";
 import { attemptIdSchema } from "@/lib/validation/student-assessments";
 
 /**
@@ -23,7 +24,8 @@ import { attemptIdSchema } from "@/lib/validation/student-assessments";
 export async function POST(request: NextRequest, { params }: { params: Promise<{ attemptId: string }> }) {
   const done = new NextResponse(null, { status: 204 });
   const origin = request.headers.get("origin");
-  if (!origin || origin.replace(/^https?:\/\//, "") !== request.headers.get("host")) return new NextResponse(null, { status: 403 });
+  const allowed = allowedOrigins(request.headers, process.env.NEXT_PUBLIC_APP_URL, request.nextUrl.protocol);
+  if (!isSameOriginRequest({ origin, secFetchSite: request.headers.get("sec-fetch-site") }, allowed)) return new NextResponse(null, { status: 403 });
 
   const parsed = attemptIdSchema.safeParse((await params).attemptId);
   if (!parsed.success) return done;

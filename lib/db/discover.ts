@@ -65,7 +65,7 @@ export function discoverClassSelect(centerId: string) {
     room: { select: { id: true, name: true, capacity: true } },
     extraRooms: {
       select: { room: { select: { id: true, name: true, capacity: true } } },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     },
     schedules: {
       select: { dayOfWeek: true, startTime: true, endTime: true },

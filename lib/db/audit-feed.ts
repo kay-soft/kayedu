@@ -90,7 +90,7 @@ export async function loadAuditFeed(
     ...FILTER_WHERE[filter],
   };
   const [rows, total] = await Promise.all([
-    db.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: page.take, skip: page.skip }),
+    db.auditLog.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: page.take, skip: page.skip }),
     db.auditLog.count({ where }),
   ]);
   if (rows.length === 0) return { entries: [], total };

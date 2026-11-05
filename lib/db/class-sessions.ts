@@ -693,7 +693,7 @@ async function loadPlan(db: Db, centerId: string, classGroupId: string) {
       price: true,
       startDate: true,
       endDate: true,
-      extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } },
+      extraRooms: { select: { roomId: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       schedules: { select: { dayOfWeek: true, startTime: true, endTime: true } },
     },
   });
@@ -1546,7 +1546,7 @@ export async function removeSessionsOnHoliday(
     where: scopedWhere(centerId, { date, OR: [{ classGroupId: null }, { classGroup: { active: true } }] }),
     select: {
       ...SESSION_STATE_SELECT,
-      classGroup: { select: { teacherId: true, roomId: true, extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } } } },
+      classGroup: { select: { teacherId: true, roomId: true, extraRooms: { select: { roomId: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } } },
     },
   });
   const pristine: string[] = [];

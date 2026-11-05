@@ -632,7 +632,7 @@ export function sessionListSelect(centerId: string) {
     // R3 — rooms combined with the primary for this session.
     extraRooms: {
       select: { room: { select: { id: true, name: true, capacity: true } } },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     },
     _count: { select: { attendees: true } },
   } satisfies Prisma.SessionSelect;
@@ -658,7 +658,7 @@ export function sessionDetailInclude(centerId: string) {
     room: true,
     // U2 — a replacement's "Moved from <date, time>".
     rescheduledFrom: { select: { date: true, startTime: true } },
-    extraRooms: { include: { room: true }, orderBy: { createdAt: "asc" } },
+    extraRooms: { include: { room: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     // Null on a one-time session (R5) — its own subject/grade below label it.
     classGroup: { include: { subject: withSelection, grade: withSelection } },
     subject: withSelection,
@@ -667,9 +667,9 @@ export function sessionDetailInclude(centerId: string) {
       include: {
         studentProfile: { include: { user: true } },
         enrollment: true,
-        payments: { orderBy: { recordedAt: "desc" } },
+        payments: { orderBy: [{ recordedAt: "desc" }, { id: "desc" }] },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     },
   } satisfies Prisma.SessionInclude;
 }

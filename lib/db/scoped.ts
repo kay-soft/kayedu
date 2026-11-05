@@ -226,14 +226,14 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       list: (where?: Prisma.InvitationWhereInput) =>
         prisma.invitation.findMany({
           where: scopedWhere(centerId, where),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
 
       /** Users & Roles' pending list (R9): staff roles only, see `staff-filter.ts`. */
       listStaff: (where?: Prisma.InvitationWhereInput) =>
         prisma.invitation.findMany({
           where: scopedWhere(centerId, staffInvitationFilter(where)),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
 
       findById: (id: string) => scopedFindById(prisma.invitation, centerId, id),
@@ -342,7 +342,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       list: (where?: Prisma.StudentProfileWhereInput) =>
         prisma.studentProfile.findMany({
           where: scopedWhere(centerId, where),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           include: { user: true },
         }),
 
@@ -437,7 +437,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       recent: (take = 10) =>
         prisma.gradePromotionBatch.findMany({
           where: scopedWhere(centerId),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take,
           include: {
             _count: { select: { items: true } },
@@ -450,7 +450,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       latestOpen: () =>
         prisma.gradePromotionBatch.findFirst({
           where: scopedWhere(centerId, { undoneAt: null }),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           include: {
             _count: { select: { items: true } },
             fromGrade: { include: { selections: { where: { centerId }, select: CATALOG_OVERRIDE_SELECT, take: 1 } } },
@@ -468,7 +468,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       list: (where?: Prisma.StudentBlockWhereInput) =>
         prisma.studentBlock.findMany({
           where: scopedWhere(centerId, where),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
 
       count: (where?: Prisma.StudentBlockWhereInput) =>
@@ -532,7 +532,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       listForStudent: (studentProfileId: string) =>
         prisma.enrollment.findMany({
           where: scopedWhere(centerId, { studentProfileId }),
-          orderBy: { enrolledAt: "desc" },
+          orderBy: [{ enrolledAt: "desc" }, { id: "desc" }],
           include: {
             classGroup: {
               include: {
@@ -548,7 +548,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       listForClass: (classGroupId: string) =>
         prisma.enrollment.findMany({
           where: scopedWhere(centerId, { classGroupId }),
-          orderBy: { enrolledAt: "asc" },
+          orderBy: [{ enrolledAt: "asc" }, { id: "asc" }],
           include: {
             studentProfile: { include: { user: true } },
           },
@@ -608,7 +608,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
           where: scopedWhere(centerId, attendeeInWindow({ id })),
           include: {
             studentProfile: { include: { user: true } },
-            payments: { orderBy: { recordedAt: "desc" } },
+            payments: { orderBy: [{ recordedAt: "desc" }, { id: "desc" }] },
           },
         }),
 
@@ -679,7 +679,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
             centerId,
             visibilityFloor ? { refundedAt: { gte: visibilityFloor } } : undefined,
           ),
-          orderBy: { refundedAt: "desc" },
+          orderBy: [{ refundedAt: "desc" }, { id: "desc" }],
           take,
           include: {
             payment: {
@@ -714,7 +714,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       list: (where?: Prisma.SettlementWhereInput) =>
         prisma.settlement.findMany({
           where: scopedWhere(centerId, where),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           include: {
             session: {
               include: {
@@ -786,7 +786,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         prisma.classGroupRoom.findMany({
           where: scopedWhere(centerId, { classGroupId }),
           include: { room: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         }),
     },
 
@@ -800,7 +800,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         prisma.sessionRoom.findMany({
           where: scopedWhere(centerId, { sessionId }),
           include: { room: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         }),
     },
 
@@ -941,12 +941,12 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       listForNewSession: () =>
         prisma.classGroup.findMany({
           where: scopedWhere(centerId, { active: true }),
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           select: {
             id: true,
             teacherId: true,
             roomId: true,
-            extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } },
+            extraRooms: { select: { roomId: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
             schedules: {
               select: { dayOfWeek: true, startTime: true, endTime: true },
               orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
@@ -1197,7 +1197,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       list: (take = 50) =>
         prisma.auditLog.findMany({
           where: { centerId },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take,
           include: { actor: true },
         }),
@@ -1269,7 +1269,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
           // R4: a deactivated class's requests wait, unseen, until it is
           // reactivated — `confirmReservation` refuses them meanwhile.
           where: scopedWhere(centerId, { status: PENDING_RESERVATION, classGroup: { active: true } }),
-          orderBy: { requestedAt: "asc" },
+          orderBy: [{ requestedAt: "asc" }, { id: "asc" }],
           ...(options?.take ? { take: options.take } : {}),
           include: {
             // SEC-72: the requester's name only — never a whole `User` row
@@ -1296,7 +1296,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
             status: PENDING_RESERVATION,
             classGroup: { teacherId, active: true },
           }),
-          orderBy: { requestedAt: "asc" },
+          orderBy: [{ requestedAt: "asc" }, { id: "asc" }],
           include: {
             // SEC-72: the requester's name only — never a whole `User` row
             // (authId, isPlatformAdmin, contacts) in a server component.
@@ -1344,7 +1344,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         const now = options.now ?? new Date();
         const rows = await prisma.sessionBooking.findMany({
           where: pendingBookingWhere(centerId, centreTimeZone(ctx.settings), options.teacherId, now),
-          orderBy: { requestedAt: "asc" },
+          orderBy: [{ requestedAt: "asc" }, { id: "asc" }],
           take: 500,
           select: {
             id: true,
@@ -1387,7 +1387,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         const now = options.now ?? new Date();
         const rows = await prisma.sessionBooking.findMany({
           where: pendingBookingWhere(centerId, centreTimeZone(ctx.settings), options.teacherId, now),
-          orderBy: { requestedAt: "asc" },
+          orderBy: [{ requestedAt: "asc" }, { id: "asc" }],
           take: 500,
           select: {
             session: {
@@ -1410,7 +1410,7 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
       listConfirmedForSession: (sessionId: string) =>
         prisma.sessionBooking.findMany({
           where: scopedWhere(centerId, { sessionId, status: CONFIRMED_BOOKING }),
-          orderBy: { requestedAt: "asc" },
+          orderBy: [{ requestedAt: "asc" }, { id: "asc" }],
           select: { id: true, studentId: true, sessionAttendeeId: true },
         }),
     },

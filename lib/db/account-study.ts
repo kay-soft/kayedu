@@ -64,7 +64,7 @@ export async function latestDeclaredParent(db: Db, studentUserId: string): Promi
       status: { in: ["PENDING", "ACCEPTED"] },
       declaredParentPhone: { not: null },
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: { declaredParentFirstName: true, declaredParentLastName: true, declaredParentPhone: true },
   });
   if (!row?.declaredParentPhone) return null;

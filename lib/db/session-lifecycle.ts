@@ -752,7 +752,7 @@ export async function listSessionAttendanceChanges(
 ): Promise<SessionAttendanceChangeRow[]> {
   const rows = await db.sessionAttendanceChange.findMany({
     where: { centerId, sessionId },
-    orderBy: { changedAt: "asc" },
+    orderBy: [{ changedAt: "asc" }, { id: "asc" }],
     include: { studentProfile: { include: { user: true } } },
   });
   if (rows.length === 0) return [];

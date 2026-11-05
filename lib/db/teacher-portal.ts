@@ -283,7 +283,7 @@ export function studentSessionsWithTeacher(
           grade: withSelection,
         },
       },
-      payments: { where: { voided: false }, orderBy: { recordedAt: "desc" }, take: 1 },
+      payments: { where: { voided: false }, orderBy: [{ recordedAt: "desc" }, { id: "desc" }], take: 1 },
     },
   });
 }

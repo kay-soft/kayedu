@@ -550,7 +550,7 @@ export async function sessionReceiptLines(
   const [voided, refunds, unpaid] = await Promise.all([
     db.payment.findMany({
       where: { centerId, sessionId, voided: true },
-      orderBy: { voidedAt: "asc" },
+      orderBy: [{ voidedAt: "asc" }, { id: "asc" }],
       select: {
         id: true,
         amount: true,
@@ -562,7 +562,7 @@ export async function sessionReceiptLines(
     }),
     db.refund.findMany({
       where: { centerId, payment: { centerId, sessionId } },
-      orderBy: { refundedAt: "asc" },
+      orderBy: [{ refundedAt: "asc" }, { id: "asc" }],
       select: {
         paymentId: true,
         amount: true,
@@ -580,7 +580,7 @@ export async function sessionReceiptLines(
         payments: { none: { voided: false, refunded: false } },
         studentProfileId: { not: null },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { id: true, attendanceStatus: true, studentProfile: { select: studentSelect } },
     }),
   ]);

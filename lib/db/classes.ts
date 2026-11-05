@@ -76,7 +76,7 @@ export function classDetailInclude(centerId: string) {
     grade: withSelection,
     educationSystem: withSelection,
     room: true,
-    extraRooms: { include: { room: true }, orderBy: { createdAt: "asc" } },
+    extraRooms: { include: { room: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     schedules: { orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }] },
   } satisfies Prisma.ClassGroupInclude;
 }

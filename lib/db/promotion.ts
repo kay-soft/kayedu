@@ -211,7 +211,7 @@ export async function undoGradePromotion(
 
     const latest = await tx.gradePromotionBatch.findFirst({
       where: scopedWhere(centerId, { undoneAt: null }),
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: { id: true },
     });
     if (latest?.id !== batch.id) return { ok: false, error: "notLatest" } as const;

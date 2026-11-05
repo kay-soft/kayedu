@@ -122,7 +122,7 @@ export function listTeacherAssessments(db: Db, teacher: AssessmentTeacher, filte
       session: { select: sessionSummarySelect },
       _count: { select: { questions: true } },
     },
-    orderBy: { updatedAt: "desc" },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
   });
 }
 

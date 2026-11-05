@@ -49,6 +49,7 @@ import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { gateSlugPrefixes } from "./lib/gate-fixtures.ts";
 import { readSource } from "./lib/source.ts";
+import { allowedOrigins, isSameOriginRequest } from "../lib/same-origin.ts";
 import {
   ASSESSMENT_LIMITS,
   ONE_SITTING_GRACE_SECONDS,
@@ -764,6 +765,47 @@ async function checkRlsAndGrants() {
       (["MANAGER", "RECEPTIONIST", "ACCOUNTANT"] as const).every((role) => !editableActionsFor(role).includes("assessment.manage.own")),
   );
   check("TEACHER is denied without a stored row (deny-by-default)", !can("TEACHER", "assessment.manage.own", {}));
+}
+
+// ── The close route's origin check (SEC-52, fails closed) ──────────────────
+
+function checkCloseRouteOrigin() {
+  console.log("\nClose route — the origin check fails closed");
+  const headers = (values: Record<string, string>) => ({ get: (name: string) => values[name.toLowerCase()] ?? null });
+  const app = "https://kayedu.example";
+  const allowed = allowedOrigins(headers({}), app, "https:");
+  const accepts = (values: Record<string, string>, list = allowed) =>
+    isSameOriginRequest({ origin: values.origin ?? null, secFetchSite: values["sec-fetch-site"] ?? null }, list);
+
+  check("The configured origin is the only allowed one", allowed.length === 1 && allowed[0] === app);
+  check("Same origin is accepted", accepts({ origin: app }));
+  check("Same origin with Sec-Fetch-Site same-origin is accepted", accepts({ origin: app, "sec-fetch-site": "same-origin" }));
+  check("A missing Origin is refused", !accepts({}));
+  check("A foreign origin is refused", !accepts({ origin: "https://evil.example" }));
+  check("A lookalike host (suffix) is refused", !accepts({ origin: "https://kayedu.example.evil.example" }));
+  check("A lookalike host (prefix) is refused", !accepts({ origin: "https://evil-kayedu.example" }));
+  check("A subdomain is refused", !accepts({ origin: "https://a.kayedu.example" }));
+  check("The wrong scheme is refused", !accepts({ origin: "http://kayedu.example" }));
+  check("The wrong port is refused", !accepts({ origin: "https://kayedu.example:8443" }));
+  check("An origin with a path is refused", !accepts({ origin: "https://kayedu.example/x" }));
+  check("The literal Origin 'null' is refused", !accepts({ origin: "null" }));
+  check("A non-http scheme is refused", !accepts({ origin: "chrome-extension://kayedu.example" }));
+  check("Sec-Fetch-Site cross-site is refused even with the right Origin", !accepts({ origin: app, "sec-fetch-site": "cross-site" }));
+  check("Sec-Fetch-Site same-site is refused", !accepts({ origin: app, "sec-fetch-site": "same-site" }));
+  check("No allowed origin at all refuses everything", !accepts({ origin: app }, []));
+
+  const own = allowedOrigins(headers({ host: "localhost:3000" }), undefined, "http:");
+  check("Without a configured origin the request's own scheme and host are used", own.length === 1 && own[0] === "http://localhost:3000");
+  check("…and a matching Origin is accepted there", accepts({ origin: "http://localhost:3000" }, own));
+  check("…while the wrong scheme is not", !accepts({ origin: "https://localhost:3000" }, own));
+  check("No host and no configured origin → nothing allowed", allowedOrigins(headers({}), undefined, "https:").length === 0);
+
+  const route = readSource(join(ROOT, "app/api/assessment-attempts/[attemptId]/close/route.ts"));
+  const guard = route.indexOf("isSameOriginRequest(");
+  check(
+    "The route runs the check before it reads the session or the attempt",
+    guard > -1 && guard < route.indexOf("getCurrentUser(") && guard < route.indexOf("attemptIdSchema.safeParse") && /status: 403/.test(route),
+  );
 }
 
 // ── 9. Statics ─────────────────────────────────────────────────────────────
@@ -1494,6 +1536,7 @@ async function main() {
   checkDefaults();
   checkLimits();
   checkTimeRules();
+  checkCloseRouteOrigin();
 
   const centerA = await makeCenter(SLUG_A);
   const centerB = await makeCenter(SLUG_B);

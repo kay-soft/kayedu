@@ -378,7 +378,7 @@ export async function combinationUsageDetail(
       where: classWhere,
       select: { classGroup: { select: { subject: label.subject, grade: label.grade } } },
       distinct: ["classGroupId"],
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: USAGE_LIST_LIMIT,
     }),
     db.sessionRoom.findMany({
@@ -554,7 +554,7 @@ export async function loadClassRoomSet(
       room: { select: { id: true, name: true, capacity: true } },
       extraRooms: {
         select: { room: { select: { id: true, name: true, capacity: true } } },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       },
     },
   });

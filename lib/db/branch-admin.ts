@@ -594,6 +594,6 @@ export function platformDeletedBranches(db: Db, organizationId: string) {
       deletedAt: true,
       restorableUntil: true,
     },
-    orderBy: { deletedAt: "desc" },
+    orderBy: [{ deletedAt: "desc" }, { id: "desc" }],
   });
 }
