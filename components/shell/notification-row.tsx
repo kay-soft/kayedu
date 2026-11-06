@@ -1,5 +1,5 @@
 import type { NotificationKind } from "@prisma/client";
-import { CalendarClock, CalendarX2, CircleCheck, CircleX, type LucideIcon } from "lucide-react";
+import { CalendarClock, CalendarX2, CircleCheck, CircleX, Clock, FileQuestion, type LucideIcon } from "lucide-react";
 
 import { openNotificationAction } from "@/app/[locale]/notifications/actions";
 import type { PresentedNotification } from "@/lib/notifications/present";
@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * Each kind's icon tile (docs/04 §11.31). The tone follows the fixed semantic
- * colours — approved green, declined/cancelled red, moved blue (upcoming) —
- * and is never the only signal: the sentence says what happened.
+ * colours — approved green, declined/cancelled red, moved blue (upcoming), an
+ * assessment coming up blue, one needing action soon amber (pending) — and is
+ * never the only signal: the sentence says what happened.
  */
 const KIND_ICON: Record<NotificationKind, { icon: LucideIcon; tone: string }> = {
   ENROLLMENT_APPROVED: { icon: CircleCheck, tone: "bg-success-bg text-success-fg" },
@@ -17,6 +18,10 @@ const KIND_ICON: Record<NotificationKind, { icon: LucideIcon; tone: string }> = 
   BOOKING_DECLINED: { icon: CircleX, tone: "bg-danger-bg text-danger-fg" },
   SESSION_CANCELLED: { icon: CalendarX2, tone: "bg-danger-bg text-danger-fg" },
   SESSION_RESCHEDULED: { icon: CalendarClock, tone: "bg-info-bg text-info-fg" },
+  ASSESSMENT_PUBLISHED: { icon: FileQuestion, tone: "bg-info-bg text-info-fg" },
+  ASSESSMENT_EXTENDED: { icon: CalendarClock, tone: "bg-info-bg text-info-fg" },
+  ASSESSMENT_OPENS_SOON: { icon: Clock, tone: "bg-warning-bg text-warning-fg" },
+  ASSESSMENT_DUE_SOON: { icon: Clock, tone: "bg-warning-bg text-warning-fg" },
 };
 
 /**

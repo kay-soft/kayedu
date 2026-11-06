@@ -19,7 +19,7 @@ import { countUnread, listNotifications } from "@/lib/db/notifications";
 import { fullName } from "@/lib/identity";
 import { personInitials } from "@/lib/initials";
 import { presentNotifications } from "@/lib/notifications/present";
-import { notificationReach } from "@/lib/notifications/reach";
+import { ensureSoonNotices, notificationReach } from "@/lib/notifications/reach";
 import { ACCOUNT_HUB_HINT, notificationsPath } from "@/lib/routes";
 import { NOTIFICATIONS_PAGE_SIZE } from "@/lib/validation/notifications";
 
@@ -50,6 +50,7 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/[l
 
   const requested = Number(typeof rawPage === "string" ? rawPage : 1);
   const page = Number.isInteger(requested) && requested > 0 ? requested : 1;
+  await ensureSoonNotices(user.id);
   const reach = await notificationReach(user.id);
   const [{ rows, total }, unread] = await Promise.all([
     listNotifications(prisma, user.id, reach, {

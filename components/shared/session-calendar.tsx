@@ -26,7 +26,9 @@ import {
 import { dateKey } from "@/lib/scheduling";
 import { cn } from "@/lib/utils";
 
-/** One session on the calendar, already labelled by the page. */
+type BadgeVariant = "success" | "warning" | "danger" | "info" | "neutral" | "brand";
+
+/** One session, exam or homework on the calendar, already labelled by the page. */
 export type CalendarEntry = {
   id: string;
   /** "YYYY-MM-DD" — the session's own calendar day. */
@@ -50,14 +52,24 @@ export type CalendarEntry = {
    * teacher; a row with `href` is a link and cannot carry one.
    */
   actions?: React.ReactNode;
+  /**
+   * W3b (D-W32): this row is an exam or a homework. `tone` is its type, and its
+   * text badge reads so; these add the class, the state badge and, for a
+   * teacher's published row, started and submitted.
+   */
+  assessment?: {
+    className: string;
+    state: { label: string; variant: BadgeVariant };
+    attempts?: string;
+  };
 };
 
 /**
  * Each tone's dot — semantic tokens only (docs/04 §2, CLAUDE.md rule 8):
  * present/held green, late amber, absent red, upcoming blue; a booked single
  * session is a blue **ring**, a requested one a dashed amber ring, cancelled
- * grey. A dot is never the only signal: every row below carries a text badge,
- * and the legend names each mark.
+ * grey, an exam a filled brand dot and a homework a brand ring. A dot is never the
+ * only signal: every row below carries a text badge, and the legend names each mark.
  */
 const DOT: Record<CalendarTone, string> = {
   present: "bg-success",
@@ -68,6 +80,8 @@ const DOT: Record<CalendarTone, string> = {
   booked: "border-[1.5px] border-info bg-transparent",
   requested: "border-[1.5px] border-dashed border-warning bg-transparent",
   cancelled: "bg-text-muted",
+  exam: "bg-brand",
+  homework: "border-[1.5px] border-brand bg-transparent",
 };
 
 const BADGE: Record<CalendarTone, "success" | "warning" | "danger" | "info" | "neutral"> = {
@@ -79,6 +93,8 @@ const BADGE: Record<CalendarTone, "success" | "warning" | "danger" | "info" | "n
   booked: "info",
   requested: "warning",
   cancelled: "neutral",
+  exam: "neutral",
+  homework: "neutral",
 };
 
 function Dot({ tone, className }: { tone: CalendarTone; className?: string }) {
@@ -199,10 +215,15 @@ export async function SessionCalendar({
                 const list = byDay.get(key) ?? [];
                 const isToday = key === todayKey;
                 const isSelected = key === selectedDay;
+                const assessmentCount = list.filter((entry) => entry.assessment).length;
+                const sessionCount = list.length - assessmentCount;
                 const label = [
                   formatFullDate(day, locale),
                   isToday ? t("todayMarker") : null,
-                  t("sessionCount", { count: list.length, formatted: formatNumber(list.length, locale) }),
+                  t("sessionCount", { count: sessionCount, formatted: formatNumber(sessionCount, locale) }),
+                  assessmentCount > 0
+                    ? t("assessmentCount", { count: assessmentCount, formatted: formatNumber(assessmentCount, locale) })
+                    : null,
                 ]
                   .filter(Boolean)
                   .join(", ");
@@ -274,7 +295,7 @@ export async function SessionCalendar({
                             absent: formatNumber(entry.counts.absent, locale),
                           })
                         : null
-                    } openLabel={t("openSession")} />
+                    } openLabel={entry.assessment ? t("openAssessment") : t("openSession")} />
                   </li>
                 ))}
               </ul>
@@ -307,15 +328,20 @@ function DayRow({
       <div className="flex min-w-0 items-start gap-3">
         <Dot tone={entry.tone} className="mt-1.5" />
         <div className="min-w-0">
-          <p className={cn("text-sm font-semibold text-text-primary", cancelled && "text-text-secondary line-through")}>
+          <p
+            dir={entry.assessment ? "auto" : undefined}
+            className={cn("break-words text-sm font-semibold text-text-primary", cancelled && "text-text-secondary line-through")}
+          >
             {entry.title}
           </p>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
+            {entry.assessment ? <span>{entry.assessment.className}</span> : null}
             <span className="tabular-nums">{entry.time}</span>
             {entry.branch ? <span className="font-medium">{entry.branch}</span> : null}
             {entry.room ? <span>{entry.room}</span> : null}
           </p>
           {countsLabel ? <p className="mt-1 text-xs text-text-muted">{countsLabel}</p> : null}
+          {entry.assessment?.attempts ? <p className="mt-1 text-xs text-text-muted">{entry.assessment.attempts}</p> : null}
         </div>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-3">
@@ -329,6 +355,7 @@ function DayRow({
         >
           {statusLabel}
         </Badge>
+        {entry.assessment ? <Badge variant={entry.assessment.state.variant}>{entry.assessment.state.label}</Badge> : null}
         {entry.href ? <span className="sr-only">{openLabel}</span> : null}
         {!entry.href && entry.actions ? entry.actions : null}
       </div>

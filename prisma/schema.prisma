@@ -231,6 +231,10 @@ enum NotificationKind {
   BOOKING_DECLINED
   SESSION_CANCELLED
   SESSION_RESCHEDULED
+  ASSESSMENT_PUBLISHED
+  ASSESSMENT_EXTENDED
+  ASSESSMENT_OPENS_SOON
+  ASSESSMENT_DUE_SOON
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2020,6 +2024,9 @@ model Assessment {
   @@index([centerId, teacherMembershipId])
   @@index([centerId, classGroupId])
   @@index([centerId, sessionId])
+  // W3b (D-W32): the "soon" reads and the calendar's range reads.
+  @@index([centerId, status, windowStart])
+  @@index([centerId, status, deadline])
 }
 
 // Text only in v1 (D-W04). Points 1–100 (a CHECK).

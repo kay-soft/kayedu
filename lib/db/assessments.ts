@@ -7,6 +7,7 @@ import {
   assessmentDefaults,
   defaultHomeworkDeadline,
   draftErrors,
+  finalisationDue,
   hasClosed,
   isReady,
   pickNextSessionStart,
@@ -18,8 +19,9 @@ import {
 } from "../assessments.ts";
 import { canInContext, type PermissionGrants, type TenantRole } from "../auth/permissions.ts";
 import { sessionLabelSelect } from "../session-label.ts";
-import { finaliseDueAttempts } from "./assessment-attempts.ts";
+import { finaliseDueAttempts, finaliseIfDue } from "./assessment-attempts.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { deleteAssessmentNotices, notifyAssessmentExtended, notifyAssessmentPublished } from "./notifications.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -98,6 +100,8 @@ export type AssessmentListFilter = {
   type?: AssessmentType;
   classGroupId?: string;
   sessionId?: string;
+  /** The calendar's range (W3b): an exam by when it opens, a homework by its deadline. */
+  within?: { from: Date; to: Date };
 };
 
 export function listTeacherAssessments(db: Db, teacher: AssessmentTeacher, filter: AssessmentListFilter = {}) {
@@ -107,6 +111,14 @@ export function listTeacherAssessments(db: Db, teacher: AssessmentTeacher, filte
       ...(filter.type ? { type: filter.type } : {}),
       ...(filter.classGroupId ? { classGroupId: filter.classGroupId } : {}),
       ...(filter.sessionId ? { sessionId: filter.sessionId } : {}),
+      ...(filter.within
+        ? {
+            OR: [
+              { type: "EXAM" as const, windowStart: { gte: filter.within.from, lte: filter.within.to } },
+              { type: "HOMEWORK" as const, deadline: { gte: filter.within.from, lte: filter.within.to } },
+            ],
+          }
+        : {}),
     }),
     select: {
       id: true,
@@ -127,6 +139,46 @@ export function listTeacherAssessments(db: Db, teacher: AssessmentTeacher, filte
 }
 
 export type TeacherAssessmentListRow = Awaited<ReturnType<typeof listTeacherAssessments>>[number];
+
+/**
+ * Started and submitted per assessment, for the teacher's own rows on a calendar
+ * day (W3b). This reads attempts, so what is overdue is finalised first (D-W10);
+ * only those that are due cost a write, and the count is the same either way.
+ */
+export async function assessmentAttemptCounts(
+  db: PrismaClient,
+  teacher: AssessmentTeacher,
+  assessmentIds: readonly string[],
+  now: Date,
+): Promise<Map<string, { started: number; submitted: number }>> {
+  const counts = new Map<string, { started: number; submitted: number }>();
+  if (assessmentIds.length === 0) return counts;
+  const attempts = await db.assessmentAttempt.findMany({
+    where: scopedWhere(teacher.centerId, {
+      assessmentId: { in: [...assessmentIds] },
+      assessment: { teacherMembershipId: teacher.membershipId },
+    }),
+    select: {
+      id: true,
+      assessmentId: true,
+      startedAt: true,
+      lastSeenAt: true,
+      submittedAt: true,
+      assessment: {
+        select: { type: true, windowStart: true, windowEnd: true, deadline: true, durationMinutes: true, oneSitting: true },
+      },
+    },
+  });
+  for (const attempt of attempts) {
+    const due = attempt.submittedAt ? null : finalisationDue(attempt.assessment, attempt, now);
+    if (due) await finaliseIfDue(db, teacher.centerId, attempt.id, now);
+    const entry = counts.get(attempt.assessmentId) ?? { started: 0, submitted: 0 };
+    entry.started += 1;
+    if (attempt.submittedAt || due) entry.submitted += 1;
+    counts.set(attempt.assessmentId, entry);
+  }
+  return counts;
+}
 
 /** The builder's read — the teacher's own row, `isCorrect` included (never a student read). */
 export function findTeacherAssessment(db: Db, teacher: AssessmentTeacher, assessmentId: string) {
@@ -449,6 +501,8 @@ export async function deleteAssessment(
     await lockAssessment(tx, centerId, assessmentId);
     if (await isAssessmentLocked(tx, centerId, assessmentId)) return { ok: false, error: "locked" } as const;
 
+    // Its notices go with it, in this transaction (D-W32); an unpublish only hides them.
+    await deleteAssessmentNotices(tx, centerId, assessmentId);
     const removed = await tx.assessment.deleteMany({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
     });
@@ -477,7 +531,8 @@ export async function deleteAssessment(
 /**
  * DRAFT → PUBLISHED. Refused unless "Ready to publish" is all done (D-W30, with
  * the closing time in the future) and the class is active. Students can see and
- * start it from now on. The notices and calendar entries are W3b's.
+ * start it from now on, and every student enrolled right now is told, in this
+ * transaction (D-W32).
  */
 export async function publishAssessment(
   db: PrismaClient,
@@ -507,6 +562,7 @@ export async function publishAssessment(
       where: scopedWhere(centerId, { id: assessmentId, status: "DRAFT" as const }),
       data: { status: "PUBLISHED", publishedAt: now, updatedByUserId: actor.userId },
     });
+    await notifyAssessmentPublished(tx, { id: assessmentId, centerId, classGroupId: current.classGroupId }, now);
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,
@@ -582,7 +638,7 @@ export async function extendAssessment(
     await lockAssessment(tx, centerId, assessmentId);
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
-      select: { status: true, type: true, windowEnd: true, deadline: true },
+      select: { status: true, type: true, classGroupId: true, windowEnd: true, deadline: true },
     });
     if (!current) return { ok: false, error: "notFound" } as const;
     if (current.status !== "PUBLISHED") return { ok: false, error: "notPublished" } as const;
@@ -596,6 +652,7 @@ export async function extendAssessment(
       where: scopedWhere(centerId, { id: assessmentId }),
       data: { [column]: newEnd, updatedByUserId: actor.userId },
     });
+    await notifyAssessmentExtended(tx, { id: assessmentId, centerId, classGroupId: current.classGroupId }, newEnd);
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,

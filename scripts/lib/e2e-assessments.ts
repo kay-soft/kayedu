@@ -4,8 +4,10 @@
  * Every title starts with `E2E_ASSESSMENT_PREFIX` (registered once, in
  * `scripts/lib/gate-fixtures.ts`), followed by the test's own tag, so one project's
  * teardown cannot touch a test still running in another. Deleting by prefix removes
- * attempts first, then their audit rows and the assessment's, then the assessment
- * (questions and options cascade), so a second run leaves the same row counts.
+ * attempts first, then their audit rows and the assessment's, then its notices (W3b,
+ * by the `assessment:<id>:` key prefix: a notice has no foreign key to the assessment),
+ * then the assessment (questions and options cascade), so a second run leaves the same
+ * row counts.
  *
  * Staging-guarded: it refuses unless the run may write (S1, docs/staging.md).
  */
@@ -17,7 +19,7 @@ import { E2E_ASSESSMENT_PREFIX } from "./gate-fixtures.ts";
 
 export { E2E_ASSESSMENT_PREFIX };
 
-export type RemovedE2eAssessments = { assessments: number; attempts: number; auditRows: number };
+export type RemovedE2eAssessments = { assessments: number; attempts: number; auditRows: number; notices: number };
 
 /** Everything titled `<prefix><tag>…`; with no tag, every e2e assessment. */
 export async function removeE2eAssessments(db: PrismaClient, tag = ""): Promise<RemovedE2eAssessments> {
@@ -27,7 +29,7 @@ export async function removeE2eAssessments(db: PrismaClient, tag = ""): Promise<
     select: { id: true },
   });
   const assessmentIds = assessments.map((row) => row.id);
-  if (assessmentIds.length === 0) return { assessments: 0, attempts: 0, auditRows: 0 };
+  if (assessmentIds.length === 0) return { assessments: 0, attempts: 0, auditRows: 0, notices: 0 };
 
   const attempts = await db.assessmentAttempt.findMany({ where: { assessmentId: { in: assessmentIds } }, select: { id: true } });
   const attemptIds = attempts.map((row) => row.id);
@@ -38,6 +40,9 @@ export async function removeE2eAssessments(db: PrismaClient, tag = ""): Promise<
       { entityType: "Assessment", entityId: { in: assessmentIds } },
     ],
   });
+  const notices = await db.notification.deleteMany({
+    where: { OR: assessmentIds.map((id) => ({ dedupeKey: { startsWith: `assessment:${id}:` } })) },
+  });
   await db.assessment.deleteMany({ where: { id: { in: assessmentIds } } });
-  return { assessments: assessmentIds.length, attempts: attemptIds.length, auditRows };
+  return { assessments: assessmentIds.length, attempts: attemptIds.length, auditRows, notices: notices.count };
 }

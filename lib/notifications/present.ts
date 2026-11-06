@@ -4,7 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { branchName } from "@/lib/branch-name";
 import { loadNotificationSubjects, type NotificationSession } from "@/lib/db/notifications";
 import { prisma } from "@/lib/db/client";
-import { formatDay, formatRelativeTime, formatTimeRange } from "@/lib/format";
+import { formatDateTime, formatDay, formatRelativeTime, formatTimeRange } from "@/lib/format";
 import { isIdsOnlyPayload } from "@/lib/notifications/kinds";
 import { sessionDisplayName } from "@/lib/session-label";
 
@@ -19,6 +19,9 @@ export type PresentedNotification = {
   createdAt: string;
   unread: boolean;
 };
+
+/** A teacher's title in a sentence of the other script: isolated, so it cannot reorder what surrounds it. */
+const isolate = (text: string) => `${String.fromCodePoint(0x2068)}${text}${String.fromCodePoint(0x2069)}`;
 
 /**
  * Renders a page of notices at read time (W1, decision 2): the text is the
@@ -79,6 +82,25 @@ export async function presentNotifications(
           oldTime: from.time,
           newDate: to.date,
           newTime: to.time,
+        });
+        break;
+      }
+      // W3b (D-W32): the assessment's current title, class and times, so a rename
+      // or an extension shows. In the session's frozen timezone, else the branch's.
+      case "ASSESSMENT_PUBLISHED":
+      case "ASSESSMENT_EXTENDED":
+      case "ASSESSMENT_OPENS_SOON":
+      case "ASSESSMENT_DUE_SOON": {
+        const assessment = subjects.assessments.get(payload.assessmentId ?? "");
+        const zone = assessment?.session?.timezone ?? branchRow?.timeZone;
+        const when = (at: Date | null | undefined) => (at && zone ? formatDateTime(at, locale, zone) : fallback);
+        text = t(`kinds.${row.kind}`, {
+          type: assessment?.type ?? "other",
+          title: assessment ? isolate(assessment.title) : fallback,
+          className: assessment ? sessionDisplayName(locale, { classGroup: assessment.classGroup }) : fallback,
+          branch,
+          start: when(assessment?.windowStart),
+          end: when(assessment?.type === "EXAM" ? assessment.windowEnd : assessment?.deadline),
         });
         break;
       }

@@ -873,12 +873,19 @@ Additive. It was generated with the read-only `migrate diff --from-url`, and pro
 **Docs:** 00 (D-W31, §4.3 item 1b, OD-18 closed), 01 ("Assessments layer"), 02 §18, 03 (this entry and W3b), 04 §11.33–§11.34, 05 (entry 39), 06 (two new pages), `staging.md`.
 **Follow-up (test hardening, no product change):** the one-sitting close route's origin check is now `lib/same-origin.ts` — an exact `scheme://host[:port]` match against `NEXT_PUBLIC_APP_URL` when it is set (otherwise the request's own forwarded scheme and host); a missing, unparsable or foreign `Origin` is refused, and so is a `Sec-Fetch-Site` other than `same-origin`. It replaced a scheme-stripping comparison with the `Host` header. Every single-timestamp `orderBy` under `lib/db` gained `id` as its tiebreaker (rows written in one transaction share a timestamp); `check:session-lifecycle` asserts it for the session change log. `check:assessments` asserts the origin check. `e2e/assessments.spec.ts` gains four `@write` tests — a one-sitting exam submitted by closing the page, the reveal in four cases, extend with locked controls, and access by other roles — using exams inserted straight into the database under the shared prefix.
 
-### W3b — Notices + calendar (planned)
-**Build:** assessments on the **student** calendar (not the parent's — D-W11); the `ASSESSMENT_PUBLISHED` notice at publish and computed "due soon" notices (W1, D-W12). The publish confirmation then states who is notified.
-**DB:** an additive enum value for the notice kind.
-**Done when:** publishing notifies every student who is eligible at that moment, once; a "due soon" notice is computed on read, with no job; a calendar entry sits on a homework's deadline day and an exam's window; nothing reaches a parent.
-**Gates:** `check:assessments`, `check:notifications`, `check:student-portal`, `check:parent` (nothing new reaches a parent), `check:isolation`, `check:design`, `check:rtl`.
-**Docs:** 00 §4.3 (calendar line), 02 §18, 04 §11.28 and §11.31, this entry.
+### W3b — Notices + calendar (delivered 6 Nov 2026)
+**Built:**
+- **Four notice kinds (D-W32):** `ASSESSMENT_PUBLISHED` and `ASSESSMENT_EXTENDED` in their writers' transactions; `ASSESSMENT_OPENS_SOON` and `ASSESSMENT_DUE_SOON` computed when a student's bell or inbox renders. Ids only, text at read time, the deep link is the assessment.
+- **The re-check:** hidden when the assessment is no longer published, the class is inactive, the enrolment is gone or the branch is out of reach; a "soon" notice also once the attempt is final; an earlier publish's notice after a republish. Deleting an assessment deletes its notices. The publish confirmation says students get a notification.
+- **Calendars:** exams and homework on the student and teacher calendars, on the right day in the session's frozen timezone, with a legend entry each, type and state badges and a link. The teacher's row adds started and submitted on a published row. The parent calendar is unchanged.
+**DB:** migration `20261106090000_w3b_assessment_notices`: additive, four enum values and `Assessment(centerId, status, windowStart)` / `(centerId, status, deadline)`.
+**Gates:** `check:notifications` sections 9–15; `check:assessments` sections 21–23; e2e `assessments.spec.ts` (`@write`: the bell rises, the panel opens the assessment, the calendar shows it; the teardown removes the notices by key prefix). Also run on staging: `check:student-portal`, `check:teacher-portal`, `check:timezone`, `check:performance`, `check:isolation`, `check:rls`, `check:enrollment`, `check:gate-fixtures`, `seed:verify`, `navigation.spec`.
+**Results (staging, 6 Nov 2026):** the named gates pass, and `check:notifications` passes except the one assertion below. The new W3b journey passed in en-1280 and ar-375 on both runs, `navigation.spec` is 71 passed, and a second run left the same row counts.
+**Open, waiting on the founder (no existing test was edited):**
+- `check:notifications` still asserts `NOTIFICATION_KIND_LIST.length === 6`. The four new kinds make it 10, so it fails until that literal changes.
+- `assessments.spec` "a published exam with an attempt" fails intermittently on W3a too: the fixture passes `endsInMs` relative to its own later `Date.now()`, so `windowEnd` can land 1 ms off the time the test compares it with.
+- `assessments.spec` "other roles cannot open…" moves on before the redirect of the page before it has finished, so its next `goto` can be aborted (`ERR_ABORTED`). It passed on W3a and failed 4 of 4 full-spec runs here. A trace shows the student is bounced correctly and the two navigations about 8 ms apart: a race in the test, which W3b's extra bell reads appear to have shifted.
+**Docs:** 00 (D-W32, §4.2 item 2a, §4.3 items 1a and 1b), 01 (Notifications and Assessments layers), 02 §18, this entry, 04 §11.28, §11.31, §11.34, `staging.md`.
 
 ### W4 — Results (planned)
 **Build:** the teacher's results page per assessment: eligible / started / submitted, score, percentage (derived), time taken, each student's answers; the reveal toggles editable afterwards (D-W06, D-W11).

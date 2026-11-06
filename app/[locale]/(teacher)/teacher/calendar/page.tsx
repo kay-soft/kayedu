@@ -1,16 +1,21 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { assessmentCalendarEntry, type AssessmentCalendarLabels } from "@/components/shared/assessment-calendar-entry";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionCalendar, type CalendarEntry } from "@/components/shared/session-calendar";
 import { BranchFilter } from "@/components/teacher/branch-filter";
 import { branchesInView, getTeacherScope, showsBranches } from "@/lib/auth/teacher-scope";
 import {
+  ASSESSMENT_CALENDAR_TONES,
   TEACHER_CALENDAR_TONES,
+  assessmentCalendarWindow,
+  assessmentOnCalendar,
   calendarMonthRange,
   parseCalendarDay,
   parseCalendarMonth,
   teacherCalendarTone,
 } from "@/lib/calendar";
+import { assessmentAttemptCounts, listTeacherAssessments, resolveAssessmentTeacher } from "@/lib/db/assessments";
 import { prisma } from "@/lib/db/client";
 import { scoped } from "@/lib/db/scoped";
 import { closeEndedSessions } from "@/lib/db/session-lifecycle";
@@ -21,7 +26,7 @@ import {
   teacherSessionListWhere,
 } from "@/lib/db/teacher-portal";
 import { clampRangeToVisibility } from "@/lib/db/visibility";
-import { formatTimeRange } from "@/lib/format";
+import { formatNumber, formatTimeRange } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
 import { sessionDisplayName } from "@/lib/session-label";
@@ -35,6 +40,11 @@ import { sessionDisplayName } from "@/lib/session-label";
  * history preference (U6), never a centre window. A moved original (U2) is
  * left out by the search itself. The selected day lists each session's
  * present / late / absent and links to it.
+ *
+ * W3b (D-W32) adds the teacher's own exams and homework at each branch where they
+ * may manage them: the list's own read, limited to the month and the same history
+ * floor, drafts included and labelled. A draft exam with no window has no day yet.
+ * Started and submitted are read for the selected day's published rows only.
  */
 export default async function TeacherCalendarPage({
   searchParams,
@@ -48,6 +58,7 @@ export default async function TeacherCalendarPage({
   const branchFilter = withBranch && branches.length === 1 ? branches[0].center.id : null;
 
   const t = await getTranslations("Calendar");
+  const tAssessments = await getTranslations("TeacherAssessments");
   const tCommon = await getTranslations("Settings.common");
   const locale = await getLocale();
   const now = new Date();
@@ -79,12 +90,35 @@ export default async function TeacherCalendarPage({
       ).filter((row) => deriveSessionDisplayStatus(row, now, timeZone) !== "RESCHEDULED");
       const onDay = selectedDay ? rows.filter((row) => dateKey(row.date) === selectedDay) : [];
       const counts = await sessionAttendanceCounts(prisma, ctx.center.id, onDay);
-      return { ctx, rows, counts };
+
+      const teacher = await resolveAssessmentTeacher(prisma, ctx);
+      const assessments = teacher
+        ? (await listTeacherAssessments(prisma, teacher, { within: assessmentCalendarWindow({ start: from, end: to }) })).flatMap((row) => {
+            const zone = row.session?.timezone ?? timeZone;
+            const placement = assessmentOnCalendar(row, zone, { start: from, end: to });
+            return placement ? [{ row, zone, placement }] : [];
+          })
+        : [];
+      const attemptCounts = teacher
+        ? await assessmentAttemptCounts(
+            prisma,
+            teacher,
+            assessments
+              .filter(({ row, placement }) => row.status === "PUBLISHED" && placement.day === selectedDay)
+              .map(({ row }) => row.id),
+            now,
+          )
+        : new Map<string, { started: number; submitted: number }>();
+      return { ctx, rows, counts, assessments, attemptCounts };
     }),
   );
 
-  const entries: CalendarEntry[] = perBranch.flatMap(({ ctx, rows, counts }) =>
-    rows.map((row) => ({
+  const labels: AssessmentCalendarLabels = {
+    due: (date) => t("assessmentDue", { date }),
+    window: (start, end) => t("assessmentWindow", { start, end }),
+  };
+  const entries: CalendarEntry[] = perBranch.flatMap(({ ctx, rows, counts, assessments, attemptCounts }) => [
+    ...rows.map((row) => ({
       id: row.id,
       day: dateKey(row.date),
       tone: teacherCalendarTone(row),
@@ -96,7 +130,28 @@ export default async function TeacherCalendarPage({
       href: ROUTES.teacherSession(row.id),
       counts: counts.get(row.id),
     })),
-  );
+    ...assessments.map(({ row, zone, placement }) => {
+      const attempts = attemptCounts.get(row.id) ?? { started: 0, submitted: 0 };
+      return assessmentCalendarEntry({
+        row,
+        placement,
+        zone,
+        locale,
+        labels,
+        className: sessionDisplayName(locale, { classGroup: row.classGroup }) || tCommon("none"),
+        branch: withBranch ? ctx.center.name : null,
+        href: ROUTES.teacherAssessment(row.id),
+        state: { label: tAssessments(`status.${row.status}`), variant: row.status === "DRAFT" ? "neutral" : "info" },
+        attempts:
+          row.status === "PUBLISHED" && placement.day === selectedDay
+            ? t("assessmentAttempts", {
+                started: formatNumber(attempts.started, locale),
+                submitted: formatNumber(attempts.submitted, locale),
+              })
+            : undefined,
+      });
+    }),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -117,7 +172,7 @@ export default async function TeacherCalendarPage({
         selectedDay={selectedDay}
         todayKey={dateKey(today)}
         entries={entries}
-        legend={TEACHER_CALENDAR_TONES}
+        legend={[...TEACHER_CALENDAR_TONES, ...ASSESSMENT_CALENDAR_TONES]}
         emptyMonthHint={t("teacherEmpty")}
       />
     </div>

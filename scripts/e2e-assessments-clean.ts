@@ -12,7 +12,7 @@ assertSafeToWrite("npm run e2e:clean-assessments");
 const prisma = new PrismaClient();
 try {
   const removed = await removeE2eAssessments(prisma);
-  console.log(`Removed ${removed.assessments} assessment(s), ${removed.attempts} attempt(s), ${removed.auditRows} audit row(s).`);
+  console.log(`Removed ${removed.assessments} assessment(s), ${removed.attempts} attempt(s), ${removed.auditRows} audit row(s), ${removed.notices} notice(s).`);
 } finally {
   await prisma.$disconnect();
 }

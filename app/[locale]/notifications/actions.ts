@@ -13,7 +13,7 @@ import {
 import { redirect } from "@/lib/i18n/navigation";
 import { notificationHref } from "@/lib/notifications/kinds";
 import { presentNotifications, type PresentedNotification } from "@/lib/notifications/present";
-import { notificationReach } from "@/lib/notifications/reach";
+import { ensureSoonNotices, notificationReach } from "@/lib/notifications/reach";
 import { ROUTES } from "@/lib/routes";
 import { localeSchema } from "@/lib/validation/auth";
 import {
@@ -41,6 +41,7 @@ export async function loadNotificationPanelAction(rawLocale: string): Promise<No
   const user = await getCurrentUser();
   if (!parsed.success || !user) return null;
 
+  await ensureSoonNotices(user.id);
   const reach = await notificationReach(user.id);
   const [{ rows }, unread] = await Promise.all([
     listNotifications(prisma, user.id, reach, { skip: 0, take: NOTIFICATION_PANEL_SIZE }),
@@ -78,7 +79,7 @@ export async function markAllNotificationsReadAction(
   const user = await getCurrentUser();
   if (!user) return { error: "signedOut" };
 
-  await markAllNotificationsRead(prisma, user.id, await notificationReach(user.id));
+  await markAllNotificationsRead(prisma, user.id, await notificationReach(user.id, { unreadOnly: true }));
   revalidatePath("/", "layout");
   return { status: "markedAllRead" };
 }

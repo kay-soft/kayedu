@@ -455,8 +455,18 @@ function shownScore(
   return { score: attempt.score, maxScore: attempt.maxScore, percentage: percentage(attempt.score, attempt.maxScore) };
 }
 
-/** One branch's assessments for this student. Finalises what is due first (D-W10). */
-export async function listStudentAssessments(db: Db, student: AssessmentStudent, now: Date): Promise<StudentAssessmentListItem[]> {
+/**
+ * One branch's assessments for this student. Finalises what is due first (D-W10).
+ * `within` is the calendar's range (W3b): an exam by when it opens, a homework by
+ * its deadline. The rest of the rules are the list's own.
+ */
+export async function listStudentAssessments(
+  db: Db,
+  student: AssessmentStudent,
+  now: Date,
+  options: { within?: { from: Date; to: Date } } = {},
+): Promise<StudentAssessmentListItem[]> {
+  const { within } = options;
   const { centerId, studentProfileId } = student;
   const open = await db.assessmentAttempt.findMany({
     where: scopedWhere(centerId, { studentProfileId, submittedAt: null }),
@@ -465,7 +475,22 @@ export async function listStudentAssessments(db: Db, student: AssessmentStudent,
   for (const attempt of open) await finaliseIfDue(db, centerId, attempt.id, now);
 
   const rows = await db.assessment.findMany({
-    where: visibleTo(student, {}),
+    where: visibleTo(
+      student,
+      within
+        ? {
+            // Under AND: `visibleTo` keeps its own OR at the top level.
+            AND: [
+              {
+                OR: [
+                  { type: "EXAM" as const, windowStart: { gte: within.from, lte: within.to } },
+                  { type: "HOMEWORK" as const, deadline: { gte: within.from, lte: within.to } },
+                ],
+              },
+            ],
+          }
+        : {},
+    ),
     select: {
       id: true,
       title: true,

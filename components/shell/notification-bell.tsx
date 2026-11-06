@@ -61,6 +61,7 @@ export function NotificationBell({ unread, from }: { unread: number; from: Accou
         aria-label={name}
         title={name}
         data-notification-bell
+        data-unread={unread}
         className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-ui focus-ring hover:bg-surface-hover hover:text-text-primary active:bg-surface-active data-[popup-open]:bg-surface-hover data-[popup-open]:text-text-primary"
       >
         <Bell className="size-5" aria-hidden />

@@ -2437,7 +2437,7 @@
       "sectionHint": "يُنشر آخر إصدار محفوظ. يمكن بعدها للطلاب المسجلين في الفصل رؤيته وبدؤه عند فتحه.",
       "label": "نشر",
       "title": "هل تنشر هذا الآن؟",
-      "body": "سيراه الطلاب المسجلون في الفصل. يمكنك إلغاء النشر حتى يبدأ أول طالب. بعد ذلك تُقفل الأسئلة ولا يمكنك إلا تمديد الوقت.",
+      "body": "سيراه الطلاب المسجلون في الفصل وسيصلهم إشعار. يمكنك إلغاء النشر حتى يبدأ أول طالب. بعد ذلك تُقفل الأسئلة ولا يمكنك إلا تمديد الوقت.",
       "notReadyHint": "أكمل قائمة «جاهز للنشر» واحفظ مسودتك أولًا.",
       "done": "تم النشر."
     },
@@ -3878,11 +3878,11 @@
   },
   "Calendar": {
     "studentTitle": "التقويم",
-    "studentSubtitle": "حصصك في كل الفروع، شهرًا بشهر.",
-    "studentEmpty": "لا شيء هذا الشهر. تظهر هنا مجموعاتك وحضورك والحصص التي حجزتها.",
+    "studentSubtitle": "حصصك وامتحاناتك وواجباتك في كل الفروع، شهرًا بشهر.",
+    "studentEmpty": "لا شيء هذا الشهر. تظهر هنا مجموعاتك وحضورك والحصص التي حجزتها وامتحاناتك وواجباتك.",
     "teacherTitle": "التقويم",
-    "teacherSubtitle": "حصصك شهرًا بشهر. اضغط على يوم لعرض حصصه.",
-    "teacherEmpty": "لا حصص هذا الشهر.",
+    "teacherSubtitle": "حصصك وامتحاناتك وواجباتك شهرًا بشهر. اضغط على يوم لعرضها.",
+    "teacherEmpty": "لا حصص أو امتحانات أو واجبات هذا الشهر.",
     "parentTitle": "التقويم",
     "parentSubtitle": "حصص ابنك شهرًا بشهر، للعرض فقط.",
     "parentEmpty": "لا شيء هذا الشهر لهذا الابن.",
@@ -3900,6 +3900,11 @@
     "noSessions": "لا حصص في هذا اليوم.",
     "counts": "حاضر {present} · متأخر {late} · غائب {absent}",
     "openSession": "فتح الحصة",
+    "assessmentCount": "{count, plural, one {امتحان أو واجب واحد} other {{count, number, arab} امتحانات وواجبات}}",
+    "assessmentWindow": "{start} – {end}",
+    "assessmentDue": "موعد التسليم {date}",
+    "assessmentAttempts": "بدأ {started} · سلّم {submitted}",
+    "openAssessment": "فتح الامتحان أو الواجب",
     "tone": {
       "present": "حاضر",
       "late": "متأخر",
@@ -3908,7 +3913,9 @@
       "booked": "محجوزة",
       "requested": "مطلوبة",
       "cancelled": "ملغاة",
-      "held": "انعقدت"
+      "held": "انعقدت",
+      "exam": "امتحان",
+      "homework": "واجب"
     }
   },
   "Media": {
@@ -3964,7 +3971,7 @@
   },
   "Notifications": {
     "title": "الإشعارات",
-    "description": "تحديثات طلباتك وحصصك.",
+    "description": "تحديثات طلباتك وحصصك وامتحاناتك وواجباتك.",
     "bell": "الإشعارات",
     "bellUnread": "الإشعارات، {count} غير مقروءة",
     "capped": "{max}+",
@@ -3979,7 +3986,7 @@
     "fallback": "—",
     "empty": {
       "title": "لا توجد إشعارات بعد",
-      "description": "عندما يرد فرع على أحد طلباتك أو يغيّر إحدى حصصك، ستجد ذلك هنا."
+      "description": "عندما يرد فرع على أحد طلباتك أو يغيّر إحدى حصصك، أو يضيف معلم امتحانًا أو واجبًا، ستجد ذلك هنا."
     },
     "kinds": {
       "ENROLLMENT_APPROVED": "وافق {branch} على طلب انضمامك إلى {className}.",
@@ -3987,7 +3994,11 @@
       "BOOKING_APPROVED": "وافق {branch} على حجزك في {className} يوم {date}، {time}.",
       "BOOKING_DECLINED": "رفض {branch} حجزك في {className} يوم {date}، {time}.",
       "SESSION_CANCELLED": "أُلغيت حصة {className} في {branch} يوم {date}، {time}.",
-      "SESSION_RESCHEDULED": "نُقلت حصة {className} في {branch} من {oldDate}، {oldTime} إلى {newDate}، {newTime}."
+      "SESSION_RESCHEDULED": "نُقلت حصة {className} في {branch} من {oldDate}، {oldTime} إلى {newDate}، {newTime}.",
+      "ASSESSMENT_PUBLISHED": "{type, select, EXAM {امتحان جديد «{title}» لـ{className} في {branch}. يفتح {start} ويُغلق {end}.} other {واجب جديد «{title}» لـ{className} في {branch}. موعد التسليم {end}.}}",
+      "ASSESSMENT_EXTENDED": "{type, select, EXAM {وقت إضافي لامتحان «{title}» لـ{className} في {branch}. يُغلق الآن {end}.} other {وقت إضافي لواجب «{title}» لـ{className} في {branch}. موعد التسليم الآن {end}.}}",
+      "ASSESSMENT_OPENS_SOON": "يفتح امتحان «{title}» لـ{className} في {branch} قريبًا: {start}. ويُغلق {end}.",
+      "ASSESSMENT_DUE_SOON": "يحين قريبًا موعد تسليم واجب «{title}» لـ{className} في {branch}: {end}."
     }
   },
   "StudentAssessments": {

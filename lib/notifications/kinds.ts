@@ -1,4 +1,4 @@
-import type { NotificationKind } from "@prisma/client";
+import type { AssessmentType, NotificationKind } from "@prisma/client";
 
 // Relative import on purpose: `npm run check:notifications` exercises this
 // module directly, outside the Next.js runtime (the lib/money.ts reasoning).
@@ -30,8 +30,8 @@ type KindSpec = {
   /** The payload's keys — every value an id (a uuid). */
   ids: readonly string[];
   audience: NotificationAudience;
-  /** Locale-less deep link (ROUTES). v1's links name a page, not a row; a later kind may read its payload. */
-  href: () => string;
+  /** Locale-less deep link (ROUTES). W1's links name a page; an assessment notice names its row. */
+  href: (payload: Record<string, string>) => string;
 };
 
 export const NOTIFICATION_KINDS = {
@@ -67,6 +67,27 @@ export const NOTIFICATION_KINDS = {
     audience: "relation",
     href: () => ROUTES.studentSchedule,
   },
+  // W3b (D-W32): the re-check is `assessmentNoticeHidden`, on top of `relation`.
+  ASSESSMENT_PUBLISHED: {
+    ids: ["assessmentId"],
+    audience: "relation",
+    href: (payload) => ROUTES.studentAssessment(payload.assessmentId),
+  },
+  ASSESSMENT_EXTENDED: {
+    ids: ["assessmentId"],
+    audience: "relation",
+    href: (payload) => ROUTES.studentAssessment(payload.assessmentId),
+  },
+  ASSESSMENT_OPENS_SOON: {
+    ids: ["assessmentId"],
+    audience: "relation",
+    href: (payload) => ROUTES.studentAssessment(payload.assessmentId),
+  },
+  ASSESSMENT_DUE_SOON: {
+    ids: ["assessmentId"],
+    audience: "relation",
+    href: (payload) => ROUTES.studentAssessment(payload.assessmentId),
+  },
 } as const satisfies Record<NotificationKind, KindSpec>;
 
 export const NOTIFICATION_KIND_LIST = Object.keys(NOTIFICATION_KINDS) as NotificationKind[];
@@ -75,6 +96,57 @@ export const NOTIFICATION_KIND_LIST = Object.keys(NOTIFICATION_KINDS) as Notific
 export const REQUESTER_KINDS = NOTIFICATION_KIND_LIST.filter(
   (kind) => NOTIFICATION_KINDS[kind].audience === "requester",
 );
+
+/** Every notice about an exam or homework (W3b, D-W32): only a student at that branch ever sees one. */
+export const ASSESSMENT_NOTICE_KINDS = [
+  "ASSESSMENT_PUBLISHED",
+  "ASSESSMENT_EXTENDED",
+  "ASSESSMENT_OPENS_SOON",
+  "ASSESSMENT_DUE_SOON",
+] as const satisfies readonly NotificationKind[];
+
+/** The two computed on read; hidden once the student has a final attempt. */
+export const ASSESSMENT_SOON_KINDS = [
+  "ASSESSMENT_OPENS_SOON",
+  "ASSESSMENT_DUE_SOON",
+] as const satisfies readonly NotificationKind[];
+
+export type AssessmentSoonKind = (typeof ASSESSMENT_SOON_KINDS)[number];
+
+/** The one constant behind both "soon" notices (D-W32). */
+export const ASSESSMENT_SOON = {
+  OPENS_SOON_MINUTES: 60,
+  DUE_SOON_HOURS: 24,
+} as const;
+
+const MINUTE_MS = 60_000;
+const OPENS_SOON_MS = ASSESSMENT_SOON.OPENS_SOON_MINUTES * MINUTE_MS;
+const DUE_SOON_MS = ASSESSMENT_SOON.DUE_SOON_HOURS * 60 * MINUTE_MS;
+
+/** The latest moment each "soon" notice reaches, for the query's indexed range (`now` is exclusive). */
+export function assessmentSoonBounds(now: Date): { opensBy: Date; dueBy: Date } {
+  return {
+    opensBy: new Date(now.getTime() + OPENS_SOON_MS),
+    dueBy: new Date(now.getTime() + DUE_SOON_MS),
+  };
+}
+
+/**
+ * Which "soon" notice this assessment is due at `now`, if any: an exam still
+ * to open within the hour, a homework still to close within a day. The moment
+ * itself counts as gone (it has opened, or closed), and the far edge counts as in.
+ */
+export function assessmentSoonNotice(
+  assessment: { type: AssessmentType; windowStart: Date | null; deadline: Date | null },
+  now: Date,
+): { kind: AssessmentSoonKind; at: Date } | null {
+  const at = assessment.type === "EXAM" ? assessment.windowStart : assessment.deadline;
+  if (!at) return null;
+  const left = at.getTime() - now.getTime();
+  if (left <= 0) return null;
+  if (assessment.type === "EXAM") return left <= OPENS_SOON_MS ? { kind: "ASSESSMENT_OPENS_SOON", at } : null;
+  return left <= DUE_SOON_MS ? { kind: "ASSESSMENT_DUE_SOON", at } : null;
+}
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -94,7 +166,9 @@ export function isIdsOnlyPayload(kind: NotificationKind, payload: unknown): payl
 
 /** The deep link a stored notice opens (locale-less). */
 export function notificationHref(kind: NotificationKind, payload: unknown): string {
-  return isIdsOnlyPayload(kind, payload) ? NOTIFICATION_KINDS[kind].href() : ROUTES.studentSchedule;
+  if (!isIdsOnlyPayload(kind, payload)) return ROUTES.studentSchedule;
+  const spec: KindSpec = NOTIFICATION_KINDS[kind];
+  return spec.href(payload);
 }
 
 /**
@@ -111,4 +185,12 @@ export const dedupeKeys = {
     `booking-${outcome}:${bookingId}:${requestedAt.getTime()}`,
   sessionCancelled: (sessionId: string) => `session-cancelled:${sessionId}`,
   sessionRescheduled: (sessionId: string) => `session-rescheduled:${sessionId}`,
+  // W3b: every assessment key opens with this prefix, which is how deleting an
+  // assessment finds its notices. Republishing and each new end time are new notices.
+  assessmentPrefix: (assessmentId: string) => `assessment:${assessmentId}:`,
+  assessmentPublished: (assessmentId: string, publishedAt: Date) =>
+    `assessment:${assessmentId}:published:${publishedAt.getTime()}`,
+  assessmentExtended: (assessmentId: string, newEnd: Date) => `assessment:${assessmentId}:extended:${newEnd.getTime()}`,
+  assessmentSoon: (assessmentId: string, kind: AssessmentSoonKind, at: Date) =>
+    `assessment:${assessmentId}:${kind}:${at.getTime()}`,
 };

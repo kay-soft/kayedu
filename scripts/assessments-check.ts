@@ -37,6 +37,9 @@
  * 16. One sitting. 17. Reveal, score, and every student payload (rule 11).
  * 18. Homework and the class engine (D-W31). 19. Audit rows, ids only.
  * 20. RLS on the two tables and the W3a statics.
+ * 21. W3b: where an assessment sits on the calendar, in its zone (pure).
+ * 22. The calendar's reads: the range, who sees what, rule 11, the counts.
+ * 23. Publish, extend and delete write their notices; the calendar statics.
  *
  * Needs a reachable database and cleans up after itself.
  */
@@ -85,6 +88,7 @@ import {
   type TenantRole,
 } from "../lib/auth/permissions.ts";
 import {
+  assessmentAttemptCounts,
   createAssessment,
   deleteAssessment,
   extendAssessment,
@@ -118,6 +122,12 @@ import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import { loadPermissionGrants, savePermissionGrants } from "../lib/db/permissions.ts";
 import { provisionCenterBaseline } from "../lib/db/provision.ts";
 import { scopedData } from "../lib/db/tenant-scope.ts";
+import {
+  ASSESSMENT_CALENDAR_TONES,
+  STUDENT_CALENDAR_TONES,
+  assessmentCalendarWindow,
+  assessmentOnCalendar,
+} from "../lib/calendar.ts";
 import { dateKey, zonedDateTimeToUtc } from "../lib/scheduling.ts";
 
 const prisma = await gatePrisma();
@@ -1515,6 +1525,143 @@ async function checkAttemptTablesAndStatics() {
   check("One grace constant: it is named once, in lib/assessments.ts", walk(join(ROOT, "lib")).concat(walk(join(ROOT, "app"))).filter((file) => /ONE_SITTING_GRACE_SECONDS\s*=/.test(readSource(file))).length === 1);
 }
 
+// ── 21–23. The calendar and the notices (W3b, D-W32) ────────────────────────
+
+function checkCalendarRules() {
+  console.log("\n21. Where an assessment sits on the calendar (pure)");
+  const november = { start: new Date("2026-11-01T00:00:00.000Z"), end: new Date("2026-11-30T00:00:00.000Z") };
+  const december = { start: new Date("2026-12-01T00:00:00.000Z"), end: new Date("2026-12-31T00:00:00.000Z") };
+  const lateUtc = new Date("2026-11-30T22:30:00.000Z");
+  const exam = { type: "EXAM" as const, windowStart: lateUtc, deadline: null };
+  const homework = { type: "HOMEWORK" as const, windowStart: null, deadline: lateUtc };
+  const cairo = assessmentOnCalendar(exam, "Africa/Cairo", december);
+  check("An exam sits on the day of windowStart in its zone (Cairo: the next day)", cairo?.day === "2026-12-01" && cairo.startTime === "00:30", JSON.stringify(cairo));
+  check("The same instant is outside November in Cairo", assessmentOnCalendar(exam, "Africa/Cairo", november) === null);
+  check("In UTC it is still November", assessmentOnCalendar(exam, "UTC", november)?.day === "2026-11-30");
+  check("A homework sits on the day of its deadline", assessmentOnCalendar(homework, "Africa/Cairo", december)?.day === "2026-12-01");
+  check("A draft exam with no window has no day", assessmentOnCalendar({ type: "EXAM", windowStart: null, deadline: null }, "Africa/Cairo", november) === null);
+  check("An exam ignores a deadline", assessmentOnCalendar({ type: "EXAM", windowStart: null, deadline: lateUtc }, "UTC", november) === null);
+  const window = assessmentCalendarWindow(november);
+  check(
+    "The read reaches past the month, so no zone loses a row",
+    window.from.getTime() < november.start.getTime() && window.to.getTime() > november.end.getTime() + 86_400_000,
+  );
+  check("The parent's tones hold neither", !STUDENT_CALENDAR_TONES.includes("exam") && !STUDENT_CALENDAR_TONES.includes("homework"));
+  check("The legend has an entry for each", ASSESSMENT_CALENDAR_TONES.join() === "exam,homework");
+  for (const locale of ["en", "ar"]) {
+    const tone = (JSON.parse(readSource(`${ROOT}/messages/${locale}.json`)) as { Calendar: { tone: Record<string, string> } }).Calendar.tone;
+    check(`${locale}: the legend names Exam and Homework`, Boolean(tone.exam) && Boolean(tone.homework));
+  }
+}
+
+async function checkCalendarReads(fx: Fixture, otherTeacher: AssessmentTeacher, now: Date) {
+  console.log("\n22. The calendar's reads");
+  const { centerId } = fx.teacher;
+  const classId = (await makeClass(centerId, fx.teacher.userId)).id;
+  const local: Fixture = { ...fx, classGroupId: classId };
+  const student = await makeStudent(centerId, "cal", classId);
+  const stranger = await makeStudent(centerId, "cal-stranger");
+  const leftWithout = await makeStudent(centerId, "cal-left", classId);
+  const leftWith = await makeStudent(centerId, "cal-left-att", classId);
+
+  const inRange = await publishedExam(local, now);
+  const started = await startAttempt(prisma, leftWith.student, inRange, now);
+  if (!started.ok) throw new Error(`fixture start: ${JSON.stringify(started)}`);
+  for (const row of [leftWithout, leftWith]) {
+    await prisma.enrollment.updateMany({ where: { studentProfileId: row.profile.id, classGroupId: classId }, data: { status: "REMOVED" } });
+  }
+  const future = new Date(now.getTime() + 60 * DAY);
+  const outOfRange = await publishedExam(local, now, { windowStart: future, windowEnd: new Date(future.getTime() + 3 * HOUR) });
+
+  const session = await makeSession(centerId, classId, fx.teacher.userId, 1, "10:00", { timezone: "Asia/Dubai" });
+  const homeworkCreated = await createAssessment(prisma, fx.actor, fx.teacher, {
+    type: "HOMEWORK",
+    sessionId: session.id,
+    draft: homeworkDraft(new Date(now.getTime() + 2 * DAY), { questions: scoredQuestions() }),
+  });
+  if (!homeworkCreated.ok) throw new Error(`fixture homework: ${JSON.stringify(homeworkCreated)}`);
+  await publishAssessment(prisma, fx.actor, fx.teacher, homeworkCreated.id, now);
+  const draftCreated = await createAssessment(prisma, fx.actor, fx.teacher, {
+    type: "EXAM",
+    classGroupId: classId,
+    draft: examDraft({ windowStart: new Date(now.getTime() + DAY), windowEnd: new Date(now.getTime() + DAY + 3 * HOUR), durationMinutes: 30, questions: scoredQuestions() }),
+  });
+  if (!draftCreated.ok) throw new Error(`fixture draft: ${JSON.stringify(draftCreated)}`);
+
+  const within = { from: new Date(now.getTime() - 5 * DAY), to: new Date(now.getTime() + 10 * DAY) };
+  const ids = (items: { id: string }[]) => items.map((item) => item.id);
+  const shown = await listStudentAssessments(prisma, student.student, now, { within });
+  check("The student sees the exam and the homework inside the range", ids(shown).includes(inRange) && ids(shown).includes(homeworkCreated.id), JSON.stringify(ids(shown)));
+  check("One outside the range is left out", !ids(shown).includes(outOfRange));
+  check("The range changes nothing else: the unfiltered list still has it", ids(await listStudentAssessments(prisma, student.student, now)).includes(outOfRange));
+  check("A draft never reaches a student", !ids(shown).includes(draftCreated.id));
+  check("A homework carries its session's frozen timezone", shown.find((item) => item.id === homeworkCreated.id)?.timeZone === "Asia/Dubai");
+  check("An exam with no session has none, so the branch's is used", shown.find((item) => item.id === inRange)?.timeZone === null);
+  check("The state comes from the list's own rule", shown.find((item) => item.id === inRange)?.state === "OPEN");
+  check("A student not enrolled sees nothing", (await listStudentAssessments(prisma, stranger.student, now, { within })).length === 0);
+  check("A student who left with no attempt sees nothing", (await listStudentAssessments(prisma, leftWithout.student, now, { within })).length === 0);
+  check("A student who left with an attempt keeps theirs", ids(await listStudentAssessments(prisma, leftWith.student, now, { within })).includes(inRange));
+  const payload = JSON.stringify(shown);
+  check("The calendar's read carries no correct answer (rule 11)", !payload.includes("isCorrect") && !payload.includes("questions"));
+
+  const closedExam = await publishedExam(local, now, { windowStart: new Date(now.getTime() - 3 * HOUR), windowEnd: new Date(now.getTime() + HOUR) });
+  const afterClose = new Date(now.getTime() + 2 * HOUR);
+  check("A closed one stays on its day, as Missed", (await listStudentAssessments(prisma, student.student, afterClose, { within })).find((item) => item.id === closedExam)?.state === "MISSED");
+
+  const teacherRows = await listTeacherAssessments(prisma, fx.teacher, { within });
+  check("The teacher sees their own rows in the range, drafts included", ids(teacherRows).includes(draftCreated.id) && ids(teacherRows).includes(inRange) && ids(teacherRows).includes(homeworkCreated.id));
+  check("Their rows outside the range are left out", !ids(teacherRows).includes(outOfRange));
+  check("Another teacher sees none of them", (await listTeacherAssessments(prisma, otherTeacher, { within })).every((row) => !ids(teacherRows).includes(row.id)));
+
+  const timedClass = (await makeClass(centerId, fx.teacher.userId)).id;
+  const a = await makeStudent(centerId, "cnt-a", timedClass);
+  const b = await makeStudent(centerId, "cnt-b", timedClass);
+  const c = await makeStudent(centerId, "cnt-c", timedClass);
+  await makeStudent(centerId, "cnt-none", timedClass);
+  const countedExam = await publishedExam({ ...fx, classGroupId: timedClass }, now);
+  const startedA = await startAttempt(prisma, a.student, countedExam, now);
+  const startedB = await startAttempt(prisma, b.student, countedExam, now);
+  const startedC = await startAttempt(prisma, c.student, countedExam, new Date(now.getTime() - HOUR));
+  if (!startedA.ok || !startedB.ok || !startedC.ok) throw new Error("fixture counts");
+  await submitAttempt(prisma, a.student, startedA.attemptId, now);
+  const counts = await assessmentAttemptCounts(prisma, fx.teacher, [countedExam], now);
+  check("Started counts every attempt; submitted counts the final and the overdue", counts.get(countedExam)?.started === 3 && counts.get(countedExam)?.submitted === 2, JSON.stringify(counts.get(countedExam)));
+  check(
+    "Reading them finalised the overdue attempt (D-W10), and left the open one open",
+    (await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: startedC.attemptId } })).submittedAt !== null &&
+      (await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: startedB.attemptId } })).submittedAt === null,
+  );
+  check("Another teacher reads no counts", (await assessmentAttemptCounts(prisma, otherTeacher, [countedExam], now)).size === 0);
+  check("No ids, no read", (await assessmentAttemptCounts(prisma, fx.teacher, [], now)).size === 0);
+}
+
+async function checkNoticesFromWriters(fx: Fixture, now: Date) {
+  console.log("\n23. Publish, extend and delete write their notices");
+  const classId = (await makeClass(fx.teacher.centerId, fx.teacher.userId)).id;
+  const local: Fixture = { ...fx, classGroupId: classId };
+  const student = await makeStudent(fx.teacher.centerId, "ntc", classId);
+  const prefix = (id: string) => ({ userId: student.user.id, dedupeKey: { startsWith: `assessment:${id}:` } });
+  const id = await publishedExam(local, now);
+  check("Publishing notified the enrolled student", (await prisma.notification.count({ where: prefix(id) })) === 1);
+  const newEnd = new Date(now.getTime() + 5 * HOUR);
+  await extendAssessment(prisma, fx.actor, fx.teacher, id, newEnd, now);
+  check("Extending notified them too", (await prisma.notification.count({ where: { ...prefix(id), kind: "ASSESSMENT_EXTENDED" } })) === 1);
+  await unpublishAssessment(prisma, fx.actor, fx.teacher, id);
+  check("Unpublishing deletes nothing", (await prisma.notification.count({ where: prefix(id) })) === 2);
+  const removed = await deleteAssessment(prisma, fx.actor, fx.teacher, id);
+  check("Deleting it succeeds and leaves no notice row", removed.ok && (await prisma.notification.count({ where: { dedupeKey: { startsWith: `assessment:${id}:` } } })) === 0);
+
+  const pageSource = (path: string) => readSource(`${ROOT}/${path}`);
+  const studentCalendar = pageSource("app/[locale]/(student)/student/calendar/page.tsx");
+  const teacherCalendar = pageSource("app/[locale]/(teacher)/teacher/calendar/page.tsx");
+  const parentCalendar = pageSource("app/[locale]/(parent)/parent/calendar/page.tsx");
+  check("The student calendar reuses the assessment list's read", /listStudentAssessments\(/.test(studentCalendar) && !/prisma\.assessment/.test(studentCalendar));
+  check("The teacher calendar reuses the list's read", /listTeacherAssessments\(/.test(teacherCalendar) && !/prisma\.assessment/.test(teacherCalendar));
+  check("The teacher calendar keeps the history floor for them", /assessmentCalendarWindow\(\{ start: from, end: to \}\)/.test(teacherCalendar));
+  check("The parent's calendar is untouched: no assessment read, no assessment tone", !/assessment/i.test(parentCalendar));
+  check("One shared calendar component", /<SessionCalendar/.test(studentCalendar) && /<SessionCalendar/.test(teacherCalendar) && /<SessionCalendar/.test(parentCalendar));
+}
+
 async function checkTaking(ids: { fx: Fixture; otherTeacher: AssessmentTeacher; centerB: string }) {
   const { fx, otherTeacher, centerB } = ids;
   const inactive = await makeClass(fx.teacher.centerId, fx.teacher.userId);
@@ -1529,6 +1676,8 @@ async function checkTaking(ids: { fx: Fixture; otherTeacher: AssessmentTeacher; 
   await checkRevealAndPayloads(fx, now);
   await checkHomework(fx, now);
   await checkAttemptAudit(fx.teacher.centerId);
+  await checkCalendarReads(fx, otherTeacher, now);
+  await checkNoticesFromWriters(fx, now);
 }
 
 async function main() {
@@ -1537,6 +1686,7 @@ async function main() {
   checkLimits();
   checkTimeRules();
   checkCloseRouteOrigin();
+  checkCalendarRules();
 
   const centerA = await makeCenter(SLUG_A);
   const centerB = await makeCenter(SLUG_B);

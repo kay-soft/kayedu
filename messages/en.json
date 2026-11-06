@@ -2437,7 +2437,7 @@
       "sectionHint": "Publishes the last saved version. Students enrolled in the class can then see it and start it when it opens.",
       "label": "Publish",
       "title": "Publish this now?",
-      "body": "Students enrolled in the class will see it. You can unpublish until the first student starts. After that the questions are locked, and you can only extend the time.",
+      "body": "Students enrolled in the class will see it and get a notification. You can unpublish until the first student starts. After that the questions are locked, and you can only extend the time.",
       "notReadyHint": "Finish the Ready to publish list and save your draft first.",
       "done": "Published."
     },
@@ -3878,11 +3878,11 @@
   },
   "Calendar": {
     "studentTitle": "Calendar",
-    "studentSubtitle": "Your sessions at every branch, month by month.",
-    "studentEmpty": "Nothing this month. Your classes, attendance and booked sessions appear here.",
+    "studentSubtitle": "Your sessions, exams and homework at every branch, month by month.",
+    "studentEmpty": "Nothing this month. Your classes, attendance, booked sessions, exams and homework appear here.",
     "teacherTitle": "Calendar",
-    "teacherSubtitle": "Your sessions month by month. Tap a day to see its sessions.",
-    "teacherEmpty": "No sessions this month.",
+    "teacherSubtitle": "Your sessions, exams and homework month by month. Tap a day to see them.",
+    "teacherEmpty": "No sessions, exams or homework this month.",
     "parentTitle": "Calendar",
     "parentSubtitle": "Your child's sessions, month by month. Read-only.",
     "parentEmpty": "Nothing this month for this child.",
@@ -3900,6 +3900,11 @@
     "noSessions": "No sessions on this day.",
     "counts": "Present {present} · Late {late} · Absent {absent}",
     "openSession": "Open session",
+    "assessmentCount": "{count, plural, one {# exam or homework} other {# exams and homework}}",
+    "assessmentWindow": "{start} – {end}",
+    "assessmentDue": "Due {date}",
+    "assessmentAttempts": "Started {started} · Submitted {submitted}",
+    "openAssessment": "Open exam or homework",
     "tone": {
       "present": "Present",
       "late": "Late",
@@ -3908,7 +3913,9 @@
       "booked": "Booked",
       "requested": "Requested",
       "cancelled": "Cancelled",
-      "held": "Held"
+      "held": "Held",
+      "exam": "Exam",
+      "homework": "Homework"
     }
   },
   "Media": {
@@ -3964,7 +3971,7 @@
   },
   "Notifications": {
     "title": "Notifications",
-    "description": "Updates about your requests and your sessions.",
+    "description": "Updates about your requests, your sessions, and your exams and homework.",
     "bell": "Notifications",
     "bellUnread": "Notifications, {count} unread",
     "capped": "{max}+",
@@ -3979,7 +3986,7 @@
     "fallback": "—",
     "empty": {
       "title": "No notifications yet",
-      "description": "When a branch answers one of your requests or changes one of your sessions, you'll see it here."
+      "description": "When a branch answers one of your requests or changes one of your sessions, or a teacher sets an exam or homework, you'll see it here."
     },
     "kinds": {
       "ENROLLMENT_APPROVED": "{branch} approved your request to join {className}.",
@@ -3987,7 +3994,11 @@
       "BOOKING_APPROVED": "{branch} approved your booking for {className} on {date}, {time}.",
       "BOOKING_DECLINED": "{branch} declined your booking for {className} on {date}, {time}.",
       "SESSION_CANCELLED": "{className} at {branch} on {date}, {time} was cancelled.",
-      "SESSION_RESCHEDULED": "{className} at {branch} moved from {oldDate}, {oldTime} to {newDate}, {newTime}."
+      "SESSION_RESCHEDULED": "{className} at {branch} moved from {oldDate}, {oldTime} to {newDate}, {newTime}.",
+      "ASSESSMENT_PUBLISHED": "{type, select, EXAM {New exam “{title}” for {className} at {branch}. Opens {start}, closes {end}.} other {New homework “{title}” for {className} at {branch}. Due {end}.}}",
+      "ASSESSMENT_EXTENDED": "{type, select, EXAM {More time on the exam “{title}” for {className} at {branch}. It now closes {end}.} other {More time on the homework “{title}” for {className} at {branch}. It is now due {end}.}}",
+      "ASSESSMENT_OPENS_SOON": "The exam “{title}” for {className} at {branch} opens soon: {start}. It closes {end}.",
+      "ASSESSMENT_DUE_SOON": "The homework “{title}” for {className} at {branch} is due soon: {end}."
     }
   },
   "StudentAssessments": {

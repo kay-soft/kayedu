@@ -6,12 +6,14 @@ import { ACCOUNTS, uniqueTag, type AccountKey } from "./support/accounts";
 import { DAY, HOUR, findFixtureClass, insertExam } from "./support/assessment-fixtures";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import type { AppLocale } from "./support/i18n";
-import { dayFromToday, openDialog, pickDate } from "./support/ui";
+import { dayFromToday, isoDayFromToday, openDialog, pickDate } from "./support/ui";
 
 /**
  * W3a: a teacher builds and publishes an exam through the UI, an enrolled student
  * takes it, refreshes, resumes and submits. Throughout, neither the page nor any
- * response the student receives contains `isCorrect` (rule 11, D-W09). The exam's
+ * response the student receives contains `isCorrect` (rule 11, D-W09). W3b: publishing
+ * raises the student's bell, the panel opens the assessment, and the calendar shows it
+ * on its day. The exam's
  * title carries the shared e2e prefix; the test removes what its tag created,
  * pass or fail, so a second run leaves the same row counts.
  */
@@ -62,12 +64,26 @@ async function findClass(): Promise<{ classGroupId: string; centerId: string; te
   }
 }
 
+/** The bell's uncapped count, which the server rendered into the page (never polled). */
+async function unreadCount(page: Page): Promise<number> {
+  return Number(await page.locator("[data-notification-bell]").getAttribute("data-unread"));
+}
+
 test("@write a teacher publishes an exam, a student takes it, and no correct answer reaches the student", async ({ as, appLocale, msg }) => {
   const tag = uniqueTag("").toLowerCase();
   const title = `${E2E_ASSESSMENT_PREFIX}${tag}`;
   const { classGroupId, centerId, teacher } = await findClass();
 
   try {
+    // The student's bell before anything is published.
+    const studentPage = await as("studentDowntown");
+    const bodies: string[] = [];
+    watchResponses(studentPage, bodies);
+    await studentPage.goto(`/${appLocale}/student/assessments`);
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    const unreadBefore = await unreadCount(studentPage);
+
     // ── The teacher: build, save, publish ──────────────────────────────────
     const teacherPage = await as(teacher);
     await teacherPage.goto(`/${appLocale}/teacher/assessments/new?type=EXAM&branch=${encodeURIComponent(centerId)}&class=${encodeURIComponent(classGroupId)}`);
@@ -102,11 +118,29 @@ test("@write a teacher publishes an exam, a student takes it, and no correct ans
     await openDialog(teacherPage).getByRole("button", { name: msg("TeacherAssessments.publish.label"), exact: true }).click();
     await expect(teacherPage.getByRole("button", { name: msg("TeacherAssessments.unpublish.label"), exact: true })).toBeVisible();
 
-    // ── The student: list, start, answer, refresh, resume, submit ──────────
-    const studentPage = await as("studentDowntown");
-    const bodies: string[] = [];
-    watchResponses(studentPage, bodies);
+    // ── W3b: the bell rises, the panel opens it, the calendar shows it ─────
+    await studentPage.reload();
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    expect(await unreadCount(studentPage), "the bell rose after publishing").toBeGreaterThan(unreadBefore);
+    await studentPage.locator("[data-notification-bell]").click();
+    const notice = studentPage.locator("[data-notification-row]", { hasText: title });
+    await expect(notice, "the panel shows the notice").toBeVisible();
+    await notice.click();
+    await studentPage.waitForURL(new RegExp(`/student/assessments/${assessmentId}`));
+    await expectHealthy(studentPage, appLocale);
 
+    const dayKey = isoDayFromToday(0);
+    await studentPage.goto(`/${appLocale}/student/calendar?month=${dayKey.slice(0, 7)}&day=${dayKey}`);
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    const entry = studentPage.getByRole("link", { name: new RegExp(title) });
+    await expect(entry, "the calendar lists the exam on the day its window opens").toBeVisible();
+    await expect(entry.getByText(msg("Calendar.tone.exam"), { exact: true })).toBeVisible();
+    await expect(entry.getByText(msg("StudentAssessments.state.OPEN"), { exact: true })).toBeVisible();
+    await expect(entry).toHaveAttribute("href", new RegExp(`/student/assessments/${assessmentId}$`));
+
+    // ── The student: list, start, answer, refresh, resume, submit ──────────
     await studentPage.goto(`/${appLocale}/student/assessments`);
     await expectHealthy(studentPage, appLocale);
     await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));

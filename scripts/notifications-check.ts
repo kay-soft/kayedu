@@ -26,32 +26,60 @@
  *     by the writer and by the database CHECK.
  *  7. RLS on the table, zero policies.
  *  8. Email — with EMAIL_ENABLED off nothing is sent; there is no cron.
+ *  9–15. W3b (D-W32), through the real `publishAssessment`, `extendAssessment`,
+ *     `deleteAssessment` and `syncAssessmentSoonNotices`: each assessment kind,
+ *     the thresholds at their edges, dedupe on repeat and concurrent reads, every
+ *     hiding case of the re-check, rolled-back writers, deletion, ids only.
  *
  * Needs a reachable database and cleans up after itself.
  */
 
 
 import type { NotificationKind, Prisma } from "@prisma/client";
+import { IntlMessageFormat } from "intl-messageformat";
 
+import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { gatePrisma } from "./lib/gate-db.ts";
+import { assessmentDefaults, type AssessmentDraft } from "../lib/assessments.ts";
 import { resolveCenterRelations } from "../lib/auth/relations.ts";
+import { startAttempt, submitAttempt, type AssessmentStudent } from "../lib/db/assessment-attempts.ts";
+import {
+  createAssessment,
+  deleteAssessment,
+  extendAssessment,
+  publishAssessment,
+  unpublishAssessment,
+  type AssessmentTeacher,
+} from "../lib/db/assessments.ts";
 import { createBranchPause } from "../lib/db/branch-admin.ts";
 import {
   NotificationPayloadError,
   countUnread,
+  hiddenAssessmentNoticeIds,
   listNotifications,
   loadNotificationSubjects,
   markAllNotificationsRead,
   markNotificationRead,
   notify,
+  notifyAssessmentExtended,
+  notifyAssessmentPublished,
   notifyReservationResolved,
   notifySessionCancelled,
+  syncAssessmentSoonNotices,
   type NotificationReach,
 } from "../lib/db/notifications.ts";
 import { confirmReservation, rejectReservation } from "../lib/db/reservations.ts";
 import { confirmBooking, rejectBooking } from "../lib/db/session-bookings.ts";
 import { cancelSession, rescheduleSession } from "../lib/db/sessions.ts";
-import { NOTIFICATION_KIND_LIST, isIdsOnlyPayload } from "../lib/notifications/kinds.ts";
+import {
+  ASSESSMENT_NOTICE_KINDS,
+  ASSESSMENT_SOON,
+  NOTIFICATION_KIND_LIST,
+  assessmentSoonNotice,
+  dedupeKeys,
+  isIdsOnlyPayload,
+  notificationHref,
+} from "../lib/notifications/kinds.ts";
 import { emailEnabled, queueNotificationEmails } from "../lib/notify/email.ts";
 import { readSource } from "./lib/source.ts";
 
@@ -61,6 +89,7 @@ const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "
 const STEM = "notifications-check";
 const SLUG_A = `${STEM}-a`;
 const SLUG_B = `${STEM}-b`;
+const SLUG_W3B = `${STEM}-w3b`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 let failures = 0;
@@ -73,8 +102,11 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 async function cleanup() {
-  // Notices cascade with their branch and with their recipient.
-  await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
+  // Notices cascade with their branch and with their recipient. The W3b branch's
+  // assessment writers audit, and the log is append-only (a trigger).
+  const audited = await prisma.center.findMany({ where: { slug: SLUG_W3B }, select: { id: true } });
+  if (audited.length > 0) await deleteAuditRows(prisma, { centerId: { in: audited.map((center) => center.id) } });
+  await prisma.center.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B, SLUG_W3B] } } });
   await prisma.organization.deleteMany({ where: { name: { startsWith: STEM } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: `${STEM}-` } } });
 }
@@ -189,6 +221,532 @@ function checkStatic() {
   check("EMAIL_ENABLED unset → off: the hook sends nothing", off);
   check("EMAIL_ENABLED=true still sends nothing until M20's sender exists", onButNoSender);
   check("This run's environment has EMAIL_ENABLED off", !emailEnabled());
+}
+
+// ── 9–15. Assessment notices (W3b, D-W32) ───────────────────────────────────
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+
+function readyDraft(
+  type: "EXAM" | "HOMEWORK",
+  times: { windowStart?: Date; windowEnd?: Date; deadline?: Date },
+  extra: Partial<AssessmentDraft> = {},
+): AssessmentDraft {
+  return {
+    ...assessmentDefaults(type),
+    title: `${type} fixture`,
+    instructions: null,
+    windowStart: times.windowStart ?? null,
+    windowEnd: times.windowEnd ?? null,
+    deadline: times.deadline ?? null,
+    questions: [{ text: "Q", points: 1, options: [{ text: "A", isCorrect: true }, { text: "B", isCorrect: false }] }],
+    ...extra,
+  };
+}
+
+/** The reach a real request resolves: relations, student branches, and what the re-check hid. */
+async function fullReach(userId: string, now: Date, options: { unreadOnly?: boolean } = {}): Promise<NotificationReach> {
+  const relations = await resolveCenterRelations(prisma, userId);
+  const studentCenterIds = relations.filter((relation) => relation.studentProfile).map((relation) => relation.center.id);
+  return {
+    relationCenterIds: relations.map((relation) => relation.center.id),
+    studentCenterIds,
+    hiddenNoticeIds: await hiddenAssessmentNoticeIds(prisma, userId, studentCenterIds, now, options),
+  };
+}
+
+const noticesOf = (userId: string, assessmentId: string) =>
+  prisma.notification.findMany({
+    where: { userId, dedupeKey: { startsWith: dedupeKeys.assessmentPrefix(assessmentId) } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+
+async function visibleOf(userId: string, assessmentId: string, now: Date) {
+  const { rows } = await listNotifications(prisma, userId, await fullReach(userId, now), { skip: 0, take: 100 });
+  return rows.filter((row) => row.dedupeKey.startsWith(dedupeKeys.assessmentPrefix(assessmentId)));
+}
+
+/** The real writer's own transaction, rolled back after its last statement. */
+function rollingBackClient() {
+  const marker = new Error("rollback on purpose");
+  const client = new Proxy(prisma, {
+    get(target, key, receiver) {
+      if (key !== "$transaction") return Reflect.get(target, key, receiver);
+      return (fn: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+        target.$transaction(async (tx) => {
+          await fn(tx);
+          throw marker;
+        });
+    },
+  });
+  return { client, isRollback: (error: unknown) => error === marker };
+}
+
+function checkSoonRulesPure() {
+  console.log("\n9. The soon thresholds (pure, one constant)");
+  const now = new Date("2026-11-10T10:00:00.000Z");
+  const later = (ms: number) => new Date(now.getTime() + ms);
+  const exam = (at: Date) => assessmentSoonNotice({ type: "EXAM", windowStart: at, deadline: null }, now);
+  const homework = (at: Date) => assessmentSoonNotice({ type: "HOMEWORK", windowStart: null, deadline: at }, now);
+  check("One constant: 60 minutes and 24 hours", ASSESSMENT_SOON.OPENS_SOON_MINUTES === 60 && ASSESSMENT_SOON.DUE_SOON_HOURS === 24);
+  check("Exam 45 minutes from opening → opens soon", exam(later(45 * MINUTE_MS))?.kind === "ASSESSMENT_OPENS_SOON");
+  check("Exam exactly 60 minutes from opening → opens soon", exam(later(60 * MINUTE_MS))?.kind === "ASSESSMENT_OPENS_SOON");
+  check("Exam 60 minutes and 1 ms from opening → nothing", exam(later(60 * MINUTE_MS + 1)) === null);
+  check("Exam opening right now → nothing (it has opened)", exam(now) === null);
+  check("Homework 20 hours from its deadline → due soon", homework(later(20 * HOUR_MS))?.kind === "ASSESSMENT_DUE_SOON");
+  check("Homework exactly 24 hours from its deadline → due soon", homework(later(24 * HOUR_MS))?.kind === "ASSESSMENT_DUE_SOON");
+  check("Homework 24 hours and 1 ms from its deadline → nothing", homework(later(24 * HOUR_MS + 1)) === null);
+  check("Homework at its deadline → nothing (it has closed)", homework(now) === null);
+  check("An exam never reads a deadline", assessmentSoonNotice({ type: "EXAM", windowStart: null, deadline: later(MINUTE_MS) }, now) === null);
+  check(
+    "The deep link is the assessment's own page",
+    notificationHref("ASSESSMENT_PUBLISHED", { assessmentId: "11111111-1111-4111-8111-111111111111" }) ===
+      "/student/assessments/11111111-1111-4111-8111-111111111111",
+  );
+}
+
+function checkAssessmentNoticeTexts() {
+  console.log("\n15. The notice texts and the statics");
+  const values = { title: "T", className: "C", branch: "B", start: "S", end: "E" };
+  for (const locale of ["en", "ar"]) {
+    const kinds = (JSON.parse(readSource(`${ROOT}/messages/${locale}.json`)) as { Notifications: { kinds: Record<string, string> } }).Notifications.kinds;
+    for (const kind of NOTIFICATION_KIND_LIST.filter((row) => row.startsWith("ASSESSMENT_"))) {
+      for (const type of ["EXAM", "HOMEWORK"]) {
+        let text = "";
+        try {
+          text = String(new IntlMessageFormat(kinds[kind], locale).format({ ...values, type }));
+        } catch (error) {
+          text = `ERROR ${String(error)}`;
+        }
+        const namesEnd = !text.startsWith("ERROR") && text.includes("T") && text.includes("C") && text.includes("B") && text.includes("E");
+        check(`${locale} ${kind} (${type}) renders the title, class, branch and closing time`, namesEnd, text);
+      }
+    }
+    const published = new IntlMessageFormat(kinds.ASSESSMENT_PUBLISHED, locale);
+    check(`${locale}: a published exam's text states when it opens`, String(published.format({ ...values, type: "EXAM" })).includes("S"));
+  }
+  const writer = readSource(`${ROOT}/lib/db/assessments.ts`);
+  check("Publish notifies inside its transaction", /notifyAssessmentPublished\(tx,/.test(writer));
+  check("Extend notifies inside its transaction", /notifyAssessmentExtended\(tx,/.test(writer));
+  check("Delete removes notices inside its transaction", /deleteAssessmentNotices\(tx,/.test(writer));
+  const reachSource = readSource(`${ROOT}/lib/notifications/reach.ts`);
+  check(
+    "The soon sync runs only for a person with a student profile",
+    /relation\.studentProfile/.test(reachSource) && /if \(studentCenterIds\.length > 0\) await syncAssessmentSoonNotices/.test(reachSource),
+  );
+  const parentCalendar = readSource(`${ROOT}/app/[locale]/(parent)/parent/calendar/page.tsx`);
+  check("The parent's calendar reads no assessment", !/assessment/i.test(parentCalendar));
+  check("Every assessment kind is in the catalogue, ids only", ASSESSMENT_NOTICE_KINDS.every((kind) => NOTIFICATION_KIND_LIST.includes(kind)));
+}
+
+async function checkAssessmentNotices() {
+  checkSoonRulesPure();
+
+  const center = await makeCenter(SLUG_W3B);
+  const teacherUser = await makeUser("w3b-teacher");
+  const membership = await prisma.membership.create({
+    data: { centerId: center.id, userId: teacherUser.id, role: "TEACHER", firstName: "T", lastName: "W3b" },
+  });
+  const teacher: AssessmentTeacher = { centerId: center.id, membershipId: membership.id, userId: teacherUser.id };
+  const actor = { userId: teacherUser.id };
+  const T = new Date();
+  const at = (ms: number) => new Date(T.getTime() + ms);
+
+  const makeStudentIn = async (tag: string, classGroupId: string | null, status: "ACTIVE" | "REMOVED" | "BLOCKED" = "ACTIVE") => {
+    const user = await makeUser(`w3b-${tag}`);
+    const profile = await prisma.studentProfile.create({
+      data: { centerId: center.id, userId: user.id, studentCode: `w3b-${tag}`, firstName: "S", lastName: tag },
+    });
+    const enrollment = classGroupId
+      ? await prisma.enrollment.create({ data: { centerId: center.id, studentProfileId: profile.id, classGroupId, status } })
+      : null;
+    const student: AssessmentStudent = { centerId: center.id, studentProfileId: profile.id, userId: user.id };
+    return { user, profile, enrollment, student };
+  };
+
+  const newExam = async (classGroupId: string, start: number, extra: Partial<AssessmentDraft> = {}) => {
+    const created = await createAssessment(prisma, actor, teacher, {
+      type: "EXAM",
+      classGroupId,
+      draft: readyDraft("EXAM", { windowStart: at(start), windowEnd: at(start + 3 * HOUR_MS) }, { durationMinutes: 30, ...extra }),
+    });
+    if (!created.ok) throw new Error(`fixture exam: ${JSON.stringify(created)}`);
+    return created.id;
+  };
+  const newHomework = async (classGroupId: string, deadline: number, extra: Partial<AssessmentDraft> = {}) => {
+    const session = await makeSession(center.id, classGroupId, teacherUser.id, 1, "10:00");
+    const created = await createAssessment(prisma, actor, teacher, {
+      type: "HOMEWORK",
+      sessionId: session.id,
+      draft: readyDraft("HOMEWORK", { deadline: at(deadline) }, extra),
+    });
+    if (!created.ok) throw new Error(`fixture homework: ${JSON.stringify(created)}`);
+    return created.id;
+  };
+  const publish = async (id: string, when: Date = T) => {
+    const result = await publishAssessment(prisma, actor, teacher, id, when);
+    if (!result.ok) throw new Error(`fixture publish: ${JSON.stringify(result)}`);
+  };
+  const sync = (userId: string, now: Date) => syncAssessmentSoonNotices(prisma, userId, [center.id], now);
+
+  // ── 10. Published ─────────────────────────────────────────────────────────
+  console.log("\n10. ASSESSMENT_PUBLISHED — in the publish transaction");
+  const classPublish = await makeClass(center.id, teacherUser.id);
+  const enrolled = await makeStudentIn("enrolled", classPublish.id);
+  const left = await makeStudentIn("left", classPublish.id, "REMOVED");
+  const blocked = await makeStudentIn("blocked", classPublish.id, "BLOCKED");
+  const notEnrolled = await makeStudentIn("not-enrolled", null);
+  const parent = await makeUser("w3b-parent");
+  await prisma.familyLink.create({ data: { parentUserId: parent.id, studentUserId: enrolled.user.id, source: "LEGACY_VERIFIED" } });
+
+  const examId = await newExam(classPublish.id, 2 * HOUR_MS);
+  const unreadBefore = await countUnread(prisma, enrolled.user.id, await fullReach(enrolled.user.id, T, { unreadOnly: true }));
+  const rollback = rollingBackClient();
+  const refused = await publishAssessment(rollback.client, actor, teacher, examId, T).then(() => null, (error) => error);
+  check(
+    "A rolled-back publish leaves no notice and the row a DRAFT",
+    rollback.isRollback(refused) &&
+      (await noticesOf(enrolled.user.id, examId)).length === 0 &&
+      (await prisma.assessment.findUniqueOrThrow({ where: { id: examId } })).status === "DRAFT",
+  );
+  await publish(examId);
+  const publishedRows = await noticesOf(enrolled.user.id, examId);
+  check("The enrolled student gets exactly one notice", publishedRows.length === 1, JSON.stringify(publishedRows));
+  check("It is ASSESSMENT_PUBLISHED, about this branch", publishedRows[0]?.kind === "ASSESSMENT_PUBLISHED" && publishedRows[0]?.centerId === center.id);
+  check("Its payload is the assessment's id, nothing else", samePayload(publishedRows[0]?.payload, { assessmentId: examId }));
+  check("Its key is assessment:<id>:published:<publishedAt>", publishedRows[0]?.dedupeKey === `assessment:${examId}:published:${T.getTime()}`, publishedRows[0]?.dedupeKey);
+  check(
+    "The student's bell count rises by one",
+    (await countUnread(prisma, enrolled.user.id, await fullReach(enrolled.user.id, T, { unreadOnly: true }))) === unreadBefore + 1,
+  );
+  for (const [name, userId] of [
+    ["A student who left", left.user.id],
+    ["A blocked student", blocked.user.id],
+    ["A student not enrolled", notEnrolled.user.id],
+    ["A parent of the enrolled student", parent.id],
+    ["The teacher", teacherUser.id],
+  ] as const) {
+    check(`${name} gets nothing`, (await noticesOf(userId, examId)).length === 0);
+  }
+  await prisma.$transaction((tx) => notifyAssessmentPublished(tx, { id: examId, centerId: center.id, classGroupId: classPublish.id }, T));
+  check("The same publish twice writes one row", (await noticesOf(enrolled.user.id, examId)).length === 1);
+  await prisma.$transaction((tx) => notifyAssessmentPublished(tx, { id: examId, centerId: center.id, classGroupId: classPublish.id }, T));
+
+  // ── 11. Soon, computed on read ────────────────────────────────────────────
+  console.log("\n11. OPENS_SOON and DUE_SOON — computed on read, with no job");
+  const classSoon = await makeClass(center.id, teacherUser.id);
+  const soonStudent = await makeStudentIn("soon", classSoon.id);
+  const soonLeft = await makeStudentIn("soon-left", classSoon.id, "REMOVED");
+  const soonOutsider = await makeStudentIn("soon-outsider", null);
+  const opens45 = await newExam(classSoon.id, 45 * MINUTE_MS);
+  await publish(opens45);
+  await sync(soonStudent.user.id, T);
+  const soonKindsOf = async (userId: string, id: string) =>
+    (await noticesOf(userId, id)).filter((row) => row.kind === "ASSESSMENT_OPENS_SOON" || row.kind === "ASSESSMENT_DUE_SOON");
+  const opens = await soonKindsOf(soonStudent.user.id, opens45);
+  check("An exam 45 minutes from opening produces one opens-soon notice", opens.length === 1 && opens[0].kind === "ASSESSMENT_OPENS_SOON", JSON.stringify(opens));
+  check(
+    "Its key is assessment:<id>:<kind>:<windowStart>",
+    opens[0]?.dedupeKey === `assessment:${opens45}:ASSESSMENT_OPENS_SOON:${at(45 * MINUTE_MS).getTime()}`,
+    opens[0]?.dedupeKey,
+  );
+  check("Its payload is ids only", samePayload(opens[0]?.payload, { assessmentId: opens45 }));
+  await sync(soonStudent.user.id, T);
+  await sync(soonStudent.user.id, at(MINUTE_MS));
+  check("Reloading creates no second notice", (await soonKindsOf(soonStudent.user.id, opens45)).length === 1);
+  await sync(soonLeft.user.id, T);
+  await sync(soonOutsider.user.id, T);
+  check("A student who left gets no soon notice", (await soonKindsOf(soonLeft.user.id, opens45)).length === 0);
+  check("A student not enrolled gets no soon notice", (await soonKindsOf(soonOutsider.user.id, opens45)).length === 0);
+
+  const due20 = await newHomework(classSoon.id, 20 * HOUR_MS);
+  await publish(due20);
+  await sync(soonStudent.user.id, T);
+  const due = await soonKindsOf(soonStudent.user.id, due20);
+  check("A homework due in 20 hours produces one due-soon notice", due.length === 1 && due[0].kind === "ASSESSMENT_DUE_SOON", JSON.stringify(due));
+  check("Its key is assessment:<id>:<kind>:<deadline>", due[0]?.dedupeKey === `assessment:${due20}:ASSESSMENT_DUE_SOON:${at(20 * HOUR_MS).getTime()}`, due[0]?.dedupeKey);
+
+  // Boundaries against the database, with a student who sees only this class.
+  const classEdge = await makeClass(center.id, teacherUser.id);
+  const edgeStudent = await makeStudentIn("edge", classEdge.id);
+  const edgeExam = await newExam(classEdge.id, 5 * HOUR_MS);
+  const edgeHomework = await newHomework(classEdge.id, 30 * HOUR_MS);
+  await publish(edgeExam);
+  await publish(edgeHomework);
+  const windowStart = at(5 * HOUR_MS).getTime();
+  const deadline = at(30 * HOUR_MS).getTime();
+  await sync(edgeStudent.user.id, new Date(windowStart - 60 * MINUTE_MS - 1));
+  check("Database: the exam at 60 minutes + 1 ms gets nothing", (await soonKindsOf(edgeStudent.user.id, edgeExam)).length === 0);
+  await sync(edgeStudent.user.id, new Date(windowStart));
+  check("Database: the exam at its opening moment gets nothing", (await soonKindsOf(edgeStudent.user.id, edgeExam)).length === 0);
+  await sync(edgeStudent.user.id, new Date(windowStart - 60 * MINUTE_MS));
+  check("Database: the exam at exactly 60 minutes gets its notice", (await soonKindsOf(edgeStudent.user.id, edgeExam)).length === 1);
+  await sync(edgeStudent.user.id, new Date(deadline - 24 * HOUR_MS - 1));
+  check("Database: the homework at 24 hours + 1 ms gets nothing", (await soonKindsOf(edgeStudent.user.id, edgeHomework)).length === 0);
+  await sync(edgeStudent.user.id, new Date(deadline));
+  check("Database: the homework at its deadline gets nothing", (await soonKindsOf(edgeStudent.user.id, edgeHomework)).length === 0);
+  await sync(edgeStudent.user.id, new Date(deadline - 24 * HOUR_MS));
+  check("Database: the homework at exactly 24 hours gets its notice", (await soonKindsOf(edgeStudent.user.id, edgeHomework)).length === 1);
+
+  // Two concurrent reads.
+  const classRace = await makeClass(center.id, teacherUser.id);
+  const raceStudent = await makeStudentIn("race", classRace.id);
+  const raceExam = await newExam(classRace.id, 30 * MINUTE_MS);
+  const raceHomework = await newHomework(classRace.id, 3 * HOUR_MS);
+  await publish(raceExam);
+  await publish(raceHomework);
+  await Promise.all([sync(raceStudent.user.id, T), sync(raceStudent.user.id, T), sync(raceStudent.user.id, T)]);
+  check(
+    "Concurrent reads leave one row per notice",
+    (await soonKindsOf(raceStudent.user.id, raceExam)).length === 1 && (await soonKindsOf(raceStudent.user.id, raceHomework)).length === 1,
+  );
+
+  // ── 12. The re-check ──────────────────────────────────────────────────────
+  console.log("\n12. The read-time re-check — hidden, never deleted");
+  const visibleCount = async () => (await visibleOf(enrolled.user.id, examId, T)).length;
+  const storedCount = async () => (await noticesOf(enrolled.user.id, examId)).length;
+  const hiddenWhile = async (name: string, change: () => Promise<unknown>, restore: () => Promise<unknown>) => {
+    const stored = await storedCount();
+    await change();
+    const whileHidden = await visibleCount();
+    const unreadHidden = await countUnread(prisma, enrolled.user.id, await fullReach(enrolled.user.id, T, { unreadOnly: true }));
+    const stillStored = await storedCount();
+    await restore();
+    check(`${name} hides it`, whileHidden === 0, String(whileHidden));
+    check(`${name}: the bell does not count it`, unreadHidden === unreadBefore, String(unreadHidden));
+    check(`${name}: the row is still stored`, stillStored === stored);
+    check(`${name}: undoing it shows the notice again`, (await visibleCount()) === 1);
+  };
+  check("Visible with full access", (await visibleCount()) === 1);
+  await hiddenWhile(
+    "An inactive class",
+    () => prisma.classGroup.update({ where: { id: classPublish.id }, data: { active: false } }),
+    () => prisma.classGroup.update({ where: { id: classPublish.id }, data: { active: true } }),
+  );
+  await hiddenWhile(
+    "A student leaving the class",
+    () => prisma.enrollment.update({ where: { id: enrolled.enrollment!.id }, data: { status: "REMOVED" } }),
+    () => prisma.enrollment.update({ where: { id: enrolled.enrollment!.id }, data: { status: "ACTIVE" } }),
+  );
+  await hiddenWhile(
+    "A blocked enrolment",
+    () => prisma.enrollment.update({ where: { id: enrolled.enrollment!.id }, data: { status: "BLOCKED" } }),
+    () => prisma.enrollment.update({ where: { id: enrolled.enrollment!.id }, data: { status: "ACTIVE" } }),
+  );
+  await hiddenWhile(
+    "A deactivated profile",
+    () => prisma.studentProfile.update({ where: { id: enrolled.profile.id }, data: { active: false } }),
+    () => prisma.studentProfile.update({ where: { id: enrolled.profile.id }, data: { active: true } }),
+  );
+  await hiddenWhile(
+    "A suspended branch",
+    () => prisma.center.update({ where: { id: center.id }, data: { lifecycleState: "SUSPENDED" } }),
+    () => prisma.center.update({ where: { id: center.id }, data: { lifecycleState: "ACTIVE" } }),
+  );
+  await prisma.$transaction((tx) =>
+    notify(tx, [
+      {
+        userId: teacherUser.id,
+        kind: "ASSESSMENT_PUBLISHED",
+        centerId: center.id,
+        payload: { assessmentId: examId },
+        dedupeKey: dedupeKeys.assessmentPublished(examId, T),
+      },
+    ]),
+  );
+  check("A person who is staff at the branch, not a student, sees no assessment notice", (await visibleOf(teacherUser.id, examId, T)).length === 0);
+
+  const unpublishTo = await unpublishAssessment(prisma, actor, teacher, examId);
+  check("Unpublish succeeds", unpublishTo.ok);
+  const hiddenId = publishedRows[0].id;
+  check("An unpublished assessment hides its notice", (await visibleCount()) === 0);
+  check("A hidden notice cannot be opened", (await markNotificationRead(prisma, enrolled.user.id, await fullReach(enrolled.user.id, T), hiddenId)) === null);
+  await markAllNotificationsRead(prisma, enrolled.user.id, await fullReach(enrolled.user.id, T, { unreadOnly: true }));
+  check("\"Mark all\" leaves a hidden notice unread", (await prisma.notification.findUniqueOrThrow({ where: { id: hiddenId } })).readAt === null);
+  await publish(examId, at(1_000));
+  const republished = await noticesOf(enrolled.user.id, examId);
+  const shown = await visibleOf(enrolled.user.id, examId, T);
+  check("Republishing writes a new notice (publishedAt is in the key)", republished.length === 2, JSON.stringify(republished.map((row) => row.dedupeKey)));
+  check(
+    "Only the new one shows, so one publish rings once",
+    shown.length === 1 && shown[0].dedupeKey === dedupeKeys.assessmentPublished(examId, at(1_000)),
+    JSON.stringify(shown.map((row) => row.dedupeKey)),
+  );
+
+  // The soon notices and a final attempt.
+  const { rows: beforeSubmit } = await listNotifications(prisma, soonStudent.user.id, await fullReach(soonStudent.user.id, T), { skip: 0, take: 100 });
+  const dueShown = (rows: { kind: string; dedupeKey: string }[]) =>
+    rows.filter((row) => row.kind === "ASSESSMENT_DUE_SOON" && row.dedupeKey.startsWith(dedupeKeys.assessmentPrefix(due20))).length;
+  check("The due-soon notice shows before any attempt", dueShown(beforeSubmit) === 1);
+  const started = await startAttempt(prisma, soonStudent.student, due20, T);
+  if (!started.ok) throw new Error(`fixture start: ${JSON.stringify(started)}`);
+  const inProgress = await visibleOf(soonStudent.user.id, due20, T);
+  check("An attempt still in progress keeps it", dueShown(inProgress) === 1);
+  await sync(soonStudent.user.id, T);
+  check("An attempt still in progress adds no second one", (await soonKindsOf(soonStudent.user.id, due20)).length === 1);
+  await submitAttempt(prisma, soonStudent.student, started.attemptId, at(MINUTE_MS));
+  check("Submitting hides it", dueShown(await visibleOf(soonStudent.user.id, due20, at(MINUTE_MS))) === 0);
+  await sync(soonStudent.user.id, at(2 * MINUTE_MS));
+  check("A read after submitting creates nothing new", (await soonKindsOf(soonStudent.user.id, due20)).length === 1);
+  const dueRow = (await soonKindsOf(soonStudent.user.id, due20))[0];
+  check("The full re-check names a hidden notice", (await hiddenAssessmentNoticeIds(prisma, soonStudent.user.id, [center.id], at(MINUTE_MS))).includes(dueRow.id));
+  await prisma.notification.update({ where: { id: dueRow.id }, data: { readAt: at(MINUTE_MS) } });
+  check(
+    "The bell's unread-only re-check leaves a read notice out",
+    !(await hiddenAssessmentNoticeIds(prisma, soonStudent.user.id, [center.id], at(MINUTE_MS), { unreadOnly: true })).includes(dueRow.id),
+  );
+
+  const finalExamRows = await soonKindsOf(soonStudent.user.id, opens45);
+  await prisma.assessmentAttempt.create({
+    data: {
+      centerId: center.id,
+      assessmentId: opens45,
+      studentProfileId: soonStudent.profile.id,
+      startedAt: T,
+      lastSeenAt: T,
+      submittedAt: T,
+      finalisedBy: "STUDENT",
+      score: 0,
+      maxScore: 1,
+    },
+  });
+  check("A final attempt hides the opens-soon notice", !(await visibleOf(soonStudent.user.id, opens45, T)).some((row) => row.id === finalExamRows[0]?.id));
+  check("It is still stored", (await soonKindsOf(soonStudent.user.id, opens45)).length === 1);
+
+  const classDue = await makeClass(center.id, teacherUser.id);
+  const dueStudent = await makeStudentIn("overdue", classDue.id);
+  const timedHomework = await newHomework(classDue.id, 10 * HOUR_MS, { durationMinutes: 10 });
+  await publish(timedHomework);
+  await sync(dueStudent.user.id, T);
+  const timedStart = await startAttempt(prisma, dueStudent.student, timedHomework, T);
+  if (!timedStart.ok) throw new Error(`fixture start: ${JSON.stringify(timedStart)}`);
+  const pastItsEnd = at(11 * MINUTE_MS);
+  check(
+    "An attempt past its end counts as final before anyone finalised it (D-W10), with nothing written",
+    !(await visibleOf(dueStudent.user.id, timedHomework, pastItsEnd)).some((row) => row.kind === "ASSESSMENT_DUE_SOON") &&
+      (await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: timedStart.attemptId } })).submittedAt === null,
+  );
+
+  // ── 13. Extended ──────────────────────────────────────────────────────────
+  console.log("\n13. ASSESSMENT_EXTENDED — in the extend transaction");
+  const classExtend = await makeClass(center.id, teacherUser.id);
+  const fresh = await makeStudentIn("fresh", classExtend.id);
+  const working = await makeStudentIn("working", classExtend.id);
+  const finished = await makeStudentIn("finished", classExtend.id);
+  const overdue = await makeStudentIn("past-end", classExtend.id);
+  const gone = await makeStudentIn("gone", classExtend.id, "REMOVED");
+  const extendId = await newExam(classExtend.id, -1 * HOUR_MS);
+  await publish(extendId);
+  for (const [student, when] of [[working.student, T], [finished.student, T], [overdue.student, at(-40 * MINUTE_MS)]] as const) {
+    const result = await startAttempt(prisma, student, extendId, when);
+    if (!result.ok) throw new Error(`fixture start: ${JSON.stringify(result)}`);
+    if (student === finished.student) await submitAttempt(prisma, student, result.attemptId, T);
+  }
+  const extendedOf = async (userId: string) => (await noticesOf(userId, extendId)).filter((row) => row.kind === "ASSESSMENT_EXTENDED");
+  const firstEnd = at(5 * HOUR_MS);
+  const extendRollback = rollingBackClient();
+  const extendRefused = await extendAssessment(extendRollback.client, actor, teacher, extendId, firstEnd, T).then(() => null, (error) => error);
+  check(
+    "A rolled-back extension leaves no notice and the old end",
+    extendRollback.isRollback(extendRefused) &&
+      (await extendedOf(fresh.user.id)).length === 0 &&
+      (await prisma.assessment.findUniqueOrThrow({ where: { id: extendId } })).windowEnd?.getTime() === at(2 * HOUR_MS).getTime(),
+  );
+  const extended = await extendAssessment(prisma, actor, teacher, extendId, firstEnd, T);
+  check("The extension succeeds", extended.ok, JSON.stringify(extended));
+  check("A student with no attempt is told", (await extendedOf(fresh.user.id)).length === 1);
+  check("A student mid-attempt is told", (await extendedOf(working.user.id)).length === 1);
+  check("A student who submitted is not", (await extendedOf(finished.user.id)).length === 0);
+  check("An attempt the extension finalised at its old end is not", (await extendedOf(overdue.user.id)).length === 0);
+  check("A student who left is not", (await extendedOf(gone.user.id)).length === 0);
+  check("Its key carries the new end", (await extendedOf(fresh.user.id))[0]?.dedupeKey === `assessment:${extendId}:extended:${firstEnd.getTime()}`);
+  await prisma.$transaction((tx) => notifyAssessmentExtended(tx, { id: extendId, centerId: center.id, classGroupId: classExtend.id }, firstEnd));
+  check("The same extension twice writes one row", (await extendedOf(fresh.user.id)).length === 1);
+  const secondEnd = at(6 * HOUR_MS);
+  await extendAssessment(prisma, actor, teacher, extendId, secondEnd, T);
+  check("A later extension is a new notice", (await extendedOf(fresh.user.id)).length === 2);
+  await prisma.classGroup.update({ where: { id: classExtend.id }, data: { active: false } });
+  await extendAssessment(prisma, actor, teacher, extendId, at(7 * HOUR_MS), T);
+  await prisma.classGroup.update({ where: { id: classExtend.id }, data: { active: true } });
+  check("Nobody is told while the class is inactive", (await extendedOf(fresh.user.id)).length === 2);
+
+  // ── 14. Delete, payloads, current names ───────────────────────────────────
+  console.log("\n14. Deleting removes the notices; payloads are ids only; the text reads current values");
+  const classDelete = await makeClass(center.id, teacherUser.id);
+  const deleteStudent = await makeStudentIn("delete", classDelete.id);
+  const doomed = await newExam(classDelete.id, 30 * MINUTE_MS);
+  const kept = await newExam(classDelete.id, 40 * MINUTE_MS);
+  await publish(doomed);
+  await publish(kept);
+  await sync(deleteStudent.user.id, T);
+  const storedBefore = (await noticesOf(deleteStudent.user.id, doomed)).length;
+  const keptBefore = (await noticesOf(deleteStudent.user.id, kept)).length;
+  check("Fixture: both exams hold a published and an opens-soon notice", storedBefore === 2 && keptBefore === 2, `${storedBefore}/${keptBefore}`);
+  await unpublishAssessment(prisma, actor, teacher, doomed);
+  check("Unpublishing hides them and deletes none", (await noticesOf(deleteStudent.user.id, doomed)).length === 2 && (await visibleOf(deleteStudent.user.id, doomed, T)).length === 0);
+  const deleteRollback = rollingBackClient();
+  const deleteRefused = await deleteAssessment(deleteRollback.client, actor, teacher, doomed).then(() => null, (error) => error);
+  check(
+    "A rolled-back delete keeps the assessment and its notices",
+    deleteRollback.isRollback(deleteRefused) && (await noticesOf(deleteStudent.user.id, doomed)).length === 2,
+  );
+  const removed = await deleteAssessment(prisma, actor, teacher, doomed);
+  check("Deleting the draft succeeds", removed.ok, JSON.stringify(removed));
+  check("It leaves no notice row, of any kind", (await prisma.notification.count({ where: { dedupeKey: { startsWith: dedupeKeys.assessmentPrefix(doomed) } } })) === 0);
+  check("Another assessment's notices are untouched", (await noticesOf(deleteStudent.user.id, kept)).length === keptBefore);
+
+  const allRows = await prisma.notification.findMany({ where: { centerId: center.id } });
+  check(
+    "Every assessment payload is exactly its id",
+    allRows.length > 0 && allRows.every((row) => isIdsOnlyPayload(row.kind, row.payload) && UUID.test((row.payload as { assessmentId: string }).assessmentId)),
+  );
+  const nameRefused = await prisma
+    .$transaction((tx) =>
+      notify(tx, [
+        {
+          userId: enrolled.user.id,
+          kind: "ASSESSMENT_PUBLISHED",
+          centerId: center.id,
+          payload: { assessmentId: examId, title: "A name" },
+          dedupeKey: `assessment:${examId}:refused`,
+        },
+      ]),
+    )
+    .then(() => null, (error) => error);
+  check("A title in the payload is refused by the writer", nameRefused instanceof NotificationPayloadError);
+
+  await prisma.assessment.update({ where: { id: kept }, data: { title: "Renamed" } });
+  // Frozen at creation by a trigger (D-14), so it is set there.
+  const zonedSession = await prisma.session.create({
+    data: {
+      centerId: center.id,
+      classGroupId: classDelete.id,
+      teacherId: teacherUser.id,
+      date: day(2).date,
+      startTime: "11:00",
+      endTime: "12:00",
+      priceSnapshot: 10_000,
+      timezone: "Asia/Dubai",
+    },
+  });
+  const zonedHomework = await createAssessment(prisma, actor, teacher, {
+    type: "HOMEWORK",
+    sessionId: zonedSession.id,
+    draft: readyDraft("HOMEWORK", { deadline: at(10 * HOUR_MS) }),
+  });
+  if (!zonedHomework.ok) throw new Error("fixture zoned homework");
+  await publish(zonedHomework.id);
+  const subjects = await loadNotificationSubjects(prisma, [
+    ...(await noticesOf(deleteStudent.user.id, kept)),
+    ...(await noticesOf(deleteStudent.user.id, zonedHomework.id)),
+  ]);
+  check("The text reads the current title", subjects.assessments.get(kept)?.title === "Renamed");
+  check("An exam with no session reads the branch's timezone", subjects.assessments.get(kept)?.session === null && Boolean(subjects.branches.get(center.id)?.timeZone));
+  check("A homework reads its session's frozen timezone", subjects.assessments.get(zonedHomework.id)?.session?.timezone === "Asia/Dubai", JSON.stringify(subjects.assessments.get(zonedHomework.id)?.session ?? null));
+  check("The subjects never carry a question or a correct mark", !JSON.stringify([...subjects.assessments.values()]).includes("isCorrect"));
+
+  checkAssessmentNoticeTexts();
 }
 
 async function main() {
@@ -513,6 +1071,8 @@ async function main() {
     SELECT count(*) AS count FROM pg_policies WHERE schemaname = 'public' AND tablename = 'Notification'`;
   check("RLS is on for Notification", rls?.on === true);
   check("Notification carries zero policies (deny-all to the Data API)", Number(policies?.count ?? -1) === 0);
+
+  await checkAssessmentNotices();
 }
 
 main()
