@@ -7,6 +7,7 @@ import {
 } from "@/app/[locale]/(student)/rating-popup";
 import { ProfileCompletionForm } from "@/app/[locale]/(student)/student/profile/profile-completion-form";
 import { PLATFORM_BRAND, shellUser, type ShellFrame } from "@/components/shell/from-context";
+import { shellExperiences } from "@/components/shell/experience-switcher-data";
 import { navForExperience } from "@/components/shell/nav";
 import { requireStudentUser } from "@/lib/auth/tenant";
 import { unreadNotificationCount } from "@/lib/notifications/reach";
@@ -98,11 +99,13 @@ async function pendingRatingViews(
  */
 export async function studentShell({ interruptions = true }: { interruptions?: boolean } = {}): Promise<ShellFrame> {
   const session = await requireStudentUser();
-  const [defaultCollapsed, locale, unreadNotifications] = await Promise.all([
+  const [defaultCollapsed, locale, unreadNotifications, experiences] = await Promise.all([
     cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
     getLocale(),
     // W1: the bell's count.
     unreadNotificationCount(session.user.id),
+    // W5: the role switcher.
+    shellExperiences(session.user.id, "student"),
   ]);
 
   // M18 (spec §4.3 item 4): a self-registered student's `StudentProfile` is
@@ -136,6 +139,7 @@ export async function studentShell({ interruptions = true }: { interruptions?: b
         nav: navForExperience("student", "STUDENT"),
         brand: PLATFORM_BRAND,
         user: shellUser(session.user, "STUDENT"),
+        experiences,
         defaultCollapsed,
         unreadNotifications,
       },
@@ -175,6 +179,7 @@ export async function studentShell({ interruptions = true }: { interruptions?: b
       // and booking names its own branch.
       brand: PLATFORM_BRAND,
       user: shellUser(session.user, "STUDENT"),
+        experiences,
       defaultCollapsed,
       unreadNotifications,
     },

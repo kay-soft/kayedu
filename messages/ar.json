@@ -117,6 +117,27 @@
     "allBranches": "كل الفروع",
     "allBranchesHint": "{count, plural, one {فرع واحد} two {فرعان معًا} few {{count, number, arab} فروع معًا} many {{count, number, arab} فرعًا معًا} other {{count, number, arab} فرع معًا}}"
   },
+  "Experiences": {
+    "title": "تبديل الدور",
+    "trigger": "تبديل الدور. الدور الحالي: {current}",
+    "triggerNoCurrent": "تبديل الدور",
+    "listLabel": "أدوارك",
+    "roleSeparator": "، ",
+    "current": "الحالي",
+    "groupPortals": "بواباتك",
+    "groupBranches": "الفروع التي تعمل بها",
+    "groupPlatform": "المنصة",
+    "wholeManagement": "الإدارة الكاملة",
+    "wholeManagementPlace": "{organization}، {count, plural, one {فرع واحد} two {فرعان} few {{count, number, arab} فروع} many {{count, number, arab} فرعًا} other {{count, number, arab} فرع}}",
+    "student": "طالب",
+    "studentPlace": "كل فروعك",
+    "teacher": "مدرس",
+    "teacherPlace": "كل الفروع",
+    "parent": "ولي أمر",
+    "parentPlace": "أبناؤك",
+    "admin": "مشرف المنصة",
+    "adminPlace": "المنصة بالكامل"
+  },
   "NavGroups": {
     "frontDesk": "المكتب الأمامي",
     "academics": "الأكاديمي",
@@ -226,7 +247,9 @@
       "teacherPortal": "بوابة المدرّس",
       "teacherPortalHint": "حصصك وطلابك في كل الفروع",
       "parentPortal": "بوابة وليّ الأمر",
-      "parentPortalHint": "جداول أبنائك"
+      "parentPortalHint": "جداول أبنائك",
+      "lastUsed": "آخر استخدام",
+      "continue": "متابعة"
     },
     "invite": {
       "title": "دعوة للانضمام",

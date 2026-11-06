@@ -17,11 +17,14 @@ import {
   type PermissionGrants,
   type TenantRole,
 } from "@/lib/auth/permissions";
+import { loadExperiences, type ExperienceEntry } from "@/lib/auth/experiences";
 import {
   resolveCenterRelations,
+  resolveOwnerOrgGroups,
   roleForExperience,
   type CenterRelation,
   type Experience,
+  type OwnerOrgGroup,
 } from "@/lib/auth/relations";
 import { onboardingPath } from "@/lib/auth/onboarding";
 import { loadPermissionGrants } from "@/lib/db/permissions";
@@ -38,7 +41,7 @@ import {
 } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 
-export type { CenterRelation, Experience };
+export type { CenterRelation, Experience, OwnerOrgGroup };
 
 /**
  * Everything a request needs to be safely tenant-scoped
@@ -97,12 +100,6 @@ export const getUserCenterRelations = cache(
   async (userId: string): Promise<CenterRelation[]> => resolveCenterRelations(prisma, userId),
 );
 
-export type OwnerOrgGroup = {
-  organizationId: string;
-  organizationName: string;
-  branches: Center[];
-};
-
 /**
  * The organizations this user is an Owner of, where the organization actually
  * has more than one branch — the set the "Whole Management" option in the
@@ -111,34 +108,29 @@ export type OwnerOrgGroup = {
  * lists that one branch as an ordinary card via `getUserCenterRelations`.
  */
 export const getOwnerOrgGroups = cache(
-  async (userId: string): Promise<OwnerOrgGroup[]> => {
-    const relations = await getUserCenterRelations(userId);
-    const branchesByOrg = new Map<string, Center[]>();
-    for (const relation of relations) {
-      if (!relation.roles.includes("OWNER")) continue;
-      const orgId = relation.center.organizationId;
-      const list = branchesByOrg.get(orgId) ?? [];
-      list.push(relation.center);
-      branchesByOrg.set(orgId, list);
-    }
+  async (userId: string): Promise<OwnerOrgGroup[]> =>
+    resolveOwnerOrgGroups(prisma, await getUserCenterRelations(userId)),
+);
 
-    const multiOrgIds = [...branchesByOrg.entries()]
-      .filter(([, branches]) => branches.length > 1)
-      .map(([orgId]) => orgId);
-    if (multiOrgIds.length === 0) return [];
-
-    const organizations = await prisma.organization.findMany({
-      where: { id: { in: multiOrgIds } },
-    });
-
-    return organizations.map((organization) => ({
-      organizationId: organization.id,
-      organizationName: organization.name,
-      branches: (branchesByOrg.get(organization.id) ?? []).sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ),
-    }));
-  },
+/**
+ * Every experience this account has (W5, D-W34): the one list behind the hub,
+ * the header switcher and sign-in's landing, derived on every request. See
+ * `lib/auth/experiences.ts`. It re-uses this request's cached resolvers, so a
+ * shell that already read the relations pays for no second read of them.
+ */
+export const listExperiences = cache(
+  async (userId: string): Promise<ExperienceEntry[]> =>
+    loadExperiences(prisma, userId, {
+      relations: getUserCenterRelations,
+      orgGroups: getOwnerOrgGroups,
+      hasLinkedChild: async (id) => (await getParentChildren(id)).linked.length > 0,
+      isPlatformAdmin: async (id) => {
+        const user = await getCurrentUser();
+        if (user?.id === id) return user.isPlatformAdmin;
+        const row = await prisma.user.findUnique({ where: { id }, select: { isPlatformAdmin: true } });
+        return row?.isPlatformAdmin ?? false;
+      },
+    }),
 );
 
 async function redirectTo(href: string): Promise<never> {
@@ -497,23 +489,10 @@ export async function singleExperienceHome(
   return homes.length === 1 ? homes[0] : null;
 }
 
-/** Every experience this person holds, one home each — see `singleExperienceHome`. */
-export async function experienceHomes(user: Pick<User, "id" | "isPlatformAdmin">): Promise<ExperienceHome[]> {
-  const [relations, orgGroups, children] = await Promise.all([
-    getUserCenterRelations(user.id),
-    getOwnerOrgGroups(user.id),
-    getParentChildren(user.id),
-  ]);
-  return [
-    ...relations
-      .filter((relation) => relation.roles.some((role) => isCenterStaffRole(role)))
-      .map((relation) => ({ href: ROUTES.centerDashboard, centerId: relation.center.id })),
-    ...orgGroups.map(() => ({ href: ROUTES.centerDashboard })),
-    ...(relations.some((relation) => relation.roles.includes("TEACHER")) ? [{ href: ROUTES.teacherDashboard }] : []),
-    ...(relations.some((relation) => relation.roles.includes("STUDENT")) ? [{ href: ROUTES.studentSchedule }] : []),
-    ...(children.linked.length > 0 ? [{ href: ROUTES.parentHome }] : []),
-    ...(user.isPlatformAdmin ? [{ href: ROUTES.adminCenters }] : []),
-  ];
+/** Every experience this person holds, one home each: `listExperiences`, see `singleExperienceHome`. */
+export async function experienceHomes(user: Pick<User, "id">): Promise<ExperienceHome[]> {
+  const entries = await listExperiences(user.id);
+  return entries.map((entry) => ({ href: entry.href, centerId: entry.centerId }));
 }
 
 export type ParentSession = {

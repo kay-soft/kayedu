@@ -117,6 +117,27 @@
     "allBranches": "All branches",
     "allBranchesHint": "{count, plural, one {# branch} other {# branches, together}}"
   },
+  "Experiences": {
+    "title": "Switch role",
+    "trigger": "Switch role. Now: {current}",
+    "triggerNoCurrent": "Switch role",
+    "listLabel": "Your roles",
+    "roleSeparator": ", ",
+    "current": "Current",
+    "groupPortals": "Your portals",
+    "groupBranches": "Branches you work at",
+    "groupPlatform": "Platform",
+    "wholeManagement": "Whole Management",
+    "wholeManagementPlace": "{organization}, {count, plural, one {# branch} other {# branches}}",
+    "student": "Student",
+    "studentPlace": "All your branches",
+    "teacher": "Teacher",
+    "teacherPlace": "All branches",
+    "parent": "Parent",
+    "parentPlace": "Your children",
+    "admin": "Platform admin",
+    "adminPlace": "The whole platform"
+  },
   "NavGroups": {
     "frontDesk": "Front desk",
     "academics": "Academics",
@@ -226,7 +247,9 @@
       "teacherPortal": "Teacher portal",
       "teacherPortalHint": "Your sessions and students at every branch",
       "parentPortal": "Parent portal",
-      "parentPortalHint": "Your children's schedules"
+      "parentPortalHint": "Your children's schedules",
+      "lastUsed": "Last used",
+      "continue": "Continue"
     },
     "invite": {
       "title": "Staff invitation",

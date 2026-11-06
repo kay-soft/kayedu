@@ -7,6 +7,7 @@ import {
   shellUser,
   type ShellFrame,
 } from "@/components/shell/from-context";
+import { shellExperiences } from "@/components/shell/experience-switcher-data";
 import { teacherNavAcross, withPendingCount } from "@/components/shell/nav";
 import { getPendingTeacherApprovalCounts } from "@/lib/auth/approval-counts";
 import { ctxCan, requireTeacherUser } from "@/lib/auth/tenant";
@@ -32,10 +33,12 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  */
 export async function teacherShell(): Promise<ShellFrame> {
   const session = await requireTeacherUser();
-  const [defaultCollapsed, unreadNotifications] = await Promise.all([
+  const [defaultCollapsed, unreadNotifications, experiences] = await Promise.all([
     cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
     // W1: the bell's count.
     unreadNotificationCount(session.user.id),
+    // W5: the role switcher.
+    shellExperiences(session.user.id, "teacher"),
   ]);
 
   if (!session.hasCenter) {
@@ -45,6 +48,7 @@ export async function teacherShell(): Promise<ShellFrame> {
         nav: [{ href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" }],
         brand: PLATFORM_BRAND,
         user: shellUser(session.user, "TEACHER"),
+        experiences,
         defaultCollapsed,
         unreadNotifications,
       },
@@ -71,6 +75,7 @@ export async function teacherShell(): Promise<ShellFrame> {
       brand: scope.selected ? brandFromContext(scope.selected) : PLATFORM_BRAND,
       user: shellUser(scope.user, "TEACHER"),
       scope: { ...shellScope(teacherRelations, [], scope.selected?.center.id ?? null), mode: "teacher" },
+      experiences,
       defaultCollapsed,
       unreadNotifications,
     },

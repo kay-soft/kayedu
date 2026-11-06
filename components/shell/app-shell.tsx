@@ -11,6 +11,8 @@ import {
   type BranchOption,
   type RollupOption,
 } from "@/components/shell/branch-switcher";
+import { ExperienceSwitcher } from "@/components/shell/experience-switcher";
+import type { ExperienceSwitcherData } from "@/components/shell/experience-switcher-data";
 import { NavItem } from "@/components/shell/nav-item";
 import { NotificationBell } from "@/components/shell/notification-bell";
 import { RollupNavItem } from "@/components/shell/rollup-nav-item";
@@ -60,6 +62,8 @@ export type AppShellProps = {
   user: ShellUser;
   /** Omitted for an experience with nothing to switch between. */
   scope?: ShellScope;
+  /** W5 (D-W34): the role switcher's list. Omitted for a person with one experience. */
+  experiences?: ExperienceSwitcherData;
   /** Nav hrefs shown disabled with a reason — "Whole Management" only. */
   disabledHrefs?: string[];
   /** Read server-side from the cookie, so the first paint is already correct. */
@@ -242,6 +246,7 @@ export function AppShell({
   brand,
   user,
   scope,
+  experiences,
   disabledHrefs,
   defaultCollapsed,
   unreadNotifications,
@@ -433,6 +438,9 @@ export function AppShell({
             <div className="content-edge-end ms-auto flex items-center gap-2">
               <LocaleToggle />
               <NotificationBell unread={unreadNotifications} from={experience} />
+              {/* Keyed by what is current: a switch closes the sheet, even when
+                  the destination keeps this same layout (one branch to another). */}
+              {experiences ? <ExperienceSwitcher key={experiences.current?.key ?? "none"} data={experiences} /> : null}
               <UserMenu user={user} experience={experience} />
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { PLATFORM_BRAND, shellUser, type ShellFrame } from "@/components/shell/from-context";
+import { shellExperiences } from "@/components/shell/experience-switcher-data";
 import { navForExperience } from "@/components/shell/nav";
 import { requirePlatformAdmin } from "@/lib/auth/tenant";
 import { unreadNotificationCount } from "@/lib/notifications/reach";
@@ -18,7 +19,11 @@ export async function adminShell(): Promise<ShellFrame> {
   ]);
 
   // W1: the bell's count — the admin's own notices (none are produced for them in v1).
-  const unreadNotifications = await unreadNotificationCount(user.id);
+  const [unreadNotifications, experiences] = await Promise.all([
+    unreadNotificationCount(user.id),
+    // W5: the role switcher.
+    shellExperiences(user.id, "admin"),
+  ]);
 
   return {
     props: {
@@ -26,6 +31,7 @@ export async function adminShell(): Promise<ShellFrame> {
       nav: navForExperience("admin", "PLATFORM_ADMIN"),
       brand: PLATFORM_BRAND,
       user: shellUser(user, "PLATFORM_ADMIN"),
+      experiences,
       defaultCollapsed,
       unreadNotifications,
     },

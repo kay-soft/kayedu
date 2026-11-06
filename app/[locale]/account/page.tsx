@@ -115,7 +115,7 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
       roleKey: "",
     };
     return (
-      <HubShell user={hubUser} unreadNotifications={await unreadNotificationCount(user.id)}>
+      <HubShell userId={user.id} user={hubUser} unreadNotifications={await unreadNotificationCount(user.id)}>
         {body}
       </HubShell>
     );

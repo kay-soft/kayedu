@@ -25,6 +25,12 @@ export type CenterRelation = {
   roles: TenantRole[];
 };
 
+export type OwnerOrgGroup = {
+  organizationId: string;
+  organizationName: string;
+  branches: Center[];
+};
+
 /** Drops the joined `center` relation so the row matches its Prisma model type. */
 function withoutCenter<T extends { center: unknown }>(row: T): Omit<T, "center"> {
   const copy: Record<string, unknown> = { ...row };
@@ -184,6 +190,43 @@ export async function resolveCenterRelations(
   return [...byCenter.values()]
     .map((relation) => ({ ...relation, roles: sortRoles(relation.roles) }))
     .sort((a, b) => a.center.name.localeCompare(b.center.name));
+}
+
+/**
+ * The organizations these relations hold an Owner role in, where the
+ * organization actually has more than one branch — the set "Whole Management"
+ * offers (M11, spec §4.1). A single-branch organization has nothing for a
+ * roll-up to sum, so it never appears here. Issues no query when there is none.
+ */
+export async function resolveOwnerOrgGroups(
+  prisma: Pick<PrismaClient, "organization">,
+  relations: CenterRelation[],
+): Promise<OwnerOrgGroup[]> {
+  const branchesByOrg = new Map<string, Center[]>();
+  for (const relation of relations) {
+    if (!relation.roles.includes("OWNER")) continue;
+    const orgId = relation.center.organizationId;
+    const list = branchesByOrg.get(orgId) ?? [];
+    list.push(relation.center);
+    branchesByOrg.set(orgId, list);
+  }
+
+  const multiOrgIds = [...branchesByOrg.entries()]
+    .filter(([, branches]) => branches.length > 1)
+    .map(([orgId]) => orgId);
+  if (multiOrgIds.length === 0) return [];
+
+  const organizations = await prisma.organization.findMany({
+    where: { id: { in: multiOrgIds } },
+  });
+
+  return organizations.map((organization) => ({
+    organizationId: organization.id,
+    organizationName: organization.name,
+    branches: (branchesByOrg.get(organization.id) ?? []).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    ),
+  }));
 }
 
 /**

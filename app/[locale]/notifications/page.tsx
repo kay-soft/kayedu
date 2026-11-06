@@ -113,7 +113,7 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/[l
       roleKey: "",
     };
     return (
-      <HubShell user={hubUser} unreadNotifications={unread}>
+      <HubShell userId={user.id} user={hubUser} unreadNotifications={unread}>
         {body}
       </HubShell>
     );

@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 
+import { LAST_EXPERIENCE_COOKIE, type LastExperience } from "@/lib/auth/experiences";
+
 /**
  * The active selection lives in one cookie; every request resolves from it.
  *
@@ -75,4 +77,35 @@ export async function setTeacherBranchId(id: string | null): Promise<void> {
     path: "/",
     maxAge: COOKIE_MAX_AGE,
   });
+}
+
+const LAST_EXPERIENCE_MAX_AGE = 60 * 60 * 24 * 90; // 90 days (D-W34)
+
+/**
+ * The experience last switched to (W5, D-W34): a hint the hub orders and labels
+ * by, and nothing else. No gate reads it, and it is never a `TenantContext`
+ * (`check:account` asserts who may import these). A read value means nothing
+ * until `resolveLastExperience` has looked it up in the current list.
+ */
+export async function getLastExperienceCookie(): Promise<string | null> {
+  const store = await cookies();
+  return store.get(LAST_EXPERIENCE_COOKIE)?.value || null;
+}
+
+/** Server Actions only. */
+export async function setLastExperienceCookie(value: LastExperience): Promise<void> {
+  const store = await cookies();
+  store.set(LAST_EXPERIENCE_COOKIE, JSON.stringify(value), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: LAST_EXPERIENCE_MAX_AGE,
+  });
+}
+
+/** Server Actions only. */
+export async function clearLastExperienceCookie(): Promise<void> {
+  const store = await cookies();
+  store.delete(LAST_EXPERIENCE_COOKIE);
 }
