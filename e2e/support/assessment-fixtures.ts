@@ -63,7 +63,9 @@ export type ExamFixture = {
   tag: string;
   /** Window relative to now, in ms. */
   startsInMs?: number;
-  endsInMs: number;
+  endsInMs?: number;
+  /** An exact closing instant; wins over `endsInMs`. */
+  endsAt?: Date;
   oneSitting?: boolean;
   durationMinutes?: number | null;
   showScore?: boolean;
@@ -91,7 +93,9 @@ function questionsFor(title: string) {
 export async function insertExam(db: PrismaClient, fx: FixtureClass, spec: ExamFixture): Promise<InsertedExam> {
   assertSafeToWrite("the e2e assessment fixtures");
   const title = `${E2E_ASSESSMENT_PREFIX}${spec.tag}-${spec.suffix}`;
-  const now = Date.now();
+  // Minute-aligned: the time pickers have minute precision, so a fixture on a whole
+  // minute survives a round trip through them unchanged.
+  const now = Math.floor(Date.now() / MINUTE) * MINUTE;
   const questions = questionsFor(title);
   const exam = await db.assessment.create({
     data: {
@@ -102,7 +106,7 @@ export async function insertExam(db: PrismaClient, fx: FixtureClass, spec: ExamF
       status: "PUBLISHED",
       title,
       windowStart: new Date(now + (spec.startsInMs ?? -2 * HOUR)),
-      windowEnd: new Date(now + spec.endsInMs),
+      windowEnd: spec.endsAt ?? new Date(now + (spec.endsInMs ?? DAY)),
       durationMinutes: spec.durationMinutes ?? null,
       oneSitting: spec.oneSitting ?? false,
       showScore: spec.showScore ?? false,

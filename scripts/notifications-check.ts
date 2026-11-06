@@ -1060,7 +1060,24 @@ async function main() {
     databaseRefused = true;
   }
   check("The database CHECK refuses a name in a payload", databaseRefused);
-  check("Every kind declares its ids (the catalogue covers the enum)", NOTIFICATION_KIND_LIST.length === 6);
+  // A hand-written list, not a count: adding a kind must be a deliberate edit here too.
+  const EXPECTED_KINDS = [
+    "ASSESSMENT_DUE_SOON",
+    "ASSESSMENT_EXTENDED",
+    "ASSESSMENT_OPENS_SOON",
+    "ASSESSMENT_PUBLISHED",
+    "BOOKING_APPROVED",
+    "BOOKING_DECLINED",
+    "ENROLLMENT_APPROVED",
+    "ENROLLMENT_DECLINED",
+    "SESSION_CANCELLED",
+    "SESSION_RESCHEDULED",
+  ];
+  check(
+    "Every kind declares its ids (the catalogue is exactly the ten expected kinds)",
+    [...NOTIFICATION_KIND_LIST].sort().join() === EXPECTED_KINDS.join(),
+    NOTIFICATION_KIND_LIST.join(),
+  );
 
   // ── 7. RLS ────────────────────────────────────────────────────────────────
   console.log("\n7. Row-level security");

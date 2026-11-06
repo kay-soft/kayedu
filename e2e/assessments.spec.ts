@@ -327,7 +327,7 @@ test("@write a published exam with an attempt: no question controls, an earlier 
     const fx = await findFixtureClass(db);
     // Closes at 12:00 UTC two Cairo days from now: a fixed time of day to move the date around.
     const closesAt = new Date(dayFromToday(2).getTime() + 12 * HOUR);
-    const exam = await insertExam(db, fx, { suffix: "extend", tag, endsInMs: closesAt.getTime() - Date.now(), finalAttempt: true });
+    const exam = await insertExam(db, fx, { suffix: "extend", tag, endsAt: closesAt, finalAttempt: true });
     const stored = () => db.assessment.findUniqueOrThrow({ where: { id: exam.id }, select: { windowEnd: true, status: true } });
     expect((await stored()).windowEnd?.getTime()).toBe(closesAt.getTime());
 
@@ -371,8 +371,10 @@ test("@write other roles cannot open a student's assessment, and a student canno
     await openStudentAssessment(student, appLocale, exam.id, msg);
     await expect(student.getByText(exam.title).first()).toBeVisible();
 
-    const expectNothing = async (page: Page, path: string, buttonLabel: string) => {
+    // `lands` is where the account ends up: the same URL (a 404 page) or a redirect.
+    const expectNothing = async (page: Page, path: string, buttonLabel: string, lands: string = path.split("?")[0]) => {
       await page.goto(`/${appLocale}${path}`);
+      await page.waitForURL((url) => url.pathname === `/${appLocale}${lands}`);
       await page.waitForLoadState("domcontentloaded");
       const html = await page.content();
       for (const text of hidden) expect(html, `${path} must not show "${text}"`).not.toContain(text);
@@ -388,11 +390,12 @@ test("@write other roles cannot open a student's assessment, and a student canno
 
     // A student opening the teacher's builder and viewer.
     const save = msg("TeacherAssessments.builder.save");
-    await expectNothing(student, `/teacher/assessments/${exam.id}`, save);
+    await expectNothing(student, `/teacher/assessments/${exam.id}`, save, "/teacher/centers");
     await expectNothing(
       student,
       `/teacher/assessments/new?type=EXAM&branch=${encodeURIComponent(fx.centerId)}&class=${encodeURIComponent(fx.classGroupId)}`,
       save,
+      "/teacher/centers",
     );
     await expect(student.locator("#assessment-title")).toHaveCount(0);
   });

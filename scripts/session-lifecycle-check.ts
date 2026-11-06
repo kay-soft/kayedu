@@ -891,13 +891,23 @@ async function main() {
     JSON.stringify({ revenueBefore, revenueAfter }),
   );
   const changeRows = await listSessionAttendanceChanges(prisma, centerA.id, sessionVoid.id);
+  // V8 (old → new): was "changeRows[0] is the voided-payment row, changeRows[3] is not",
+  // which leaned on the physical order of rows that share a changedAt. Now: the list is
+  // exactly the rows sorted by (changedAt, id), changedAt never decreases, and the
+  // voided-payment row is found by content.
+  const sortedChanges = [...changeRows].sort(
+    (a, b) => a.changedAt.getTime() - b.changedAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  const voidedRow = changeRows.find((row) => row.voidedPaymentId === vPay1.id);
   check(
-    "The receipt's change list reads them back in order, with local names and the voided payment",
+    "The receipt's change list reads them back in (changedAt, id) order, with local names and the voided payment",
     changeRows.length === 4 &&
-      changeRows[0].studentName.firstName === "S1" &&
-      changeRows[0].changedByName?.lastName === "Desk" &&
-      changeRows[0].voidedPaymentId === vPay1.id &&
-      changeRows[3].voidedPaymentId === null,
+      changeRows.every((row, index) => row.id === sortedChanges[index].id) &&
+      changeRows.every((row, index) => index === 0 || row.changedAt.getTime() >= changeRows[index - 1].changedAt.getTime()) &&
+      voidedRow !== undefined &&
+      voidedRow.studentName.firstName === "S1" &&
+      voidedRow.changedByName?.lastName === "Desk" &&
+      changeRows.some((row) => row.voidedPaymentId === null),
     JSON.stringify(changeRows.map((row) => [row.studentName.firstName, row.fromStatus, row.toStatus])),
   );
 
