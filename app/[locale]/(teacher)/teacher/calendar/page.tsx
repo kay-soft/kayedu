@@ -140,7 +140,7 @@ export default async function TeacherCalendarPage({
         labels,
         className: sessionDisplayName(locale, { classGroup: row.classGroup }) || tCommon("none"),
         branch: withBranch ? ctx.center.name : null,
-        href: ROUTES.teacherAssessment(row.id),
+        href: row.status === "PUBLISHED" ? ROUTES.teacherAssessmentResults(row.id) : ROUTES.teacherAssessment(row.id),
         state: { label: tAssessments(`status.${row.status}`), variant: row.status === "DRAFT" ? "neutral" : "info" },
         attempts:
           row.status === "PUBLISHED" && placement.day === selectedDay

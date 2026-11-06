@@ -11,6 +11,7 @@ import { ResultsRegion } from "@/components/shared/results-region";
 import { Card, CardContent } from "@/components/ui/card";
 import { ctxCan, requirePermission } from "@/lib/auth/tenant";
 import { branchesInView, firstGranting, getTeacherScope } from "@/lib/auth/teacher-scope";
+import { assessmentResultProgress } from "@/lib/db/assessment-results";
 import { listTeacherAssessments } from "@/lib/db/assessments";
 import { prisma } from "@/lib/db/client";
 import { ROUTES } from "@/lib/routes";
@@ -20,7 +21,9 @@ import { sessionDisplayName } from "@/lib/session-label";
  * The teacher's exams and homework (W2, D-W30; docs/04 §11.33). Opens when any
  * branch in view grants `assessment.manage.own`; lists the teacher's own rows
  * at every granting branch — one scoped read per branch, merged (U7) — with
- * Type, Class and (under All branches) Branch filters. Drafts only in W2.
+ * Type, Class and (under All branches) Branch filters. W4: a published row shows
+ * "submitted / eligible" and its Results action, and one older than the teacher's
+ * own history window is not listed (D-W33).
  */
 export default async function TeacherAssessmentsPage({
   searchParams,
@@ -42,14 +45,15 @@ export default async function TeacherAssessmentsPage({
   const locale = await getLocale();
 
   const branches = await assessmentBranches(listed);
+  const now = new Date();
   const perBranch = await Promise.all(
-    branches.map(async (branch) => ({
-      branch,
-      rows: await listTeacherAssessments(prisma, branch.teacher, { type }),
-    })),
+    branches.map(async (branch) => {
+      const rows = await listTeacherAssessments(prisma, branch.teacher, { type, history: branch.history });
+      return { branch, rows, progress: await assessmentResultProgress(prisma, { userId: scope.user.id }, branch.teacher, rows.map((row) => row.id), now) };
+    }),
   );
-  const all = perBranch.flatMap(({ branch, rows }) =>
-    rows.map((row) => ({ row, branchName: branch.ctx.center.name, branchZone: branch.zone })),
+  const all = perBranch.flatMap(({ branch, rows, progress }) =>
+    rows.map((row) => ({ row, branchName: branch.ctx.center.name, branchZone: branch.zone, progress: progress.get(row.id) })),
   );
   const classOptions = [...new Map(all.map((entry) => [entry.row.classGroupId, entry])).values()].map((entry) => ({
     value: entry.row.classGroupId,

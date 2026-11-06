@@ -17,6 +17,7 @@ import {
   type DraftError,
   type HomeworkDeadlineBasis,
 } from "../assessments.ts";
+import { outsideTeacherHistory } from "../assessment-results.ts";
 import { canInContext, type PermissionGrants, type TenantRole } from "../auth/permissions.ts";
 import { sessionLabelSelect } from "../session-label.ts";
 import { finaliseDueAttempts, finaliseIfDue } from "./assessment-attempts.ts";
@@ -81,7 +82,7 @@ export async function isAssessmentLocked(db: Db, centerId: string, assessmentId:
 
 // ── Reads (the owning teacher's own rows) ──────────────────────────────────
 
-const classLabelSelect = (centerId: string) => {
+export const classLabelSelect = (centerId: string) => {
   const catalog = sessionLabelSelect(centerId).classGroup.select.subject;
   return { id: true, active: true, subject: catalog, grade: catalog } as const;
 };
@@ -96,16 +97,33 @@ const sessionSummarySelect = {
   rescheduledToId: true,
 } as const;
 
+/**
+ * The teacher's own history window at one branch (U6, D-W33): `floor` is
+ * `teacherPortalHistoryFloor`, `zone` the branch's. A row is judged on its closing
+ * day in its own frozen timezone (`outsideTeacherHistory`); a draft is never hidden.
+ */
+export type TeacherHistory = { floor: Date | null; zone: string };
+
 export type AssessmentListFilter = {
   type?: AssessmentType;
   classGroupId?: string;
   sessionId?: string;
   /** The calendar's range (W3b): an exam by when it opens, a homework by its deadline. */
   within?: { from: Date; to: Date };
+  /** Every list passes it. Only the calendar does not: it clamps its own range to the floor. */
+  history?: TeacherHistory;
 };
 
-export function listTeacherAssessments(db: Db, teacher: AssessmentTeacher, filter: AssessmentListFilter = {}) {
-  return db.assessment.findMany({
+function hiddenByHistory(
+  row: Parameters<typeof outsideTeacherHistory>[0] & { session: { timezone: string | null } | null },
+  history: TeacherHistory | undefined,
+): boolean {
+  if (!history) return false;
+  return outsideTeacherHistory(row, row.session ? sessionZone(row.session, history.zone) : history.zone, history.floor);
+}
+
+export async function listTeacherAssessments(db: Db, teacher: AssessmentTeacher, filter: AssessmentListFilter = {}) {
+  const rows = await db.assessment.findMany({
     where: scopedWhere(teacher.centerId, {
       teacherMembershipId: teacher.membershipId,
       ...(filter.type ? { type: filter.type } : {}),
@@ -136,6 +154,7 @@ export function listTeacherAssessments(db: Db, teacher: AssessmentTeacher, filte
     },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
   });
+  return rows.filter((row) => !hiddenByHistory(row, filter.history));
 }
 
 export type TeacherAssessmentListRow = Awaited<ReturnType<typeof listTeacherAssessments>>[number];
@@ -180,9 +199,13 @@ export async function assessmentAttemptCounts(
   return counts;
 }
 
-/** The builder's read — the teacher's own row, `isCorrect` included (never a student read). */
-export function findTeacherAssessment(db: Db, teacher: AssessmentTeacher, assessmentId: string) {
-  return db.assessment.findFirst({
+/**
+ * The builder's read — the teacher's own row, `isCorrect` included (never a student
+ * read). With `history`, a published row outside the teacher's window reads as not
+ * found (D-W33); writes never pass it (U6: the window is not an integrity check).
+ */
+export async function findTeacherAssessment(db: Db, teacher: AssessmentTeacher, assessmentId: string, options: { history?: TeacherHistory } = {}) {
+  const row = await db.assessment.findFirst({
     where: scopedWhere(teacher.centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
     include: {
       classGroup: { select: classLabelSelect(teacher.centerId) },
@@ -194,6 +217,7 @@ export function findTeacherAssessment(db: Db, teacher: AssessmentTeacher, assess
       _count: { select: { attempts: true } },
     },
   });
+  return row && hiddenByHistory(row, options.history) ? null : row;
 }
 
 export type TeacherAssessment = NonNullable<Awaited<ReturnType<typeof findTeacherAssessment>>>;
@@ -292,7 +316,7 @@ export type AssessmentWriteResult =
   | { ok: false; error: AssessmentWriteError; errors?: DraftError[] };
 
 /** The owning membership is still an ACTIVE TEACHER one at this branch — re-read in the write. */
-async function teacherStillActive(tx: Db, teacher: AssessmentTeacher): Promise<boolean> {
+export async function teacherStillActive(tx: Db, teacher: AssessmentTeacher): Promise<boolean> {
   const row = await tx.membership.findFirst({
     where: scopedWhere(teacher.centerId, { id: teacher.membershipId, userId: teacher.userId, role: "TEACHER" as const, active: true }),
     select: { id: true },

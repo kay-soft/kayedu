@@ -1,6 +1,6 @@
 /**
- * Assessments check — the W2 and W3a acceptance gate (docs/03-build-order.md W2
- * and W3a "Gates"; D-W01–D-W11, D-W30, D-W31 in docs/00 §5.1 "W-batch").
+ * Assessments check — the W2, W3a, W3b and W4 acceptance gate (docs/03-build-order.md
+ * "Gates"; D-W01–D-W11, D-W30–D-W33 in docs/00 §5.1 "W-batch").
  *
  * Run with:  npm run check:assessments   (staging or a local database only — S1)
  *
@@ -40,6 +40,13 @@
  * 21. W3b: where an assessment sits on the calendar, in its zone (pure).
  * 22. The calendar's reads: the range, who sees what, rule 11, the counts.
  * 23. Publish, extend and delete write their notices; the calendar statics.
+ * 24. W4, pure: the roster, the summary, sort and filter, the analysis, history.
+ * 25. Lazy finalisation inside the results read. 26. The summary and the students.
+ * 27. Time taken, capped. 28. Per-question and per-option counts.
+ * 29. One student's answers; an in-progress attempt returns none.
+ * 30. After it closes; no submissions. 31. Frozen scores, derived percentage.
+ * 32. Every refused role by direct call, the switch-off, cross-centre, All branches.
+ * 33. The list's numbers, the history window, the student path, statics.
  *
  * Needs a reachable database and cleans up after itself.
  */
@@ -87,6 +94,19 @@ import {
   type PermissionGrants,
   type TenantRole,
 } from "../lib/auth/permissions.ts";
+import {
+  analyseQuestions,
+  answerOutcome,
+  buildResultRows,
+  filterAndSortResults,
+  outsideTeacherHistory,
+  summariseResults,
+  type ResultRow,
+  type ResultSort,
+  type RosterAttempt,
+} from "../lib/assessment-results.ts";
+import { assessmentResultProgress, readAssessmentResults, readAttemptResult } from "../lib/db/assessment-results.ts";
+import { teacherHistoryFloor } from "../lib/db/visibility.ts";
 import {
   assessmentAttemptCounts,
   createAssessment,
@@ -1662,6 +1682,419 @@ async function checkNoticesFromWriters(fx: Fixture, now: Date) {
   check("One shared calendar component", /<SessionCalendar/.test(studentCalendar) && /<SessionCalendar/.test(teacherCalendar) && /<SessionCalendar/.test(parentCalendar));
 }
 
+// ── 24–33. Results (W4, D-W11, D-W33) ───────────────────────────────────────
+
+function checkResultRules() {
+  console.log("\n24. Results rules (pure)");
+  const at = (minutes: number) => new Date(Date.UTC(2026, 10, 10, 10, minutes));
+  const exam: AssessmentTiming = { type: "EXAM", windowStart: at(-60), windowEnd: at(120), deadline: null, durationMinutes: 30, oneSitting: false };
+  const enrol = (id: string, enrolledAt: Date = at(-1000)) => ({ studentProfileId: id, name: id, enrolledAt });
+  const attempt = (id: string, extra: Partial<RosterAttempt> = {}): RosterAttempt => ({
+    id: `attempt-${id}`,
+    studentProfileId: id,
+    name: id,
+    startedAt: at(0),
+    submittedAt: null,
+    finalisedBy: null,
+    score: null,
+    maxScore: null,
+    ...extra,
+  });
+  const done = (id: string, score: number, minutes = 10) => attempt(id, { submittedAt: at(minutes), finalisedBy: "STUDENT", score, maxScore: 10 });
+
+  const open = buildResultRows(exam, [enrol("a"), enrol("b"), enrol("c")], [done("a", 7), attempt("b"), done("gone", 3)], at(5));
+  const row = (rows: ResultRow[], id: string) => rows.find((item) => item.studentProfileId === id);
+  check("A final attempt is Submitted, an open one In progress, no attempt Not started", row(open, "a")?.status === "SUBMITTED" && row(open, "b")?.status === "IN_PROGRESS" && row(open, "c")?.status === "NOT_STARTED");
+  check("An attempt with no ACTIVE enrolment stays listed, as left and not eligible", row(open, "gone")?.left === true && row(open, "gone")?.eligible === false && row(open, "a")?.left === false);
+  check("Percentage and time taken are derived from the frozen values", row(open, "a")?.percentage === percentage(7, 10) && row(open, "a")?.timeTakenMs === 10 * MINUTE);
+  check("In progress: no score and no time taken, and the time left from the derived end", row(open, "b")?.score === null && row(open, "b")?.timeTakenMs === null && row(open, "b")?.timeLeftMs === 25 * MINUTE);
+
+  const closed = buildResultRows(exam, [enrol("c"), enrol("late", at(121)), enrol("onTime", at(120))], [], at(200));
+  check("Closed with no attempt: Missed", row(closed, "c")?.status === "MISSED" && row(closed, "onTime")?.status === "MISSED");
+  check("Joined after it closed: not listed, so it never reads as missed (D-W33)", row(closed, "late") === undefined);
+  const rejoined = buildResultRows(exam, [enrol("back", at(300))], [done("back", 5)], at(400));
+  check("Rejoined after it closed with an attempt: listed and eligible", row(rejoined, "back")?.status === "SUBMITTED" && row(rejoined, "back")?.eligible === true);
+
+  const summary = summariseResults(open);
+  check(
+    "Summary: eligible, started, submitted, in progress, not started, missed",
+    summary.eligible === 3 && summary.started === 3 && summary.submitted === 2 && summary.inProgress === 1 && summary.notStarted === 1 && summary.missed === 0,
+    JSON.stringify(summary),
+  );
+  check("Average, highest and lowest are over submitted attempts only", summary.averagePercentage === 50 && summary.highestPercentage === 70 && summary.lowestPercentage === 30, JSON.stringify(summary));
+  const empty = summariseResults(buildResultRows(exam, [enrol("c")], [attempt("b")], at(5)));
+  check("With no submissions all three are null (\"No submissions yet\")", empty.averagePercentage === null && empty.highestPercentage === null && empty.lowestPercentage === null);
+
+  const sortable = buildResultRows(exam, [enrol("Zeina"), enrol("Amal"), enrol("Bassem"), enrol("Dina")], [done("Zeina", 9, 20), done("Amal", 2, 5), done("Bassem", 5, 10)], at(30));
+  const names = (rows: ResultRow[]) => rows.map((item) => item.name).join();
+  const sorted = (sort: ResultSort) => names(filterAndSortResults(sortable, { query: "", status: null, sort }, "en"));
+  check("Sort by name", sorted("name") === "Amal,Bassem,Dina,Zeina", sorted("name"));
+  check("Sort by score, either way, with no score last", sorted("scoreDesc") === "Zeina,Bassem,Amal,Dina" && sorted("scoreAsc") === "Amal,Bassem,Zeina,Dina", `${sorted("scoreDesc")} / ${sorted("scoreAsc")}`);
+  check("Sort by time taken, either way, with no time last", sorted("timeAsc") === "Amal,Bassem,Zeina,Dina" && sorted("timeDesc") === "Zeina,Bassem,Amal,Dina");
+  check("Search by name", names(filterAndSortResults(sortable, { query: " ZEI ", status: null, sort: "name" }, "en")) === "Zeina");
+  check("Filter by status", names(filterAndSortResults(sortable, { query: "", status: "MISSED", sort: "name" }, "en")) === "" && names(filterAndSortResults(sortable, { query: "", status: "NOT_STARTED", sort: "name" }, "en")) === "Dina");
+
+  check("Answer outcome: Correct, Incorrect, Unanswered", answerOutcome({ optionId: "o", isCorrect: true }) === "CORRECT" && answerOutcome({ optionId: "o", isCorrect: false }) === "INCORRECT" && answerOutcome({ optionId: null, isCorrect: false }) === "UNANSWERED" && answerOutcome(undefined) === "UNANSWERED");
+
+  const analysed = analyseQuestions(
+    [{ id: "q", text: "Q", points: 1, options: [{ id: "r", text: "R", isCorrect: true }, { id: "w", text: "W", isCorrect: false }] }],
+    [{ questionId: "q", optionId: "r", isCorrect: true, count: 3 }, { questionId: "q", optionId: "w", isCorrect: false, count: 1 }, { questionId: "q", optionId: null, isCorrect: false, count: 1 }],
+    5,
+  )[0];
+  check("Analysis: the percentage correct, and how many chose each option", analysed.correctCount === 3 && analysed.correctPercentage === 60 && analysed.unanswered === 1 && analysed.options[0].count === 3 && analysed.options[1].count === 1, JSON.stringify(analysed));
+  check("Analysis with no submissions: no percentage", analyseQuestions([{ id: "q", text: "Q", points: 1, options: [] }], [], 0)[0].correctPercentage === null);
+
+  const floor = new Date(Date.UTC(2026, 9, 10));
+  const published = (windowEnd: Date) => ({ status: "PUBLISHED" as const, type: "EXAM" as const, windowEnd, deadline: null });
+  check("History: closed before the floor's day is hidden", outsideTeacherHistory(published(new Date(Date.UTC(2026, 9, 9, 12))), "Africa/Cairo", floor));
+  check("History: closed on the floor's day is kept", !outsideTeacherHistory(published(new Date(Date.UTC(2026, 9, 10, 12))), "Africa/Cairo", floor));
+  const lateEvening = published(new Date(Date.UTC(2026, 9, 9, 22, 30)));
+  check("History: the day is the row's own timezone's", !outsideTeacherHistory(lateEvening, "Africa/Cairo", floor) && outsideTeacherHistory(lateEvening, "UTC", floor));
+  check("History: a draft and a null floor hide nothing", !outsideTeacherHistory({ ...published(new Date(0)), status: "DRAFT" }, "Africa/Cairo", floor) && !outsideTeacherHistory(published(new Date(0)), "Africa/Cairo", null));
+}
+
+/** Answers `rightOn` questions right and `wrongOn` wrong, by question index. */
+async function answerAs(student: AssessmentStudent, attemptId: string, assessmentId: string, rightOn: number[], wrongOn: number[], at: Date) {
+  const questions = await optionsOf(assessmentId);
+  for (const index of rightOn) await saveAnswer(prisma, student, attemptId, { questionId: questions[index].id, optionId: questions[index].right }, at);
+  for (const index of wrongOn) await saveAnswer(prisma, student, attemptId, { questionId: questions[index].id, optionId: questions[index].wrong }, at);
+}
+
+async function startedAttempt(student: AssessmentStudent, assessmentId: string, at: Date): Promise<string> {
+  const started = await startAttempt(prisma, student, assessmentId, at);
+  if (!started.ok) throw new Error(`results fixture start: ${JSON.stringify(started)}`);
+  return started.attemptId;
+}
+
+async function checkResults(ids: {
+  fx: Fixture;
+  otherTeacher: AssessmentTeacher;
+  centerB: string;
+  teacherB: AssessmentTeacher;
+  ownerUserId: string;
+  staffUserIds: Record<"MANAGER" | "RECEPTIONIST" | "ACCOUNTANT", string>;
+}) {
+  const { fx, otherTeacher, centerB, teacherB, ownerUserId, staffUserIds } = ids;
+  const { teacher, actor } = fx;
+  const centerId = teacher.centerId;
+  const now = new Date();
+
+  // ── The fixture: one class, every kind of student ────────────────────────
+  const classId = (await makeClass(centerId, teacher.userId)).id;
+  const local: Fixture = { ...fx, classGroupId: classId };
+  const right = await makeStudent(centerId, "res-right", classId);
+  const wrong = await makeStudent(centerId, "res-wrong", classId);
+  const deadline = await makeStudent(centerId, "res-deadline", classId);
+  const working = await makeStudent(centerId, "res-working", classId);
+  const none = await makeStudent(centerId, "res-none", classId);
+  const left = await makeStudent(centerId, "res-left", classId);
+  const blocked = await makeStudent(centerId, "res-blocked", classId);
+  const removedEarly = await makeStudent(centerId, "res-removed", classId);
+  const deactivated = await makeStudent(centerId, "res-deactivated", classId);
+  await prisma.enrollment.updateMany({ where: { studentProfileId: blocked.profile.id }, data: { status: "BLOCKED" } });
+  await prisma.enrollment.updateMany({ where: { studentProfileId: removedEarly.profile.id }, data: { status: "REMOVED" } });
+  await prisma.studentProfile.update({ where: { id: deactivated.profile.id }, data: { active: false } });
+  await prisma.studentProfile.update({ where: { id: right.profile.id }, data: { phone: "+201000000099" } });
+
+  // 2 + 3 + 5 points, shuffled (the exam default), 30 minutes, window ±3h.
+  const examId = await publishedExam(local, now);
+  const minutesAgo = (minutes: number) => new Date(now.getTime() - minutes * MINUTE);
+
+  const rightAttempt = await startedAttempt(right.student, examId, minutesAgo(10));
+  await answerAs(right.student, rightAttempt, examId, [0, 1, 2], [], minutesAgo(9));
+  await submitAttempt(prisma, right.student, rightAttempt, minutesAgo(5));
+
+  const wrongAttempt = await startedAttempt(wrong.student, examId, minutesAgo(12));
+  await answerAs(wrong.student, wrongAttempt, examId, [0], [1, 2], minutesAgo(11));
+  await submitAttempt(prisma, wrong.student, wrongAttempt, minutesAgo(10));
+
+  // Started two hours ago on a 30-minute timer, and nothing has read it since.
+  const deadlineStart = minutesAgo(120);
+  const deadlineAttempt = await startedAttempt(deadline.student, examId, deadlineStart);
+  await answerAs(deadline.student, deadlineAttempt, examId, [0], [], minutesAgo(119));
+
+  const workingAttempt = await startedAttempt(working.student, examId, minutesAgo(5));
+  await answerAs(working.student, workingAttempt, examId, [0], [], minutesAgo(4));
+
+  const leftAttempt = await startedAttempt(left.student, examId, minutesAgo(20));
+  await answerAs(left.student, leftAttempt, examId, [2], [], minutesAgo(19));
+  await submitAttempt(prisma, left.student, leftAttempt, minutesAgo(18));
+  await prisma.enrollment.updateMany({ where: { studentProfileId: left.profile.id }, data: { status: "REMOVED" } });
+
+  // ── 25. Lazy finalisation inside the read ────────────────────────────────
+  console.log("\n25. Lazy finalisation inside the results read (D-W10)");
+  const untouched = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: deadlineAttempt } });
+  check("Before the read the overdue attempt is not final", untouched.submittedAt === null && untouched.score === null);
+  const read = await readAssessmentResults(prisma, actor, teacher, examId, now);
+  if (!read.ok) {
+    check("The owner reads the results", false, JSON.stringify(read));
+    return;
+  }
+  const results = read.results;
+  const finalised = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: deadlineAttempt } });
+  check("The results read finalised it, graded with what was saved", finalised.submittedAt !== null && finalised.finalisedBy === "DEADLINE" && finalised.score === 2 && finalised.maxScore === 10, JSON.stringify(finalised));
+  const rowOf = (rows: ResultRow[], student: { profile: { id: string } }) => rows.find((item) => item.studentProfileId === student.profile.id);
+
+  // ── 26. Summary, percentages, frozen values ──────────────────────────────
+  console.log("\n26. The summary, over the whole class");
+  const { summary } = results;
+  check(
+    "Open: eligible 5, started 5, submitted 4, in progress 1, not started 1, missed 0",
+    summary.eligible === 5 && summary.started === 5 && summary.submitted === 4 && summary.inProgress === 1 && summary.notStarted === 1 && summary.missed === 0,
+    JSON.stringify(summary),
+  );
+  check("Average, highest and lowest cover submitted only (100, 20, 20, 50)", summary.averagePercentage === 48 && summary.highestPercentage === 100 && summary.lowestPercentage === 20, JSON.stringify(summary));
+  check("BLOCKED, REMOVED and deactivated students with no attempt are not listed", !rowOf(results.students, blocked) && !rowOf(results.students, removedEarly) && !rowOf(results.students, deactivated));
+  check("Status per student", rowOf(results.students, right)?.status === "SUBMITTED" && rowOf(results.students, working)?.status === "IN_PROGRESS" && rowOf(results.students, none)?.status === "NOT_STARTED");
+  check("A student who left after submitting still appears, with the left-class flag", rowOf(results.students, left)?.status === "SUBMITTED" && rowOf(results.students, left)?.left === true && rowOf(results.students, left)?.percentage === 50);
+  check("The rest have not left", rowOf(results.students, right)?.left === false && rowOf(results.students, none)?.left === false);
+  check("Each row's score is the frozen one", rowOf(results.students, right)?.score === 10 && rowOf(results.students, wrong)?.score === 2 && rowOf(results.students, right)?.maxScore === 10);
+  check("How it ended: by the student, at the deadline", rowOf(results.students, right)?.finalisedBy === "STUDENT" && rowOf(results.students, deadline)?.finalisedBy === "DEADLINE");
+  check("No phone in the payload (D-W33)", !JSON.stringify(results).includes("+201000000099") && !keysDeep(results).has("phone"));
+
+  // ── 27. Time taken ───────────────────────────────────────────────────────
+  console.log("\n27. Time taken");
+  check("A student's time is submittedAt − startedAt", rowOf(results.students, right)?.timeTakenMs === 5 * MINUTE);
+  check("A deadline finalisation is capped at its 30 minutes, however late the read", rowOf(results.students, deadline)?.timeTakenMs === 30 * MINUTE && finalised.submittedAt?.getTime() === deadlineStart.getTime() + 30 * MINUTE);
+  const gapClass = (await makeClass(centerId, teacher.userId)).id;
+  const sitter = await makeStudent(centerId, "res-sitter", gapClass);
+  const sittingExam = await publishedExam({ ...fx, classGroupId: gapClass }, now, { oneSitting: true });
+  const sitterAttempt = await startedAttempt(sitter.student, sittingExam, minutesAgo(60));
+  await attemptHeartbeat(prisma, sitter.student, sitterAttempt, minutesAgo(58));
+  const sittingRead = await readAssessmentResults(prisma, actor, teacher, sittingExam, now);
+  const sat = sittingRead.ok ? rowOf(sittingRead.results.students, sitter) : null;
+  check("A one-sitting exam left open ends as ONE_SITTING_GAP, timed to when they were last seen", sat?.finalisedBy === "ONE_SITTING_GAP" && sat.timeTakenMs === 2 * MINUTE, JSON.stringify(sat));
+
+  // ── 28. Per-question and per-option counts ───────────────────────────────
+  console.log("\n28. Per-question and per-option counts (submitted only)");
+  const qs = await optionsOf(examId);
+  const analysis = (index: number) => results.questions.find((question) => question.id === qs[index].id);
+  const chose = (index: number, optionId: string) => analysis(index)?.options.find((option) => option.id === optionId)?.count;
+  check("Questions come in the assessment's order", results.questions.map((question) => question.id).join() === qs.map((question) => question.id).join());
+  check("Question 1: 3 of 4 correct, 75%, 1 unanswered", analysis(0)?.correctCount === 3 && analysis(0)?.correctPercentage === 75 && analysis(0)?.unanswered === 1 && chose(0, qs[0].right) === 3, JSON.stringify(analysis(0)));
+  check("Question 2: 1 of 4 correct, one wrong, two unanswered", analysis(1)?.correctPercentage === 25 && chose(1, qs[1].right) === 1 && chose(1, qs[1].wrong) === 1 && analysis(1)?.unanswered === 2, JSON.stringify(analysis(1)));
+  check("Question 3: 2 of 4 correct, one wrong, one unanswered", analysis(2)?.correctPercentage === 50 && chose(2, qs[2].right) === 2 && chose(2, qs[2].wrong) === 1 && analysis(2)?.unanswered === 1, JSON.stringify(analysis(2)));
+  check(
+    "Every question's counts add up to the submitted attempts",
+    results.questions.every((question) => question.options.reduce((sum, option) => sum + option.count, 0) + question.unanswered === summary.submitted),
+  );
+  check("The in-progress student's saved answer counts nowhere", analysis(0)?.options.reduce((sum, option) => sum + option.count, 0) === 3);
+
+  // ── 29. One student's answers ────────────────────────────────────────────
+  console.log("\n29. One student's answers");
+  const wrongRead = await readAttemptResult(prisma, actor, teacher, examId, wrongAttempt, now);
+  const wrongAnswers = wrongRead.ok ? wrongRead.attempt.answers : null;
+  check("In the assessment's order, not the attempt's shuffled one", wrongAnswers?.map((answer) => answer.id).join() === qs.map((question) => question.id).join());
+  check(
+    "The chosen option, the correct option, points and outcome",
+    wrongAnswers?.[0].chosenOptionId === qs[0].right && wrongAnswers[0].correctOptionId === qs[0].right && wrongAnswers[0].pointsAwarded === 2 && wrongAnswers[0].outcome === "CORRECT" &&
+      wrongAnswers[1].chosenOptionId === qs[1].wrong && wrongAnswers[1].correctOptionId === qs[1].right && wrongAnswers[1].pointsAwarded === 0 && wrongAnswers[1].outcome === "INCORRECT",
+    JSON.stringify(wrongAnswers?.slice(0, 2)),
+  );
+  const deadlineRead = await readAttemptResult(prisma, actor, teacher, examId, deadlineAttempt, now);
+  const unanswered = deadlineRead.ok ? deadlineRead.attempt.answers?.[1] : null;
+  check("An unanswered question reads Unanswered, 0 points, with its correct option", unanswered?.outcome === "UNANSWERED" && unanswered.chosenOptionId === null && unanswered.pointsAwarded === 0 && unanswered.correctOptionId === qs[1].right);
+  const workingRead = await readAttemptResult(prisma, actor, teacher, examId, workingAttempt, now);
+  check("In progress: no answers, and the time left", workingRead.ok && workingRead.attempt.answers === null && workingRead.attempt.timeLeftMs === 25 * MINUTE);
+  check("In progress: the payload names no answer, option or correctness", workingRead.ok && !/isCorrect|correctOptionId|pointsAwarded|chosenOptionId|optionId/.test(JSON.stringify(workingRead.attempt)));
+  const inList = rowOf(results.students, working);
+  check("In progress on the list: no score, no percentage, no time taken", inList?.score === null && inList.percentage === null && inList.timeTakenMs === null && inList.submittedAt === null);
+  const leftRead = await readAttemptResult(prisma, actor, teacher, examId, leftAttempt, now);
+  check("A student who left: their answers still open, flagged", leftRead.ok && leftRead.attempt.left === true && leftRead.attempt.answers !== null);
+  const dueRead = await (async () => {
+    const dueStudent = await makeStudent(centerId, "res-due", classId);
+    const dueAttempt = await startedAttempt(dueStudent.student, examId, minutesAgo(100));
+    const reading = await readAttemptResult(prisma, actor, teacher, examId, dueAttempt, now);
+    return { reading, row: await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: dueAttempt } }) };
+  })();
+  check("Opening an overdue attempt finalises it too", dueRead.row.finalisedBy === "DEADLINE" && dueRead.reading.ok && dueRead.reading.attempt.answers !== null);
+
+  // ── 30. Closed, and no submissions ───────────────────────────────────────
+  console.log("\n30. After it closes");
+  const lateJoiner = await makeStudent(centerId, "res-late", classId);
+  const later = new Date(now.getTime() + 4 * HOUR);
+  await prisma.enrollment.updateMany({ where: { studentProfileId: lateJoiner.profile.id }, data: { enrolledAt: new Date(now.getTime() + 3.5 * HOUR) } });
+  const closedRead = await readAssessmentResults(prisma, actor, teacher, examId, later);
+  const closedSummary = closedRead.ok ? closedRead.results.summary : null;
+  check(
+    "Closed: nobody is in progress or not started, and the one with no attempt is Missed",
+    closedSummary?.inProgress === 0 && closedSummary.notStarted === 0 && closedSummary.missed === 1 && closedSummary.submitted === 6,
+    JSON.stringify(closedSummary),
+  );
+  check("The in-progress attempt is now final and capped", closedRead.ok && rowOf(closedRead.results.students, working)?.finalisedBy === "DEADLINE" && rowOf(closedRead.results.students, working)?.timeTakenMs === 30 * MINUTE);
+  check("Someone who joined after it closed is not listed or counted (D-W33)", closedRead.ok && !rowOf(closedRead.results.students, lateJoiner) && closedSummary?.eligible === 6, JSON.stringify(closedSummary));
+
+  const quietClass = (await makeClass(centerId, teacher.userId)).id;
+  await makeStudent(centerId, "res-quiet", quietClass);
+  const quietExam = await publishedExam({ ...fx, classGroupId: quietClass }, now);
+  const quiet = await readAssessmentResults(prisma, actor, teacher, quietExam, now);
+  check(
+    "No submissions: average, highest and lowest are null, and the analysis has no percentage",
+    quiet.ok && quiet.results.summary.averagePercentage === null && quiet.results.summary.highestPercentage === null && quiet.results.summary.lowestPercentage === null && quiet.results.questions.every((question) => question.correctPercentage === null),
+  );
+
+  // ── 31. Frozen scores ────────────────────────────────────────────────────
+  console.log("\n31. Scores stay frozen (D-W09)");
+  const frozenClass = (await makeClass(centerId, teacher.userId)).id;
+  const frozenStudent = await makeStudent(centerId, "res-frozen", frozenClass);
+  const frozenExam = await publishedExam({ ...fx, classGroupId: frozenClass }, now);
+  const frozenAttempt = await startedAttempt(frozenStudent.student, frozenExam, minutesAgo(10));
+  await answerAs(frozenStudent.student, frozenAttempt, frozenExam, [0, 1], [2], minutesAgo(9));
+  await submitAttempt(prisma, frozenStudent.student, frozenAttempt, minutesAgo(8));
+  const edit = await saveAssessmentDraft(prisma, actor, teacher, frozenExam, examDraft());
+  check("Once locked, an edit through the writer is refused", !edit.ok && (edit.error === "notDraft" || edit.error === "locked"), JSON.stringify(edit));
+  const frozenQuestions = await optionsOf(frozenExam);
+  await prisma.assessmentQuestion.update({ where: { id: frozenQuestions[0].id }, data: { text: "Edited behind the writer's back", points: 99 } });
+  const afterEdit = await readAssessmentResults(prisma, actor, teacher, frozenExam, now);
+  const frozenRow = afterEdit.ok ? rowOf(afterEdit.results.students, frozenStudent) : null;
+  check("A question changed afterwards changes no score: frozen 5 / 10, 50%", frozenRow?.score === 5 && frozenRow.maxScore === 10 && frozenRow.percentage === 50, JSON.stringify(frozenRow));
+  const frozenAnswers = await readAttemptResult(prisma, actor, teacher, frozenExam, frozenAttempt, now);
+  check("…and neither does the attempt's own read: the awarded points stay frozen", frozenAnswers.ok && frozenAnswers.attempt.score === 5 && frozenAnswers.attempt.answers?.[0].pointsAwarded === 2);
+  await prisma.assessmentAttempt.update({ where: { id: frozenAttempt }, data: { score: 3 } });
+  const derived = await readAssessmentResults(prisma, actor, teacher, frozenExam, now);
+  const derivedRow = derived.ok ? rowOf(derived.results.students, frozenStudent) : null;
+  check("The percentage is derived from the frozen pair, not stored", derivedRow?.percentage === percentage(3, 10) && derivedRow?.percentage === 30);
+  const columns = await prisma.$queryRaw<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name = 'AssessmentAttempt'`;
+  check("AssessmentAttempt has no percentage or time-taken column", !columns.some((row) => /percent|timeTaken/i.test(row.column_name)));
+
+  // ── 32. Who can read: every refusal, by direct call ──────────────────────
+  console.log("\n32. Who can read results (D-W11, D-W33)");
+  const refused = async (label: string, who: { userId: string }, as: AssessmentTeacher, expected: string[] = ["forbidden"]) => {
+    const list = await readAssessmentResults(prisma, who, as, examId, now);
+    const one = await readAttemptResult(prisma, who, as, examId, wrongAttempt, now);
+    const numbers = await assessmentResultProgress(prisma, who, as, [examId], now);
+    check(
+      `${label}: refused`,
+      !list.ok && expected.includes(list.error) && !one.ok && expected.includes(one.error) && numbers.size === 0,
+      JSON.stringify({ list: list.ok ? "ok" : list.error, one: one.ok ? "ok" : one.error, numbers: numbers.size }),
+    );
+  };
+
+  await refused("Another teacher, with their own membership", { userId: otherTeacher.userId }, otherTeacher, ["notFound"]);
+  await refused("Another teacher, naming the owner's membership", { userId: otherTeacher.userId }, teacher);
+  await refused("Another teacher, forging the owner's user id onto their membership", { userId: teacher.userId }, { ...otherTeacher, userId: teacher.userId });
+  await refused("The Owner", { userId: ownerUserId }, { ...teacher, userId: ownerUserId });
+  await refused("A manager", { userId: staffUserIds.MANAGER }, { ...teacher, userId: staffUserIds.MANAGER });
+  await refused("A receptionist", { userId: staffUserIds.RECEPTIONIST }, { ...teacher, userId: staffUserIds.RECEPTIONIST });
+  await refused("An accountant", { userId: staffUserIds.ACCOUNTANT }, { ...teacher, userId: staffUserIds.ACCOUNTANT });
+  await refused("A student", { userId: right.user.id }, { ...teacher, userId: right.user.id });
+  await refused("A student naming the teacher", { userId: right.user.id }, teacher);
+  const parentUser = await prisma.user.create({ data: { firstName: "P", lastName: "res", email: `${STEM}-res-parent@kayedu.test`, locale: "en" } });
+  await refused("A parent", { userId: parentUser.id }, { ...teacher, userId: parentUser.id });
+  await refused("A parent naming the teacher", { userId: parentUser.id }, teacher);
+  for (const [role, userId] of [["OWNER", ownerUserId], ["MANAGER", staffUserIds.MANAGER], ["RECEPTIONIST", staffUserIds.RECEPTIONIST], ["ACCOUNTANT", staffUserIds.ACCOUNTANT]] as const) {
+    check(`${role} never resolves as an assessment teacher`, (await resolveAssessmentTeacher(prisma, await authority(centerId, userId, role))) === null);
+  }
+
+  await savePermissionGrants(prisma, centerId, [{ role: "TEACHER", action: "assessment.manage.own", allowed: false }]);
+  await refused("The owning teacher with assessment.manage.own switched off", actor, teacher);
+  check("…and they no longer resolve at all", (await resolveAssessmentTeacher(prisma, await authority(centerId, teacher.userId, "TEACHER"))) === null);
+  await savePermissionGrants(prisma, centerId, [{ role: "TEACHER", action: "assessment.manage.own", allowed: true }]);
+  check("Switched back on: readable again", (await readAssessmentResults(prisma, actor, teacher, examId, now)).ok);
+
+  await prisma.membership.update({ where: { id: teacher.membershipId }, data: { active: false } });
+  await refused("An inactive owning membership", actor, teacher);
+  await prisma.membership.update({ where: { id: teacher.membershipId }, data: { active: true } });
+
+  // Cross-centre, and the same teacher in All branches.
+  await refused("A teacher at another centre", { userId: teacherB.userId }, teacherB, ["notFound"]);
+  const elsewhere = await prisma.membership.create({
+    data: scopedData(centerB, { userId: teacher.userId, role: "TEACHER" as const, joinedAt: new Date(), firstName: "A", lastName: "both" }),
+  });
+  const atB: AssessmentTeacher = { centerId: centerB, membershipId: elsewhere.id, userId: teacher.userId };
+  await refused("The same teacher, read at their other branch", actor, atB, ["notFound"]);
+  await refused("A posted centre id with the owner's membership", actor, { ...teacher, centerId: centerB });
+  const union = await Promise.all([teacher, atB].map((branch) => readAssessmentResults(prisma, actor, branch, examId, now)));
+  check("All branches: a read per branch, and only the row's own branch finds it", union[0].ok && !union[1].ok);
+  const bClass = (await makeClass(centerB, teacher.userId)).id;
+  const bStudent = await makeStudent(centerB, "res-b", bClass);
+  const bExam = await publishedExam({ teacher: atB, actor, classGroupId: bClass }, now);
+  const bAttempt = await startedAttempt(bStudent.student, bExam, minutesAgo(5));
+  const bRead = await readAssessmentResults(prisma, actor, atB, bExam, now);
+  check("Their other branch's results hold only that branch's students", bRead.ok && bRead.results.students.length === 1 && bRead.results.students[0].studentProfileId === bStudent.profile.id);
+  const foreignAttempt = await readAttemptResult(prisma, actor, teacher, examId, bAttempt, now);
+  const otherAssessmentAttempt = await readAttemptResult(prisma, actor, teacher, examId, frozenAttempt, now);
+  check("An attempt from another branch, or another assessment, is not found by id", !foreignAttempt.ok && foreignAttempt.error === "notFound" && !otherAssessmentAttempt.ok && otherAssessmentAttempt.error === "notFound");
+  const untouchedForeign = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: bAttempt } });
+  check("…and that read finalises nothing of theirs", untouchedForeign.submittedAt === null);
+
+  const draft = await createAssessment(prisma, actor, teacher, { type: "EXAM", classGroupId: classId, draft: examDraft() });
+  if (draft.ok) {
+    const draftRead = await readAssessmentResults(prisma, actor, teacher, draft.id, now);
+    check("A draft has no results: the read says so, and the page opens its builder", !draftRead.ok && draftRead.error === "draft");
+  } else check("Draft fixture", false, JSON.stringify(draft));
+
+  // ── 33. The list, the history window, the student path, statics ──────────
+  console.log("\n33. The list's numbers, the history window, the student path");
+  const listed = await listTeacherAssessments(prisma, teacher, { classGroupId: classId });
+  const progress = await assessmentResultProgress(prisma, actor, teacher, listed.map((row) => row.id), now);
+  const fresh = await readAssessmentResults(prisma, actor, teacher, examId, now);
+  check(
+    "The list's \"submitted / eligible\" equals the page's",
+    fresh.ok && progress.get(examId)?.submitted === fresh.results.summary.submitted && progress.get(examId)?.eligible === fresh.results.summary.eligible,
+    JSON.stringify({ list: progress.get(examId), page: fresh.ok ? fresh.results.summary : null }),
+  );
+  check("A draft on the list has no progress", draft.ok && !progress.has(draft.id));
+  check("Another teacher's handle gets no numbers for these rows", (await assessmentResultProgress(prisma, { userId: otherTeacher.userId }, teacher, listed.map((row) => row.id), now)).size === 0);
+
+  const historyClass = (await makeClass(centerId, teacher.userId)).id;
+  const historyStudent = await makeStudent(centerId, "res-history", historyClass);
+  const oldExam = await publishedExam({ ...fx, classGroupId: historyClass }, now);
+  const recentExam = await publishedExam({ ...fx, classGroupId: historyClass }, now);
+  const oldAttempt = await startedAttempt(historyStudent.student, oldExam, minutesAgo(10));
+  await submitAttempt(prisma, historyStudent.student, oldAttempt, minutesAgo(5));
+  await prisma.assessment.update({ where: { id: oldExam }, data: { windowStart: new Date(now.getTime() - 12 * DAY), windowEnd: new Date(now.getTime() - 10 * DAY) } });
+  const oldDraft = await createAssessment(prisma, actor, teacher, { type: "EXAM", classGroupId: historyClass, draft: examDraft() });
+
+  const allHistory = await readAssessmentResults(prisma, actor, teacher, oldExam, now);
+  check("All history (the default): an old exam's results open", allHistory.ok);
+  await prisma.user.update({ where: { id: teacher.userId }, data: { teacherHistoryDays: 3 } });
+  const window = { floor: teacherHistoryFloor(3, "Africa/Cairo", now), zone: "Africa/Cairo" };
+  const windowed = await listTeacherAssessments(prisma, teacher, { classGroupId: historyClass, history: window });
+  const windowedIds = windowed.map((row) => row.id);
+  check("A 3-day window: the old exam is not listed", !windowedIds.includes(oldExam));
+  check("…the recent exam and the draft still are", windowedIds.includes(recentExam) && oldDraft.ok && windowedIds.includes(oldDraft.id));
+  const opened = await readAssessmentResults(prisma, actor, teacher, oldExam, now);
+  check("…and opening it by direct id is not found", !opened.ok && opened.error === "notFound");
+  const openedAttempt = await readAttemptResult(prisma, actor, teacher, oldExam, oldAttempt, now);
+  check("…and neither is one of its attempts", !openedAttempt.ok && openedAttempt.error === "notFound");
+  check("…and its details and preview read as not found", (await findTeacherAssessment(prisma, teacher, oldExam, { history: window })) === null);
+  check("A write's read is never windowed (U6): it still finds the row", (await findTeacherAssessment(prisma, teacher, oldExam)) !== null);
+  check("A recent exam still opens inside the window", (await readAssessmentResults(prisma, actor, teacher, recentExam, now)).ok);
+  await prisma.user.update({ where: { id: teacher.userId }, data: { teacherHistoryDays: 0 } });
+  check("Back to all history: it opens again, so the window deleted nothing", (await readAssessmentResults(prisma, actor, teacher, oldExam, now)).ok);
+
+  // Rule 11: the student's own path is unchanged, whatever the teacher has read.
+  const noCorrectness = (value: unknown) => !/isCorrect|correctOptionId|pointsAwarded/.test(JSON.stringify(value));
+  check("The student's list still carries no correctness", noCorrectness(await listStudentAssessments(prisma, right.student, now)));
+  check("The student's page still carries no correctness", noCorrectness(await readStudentAssessment(prisma, right.student, examId, now)));
+  check("The student's reveal is still refused with the toggle off, before and after close", (await readAttemptReveal(prisma, right.student, rightAttempt, now)) === null && (await readAttemptReveal(prisma, right.student, rightAttempt, later)) === null);
+
+  const resultsModule = readSource(join(ROOT, "lib/db/assessment-results.ts"));
+  const code = resultsModule.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check("The teacher read reuses no student serializer or reveal", !/toStudentAssessment|readAttemptReveal|revealOf|STUDENT_ASSESSMENT_SELECT|readStudentAssessment/.test(code));
+  check("The attempts module never imports the results module", !/assessment-results/.test(readSource(join(ROOT, "lib/db/assessment-attempts.ts"))));
+  check("The results read never selects a phone", !/phone/i.test(code));
+  const bodies = functionBodies(code);
+  for (const name of ["readAssessmentResults", "readAttemptResult", "assessmentResultProgress"]) {
+    const body = bodies.find((fn) => fn.name === name)?.body ?? "";
+    check(`${name} finalises what is due before it reads attempts`, /finaliseDue\(|finaliseIfDue\(/.test(body));
+    check(`${name} checks authority first`, /ownedPublished\(|holdsResultsAuthority\(/.test(body));
+  }
+  const pageDir = "app/[locale]/(teacher)/teacher/assessments";
+  const resultsPage = readSource(join(ROOT, pageDir, "[id]/results/page.tsx"));
+  const attemptPage = readSource(join(ROOT, pageDir, "[id]/results/[attemptId]/page.tsx"));
+  check("The results pages take the branch from the assessment, never a posted centre id", ![resultsPage, attemptPage].some((source) => /query\.(branch|center)|centerId|formData/.test(source)) && [resultsPage, attemptPage].every((source) => /assessmentBranches\(scope\.inView\)/.test(source)));
+  check("Every list and page passes the history window", /history: branch\.history/.test(readSource(join(ROOT, pageDir, "page.tsx"))) && /classGroupId: props\.classGroupId, history/.test(readSource(join(ROOT, pageDir, "linked-assessments.tsx"))) && /history: found\.history/.test(readSource(join(ROOT, pageDir, "[id]/page.tsx"))) && /history: found\.history/.test(readSource(join(ROOT, pageDir, "[id]/preview/page.tsx"))));
+  check("A published calendar row links to its results, a draft to its builder", /row\.status === "PUBLISHED" \? ROUTES\.teacherAssessmentResults\(row\.id\) : ROUTES\.teacherAssessment\(row\.id\)/.test(readSource(join(ROOT, "app/[locale]/(teacher)/teacher/calendar/page.tsx"))));
+  const groups = ["(center)", "(student)", "(parent)", "(admin)"];
+  const offenders = groups.flatMap((group) => walk(join(ROOT, "app", "[locale]", group)).filter((file) => /assessment-results|teacher\/assessments\//.test(readSource(file))));
+  check("No centre, student, parent or admin file reaches the results (D-W11)", offenders.length === 0, offenders.map((f) => relative(ROOT, f)).join(", "));
+  const componentOffenders = walk(join(ROOT, "components")).filter((file) => !/components[\\/]teacher[\\/]/.test(file)).filter((file) => /assessment-results/.test(readSource(file)));
+  check("Only teacher components name the results module", componentOffenders.length === 0, componentOffenders.map((f) => relative(ROOT, f)).join(", "));
+  check("Rule 12: no route handler, cron or timer for results", walk(join(ROOT, "app", "api")).filter((file) => /result/i.test(relative(ROOT, file))).length === 0 && !/result/i.test(readSource(join(ROOT, "vercel.json"))));
+}
+
 async function checkTaking(ids: { fx: Fixture; otherTeacher: AssessmentTeacher; centerB: string }) {
   const { fx, otherTeacher, centerB } = ids;
   const inactive = await makeClass(fx.teacher.centerId, fx.teacher.userId);
@@ -1687,6 +2120,7 @@ async function main() {
   checkTimeRules();
   checkCloseRouteOrigin();
   checkCalendarRules();
+  checkResultRules();
 
   const centerA = await makeCenter(SLUG_A);
   const centerB = await makeCenter(SLUG_B);
@@ -1719,6 +2153,14 @@ async function main() {
       fx: { teacher: who.teacher, actor: who.actor, classGroupId: (await makeClass(centerA.id, teacherA.user.id)).id },
       otherTeacher: { centerId: centerA.id, membershipId: teacherA2.membership.id, userId: teacherA2.user.id },
       centerB: centerB.id,
+    });
+    await checkResults({
+      fx: { teacher: who.teacher, actor: who.actor, classGroupId: (await makeClass(centerA.id, teacherA.user.id)).id },
+      otherTeacher: { centerId: centerA.id, membershipId: teacherA2.membership.id, userId: teacherA2.user.id },
+      centerB: centerB.id,
+      teacherB: { centerId: centerB.id, membershipId: teacherB.membership.id, userId: teacherB.user.id },
+      ownerUserId: owner.user.id,
+      staffUserIds: { MANAGER: manager.user.id, RECEPTIONIST: receptionist.user.id, ACCOUNTANT: accountant.user.id },
     });
   } else {
     check("Who-can fixtures resolved (later sections depend on them)", false);

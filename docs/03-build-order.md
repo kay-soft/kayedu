@@ -887,12 +887,19 @@ Additive. It was generated with the read-only `migrate diff --from-url`, and pro
 - `assessments.spec` "other roles cannot open…" moves on before the redirect of the page before it has finished, so its next `goto` can be aborted (`ERR_ABORTED`). It passed on W3a and failed 4 of 4 full-spec runs here. A trace shows the student is bounced correctly and the two navigations about 8 ms apart: a race in the test, which W3b's extra bell reads appear to have shifted.
 **Docs:** 00 (D-W32, §4.2 item 2a, §4.3 items 1a and 1b), 01 (Notifications and Assessments layers), 02 §18, this entry, 04 §11.28, §11.31, §11.34, `staging.md`.
 
-### W4 — Results (planned)
-**Build:** the teacher's results page per assessment: eligible / started / submitted, score, percentage (derived), time taken, each student's answers; the reveal toggles editable afterwards (D-W06, D-W11).
-**DB:** no.
-**Done when:** the numbers reconcile with the frozen attempt scores; percentages are derived; the page is reachable only by the class's teacher (and, from W9, an assistant with `assessments.review`).
-**Gates:** `check:assessments` (results reconciliation, authority, no centre path); `check:design`, `check:rtl`.
-**Docs:** 04 §11.35, this entry.
+### W4 — Results (delivered 6 Nov 2026)
+**Built (D-W33):**
+- **`/teacher/assessments/[id]/results`**, published only (a draft opens its builder): eligible now, started, submitted, in progress, not started and missed; average, highest and lowest over submitted attempts, or "No submissions yet"; the students with status, score, percentage, time taken, how it ended, started and submitted, with search, a status filter and three sorts; a Left class badge; each question's percentage correct and how many chose each option.
+- **`…/results/[attemptId]`:** each question in the assessment's order, the chosen and correct options, points, and a text badge; an in-progress attempt shows the time left and returns no answers.
+- **`lib/db/assessment-results.ts`,** a separate read from the student's, over the pure `lib/assessment-results.ts`: the actor and the owning teacher as separate parameters, the membership and the cell re-read on every call, and what is due finalised first (D-W10).
+- **Entry points:** "n / m submitted" and a **Results** action on a published row in the teacher's lists, a header action on the assessment's page, and a published row on the calendar now links to its results.
+- **The history window (U6) now applies to published assessments,** superseding that sentence in D-W31 and D-W32: older than `teacherHistoryDays` by closing day is not listed, and its pages read as not found. Drafts are always listed.
+**Decided with the founder at W4, against the prompt or the plan as written:** a student who joined after it closed is left out of the table, Eligible and Missed, not shown as Missed (the rule of the student's own list, one function, `joinedAfterClose`). The reveal toggles stay locked after an attempt exists, so "editable afterwards" left this entry for the backlog (entry 43).
+**Also, beyond the prompt's list:** an ACTIVE enrolment of a **deactivated** profile with no attempt is not listed or counted, since it cannot start. The same applies to its "Left class" badge: an attempt whose student has no ACTIVE enrolment of an active profile reads as left.
+**DB:** no. No migration and no new index.
+**Gates:** `check:assessments` sections 24–33: every refused role by direct call and the permission switch-off; summary counts; average, highest and lowest over submitted only; a derived percentage; unchanged scores after a question changes (and edits refused through the writer); time taken capped; in-progress attempts returning no answers; per-question and per-option counts; lazy finalisation inside the read; the left-class flag; the history window; cross-centre and All-branches isolation; the student path still free of correctness; statics. A temporary mutation run (authority, the cell, finalisation, the history window, in-progress answers, late joiners) failed 22 checks and was reverted. e2e `assessment-results.spec.ts` (`@write`, `en-1280` and `ar-375`).
+**Results (staging, 6 Nov 2026):** `check:assessments` 443 passed, `check:performance`, `check:isolation`, `check:teacher-portal`, `check:permissions` and `check:gate-fixtures` pass. The new spec passes in both projects. Row counts were the same before and after each run (no assessment rows left, audit rows unchanged). The full e2e suite and `check:all` were not run.
+**Docs:** 00 (D-W33, §4.2 item 2b, D-W31 and D-W32 amended), 01, 02 §18, this entry, 04 §11.33 and §11.35, 05 (entries 39–43), 06 (two new pages), `staging.md`.
 
 ### W5 — Role switcher (planned)
 **Build:** `experiencesFor(user)` and the header switcher in every shell listing every experience (D-W13); the `kayedu_last_experience` cookie (orders and marks the list only). Landing is unchanged: U7's `singleExperienceHome` and the hub. Assistant rows appear once W7 lands.

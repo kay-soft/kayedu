@@ -78,7 +78,10 @@ export type InsertedExam = {
   id: string;
   title: string;
   questions: { text: string; options: string[]; correct: number }[];
+  /** The same questions by database id, in order, with their options in order. */
+  rows: { id: string; options: { id: string }[] }[];
   attemptId: string | null;
+  windowEnd: Date;
 };
 
 /** Two questions, four options each; the correct option is the first. */
@@ -133,6 +136,7 @@ export async function insertExam(db: PrismaClient, fx: FixtureClass, spec: ExamF
     },
     select: {
       id: true,
+      windowEnd: true,
       questions: { orderBy: { position: "asc" }, select: { id: true, options: { orderBy: { position: "asc" }, select: { id: true } } } },
     },
   });
@@ -167,7 +171,105 @@ export async function insertExam(db: PrismaClient, fx: FixtureClass, spec: ExamF
     });
     attemptId = attempt.id;
   }
-  return { id: exam.id, title, questions, attemptId };
+  return { id: exam.id, title, questions, rows: exam.questions, attemptId, windowEnd: exam.windowEnd! };
+}
+
+export type RosterClass = FixtureClass & { roster: { studentProfileId: string; firstName: string | null; enrolledAt: Date }[] };
+
+/** A seeded teacher's active class with at least `size` active students (W4). */
+export async function findRosterClass(db: PrismaClient, size: number): Promise<RosterClass> {
+  const teacherKeys: AccountKey[] = ["teacherDowntown", "teacherShared"];
+  for (const teacher of teacherKeys) {
+    const classes = await db.classGroup.findMany({
+      where: { active: true, teacher: { email: ACCOUNTS[teacher].email } },
+      select: {
+        id: true,
+        centerId: true,
+        teacherId: true,
+        enrollments: {
+          where: { status: "ACTIVE", studentProfile: { active: true } },
+          select: { studentProfileId: true, enrolledAt: true, studentProfile: { select: { firstName: true } } },
+          orderBy: { enrolledAt: "asc" },
+        },
+      },
+      orderBy: { id: "asc" },
+    });
+    for (const row of classes) {
+      if (row.enrollments.length < size) continue;
+      const membership = await db.membership.findFirst({
+        where: { centerId: row.centerId, userId: row.teacherId, role: "TEACHER", active: true },
+        select: { id: true, userId: true },
+      });
+      if (!membership) continue;
+      return {
+        centerId: row.centerId,
+        classGroupId: row.id,
+        studentProfileId: row.enrollments[0].studentProfileId,
+        teacherMembershipId: membership.id,
+        teacherUserId: membership.userId,
+        teacher,
+        roster: row.enrollments.map((enrolment) => ({
+          studentProfileId: enrolment.studentProfileId,
+          firstName: enrolment.studentProfile.firstName,
+          enrolledAt: enrolment.enrolledAt,
+        })),
+      };
+    }
+  }
+  throw new Error(`e2e: no seeded teacher has an active class with ${size} active students`);
+}
+
+export type AttemptFixture = {
+  studentProfileId: string;
+  /** Per question, the index of the option picked; null leaves it unanswered. */
+  picks: (number | null)[];
+  startedMsAgo: number;
+  /** Set for a final attempt, graded here; omit it to leave the attempt open. */
+  submittedMsAgo?: number;
+};
+
+/**
+ * One attempt on an inserted exam (W4). A final one is written graded, the way
+ * finalisation leaves it. An open one holds saved answers only (`isCorrect` null), so
+ * a read past its end has to finalise it (D-W10). Removed with its exam.
+ */
+export async function insertAttempt(db: PrismaClient, fx: FixtureClass, exam: InsertedExam, spec: AttemptFixture): Promise<string> {
+  assertSafeToWrite("the e2e assessment fixtures");
+  const now = Math.floor(Date.now() / MINUTE) * MINUTE;
+  const final = spec.submittedMsAgo !== undefined;
+  const right = exam.rows.filter((row, index) => spec.picks[index] === exam.questions[index].correct).length;
+  const submittedAt = final ? new Date(now - spec.submittedMsAgo!) : null;
+  const attempt = await db.assessmentAttempt.create({
+    data: {
+      centerId: fx.centerId,
+      assessmentId: exam.id,
+      studentProfileId: spec.studentProfileId,
+      startedAt: new Date(now - spec.startedMsAgo),
+      lastSeenAt: submittedAt ?? new Date(now - spec.startedMsAgo),
+      submittedAt,
+      finalisedBy: final ? "STUDENT" : null,
+      score: final ? right : null,
+      maxScore: final ? exam.rows.length : null,
+      answers: {
+        create: exam.rows.flatMap((row, index) => {
+          const pick = spec.picks[index];
+          if (pick === null && !final) return [];
+          const isRight = pick === exam.questions[index].correct;
+          return [
+            {
+              centerId: fx.centerId,
+              questionId: row.id,
+              optionId: pick === null ? null : row.options[pick].id,
+              isCorrect: final ? isRight : null,
+              pointsAwarded: final ? (isRight ? 1 : 0) : null,
+            },
+          ];
+        }),
+      },
+    },
+    select: { id: true },
+  });
+  return attempt.id;
 }
 
 export { DAY, HOUR, MINUTE };

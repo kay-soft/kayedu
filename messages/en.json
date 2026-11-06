@@ -2471,6 +2471,103 @@
         "title": "Delete this?",
         "body": "Students will no longer see it, and all its questions will be deleted. This can't be undone."
       }
+    },
+    "results": {
+      "action": "Results",
+      "progress": "{submitted} / {eligible} submitted",
+      "title": "Results",
+      "back": "Back to details",
+      "open": "Open",
+      "closed": "Closed",
+      "summaryTitle": "Summary",
+      "summary": {
+        "eligible": "Eligible now",
+        "started": "Started",
+        "submitted": "Submitted",
+        "inProgress": "In progress",
+        "notStarted": "Not started",
+        "missed": "Missed",
+        "average": "Average",
+        "highest": "Highest",
+        "lowest": "Lowest"
+      },
+      "noSubmissions": "No submissions yet",
+      "none": "—",
+      "percent": "{value}%",
+      "score": "{score} / {max}",
+      "timeLeft": "{time} left",
+      "leftClass": "Left class",
+      "viewAnswers": "View answers",
+      "viewProgress": "View progress",
+      "studentsTitle": "Students",
+      "studentsHint": "Everyone who could take it, and anyone who started and has since left.",
+      "empty": "No students are enrolled in this class.",
+      "emptyFiltered": "No students match these filters.",
+      "status": {
+        "SUBMITTED": "Submitted",
+        "IN_PROGRESS": "In progress",
+        "NOT_STARTED": "Not started",
+        "MISSED": "Missed"
+      },
+      "ended": {
+        "STUDENT": "By the student",
+        "DEADLINE": "At the deadline",
+        "ONE_SITTING_GAP": "Closed the page"
+      },
+      "columns": {
+        "student": "Student",
+        "branch": "Branch",
+        "status": "Status",
+        "score": "Score",
+        "percentage": "Percentage",
+        "timeTaken": "Time taken",
+        "ended": "How it ended",
+        "startedAt": "Started",
+        "submittedAt": "Submitted",
+        "answers": "Answers"
+      },
+      "filters": {
+        "search": "Search by name",
+        "searchPlaceholder": "Student name",
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "sort": "Sort by",
+        "apply": "Search",
+        "sorts": {
+          "name": "Name",
+          "scoreDesc": "Score, highest first",
+          "scoreAsc": "Score, lowest first",
+          "timeAsc": "Time taken, shortest first",
+          "timeDesc": "Time taken, longest first"
+        }
+      },
+      "duration": {
+        "hours": "{hours} h {minutes} min",
+        "minutes": "{minutes} min {seconds} s",
+        "seconds": "{seconds} s"
+      },
+      "analysis": {
+        "title": "Question by question",
+        "hint": "Counts submitted attempts only.",
+        "question": "Question {n}",
+        "correctLine": "{percent}% correct · {correct} of {submitted}",
+        "correctAnswer": "Correct answer",
+        "chosenBy": "Chosen by {count}",
+        "unanswered": "Unanswered"
+      },
+      "answers": {
+        "back": "Back to results",
+        "timeLeft": "Time left",
+        "inProgressHint": "This student is still working. Their answers show once the attempt is submitted.",
+        "points": "{awarded} of {points} points",
+        "chosen": "Student's answer",
+        "correct": "Correct answer",
+        "outcome": {
+          "CORRECT": "Correct",
+          "INCORRECT": "Incorrect",
+          "UNANSWERED": "Unanswered"
+        }
+      }
     }
   },
   "TeacherClass": {

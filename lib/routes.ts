@@ -89,6 +89,8 @@ export const ROUTES = {
   teacherAssessmentNew: "/teacher/assessments/new",
   teacherAssessment: (id: string) => `/teacher/assessments/${id}`,
   teacherAssessmentPreview: (id: string) => `/teacher/assessments/${id}/preview`,
+  teacherAssessmentResults: (id: string) => `/teacher/assessments/${id}/results`,
+  teacherAssessmentAttempt: (id: string, attemptId: string) => `/teacher/assessments/${id}/results/${attemptId}`,
   teacherApprovals: "/teacher/approvals",
   teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",

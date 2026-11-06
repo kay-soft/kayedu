@@ -6,8 +6,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { LinkButton } from "@/components/shared/link-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TenantContext } from "@/lib/auth/tenant";
+import { assessmentResultProgress } from "@/lib/db/assessment-results";
 import { listTeacherAssessments, resolveAssessmentTeacher } from "@/lib/db/assessments";
 import { prisma } from "@/lib/db/client";
+import { teacherPortalHistoryFloor } from "@/lib/db/teacher-portal";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone } from "@/lib/scheduling";
 
@@ -29,10 +31,14 @@ export async function LinkedAssessments(
   const t = await getTranslations("TeacherAssessments");
   const section = props.kind === "class" ? "classSection" : "sessionSection";
 
+  const branchZone = centreTimeZone(props.ctx.settings);
+  const now = new Date();
+  const history = { floor: teacherPortalHistoryFloor(props.ctx, now), zone: branchZone };
   const rows =
     props.kind === "class"
-      ? await listTeacherAssessments(prisma, teacher, { classGroupId: props.classGroupId })
-      : await listTeacherAssessments(prisma, teacher, { sessionId: props.sessionId });
+      ? await listTeacherAssessments(prisma, teacher, { classGroupId: props.classGroupId, history })
+      : await listTeacherAssessments(prisma, teacher, { sessionId: props.sessionId, history });
+  const progress = await assessmentResultProgress(prisma, { userId: props.ctx.user.id }, teacher, rows.map((row) => row.id), now);
   const branch = `branch=${encodeURIComponent(props.ctx.center.id)}`;
   const createHref =
     props.kind === "class"
@@ -51,7 +57,7 @@ export async function LinkedAssessments(
           <EmptyState compact icon={<FileQuestion />} title={t(`${section}.empty`)} />
         ) : (
           <AssessmentList
-            entries={rows.map((row) => ({ row, branchName: props.ctx.center.name, branchZone: centreTimeZone(props.ctx.settings) }))}
+            entries={rows.map((row) => ({ row, branchName: props.ctx.center.name, branchZone, progress: progress.get(row.id) }))}
             showBranch={false}
             showClass={props.kind === "session"}
           />

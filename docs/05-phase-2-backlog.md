@@ -400,7 +400,47 @@
 
 **Why deferred.** W3a decided parents see nothing in v1 (D-W11, D-W31). Reveal rules were designed around the student: a parent's view needs its own answer to whether a score hidden from the student is hidden from the parent too, and before reveal it must carry the same guarantee (CLAUDE.md rule 11).
 
-**Depends on.** A decision on what a parent may see against `showScore` and `showCorrectAnswers`; W4's results read; `check:assessments` extending its sweep to `(parent)` for anything it starts reading.
+**Depends on.** A decision on what a parent may see against `showScore` and `showCorrectAnswers`; a read of its own (W4's `lib/db/assessment-results.ts` is teacher-only and returns correctness, so a parent must never reuse it); `check:assessments` extending its sweep to `(parent)` for anything it starts reading.
+
+---
+
+## 40. CSV export of an assessment's results
+
+**What it is.** Downloading a results table, and perhaps the per-question analysis, as a CSV from the results page.
+
+**Why deferred.** W4's job is reading results on screen (D-W33). An export is a new way for students' names and marks to leave the system, so it needs its own answer on what it carries and whether it is audited.
+
+**Depends on.** W4's `readAssessmentResults`; a decision on columns and audit; the same owning-teacher authority.
+
+---
+
+## 41. Manual regrade and point overrides
+
+**What it is.** A teacher correcting a question's key or awarding points by hand after attempts are final.
+
+**Why deferred.** Scores are frozen at submit and never recomputed (D-W09), and that is what makes the results reconcile. A regrade needs a designed answer for how a corrected score sits beside the frozen one, what the student is told, and how it is audited.
+
+**Depends on.** A decision that replaces "never recomputed" for this one case, with an audited, append-only correction (the void-and-recreate shape of rule 2); the lock (D-W08).
+
+---
+
+## 42. Comparing a student across assessments
+
+**What it is.** One student's scores over time, across every exam and homework in a class or from a teacher.
+
+**Why deferred.** W4 is per assessment (D-W11). A longitudinal view is the gradebook and progress tracking entry 5 keeps deferred, and it raises questions W4 does not: how homework and exams weigh against each other, and what happens across a left and rejoined class.
+
+**Depends on.** Entry 5's gradebook decision; W4's reads.
+
+---
+
+## 43. Changing the reveal toggles after a student has started
+
+**What it is.** A teacher turning `showScore` or `showCorrectAnswers` on or off once an attempt exists, for example to show answers after the exam, having published with them off.
+
+**Why deferred.** W2 and W3a let the teacher choose them before publishing, and D-W08/D-W31 fix everything except the closing time once an attempt exists. The W4 plan named these toggles as editable afterwards, which contradicts that lock, so the founder deferred them at W4 (D-W33). Turning `showCorrectAnswers` on reaches rule 11 directly, since it changes who can read correct answers.
+
+**Depends on.** A recorded exception to D-W08/D-W31; audit of the change; a `check:assessments` proof that the reveal still needs a final attempt and a closed assessment; whether students are told.
 
 ---
 

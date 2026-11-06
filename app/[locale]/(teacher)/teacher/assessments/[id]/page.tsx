@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Check, Eye } from "lucide-react";
+import { BarChart3, Check, Eye } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { AssessmentBuilder } from "@/app/[locale]/(teacher)/teacher/assessments/builder";
@@ -32,7 +32,8 @@ import { fieldsFromInstant } from "@/lib/validation/assessments";
  * and questions, Extend, and Unpublish and Delete while no student has started.
  * Found at the branch that holds it among those where the teacher may manage
  * assessments, and only when the teacher's own membership owns it — another
- * teacher's, or another branch's, is a 404.
+ * teacher's, or another branch's, is a 404, and so is a published one older than
+ * the teacher's own history window (D-W33).
  */
 export default async function EditAssessmentPage({ params }: { params: Promise<{ id: string }> }) {
   const scope = await getTeacherScope();
@@ -43,7 +44,10 @@ export default async function EditAssessmentPage({ params }: { params: Promise<{
   const branches = await assessmentBranches(scope.inView);
   const hit = await findInBranches(
     branches.map((branch) => branch.ctx),
-    (branchCtx) => findTeacherAssessment(prisma, branches.find((b) => b.ctx === branchCtx)!.teacher, id),
+    (branchCtx) => {
+      const found = branches.find((b) => b.ctx === branchCtx)!;
+      return findTeacherAssessment(prisma, found.teacher, id, { history: found.history });
+    },
   );
   if (!hit) notFound();
   const branch = branches.find((b) => b.ctx === hit!.ctx)!;
@@ -71,6 +75,14 @@ export default async function EditAssessmentPage({ params }: { params: Promise<{
         title={title}
         description={[label, sessionLine, scope.inView.length > 1 ? branch.ctx.center.name : null].filter(Boolean).join(" · ")}
         back={{ href: ROUTES.teacherAssessments, label: t("builder.back") }}
+        action={
+          published ? (
+            <LinkButton href={ROUTES.teacherAssessmentResults(row.id)}>
+              <BarChart3 className="size-4" aria-hidden />
+              {t("results.action")}
+            </LinkButton>
+          ) : undefined
+        }
         meta={
           <div className="flex flex-wrap gap-2">
             <Badge variant="neutral">{t(`type.${row.type}`)}</Badge>

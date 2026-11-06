@@ -36,8 +36,8 @@ type Db = PrismaClient | Prisma.TransactionClient;
  * (all history) at 0, the default. No centre window is ever applied in the
  * teacher portal; this is the teacher's preference alone. Applied to the
  * portal's reads (dashboard, session list, students, student history,
- * session detail) — never to a write's integrity check, and never to
- * settlements (carved out).
+ * session detail, and from W4 published assessments and their results, D-W33)
+ * — never to a write's integrity check, and never to settlements (carved out).
  */
 export function teacherPortalHistoryFloor(
   ctx: { user: { teacherHistoryDays: number }; settings: { timezone: string } | null },

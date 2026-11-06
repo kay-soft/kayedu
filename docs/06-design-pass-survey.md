@@ -249,6 +249,12 @@ Exams & homework: `PageHeader` with **New exam**, a filter row (Type, Class, and
 ### `app/[locale]/(teacher)/teacher/assessments/[id]/preview/page.tsx` — **W2 (new)**
 The draft as a student sees it, from the student serializer: title, instructions, times, total points, a timer box showing the duration (not running), the one-sitting warning, then each question with 44px option tiles. No correct marks; Start is disabled. Max width 2xl, one column.
 
+### `app/[locale]/(teacher)/teacher/assessments/[id]/results/page.tsx` — **W4 (new)**
+One published assessment's results: `PageHeader` with the title, class and branch, three dense rows of stat cards, a filter row, the students as a table from `xl` and stacked cards below it, and one block per question. One column at 375px; 44px targets. `04-design-system.md` §11.35.
+
+### `app/[locale]/(teacher)/teacher/assessments/[id]/results/[attemptId]/page.tsx` — **W4 (new)**
+One student's attempt: `PageHeader` with their name, a card of facts, then one card per question with text badges, or the time left and no answers while in progress. §11.35.
+
 ### `app/[locale]/(student)/student/assessments/page.tsx` — **W3a (new)**
 Exams & homework for a student: `PageHeader`, then one card per state (In progress, Open, Upcoming, Submitted, Missed, Closed), and under each the student's branches, each with stacked 44px link rows: title (`dir="auto"`), a semantic state badge, type and class, the times in the session's frozen timezone or the branch's, and the score when the teacher left it on. One-column at every width; never a table. docs/04 §11.34.
 

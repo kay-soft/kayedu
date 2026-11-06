@@ -403,6 +403,14 @@ export function hasClosed(assessment: Pick<AssessmentTiming, "type" | "windowEnd
 }
 
 /**
+ * Joined the class after it closed: they could never have taken it, so it is not
+ * shown to them and not counted against them (D-W31, D-W33).
+ */
+export function joinedAfterClose(enrolledAt: Date, closes: Date | null): boolean {
+  return closes !== null && enrolledAt.getTime() > closes.getTime();
+}
+
+/**
  * The attempt's end — derived, never stored. EXAM: min(startedAt + duration,
  * windowEnd). HOMEWORK: the deadline when untimed, else min(startedAt +
  * duration, deadline). A published row always has its window or deadline

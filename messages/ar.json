@@ -2471,6 +2471,103 @@
         "title": "هل تحذف هذا؟",
         "body": "لن يراه الطلاب بعد الآن، وستُحذف كل أسئلته. لا يمكن التراجع عن ذلك."
       }
+    },
+    "results": {
+      "action": "النتائج",
+      "progress": "سلّم {submitted} / {eligible}",
+      "title": "النتائج",
+      "back": "العودة إلى التفاصيل",
+      "open": "مفتوح",
+      "closed": "مغلق",
+      "summaryTitle": "الملخص",
+      "summary": {
+        "eligible": "المؤهلون الآن",
+        "started": "بدأوا",
+        "submitted": "سلّموا",
+        "inProgress": "جارٍ",
+        "notStarted": "لم يبدأوا",
+        "missed": "فاتهم",
+        "average": "المتوسط",
+        "highest": "الأعلى",
+        "lowest": "الأقل"
+      },
+      "noSubmissions": "لا توجد تسليمات بعد",
+      "none": "—",
+      "percent": "{value}٪",
+      "score": "{score} / {max}",
+      "timeLeft": "متبقٍ {time}",
+      "leftClass": "ترك الفصل",
+      "viewAnswers": "عرض الإجابات",
+      "viewProgress": "عرض التقدم",
+      "studentsTitle": "الطلاب",
+      "studentsHint": "كل من أمكنه أداؤه، ومن بدأ ثم ترك الفصل.",
+      "empty": "لا يوجد طلاب مسجلون في هذا الفصل.",
+      "emptyFiltered": "لا يوجد طلاب يطابقون هذه الفلاتر.",
+      "status": {
+        "SUBMITTED": "تم التسليم",
+        "IN_PROGRESS": "جارٍ",
+        "NOT_STARTED": "لم يبدأ",
+        "MISSED": "فاته"
+      },
+      "ended": {
+        "STUDENT": "بواسطة الطالب",
+        "DEADLINE": "عند انتهاء الوقت",
+        "ONE_SITTING_GAP": "أغلق الصفحة"
+      },
+      "columns": {
+        "student": "الطالب",
+        "branch": "الفرع",
+        "status": "الحالة",
+        "score": "الدرجة",
+        "percentage": "النسبة",
+        "timeTaken": "الوقت المستغرق",
+        "ended": "طريقة الانتهاء",
+        "startedAt": "بدأ",
+        "submittedAt": "سلّم",
+        "answers": "الإجابات"
+      },
+      "filters": {
+        "search": "البحث بالاسم",
+        "searchPlaceholder": "اسم الطالب",
+        "status": "الحالة",
+        "allStatuses": "كل الحالات",
+        "sort": "الترتيب حسب",
+        "apply": "بحث",
+        "sorts": {
+          "name": "الاسم",
+          "scoreDesc": "الدرجة، الأعلى أولًا",
+          "scoreAsc": "الدرجة، الأقل أولًا",
+          "timeAsc": "الوقت المستغرق، الأقصر أولًا",
+          "timeDesc": "الوقت المستغرق، الأطول أولًا"
+        }
+      },
+      "duration": {
+        "hours": "{hours} س {minutes} د",
+        "minutes": "{minutes} د {seconds} ث",
+        "seconds": "{seconds} ث"
+      },
+      "analysis": {
+        "title": "سؤال بسؤال",
+        "hint": "تُحسب المحاولات المُسلَّمة فقط.",
+        "question": "السؤال {n}",
+        "correctLine": "{percent}٪ صحيحة · {correct} من {submitted}",
+        "correctAnswer": "الإجابة الصحيحة",
+        "chosenBy": "اختارها {count}",
+        "unanswered": "بلا إجابة"
+      },
+      "answers": {
+        "back": "العودة إلى النتائج",
+        "timeLeft": "الوقت المتبقي",
+        "inProgressHint": "هذا الطالب ما زال يجيب. تظهر إجاباته بعد تسليم المحاولة.",
+        "points": "{awarded} من {points} درجة",
+        "chosen": "إجابة الطالب",
+        "correct": "الإجابة الصحيحة",
+        "outcome": {
+          "CORRECT": "صحيحة",
+          "INCORRECT": "خاطئة",
+          "UNANSWERED": "بلا إجابة"
+        }
+      }
     }
   },
   "TeacherClass": {

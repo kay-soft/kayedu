@@ -9,6 +9,7 @@ import {
   attemptOrder,
   finalisationDue,
   gradeAnswers,
+  joinedAfterClose,
   percentage,
   revealAllowed,
   startRefusal,
@@ -514,7 +515,7 @@ export async function listStudentAssessments(
     const closes = assessmentClosesAt(row);
     const enrolledAt = row.classGroup.enrollments[0]?.enrolledAt;
     // Joining a class later does not make its past exams "missed".
-    if (!attempt && closes && enrolledAt && enrolledAt.getTime() > closes.getTime()) continue;
+    if (!attempt && enrolledAt && joinedAfterClose(enrolledAt, closes)) continue;
     items.push({
       id: row.id,
       type: row.type,

@@ -20,6 +20,12 @@ export function formatNumber(value: number, locale: string): string {
   return new Intl.NumberFormat(NUMBER_LOCALE[locale] ?? "en-US").format(value);
 }
 
+/** A span of time, split for a label: 3_725_000 ms → 1 h 2 min 5 s (W4). */
+export function elapsedParts(ms: number): { hours: number; minutes: number; seconds: number } {
+  const total = Math.max(0, Math.round(ms / 1_000));
+  return { hours: Math.floor(total / 3_600), minutes: Math.floor((total % 3_600) / 60), seconds: total % 60 };
+}
+
 /** A whole number padded to two digits — "05", "٠٥" — for minute lists. */
 export function formatTwoDigits(value: number, locale: string): string {
   return new Intl.NumberFormat(NUMBER_LOCALE[locale] ?? "en-US", {

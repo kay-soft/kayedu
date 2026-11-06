@@ -32,7 +32,10 @@ export default async function PreviewAssessmentPage({ params }: { params: Promis
   const branches = await assessmentBranches(scope.inView);
   const hit = await findInBranches(
     branches.map((branch) => branch.ctx),
-    (branchCtx) => findTeacherAssessment(prisma, branches.find((b) => b.ctx === branchCtx)!.teacher, id),
+    (branchCtx) => {
+      const found = branches.find((b) => b.ctx === branchCtx)!;
+      return findTeacherAssessment(prisma, found.teacher, id, { history: found.history });
+    },
   );
   if (!hit) notFound();
   const branch = branches.find((b) => b.ctx === hit!.ctx)!;
