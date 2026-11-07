@@ -547,6 +547,11 @@ model CenterSettings {
   // sign-in). Only ACTIVE/GRACE branches are ever listed, whatever this says
   // (lib/db/public-catalog.ts). It never affects the signed-in student Discover.
   publicListing            Boolean        @default(true)
+  // W7b (D-W19, D-W37): whether a premium teacher's assistants may read and
+  // act at this branch on the teacher's behalf. Off removes the branch from
+  // every assistant page and read on the next request; the teacher is
+  // unaffected. Edited in Settings → General (`center.settings.edit`).
+  allowTeacherAssistants   Boolean        @default(true)
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt
 }
@@ -1710,6 +1715,11 @@ model ChangeRequest {
   center      Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
   type        ChangeRequestType
   requestedBy String // teacher userId
+  // W7b (D-W37): the assistant who filed it on the teacher's behalf, else
+  // null. The request is the teacher's (`requestedBy`); centre screens show
+  // only a "via assistant" tag, never this person. A plain id, like
+  // `requestedBy` — no relation.
+  viaAssistantUserId String?
   payload     Json // proposed class/session details
   status      ChangeRequestStatus @default(PENDING)
   resolvedBy  String?
@@ -1932,6 +1942,11 @@ model AuditLog {
   center      Center?  @relation(fields: [centerId], references: [id])
   actorUserId String?
   actor       User?    @relation(fields: [actorUserId], references: [id])
+  // W7b (D-W18, D-W37): set only on a write an assistant made — the teacher
+  // they acted for; `actorUserId` is then the assistant. Null on everyone
+  // else's rows, the teacher's own included. A plain id (no relation, so no
+  // referential action ever touches this append-only table).
+  onBehalfOfUserId String?
   action      String // "payment.void", "attendance.correct", "share.change"…
   entityType  String
   entityId    String

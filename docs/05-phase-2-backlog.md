@@ -484,6 +484,56 @@
 
 ---
 
+## 48. Notices to and about assistants
+
+**What it is.** An assistant receives the notices that matter to their work (a student submitted, a request the assistant filed was approved or declined), and the teacher is told when an assistant acts for them ("<assistant> published <exam>").
+
+**Why deferred.** W7b (D-W37 item 11) sends nothing to or about an assistant. Each kind is a decision about who learns what about whom, and an assistant has no centre relation, so the read-time access re-check notices use (D-W12) has no reach to test them against. A notice about an assistant's act would also be the first place the teacher sees the assistant's name tied to an action.
+
+**Depends on.** New `NotificationKind` values (an additive enum migration) written in the event's own transaction; a reach rule for assistants built on `resolveAssistantActing` (an effective link, the branch allowing assistants), re-checked on read; ids only in the payload, names at read time.
+
+---
+
+## 49. A teacher's view of their assistants' activity
+
+**What it is.** On the teacher's own side, a list of what each assistant did for them: the exams published, the requests filed, each with "via <assistant>". The teacher's request list could also tag a request filed through an assistant.
+
+**Why deferred.** D-W37 item 10 puts the "via assistant" tag on the teacher's own audit-style views only where one exists, and the teacher portal has none: its pages list rows, not who acted on them. The audit rows already carry both people (`actorUserId` = the assistant, `onBehalfOfUserId` = the teacher), so the data is there.
+
+**Depends on.** A teacher-facing read of `AuditLog` by `onBehalfOfUserId`. Unlike every centre read it would show the assistant's name to the teacher, who sees their assistants already (the Assistants page). It also needs a page under the teacher nav (P1: the nav permission, the baseline, the expected navs).
+
+---
+
+## 50. A reschedule request (teacher and assistant)
+
+**What it is.** A teacher, or their assistant with `requests.manage`, asks the branch to move one of the teacher's sessions to another date and time, and the branch approves it in `/approvals` like the other teacher requests.
+
+**Why deferred.** The W7b prompt listed "reschedule" among the requests a teacher can file, but the teacher cannot file one: `ChangeRequestType` is only `NEW_CLASS` and `NEW_SESSION`, and rescheduling is a staff action (`rescheduleSession`). Decided with the founder at W7b: assistants file exactly what the teacher can, so this waits for both.
+
+**Depends on.** A `RESCHEDULE` value on `ChangeRequestType` (an additive enum migration), a payload naming the session and the new slot, an approval branch in `/approvals` that calls the unchanged `rescheduleSession` (so its conflict, pause and notice rules apply), and the trusted-teacher and `changeRequest.create` gates of the other requests.
+
+---
+
+## 51. Cancelling a pending request (teacher and assistant)
+
+**What it is.** The teacher, or their assistant, withdraws a request the branch has not decided yet.
+
+**Why deferred.** Teachers cannot do it today: `ChangeRequestStatus` has no cancelled state and there is no withdraw action. Decided with the founder at W7b: the assistant sees each request's status and cannot cancel one until the teacher can.
+
+**Depends on.** A `CANCELLED` status (an additive enum migration) or a delete rule, an action for the teacher and the assistant (the assistant's through `assistantCan(…, "requests.manage")`, audited on behalf), the approvals queue and counts leaving cancelled rows out, and a decision on whether a cancelled request stays in the teacher's list.
+
+---
+
+## 52. Student phones for the teacher and the assistant
+
+**What it is.** A teacher sees their students' phone numbers on their class roster, and an assistant sees them only when the teacher grants `students.phones`.
+
+**Why deferred.** The teacher's own portal shows no student phone today; it searches by phone but never displays one. An assistant is never wider than the teacher (CLAUDE.md rule 6, D-W19). So in W7b `students.phones` stays in the catalogue and reveals nothing, and every assistant roster is names only (decided with the founder). Showing phones to teachers is a product decision about student contact data.
+
+**Depends on.** The decision for teachers first. Then the teacher's roster read, and the assistant's `assistantClassDetail`, select the profile phone only when allowed (`assistantCan(…, "students.phones")` returns true once the equivalent teacher view exists). It is formatted through `lib/phone.ts` and never written to an audit row.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

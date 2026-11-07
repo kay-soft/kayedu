@@ -204,6 +204,8 @@ export const generalSettingsSchema = z
     teacherDataVisibilityDays: visibilityWindowField(DEFAULT_TEACHER_VISIBILITY_DAYS, MAX_TEACHER_VISIBILITY_DAYS),
     // F5: whether this branch appears on the public Explore pages.
     publicListing: checkbox,
+    // W7b (D-W19, D-W37): whether a premium teacher's assistants may work at this branch.
+    allowTeacherAssistants: checkbox,
   })
   .transform((value, ctx) => {
     // The share value means two different things depending on the mode, so it
@@ -278,6 +280,7 @@ export const generalSettingsSchema = z
       centerDataVisibilityDays: value.centerDataVisibilityDays,
       teacherDataVisibilityDays: value.teacherDataVisibilityDays,
       publicListing: value.publicListing,
+      allowTeacherAssistants: value.allowTeacherAssistants,
     };
   });
 

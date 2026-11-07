@@ -63,6 +63,7 @@ export function RequestCard({
   details,
   note,
   actions,
+  viaAssistantLabel,
 }: {
   kind: RequestKind;
   kindLabel: string;
@@ -74,6 +75,11 @@ export function RequestCard({
   details?: RequestDetail[];
   note?: string | null;
   actions: ReactNode;
+  /**
+   * W7b (D-W18): "via assistant" when an assistant filed it for the teacher.
+   * The requester stays the teacher; the assistant is never named here.
+   */
+  viaAssistantLabel?: string | null;
 }) {
   const Icon = KIND_ICONS[kind];
   const [first, last] = splitName(requesterName);
@@ -98,6 +104,7 @@ export function RequestCard({
               <Icon aria-hidden />
               {kindLabel}
             </Badge>
+            {viaAssistantLabel ? <Badge variant="neutral">{viaAssistantLabel}</Badge> : null}
           </div>
 
           <p className="text-sm text-text-secondary">{headline}</p>

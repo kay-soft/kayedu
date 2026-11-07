@@ -29,6 +29,12 @@ export type AuditRowInput = {
   /** null only for platform-level actions that belong to no tenant. */
   centerId: string | null;
   actorUserId: string | null;
+  /**
+   * W7b (D-W18, D-W37): the teacher an assistant acted for — set only on an
+   * assistant's write, where `actorUserId` is the assistant. Absent (null) on
+   * everyone else's rows, the teacher's own included.
+   */
+  onBehalfOfUserId?: string | null;
   /** Dotted action name, e.g. "payment.void", "settlement.approve". */
   action: string;
   entityType: string;
@@ -106,6 +112,7 @@ export function auditRowData(input: AuditRowInput): Prisma.AuditLogUncheckedCrea
   return {
     centerId: input.centerId,
     actorUserId: input.actorUserId,
+    onBehalfOfUserId: input.onBehalfOfUserId ?? null,
     action: input.action,
     entityType: input.entityType,
     entityId: input.entityId,

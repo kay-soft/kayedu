@@ -78,3 +78,13 @@ export const assistantCodeSchema = z.object({
   locale: localeSchema,
   code: z.string().trim().min(1, "required").max(40, "invalidCode"),
 });
+
+/**
+ * W7b: the route's teacher an assistant's post names (the `[teacherId]`
+ * segment). It is only a key: every action re-resolves the link from it and
+ * the **session's** user (`assistantActionScope`), so another teacher's id
+ * finds nothing.
+ */
+export const assistantTeacherRefSchema = z.object({
+  teacherId: z.string().trim().min(1).max(64),
+});

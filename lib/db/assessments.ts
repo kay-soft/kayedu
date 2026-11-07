@@ -21,6 +21,7 @@ import { outsideTeacherHistory } from "../assessment-results.ts";
 import { canInContext, type PermissionGrants, type TenantRole } from "../auth/permissions.ts";
 import { sessionLabelSelect } from "../session-label.ts";
 import { finaliseDueAttempts, finaliseIfDue } from "./assessment-attempts.ts";
+import { assistantMayAt, onBehalfOf } from "./assistant-acting.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { deleteAssessmentNotices, notifyAssessmentExtended, notifyAssessmentPublished } from "./notifications.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
@@ -324,6 +325,24 @@ export async function teacherStillActive(tx: Db, teacher: AssessmentTeacher): Pr
   return row !== null;
 }
 
+/**
+ * W7b (D-W18, D-W37): a write by someone other than the owning teacher is an
+ * assistant's, and is allowed only while `assistantCan` grants
+ * `assessments.manage` for this teacher at this branch — re-resolved here on
+ * the write's own transaction (the link effective, the grant held, the
+ * teacher's `assessment.manage.own` cell on, the branch allowing assistants).
+ * The teacher's own writes pass unchanged.
+ */
+async function actorMayWrite(tx: Db, actor: AssessmentActor, teacher: AssessmentTeacher): Promise<boolean> {
+  if (actor.userId === teacher.userId) return true;
+  return assistantMayAt(tx, {
+    assistantUserId: actor.userId,
+    teacherUserId: teacher.userId,
+    centerId: teacher.centerId,
+    permission: "assessments.manage",
+  });
+}
+
 function draftColumns(draft: AssessmentDraft) {
   return {
     title: draft.title.trim(),
@@ -394,6 +413,7 @@ export async function createAssessment(
 
   return db.$transaction(async (tx) => {
     if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
 
     let classGroupId: string;
     let sessionId: string | null = null;
@@ -435,6 +455,7 @@ export async function createAssessment(
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,
+      onBehalfOfUserId: onBehalfOf(actor.userId, teacher.userId),
       action: "assessment.create",
       entityType: "Assessment",
       entityId: created.id,
@@ -462,6 +483,7 @@ export async function saveAssessmentDraft(
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
     if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
       select: { id: true, type: true, status: true, _count: { select: { questions: true } } },
@@ -485,6 +507,7 @@ export async function saveAssessmentDraft(
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,
+      onBehalfOfUserId: onBehalfOf(actor.userId, teacher.userId),
       action: "assessment.update",
       entityType: "Assessment",
       entityId: assessmentId,
@@ -517,6 +540,7 @@ export async function deleteAssessment(
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
     if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
       select: { id: true, type: true, status: true, classGroupId: true, sessionId: true, _count: { select: { questions: true } } },
@@ -534,6 +558,7 @@ export async function deleteAssessment(
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,
+      onBehalfOfUserId: onBehalfOf(actor.userId, teacher.userId),
       action: "assessment.delete",
       entityType: "Assessment",
       entityId: assessmentId,
@@ -568,6 +593,7 @@ export async function publishAssessment(
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
     if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
     await lockAssessment(tx, centerId, assessmentId);
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
@@ -590,6 +616,7 @@ export async function publishAssessment(
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,
+      onBehalfOfUserId: onBehalfOf(actor.userId, teacher.userId),
       action: "assessment.publish",
       entityType: "Assessment",
       entityId: assessmentId,
@@ -617,6 +644,7 @@ export async function unpublishAssessment(
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
     if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
     await lockAssessment(tx, centerId, assessmentId);
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
@@ -632,6 +660,7 @@ export async function unpublishAssessment(
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,
+      onBehalfOfUserId: onBehalfOf(actor.userId, teacher.userId),
       action: "assessment.unpublish",
       entityType: "Assessment",
       entityId: assessmentId,
@@ -659,6 +688,7 @@ export async function extendAssessment(
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
     if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
+    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
     await lockAssessment(tx, centerId, assessmentId);
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
@@ -680,6 +710,7 @@ export async function extendAssessment(
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.userId,
+      onBehalfOfUserId: onBehalfOf(actor.userId, teacher.userId),
       action: "assessment.extend",
       entityType: "Assessment",
       entityId: assessmentId,

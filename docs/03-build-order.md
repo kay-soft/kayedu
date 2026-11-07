@@ -945,12 +945,74 @@ Additive. It was generated with the read-only `migrate diff --from-url`, and pro
 **E2E (staging, `en-1280` and `ar-375`):** new `assistants.spec.ts` (`@write`): two logins made through the Supabase admin API and given TEACHER memberships at Downtown; the teacher's page offers nothing without premium; the admin grants premium; the teacher invites (Co-teacher) and reads the code once; the second account gets the one message for a wrong code, then the confirmation with the teacher's name and permissions (nothing linked yet), confirms, lands in "Assistant of <teacher>", switches to Teacher and back through the role switcher and finds the role on Account settings; the teacher removes them; the route and the Account card are gone on the next request. The teardown deletes both accounts (cascading memberships, invites, links and grants), their audit rows and the assistant-join rate buckets (the local dev server sees one client address); the test asserts nothing of its run is left, and two back-to-back runs left the same row counts (users 145, audit rows 1,654, no assistant rows). `navigation.spec` 71 passed.
 **Docs:** 00 (D-W36, §3, §4.2 item 10, §4.6 item 5, the delivered list), 01 ("Assistants layer"), 02 §4, §6, §18, this entry, 04 §11.36, 05 (entries 46, 47), 06 (three new pages), `staging.md`, CLAUDE.md rule 7.
 
-### W7b — Assistants act on behalf (planned)
-**Build:** `AuditLog.onBehalfOfUserId`, `CenterSettings.allowTeacherAssistants`; `assistantContext(teacherUserId, centerId, key)` (`02-architecture.md` §18) as the only way an assistant acts; the branch setting "Allow teacher assistants"; "via assistant" on centre screens; in-centre assistant actions: classes and sessions (`classes.view`), requests (`requests.manage`), assessments (from W9), analytics under Full (`analytics.view`); student phones only with `students.phones`.
-**DB:** yes — one `AuditLog` column, one `CenterSettings` column.
-**Done when:** an assistant can never pass a check the teacher would fail (by direct call); every assistant write carries both ids; expiry of premium removes access on the next request; a branch with assistants off sees no assistant read or write; student phones are absent unless granted; the branch's teacher window floors assistant reads.
-**Gates:** `check:assistants` (never wider than the teacher, the branch switch, the teacher-window floor, phone hiding, on-behalf audit); `check:permissions` (the centre matrix unchanged), `check:security`, `check:isolation`, `check:visibility`, `check:design`, `check:rtl`.
-**Docs:** 00 §3, 01, 02 §6 and §18, 04 §11.36, this entry.
+### W7b — Assistants act on behalf (delivered 7 Nov 2026)
+**Built (D-W37):**
+- **Resolution and the one decision.** `lib/db/assistant-acting.ts`:
+  - `resolveAssistantActing` reads fresh an effective link (live, the teacher premium now), the teacher's ACTIVE TEACHER memberships at accessible branches whose new `CenterSettings.allowTeacherAssistants` is on, and each branch's stored TEACHER cells and trusted flag.
+  - `assistantCan(acting, permission, centerId)` decides alone: the grant ∧ the teacher's equivalent cell (`assessment.manage.own`; `changeRequest.create` + trusted; `analytics.own.view`; `classes.view` = the membership) ∧ the branch setting. Manage covers Review.
+  - `assistantMayAt` re-runs it inside the assessment writers, the results reads and the request writer whenever the actor is not the owning teacher.
+  - `lib/auth/assistant-context.ts`'s `getAssistantScope` / `assistantActionScope` hand the pages **the teacher's** `TenantContext` per allowed branch (`getTeacherContexts`) and the assistant's floor.
+- **Pages** under `/assistant/[teacherId]` (the nav per grant, `lib/assistant-nav.ts`):
+  - **Exams & homework**: list, new, builder, preview, publish, unpublish, extend, delete, results and one student's answers. These are the teacher's own bodies, moved into `components/teacher/assessments/*` and driven by a serializable `AssessmentSurface`, over the unchanged W2/W3a/W4 functions with actor = the assistant.
+  - **Classes**, read-only: classes, sessions inside the window, roster names.
+  - **Requests**: NEW_SESSION and NEW_CLASS through the teacher's forms, stored as the teacher's with `ChangeRequest.viaAssistantUserId`, audited `changeRequest.create`, plus each request's status.
+  - **Overview** (Full): `teacherCenterSummary` per branch.
+  - The landing page lists the branches where the assistant may work, or "Not available at the teacher's branches".
+- **Windows:** `assistantReadFloor`, the stricter of the branch's teacher window and the teacher's `teacherHistoryDays`. It applies to the lists, pages, results (re-read in the data layer), sessions and requests, and writes re-find their row inside it.
+- **Audit:** `AuditLog.onBehalfOfUserId` on every assistant write (actor = the assistant), null on the teacher's own.
+- **Centres:** the audit log names the teacher with a "via assistant" badge and never resolves the assistant. `scoped(ctx).changeRequests.list` drops the assistant's id (`withoutAssistantId`), so the approvals queue shows the teacher's card with the badge. Settings → General gains **Teacher assistants** ("Allow teacher assistants", on).
+- **W7a changed:** revoking an invite and removing an assistant no longer need premium (`teacherActorGate`). Without premium, Teacher → Assistants lists pending invites with Revoke and assistants with Remove, and offers no Invite and no Edit permissions.
+
+**Decided with the founder at W7b, against the prompt (recorded in D-W37):**
+- The prompt's **reschedule** request and **cancel a pending request** do not exist for the teacher, so assistants file NEW_SESSION and NEW_CLASS and see the status (backlog 50, 51). The e2e files a new-session request.
+- The teacher's portal shows no student phone, so **`students.phones` reveals nothing yet**: rosters are names only, with or without it (backlog 52).
+- Two W7a statics in `check:assistants` were replaced (approved; below).
+
+**Decided at W7b, beyond the prompt's list:**
+- Manage implies Review.
+- `classes.view` maps to the TEACHER membership alone (the teacher's Sessions and class pages carry no cell).
+- Assistant writes re-find their row inside the assistant's floor.
+- A Grader's list holds no drafts, and a row opens its results.
+- The request writer is the only new audit action (`changeRequest.create`); the teacher's own request actions still write none.
+- The session change log and the receipt list need no tag: no assistant path writes attendance or money (asserted).
+- The e2e's "the teacher switches the branch setting off" is done by the **manager**: a teacher holds no `center.settings.edit`.
+- The setting is not copied by "Copy setup from".
+- No notices (backlog 48); the teacher's view of assistant activity is backlog 49.
+
+**Against this entry's W7b plan:** the plan's `assistantContext(teacherUserId, centerId, key)` became `resolveAssistantActing` + `assistantCan` + `assistantMayAt`. The plan's "centre screens that name the recorder (the roster, the receipt)" became the audit log and the approvals queue: no assistant writes a roster or receipt row. The plan left assessments to W9; the prompt moved centre-branch assessments here, and W9 keeps workspaces.
+
+**DB:** migration `20261107180000_w7b_assistants_on_behalf`: `AuditLog.onBehalfOfUserId`, `ChangeRequest.viaAssistantUserId` (nullable text, no relation) and `CenterSettings.allowTeacherAssistants` (boolean, default true). Generated with the read-only `migrate diff --from-url`; no `DROP INDEX` was generated, and no hand-written SQL was needed (the three tables already have RLS on). Applied with `migrate deploy` to staging and dev.
+
+**Assertions changed:**
+- **Old → new, the prompt's list:** `check:assistants` "revoke / remove require premium" → "do not require premium". The lock-then-gate static for `revokeAssistantInvite` / `removeAssistant` now expects `teacherActorGate` and no `requirePremium`. "A lapsed teacher is refused every teacher action" became two checks: refused what widens; may revoke, remove and be left. The non-premium intruder gets `notFound` on revoke and remove instead of `premiumRequired`.
+- **Approved by the founder during W7b:** `check:assistants` "The assistant experience resolves no tenant context and reads no centre data module" → "the assistant surface never calls getTenantContext / requireExperience / getTeacherScope / ctxCan and never imports a payment, settlement, refund, money, premium or account module; centre reads go only through getAssistantScope's teacher contexts". "Nothing under (assistant) declares a Server Action" → "every Server Action under (assistant) resolves assistantActionScope first and trusts no posted user, link or centre id".
+- Untouched: "assistants hold no Membership and no centre permission", `seed:verify`, `check:permissions` and the centre and teacher navigation expectations.
+
+**Gates (staging, 7 Nov 2026):** `check:assistants` gains §13–20, **147 checks** in all:
+- **The matrix**: every catalogue key at a branch, allowed exactly by Co-teacher, Grader, Full and a Custom set. Each of the five branch keys is refused for a missing grant, the teacher's own cell off (or membership inactive), the branch setting off (the other branch unaffected), the teacher not trusted (requests), premium lapsed (at the end instant, allowed 1 ms before), a swapped teacherId and another centre.
+- **Assessments**: Co-teacher creates, saves, publishes, extends and reads results through the unchanged writers. A Grader reads results and an attempt but is refused all six writes. `classes.view` alone reads and writes nothing. Refused by direct call: another teacher's assistant, a swapped teacher, another teacher's class or assessment, another centre's class, a forged centre. Branch off cuts the assistant's read and write while the teacher's still works.
+- **Audit**: every on-behalf row is actor = assistant, onBehalfOf = teacher, ids only; the teacher's own row is null.
+- **Requests**: stored as the teacher's, `viaAssistantUserId`, audited with no note; refused for a Grader, another teacher's class, another centre, a swapped teacher, untrusted.
+- **Centre-facing reads**: the audit feed and the approvals rows (`withoutAssistantId`) carry the teacher, `viaAssistant`, and no assistant name, email or id.
+- **The window**: the stricter of 30 / 10 / 60 / 7 days. Class sessions stop at the floor. A 40-day-old exam is readable by the teacher, not the assistant.
+- **Rosters and nav**: rosters are id + names only, with phones on file and with `students.phones`; the nav per preset; every branch off → Home only.
+- **Removal**: removal and lapse cut access; the assistants still hold no Membership.
+- **Old → new edits**: revoke, remove and leave without premium.
+- **Statics**: no own context, no money or account import, every page re-resolves, every action resolves `assistantActionScope` first, assessment actions never read `centerId`, `TEACHER_EQUIVALENT` in one file, no phone in the reads, no attendance or money writer, no settlements or account in the nav.
+
+Run alone it passes twice; two copies at once collide on the shared stem (`staging.md`). Also on staging, one at a time, all pass: `check:assessments` 443, `check:teacher-portal` 29, `check:approvals` 49, `check:permissions` 49, `check:config` 15, `check:rls` (59 tables locked down), `check:isolation` 38, `check:admin` 115, `check:visibility` 68, `check:gate-fixtures` 14, `seed:verify` 213. `check:design`, `check:rtl`, `check:public`, `tsc`, `eslint` and `prisma validate` pass. `check:all` and the full e2e suite were not run.
+
+**E2E:** `assistants.spec.ts` (`@write`, `en-1280` and `ar-375`) gains the W7b journey on the seeded teacher.downtown:
+1. The admin grants premium.
+2. A tagged assistant redeems the teacher's invite and sees the Co-teacher nav (no Overview, no Settlements).
+3. The assistant builds and publishes an exam in the teacher's class (owned by the teacher's membership; every audit row actor = assistant, onBehalfOf = teacher) and opens its results.
+4. The assistant files a new-session request (stored as the teacher's).
+5. The manager sees it in the approvals queue and the audit log with the teacher's name and "via assistant", never the assistant's name.
+6. The manager switches "Allow teacher assistants" off, and Downtown disappears from the assistant's branches and the exam page.
+
+The two projects take turns on a lock row. The teardown restores premium and the setting and removes the run's rows. Two back-to-back runs passed (19 with setup, 6.3–8.2 min) and left the same whole-table counts: users 145, audit rows 1,656, change requests 3, invites, links, assessments and lock rows 0. `navigation.spec` 71 passed. The browser logs Base UI's "uncontrolled Switch changing its default" notice after the settings save, the same pattern the form's other switches already have; not a failure.
+
+**Docs:** 00 (D-W37, D-W19, D-W17, D-W36 superseded line, §3, §4.2 items 10 and 10a, the delivered list), 01 (CenterSettings, ChangeRequest, AuditLog, the assistants layer, §7), 02 §4, §6, §18, this entry and W9, 04 §11.36, 05 (entries 48–52), 06 (ten new pages, three touched), `staging.md`.
 
 ### W8 — PERSONAL workspaces: classes, check-in and payments (planned)
 **Precondition:** none left. **OD-16 → D-W27** and **OD-17 → D-W28** were decided in the W0 follow-up (3 Nov 2026).
@@ -977,9 +1039,9 @@ Additive. It was generated with the read-only `migrate diff --from-url`, and pro
 **Docs:** 00 §4 (teacher portal workspace items), 01, 02 §6.2 and §18, 04 §11.37 and §11.38, `dev-accounts.md` (a premium teacher and a workspace in the seed), this entry.
 
 ### W9 — Assessments in workspaces + assistant access to assessments (planned)
-**Build:** the W2–W4 engine on workspace classes under `requireWorkspaceOwner` (D-W26, read-only while lapsed); assistants with `assessments.manage` / `assessments.review` build, publish, extend and review in centres and workspaces, every write audited on behalf (D-W17, D-W18).
+**Build:** the W2–W4 engine on workspace classes under `requireWorkspaceOwner` (D-W26, read-only while lapsed); assistants with `assessments.manage` / `assessments.review` build, publish, extend and review **in workspaces**, every write audited on behalf (D-W17, D-W18). *(At the teacher's branches this was delivered at W7b, D-W37 — the W7b prompt moved it there; W9 extends `assistantCan` to PERSONAL workspaces.)*
 **DB:** no.
-**Done when:** a workspace assessment behaves exactly as a centre one; an assistant's assessment writes carry both ids; a Grader cannot edit; a lapsed teacher's workspace assessments refuse writes.
+**Done when:** a workspace assessment behaves exactly as a centre one; an assistant's workspace assessment writes carry both ids; a Grader cannot edit one; a lapsed teacher's workspace assessments refuse writes.
 **Gates:** `check:assessments` (workspace section), `check:assistants` (assessment keys), `check:workspaces` (assessments read-only on expiry); `check:design`, `check:rtl`.
 **Docs:** 02 §18, this entry.
 

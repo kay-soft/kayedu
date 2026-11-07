@@ -172,7 +172,9 @@
     "calendar": "Calendar",
     "profile": "Profile",
     "assistants": "Assistants",
-    "home": "Home"
+    "home": "Home",
+    "requests": "Requests",
+    "overview": "Overview"
   },
   "Roles": {
     "OWNER": "Owner",
@@ -1717,7 +1719,8 @@
         "bookingOff": "Booking is closed for this class.",
         "failed": "Something went wrong. Try again."
       }
-    }
+    },
+    "viaAssistant": "via assistant"
   },
   "Refunds": {
     "title": "Refunds",
@@ -1908,7 +1911,11 @@
       "publicListingTitle": "Public listing",
       "publicListingDescription": "Whether people without an account can find this branch on Explore — its name, logo, classes open to new students, their prices and teachers. Contact details and students are never shown.",
       "publicListingLabel": "List this branch on Explore",
-      "publicListingHint": "On by default. Turn it off and the branch's public pages disappear at once; signed-in students can still find its classes in Discover."
+      "publicListingHint": "On by default. Turn it off and the branch's public pages disappear at once; signed-in students can still find its classes in Discover.",
+      "assistantsTitle": "Teacher assistants",
+      "assistantsDescription": "A premium teacher can give an assistant access to their exams, homework, classes and requests here, on the teacher's behalf. Everything an assistant does is recorded as the teacher's, marked \"via assistant\".",
+      "assistantsLabel": "Allow teacher assistants",
+      "assistantsHint": "On by default. Turn it off and assistants lose this branch at once; the teachers themselves are not affected."
     },
     "catalog": {
       "title": "Academic catalog",
@@ -3407,7 +3414,8 @@
       },
       "changeRequest": {
         "approve": "Teacher request approved",
-        "decline": "Teacher request declined"
+        "decline": "Teacher request declined",
+        "create": "Teacher request filed"
       },
       "expenseCategory": {
         "create": "Expense category added",
@@ -3497,7 +3505,8 @@
       "timezone": "Timezone"
     },
     "unknownAction": "Other change",
-    "diffSet": "{field}: {after}"
+    "diffSet": "{field}: {after}",
+    "viaAssistant": "via assistant"
   },
   "Toasts": {
     "saved": "Saved.",
@@ -4400,7 +4409,7 @@
       "description": "People who help you, with only the permissions you give them.",
       "premiumTitle": "Assistants come with premium",
       "premiumDescription": "With premium you can invite up to {max} assistants and choose exactly what each one may do.",
-      "premiumLapsedNote": "If your premium has ended, your assistants keep their place but can't open anything until it's renewed.",
+      "premiumLapsedNote": "If your premium has ended, your assistants keep their place but can't open anything until it's renewed. You can still cancel an invite or remove an assistant.",
       "premiumContact": "Contact KayEdu to subscribe or renew.",
       "slots": "{used} of {max} places in use",
       "slotsHint": "Assistants and unused invites both take a place.",
@@ -4474,7 +4483,10 @@
       "description": "You act for this teacher, within what they allow.",
       "permissionsTitle": "What you may do",
       "permissionsDescription": "Preset: {preset}. Assistant since {date}.",
-      "nothingYet": "There is nothing to work on here yet. The teacher's tools will appear on this page."
+      "branchesTitle": "Where you can work",
+      "branchesDescription": "The teacher's branches that allow assistants. Each page in the menu shows only what the teacher let you do there.",
+      "noBranches": "Not available at the teacher's branches",
+      "noBranchesHint": "None of this teacher's branches allows assistants right now. The branch decides this, not the teacher."
     },
     "errors": {
       "signInRequired": "Sign in first.",
@@ -4492,6 +4504,52 @@
       "unverified": "Confirm your email address first.",
       "required": "This field is required.",
       "tooLong": "This value is too long."
+    },
+    "work": {
+      "assessmentsSubtitle": "{teacher}'s exams and homework, at the branches where you may work.",
+      "assessmentsEmptyHint": "The teacher's exams and homework appear here.",
+      "classes": {
+        "title": "Classes",
+        "subtitle": "{teacher}'s classes, read-only.",
+        "listTitle": "The teacher's classes",
+        "readOnly": "Read-only. Open a class to see its sessions and students.",
+        "empty": "No classes at the branches where you may work.",
+        "students": "{count, plural, one {# student} other {{n} students}}",
+        "inactive": "Inactive",
+        "back": "Classes",
+        "sessionsTitle": "Sessions",
+        "sessionsHint": "The teacher's sessions of this class, as far back as the branch allows.",
+        "noSessions": "No sessions in this period.",
+        "addHomework": "Add homework",
+        "schedule": "Weekly schedule",
+        "period": "Period",
+        "rosterTitle": "Students",
+        "rosterHint": "Names only.",
+        "rosterEmpty": "No students are enrolled yet."
+      },
+      "requests": {
+        "title": "Requests",
+        "subtitle": "Ask the branch for a new session or class for {teacher}. The branch decides.",
+        "listTitle": "The teacher's requests",
+        "listHint": "Every request is the teacher's. The branch approves or declines it.",
+        "empty": "No requests yet.",
+        "type": {
+          "NEW_SESSION": "Session",
+          "NEW_CLASS": "Class"
+        },
+        "viaAssistant": "via assistant",
+        "filedOn": "Sent {date}"
+      },
+      "overview": {
+        "title": "Overview",
+        "subtitle": "{teacher}'s sessions and earnings, read-only.",
+        "sessionsToday": "Sessions today",
+        "sessionsThisWeek": "Sessions this week",
+        "earningsThisMonth": "Earnings this month",
+        "branchesTitle": "By branch",
+        "branchesHint": "The teacher's share, as far back as each branch allows.",
+        "branchLine": "Today {today} · This week {week} · This month {earnings}"
+      }
     }
   }
 }

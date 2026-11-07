@@ -9,6 +9,11 @@ import {
   publishAssessmentAction,
   unpublishAssessmentAction,
 } from "@/app/[locale]/(teacher)/teacher/assessments/publish-actions";
+import {
+  assistantExtendAssessmentAction,
+  assistantPublishAssessmentAction,
+  assistantUnpublishAssessmentAction,
+} from "@/app/[locale]/(assistant)/assistant/[teacherId]/assessments/actions";
 import { ConfirmAction } from "@/components/shared/confirm-action";
 import { FormMessage } from "@/components/shared/form-message";
 import { SubmitButton } from "@/components/shared/submit-button";
@@ -16,16 +21,21 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import { TimePicker } from "@/components/ui/time-picker";
 import { useActionFeedback, useGuardedActionState } from "@/lib/ui/action-feedback";
+import { TEACHER_SURFACE, surfaceFields, type AssessmentSurface } from "@/lib/routes";
 import { IDLE_ASSESSMENT_STATE } from "@/lib/validation/assessments";
 
-type Identity = { centerId: string; assessmentId: string };
+/** W7b: `surface` (default the teacher) picks the teacher's action or the assistant's. */
+type Identity = { centerId: string; assessmentId: string; surface?: AssessmentSurface };
 
 /** Publish the last saved version, after a confirmation. Disabled until it is ready. */
-export function PublishAssessment({ centerId, assessmentId, ready }: Identity & { ready: boolean }) {
+export function PublishAssessment({ centerId, assessmentId, ready, surface = TEACHER_SURFACE }: Identity & { ready: boolean }) {
   const t = useTranslations("TeacherAssessments.publish");
   const tErrors = useTranslations("TeacherAssessments.errors");
   const locale = useLocale();
-  const [state, action] = useGuardedActionState(publishAssessmentAction, IDLE_ASSESSMENT_STATE);
+  const [state, action] = useGuardedActionState(
+    surface.kind === "assistant" ? assistantPublishAssessmentAction : publishAssessmentAction,
+    IDLE_ASSESSMENT_STATE,
+  );
   useActionFeedback(state, { success: () => t("done") });
 
   return (
@@ -40,7 +50,7 @@ export function PublishAssessment({ centerId, assessmentId, ready }: Identity & 
         title={t("title")}
         description={t("body")}
         action={action}
-        fields={{ locale, centerId, assessmentId }}
+        fields={{ locale, centerId, assessmentId, ...surfaceFields(surface) }}
       />
       {!ready ? <p className="text-xs text-text-muted">{t("notReadyHint")}</p> : null}
       {state.error ? <FormMessage className="text-xs">{tErrors(state.error)}</FormMessage> : null}
@@ -49,11 +59,14 @@ export function PublishAssessment({ centerId, assessmentId, ready }: Identity & 
 }
 
 /** Back to a draft, only while no student has started. */
-export function UnpublishAssessment({ centerId, assessmentId }: Identity) {
+export function UnpublishAssessment({ centerId, assessmentId, surface = TEACHER_SURFACE }: Identity) {
   const t = useTranslations("TeacherAssessments.unpublish");
   const tErrors = useTranslations("TeacherAssessments.errors");
   const locale = useLocale();
-  const [state, action] = useGuardedActionState(unpublishAssessmentAction, IDLE_ASSESSMENT_STATE);
+  const [state, action] = useGuardedActionState(
+    surface.kind === "assistant" ? assistantUnpublishAssessmentAction : unpublishAssessmentAction,
+    IDLE_ASSESSMENT_STATE,
+  );
   useActionFeedback(state, { success: () => t("done") });
 
   return (
@@ -67,7 +80,7 @@ export function UnpublishAssessment({ centerId, assessmentId }: Identity) {
         title={t("title")}
         description={t("body")}
         action={action}
-        fields={{ locale, centerId, assessmentId }}
+        fields={{ locale, centerId, assessmentId, ...surfaceFields(surface) }}
       />
       {state.error ? <FormMessage className="text-xs">{tErrors(state.error)}</FormMessage> : null}
     </div>
@@ -81,11 +94,15 @@ export function ExtendAssessment({
   zone,
   todayIso,
   current,
+  surface = TEACHER_SURFACE,
 }: Identity & { zone: string; todayIso: string; current: { date: string; time: string } }) {
   const t = useTranslations("TeacherAssessments.extend");
   const tErrors = useTranslations("TeacherAssessments.errors");
   const locale = useLocale();
-  const [state, action] = useGuardedActionState(extendAssessmentAction, IDLE_ASSESSMENT_STATE);
+  const [state, action] = useGuardedActionState(
+    surface.kind === "assistant" ? assistantExtendAssessmentAction : extendAssessmentAction,
+    IDLE_ASSESSMENT_STATE,
+  );
   useActionFeedback(state, { success: () => t("done") });
   const [time, setTime] = useState(current.time);
 
@@ -94,6 +111,9 @@ export function ExtendAssessment({
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="centerId" value={centerId} />
       <input type="hidden" name="assessmentId" value={assessmentId} />
+      {Object.entries(surfaceFields(surface)).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
       <p className="text-xs text-text-muted">{t("zone", { zone })}</p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-1">

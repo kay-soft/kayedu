@@ -159,11 +159,15 @@ export default async function AuditPage({
                       </p>
                     ) : null}
                   </div>
-                  <p className="text-xs text-text-secondary">
-                    {t("meta", {
-                      time: formatDateTime(entry.createdAt, locale, timeZone),
-                      name: entry.actorName ? fullName(entry.actorName) : t("system"),
-                    })}
+                  <p className="flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+                    <span>
+                      {t("meta", {
+                        time: formatDateTime(entry.createdAt, locale, timeZone),
+                        name: entry.actorName ? fullName(entry.actorName) : t("system"),
+                      })}
+                    </span>
+                    {/* W7b (D-W18): the teacher acted through an assistant — never the assistant's name. */}
+                    {entry.viaAssistant ? <Badge variant="neutral">{t("viaAssistant")}</Badge> : null}
                   </p>
                   {entry.subjectName ? (
                     <p className="text-sm text-text-primary" dir="auto">{fullName(entry.subjectName)}</p>

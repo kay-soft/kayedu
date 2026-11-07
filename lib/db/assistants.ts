@@ -29,12 +29,14 @@ import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
  * "Assistants"). The **only** writer of `AssistantInvite`, `TeacherAssistant`
  * and `AssistantPermissionGrant`, and the one place every rule lives:
  *
- * 1. **The teacher side needs a premium teacher.** Every teacher write (create
- *    and revoke an invite, change permissions, remove an assistant) loads the
- *    actor fresh inside its transaction: an active TEACHER membership at an
- *    accessible branch, then `requirePremium` (`forbidden` / `premiumRequired`
- *    otherwise). A row is always looked up by its id **and** the actor as its
- *    teacher, so another teacher's id is `notFound`, never a write.
+ * 1. **The teacher side.** Every teacher write loads the actor fresh inside
+ *    its transaction: an active TEACHER membership at an accessible branch
+ *    (`forbidden` otherwise). **Widening access needs premium** — creating an
+ *    invite and changing permissions add `requirePremium` (`premiumRequired`).
+ *    **Reducing access never does** (W7b, D-W37 item 12): revoking an invite
+ *    and removing an assistant work for a lapsed teacher too, like the
+ *    assistant's own Leave. A row is always looked up by its id **and** the
+ *    actor as its teacher, so another teacher's id is `notFound`, never a write.
  * 2. **Five slots** — active links + pending invites (unused, unrevoked,
  *    `expiresAt > now`) — counted under a row lock on the teacher's `User`
  *    (`SELECT … FOR UPDATE`), so two concurrent creations cannot both take the
@@ -137,15 +139,25 @@ export async function isTeacherAccount(db: Db, userId: string): Promise<boolean>
 }
 
 /**
- * The teacher side's authority: a teacher, and premium now. Run inside the
- * write's own transaction, after the lock, so the check and the write see the
- * same row.
+ * The teacher side's authority for a write that **widens** access (an invite,
+ * a permission change): a teacher, and premium now. Run inside the write's own
+ * transaction, after the lock, so the check and the write see the same row.
  */
 async function teacherGate(tx: Tx, actorUserId: string | null | undefined, now: Date): Promise<AssistantError | null> {
-  if (!actorUserId) return "forbidden";
-  if (!(await isTeacherAccount(tx, actorUserId))) return "forbidden";
-  const premium = await requirePremium(tx, actorUserId, now);
+  const refused = await teacherActorGate(tx, actorUserId);
+  if (refused) return refused;
+  const premium = await requirePremium(tx, actorUserId!, now);
   return premium.ok ? null : "premiumRequired";
+}
+
+/**
+ * The authority for a write that only **reduces** access — revoking an invite,
+ * removing an assistant (W7b, D-W37 item 12): a teacher, premium or not. The
+ * row is still found with the actor as its teacher.
+ */
+async function teacherActorGate(tx: Tx, actorUserId: string | null | undefined): Promise<AssistantError | null> {
+  if (!actorUserId) return "forbidden";
+  return (await isTeacherAccount(tx, actorUserId)) ? null : "forbidden";
 }
 
 function inTransaction<T>(db: PrismaClient, fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -215,7 +227,7 @@ export async function createAssistantInvite(
   });
 }
 
-/** The teacher cancels one of their own unused invites; its code stops working at once. */
+/** The teacher cancels one of their own unused invites; its code stops working at once. No premium needed (D-W37). */
 export async function revokeAssistantInvite(
   db: PrismaClient,
   input: { actorUserId: string | null | undefined; inviteId: string; now?: Date },
@@ -225,7 +237,7 @@ export async function revokeAssistantInvite(
   if (!actorUserId) return { ok: false, error: "forbidden" };
   return inTransaction(db, async (tx): Promise<{ ok: true } | AssistantRefusal> => {
     await lockTeacher(tx, actorUserId);
-    const refused = await teacherGate(tx, actorUserId, now);
+    const refused = await teacherActorGate(tx, actorUserId);
     if (refused) return { ok: false, error: refused };
     const revoked = await tx.assistantInvite.updateMany({
       where: { id: input.inviteId, teacherUserId: actorUserId, usedAt: null, revokedAt: null },
@@ -310,7 +322,7 @@ export async function updateAssistantPermissions(
   });
 }
 
-/** The teacher removes one of their assistants (`revokedAt`, after a confirmation). Final; a new invite relinks. */
+/** The teacher removes one of their assistants (`revokedAt`, after a confirmation). Final; a new invite relinks. No premium needed (D-W37). */
 export async function removeAssistant(
   db: PrismaClient,
   input: { actorUserId: string | null | undefined; linkId: string; now?: Date },
@@ -320,7 +332,7 @@ export async function removeAssistant(
   if (!actorUserId) return { ok: false, error: "forbidden" };
   return inTransaction(db, async (tx): Promise<{ ok: true } | AssistantRefusal> => {
     await lockTeacher(tx, actorUserId);
-    const refused = await teacherGate(tx, actorUserId, now);
+    const refused = await teacherActorGate(tx, actorUserId);
     if (refused) return { ok: false, error: refused };
     const removed = await tx.teacherAssistant.updateMany({
       where: { id: input.linkId, teacherUserId: actorUserId, revokedAt: null },

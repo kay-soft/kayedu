@@ -106,6 +106,12 @@ export const ROUTES = {
   teacherAssistants: "/teacher/assistants",
   // W7a: the assistant experience, one per teacher the account assists.
   assistantHome: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}`,
+  // W7b (D-W37): the assistant's working pages, under the teacher they assist.
+  assistantAssessments: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/assessments`,
+  assistantClasses: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/classes`,
+  assistantClass: (teacherUserId: string, id: string) => `/assistant/${encodeURIComponent(teacherUserId)}/classes/${id}`,
+  assistantRequests: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/requests`,
+  assistantOverview: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/overview`,
   studentSchedule: "/student/schedule",
   studentCalendar: "/student/calendar",
   studentDiscover: "/student/discover",
@@ -132,6 +138,48 @@ export const ROUTES = {
   // W6 (D-W35): premium for an account, found by its exact email.
   adminTeachers: "/admin/teachers",
 } as const;
+
+/**
+ * Which portal an assessment screen is part of (W7b): the teacher's own, or an
+ * assistant's for one teacher. Serializable, so a client component takes it
+ * as a prop and builds its own links and posts with `assessmentRoutes`.
+ */
+export type AssessmentSurface = { kind: "teacher" } | { kind: "assistant"; teacherId: string };
+
+export const TEACHER_SURFACE: AssessmentSurface = { kind: "teacher" };
+
+/** The assessment pages of a surface — the teacher's `/teacher/assessments/…` or the assistant's mirror. */
+export function assessmentRoutes(surface: AssessmentSurface) {
+  if (surface.kind === "teacher") {
+    return {
+      list: ROUTES.teacherAssessments,
+      newBase: ROUTES.teacherAssessmentNew,
+      detail: ROUTES.teacherAssessment,
+      preview: ROUTES.teacherAssessmentPreview,
+      results: ROUTES.teacherAssessmentResults,
+      attempt: ROUTES.teacherAssessmentAttempt,
+      klass: ROUTES.teacherClass,
+      session: ROUTES.teacherSession as ((id: string) => string) | null,
+    };
+  }
+  const base = ROUTES.assistantAssessments(surface.teacherId);
+  return {
+    list: base,
+    newBase: `${base}/new`,
+    detail: (id: string) => `${base}/${id}`,
+    preview: (id: string) => `${base}/${id}/preview`,
+    results: (id: string) => `${base}/${id}/results`,
+    attempt: (id: string, attemptId: string) => `${base}/${id}/results/${attemptId}`,
+    klass: (id: string) => ROUTES.assistantClass(surface.teacherId, id),
+    // The assistant has no session page; a homework's back link goes to its class list.
+    session: null,
+  };
+}
+
+/** The hidden fields an assistant's post carries besides the row's own ids (the route's teacher). */
+export function surfaceFields(surface: AssessmentSurface): Record<string, string> {
+  return surface.kind === "assistant" ? { teacherId: surface.teacherId } : {};
+}
 
 /**
  * Where a Supabase confirmation link should land (SEC-66) — sign-up's and

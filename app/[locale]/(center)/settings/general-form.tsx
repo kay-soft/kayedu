@@ -45,6 +45,7 @@ export type GeneralSettingsValues = {
   centerDataVisibilityDays: number;
   teacherDataVisibilityDays: number;
   publicListing: boolean;
+  allowTeacherAssistants: boolean;
 };
 
 export function GeneralSettingsForm({
@@ -366,6 +367,22 @@ export function GeneralSettingsForm({
             label={t("publicListingLabel")}
             description={t("publicListingHint")}
             defaultChecked={values.publicListing}
+          />
+        </CardContent>
+      </Card>
+
+      {/* W7b (D-W19, D-W37): off removes this branch from every assistant page and read. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("assistantsTitle")}</CardTitle>
+          <CardDescription>{t("assistantsDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ToggleRow
+            name="allowTeacherAssistants"
+            label={t("assistantsLabel")}
+            description={t("assistantsHint")}
+            defaultChecked={values.allowTeacherAssistants}
           />
         </CardContent>
       </Card>

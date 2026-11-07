@@ -18,9 +18,11 @@ import { can } from "../auth/permissions.ts";
 import { fullName, localName } from "../identity.ts";
 import { centreTimeZone } from "../scheduling.ts";
 import { finaliseIfDue } from "./assessment-attempts.ts";
+import { assistantMayAt } from "./assistant-acting.ts";
 import { classLabelSelect, sessionZone, teacherStillActive, type AssessmentActor, type AssessmentTeacher } from "./assessments.ts";
 import { loadPermissionGrants } from "./permissions.ts";
 import { teacherPortalHistoryFloor } from "./teacher-portal.ts";
+import { assistantReadFloor } from "./visibility.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -34,10 +36,15 @@ import { scopedWhere } from "./tenant-scope.ts";
  * admin file imports this module (`check:assessments`, statically).
  *
  * **Authority, re-read on every call.** The actor and the owning teacher are
- * separate parameters, so W9's assistant review fits without reshaping them: today
- * they must be the same person. The membership must still be an ACTIVE TEACHER one,
- * and the branch must still grant `assessment.manage.own`. A forged or stale
- * `AssessmentTeacher` gets `forbidden`, whoever passes it.
+ * separate parameters. The actor is the teacher, or (W7b, D-W37) an assistant
+ * for whom `assistantCan` grants `assessments.review` (Manage covers it) for this
+ * teacher at this branch, re-resolved here. The membership must still be an
+ * ACTIVE TEACHER one, and the branch must still grant `assessment.manage.own`. A
+ * forged or stale `AssessmentTeacher` gets `forbidden`, whoever passes it.
+ *
+ * **The window.** The teacher reads within their own `teacherHistoryDays`; an
+ * assistant within the stricter of that and the branch's teacher window
+ * (`teacherDataVisibilityDays`, D-W19) — both re-read here, never passed in.
  *
  * **Every read finalises what is due first (D-W10)**, so a student who ran out of
  * time with nothing reading their attempt still shows as Submitted.
@@ -52,8 +59,18 @@ function studentName(row: { firstName: string | null; lastName: string | null; u
 }
 
 async function holdsResultsAuthority(db: PrismaClient, actor: AssessmentActor, teacher: AssessmentTeacher): Promise<boolean> {
-  // W9 widens this to an assistant holding `assessments.review` for this teacher.
-  if (actor.userId !== teacher.userId) return false;
+  // W7b: anyone but the teacher must be their assistant with review rights here.
+  if (
+    actor.userId !== teacher.userId &&
+    !(await assistantMayAt(db, {
+      assistantUserId: actor.userId,
+      teacherUserId: teacher.userId,
+      centerId: teacher.centerId,
+      permission: "assessments.review",
+    }))
+  ) {
+    return false;
+  }
   if (!(await teacherStillActive(db, teacher))) return false;
   const grants = await loadPermissionGrants(db, teacher.centerId, "TEACHER");
   return can("TEACHER", "assessment.manage.own", grants);
@@ -85,10 +102,17 @@ async function ownedPublished(db: PrismaClient, actor: AssessmentActor, teacher:
 
   const [user, settings] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id: teacher.userId }, select: { teacherHistoryDays: true } }),
-    db.centerSettings.findFirst({ where: scopedWhere(centerId, {}), select: { timezone: true } }),
+    db.centerSettings.findFirst({
+      where: scopedWhere(centerId, {}),
+      select: { timezone: true, centerDataVisibilityDays: true, teacherDataVisibilityDays: true },
+    }),
   ]);
   const zone = row.session ? sessionZone(row.session, centreTimeZone(settings)) : centreTimeZone(settings);
-  if (outsideTeacherHistory(row, zone, teacherPortalHistoryFloor({ user, settings }, now))) {
+  const floor =
+    actor.userId === teacher.userId
+      ? teacherPortalHistoryFloor({ user, settings }, now)
+      : assistantReadFloor({ settings, teacherHistoryDays: user.teacherHistoryDays }, now);
+  if (outsideTeacherHistory(row, zone, floor)) {
     return { ok: false, error: "notFound" } as const;
   }
   return { ok: true, row, zone } as const;

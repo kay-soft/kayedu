@@ -736,6 +736,7 @@ export async function saveGeneralSettingsAction(
     centerDataVisibilityDays,
     teacherDataVisibilityDays,
     publicListing,
+    allowTeacherAssistants,
   } = parsed.data;
 
   const before = await scope.db.settings.get();
@@ -750,6 +751,7 @@ export async function saveGeneralSettingsAction(
     centerDataVisibilityDays,
     teacherDataVisibilityDays,
     publicListing,
+    allowTeacherAssistants,
   });
 
   // The default center cut is money configuration, so the change is audited
@@ -773,6 +775,7 @@ export async function saveGeneralSettingsAction(
           teacherDataVisibilityDays: before.teacherDataVisibilityDays,
           teacherEditDeadlineHours: before.teacherEditDeadlineHours,
           publicListing: before.publicListing,
+          allowTeacherAssistants: before.allowTeacherAssistants,
         }
       : null,
     after: {
@@ -788,6 +791,8 @@ export async function saveGeneralSettingsAction(
       teacherEditDeadlineHours,
       // F5: listing on the public Explore pages.
       publicListing,
+      // W7b: assistants may work here.
+      allowTeacherAssistants,
     },
   });
 

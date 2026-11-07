@@ -30,11 +30,31 @@
  * 12. No centre anything: an assistant holds no Membership, no centre
  *     relation and no permission grant; statics on the assistant surfaces.
  *
+ * W7b — acting on behalf (D-W17, D-W18, D-W19, D-W37):
+ * 13. The matrix: every catalogue key at a branch, allowed exactly by its
+ *     preset, refused for a missing grant, the teacher's own cell off (or
+ *     membership inactive), the branch setting off, the teacher not trusted
+ *     (requests), premium lapsed (the end instant), a swapped teacherId and
+ *     another centre — effective permission is the intersection.
+ * 14. Assessments through the unchanged W2/W3a/W4 functions, actor = the
+ *     assistant: Co-teacher builds, publishes, extends and reads results; a
+ *     Grader reads but never writes; refusals by direct call.
+ * 15. Audit rows: actor = the assistant, onBehalfOf = the teacher, ids only;
+ *     the teacher's own rows leave onBehalfOf null.
+ * 16. Requests on behalf: the teacher's, "via assistant", audited.
+ * 17. Centre-facing reads (audit feed, approvals rows) never carry the
+ *     assistant's name, email or id.
+ * 18. The window: the stricter of the branch's teacher window and the
+ *     teacher's own teacherHistoryDays.
+ * 19. Rosters names only (no phone, with or without students.phones); the
+ *     nav per preset; every branch off → Home only.
+ * 20. Removing the link, lapsing premium or swapping the teacher cuts access.
+ *
  * Writes throwaway rows under the `assistants-check` stem and cleans up.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
@@ -70,6 +90,30 @@ import { extendPremium, grantPremium, revokePremium } from "../lib/db/premium.ts
 import { premiumLatestEndDay, premiumToday, premiumUntilForDay } from "../lib/auth/premium.ts";
 import { assistantExperienceKey, assistantExperienceSources, loadExperiences } from "../lib/auth/experiences.ts";
 import { resolveCenterRelations } from "../lib/auth/relations.ts";
+import type { Permission } from "../lib/auth/permissions.ts";
+import type { AssistantPermission } from "../lib/assistant-catalog.ts";
+import { assessmentDefaults, type AssessmentDraft } from "../lib/assessments.ts";
+import { assistantNavItems } from "../lib/assistant-nav.ts";
+import { assistantFloorAt, assistantMayAt, resolveAssistantActing } from "../lib/db/assistant-acting.ts";
+import { assistantClassDetail, assistantClassList } from "../lib/db/assistant-reads.ts";
+import { fileRequestOnBehalf, listTeacherRequestsAt } from "../lib/db/assistant-requests.ts";
+import { startAttempt } from "../lib/db/assessment-attempts.ts";
+import { readAssessmentResults, readAttemptResult } from "../lib/db/assessment-results.ts";
+import {
+  createAssessment,
+  deleteAssessment,
+  extendAssessment,
+  publishAssessment,
+  resolveAssessmentTeacher,
+  saveAssessmentDraft,
+  unpublishAssessment,
+} from "../lib/db/assessments.ts";
+import { loadAuditFeed } from "../lib/db/audit-feed.ts";
+import { loadPermissionGrants, savePermissionGrants } from "../lib/db/permissions.ts";
+import { provisionCenterBaseline } from "../lib/db/provision.ts";
+import { withoutAssistantId } from "../lib/db/request-view.ts";
+import { assistantReadFloor } from "../lib/db/visibility.ts";
+import { todayInTimezone } from "../lib/scheduling.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -100,7 +144,10 @@ async function cleanup() {
     await deleteAuditRows(prisma, { actorUserId: { in: userIds } });
     await deleteAuditRows(prisma, { action: { startsWith: "platform.premium." }, entityId: { in: userIds } });
   }
-  await prisma.center.deleteMany({ where: { slug: SLUG } });
+  // W7b: the on-behalf section's branches too; their audit rows go first (no cascade on AuditLog).
+  const centers = await prisma.center.findMany({ where: { slug: { startsWith: STEM } }, select: { id: true } });
+  if (centers.length > 0) await deleteAuditRows(prisma, { centerId: { in: centers.map((center) => center.id) } });
+  await prisma.center.deleteMany({ where: { slug: { startsWith: STEM } } });
   await prisma.organization.deleteMany({ where: { name: { startsWith: ORG_NAME }, centers: { none: {} } } });
   // Cascades every invite, link and grant of these accounts.
   await prisma.user.deleteMany({ where: { email: { startsWith: EMAIL_PREFIX } } });
@@ -163,14 +210,24 @@ async function assistantRowCounts() {
 function staticChecks() {
   console.log("Static sweeps");
   const writer = stripComments(read("lib/db/assistants.ts"));
-  for (const name of ["createAssistantInvite", "revokeAssistantInvite", "updateAssistantPermissions", "removeAssistant"]) {
+  for (const name of ["createAssistantInvite", "updateAssistantPermissions"]) {
     const body = exportedBody("lib/db/assistants.ts", name);
     check(
       `${name}: locks the teacher's row, then the teacher + premium gate, inside its transaction`,
       /inTransaction\(db,/.test(body) && body.indexOf("lockTeacher(") > 0 && body.indexOf("lockTeacher(") < body.indexOf("teacherGate("),
     );
   }
-  check("The teacher gate is a TEACHER membership plus requirePremium", /isTeacherAccount\(tx, actorUserId\)[\s\S]*requirePremium\(tx, actorUserId, now\)/.test(exportedBody("lib/db/assistants.ts", "isTeacherAccount") + writer));
+  // W7b (D-W37 item 12, the prompt's old → new): reducing access never needs premium.
+  for (const name of ["revokeAssistantInvite", "removeAssistant"]) {
+    const body = exportedBody("lib/db/assistants.ts", name);
+    check(
+      `${name}: locks the teacher's row, then the teacher gate without premium (W7b), inside its transaction`,
+      /inTransaction\(db,/.test(body) && body.indexOf("lockTeacher(") > 0 && body.indexOf("lockTeacher(") < body.indexOf("teacherActorGate(") &&
+        !/teacherGate\(|requirePremium\(/.test(body),
+    );
+  }
+  check("The widening gate is a TEACHER membership plus requirePremium", /isTeacherAccount\(tx, actorUserId\)[\s\S]*requirePremium\(tx, actorUserId!?, now\)/.test(exportedBody("lib/db/assistants.ts", "isTeacherAccount") + writer));
+  check("The leave path needs no premium either", !/requirePremium\(|teacherGate\(/.test(exportedBody("lib/db/assistants.ts", "leaveAssistantLink")));
   check(
     "Every teacher-side row is looked up with the actor as its teacher",
     (writer.match(/teacherUserId: actorUserId/g) ?? []).length >= 4,
@@ -194,20 +251,102 @@ function staticChecks() {
     );
   }
 
+  // W7b (the approved replacement of two W7a statics): the assistant surface
+  // reads centre data only through the teacher's own contexts that
+  // getAssistantScope builds, never resolves a context of the assistant's own,
+  // and never reaches a payment, settlement, refund, money or account module.
   const assistantSurface = [
     ...walk(join(ROOT, "app", "[locale]", "(assistant)")),
     join(ROOT, "lib", "auth", "assistant-context.ts"),
+    join(ROOT, "lib", "assistant-nav.ts"),
+    join(ROOT, "lib", "db", "assistant-acting.ts"),
+    join(ROOT, "lib", "db", "assistant-reads.ts"),
+    join(ROOT, "lib", "db", "assistant-requests.ts"),
   ];
-  const tenantReaders = assistantSurface.filter((file) =>
-    /getTenantContext|requireExperience|getTeacherScope|lib\/db\/scoped|scoped\(|ctxCan\(|from "@\/lib\/db\/(?!assistants|client)/.test(stripComments(readSource(file))),
+  const ownContext = assistantSurface.filter((file) =>
+    /getTenantContext\(|getTenantContextForBranch\(|requireExperience\(|getTeacherScope\(|teacherBranchContext\(|actionContext\(|ctxCan\(|requirePermission\(/.test(stripComments(readSource(file))),
   );
   check(
-    "The assistant experience resolves no tenant context and reads no centre data module",
-    assistantSurface.length >= 5 && tenantReaders.length === 0,
-    tenantReaders.join(", "),
+    "The assistant surface never resolves a tenant context of its own (no getTenantContext, requireExperience, getTeacherScope, ctxCan)",
+    assistantSurface.length >= 15 && ownContext.length === 0,
+    ownContext.map((file) => relative(ROOT, file)).join(", "),
   );
-  const serverActions = assistantSurface.filter((file) => /["']use server["']/.test(readSource(file)));
-  check("Nothing under app/[locale]/(assistant)/ declares a Server Action (nothing to act on in W7a)", serverActions.length === 0, serverActions.join(", "));
+  const forbiddenModules =
+    /from "(@\/lib\/db\/(payments|settlements|refunds|money-sums|account|account-claims|premium|expenses|reception)"|@\/lib\/money"|\.\.?\/(db\/)?(payments|settlements|refunds|money-sums|money|account|account-claims|premium)\.ts"|@\/app\/\[locale\]\/(\(center\)|account)\/|@\/app\/\[locale\]\/\(teacher\)\/teacher\/(settlements|profile|assistants)\/)/;
+  const moneyReaders = assistantSurface.filter((file) => forbiddenModules.test(stripComments(readSource(file))));
+  check(
+    "No assistant file imports a payment, settlement, refund, money, premium or account module, or a centre / account / settlements page",
+    moneyReaders.length === 0,
+    moneyReaders.map((file) => relative(ROOT, file)).join(", "),
+  );
+  check(
+    "Centre reads go only through getAssistantScope's teacher contexts (getTeacherContexts(teacherUserId))",
+    /getTeacherContexts\(teacherUserId\)/.test(stripComments(read("lib/auth/assistant-context.ts"))),
+  );
+  const pages = assistantSurface.filter((file) => /[\\/]page\.tsx$/.test(file));
+  const ungated = pages.filter((file) => !/getAssistantScope\(teacherId\)|getAssistantSession\(teacherId\)/.test(readSource(file)));
+  check(
+    `Every assistant page (${pages.length}) re-resolves the link from the route on each request`,
+    pages.length >= 11 && ungated.length === 0,
+    ungated.map((file) => relative(ROOT, file)).join(", "),
+  );
+  const serverActionFiles = assistantSurface.filter((file) => /^["']use server["']/m.test(readSource(file)));
+  const actionProblems: string[] = [];
+  for (const file of serverActionFiles) {
+    const source = stripComments(readSource(file));
+    const helper = /async function manageScope[\s\S]*?assistantActionScope\(teacherId\)/.test(source);
+    for (const match of source.matchAll(/export async function (\w+)\(/g)) {
+      const start = match.index ?? 0;
+      const next = source.indexOf("\nexport ", start + 10);
+      const body = source.slice(start, next < 0 ? undefined : next);
+      const gated = /assistantActionScope\(teacherId\)/.test(body) || (helper && /manageScope\(teacherId\)/.test(body));
+      const trustsPost = /formData\.get\(["'](userId|actorUserId|teacherUserId|assistantUserId|linkId|centerId)["']\)/.test(body);
+      if (!gated || trustsPost) actionProblems.push(`${relative(ROOT, file)}#${match[1]}`);
+    }
+  }
+  check(
+    `Every Server Action under (assistant) (${serverActionFiles.length} files) resolves assistantActionScope first and trusts no posted user, link or centre id`,
+    serverActionFiles.length === 2 && actionProblems.length === 0,
+    actionProblems.join(", "),
+  );
+  const assessmentActions = stripComments(read("app/[locale]/(assistant)/assistant/[teacherId]/assessments/actions.ts"));
+  check("The assistant's assessment actions never read the posted centreId (the branch comes from the row)", !/\bcenterId\b/.test(assessmentActions));
+  const requestActions = stripComments(read("app/[locale]/(assistant)/assistant/[teacherId]/requests/actions.ts"));
+  check(
+    "A session request takes its branch from the class; a class request's named branch is only matched among the granted branches",
+    /findAtBranches\(scopeBranches\(scope, "requests\.manage"\)/.test(requestActions) &&
+      /scopeBranches\(scope, "requests\.manage"\)\.find\(\(entry\) => entry\.centerId === centerId\)/.test(requestActions) &&
+      !/centerId: centerId\b|[{,]\s*centerId,\s+request:/.test(requestActions),
+  );
+  const decisionFiles = [...walk(join(ROOT, "lib")), ...walk(join(ROOT, "app"))].filter((file) => /TEACHER_EQUIVALENT/.test(readSource(file)));
+  check(
+    "assistantCan is the only place an assistant's permission is decided (the equivalence table lives in one file)",
+    decisionFiles.length === 1 &&
+      /assistant-acting\.ts$/.test(decisionFiles[0]) &&
+      !assistantSurface.filter((file) => !/assistant-acting\.ts$/.test(file)).some((file) => /\bcan\("TEACHER"/.test(readSource(file))),
+  );
+  check(
+    "The assistant reads select no phone (W7b: students.phones reveals nothing — the teacher's portal shows none)",
+    !/phone/i.test(stripComments(read("lib/db/assistant-reads.ts"))),
+  );
+  check(
+    "The centre's request reads drop the assistant's id (scoped changeRequests.list maps every row through withoutAssistantId)",
+    /rows\.map\(withoutAssistantId\)/.test(read("lib/db/scoped.ts")) &&
+      !/viaAssistantUserId/.test(stripComments(read("app/[locale]/(center)/approvals/page.tsx"))) &&
+      !/viaAssistantUserId/.test(stripComments(read("app/[locale]/(center)/audit/page.tsx"))),
+  );
+  check(
+    "The audit feed names the teacher for an on-behalf row and never looks the assistant up",
+    /row\.onBehalfOfUserId \?\? row\.actorUserId/.test(read("lib/db/audit-feed.ts")),
+  );
+  check(
+    "No assistant path writes attendance, so the session change log and the receipt list never hold an assistant's row",
+    !assistantSurface.some((file) => /applyAttendanceChange|changeAttendanceStatus|createAttendance|recordPayment|sessionAttendanceChange/.test(stripComments(readSource(file)))),
+  );
+  check(
+    "The assistant nav offers no settlements, money, account or premium page",
+    !/settlement|payment|premium|account|profile|assistants/i.test(stripComments(read("lib/assistant-nav.ts")).replace(/assistantNavItems|AssistantActing|AssistantPermission|assistant-catalog|assistant-acting|assistantCan|assistantHome|assistantAssessments|assistantClasses|assistantRequests|assistantOverview/g, "")),
+  );
   check("ASSISTANT is not a TenantRole: can() never sees it", !/ASSISTANT/.test(stripComments(read("lib/auth/permissions.ts"))));
   check(
     "The experience list and the assistant gate build only on effective links",
@@ -543,17 +682,30 @@ async function main() {
   const lapsedWrites = await Promise.all([
     createAssistantInvite(prisma, { actorUserId: lapsing.id, preset: "GRADER", now: boundary }),
     updateAssistantPermissions(prisma, { actorUserId: lapsing.id, linkId: helperLink, change: { preset: "GRADER" }, now: boundary }),
-    removeAssistant(prisma, { actorUserId: lapsing.id, linkId: helperLink, now: boundary }),
   ]);
-  check("A lapsed teacher is refused every teacher action (premiumRequired)", lapsedWrites.every((result) => !result.ok && result.error === "premiumRequired"));
+  check("A lapsed teacher is refused what widens access — a new invite, a permission change (premiumRequired)", lapsedWrites.every((result) => !result.ok && result.error === "premiumRequired"));
+  // W7b (D-W37 item 12, the prompt's old → new): reducing access never needs premium.
+  const spareInvite = await invite(lapsing.id, "GRADER", before);
+  const { linkId: spareLink } = await link(lapsing.id, "GRADER");
+  const lapsedRevoke = await revokeAssistantInvite(prisma, { actorUserId: lapsing.id, inviteId: spareInvite.inviteId, now: boundary });
+  const lapsedRemove = await removeAssistant(prisma, { actorUserId: lapsing.id, linkId: spareLink, now: boundary });
+  check(
+    "…but a lapsed teacher may still revoke an invite and remove an assistant (W7b: no premium needed)",
+    lapsedRevoke.ok && lapsedRemove.ok &&
+      (await prisma.assistantInvite.findUniqueOrThrow({ where: { id: spareInvite.inviteId } })).revokedAt !== null &&
+      (await prisma.teacherAssistant.findUniqueOrThrow({ where: { id: spareLink } })).revokedAt !== null,
+  );
   const lapsedCode = await invite(lapsing.id, "GRADER", before);
   const toLapsed = await redeemAssistantCode(prisma, { userId: (await makeUser("late")).id, code: lapsedCode.code, ip: ip(), now: boundary });
   check("A code from a teacher who is not premium now is refused (teacherUnavailable), nothing claimed", !toLapsed.ok && toLapsed.error === "teacherUnavailable" && (await prisma.assistantInvite.findUniqueOrThrow({ where: { id: lapsedCode.inviteId } })).usedAt === null);
   const renewed = await extendPremium(prisma, { actorUserId: admin.id, userId: lapsing.id, endDay: premiumLatestEndDay(now), now });
   check("Renewal (W6's extend) restores the experience at the same instant, grants unchanged", renewed.ok && (await keys(boundary)).includes(assistantExperienceKey(lapsing.id)) &&
     (await findEffectiveAssistantLink(prisma, { assistantUserId: helper.id, teacherUserId: lapsing.id, now: boundary }))?.permissions.join() === PRESET_PERMISSIONS.FULL.join());
+  const { assistant: leaver, linkId: leaverLink } = await link(lapsing.id, "GRADER");
   const revokedPremium = await revokePremium(prisma, { actorUserId: admin.id, userId: lapsing.id, now });
   const listedAfterRevoke = (await loadExperiences(prisma, helper.id)).map((entry) => entry.key);
+  const lapsedLeave = await leaveAssistantLink(prisma, { actorUserId: leaver.id, linkId: leaverLink });
+  check("An assistant may leave a teacher who is not premium now (W7b: no premium needed)", revokedPremium.ok && lapsedLeave.ok);
   const regranted = await grantPremium(prisma, { actorUserId: admin.id, userId: lapsing.id, endDay: premiumLatestEndDay(now), now });
   const listedAfterRegrant = (await loadExperiences(prisma, helper.id)).map((entry) => entry.key);
   check(
@@ -590,7 +742,9 @@ async function main() {
 
   const intruders: [string, string | null, string][] = [
     ["no actor", null, "forbidden"],
-    ["a non-premium teacher", plainTeacher.id, "premiumRequired"],
+    // W7b: revoke and remove need no premium, so a non-premium teacher gets the
+    // ownership refusal (notFound) on those two instead (the prompt's old → new).
+    ["a non-premium teacher", plainTeacher.id, "premiumRequired|notFound|premiumRequired|notFound"],
     ["premium OWNER", premiumStaff.OWNER.id, "forbidden"],
     ["premium MANAGER", premiumStaff.MANAGER.id, "forbidden"],
     ["premium RECEPTIONIST", premiumStaff.RECEPTIONIST.id, "forbidden"],
@@ -606,7 +760,8 @@ async function main() {
       await updateAssistantPermissions(prisma, { actorUserId: actor, linkId: victimLink, change: { preset: "FULL" }, now }),
       await removeAssistant(prisma, { actorUserId: actor, linkId: victimLink, now }),
     ];
-    check(`${label}: create, revoke, change permissions and remove all refused (${expected})`, results.every((result) => !result.ok && result.error === expected), results.map((result) => (result.ok ? "ok" : result.error)).join(","));
+    const wanted = expected.includes("|") ? expected.split("|") : results.map(() => expected);
+    check(`${label}: create, revoke, change permissions and remove all refused (${expected})`, results.every((result, index) => !result.ok && result.error === wanted[index]), results.map((result) => (result.ok ? "ok" : result.error)).join(","));
   }
   const otherResults = [
     await revokeAssistantInvite(prisma, { actorUserId: otherTeacher.id, inviteId: victimInvite.inviteId, now }),
@@ -699,6 +854,367 @@ async function main() {
   check(
     "The effective links read nothing of a centre (teacher id and name, grants, dates)",
     (await effectiveAssistantLinks(prisma, helper.id, now)).every((item) => Object.keys(item).sort().join() === "linkId,permissions,preset,since,teacherName,teacherUserId"),
+  );
+
+  await checkActingOnBehalf({ centerA: center.id, now, premiumTeacher, link });
+}
+
+// ── 13–20. W7b: acting on behalf (D-W17, D-W18, D-W19, D-W37) ────────────
+
+const DAY_MS = 86_400_000;
+
+/** What `resolveAssessmentTeacher` reads of a context — the branch's real stored TEACHER cells. */
+async function teacherAuthority(centerId: string, userId: string) {
+  return { center: { id: centerId }, user: { id: userId }, role: "TEACHER" as const, grants: await loadPermissionGrants(prisma, centerId, "TEACHER"), experienceDenied: false };
+}
+
+function draftExam(now: Date, extra: Partial<AssessmentDraft> = {}): AssessmentDraft {
+  return {
+    ...assessmentDefaults("EXAM"),
+    title: "On-behalf exam",
+    instructions: null,
+    windowStart: new Date(now.getTime() - 60 * 60_000),
+    windowEnd: new Date(now.getTime() + 3 * 60 * 60_000),
+    deadline: null,
+    durationMinutes: 30,
+    questions: [
+      { text: "Q1", points: 2, options: [{ text: "A", isCorrect: true }, { text: "B", isCorrect: false }] },
+      { text: "Q2", points: 3, options: [{ text: "C", isCorrect: false }, { text: "D", isCorrect: true }] },
+    ],
+    ...extra,
+  };
+}
+
+async function setTeacherCell(centerId: string, action: Permission, allowed: boolean) {
+  await savePermissionGrants(prisma, centerId, [{ role: "TEACHER", action, allowed }]);
+}
+
+async function checkActingOnBehalf(input: {
+  /** The W7a section's bare centre: the W7b teachers step out of it, so only the provisioned branches count. */
+  centerA: string;
+  now: Date;
+  premiumTeacher: (tag: string) => Promise<{ id: string; firstName: string; lastName: string; email: string | null }>;
+  link: (teacherId: string, preset?: string) => Promise<{ assistant: { id: string; firstName: string; lastName: string; email: string | null }; linkId: string }>;
+}) {
+  const { now } = input;
+  const org = await prisma.organization.create({ data: { name: `${ORG_NAME} W7b ${RUN}` } });
+  const makeBranch = async (suffix: string, organizationId: string) => {
+    const branch = await prisma.center.create({ data: { slug: `${STEM}-${suffix}-${RUN}`, name: `${ORG_NAME} ${suffix}`, organizationId } });
+    await prisma.$transaction((tx) => provisionCenterBaseline(tx, branch.id));
+    return branch;
+  };
+  const b1 = await makeBranch("b1", org.id);
+  const b2 = await makeBranch("b2", org.id);
+  const foreignOrg = await prisma.organization.create({ data: { name: `${ORG_NAME} X ${RUN}` } });
+  const x = await makeBranch("x", foreignOrg.id);
+
+  // The teacher T at both branches (trusted by default), another teacher U at B1, a teacher W at X.
+  const t = await input.premiumTeacher("w7b-teacher");
+  await member(b1.id, t.id, "TEACHER");
+  await member(b2.id, t.id, "TEACHER");
+  const u = await input.premiumTeacher("w7b-other");
+  await member(b1.id, u.id, "TEACHER");
+  const w = await makeUser("w7b-foreign");
+  await member(x.id, w.id, "TEACHER");
+  await prisma.membership.updateMany({ where: { centerId: input.centerA, userId: { in: [t.id, u.id] } }, data: { active: false } });
+  const tMembership = await prisma.membership.findFirstOrThrow({ where: { centerId: b1.id, userId: t.id, role: "TEACHER" } });
+
+  const coTeacher = await input.link(t.id, "CO_TEACHER");
+  const grader = await input.link(t.id, "GRADER");
+  const full = await input.link(t.id, "FULL");
+  const custom = await input.link(t.id, "GRADER");
+  if (!(await updateAssistantPermissions(prisma, { actorUserId: t.id, linkId: custom.linkId, change: { permissions: ["classes.view", "students.phones"] }, now })).ok) {
+    throw new Error("custom grants");
+  }
+  const ofOther = await input.link(u.id, "FULL");
+  const co = coTeacher.assistant;
+
+  // Classes, sessions and students.
+  const classAt = (centerId: string, teacherId: string) =>
+    prisma.classGroup.create({ data: { centerId, teacherId, price: 10_000, startDate: new Date(now.getTime() - 90 * DAY_MS), endDate: new Date(now.getTime() + 120 * DAY_MS) } });
+  const sessionAt = (centerId: string, classGroupId: string, teacherId: string, days: number) => {
+    const date = new Date(`${new Date(now.getTime() + days * DAY_MS).toISOString().slice(0, 10)}T00:00:00.000Z`);
+    return prisma.session.create({ data: { centerId, classGroupId, teacherId, date, startTime: "16:00", endTime: "17:00", priceSnapshot: 10_000 } });
+  };
+  const c1 = await classAt(b1.id, t.id);
+  const c2 = await classAt(b2.id, t.id);
+  const cU = await classAt(b1.id, u.id);
+  const cX = await classAt(x.id, w.id);
+  const sNext = await sessionAt(b1.id, c1.id, t.id, 2);
+  const sOld = await sessionAt(b1.id, c1.id, t.id, -60);
+  const enrol = async (centerId: string, classGroupId: string, tag: string, phone: string) => {
+    const user = await makeUser(`w7b-student-${tag}`);
+    const profile = await prisma.studentProfile.create({
+      data: scopedData(centerId, { userId: user.id, studentCode: `W7B-${tag}-${RUN}`, firstName: "Student", lastName: tag, phone }),
+    });
+    await prisma.enrollment.create({ data: scopedData(centerId, { studentProfileId: profile.id, classGroupId }) });
+    return { user, profile };
+  };
+  const studentOne = await enrol(b1.id, c1.id, "one", "+201001234567");
+  await enrol(b1.id, c1.id, "two", "+201007654321");
+
+  const can = (assistantUserId: string, permission: AssistantPermission, centerId: string, at: Date = now, teacherUserId: string = t.id) =>
+    assistantMayAt(prisma, { assistantUserId, teacherUserId, centerId, permission, now: at });
+
+  // ── 13. The matrix: every key × the refusals ──────────────────────────
+  console.log("\n13. Effective permission = grant ∧ the teacher's own authority ∧ the branch setting");
+  const ALL: AssistantPermission[] = [...ASSISTANT_PERMISSIONS];
+  const expectAllowed: Record<string, AssistantPermission[]> = {
+    CO_TEACHER: ["assessments.review", "assessments.manage", "classes.view", "requests.manage"],
+    GRADER: ["assessments.review"],
+    FULL: ["assessments.review", "assessments.manage", "classes.view", "requests.manage", "analytics.view"],
+    CUSTOM: ["classes.view"],
+  };
+  for (const [label, who] of [["CO_TEACHER", coTeacher], ["GRADER", grader], ["FULL", full], ["CUSTOM", custom]] as const) {
+    const got: AssistantPermission[] = [];
+    for (const permission of ALL) if (await can(who.assistant.id, permission, b1.id)) got.push(permission);
+    check(`${label}: allowed exactly ${expectAllowed[label].join(", ")} at the teacher's branch`, got.join() === expectAllowed[label].join(), got.join());
+  }
+  check(
+    "The workspace keys and students.phones grant nothing at a branch (W8; the teacher's portal shows no phone)",
+    !(await can(full.assistant.id, "checkin.workspace", b1.id)) && !(await can(full.assistant.id, "payments.workspace", b1.id)) && !(await can(custom.assistant.id, "students.phones", b1.id)),
+  );
+
+  const teacherCell: Partial<Record<AssistantPermission, Permission>> = {
+    "assessments.review": "assessment.manage.own",
+    "assessments.manage": "assessment.manage.own",
+    "requests.manage": "changeRequest.create",
+    "analytics.view": "analytics.own.view",
+  };
+  const keys: AssistantPermission[] = ["assessments.review", "assessments.manage", "classes.view", "requests.manage", "analytics.view"];
+  for (const permission of keys) {
+    const holder = full.assistant.id;
+    const refusals: [string, boolean][] = [];
+    refusals.push(["grant missing", !(await can(permission === "assessments.review" ? custom.assistant.id : grader.assistant.id, permission, b1.id))]);
+    const cell = teacherCell[permission];
+    if (cell) {
+      await setTeacherCell(b1.id, cell, false);
+      refusals.push(["the teacher's own permission off", !(await can(holder, permission, b1.id))]);
+      refusals.push(["…while the other branch still allows it", await can(holder, permission, b2.id)]);
+      await setTeacherCell(b1.id, cell, true);
+    } else {
+      await prisma.membership.update({ where: { id: tMembership.id }, data: { active: false } });
+      refusals.push(["the teacher's own membership inactive", !(await can(holder, permission, b1.id))]);
+      await prisma.membership.update({ where: { id: tMembership.id }, data: { active: true } });
+    }
+    await prisma.centerSettings.update({ where: { centerId: b1.id }, data: { allowTeacherAssistants: false } });
+    refusals.push(["the branch setting off", !(await can(holder, permission, b1.id))]);
+    refusals.push(["…the other branch unaffected", await can(holder, permission, b2.id)]);
+    await prisma.centerSettings.update({ where: { centerId: b1.id }, data: { allowTeacherAssistants: true } });
+    if (permission === "requests.manage") {
+      await prisma.membership.update({ where: { id: tMembership.id }, data: { isTrustedTeacher: false } });
+      refusals.push(["the teacher not trusted there", !(await can(holder, permission, b1.id))]);
+      await prisma.membership.update({ where: { id: tMembership.id }, data: { isTrustedTeacher: true } });
+    }
+    const premiumEnd = (await prisma.user.findUniqueOrThrow({ where: { id: t.id }, select: { premiumUntil: true } })).premiumUntil!;
+    refusals.push(["premium lapsed (at the end instant)", !(await can(holder, permission, b1.id, premiumEnd))]);
+    refusals.push(["…allowed 1 ms before it", await can(holder, permission, b1.id, new Date(premiumEnd.getTime() - 1))]);
+    refusals.push(["teacherId swapped to another teacher", !(await can(holder, permission, b1.id, now, u.id))]);
+    refusals.push(["another centre by id", !(await can(holder, permission, x.id))]);
+    refusals.push(["allowed again once restored", await can(holder, permission, b1.id)]);
+    const failed = refusals.filter(([, passed]) => !passed).map(([name]) => name);
+    check(`${permission}: refused for ${refusals.length - 3} reasons, allowed otherwise`, failed.length === 0, failed.join("; "));
+  }
+
+  // ── 14. Assessments by the assistant, through the unchanged writers ────
+  console.log("\n14. Assessments on behalf: the W2/W3a/W4 functions, actor = the assistant");
+  const tAtB1 = await resolveAssessmentTeacher(prisma, await teacherAuthority(b1.id, t.id));
+  const uAtB1 = await resolveAssessmentTeacher(prisma, await teacherAuthority(b1.id, u.id));
+  if (!tAtB1 || !uAtB1) throw new Error("teacher handles");
+  const asCo = { userId: co.id };
+  const created = await createAssessment(prisma, asCo, tAtB1, { type: "EXAM", classGroupId: c1.id, draft: draftExam(now) });
+  check("Co-teacher creates an exam in the teacher's class (owned by the teacher's membership)", created.ok && (await prisma.assessment.findUniqueOrThrow({ where: { id: created.ok ? created.id : "" } })).teacherMembershipId === tMembership.id);
+  const examId = created.ok ? created.id : "";
+  const saved = await saveAssessmentDraft(prisma, asCo, tAtB1, examId, draftExam(now, { title: "Saved by assistant" }));
+  const published = await publishAssessment(prisma, asCo, tAtB1, examId, now);
+  const extended = await extendAssessment(prisma, asCo, tAtB1, examId, new Date(now.getTime() + 5 * 60 * 60_000), now);
+  check("…saves, publishes and extends it", saved.ok && published.ok && extended.ok, JSON.stringify([saved, published, extended]));
+  const results = await readAssessmentResults(prisma, asCo, tAtB1, examId, now);
+  const graderResults = await readAssessmentResults(prisma, { userId: grader.assistant.id }, tAtB1, examId, now);
+  check("Co-teacher and Grader read its results (W4), the students listed", results.ok && graderResults.ok && results.results.students.length === 2);
+  const attempt = await startAttempt(prisma, { centerId: b1.id, studentProfileId: studentOne.profile.id, userId: studentOne.user.id }, examId, now);
+  const attemptRead = attempt.ok ? await readAttemptResult(prisma, { userId: grader.assistant.id }, tAtB1, examId, attempt.attemptId, now) : null;
+  check("…and one student's attempt", attemptRead?.ok === true);
+  const graderWrites = [
+    await createAssessment(prisma, { userId: grader.assistant.id }, tAtB1, { type: "EXAM", classGroupId: c1.id, draft: draftExam(now) }),
+    await saveAssessmentDraft(prisma, { userId: grader.assistant.id }, tAtB1, examId, draftExam(now)),
+    await publishAssessment(prisma, { userId: grader.assistant.id }, tAtB1, examId, now),
+    await unpublishAssessment(prisma, { userId: grader.assistant.id }, tAtB1, examId),
+    await extendAssessment(prisma, { userId: grader.assistant.id }, tAtB1, examId, new Date(now.getTime() + 9 * 60 * 60_000), now),
+    await deleteAssessment(prisma, { userId: grader.assistant.id }, tAtB1, examId),
+  ];
+  check("A Grader can read results but not build, save, publish, unpublish, extend or delete (forbidden ×6)", graderWrites.every((result) => !result.ok && result.error === "forbidden"), graderWrites.map((r) => (r.ok ? "ok" : r.error)).join(","));
+  const customRead = await readAssessmentResults(prisma, { userId: custom.assistant.id }, tAtB1, examId, now);
+  check("classes.view alone reads no results and writes nothing", !customRead.ok && customRead.error === "forbidden" && !(await createAssessment(prisma, { userId: custom.assistant.id }, tAtB1, { type: "EXAM", classGroupId: c1.id, draft: draftExam(now) })).ok);
+  const intrusions = [
+    // Another teacher's assistant, with the first teacher's handle.
+    await saveAssessmentDraft(prisma, { userId: ofOther.assistant.id }, tAtB1, examId, draftExam(now)),
+    // Our assistant with another teacher's handle (a swapped teacherId).
+    await createAssessment(prisma, asCo, uAtB1, { type: "EXAM", classGroupId: cU.id, draft: draftExam(now) }),
+    // Our assistant, the teacher's handle, another teacher's class by id.
+    await createAssessment(prisma, asCo, tAtB1, { type: "EXAM", classGroupId: cU.id, draft: draftExam(now) }),
+    // …another centre's class by id.
+    await createAssessment(prisma, asCo, tAtB1, { type: "EXAM", classGroupId: cX.id, draft: draftExam(now) }),
+    // …a forged handle naming another centre.
+    await createAssessment(prisma, asCo, { ...tAtB1, centerId: x.id }, { type: "EXAM", classGroupId: cX.id, draft: draftExam(now) }),
+  ];
+  const errors = intrusions.map((result) => (result.ok ? "ok" : result.error));
+  check("Refused by direct call: another teacher's assistant, a swapped teacher, another teacher's class, another centre's class, a forged centre", errors.join() === "forbidden,forbidden,notFound,notFound,forbidden", errors.join());
+  const uExam = await createAssessment(prisma, { userId: u.id }, uAtB1, { type: "EXAM", classGroupId: cU.id, draft: draftExam(now) });
+  const uTouch = uExam.ok ? await saveAssessmentDraft(prisma, asCo, tAtB1, uExam.id, draftExam(now)) : null;
+  check("Another teacher's assessment by id, through our teacher's handle: notFound", uTouch !== null && !uTouch.ok && uTouch.error === "notFound");
+  if (uExam.ok) await deleteAssessment(prisma, { userId: u.id }, uAtB1, uExam.id);
+
+  // The branch setting off cuts the writers and the read at once.
+  await prisma.centerSettings.update({ where: { centerId: b1.id }, data: { allowTeacherAssistants: false } });
+  const cutRead = await readAssessmentResults(prisma, asCo, tAtB1, examId, now);
+  const cutWrite = await extendAssessment(prisma, asCo, tAtB1, examId, new Date(now.getTime() + 7 * 60 * 60_000), now);
+  const teacherStill = await readAssessmentResults(prisma, { userId: t.id }, tAtB1, examId, now);
+  check("Branch setting off: the assistant's read and write are refused; the teacher is unaffected", !cutRead.ok && !cutWrite.ok && teacherStill.ok);
+  await prisma.centerSettings.update({ where: { centerId: b1.id }, data: { allowTeacherAssistants: true } });
+
+  // ── 15. Audit: actor + onBehalfOf, ids only ───────────────────────────
+  console.log("\n15. Audit rows: the assistant as actor, the teacher as onBehalfOf, ids only");
+  const teacherOwn = await createAssessment(prisma, { userId: t.id }, tAtB1, { type: "EXAM", classGroupId: c1.id, draft: draftExam(now, { title: "Teacher's own" }) });
+  const assessmentRows = await prisma.auditLog.findMany({ where: { entityType: "Assessment", entityId: examId } });
+  check(
+    `Every on-behalf assessment row (${assessmentRows.length}) carries actor = the assistant and onBehalfOf = the teacher`,
+    assessmentRows.length >= 4 && assessmentRows.every((row) => row.actorUserId === co.id && row.onBehalfOfUserId === t.id),
+    assessmentRows.map((row) => `${row.action}:${row.actorUserId === co.id}:${row.onBehalfOfUserId === t.id}`).join(","),
+  );
+  const ownRow = teacherOwn.ok ? await prisma.auditLog.findFirst({ where: { entityType: "Assessment", entityId: teacherOwn.id } }) : null;
+  check("The teacher's own write leaves onBehalfOf null", ownRow !== null && ownRow.actorUserId === t.id && ownRow.onBehalfOfUserId === null);
+  if (teacherOwn.ok) await deleteAssessment(prisma, { userId: t.id }, tAtB1, teacherOwn.id);
+
+  // ── 16. Requests on behalf ────────────────────────────────────────────
+  console.log("\n16. Requests on behalf: stored as the teacher's, via assistant");
+  const tomorrow = new Date(now.getTime() + 3 * DAY_MS).toISOString().slice(0, 10);
+  const sessionPayload = { classGroupId: c1.id, date: tomorrow, startTime: "18:00", endTime: "19:00", note: "Private note text" };
+  const classPayload = { subjectId: null, gradeId: null, dayOfWeek: 2, startTime: "10:00", endTime: "11:00", lateThresholdMinutes: 10, note: null };
+  const sessionReq = await fileRequestOnBehalf(prisma, { assistantUserId: co.id, teacherUserId: t.id, centerId: b1.id, request: { type: "NEW_SESSION", payload: sessionPayload }, now });
+  const classReq = await fileRequestOnBehalf(prisma, { assistantUserId: co.id, teacherUserId: t.id, centerId: b2.id, request: { type: "NEW_CLASS", payload: classPayload }, now });
+  const stored = sessionReq.ok ? await prisma.changeRequest.findUniqueOrThrow({ where: { id: sessionReq.id } }) : null;
+  check(
+    "Co-teacher files a NEW_SESSION and a NEW_CLASS request; each is the teacher's (requestedBy) with viaAssistantUserId = the assistant, PENDING",
+    sessionReq.ok && classReq.ok && stored?.requestedBy === t.id && stored.viaAssistantUserId === co.id && stored.status === "PENDING",
+  );
+  const requestRefusals = [
+    await fileRequestOnBehalf(prisma, { assistantUserId: grader.assistant.id, teacherUserId: t.id, centerId: b1.id, request: { type: "NEW_SESSION", payload: sessionPayload }, now }),
+    await fileRequestOnBehalf(prisma, { assistantUserId: co.id, teacherUserId: t.id, centerId: b1.id, request: { type: "NEW_SESSION", payload: { ...sessionPayload, classGroupId: cU.id } }, now }),
+    await fileRequestOnBehalf(prisma, { assistantUserId: co.id, teacherUserId: t.id, centerId: x.id, request: { type: "NEW_SESSION", payload: { ...sessionPayload, classGroupId: cX.id } }, now }),
+    await fileRequestOnBehalf(prisma, { assistantUserId: co.id, teacherUserId: u.id, centerId: b1.id, request: { type: "NEW_CLASS", payload: classPayload }, now }),
+  ];
+  await prisma.membership.update({ where: { id: tMembership.id }, data: { isTrustedTeacher: false } });
+  requestRefusals.push(await fileRequestOnBehalf(prisma, { assistantUserId: co.id, teacherUserId: t.id, centerId: b1.id, request: { type: "NEW_CLASS", payload: classPayload }, now }));
+  await prisma.membership.update({ where: { id: tMembership.id }, data: { isTrustedTeacher: true } });
+  check(
+    "Refused: a Grader, another teacher's class, another centre, a swapped teacher, the teacher not trusted",
+    requestRefusals.map((r) => (r.ok ? "ok" : r.error)).join() === "forbidden,notFound,forbidden,forbidden,forbidden",
+    requestRefusals.map((r) => (r.ok ? "ok" : r.error)).join(),
+  );
+  const requestAudit = sessionReq.ok ? await prisma.auditLog.findFirst({ where: { entityType: "ChangeRequest", entityId: sessionReq.id } }) : null;
+  check(
+    "changeRequest.create is audited on the same transaction: actor = the assistant, onBehalfOf = the teacher, ids only (no note)",
+    requestAudit?.action === "changeRequest.create" && requestAudit.actorUserId === co.id && requestAudit.onBehalfOfUserId === t.id &&
+      requestAudit.centerId === b1.id && forbiddenAuditKey(requestAudit.after) === null && !JSON.stringify(requestAudit.after).includes("Private note"),
+  );
+
+  // ── 17. Centre-facing reads never name the assistant ──────────────────
+  console.log("\n17. Centre-facing reads: the teacher, \"via assistant\", never the assistant");
+  const secrets = [co.id, co.email ?? "@@", co.lastName, `${co.firstName} ${co.lastName}`];
+  const leaks = (value: unknown) => {
+    const text = JSON.stringify(value);
+    return secrets.filter((secret) => text.includes(secret));
+  };
+  const feed = await loadAuditFeed(prisma, b1.id, "all", { take: 200, skip: 0 });
+  const requestEntry = feed.entries.find((entry) => entry.entityType === "ChangeRequest" && sessionReq.ok && entry.entityId === sessionReq.id);
+  check(
+    "The centre audit log shows the request as the teacher's (local name) with viaAssistant, and never the assistant's name, email or id",
+    requestEntry?.viaAssistant === true && requestEntry.actorName?.lastName === "TEACHER" && leaks(feed).length === 0,
+    leaks(feed).join(","),
+  );
+  check("The centre audit log lists no assessment row (D-W11), on-behalf or not", feed.entries.every((entry) => entry.entityType !== "Assessment"));
+  const queue = (await prisma.changeRequest.findMany({ where: { centerId: b1.id, status: "PENDING" } })).map(withoutAssistantId);
+  check(
+    "The approvals queue's rows carry viaAssistant and no assistant id (what scoped changeRequests.list returns)",
+    queue.some((row) => row.viaAssistant && row.requestedBy === t.id) && leaks(queue).length === 0 && queue.every((row) => !("viaAssistantUserId" in row)),
+  );
+  const teacherRequests = await listTeacherRequestsAt(prisma, { centerId: b1.id, teacherUserId: t.id, floor: assistantFloorAt({ teacherHistoryDays: 0 }, { settings: { centerDataVisibilityDays: 365, teacherDataVisibilityDays: 30, timezone: "Africa/Cairo" } }, now) });
+  check("The assistant's own request list carries viaAssistant and no assistant id", teacherRequests.length >= 1 && teacherRequests[0].viaAssistant && leaks(teacherRequests).length === 0);
+
+  // ── 18. The window is the stricter of the two ─────────────────────────
+  console.log("\n18. The assistant's window: the stricter of the branch's teacher window and the teacher's own");
+  const settingsB1 = { centerDataVisibilityDays: 365, teacherDataVisibilityDays: 30, timezone: "Africa/Cairo" };
+  const today = todayInTimezone("Africa/Cairo", now);
+  const days = (date: Date) => Math.round((today.getTime() - date.getTime()) / DAY_MS);
+  check(
+    "Teacher all-history (0): the branch's 30 days; teacher 10: 10 days; teacher 60: still 30 days; branch 7 with teacher 10: 7",
+    days(assistantReadFloor({ settings: settingsB1, teacherHistoryDays: 0 }, now)) === 30 &&
+      days(assistantReadFloor({ settings: settingsB1, teacherHistoryDays: 10 }, now)) === 10 &&
+      days(assistantReadFloor({ settings: settingsB1, teacherHistoryDays: 60 }, now)) === 30 &&
+      days(assistantReadFloor({ settings: { ...settingsB1, teacherDataVisibilityDays: 7 }, teacherHistoryDays: 10 }, now)) === 7,
+  );
+  const floorB1 = assistantReadFloor({ settings: settingsB1, teacherHistoryDays: 0 }, now);
+  const detail = await assistantClassDetail(prisma, { centerId: b1.id, teacherUserId: t.id, classGroupId: c1.id, floor: floorB1 });
+  check(
+    "The class page's sessions stop at the floor: next week's session listed, the one 60 days ago not",
+    detail !== null && detail.sessions.some((s) => s.id === sNext.id) && !detail.sessions.some((s) => s.id === sOld.id),
+  );
+  const oldExam = await createAssessment(prisma, { userId: t.id }, tAtB1, { type: "EXAM", classGroupId: c1.id, draft: draftExam(now, { title: "Old" }) });
+  if (!oldExam.ok || !(await publishAssessment(prisma, { userId: t.id }, tAtB1, oldExam.id, now)).ok) throw new Error("old exam");
+  await prisma.assessment.update({ where: { id: oldExam.id }, data: { windowStart: new Date(now.getTime() - 41 * DAY_MS), windowEnd: new Date(now.getTime() - 40 * DAY_MS) } });
+  const oldByTeacher = await readAssessmentResults(prisma, { userId: t.id }, tAtB1, oldExam.id, now);
+  const oldByAssistant = await readAssessmentResults(prisma, asCo, tAtB1, oldExam.id, now);
+  check("An exam that closed 40 days ago: the teacher (all history) reads it, the assistant does not (branch window 30)", oldByTeacher.ok && !oldByAssistant.ok && oldByAssistant.error === "notFound");
+  await prisma.user.update({ where: { id: t.id }, data: { teacherHistoryDays: 3 } });
+  const recentWithTight = await readAssessmentResults(prisma, asCo, tAtB1, examId, now);
+  check("The teacher's own tighter window binds the assistant too (an open exam still reads)", recentWithTight.ok && !(await readAssessmentResults(prisma, asCo, tAtB1, oldExam.id, now)).ok);
+  await prisma.user.update({ where: { id: t.id }, data: { teacherHistoryDays: 0 } });
+
+  // ── 19. Phones hidden; classes.view writes nothing; navs ──────────────
+  console.log("\n19. Rosters show names only; the nav follows the grants");
+  const rosterKeys = new Set(detail?.roster.flatMap((row) => Object.keys(row)) ?? []);
+  check(
+    "The roster rows are id + names only — no phone, with or without students.phones (both students have phones on file)",
+    detail !== null && detail.roster.length === 2 && [...rosterKeys].sort().join() === "firstName,id,lastName" && !/\+20100/.test(JSON.stringify(detail)),
+  );
+  const list = await assistantClassList(prisma, { centerId: b1.id, teacherUserId: t.id });
+  check("The class list is the teacher's own classes only, with no phone", list.some((row) => row.id === c1.id) && !list.some((row) => row.id === cU.id) && !/phone/i.test(JSON.stringify(list)));
+  check("Each branch lists its own classes: B2's class at B2, not at B1", (await assistantClassList(prisma, { centerId: b2.id, teacherUserId: t.id })).some((row) => row.id === c2.id) && !list.some((row) => row.id === c2.id));
+  check("Another teacher's class is not found through the teacher's id", (await assistantClassDetail(prisma, { centerId: b1.id, teacherUserId: t.id, classGroupId: cU.id, floor: floorB1 })) === null);
+  const navOf = async (assistantUserId: string) => {
+    const acting = await resolveAssistantActing(prisma, { assistantUserId, teacherUserId: t.id, now });
+    return acting ? assistantNavItems(t.id, acting).map((item) => item.labelKey).join() : "none";
+  };
+  check(
+    "The assistant nav per preset: Grader → home, assessments; Co-teacher → + classes, requests; Full → + overview; classes.view only → home, classes",
+    (await navOf(grader.assistant.id)) === "home,assessments" &&
+      (await navOf(co.id)) === "home,assessments,classes,requests" &&
+      (await navOf(full.assistant.id)) === "home,assessments,classes,requests,overview" &&
+      (await navOf(custom.assistant.id)) === "home,classes",
+  );
+  await prisma.centerSettings.updateMany({ where: { centerId: { in: [b1.id, b2.id] } }, data: { allowTeacherAssistants: false } });
+  const noBranches = await resolveAssistantActing(prisma, { assistantUserId: full.assistant.id, teacherUserId: t.id, now });
+  check(
+    "Every branch switched off: the link still resolves (the landing page says \"Not available\") with no branch, and the nav is Home only",
+    noBranches !== null && noBranches.branches.length === 0 && (await navOf(full.assistant.id)) === "home",
+  );
+  await prisma.centerSettings.updateMany({ where: { centerId: { in: [b1.id, b2.id] } }, data: { allowTeacherAssistants: true } });
+
+  // ── 20. Removal, premium and the swapped id cut access at once ────────
+  console.log("\n20. Removing the link, lapsing premium or swapping the teacher cuts access immediately");
+  check("Before: Co-teacher acts at B1", await can(co.id, "assessments.manage", b1.id));
+  check("A swapped teacherId resolves nothing (the assistant of T for U)", (await resolveAssistantActing(prisma, { assistantUserId: co.id, teacherUserId: u.id, now })) === null);
+  check("The teacher's own id as the assistant resolves nothing", (await resolveAssistantActing(prisma, { assistantUserId: t.id, teacherUserId: t.id, now })) === null);
+  const premiumEnd = (await prisma.user.findUniqueOrThrow({ where: { id: t.id }, select: { premiumUntil: true } })).premiumUntil!;
+  check("Premium lapsed: nothing resolves and the writer refuses", (await resolveAssistantActing(prisma, { assistantUserId: co.id, teacherUserId: t.id, now: premiumEnd })) === null);
+  const removed = await removeAssistant(prisma, { actorUserId: t.id, linkId: coTeacher.linkId, now });
+  const afterRemove = await saveAssessmentDraft(prisma, asCo, tAtB1, examId, draftExam(now));
+  const readAfterRemove = await readAssessmentResults(prisma, asCo, tAtB1, examId, now);
+  check("Link removed: the next write and read are refused by direct call", removed.ok && !afterRemove.ok && !readAfterRemove.ok);
+  check(
+    "W7b assistants still hold no Membership and no PermissionGrant row of their own",
+    (await prisma.membership.count({ where: { userId: { in: [co.id, grader.assistant.id, full.assistant.id, custom.assistant.id] } } })) === 0,
   );
 }
 

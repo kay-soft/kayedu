@@ -8,7 +8,7 @@ import type { ResultProgress } from "@/lib/db/assessment-results";
 import { sessionZone, type TeacherAssessmentListRow } from "@/lib/db/assessments";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { Link } from "@/lib/i18n/navigation";
-import { ROUTES } from "@/lib/routes";
+import { TEACHER_SURFACE, assessmentRoutes, type AssessmentSurface } from "@/lib/routes";
 import { sessionDisplayName } from "@/lib/session-label";
 
 export type AssessmentListEntry = {
@@ -32,11 +32,15 @@ export async function AssessmentList({
   entries,
   showBranch,
   showClass = true,
+  surface = TEACHER_SURFACE,
 }: {
   entries: AssessmentListEntry[];
   showBranch: boolean;
   showClass?: boolean;
+  /** W7b: the teacher's own pages, or an assistant's for one teacher. */
+  surface?: AssessmentSurface;
 }) {
+  const routes = assessmentRoutes(surface);
   const t = await getTranslations("TeacherAssessments");
   const locale = await getLocale();
 
@@ -60,7 +64,7 @@ export async function AssessmentList({
             key={row.id}
             className="flex flex-col gap-3 rounded-xl border border-border p-4 transition-ui hover:border-border-strong hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
           >
-            <Link href={ROUTES.teacherAssessment(row.id)} className="flex min-h-11 min-w-0 flex-1 flex-col justify-center">
+            <Link href={routes.detail(row.id)} className="flex min-h-11 min-w-0 flex-1 flex-col justify-center">
               <p dir="auto" className="min-w-0 break-words text-sm font-semibold text-text-primary">
                 {row.title || t("untitled")}
               </p>
@@ -82,7 +86,7 @@ export async function AssessmentList({
                 </span>
               ) : null}
               {row.status === "PUBLISHED" ? (
-                <LinkButton href={ROUTES.teacherAssessmentResults(row.id)}>
+                <LinkButton href={routes.results(row.id)}>
                   <BarChart3 className="size-4" aria-hidden />
                   {t("results.action")}
                 </LinkButton>

@@ -5,7 +5,7 @@ import { LinkButton } from "@/components/shared/link-button";
 import { Badge } from "@/components/ui/badge";
 import { RESULT_STATUS_BADGE, type ResultRow } from "@/lib/assessment-results";
 import { formatDateTime, formatNumber } from "@/lib/format";
-import { ROUTES } from "@/lib/routes";
+import { TEACHER_SURFACE, assessmentRoutes, type AssessmentSurface } from "@/lib/routes";
 
 /**
  * The per-student results (W4, docs/04 §11.35): a table from `xl`, stacked cards
@@ -17,11 +17,14 @@ export async function ResultRows({
   assessmentId,
   branchName,
   zone,
+  surface = TEACHER_SURFACE,
 }: {
   rows: ResultRow[];
   assessmentId: string;
   branchName: string;
   zone: string;
+  /** W7b: the attempt links of the teacher's pages, or an assistant's. */
+  surface?: AssessmentSurface;
 }) {
   const t = await getTranslations("TeacherAssessments.results");
   const locale = await getLocale();
@@ -43,7 +46,7 @@ export async function ResultRows({
     submitted: row.submittedAt ? formatDateTime(row.submittedAt, locale, zone) : none,
     link: row.attemptId
       ? {
-          href: ROUTES.teacherAssessmentAttempt(assessmentId, row.attemptId),
+          href: assessmentRoutes(surface).attempt(assessmentId, row.attemptId),
           label: row.status === "SUBMITTED" ? t("viewAnswers") : t("viewProgress"),
         }
       : null,

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Circle, Eye, Plus, Trash2, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
+import { assistantSaveAssessmentAction } from "@/app/[locale]/(assistant)/assistant/[teacherId]/assessments/actions";
 import { saveAssessmentAction } from "@/app/[locale]/(teacher)/teacher/assessments/actions";
 import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
@@ -17,7 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { TimePicker } from "@/components/ui/time-picker";
 import { ASSESSMENT_LIMITS, isReady, newDraftQuestion, readiness, totalPoints, type DraftError } from "@/lib/assessments";
-import { ROUTES } from "@/lib/routes";
+import { TEACHER_SURFACE, assessmentRoutes, surfaceFields, type AssessmentSurface } from "@/lib/routes";
 import { useGuardedActionState } from "@/lib/ui/action-feedback";
 import {
   IDLE_ASSESSMENT_STATE,
@@ -85,6 +86,7 @@ export function AssessmentBuilder({
   todayIso,
   deadlineBasis,
   initial,
+  surface = TEACHER_SURFACE,
 }: {
   mode: "create" | "edit";
   /** The row's branch — re-resolved by the action, never trusted. */
@@ -100,6 +102,8 @@ export function AssessmentBuilder({
   /** How a new homework's deadline was pre-filled (D-W03), for the muted line under it. */
   deadlineBasis?: "nextSession" | "fallback";
   initial: AssessmentPayload;
+  /** W7b: the teacher's own builder, or an assistant's for that teacher (D-W37). */
+  surface?: AssessmentSurface;
 }) {
   const t = useTranslations("TeacherAssessments.builder");
   const tReady = useTranslations("TeacherAssessments.ready");
@@ -107,7 +111,10 @@ export function AssessmentBuilder({
   const tErrors = useTranslations("TeacherAssessments.errors");
   const locale = useLocale();
 
-  const [state, formAction] = useGuardedActionState(saveAssessmentAction, IDLE_ASSESSMENT_STATE);
+  const [state, formAction] = useGuardedActionState(
+    surface.kind === "assistant" ? assistantSaveAssessmentAction : saveAssessmentAction,
+    IDLE_ASSESSMENT_STATE,
+  );
   const [edit, setEdit] = useState<EditState>(() => toEdit(initial));
   const payloadJson = JSON.stringify(toPayload(edit));
 
@@ -244,6 +251,9 @@ export function AssessmentBuilder({
     >
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="centerId" value={centerId} />
+      {Object.entries(surfaceFields(surface)).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
       <input type="hidden" name="type" value={type} />
       {assessmentId ? <input type="hidden" name="assessmentId" value={assessmentId} /> : null}
       {classGroupId ? <input type="hidden" name="classGroupId" value={classGroupId} /> : null}
@@ -584,7 +594,7 @@ export function AssessmentBuilder({
         <div className="flex flex-wrap items-center gap-2">
           {mode === "edit" && assessmentId ? (
             <LinkButton
-              href={ROUTES.teacherAssessmentPreview(assessmentId)}
+              href={assessmentRoutes(surface).preview(assessmentId)}
             >
               <Eye className="size-4" aria-hidden />
               {t("preview")}

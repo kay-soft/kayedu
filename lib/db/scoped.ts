@@ -34,6 +34,7 @@ import {
   scopedFindById,
   scopedWhere,
 } from "./tenant-scope.ts";
+import { withoutAssistantId } from "./request-view.ts";
 import { staffInvitationFilter, staffMembershipFilter } from "./staff-filter.ts";
 import { centreReadFloor, type VisibilitySettings } from "./visibility.ts";
 import { consecutiveAbsenceCount } from "./attendance.ts";
@@ -1217,11 +1218,14 @@ function buildScoped(prisma: PrismaClient, ctx: ScopeContext, visibilityFloor: D
         // Approvals queue passes "asc" — the oldest waits at the top (F7).
         options?: { take?: number; order?: "asc" | "desc" },
       ) =>
-        prisma.changeRequest.findMany({
-          where: scopedWhere(centerId, where),
-          orderBy: { createdAt: options?.order ?? "desc" },
-          ...(options?.take ? { take: options.take } : {}),
-        }),
+        prisma.changeRequest
+          .findMany({
+            where: scopedWhere(centerId, where),
+            orderBy: { createdAt: options?.order ?? "desc" },
+            ...(options?.take ? { take: options.take } : {}),
+          })
+          // W7b (D-W37): the assistant's id never leaves the data layer — only `viaAssistant`.
+          .then((rows) => rows.map(withoutAssistantId)),
 
       count: (where?: Prisma.ChangeRequestWhereInput) =>
         prisma.changeRequest.count({ where: scopedWhere(centerId, where) }),
