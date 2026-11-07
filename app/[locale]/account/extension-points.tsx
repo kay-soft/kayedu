@@ -1,5 +1,5 @@
 import type { User } from "@prisma/client";
-import { Baby, KeyRound, Users } from "lucide-react";
+import { Baby, Check, KeyRound, Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import {
@@ -15,7 +15,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Ltr } from "@/components/shared/ltr";
 import { LinkButton } from "@/components/shared/link-button";
 import { PageSection } from "@/components/shared/page-section";
+import { PremiumStatusBadge, premiumDayLabel } from "@/components/shared/premium-status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { premiumStatus } from "@/lib/auth/premium";
 import { hasTeacherMembership } from "@/lib/db/account";
 import { showsStudyDetails } from "@/lib/db/account-study";
 import { listCatalogGrades } from "@/lib/db/catalog";
@@ -237,6 +239,54 @@ export async function TeacherHistorySection({ user }: AccountSectionProps) {
       <Card>
         <CardContent>
           <TeacherHistoryForm teacherHistoryDays={user.teacherHistoryDays} />
+        </CardContent>
+      </Card>
+    </PageSection>
+  );
+}
+
+/**
+ * Account → Premium (W6, D-W35, docs/04 §11.36): every account, whatever its
+ * role — premium belongs to the person, not a branch. The status (Not premium,
+ * Premium until <date>, Expired on <date>, and "Ends in n days" within
+ * `PREMIUM_ENDING_SOON_DAYS`), what premium adds, and how to get it: by
+ * contacting KayEdu. No payment and no self-serve in v1. Worked out from
+ * `User.premiumUntil` on this request (`premiumStatus`), never stored.
+ */
+export async function PremiumSection({ user }: AccountSectionProps) {
+  const [t, locale] = await Promise.all([getTranslations("Account.premium"), getLocale()]);
+  const status = premiumStatus(user.premiumUntil, new Date());
+  const features = ["assistants", "workspaces", "assessments"] as const;
+
+  return (
+    <PageSection title={t("title")} description={t("description")}>
+      <Card>
+        <CardHeader>
+          <CardTitle as="h3" className="flex flex-wrap items-center gap-2">
+            <span>{t("cardTitle")}</span>
+            <PremiumStatusBadge status={status} />
+          </CardTitle>
+          <CardDescription>
+            {status.kind === "active"
+              ? t("activeNote", { date: premiumDayLabel(status.endDay, locale) })
+              : status.kind === "expired"
+                ? t("expiredNote", { date: premiumDayLabel(status.endDay, locale) })
+                : t("noneNote")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-text-primary">{t("addsTitle")}</p>
+            <ul className="flex flex-col gap-2">
+              {features.map((feature) => (
+                <li key={feature} className="flex items-start gap-2 text-sm text-text-secondary">
+                  <Check className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
+                  <span>{t(`adds.${feature}`)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <p className="text-sm text-text-secondary">{t("contact")}</p>
         </CardContent>
       </Card>
     </PageSection>

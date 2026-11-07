@@ -119,6 +119,8 @@ export const ROUTES = {
   adminOrganization: (id: string) => `/admin/organizations/${id}`,
   adminPlatform: "/admin/platform",
   adminCatalog: "/admin/catalog",
+  // W6 (D-W35): premium for an account, found by its exact email.
+  adminTeachers: "/admin/teachers",
 } as const;
 
 /**

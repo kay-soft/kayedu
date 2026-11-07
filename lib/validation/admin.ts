@@ -7,6 +7,7 @@ import { localeSchema } from "./auth.ts";
 import { MAX_PRICE_PIASTRES, parseEgpToPiastres } from "../money.ts";
 import { BRANCH_COPY_KEYS, BRANCH_PAUSE_REASON_MAX, MAX_BRANCH_LIMIT, type BranchCopyKey } from "../branch-setup.ts";
 import { dateKeyField } from "./class-period.ts";
+import { premiumEndDayError } from "../auth/premium.ts";
 import { visibilityWindowField } from "./settings.ts";
 import {
   DEFAULT_CENTER_VISIBILITY_DAYS,
@@ -263,4 +264,31 @@ export const branchDeleteSchema = z.object({
 export const branchRestoreSchema = z.object({
   locale: localeSchema,
   id: branchId,
+});
+
+// ── W6 (D-W35): premium. Messages are keys under `AdminPremium.errors`. ──────
+
+const premiumUserId = z.string().trim().min(1, "accountNotFound").max(64, "accountNotFound");
+
+/** An end day: a real date, today or later, at most 400 days ahead (Cairo) — `premiumEndDayError`, the writer's own rule. */
+const premiumEndDay = dateKeyField.superRefine((value, ctx) => {
+  const error = premiumEndDayError(value, new Date());
+  if (error) ctx.addIssue({ code: "custom", message: error });
+});
+
+/** The lookup box: one exact email, trimmed and lower-cased by `findPremiumAccountByEmail`. */
+export const premiumLookupSchema = z.object({
+  locale: localeSchema,
+  email: z.string({ error: "emailRequired" }).trim().min(1, "emailRequired").max(254, "emailRequired"),
+});
+
+export const premiumGrantSchema = z.object({
+  locale: localeSchema,
+  userId: premiumUserId,
+  endDay: premiumEndDay,
+});
+
+export const premiumRevokeSchema = z.object({
+  locale: localeSchema,
+  userId: premiumUserId,
 });

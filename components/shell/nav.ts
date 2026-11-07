@@ -141,6 +141,8 @@ const ADMIN_NAV: NavDef[] = [
   { href: ROUTES.adminCenters, labelKey: "centers", icon: "centers" },
   { href: ROUTES.adminPlatform, labelKey: "platform", icon: "platform" },
   { href: ROUTES.adminCatalog, labelKey: "catalog", icon: "catalog" },
+  // W6 (D-W35): "Teachers" — premium for an account, by exact email.
+  { href: ROUTES.adminTeachers, labelKey: "premium", icon: "teachers" },
 ];
 
 /**

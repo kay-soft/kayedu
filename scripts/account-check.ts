@@ -183,9 +183,14 @@ for (const [group, file, builder, experience] of [
   check(`${group}: the layout renders ${builder}()'s frame`, layout.includes(`await ${builder}()`) && /<AppShell \{\.\.\.frame\.props\}>/.test(layout));
 }
 const page = code("app/[locale]/account/page.tsx");
+// W6: since W1 the five shell calls live in `shellFrameFor` (components/shell/
+// experience-frame.ts), which the account page and the inbox share. Same meaning:
+// every experience's frame is built there, and the account page renders it.
+const frameSelector = code("components/shell/experience-frame.ts");
 check(
   "the account page renders every experience's shared frame",
-  ["centerShell()", "teacherShell()", "studentShell({ interruptions: false })", "parentShell()", "adminShell()"].every((call) => page.includes(call)) &&
+  ["centerShell()", "teacherShell()", "studentShell({ interruptions: false })", "parentShell()", "adminShell()"].every((call) => frameSelector.includes(call)) &&
+    /shellFrameFor\(experience\)/.test(page) &&
     /<AppShell \{\.\.\.frame\.props\}>/.test(page),
 );
 check("the account page keeps both named extension points", /<StudyDetailsSection\b/.test(page) && /<FamilySection\b/.test(page));

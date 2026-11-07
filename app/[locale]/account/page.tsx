@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 
 import { AccountEmailForm, AccountPasswordForm, AccountProfileForm } from "@/app/[locale]/account/account-forms";
-import { FamilySection, StudyDetailsSection, TeacherHistorySection } from "@/app/[locale]/account/extension-points";
+import { FamilySection, PremiumSection, StudyDetailsSection, TeacherHistorySection } from "@/app/[locale]/account/extension-points";
 import { Ltr } from "@/components/shared/ltr";
 import { AppShell } from "@/components/shell/app-shell";
 import { shellFrameFor } from "@/components/shell/experience-frame";
@@ -92,6 +92,8 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
         <StudyDetailsSection user={user} />
         <FamilySection user={user} />
         <TeacherHistorySection user={user} />
+        {/* W6 (D-W35): every account — premium belongs to the person, not a branch. */}
+        <PremiumSection user={user} />
 
         <PageSection title={t("securitySection")} description={t("securitySectionDescription")}>
           <div className="grid items-start gap-4 lg:grid-cols-2">

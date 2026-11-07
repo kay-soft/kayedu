@@ -164,6 +164,7 @@
     "centers": "Branches",
     "platform": "Platform",
     "catalog": "Catalog",
+    "premium": "Teachers",
     "settings": "Settings",
     "calendar": "Calendar",
     "profile": "Profile"
@@ -3630,6 +3631,21 @@
       "save": "Save",
       "saving": "Saving…",
       "saved": "Your teacher portal history was saved."
+    },
+    "premium": {
+      "title": "Premium",
+      "description": "Premium belongs to your account, not to a branch.",
+      "cardTitle": "Your premium",
+      "activeNote": "Your premium runs to the end of {date}, Cairo time.",
+      "expiredNote": "Your premium ended on {date}.",
+      "noneNote": "You don't have premium.",
+      "addsTitle": "What premium adds",
+      "adds": {
+        "assistants": "Assistants who work on your behalf",
+        "workspaces": "Personal workspaces for your own classes",
+        "assessments": "Exams and homework inside your workspaces"
+      },
+      "contact": "Contact KayEdu to subscribe or renew."
     }
   },
   "AdminOrganizations": {
@@ -4216,6 +4232,64 @@
       "submitted": "This has already been submitted.",
       "rateLimited": "Too many requests. Wait a moment and try again.",
       "network": "Couldn't reach the server. Check your connection and try again."
+    }
+  },
+  "Premium": {
+    "status": {
+      "none": "Not premium",
+      "active": "Premium until {date}",
+      "expired": "Expired on {date}",
+      "endsIn": "{count, plural, =0 {Ends today} one {Ends in # day} other {Ends in # days}}"
+    }
+  },
+  "AdminPremium": {
+    "title": "Teachers",
+    "subtitle": "Grant, extend or end premium for one account, found by its exact email. Premium belongs to the person, not to a branch.",
+    "lookup": {
+      "title": "Find an account",
+      "description": "Type the account's full email address. Nothing is listed, and part of an email finds nothing.",
+      "label": "Email",
+      "hint": "The exact email the person signs in with.",
+      "submit": "Find",
+      "searching": "Searching…"
+    },
+    "noMatch": "No account with that email",
+    "account": {
+      "email": "Email"
+    },
+    "grant": {
+      "label": "Premium until",
+      "submit": "Grant premium"
+    },
+    "extend": {
+      "label": "New end date",
+      "submit": "Extend"
+    },
+    "endDayHint": "Premium runs to the end of this day, Cairo time. Today or later, up to {max}.",
+    "revoke": {
+      "hint": "Ending premium takes effect at once.",
+      "trigger": "Revoke premium",
+      "title": "Revoke premium?",
+      "description": "{name} loses premium now. Nothing they made is deleted, and granting premium again restores it.",
+      "confirm": "Revoke"
+    },
+    "saved": {
+      "granted": "Premium granted.",
+      "extended": "Premium extended.",
+      "revoked": "Premium revoked."
+    },
+    "errors": {
+      "emailRequired": "Enter an email address.",
+      "forbidden": "Only a KayEdu platform admin can do this.",
+      "accountNotFound": "No account with that email",
+      "alreadyPremium": "This account is already premium. Extend it instead.",
+      "notPremium": "This account is not premium right now.",
+      "notLater": "Choose a date later than the current end date.",
+      "stale": "This account just changed. Find it again and retry.",
+      "required": "Choose a date.",
+      "invalidDate": "Choose a valid date.",
+      "dateInPast": "Choose today or a later date.",
+      "dateTooFar": "Choose a date no later than {max}."
     }
   }
 }

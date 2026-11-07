@@ -288,6 +288,12 @@ model User {
   // the default; 1–3650 otherwise. The teacher's own preference only — it
   // never widens any centre window and no centre-side read consults it.
   teacherHistoryDays Int    @default(0)
+  // W6 (D-W14, D-W35): premium belongs to the person, not a centre. The end of
+  // the last covered day in Africa/Cairo, as an exclusive instant (UTC); null =
+  // never premium. Premium is `premiumUntil > now`, decided only by
+  // lib/auth/premium.ts's `isPremium` — no stored boolean, no cron. Only a
+  // platform admin writes it (lib/db/premium.ts, audited `platform.premium.*`).
+  premiumUntil    DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

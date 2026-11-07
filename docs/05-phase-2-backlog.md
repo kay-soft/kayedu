@@ -444,6 +444,26 @@
 
 ---
 
+## 44. An admin premium overview and an expiring-soon list
+
+**What it is.** A page under `/admin/teachers` listing the accounts that are premium now, with their end dates, and a list of those ending within the next few weeks, so KayEdu can follow up on renewals.
+
+**Why deferred.** W6 (D-W35) deliberately builds an exact-email lookup only: no listing, no partial search, no browsing of users. A list of premium accounts is a list of users with names and emails, so it needs its own decision on what the admin may browse. The renewal conversation happens outside the product in v1 ("Contact KayEdu").
+
+**Depends on.** A decision on what a list may show (name, email, end date) and to which admins; paging and a count read over `User.premiumUntil` (an index if the list grows); the same `requirePlatformAdmin()` and `lib/db/premium.ts` re-check.
+
+---
+
+## 45. Notices for a premium grant, expiry or renewal
+
+**What it is.** An inbox notice (and, once `EMAIL_ENABLED` has a sender, an email) when an account is granted premium, when it is about to end, when it has ended, and when it is renewed.
+
+**Why deferred.** Out of scope at W6 (D-W35, item 7). An "about to end" or "has ended" notice has no event to write it, and rule 12 allows no cron, so it would have to be computed on read (the D-W32 "soon" pattern) — a design of its own. The grant and renewal notices are simple, but shipping only those would be half a feature.
+
+**Depends on.** A new notification kind or kinds (an additive enum migration), the compute-on-read producer for expiry, the audience (the account holder only), and the M20 email sender for anything beyond the inbox.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

@@ -52,7 +52,8 @@ const ROLES: RoleCase[] = [
   { account: "teacherNew", nav: ["centers"], home: "/teacher/centers", entry: "/teacher/dashboard" },
   { account: "studentDowntown", nav: ["schedule", "calendar", "assessments", "discover", "reservations"], home: "/student/schedule" },
   { account: "parentFamily", nav: ["schedule", "calendar"], home: "/parent" },
-  { account: "admin", nav: ["centers", "platform", "catalog"], home: "/admin/centers" },
+  // W6 (D-W35): + "premium" (Teachers).
+  { account: "admin", nav: ["centers", "platform", "catalog", "premium"], home: "/admin/centers" },
 ];
 
 /** `/{locale}` → the role's home, choosing the Downtown branch on the hub when asked. */

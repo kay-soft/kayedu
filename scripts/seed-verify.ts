@@ -85,7 +85,8 @@ const EXPECTED_CENTER_NAV: Record<StaffRole, string[]> = {
 // U7: Calendar joins the teacher, student and parent nav. (Teacher list: scripts/lib/expected-nav.ts.)
 const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "assessments", "discover", "reservations"];
 const EXPECTED_PARENT_NAV = ["schedule", "calendar"];
-const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog"];
+// W6 (D-W35): + "premium" (Teachers).
+const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog", "premium"];
 
 /**
  * U3 — the bookable test classes (single-session attendance, F6) per branch
@@ -285,7 +286,7 @@ async function main() {
     `${unstamped.length} without it — re-run the seed`,
   );
   check("No account claim is pending in the demo world", (await prisma.accountClaim.count({ where: { status: "PENDING" } })) === 0);
-  check("Admin nav is the 3 platform items", same(navForExperience("admin", "PLATFORM_ADMIN").map((i) => i.labelKey), EXPECTED_ADMIN_NAV));
+  check("Admin nav is the 4 platform items", same(navForExperience("admin", "PLATFORM_ADMIN").map((i) => i.labelKey), EXPECTED_ADMIN_NAV));
 
   // The nav ⇄ page-gate rule (docs/02 §6.2) holds for the real definitions.
   for (const [experience, defs] of [["center", CENTER_NAV], ["teacher", TEACHER_NAV]] as const) {

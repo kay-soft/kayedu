@@ -334,6 +334,9 @@ New. `PageHeader` (back to the list, the usage badge as meta), the **Branch limi
 ### `app/[locale]/(admin)/admin/catalog/page.tsx`
 Consistent. No change.
 
+### `app/[locale]/(admin)/admin/teachers/page.tsx` — **W6 (new)**
+Teachers (premium, D-W35): `PageHeader`, a **Find an account** card (one email field, LTR, and Find beside it from `sm`, stacked below), then either the neutral empty state "No account with that email" or one card for the match: name with a text status badge (Not premium / Premium until <date> green / Expired on <date>, plus an amber "Ends in n days"), the email row, an end-date `DatePicker` with Grant or Extend, and, while premium, **Revoke premium** behind the shared `ConfirmAction`. One column at every width; 44px targets. `04-design-system.md` §11.36.
+
 ---
 
 ## Other
