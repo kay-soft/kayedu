@@ -29,6 +29,7 @@ import {
 import { onboardingPath } from "@/lib/auth/onboarding";
 import { loadPermissionGrants } from "@/lib/db/permissions";
 import { activeChildLinks } from "@/lib/db/parents";
+import { ownsAnyWorkspace } from "@/lib/db/workspaces";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import {
@@ -132,6 +133,8 @@ export const listExperiences = cache(
       },
       // W7a: effective links only, premium worked out on this request.
       assistantLinks: (id) => assistantExperienceSources(prisma, id),
+      // W8a (D-W38 item 11): owning a workspace gives the Teacher entry.
+      ownsWorkspace: (id) => ownsAnyWorkspace(prisma, id),
     }),
 );
 
@@ -229,7 +232,10 @@ export const getTenantContext = cache(
       // gate that actually renders `/teacher/centers` itself without ever
       // reaching this redirect, so this only covers a teacher-experience page
       // reached some other way (a direct `/teacher/dashboard` URL, say).
-      if (experience === "teacher") return redirectTo(ROUTES.teacherCenters);
+      // W8a (D-W38 item 11): unless they own a workspace — then that is home.
+      if (experience === "teacher") {
+        return redirectTo((await ownsAnyWorkspace(prisma, user.id)) ? ROUTES.teacherWorkspaces : ROUTES.teacherCenters);
+      }
       return redirectTo(ROUTES.selectCenter);
     }
 
@@ -331,8 +337,14 @@ export const getStudentContexts = cache(
 );
 
 export type TeacherSession =
-  | { hasCenter: true; user: User; relations: CenterRelation[] }
-  | { hasCenter: false; user: User; relations: CenterRelation[] };
+  | { hasCenter: true; workspaceOnly: false; user: User; relations: CenterRelation[] }
+  | {
+      hasCenter: false;
+      /** W8a (D-W38 item 11): teaches at no branch but owns a PERSONAL workspace. */
+      workspaceOnly: boolean;
+      user: User;
+      relations: CenterRelation[];
+    };
 
 /**
  * The (teacher) route group's gate — deliberately **not**
@@ -355,7 +367,9 @@ export async function requireTeacherUser(): Promise<TeacherSession> {
   // U7: which branch(es) the portal reads is `getTeacherScope()`'s concern
   // (`lib/auth/teacher-scope.ts`) — All branches by default, never the staff
   // experience's `kayedu_center`.
-  return { hasCenter: hasTeacherCenter, user, relations };
+  if (hasTeacherCenter) return { hasCenter: true, workspaceOnly: false, user, relations };
+  // W8a: only an account with no branch pays for the workspace read.
+  return { hasCenter: false, workspaceOnly: await ownsAnyWorkspace(prisma, user.id), user, relations };
 }
 
 export type StudentSession = {
@@ -445,13 +459,15 @@ export const getParentChildren = cache(async (parentUserId: string): Promise<Par
  * Where a signed-in user with NO centre relation belongs (SYS): the platform
  * admin's console, the parent portal when they hold an active family link
  * (a link is not a centre relation, so the hub would otherwise tell a parent
- * "not connected to a branch" with no way to their children), else the
- * hub's empty state.
+ * "not connected to a branch" with no way to their children), their own
+ * workspaces when they own one (W8a, D-W38 item 11 — a workspace is not a
+ * centre relation either), else the hub's empty state.
  */
 export async function homeWithoutBranch(user: Pick<User, "id" | "isPlatformAdmin">): Promise<string> {
   if (user.isPlatformAdmin) return ROUTES.adminCenters;
-  const children = await getParentChildren(user.id);
-  return children.linked.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
+  const [children, ownsWorkspace] = await Promise.all([getParentChildren(user.id), ownsAnyWorkspace(prisma, user.id)]);
+  if (children.linked.length > 0) return ROUTES.parentHome;
+  return ownsWorkspace ? ROUTES.teacherWorkspaces : ROUTES.selectCenter;
 }
 
 /**
@@ -668,6 +684,7 @@ export async function resolveAccountExperience(hint: string | undefined): Promis
   if (relations.length === 0) {
     const home = await homeWithoutBranch(user);
     if (home === ROUTES.adminCenters) return "admin";
+    if (home === ROUTES.teacherWorkspaces) return "teacher";
     return home === ROUTES.parentHome ? "parent" : "student";
   }
 

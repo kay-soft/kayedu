@@ -25,6 +25,13 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  * `requireExperience("teacher")` — see its doc comment (`lib/auth/tenant.ts`)
  * for why that matters here.
  *
+ * W8a (D-W38 item 11): a teacher with no branch but a PERSONAL workspace gets
+ * the same minimal shell with Workspaces first (their landing), Assistants
+ * (which says assistants need a branch until W8d) and the centre directory.
+ * A teacher with neither keeps the directory alone (M15, unchanged); with
+ * premium, the directory links to Workspaces to create the first one.
+ * Workspaces never join the branch scope.
+ *
  * U7: the portal reads **All branches** by default (`getTeacherScope`). The
  * nav shows an item when any branch in view would show it, the Approvals
  * badge sums the branches that let this teacher act, and the header switcher
@@ -45,7 +52,13 @@ export async function teacherShell(): Promise<ShellFrame> {
     return {
       props: {
         experience: "teacher",
-        nav: [{ href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" }],
+        nav: session.workspaceOnly
+          ? [
+              { href: ROUTES.teacherWorkspaces, labelKey: "workspaces", icon: "workspaces" },
+              { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
+              { href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" },
+            ]
+          : [{ href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" }],
         brand: PLATFORM_BRAND,
         user: shellUser(session.user, "TEACHER"),
         experiences,

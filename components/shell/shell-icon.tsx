@@ -3,6 +3,7 @@
 import {
   BarChart3,
   BookOpen,
+  BriefcaseBusiness,
   Building2,
   CalendarDays,
   CalendarRange,
@@ -48,6 +49,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hid
   profile: UserRound,
   assessments: FileQuestion,
   assistants: UserCog,
+  workspaces: BriefcaseBusiness,
 };
 
 export function ShellIcon({

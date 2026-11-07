@@ -1323,7 +1323,38 @@ export async function deactivateClass(
   if (!current.active) return { ok: false, error: "alreadyInactive" };
   const now = options.now ?? new Date();
 
-  return db.$transaction(async (tx) => {
+  return db.$transaction((tx) => writeDeactivation(tx, centerId, classGroupId, current, options.actorUserId, now), WRITE_TRANSACTION_OPTIONS);
+}
+
+/**
+ * The same deactivation on the **caller's** transaction (W8a, D-W28): a
+ * workspace archive deactivates every active class of the workspace under one
+ * lock and one transaction (`lib/db/workspaces.ts`). The class is read on
+ * that transaction; everything after the read is `deactivateClass`'s own body
+ * (`writeDeactivation`), so the two cannot drift.
+ */
+export async function deactivateClassInTransaction(
+  tx: Tx,
+  centerId: string,
+  classGroupId: string,
+  options: { actorUserId?: string | null; now?: Date } = {},
+): Promise<DeactivateClassResult> {
+  const current = await loadPlan(tx, centerId, classGroupId);
+  if (!current) return { ok: false, error: "notFound" };
+  if (!current.active) return { ok: false, error: "alreadyInactive" };
+  return writeDeactivation(tx, centerId, classGroupId, current, options.actorUserId, options.now ?? new Date());
+}
+
+/** `deactivateClass`'s body: the writes after the class was read and found active. */
+async function writeDeactivation(
+  tx: Tx,
+  centerId: string,
+  classGroupId: string,
+  current: NonNullable<Awaited<ReturnType<typeof loadPlan>>>,
+  actorUserId: string | null | undefined,
+  now: Date,
+): Promise<DeactivateClassResult> {
+  {
     await tx.classGroup.updateMany({ where: scopedWhere(centerId, { id: classGroupId }), data: { active: false } });
     const { timeZone } = await centreScheduling(tx, centerId);
     const sessions = await futureSessions(tx, centerId, classGroupId, centreClock(now, timeZone));
@@ -1355,7 +1386,7 @@ export async function deactivateClass(
     }
     await audit(tx, {
       centerId,
-      actorUserId: options.actorUserId,
+      actorUserId,
       action: "classGroup.deactivate",
       entityType: "ClassGroup",
       entityId: classGroupId,
@@ -1363,7 +1394,7 @@ export async function deactivateClass(
       after: { active: false, sessionsDeleted: deleted, sessionsCancelled: cancelled },
     });
     return { ok: true as const, deleted, cancelled };
-  }, WRITE_TRANSACTION_OPTIONS);
+  }
 }
 
 export type ReactivateClassResult =

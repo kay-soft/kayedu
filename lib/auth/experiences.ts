@@ -11,6 +11,7 @@ import {
   type OwnerOrgGroup,
 } from "./relations.ts";
 import { effectiveAssistantLinks } from "../db/assistants.ts";
+import { ownsAnyWorkspace } from "../db/workspaces.ts";
 import { activeChildLinks } from "../db/parents.ts";
 import { ROUTES } from "../routes.ts";
 import { centerLogoSrc } from "../storage-paths.ts";
@@ -31,10 +32,12 @@ import { centerLogoSrc } from "../storage-paths.ts";
  *
  * A new kind plugs in here only: W7a added `assistant` (one per teacher whose
  * link is **effective** — live, and the teacher premium now — key
- * `assistant:<teacherUserId>`, D-W36), and W8's PERSONAL workspaces must be
- * left out of the staff step below (CLAUDE.md rule 13), so one never reads as
- * a branch. An assistant entry is no centre relation: it sets no
- * `kayedu_center` and names no branch.
+ * `assistant:<teacherUserId>`, D-W36). W8a's PERSONAL workspaces are left out
+ * of every relation (`ACCESSIBLE_CENTER` reads BRANCH only, CLAUDE.md rule
+ * 13), so one never reads as a branch here; owning one instead gives the
+ * account the **Teacher** entry (D-W38 item 11), landing on the workspaces
+ * when the account teaches at no branch. An assistant entry is no centre
+ * relation: it sets no `kayedu_center` and names no branch.
  */
 export type ExperienceKind = "staff" | "rollup" | "student" | "teacher" | "parent" | "assistant" | "admin";
 
@@ -84,6 +87,8 @@ export type ExperienceSources = {
   organizationNames: ReadonlyMap<string, string>;
   /** W7a: effective links only — the caller decides effectiveness (`effectiveAssistantLinks`). */
   assistantLinks?: AssistantExperienceSource[];
+  /** W8a: the account owns a PERSONAL workspace (archived included). */
+  ownsWorkspace?: boolean;
 };
 
 export function staffExperienceKey(centerId: string): string {
@@ -108,7 +113,15 @@ function branchBrand(center: Center): ExperienceEntry["brand"] {
  * top, then the platform console.
  */
 export function buildExperiences(sources: ExperienceSources): ExperienceEntry[] {
-  const { relations, orgGroups, hasLinkedChild, isPlatformAdmin, organizationNames, assistantLinks = [] } = sources;
+  const {
+    relations,
+    orgGroups,
+    hasLinkedChild,
+    isPlatformAdmin,
+    organizationNames,
+    assistantLinks = [],
+    ownsWorkspace = false,
+  } = sources;
   const entries: ExperienceEntry[] = [];
 
   if (relations.some((relation) => relation.roles.includes("STUDENT"))) {
@@ -121,13 +134,16 @@ export function buildExperiences(sources: ExperienceSources): ExperienceEntry[] 
       group: { kind: "portals" },
     });
   }
-  if (relations.some((relation) => relation.roles.includes("TEACHER"))) {
+  // W8a (D-W38 item 11): a teacher at a branch lands on the dashboard; an
+  // account whose only teaching is its own workspaces lands on them.
+  const teachesAtBranch = relations.some((relation) => relation.roles.includes("TEACHER"));
+  if (teachesAtBranch || ownsWorkspace) {
     entries.push({
       key: "teacher",
       kind: "teacher",
       icon: "teacher",
       label: { roles: ["TEACHER"], place: null },
-      href: ROUTES.teacherDashboard,
+      href: teachesAtBranch ? ROUTES.teacherDashboard : ROUTES.teacherWorkspaces,
       group: { kind: "portals" },
     });
   }
@@ -219,6 +235,8 @@ export type ExperienceReads = {
   isPlatformAdmin: (userId: string) => Promise<boolean>;
   /** W7a: the account's effective assistant links (live, teacher premium now). */
   assistantLinks: (userId: string) => Promise<AssistantExperienceSource[]>;
+  /** W8a: whether the account owns a PERSONAL workspace. */
+  ownsWorkspace: (userId: string) => Promise<boolean>;
 };
 
 /** The same resolvers with no request cache: what a gate runs. */
@@ -230,6 +248,7 @@ export function directExperienceReads(prisma: PrismaClient): ExperienceReads {
     isPlatformAdmin: async (userId) =>
       (await prisma.user.findUnique({ where: { id: userId }, select: { isPlatformAdmin: true } }))?.isPlatformAdmin ?? false,
     assistantLinks: (userId) => assistantExperienceSources(prisma, userId),
+    ownsWorkspace: (userId) => ownsAnyWorkspace(prisma, userId),
   };
 }
 
@@ -250,12 +269,13 @@ export async function loadExperiences(
   userId: string,
   reads: ExperienceReads = directExperienceReads(prisma),
 ): Promise<ExperienceEntry[]> {
-  const [relations, orgGroups, hasLinkedChild, isPlatformAdmin, assistantLinks] = await Promise.all([
+  const [relations, orgGroups, hasLinkedChild, isPlatformAdmin, assistantLinks, ownsWorkspace] = await Promise.all([
     reads.relations(userId),
     reads.orgGroups(userId),
     reads.hasLinkedChild(userId),
     reads.isPlatformAdmin(userId),
     reads.assistantLinks(userId),
+    reads.ownsWorkspace(userId),
   ]);
   // `Organization` is global, not a tenant table (CLAUDE.md rule 1): only the
   // names of organizations these relations already resolved.
@@ -277,6 +297,7 @@ export async function loadExperiences(
     isPlatformAdmin,
     organizationNames: new Map(organizations.map((organization) => [organization.id, organization.name])),
     assistantLinks,
+    ownsWorkspace,
   });
 }
 

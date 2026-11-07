@@ -47,6 +47,9 @@ export const GATE_FIXTURE_STEMS = [
   "student-portal-check",
   "teacher-portal-check",
   "visibility-check",
+  // W8a (D-W38): a workspace centre's slug is generated (never a fixture
+  // stem), so check:workspaces finds its centres through these users.
+  "workspaces-check",
 ] as const;
 
 /**

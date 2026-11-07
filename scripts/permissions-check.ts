@@ -351,14 +351,37 @@ function checkBranchCreatePermission() {
       !/centerSettingsBranches/.test(read("lib", "routes.ts")),
   );
 
-  // One provisioning path (P1, F1): every way a branch is born goes through
-  // provisionBranch, which is the only `center.create` in lib/db/platform.ts.
+  // One provisioning path per kind (P1, F1; W8a W-C7, D-W38): every way a
+  // branch is born goes through provisionBranch, and a PERSONAL workspace
+  // through createPersonalWorkspace — the only two `center.create` calls in
+  // lib/db/platform.ts. Only the latter creates a PERSONAL centre, and it
+  // never provisions the baseline.
+  // W8a old → new (the W8a prompt's allowed change): "exactly one center.create,
+  // inside provisionBranch" → "exactly two: provisionBranch and
+  // createPersonalWorkspace, and only the latter creates a PERSONAL centre
+  // without the baseline".
   const platform = read("lib", "db", "platform.ts");
   const centerCreates = platform.match(/\.center\.create\(/g) ?? [];
+  const bodyOf = (name: string) => {
+    const start = platform.indexOf(`export async function ${name}(`);
+    if (start < 0) return "";
+    const next = platform.indexOf("\nexport ", start + 1);
+    return platform.slice(start, next < 0 ? undefined : next);
+  };
+  const branchBody = bodyOf("provisionBranch");
+  const workspaceBody = bodyOf("createPersonalWorkspace");
   check(
-    "lib/db/platform.ts has exactly one center.create — inside provisionBranch, which calls provisionCenterBaseline (static)",
-    centerCreates.length === 1 &&
-      /export async function provisionBranch[\s\S]{0,1200}\.center\.create\([\s\S]{0,1200}provisionCenterBaseline\(tx, created\.id\)/.test(platform),
+    "lib/db/platform.ts has exactly two center.create — provisionBranch (with provisionCenterBaseline) and createPersonalWorkspace (static)",
+    centerCreates.length === 2 &&
+      (branchBody.match(/\.center\.create\(/g) ?? []).length === 1 &&
+      (workspaceBody.match(/\.center\.create\(/g) ?? []).length === 1 &&
+      /\.center\.create\([\s\S]{0,1200}provisionCenterBaseline\(tx, created\.id\)/.test(branchBody),
+  );
+  check(
+    "Only createPersonalWorkspace creates a PERSONAL centre, and it never provisions the baseline (static)",
+    /kind:\s*"PERSONAL"/.test(workspaceBody) &&
+      !/provisionCenterBaseline\(|permissionGrant|paymentMethod/i.test(workspaceBody) &&
+      !/kind:\s*"PERSONAL"/.test(platform.replace(workspaceBody, "")),
   );
   check(
     "createCenterWithSettings and addBranchToOrganization both create through provisionBranch (static)",

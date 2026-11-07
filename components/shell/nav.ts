@@ -32,7 +32,8 @@ export type ShellIconName =
   | "audit"
   | "profile"
   | "assessments"
-  | "assistants";
+  | "assistants"
+  | "workspaces";
 
 export type ShellNavItem = {
   href: string;
@@ -121,6 +122,10 @@ export const TEACHER_NAV: NavDef[] = [
   // page itself explains premium to a teacher without it, and every action is
   // gated on premium on the server (lib/db/assistants.ts).
   { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
+  // W8a (D-W38): the premium teacher's PERSONAL workspaces. No permission, like
+  // Assistants: the page explains premium, and ownership + premium are checked
+  // on the server for every read and write (lib/db/workspaces.ts).
+  { href: ROUTES.teacherWorkspaces, labelKey: "workspaces", icon: "workspaces" },
   // U9: the teacher's own photo per branch, and their classes' covers. Owning the row is the authority.
   { href: ROUTES.teacherProfile, labelKey: "profile", icon: "profile" },
 ];

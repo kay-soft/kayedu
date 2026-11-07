@@ -104,6 +104,13 @@ export const ROUTES = {
   teacherProfile: "/teacher/profile",
   // W7a (D-W36): a premium teacher's assistants and invites.
   teacherAssistants: "/teacher/assistants",
+  // W8a (D-W38): a premium teacher's PERSONAL workspaces — the list, and one
+  // workspace's Classes (its home), a class, Sessions and Settings.
+  teacherWorkspaces: "/teacher/workspaces",
+  teacherWorkspace: (id: string) => `/teacher/workspaces/${id}`,
+  teacherWorkspaceClass: (id: string, classId: string) => `/teacher/workspaces/${id}/classes/${classId}`,
+  teacherWorkspaceSessions: (id: string) => `/teacher/workspaces/${id}/sessions`,
+  teacherWorkspaceSettings: (id: string) => `/teacher/workspaces/${id}/settings`,
   // W7a: the assistant experience, one per teacher the account assists.
   assistantHome: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}`,
   // W7b (D-W37): the assistant's working pages, under the teacher they assist.

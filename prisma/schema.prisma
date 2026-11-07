@@ -38,6 +38,18 @@ enum CenterLifecycleState {
   ARCHIVED
 }
 
+// W8a (D-W20, D-W38): what a centre row is. BRANCH is a centre's branch, made
+// only by a platform admin (U5). PERSONAL is a premium teacher's own
+// workspace, made only by `createPersonalWorkspace` (lib/db/platform.ts) under
+// the teacher's personal organization. Both are tenants: center_id isolation
+// is the same. Every centre-wide surface (Explore, Discover, the directory,
+// the admin lists and KPIs, the branch limit, the baseline, the seed-world
+// checks) reads BRANCH only, through `BRANCH_ONLY` / `ACCESSIBLE_CENTER`.
+enum CenterKind {
+  BRANCH
+  PERSONAL
+}
+
 enum ShareType {
   FIXED // centerShareValue is piastres taken by the center
   PERCENTAGE // centerShareValue is a whole-number percent (e.g. 15)
@@ -333,6 +345,9 @@ model User {
   assistantInvitesUsed   AssistantInvite[]  @relation("AssistantInviteUsedBy")
   assistantsAsTeacher    TeacherAssistant[] @relation("TeacherAssistantTeacher")
   assistantLinks         TeacherAssistant[] @relation("TeacherAssistantAssistant")
+  // W8a (D-W38) — this teacher's personal organization, the parent of their
+  // PERSONAL workspaces (at most one).
+  personalOrganization   Organization?      @relation("PersonalOrganization")
 }
 
 /**
@@ -400,6 +415,13 @@ model Organization {
   // count only blocks new branches — nothing existing is touched. >= 1 is a
   // CHECK constraint in the migration (`20261026100000_f1_branch_limits`).
   maxBranches Int      @default(1)
+  // W8a (D-W38): set only for a teacher's personal organization, the parent of
+  // their PERSONAL workspaces; unique, so one per person. Created in the same
+  // transaction as the first workspace. Null for every centre organization.
+  // `maxBranches` is never read for it (D-W21). A trigger in the W8a
+  // migration refuses a PERSONAL centre under an organization without one.
+  ownerUserId String?  @unique
+  owner       User?    @relation("PersonalOrganization", fields: [ownerUserId], references: [id], onDelete: Restrict)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -431,6 +453,15 @@ model Center {
   deletedAt       DateTime?
   deletedBy       String?
   restorableUntil DateTime?
+  // W8a (D-W20, D-W38): BRANCH (every existing row) or PERSONAL (a teacher's
+  // workspace). See the enum.
+  kind            CenterKind           @default(BRANCH)
+  // W8a (D-W28, D-W38): the teacher's own archive of a PERSONAL workspace —
+  // read-only, its classes deactivated, not counted toward the 100 cap.
+  // Separate from `lifecycleState` (the admin's) and from `deletedAt`. CHECKs
+  // in the migration: both or neither, and only on a PERSONAL centre.
+  archivedAt       DateTime?
+  archivedByUserId String?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 

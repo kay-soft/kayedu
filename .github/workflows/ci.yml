@@ -111,5 +111,6 @@ jobs:
       - run: npm run check:notifications
       - run: npm run check:assessments
       - run: npm run check:assistants
+      - run: npm run check:workspaces
       - run: npm run check:security
       - run: npm run gates:users -- verify

@@ -39,6 +39,7 @@ export function ClassPeriodFields({
   startError,
   endError,
   onChange,
+  withTerms = true,
 }: {
   idPrefix: string;
   terms: TermOption[];
@@ -46,6 +47,11 @@ export function ClassPeriodFields({
   startError?: string;
   endError?: string;
   onChange?: (next: ClassPeriodValue) => void;
+  /**
+   * W8a (D-W38): a PERSONAL workspace has no terms and no Settings → Terms, so
+   * its class form shows the two dates only — no mode control, no link.
+   */
+  withTerms?: boolean;
 }) {
   const t = useTranslations("Classes.period");
   const locale = useLocale();
@@ -95,6 +101,7 @@ export function ClassPeriodFields({
           <CalendarRange className="size-4 text-text-muted" aria-hidden />
           {t("title")}
         </p>
+        {withTerms ? (
         <div
           role="group"
           aria-label={t("modeLabel")}
@@ -119,9 +126,10 @@ export function ClassPeriodFields({
             </button>
           ))}
         </div>
+        ) : null}
       </div>
 
-      {!hasTerms ? (
+      {!withTerms ? null : !hasTerms ? (
         <p className="text-xs text-text-muted">
           {t.rich("noTerms", {
             link: (chunks) => (

@@ -15,6 +15,7 @@ import {
 import { effectiveRoomIds } from "../rooms.ts";
 import { MAX_PAUSE_DAYS, RESTORE_WINDOW_DAYS } from "../branch-setup.ts";
 import { writeAuditRow } from "./audit-row.ts";
+import { BRANCH_ONLY } from "./center-kind.ts";
 import { lockOrganizationBranches } from "./platform.ts";
 import { branchTodayKey as branchToday, livePauseWhere } from "./branch-pauses.ts";
 import { centerTimeZone, WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
@@ -85,7 +86,8 @@ export async function updateBranchDetails(db: PrismaClient, input: BranchEditInp
   return db.$transaction(async (tx): Promise<BranchEditResult> => {
     if (!(await lockCenter(tx, input.centerId))) return { ok: false, error: "notFound" };
     const before = await tx.center.findUnique({ where: { id: input.centerId } });
-    if (!before || before.deletedAt) return { ok: false, error: "notFound" };
+    // W8a (D-W20): a teacher's workspace is not the admin's to edit.
+    if (!before || before.deletedAt || before.kind !== "BRANCH") return { ok: false, error: "notFound" };
     const center = await tx.center.update({
       where: { id: input.centerId },
       data: { name: input.name, nameEn: input.nameEn, themeColor: input.themeColor },
@@ -211,8 +213,9 @@ async function pauseRefusal(
   input: Pick<BranchPauseInput, "centerId" | "startDate" | "endDate">,
   now: Date,
 ): Promise<"notFound" | "pauseExists" | PauseRangeError | null> {
-  const center = await db.center.findUnique({ where: { id: input.centerId }, select: { deletedAt: true } });
-  if (!center || center.deletedAt) return "notFound";
+  const center = await db.center.findUnique({ where: { id: input.centerId }, select: { deletedAt: true, kind: true } });
+  // W8a (D-W28): a workspace has no pause — its teacher archives it instead.
+  if (!center || center.deletedAt || center.kind !== "BRANCH") return "notFound";
   const today = await branchToday(db, input.centerId, now);
   const rangeError = pauseRangeError(input.startDate, input.endDate, today);
   if (rangeError) return rangeError;
@@ -481,7 +484,7 @@ export async function branchDeleteBlocker(
   center: Pick<Center, "id" | "organizationId">,
   now: Date = new Date(),
 ): Promise<Exclude<BranchDeleteError, "notFound" | "nameMismatch"> | null> {
-  const siblings = await db.center.count({ where: { organizationId: center.organizationId, deletedAt: null } });
+  const siblings = await db.center.count({ where: { organizationId: center.organizationId, deletedAt: null, ...BRANCH_ONLY } });
   if (siblings <= 1) return "onlyBranch";
   if (await hasLiveSession(db, center.id, now)) return "liveSession";
   const openSettlements = await db.settlement.count({
@@ -583,7 +586,7 @@ export async function restoreBranch(
 /** An organization's deleted branches, newest first — its admin page's "Deleted branches". */
 export function platformDeletedBranches(db: Db, organizationId: string) {
   return db.center.findMany({
-    where: { organizationId, deletedAt: { not: null } },
+    where: { organizationId, deletedAt: { not: null }, ...BRANCH_ONLY },
     select: {
       id: true,
       name: true,

@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ASSISTANT_LIMITS } from "@/lib/assistant-catalog";
 import { isPremium, premiumStatus } from "@/lib/auth/premium";
 import { getTeacherScope } from "@/lib/auth/teacher-scope";
+import { requireTeacherUser } from "@/lib/auth/tenant";
 import { teacherAssistantsOverview } from "@/lib/db/assistants";
 import { prisma } from "@/lib/db/client";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -42,6 +43,23 @@ export async function generateMetadata(): Promise<Metadata> {
  * read — the rows belong to the teacher's account.
  */
 export default async function TeacherAssistantsPage() {
+  // W8a (D-W38): an assistant acts at the teacher's branches only until W8d
+  // brings workspaces in — so a teacher with no branch (a workspace-only
+  // account) is told so here, and offered nothing to invite.
+  const session = await requireTeacherUser();
+  if (!session.hasCenter) {
+    const tNoBranch = await getTranslations("Assistants.teacher");
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title={tNoBranch("title")} description={tNoBranch("description")} />
+        <Card>
+          <CardContent>
+            <p className="text-sm text-text-secondary">{tNoBranch("noBranchNote")}</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
   const scope = await getTeacherScope();
   const [t, tPresets, locale] = await Promise.all([
     getTranslations("Assistants.teacher"),

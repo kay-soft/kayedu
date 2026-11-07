@@ -991,9 +991,11 @@ async function checkPremium(adminId: string, centerId: string) {
   const callers = files.filter((file) => file !== "lib/auth/premium.ts" && /\brequirePremium\s*\(/.test(stripComments(readSource(join(process.cwd(), file)))));
   // W7a old → new (the W7a prompt's allowed change): "no caller outside the tests"
   // → "called only from the assistant invite and permission actions".
+  // W8a old → new (the W8a prompt's allowed change): → "the assistants and
+  // workspace actions" — lib/db/assistants.ts and lib/db/workspaces.ts.
   check(
-    "requirePremium is called only from the assistant invite and permission actions (W7a)",
-    callers.length === 1 && callers[0] === "lib/db/assistants.ts",
+    "requirePremium is called only from the assistant and workspace actions (W7a, W8a)",
+    callers.length === 2 && callers.includes("lib/db/assistants.ts") && callers.includes("lib/db/workspaces.ts"),
     callers.join(", "),
   );
   const writers = files.filter((file) => /data:\s*\{[^}]*\bpremiumUntil\b/.test(stripComments(readSource(join(process.cwd(), file)))));

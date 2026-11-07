@@ -1,4 +1,5 @@
-import type { Center, CenterLifecycleState, Prisma, PrismaClient, Role } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+import type { Center, CenterKind, CenterLifecycleState, Prisma, PrismaClient, Role } from "@prisma/client";
 
 // Relative imports on purpose — `npm run check:admin` exercises this module
 // directly, outside the Next.js runtime (same reasoning as lib/db/payments.ts,
@@ -8,6 +9,7 @@ import { runInTransaction } from "./session-lifecycle.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { MAX_BRANCH_LIMIT, type BranchCopyKey } from "../branch-setup.ts";
 import { copyBranchSetup } from "./branches.ts";
+import { BRANCH_ONLY } from "./center-kind.ts";
 
 /**
  * Platform-admin data access (M9, docs/00-master-product-spec.md §4.4). This
@@ -52,15 +54,22 @@ export const ACCESSIBLE_LIFECYCLE_STATES: readonly CenterLifecycleState[] = [
   "GRACE",
 ];
 
+// W8a (D-W20, D-W38): the one BRANCH-only filter lives in a leaf module so
+// every reader can import it; it is re-exported here beside ACCESSIBLE_CENTER.
+export { BRANCH_ONLY };
+
 /**
  * **The one "may this branch be resolved, listed or counted" filter** (U5):
- * an accessible lifecycle state *and* not deleted by a platform admin. Every
- * place a branch is resolved (`resolveCenterRelations`, branch grants), listed
- * (switcher, hub, Discover, the teacher directory, every portal) or rolled up
- * (Analytics) spreads this — a soft-deleted branch must vanish from all of
- * them at once, so there is no second spelling of it.
+ * a BRANCH (W8a — `BRANCH_ONLY`), an accessible lifecycle state *and* not
+ * deleted by a platform admin. Every place a branch is resolved
+ * (`resolveCenterRelations`, branch grants), listed (switcher, hub, Discover,
+ * the teacher directory, every portal) or rolled up (Analytics) spreads this —
+ * a soft-deleted branch must vanish from all of them at once, so there is no
+ * second spelling of it. A PERSONAL workspace is resolved only through
+ * `lib/db/workspaces.ts` (`OWNED_WORKSPACE`), by its owner.
  */
 export const ACCESSIBLE_CENTER = {
+  ...BRANCH_ONLY,
   lifecycleState: { in: [...ACCESSIBLE_LIFECYCLE_STATES] },
   deletedAt: null,
 } satisfies Prisma.CenterWhereInput;
@@ -69,8 +78,13 @@ export const ACCESSIBLE_CENTER = {
 export function isAccessibleCenter(center: {
   lifecycleState: CenterLifecycleState;
   deletedAt: Date | null;
+  kind: CenterKind;
 }): boolean {
-  return ACCESSIBLE_LIFECYCLE_STATES.includes(center.lifecycleState) && center.deletedAt === null;
+  return (
+    center.kind === "BRANCH" &&
+    ACCESSIBLE_LIFECYCLE_STATES.includes(center.lifecycleState) &&
+    center.deletedAt === null
+  );
 }
 
 /**
@@ -217,6 +231,81 @@ export async function provisionBranch(
   return created;
 }
 
+/** The name a workspace's hidden default room carries (W8a; never shown in the UI). */
+export const WORKSPACE_DEFAULT_ROOM_NAME = "Workspace";
+
+export type PersonalWorkspaceRowInput = {
+  /** The teacher who owns it — their personal organization is created on first use. */
+  owner: { id: string; firstName: string; lastName: string; email: string | null; phone: string | null };
+  name: string;
+};
+
+export type PersonalWorkspaceRows = { center: Center; organizationId: string; membershipId: string; organizationCreated: boolean };
+
+/**
+ * **The second — and last — way a centre row is born** (W8a, D-W38, W-C7;
+ * docs/02 §6.2): a premium teacher's PERSONAL workspace, on the caller's
+ * transaction. The caller (`createWorkspace`, `lib/db/workspaces.ts`) holds
+ * the lock on the teacher's `User` row and has already checked premium and
+ * the 100-ACTIVE cap. It writes:
+ *
+ * - the teacher's personal `Organization` (`ownerUserId`), if they have none;
+ * - the `Center` — `kind = PERSONAL`, ACTIVE, a generated slug that is never
+ *   public (Explore and every directory read BRANCH only);
+ * - a minimal `CenterSettings` row (Africa/Cairo, conflict policy WARN, every
+ *   other column its default);
+ * - the teacher's ACTIVE TEACHER `Membership`, its local record seeded from
+ *   the account (CLAUDE.md rule 4);
+ * - one default `Room` (capacity 0 = no seat limit), hidden from the UI: the
+ *   class engine requires a primary room on every class and session.
+ *
+ * It does **not** call `provisionCenterBaseline`: no `PermissionGrant` rows,
+ * no payment methods. A workspace's authority is owning it
+ * (`workspaceCan`), never the centre matrix (W-C3).
+ */
+export async function createPersonalWorkspace(
+  tx: Prisma.TransactionClient,
+  input: PersonalWorkspaceRowInput,
+): Promise<PersonalWorkspaceRows> {
+  const existing = await tx.organization.findUnique({ where: { ownerUserId: input.owner.id }, select: { id: true } });
+  const organization =
+    existing ??
+    (await tx.organization.create({
+      data: { name: `${input.owner.firstName} ${input.owner.lastName}`.trim(), ownerUserId: input.owner.id },
+      select: { id: true },
+    }));
+  const created = await tx.center.create({
+    data: {
+      kind: "PERSONAL",
+      name: input.name,
+      slug: `ws-${randomUUID()}`,
+      lifecycleState: "ACTIVE",
+      organizationId: organization.id,
+    },
+  });
+  // Written on their own (not nested in the centre's create): the minimal
+  // settings row and the hidden room — no baseline helper is involved.
+  await tx.centerSettings.create({
+    data: { centerId: created.id, timezone: "Africa/Cairo", scheduleConflictPolicy: "WARN" },
+  });
+  await tx.room.create({ data: { centerId: created.id, name: WORKSPACE_DEFAULT_ROOM_NAME, capacity: 0 } });
+  const membership = await tx.membership.create({
+    data: {
+      userId: input.owner.id,
+      centerId: created.id,
+      role: TEACHER_ROLE,
+      active: true,
+      joinedAt: new Date(),
+      firstName: input.owner.firstName,
+      lastName: input.owner.lastName,
+      email: input.owner.email,
+      phone: input.owner.phone,
+    },
+    select: { id: true },
+  });
+  return { center: created, organizationId: organization.id, membershipId: membership.id, organizationCreated: !existing };
+}
+
 /**
  * Creates a Center + its organization + the founding Owner invitation, then
  * hands the centre to `provisionBranch` — all in one transaction. The M9
@@ -270,9 +359,20 @@ export async function createCenterWithSettings(
  * centre that is not deleted (U5 — a soft delete frees its slot).
  */
 export const COUNTED_BRANCHES = {
+  // W8a (D-W21): a workspace never counts — it is never under a centre's
+  // organization anyway, and has its own cap (lib/db/workspaces.ts).
+  ...BRANCH_ONLY,
   lifecycleState: { not: "ARCHIVED" },
   deletedAt: null,
 } satisfies Prisma.CenterWhereInput;
+
+/**
+ * What the platform console lists and counts (W8a, D-W20): every non-deleted
+ * BRANCH — never a PERSONAL workspace — and every organization that is not a
+ * teacher's personal one.
+ */
+export const PLATFORM_CENTER = { deletedAt: null, ...BRANCH_ONLY } satisfies Prisma.CenterWhereInput;
+export const PLATFORM_ORGANIZATION = { ownerUserId: null } satisfies Prisma.OrganizationWhereInput;
 
 export type BranchLimitLock = { maxBranches: number; used: number };
 
@@ -288,8 +388,11 @@ export async function lockOrganizationBranches(
   tx: Prisma.TransactionClient,
   organizationId: string,
 ): Promise<BranchLimitLock | null> {
+  // W8a (D-W38): a teacher's personal organization is not a centre's — it
+  // takes no branch and has no limit to edit, so it reads as not found here.
   const rows = await tx.$queryRaw<{ maxBranches: number }[]>`
-    SELECT "maxBranches" FROM "Organization" WHERE "id" = ${organizationId} FOR UPDATE`;
+    SELECT "maxBranches" FROM "Organization"
+    WHERE "id" = ${organizationId} AND "ownerUserId" IS NULL FOR UPDATE`;
   if (rows.length === 0) return null;
   const used = await tx.center.count({ where: { organizationId, ...COUNTED_BRANCHES } });
   return { maxBranches: rows[0].maxBranches, used };
@@ -337,7 +440,7 @@ export async function addBranchToOrganization(
     if (!lock) return { ok: false, error: "organizationNotFound" };
     if (input.copyFrom) {
       const source = await tx.center.findFirst({
-        where: { id: input.copyFrom.centerId, organizationId: input.organizationId, deletedAt: null },
+        where: { id: input.copyFrom.centerId, organizationId: input.organizationId, deletedAt: null, ...BRANCH_ONLY },
         select: { id: true },
       });
       if (!source) return { ok: false, error: "sourceNotFound" };
@@ -415,13 +518,15 @@ export type PlatformOrganizationRow = {
 /** Every organization with its branch usage — `/admin/organizations` and the create form's picker. */
 export async function platformOrganizationList(db: Db): Promise<PlatformOrganizationRow[]> {
   const [organizations, grouped] = await Promise.all([
+    // W8a (D-W20): a teacher's personal organization is never listed.
     db.organization.findMany({
+      where: PLATFORM_ORGANIZATION,
       orderBy: { name: "asc" },
       select: { id: true, name: true, nameEn: true, maxBranches: true, createdAt: true },
     }),
     db.center.groupBy({
       by: ["organizationId", "lifecycleState"],
-      where: { deletedAt: null },
+      where: PLATFORM_CENTER,
       _count: { _all: true },
     }),
   ]);
@@ -442,7 +547,7 @@ export async function platformOrganizationList(db: Db): Promise<PlatformOrganiza
 
 /** One organization row — `/admin/organizations/[id]`. */
 export function platformOrganizationById(db: Db, id: string) {
-  return db.organization.findUnique({ where: { id } });
+  return db.organization.findFirst({ where: { id, ...PLATFORM_ORGANIZATION } });
 }
 
 // ── Center list (the /admin/centers table) ──────────────────────────────
@@ -476,10 +581,10 @@ export async function platformCenterList(
 ): Promise<PlatformCenterRow[]> {
   // U5: a deleted branch is listed only in its organization's own "Deleted
   // branches" section (`lib/db/branch-admin.ts`), never here.
-  const inOrganization = { center: { deletedAt: null, ...(organizationId ? { organizationId } : {}) } };
+  const inOrganization = { center: { ...PLATFORM_CENTER, ...(organizationId ? { organizationId } : {}) } };
   const [centers, membershipCounts, studentCounts] = await Promise.all([
     db.center.findMany({
-      where: { deletedAt: null, ...(organizationId ? { organizationId } : {}) },
+      where: { ...PLATFORM_CENTER, ...(organizationId ? { organizationId } : {}) },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: {
         id: true,
@@ -540,8 +645,8 @@ export type PlatformCenterCounts = {
 export async function platformCenterCounts(db: Db): Promise<PlatformCenterCounts> {
   // U5: a deleted branch is not a tenant any more — counted nowhere.
   const [total, grouped] = await Promise.all([
-    db.center.count({ where: { deletedAt: null } }),
-    db.center.groupBy({ by: ["lifecycleState"], where: { deletedAt: null }, _count: { _all: true } }),
+    db.center.count({ where: PLATFORM_CENTER }),
+    db.center.groupBy({ by: ["lifecycleState"], where: PLATFORM_CENTER, _count: { _all: true } }),
   ]);
 
   const byState = Object.fromEntries(
@@ -558,15 +663,15 @@ export async function platformCenterCounts(db: Db): Promise<PlatformCenterCounts
 }
 
 export async function platformTeacherCount(db: Db): Promise<number> {
-  return db.membership.count({ where: { role: TEACHER_ROLE, active: true, center: { deletedAt: null } } });
+  return db.membership.count({ where: { role: TEACHER_ROLE, active: true, center: PLATFORM_CENTER } });
 }
 
 export async function platformStudentCount(db: Db): Promise<number> {
-  return db.studentProfile.count({ where: { active: true, center: { deletedAt: null } } });
+  return db.studentProfile.count({ where: { active: true, center: PLATFORM_CENTER } });
 }
 
 export async function platformSessionCount(db: Db): Promise<number> {
-  return db.session.count({ where: { center: { deletedAt: null } } });
+  return db.session.count({ where: { center: PLATFORM_CENTER } });
 }
 
 export type AdoptionTrendPoint = { monthKey: string; count: number };
@@ -586,7 +691,7 @@ export async function platformAdoptionTrend(
   db: Db,
   months = 6,
 ): Promise<AdoptionTrendPoint[]> {
-  const centers = await db.center.findMany({ where: { deletedAt: null }, select: { createdAt: true } });
+  const centers = await db.center.findMany({ where: PLATFORM_CENTER, select: { createdAt: true } });
 
   const counts = new Map<string, number>();
   for (const { createdAt } of centers) {
@@ -659,7 +764,8 @@ export async function recordSupportAccess(
 
 /** One centre row — the platform admin's support view. */
 export function platformCenterById(db: Db, id: string) {
-  return db.center.findUnique({ where: { id } });
+  // W8a (D-W20): a workspace has no admin page — its lifecycle is not the admin's to change.
+  return db.center.findFirst({ where: { id, ...BRANCH_ONLY } });
 }
 
 /** A centre's newest audit rows (carved out of the visibility window — docs/01 §7). */

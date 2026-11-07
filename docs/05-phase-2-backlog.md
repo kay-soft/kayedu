@@ -534,6 +534,36 @@
 
 ---
 
+## 53. Workspace sessions in the teacher's calendar and Sessions lists
+
+**What it is.** A premium teacher's PERSONAL-workspace sessions shown in `/teacher/calendar` and `/teacher/sessions` beside their branch sessions, marked as the workspace's.
+
+**Why deferred.** W8a keeps every workspace out of the teacher's All-branches union (D-W38: a workspace is never a centre relation), so the calendar and Sessions list stay branch-only and a workspace's sessions live on its own Sessions page. Adding them is a second source in the union — each workspace's own scoped read, merged in memory — and a design for telling the two apart in one list.
+
+**Depends on.** W8a's `getWorkspaceContext` and `workspaceSessions`; the U7 union's shape (`getTeacherScope`), extended with the teacher's owned workspaces rather than widening `resolveCenterRelations`.
+
+---
+
+## 54. A live conflict preview in workspace forms
+
+**What it is.** The debounced "this clashes with…" preview the branch class and session dialogs show while the teacher types, in the workspace's New class, Add slot, New session and Reschedule forms.
+
+**Why deferred.** The preview action (`checkSlotConflictsAction`) reads the branch context (`getTenantContext("center")`), which a workspace never resolves. In W8a the workspace forms show the server's own refusal list with the same "I understand" tick (`useSlotConflicts(null, state)`), so nothing double-books silently — the teacher just learns of a clash on submit rather than while typing.
+
+**Depends on.** A workspace twin of the preview action that resolves `getWorkspaceContext` and runs the same `findSessionConflicts`.
+
+---
+
+## 55. A grade and subject on a workspace one-time session
+
+**What it is.** The optional grade and subject a branch's one-time session can carry, on a workspace's one-time session.
+
+**Why deferred.** `createOneOffSession` resolves them through the centre's own `CenterCatalogSelection` rows, which a workspace does not have (D-W38: its offered pairs are the whole linked catalogue). W8a's workspace one-time session has a title and a price only.
+
+**Depends on.** The PERSONAL branch of the pair rule (`isWorkspacePairOffered`, W8a) applied in the one-time session writer.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

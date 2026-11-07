@@ -113,12 +113,19 @@ async function main() {
   // Gate fixtures (scripts/lib/gate-fixtures.ts) are not the seed world: sections
   // 1, 3, 4 and 7 leave them out, section 8 reports them.
   const allCenters = await prisma.center.findMany({ orderBy: { slug: "asc" } });
-  const centers = allCenters.filter((center) => !isGateFixtureSlug(center.slug));
+  // W8a old → new (the W8a prompt's allowed change; D-W20, D-W38): the seed
+  // world — the provisioning baseline (1), the orphan checks (4) and the counts
+  // (3, 7) — is BRANCH centres only. A teacher's PERSONAL workspace has no
+  // baseline and picks no catalogue entries by design, so it is left out of
+  // every seed-world section exactly like a gate fixture (and is not one).
+  const centers = allCenters.filter((center) => !isGateFixtureSlug(center.slug) && center.kind === "BRANCH");
   const fixtureCenters = allCenters.filter((center) => isGateFixtureSlug(center.slug));
   const fixtureIds = fixtureCenters.map((center) => center.id);
-  const seedCenterWhere = { centerId: { notIn: fixtureIds } };
-  /** SQL list of the fixture centre ids; a sentinel keeps `NOT IN ()` valid when there are none. */
-  const fixtureIdList = fixtureIds.length > 0 ? fixtureIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(", ") : "''";
+  const outsideSeedIds = [...fixtureIds, ...allCenters.filter((center) => center.kind === "PERSONAL").map((center) => center.id)];
+  const seedCenterWhere = { centerId: { notIn: outsideSeedIds } };
+  /** SQL list of the centre ids outside the seed world; a sentinel keeps `NOT IN ()` valid when there are none. */
+  const fixtureIdList =
+    outsideSeedIds.length > 0 ? outsideSeedIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(", ") : "''";
   const seedCenter = (alias: string, column = "centerId") => `${alias}."${column}" NOT IN (${fixtureIdList})`;
   const notFixtureUser = (alias: string) =>
     gateEmailPrefixes()
@@ -586,7 +593,7 @@ async function main() {
   // ── 7. Counts ────────────────────────────────────────────────────────
   console.log("\n7. Entity counts (seed world, gate fixtures left out; catalog rows are global)");
   const counts: [string, number][] = [
-    ["Organizations", await prisma.organization.count({ where: { NOT: { centers: { some: { id: { in: fixtureIds } } } } } })],
+    ["Organizations", await prisma.organization.count({ where: { ownerUserId: null, NOT: { centers: { some: { id: { in: fixtureIds } } } } } })],
     ["Centres", centers.length],
     ["Users", await count(`SELECT COUNT(*)::int AS n FROM "User" u WHERE ${notFixtureUser("u")}`)],
     ["Memberships", await prisma.membership.count({ where: seedCenterWhere })],
