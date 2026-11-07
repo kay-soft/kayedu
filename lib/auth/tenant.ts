@@ -17,7 +17,7 @@ import {
   type PermissionGrants,
   type TenantRole,
 } from "@/lib/auth/permissions";
-import { loadExperiences, type ExperienceEntry } from "@/lib/auth/experiences";
+import { assistantExperienceSources, loadExperiences, type ExperienceEntry } from "@/lib/auth/experiences";
 import {
   resolveCenterRelations,
   resolveOwnerOrgGroups,
@@ -130,6 +130,8 @@ export const listExperiences = cache(
         const row = await prisma.user.findUnique({ where: { id }, select: { isPlatformAdmin: true } });
         return row?.isPlatformAdmin ?? false;
       },
+      // W7a: effective links only, premium worked out on this request.
+      assistantLinks: (id) => assistantExperienceSources(prisma, id),
     }),
 );
 

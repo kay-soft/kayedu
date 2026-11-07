@@ -136,7 +136,10 @@
     "parent": "Parent",
     "parentPlace": "Your children",
     "admin": "Platform admin",
-    "adminPlace": "The whole platform"
+    "adminPlace": "The whole platform",
+    "assistant": "Assistant",
+    "assistantOf": "Assistant of {teacher}",
+    "assistantPlace": "Acting for this teacher"
   },
   "NavGroups": {
     "frontDesk": "Front desk",
@@ -167,7 +170,9 @@
     "premium": "Teachers",
     "settings": "Settings",
     "calendar": "Calendar",
-    "profile": "Profile"
+    "profile": "Profile",
+    "assistants": "Assistants",
+    "home": "Home"
   },
   "Roles": {
     "OWNER": "Owner",
@@ -177,7 +182,8 @@
     "TEACHER": "Teacher",
     "STUDENT": "Student",
     "PLATFORM_ADMIN": "Super admin",
-    "PARENT": "Parent"
+    "PARENT": "Parent",
+    "ASSISTANT": "Assistant"
   },
   "Auth": {
     "fields": {
@@ -250,7 +256,9 @@
       "parentPortal": "Parent portal",
       "parentPortalHint": "Your children's schedules",
       "lastUsed": "Last used",
-      "continue": "Continue"
+      "continue": "Continue",
+      "assistantPortal": "Assistant of {teacher}",
+      "assistantPortalHint": "Act for this teacher, within what they allow"
     },
     "invite": {
       "title": "Staff invitation",
@@ -3517,7 +3525,13 @@
     "familyAccessRemoved": "Parent access removed",
     "studentAccountGradeUsed": "Grade updated from the student's account.",
     "logoSaved": "Logo saved.",
-    "logoRemoved": "Logo removed."
+    "logoRemoved": "Logo removed.",
+    "assistantJoined": "You're now an assistant.",
+    "assistantInviteRevoked": "Invite revoked. Its code no longer works.",
+    "assistantRemoved": "Assistant removed.",
+    "assistantPermissionsSaved": "Permissions saved.",
+    "assistantPermissionsUnchanged": "Nothing changed.",
+    "assistantLeft": "You're no longer this teacher's assistant."
   },
   "Account": {
     "title": "Account settings",
@@ -3646,6 +3660,18 @@
         "assessments": "Exams and homework inside your workspaces"
       },
       "contact": "Contact KayEdu to subscribe or renew."
+    },
+    "assistant": {
+      "title": "Assistant roles",
+      "description": "Teachers you help, and what each one lets you do. A code from a teacher adds one here.",
+      "roleTitle": "Assistant of {teacher}",
+      "roleDescription": "What this teacher lets you do:",
+      "open": "Open",
+      "leave": "Leave",
+      "leaveTitle": "Stop being {teacher}'s assistant?",
+      "leaveDescription": "You lose access straight away. To come back, {teacher} has to send you a new code.",
+      "joinTitle": "Join as an assistant",
+      "joinDescription": "Enter the code a teacher gave you. You'll see who it's from and what it allows before anything is linked."
     }
   },
   "AdminOrganizations": {
@@ -4290,6 +4316,182 @@
       "invalidDate": "Choose a valid date.",
       "dateInPast": "Choose today or a later date.",
       "dateTooFar": "Choose a date no later than {max}."
+    }
+  },
+  "Assistants": {
+    "permissions": {
+      "none": "No permissions are turned on.",
+      "assessments": {
+        "review": {
+          "label": "Review exams and homework",
+          "description": "See results and each student's answers."
+        },
+        "manage": {
+          "label": "Build exams and homework",
+          "description": "Create, edit and publish them for your classes."
+        }
+      },
+      "classes": {
+        "view": {
+          "label": "See classes and sessions",
+          "description": "Your classes, schedules and session lists."
+        }
+      },
+      "requests": {
+        "manage": {
+          "label": "Send class and session requests",
+          "description": "Ask a branch for a new session or a reschedule."
+        }
+      },
+      "checkin": {
+        "workspace": {
+          "label": "Check in students in your workspaces",
+          "description": "Mark Present, Late or Absent in your own workspaces."
+        }
+      },
+      "payments": {
+        "workspace": {
+          "label": "Take payments in your workspaces",
+          "description": "Record payments in your own workspaces."
+        }
+      },
+      "analytics": {
+        "view": {
+          "label": "See your earnings and analytics",
+          "description": "Your earnings summary and Earnings page."
+        }
+      },
+      "students": {
+        "phones": {
+          "label": "See students' phone numbers",
+          "description": "Hidden unless you turn this on. Never part of a preset."
+        }
+      }
+    },
+    "presets": {
+      "GRADER": {
+        "label": "Grader",
+        "description": "Reviews exams and homework. Nothing else."
+      },
+      "CO_TEACHER": {
+        "label": "Co-teacher",
+        "description": "Reviews and builds exams and homework, sees your classes and sessions, sends requests, and checks in and takes payments in your workspaces."
+      },
+      "FULL": {
+        "label": "Full",
+        "description": "Everything a co-teacher does, plus your earnings and analytics."
+      },
+      "CUSTOM": {
+        "label": "Custom",
+        "description": "Your own choice of permissions."
+      }
+    },
+    "code": {
+      "label": "Assistant code",
+      "expires": "Works once, until {date}.",
+      "onceWarning": "This code is shown only once. Copy it or share it now — it can't be shown again.",
+      "copy": "Copy code",
+      "copyLink": "Copy link",
+      "copied": "Copied",
+      "copyFailed": "The browser didn't allow copying. Select the code and copy it by hand."
+    },
+    "teacher": {
+      "title": "Assistants",
+      "description": "People who help you, with only the permissions you give them.",
+      "premiumTitle": "Assistants come with premium",
+      "premiumDescription": "With premium you can invite up to {max} assistants and choose exactly what each one may do.",
+      "premiumLapsedNote": "If your premium has ended, your assistants keep their place but can't open anything until it's renewed.",
+      "premiumContact": "Contact KayEdu to subscribe or renew.",
+      "slots": "{used} of {max} places in use",
+      "slotsHint": "Assistants and unused invites both take a place.",
+      "slotsFull": "All {max} places are in use. Revoke an unused invite or remove an assistant first.",
+      "invite": "Invite an assistant",
+      "pendingTitle": "Unused invites",
+      "pendingDescription": "Codes nobody has used yet. Each one holds a place until it's used, revoked or expires.",
+      "noPending": "No unused invites.",
+      "pendingPreset": "Invite as {preset}",
+      "pendingExpires": "Expires {date}",
+      "revokeInvite": "Revoke",
+      "revokeInviteTitle": "Revoke this invite?",
+      "revokeInviteDescription": "The code stops working straight away and its place is freed.",
+      "assistantsTitle": "Your assistants",
+      "assistantsDescription": "Change what each one may do, or remove them.",
+      "noAssistants": "No assistants yet.",
+      "noAssistantsHint": "Invite someone and give them the code. They'll appear here once they confirm it.",
+      "since": "Assistant since {date}",
+      "editPermissions": "Edit permissions",
+      "remove": "Remove",
+      "removeTitle": "Remove {name}?",
+      "removeDescription": "{name} loses access straight away. To bring them back, send a new invite."
+    },
+    "invite": {
+      "title": "Invite an assistant",
+      "description": "Choose what they may do. You can change it at any time after they join.",
+      "presetLabel": "Permissions",
+      "presetHint": "A starting point — you can turn single permissions on or off later.",
+      "expiryNote": "The code works once and expires in 7 days.",
+      "cancel": "Cancel",
+      "submit": "Create code",
+      "createdTitle": "Give this code to your assistant",
+      "createdDescription": "They enter it on their account, or at sign-up, and confirm.",
+      "done": "Done"
+    },
+    "edit": {
+      "title": "Permissions for {name}",
+      "description": "Pick a preset, or turn single permissions on or off.",
+      "presetLabel": "Preset",
+      "presetHint": "Changing a single permission makes it Custom.",
+      "togglesLabel": "What they may do",
+      "phonesNote": "Students' phone numbers stay hidden unless you turn that on.",
+      "cancel": "Cancel",
+      "save": "Save permissions"
+    },
+    "join": {
+      "title": "Join as an assistant",
+      "description": "Enter the code a teacher gave you.",
+      "signedInAs": "Signed in as {name}.",
+      "howToGet": "A teacher with premium creates the code on their Assistants page.",
+      "backToAccount": "Back to account settings",
+      "codeLabel": "Assistant code",
+      "codeHint": "12 letters and numbers. Dashes and spaces don't matter.",
+      "continue": "Continue",
+      "checking": "Checking…",
+      "signInFirst": "Sign in or create an account first. Your code waits here.",
+      "signIn": "Sign in",
+      "register": "Create an account",
+      "confirmTitle": "Become {teacher}'s assistant?",
+      "confirmDescription": "Check who this is from and what it lets you do. Nothing is linked until you confirm.",
+      "presetLine": "Permissions: {preset}",
+      "confirmNote": "The teacher can change these permissions or remove you at any time. You can leave from account settings.",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "confirming": "Joining…",
+      "joined": "Done. The new role is listed above."
+    },
+    "home": {
+      "metaTitle": "Assistant",
+      "title": "Assistant of {teacher}",
+      "description": "You act for this teacher, within what they allow.",
+      "permissionsTitle": "What you may do",
+      "permissionsDescription": "Preset: {preset}. Assistant since {date}.",
+      "nothingYet": "There is nothing to work on here yet. The teacher's tools will appear on this page."
+    },
+    "errors": {
+      "signInRequired": "Sign in first.",
+      "forbidden": "You don't have permission to do that.",
+      "premiumRequired": "This needs premium. Contact KayEdu to subscribe or renew.",
+      "slotsFull": "All 5 places are in use. Revoke an unused invite or remove an assistant first.",
+      "notFound": "That is no longer available. Refresh the page.",
+      "unknownPreset": "Choose one of the presets.",
+      "unknownPermission": "One of those permissions doesn't exist. Refresh the page and try again.",
+      "rateLimited": "Too many attempts. Try again in an hour.",
+      "invalidCode": "This code doesn't work. It may be mistyped, used, revoked or expired.",
+      "ownCode": "This is your own code. Give it to the person you want as your assistant.",
+      "teacherUnavailable": "This teacher can't add assistants right now. Ask them.",
+      "alreadyAssistant": "You're already this teacher's assistant.",
+      "unverified": "Confirm your email address first.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long."
     }
   }
 }

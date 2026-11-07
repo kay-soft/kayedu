@@ -31,7 +31,8 @@ export type ShellIconName =
   | "settlements"
   | "audit"
   | "profile"
-  | "assessments";
+  | "assessments"
+  | "assistants";
 
 export type ShellNavItem = {
   href: string;
@@ -116,6 +117,10 @@ export const TEACHER_NAV: NavDef[] = [
   // docs/03-build-order.md M7 note. R10a removed its "Soon" nav placeholder:
   // the nav lists only what a role can open. Add the item back with the screen.
   { href: ROUTES.teacherSettlements, labelKey: "settlements", icon: "settlements" },
+  // W7a (D-W36): a premium teacher's assistants and invites. No permission: the
+  // page itself explains premium to a teacher without it, and every action is
+  // gated on premium on the server (lib/db/assistants.ts).
+  { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
   // U9: the teacher's own photo per branch, and their classes' covers. Owning the row is the authority.
   { href: ROUTES.teacherProfile, labelKey: "profile", icon: "profile" },
 ];

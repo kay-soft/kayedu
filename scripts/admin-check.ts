@@ -37,7 +37,8 @@
  * call to `lib/db/premium.ts`, the neutral answer for an unknown email, the
  * state rules (extend must be later, revoke sets null), audit rows carrying
  * ids and the new end date only, `requirePremium`, and the statics (admin-only
- * actions and nav, and no caller of `requirePremium` yet).
+ * actions and nav, and — since W7a — `requirePremium` called only from
+ * `lib/db/assistants.ts`).
  *
  * Needs a reachable database and cleans up after itself.
  */
@@ -988,7 +989,13 @@ async function checkPremium(adminId: string, centerId: string) {
 
   const files = ["app", "components", "lib"].flatMap((dir) => sourceFiles(dir));
   const callers = files.filter((file) => file !== "lib/auth/premium.ts" && /\brequirePremium\s*\(/.test(stripComments(readSource(join(process.cwd(), file)))));
-  check("requirePremium has no caller outside the tests yet (nothing is gated at W6)", callers.length === 0, callers.join(", "));
+  // W7a old → new (the W7a prompt's allowed change): "no caller outside the tests"
+  // → "called only from the assistant invite and permission actions".
+  check(
+    "requirePremium is called only from the assistant invite and permission actions (W7a)",
+    callers.length === 1 && callers[0] === "lib/db/assistants.ts",
+    callers.join(", "),
+  );
   const writers = files.filter((file) => /data:\s*\{[^}]*\bpremiumUntil\b/.test(stripComments(readSource(join(process.cwd(), file)))));
   check("Only lib/db/premium.ts writes User.premiumUntil", writers.length === 1 && writers[0] === "lib/db/premium.ts", writers.join(", "));
   const deciders = files.filter((file) => file !== "lib/auth/premium.ts" && /premiumUntil\??\.getTime\(\)|premiumUntil\s*[<>]=?|[<>]=?\s*\w*\.premiumUntil/.test(stripComments(readSource(join(process.cwd(), file)))));

@@ -19,7 +19,7 @@ import { RollupNavItem } from "@/components/shell/rollup-nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { UserMenu } from "@/components/shell/user-menu";
-import type { ShellExperience } from "@/lib/routes";
+import type { AccountOrigin } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 import { cn } from "@/lib/utils";
 
@@ -55,8 +55,12 @@ export type ShellScope = {
 };
 
 export type AppShellProps = {
-  /** Which experience this shell is — the user menu's Account settings link returns into it (F2). */
-  experience: ShellExperience;
+  /**
+   * Which experience this shell is — the user menu's Account settings link returns
+   * into it (F2). The assistant shell (W7a) passes the hub hint: its frame needs
+   * the route's teacher, so Account settings and the inbox open in the hub shell.
+   */
+  experience: AccountOrigin;
   nav: ShellNavItem[];
   brand: ShellBrand;
   user: ShellUser;

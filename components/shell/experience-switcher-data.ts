@@ -87,6 +87,9 @@ function rowFor(entry: ExperienceEntry, t: Translate, roles: string): Experience
       return { ...base, title: t("teacher"), subtitle: t("teacherPlace") };
     case "parent":
       return { ...base, title: t("parent"), subtitle: t("parentPlace") };
+    case "assistant":
+      // W7a: one row per teacher, named — only an effective link is listed.
+      return { ...base, title: t("assistantOf", { teacher: entry.label.place ?? "" }), subtitle: t("assistantPlace") };
     case "admin":
       return { ...base, title: t("admin"), subtitle: t("adminPlace") };
   }

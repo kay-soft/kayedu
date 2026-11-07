@@ -66,6 +66,9 @@ Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on
 ### `app/[locale]/(auth)/family/join/page.tsx`
 **F3 (new).** Where a parent accepts a code; open to guests. `AuthCard` (title "Link your child", one-line description), then "Signed in as {name}" when signed in, the code field (LTR, monospaced, upper-case, `one-time-code` autofill, hint "Capitals and the dash don't matter") and **Link my child** (full width on a phone, `w-fit` from `sm`). A guest gets an info notice and **Sign in** / **Create a parent account** instead of the submit, both returning here with the code kept in the tab. A signed-in student account gets the refusal up front, with Sign out. A refusal is a `FormMessage` above the field; success toasts and lands on the parent portal.
 
+### `app/[locale]/(auth)/assistant-join/page.tsx` — **W7a (new)**
+Where any account redeems an assistant code; open to guests. `AuthCard` (title "Join as an assistant"), "Signed in as {name}" when signed in, the code field (LTR, monospaced, upper-case, `one-time-code`, hint "12 letters and numbers") and **Continue** (full width on a phone). Continue writes nothing: it swaps the field for a bordered confirmation — "Become {teacher}'s assistant?", the preset, the permission list with a check per line, a note that the teacher can change or remove it — with **Cancel** and **Confirm** (stacked full width at 375px, end-aligned from `sm`). A guest gets an info notice and **Sign in** / **Create an account**, both returning here with the code kept in the tab (never in a query). One `FormMessage` above the field for any refusal; success toasts and opens the assistant experience. `04-design-system.md` §11.36.
+
 ### `app/[locale]/(auth)/select-center/page.tsx`
 Branch cards had hover but **no selected state** — the branch you are already in looked like the others — and the "Whole Management" card was always brand-tinted, even when not selected. **R10a:** `AuthCard`; the active branch/roll-up gets a brand outline, tint and a check (not colour alone); idle cards share one hover state.
 **F3:** the empty state gains a third start, **I'm a parent: link my child** (to `/family/join`); a staff member or teacher who is also a parent gets a ghost **Your children (parent view)** link under their branches.
@@ -214,6 +217,9 @@ The teacher's month calendar on the shared `SessionCalendar` (docs/04 §11.28): 
 ### `app/[locale]/(teacher)/teacher/profile/page.tsx` — **U9 (new)**
 The teacher's own picture and their classes' covers. A `PageSection` of one card per branch in view (the teacher's `PersonAvatar` with their photo at that branch, the shared `ImageUploadForm`, and — when they teach at more than one branch — a "Use this photo at all my branches" checkbox), then a `PageSection` of the shared `ClassCard`s with the cover controls in the card's action slot, so the teacher sees exactly what a student will. Flag off: each control is replaced by the "Coming soon" note. One column at 375px, two from `lg`; 44px targets.
 
+### `app/[locale]/(teacher)/teacher/assistants/page.tsx` — **W7a (new)**
+Assistants (D-W36). Not premium: `PageHeader` and one card — a brand sparkle, "Assistants come with premium" with the text premium badge, what premium allows, the lapsed note and "Contact KayEdu"; no button at all. Premium: a slots card ("n of 5 places in use" and **Invite an assistant**, disabled with its reason when full), then `PageSection` **Unused invites** (a card per invite: preset, "Expires <date, time>", **Revoke** behind `ConfirmAction`; one column on a phone, two from `md`) and `PageSection` **Your assistants** (a card per assistant: name, a neutral preset badge or "Custom", "Assistant since", the compact permission list, **Edit permissions** and **Remove**; two columns from `lg`). Invite is a narrow `DialogShell` (the preset as three radio tiles, Co-teacher preselected, each with its summary and a check on the chosen one; the 7-day note) that turns into the once-only code reveal (code in an LTR run, expiry line, warning, Copy code / Copy link). Edit permissions is a narrow `DialogShell`: a preset `Select` and eight 44px checkbox rows; a single change reads Custom. Full-screen sheets below `md`. `04-design-system.md` §11.36.
+
 ### `app/[locale]/(teacher)/teacher/students/page.tsx`
 Consistent. No change.
 
@@ -296,6 +302,13 @@ A Discover class on the shared `ClassDetail` (the Explore class page's body) und
 
 ### `app/[locale]/(student)/student/profile/page.tsx`
 Redirect only. No change.
+
+---
+
+## Assistant experience (route group `(assistant)`)
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/page.tsx` — **W7a (new)**
+The assistant's landing page, inside its own `AppShell` (platform brand, one nav item **Home**, no branch switcher, the role switcher with this teacher current): `PageHeader` "Assistant of <teacher>" and one card **What you may do** (the preset and since-date, the full permission list with descriptions, and "There is nothing to work on here yet"). A teacher this account does not effectively assist reads as not-found. One column at every width. `04-design-system.md` §11.36.
 
 ---
 

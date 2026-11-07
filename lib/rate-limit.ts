@@ -94,6 +94,10 @@ export const RATE_LIMITS = {
   // attempt counts, valid or not, before any code is looked up.
   familyJoinPerUser: { limit: 10, windowMs: 60 * 60_000 },
   familyJoinPerIp: { limit: 10, windowMs: 60 * 60_000 },
+  // W7a: redeeming an assistant code (/assistant-join, Account settings) —
+  // the preview and the confirm each count, valid or not, before any lookup.
+  assistantJoinPerUser: { limit: 10, windowMs: 60 * 60_000 },
+  assistantJoinPerIp: { limit: 10, windowMs: 60 * 60_000 },
   // W3a: autosave and start, per account only — a whole class shares one Wi-Fi
   // address, and each pick of an option is one call.
   assessmentWritePerUser: { limit: 120, windowMs: 60_000 },

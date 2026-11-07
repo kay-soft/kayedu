@@ -64,6 +64,8 @@ export default async function SelectCenterPage({
   const portals = others.filter((entry) => entry.group.kind === "portals");
   const staff = others.filter((entry) => entry.group.kind === "organization");
   const platform = others.filter((entry) => entry.group.kind === "platform");
+  // W7a: an assistant link is no branch relation, but it is something to open.
+  const connected = relations.length > 0 || experiences.some((entry) => entry.kind === "assistant");
 
   /** The hub's own wording for an entry; the same list the switcher renders. */
   const copyOf = (entry: ExperienceEntry): { title: string; hint: string | null } => {
@@ -74,6 +76,8 @@ export default async function SelectCenterPage({
         return { title: t("teacherPortal"), hint: t("teacherPortalHint") };
       case "parent":
         return { title: t("parentPortal"), hint: t("parentPortalHint") };
+      case "assistant":
+        return { title: t("assistantPortal", { teacher: entry.label.place ?? "" }), hint: t("assistantPortalHint") };
       case "rollup":
         return {
           title: t("wholeManagement", { organization: entry.label.place ?? "" }),
@@ -146,9 +150,9 @@ export default async function SelectCenterPage({
       {stale ? <ForgetStaleExperience /> : null}
       <AuthCard
         // With nothing to choose, the title says so (DES, docs/04 §12).
-        title={relations.length > 0 ? (hasPortal ? t("titleExperiences") : t("title")) : t("emptyTitle")}
+        title={connected ? (hasPortal ? t("titleExperiences") : t("title")) : t("emptyTitle")}
         // The empty state below carries its own title — not said twice.
-        description={relations.length > 0 ? (hasPortal ? t("subtitleExperiences") : t("subtitle")) : undefined}
+        description={connected ? (hasPortal ? t("subtitleExperiences") : t("subtitle")) : undefined}
       >
         <div className="flex flex-col gap-3">
           {lastUsed ? (
@@ -187,7 +191,7 @@ export default async function SelectCenterPage({
             <p className="pt-1 text-xs font-medium text-text-muted">{t("branchesHeading")}</p>
           ) : null}
 
-          {relations.length === 0 ? (
+          {!connected ? (
             <EmptyState
               icon={<Building2 />}
               tone="info"

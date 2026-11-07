@@ -8,8 +8,11 @@ import {
   RegenerateInvitationButton,
   UnlinkChildButton,
 } from "@/app/[locale]/account/family-controls";
+import { LeaveAssistantButton } from "@/app/[locale]/account/assistant-controls";
 import { StudyDetailsForm } from "@/app/[locale]/account/study-details-form";
 import { TeacherHistoryForm } from "@/app/[locale]/account/teacher-history-form";
+import { AssistantPermissionList } from "@/components/assistants/assistant-permission-list";
+import { JoinAssistantForm } from "@/components/assistants/join-assistant-form";
 import { JoinFamilyForm } from "@/components/family/join-family-form";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Ltr } from "@/components/shared/ltr";
@@ -19,6 +22,7 @@ import { PremiumStatusBadge, premiumDayLabel } from "@/components/shared/premium
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { premiumStatus } from "@/lib/auth/premium";
 import { hasTeacherMembership } from "@/lib/db/account";
+import { effectiveAssistantLinks } from "@/lib/db/assistants";
 import { showsStudyDetails } from "@/lib/db/account-study";
 import { listCatalogGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
@@ -289,6 +293,54 @@ export async function PremiumSection({ user }: AccountSectionProps) {
           <p className="text-sm text-text-secondary">{t("contact")}</p>
         </CardContent>
       </Card>
+    </PageSection>
+  );
+}
+
+/**
+ * Account → Assistant roles (W7a, D-W36, docs/04 §11.36): every account. Each
+ * **effective** link reads "Assistant of <teacher>" — the teacher's name only
+ * through a live link whose teacher is premium now, so a lapsed or removed
+ * link (and the name with it) is not listed — with the granted permissions,
+ * Open and Leave (confirmed, audited). Below them, "Join as an assistant":
+ * the same two-step redemption as `/assistant-join`. A teacher may redeem
+ * another teacher's code; their own is refused by the server.
+ */
+export async function AssistantSection({ user }: AccountSectionProps) {
+  const [t, links] = await Promise.all([getTranslations("Account.assistant"), effectiveAssistantLinks(prisma, user.id)]);
+
+  return (
+    <PageSection title={t("title")} description={t("description")}>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        {links.map((link) => (
+          <Card key={link.linkId} size="sm">
+            <CardHeader>
+              <CardTitle as="h3" className="break-words">
+                {t("roleTitle", { teacher: link.teacherName })}
+              </CardTitle>
+              <CardDescription>{t("roleDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <AssistantPermissionList permissions={link.permissions} compact />
+              <div className="grid gap-2 sm:flex sm:justify-end">
+                <LinkButton href={ROUTES.assistantHome(link.teacherUserId)} className="w-full sm:w-auto">
+                  {t("open")}
+                </LinkButton>
+                <LeaveAssistantButton linkId={link.linkId} teacherName={link.teacherName} />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle as="h3">{t("joinTitle")}</CardTitle>
+            <CardDescription>{t("joinDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <JoinAssistantForm mode="account" signedIn />
+          </CardContent>
+        </Card>
+      </div>
     </PageSection>
   );
 }

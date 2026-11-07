@@ -2,7 +2,13 @@ import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 
 import { AccountEmailForm, AccountPasswordForm, AccountProfileForm } from "@/app/[locale]/account/account-forms";
-import { FamilySection, PremiumSection, StudyDetailsSection, TeacherHistorySection } from "@/app/[locale]/account/extension-points";
+import {
+  AssistantSection,
+  FamilySection,
+  PremiumSection,
+  StudyDetailsSection,
+  TeacherHistorySection,
+} from "@/app/[locale]/account/extension-points";
 import { Ltr } from "@/components/shared/ltr";
 import { AppShell } from "@/components/shell/app-shell";
 import { shellFrameFor } from "@/components/shell/experience-frame";
@@ -87,6 +93,9 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
             </ul>
           )}
         </PageSection>
+
+        {/* W7a (D-W36): the assistant roles sit with the roles above — every account. */}
+        <AssistantSection user={user} />
 
         {/* Extension points (F4 Study details, F3 Family) — each renders nothing for an account it does not apply to. */}
         <StudyDetailsSection user={user} />

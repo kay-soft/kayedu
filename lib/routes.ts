@@ -25,6 +25,12 @@ export const ROUTES = {
    * query parameter, so it never reaches a server or proxy log.
    */
   familyJoin: "/family/join",
+  /**
+   * W7a: an account redeems an assistant code here — guests too, who sign in
+   * or sign up and come back. Like `familyJoin`, the code travels in the URL
+   * fragment (`assistantJoinUrl`), never a query.
+   */
+  assistantJoin: "/assistant-join",
   invite: (token: string) => `/invite/${token}`,
   // F5: the public Explore pages — guests, no sign-in (`(public)` route group).
   explore: "/explore",
@@ -96,6 +102,10 @@ export const ROUTES = {
   teacherSettlements: "/teacher/settlements",
   // U9: the teacher's photo (per branch) and their classes' cover images.
   teacherProfile: "/teacher/profile",
+  // W7a (D-W36): a premium teacher's assistants and invites.
+  teacherAssistants: "/teacher/assistants",
+  // W7a: the assistant experience, one per teacher the account assists.
+  assistantHome: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}`,
   studentSchedule: "/student/schedule",
   studentCalendar: "/student/calendar",
   studentDiscover: "/student/discover",
@@ -139,6 +149,11 @@ export function authConfirmUrl(locale: "ar" | "en"): string | undefined {
  */
 export function familyJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
   return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.familyJoin}#${code}`;
+}
+
+/** The link an assistant code is shared with (W7a): `<origin>/<locale>/assistant-join#CODE`. */
+export function assistantJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
+  return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.assistantJoin}#${code}`;
 }
 
 /** The signed-in experiences, each with its own shell (docs/02 §2). */

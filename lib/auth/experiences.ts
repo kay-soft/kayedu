@@ -10,6 +10,7 @@ import {
   type CenterRelation,
   type OwnerOrgGroup,
 } from "./relations.ts";
+import { effectiveAssistantLinks } from "../db/assistants.ts";
 import { activeChildLinks } from "../db/parents.ts";
 import { ROUTES } from "../routes.ts";
 import { centerLogoSrc } from "../storage-paths.ts";
@@ -28,14 +29,17 @@ import { centerLogoSrc } from "../storage-paths.ts";
  * Listing grants nothing. An entry only names a route; the route's own gate
  * re-checks access and tenant on every request.
  *
- * A new kind plugs in here only: W7 adds `assistant` (one per teacher, key
- * `assistant:<teacherUserId>`), and W8's PERSONAL workspaces must be left out
- * of the staff step below (CLAUDE.md rule 13), so one never reads as a branch.
+ * A new kind plugs in here only: W7a added `assistant` (one per teacher whose
+ * link is **effective** — live, and the teacher premium now — key
+ * `assistant:<teacherUserId>`, D-W36), and W8's PERSONAL workspaces must be
+ * left out of the staff step below (CLAUDE.md rule 13), so one never reads as
+ * a branch. An assistant entry is no centre relation: it sets no
+ * `kayedu_center` and names no branch.
  */
-export type ExperienceKind = "staff" | "rollup" | "student" | "teacher" | "parent" | "admin";
+export type ExperienceKind = "staff" | "rollup" | "student" | "teacher" | "parent" | "assistant" | "admin";
 
 /** Which glyph an entry shows — mapped to an icon in `components/shell/experience-glyph.tsx`. */
-export type ExperienceIcon = "branch" | "wholeManagement" | "student" | "teacher" | "parent" | "admin";
+export type ExperienceIcon = "branch" | "wholeManagement" | "student" | "teacher" | "parent" | "assistant" | "admin";
 
 /** How the list groups: staff per organization; the portals; the platform. */
 export type ExperienceGroup =
@@ -44,11 +48,15 @@ export type ExperienceGroup =
   | { kind: "platform" };
 
 export type ExperienceEntry = {
-  /** Stable across requests: `staff:<centerId>`, `org:<organizationId>`, `student`, `teacher`, `parent`, `admin`. */
+  /** Stable across requests: `staff:<centerId>`, `org:<organizationId>`, `student`, `teacher`, `parent`, `assistant:<teacherUserId>`, `admin`. */
   key: string;
   kind: ExperienceKind;
   icon: ExperienceIcon;
-  /** Role + place. Role keys are `Roles.*` messages; the place is data (never translated here). */
+  /**
+   * Role + place. Role keys are `Roles.*` messages; the place is data (never
+   * translated here). An assistant entry has no `TenantRole` (ASSISTANT is not
+   * one, W7a): its roles are empty and its place is the teacher's name.
+   */
   label: { roles: TenantRole[]; place: string | null };
   /** The experience's real landing route: never a query, never a remembered page. */
   href: string;
@@ -61,7 +69,12 @@ export type ExperienceEntry = {
   brand?: { name: string; logoUrl: string | null; themeColor: string };
   /** Whole Management only: how many branches it sums. */
   branchCount?: number;
+  /** Assistant only: whose assistant (the route segment of `href`). */
+  teacherUserId?: string;
 };
+
+/** One effective assistant link, as the list needs it. */
+export type AssistantExperienceSource = { teacherUserId: string; teacherName: string };
 
 export type ExperienceSources = {
   relations: CenterRelation[];
@@ -69,6 +82,8 @@ export type ExperienceSources = {
   hasLinkedChild: boolean;
   isPlatformAdmin: boolean;
   organizationNames: ReadonlyMap<string, string>;
+  /** W7a: effective links only — the caller decides effectiveness (`effectiveAssistantLinks`). */
+  assistantLinks?: AssistantExperienceSource[];
 };
 
 export function staffExperienceKey(centerId: string): string {
@@ -77,6 +92,10 @@ export function staffExperienceKey(centerId: string): string {
 
 export function rollupExperienceKey(organizationId: string): string {
   return `org:${organizationId}`;
+}
+
+export function assistantExperienceKey(teacherUserId: string): string {
+  return `assistant:${teacherUserId}`;
 }
 
 function branchBrand(center: Center): ExperienceEntry["brand"] {
@@ -89,7 +108,7 @@ function branchBrand(center: Center): ExperienceEntry["brand"] {
  * top, then the platform console.
  */
 export function buildExperiences(sources: ExperienceSources): ExperienceEntry[] {
-  const { relations, orgGroups, hasLinkedChild, isPlatformAdmin, organizationNames } = sources;
+  const { relations, orgGroups, hasLinkedChild, isPlatformAdmin, organizationNames, assistantLinks = [] } = sources;
   const entries: ExperienceEntry[] = [];
 
   if (relations.some((relation) => relation.roles.includes("STUDENT"))) {
@@ -119,6 +138,18 @@ export function buildExperiences(sources: ExperienceSources): ExperienceEntry[] 
       icon: "parent",
       label: { roles: ["PARENT"], place: null },
       href: ROUTES.parentHome,
+      group: { kind: "portals" },
+    });
+  }
+  // W7a: one per teacher, each with its own shell — never a centre relation.
+  for (const link of assistantLinks) {
+    entries.push({
+      key: assistantExperienceKey(link.teacherUserId),
+      kind: "assistant",
+      icon: "assistant",
+      label: { roles: [], place: link.teacherName },
+      href: ROUTES.assistantHome(link.teacherUserId),
+      teacherUserId: link.teacherUserId,
       group: { kind: "portals" },
     });
   }
@@ -186,6 +217,8 @@ export type ExperienceReads = {
   orgGroups: (userId: string) => Promise<OwnerOrgGroup[]>;
   hasLinkedChild: (userId: string) => Promise<boolean>;
   isPlatformAdmin: (userId: string) => Promise<boolean>;
+  /** W7a: the account's effective assistant links (live, teacher premium now). */
+  assistantLinks: (userId: string) => Promise<AssistantExperienceSource[]>;
 };
 
 /** The same resolvers with no request cache: what a gate runs. */
@@ -196,7 +229,20 @@ export function directExperienceReads(prisma: PrismaClient): ExperienceReads {
     hasLinkedChild: async (userId) => (await activeChildLinks(prisma, userId)).length > 0,
     isPlatformAdmin: async (userId) =>
       (await prisma.user.findUnique({ where: { id: userId }, select: { isPlatformAdmin: true } }))?.isPlatformAdmin ?? false,
+    assistantLinks: (userId) => assistantExperienceSources(prisma, userId),
   };
+}
+
+/** The effective links, as the list's input — premium worked out on this read (D-W15, rule 12). */
+export async function assistantExperienceSources(
+  prisma: PrismaClient,
+  userId: string,
+  now: Date = new Date(),
+): Promise<AssistantExperienceSource[]> {
+  return (await effectiveAssistantLinks(prisma, userId, now)).map((link) => ({
+    teacherUserId: link.teacherUserId,
+    teacherName: link.teacherName,
+  }));
 }
 
 export async function loadExperiences(
@@ -204,11 +250,12 @@ export async function loadExperiences(
   userId: string,
   reads: ExperienceReads = directExperienceReads(prisma),
 ): Promise<ExperienceEntry[]> {
-  const [relations, orgGroups, hasLinkedChild, isPlatformAdmin] = await Promise.all([
+  const [relations, orgGroups, hasLinkedChild, isPlatformAdmin, assistantLinks] = await Promise.all([
     reads.relations(userId),
     reads.orgGroups(userId),
     reads.hasLinkedChild(userId),
     reads.isPlatformAdmin(userId),
+    reads.assistantLinks(userId),
   ]);
   // `Organization` is global, not a tenant table (CLAUDE.md rule 1): only the
   // names of organizations these relations already resolved.
@@ -229,6 +276,7 @@ export async function loadExperiences(
     hasLinkedChild,
     isPlatformAdmin,
     organizationNames: new Map(organizations.map((organization) => [organization.id, organization.name])),
+    assistantLinks,
   });
 }
 

@@ -327,6 +327,12 @@ model User {
   // SEC-2a (D-01) — sign-ups claiming this staff-created person.
   accountClaims        AccountClaim[]      @relation("AccountClaimTarget")
   notifications        Notification[]
+  // W7a (D-W16, D-W17, D-W36) — the teacher side and the assistant side of an
+  // assistant link, and the codes a premium teacher issued / an account used.
+  assistantInvitesIssued AssistantInvite[]  @relation("AssistantInviteTeacher")
+  assistantInvitesUsed   AssistantInvite[]  @relation("AssistantInviteUsedBy")
+  assistantsAsTeacher    TeacherAssistant[] @relation("TeacherAssistantTeacher")
+  assistantLinks         TeacherAssistant[] @relation("TeacherAssistantAssistant")
 }
 
 /**
@@ -2133,4 +2139,72 @@ model AssessmentAnswer {
   @@index([centerId])
   @@index([questionId])
   @@index([optionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ASSISTANTS (W7a, D-W16, D-W17, D-W36) — per person, not tenant tables
+// ─────────────────────────────────────────────────────────────
+
+// The three presets a teacher picks from (D-W17). The fixed permission
+// catalogue and each preset's grants live in code (lib/assistant-catalog.ts);
+// a link whose grants match no preset reads as "Custom" — never stored.
+enum AssistantPreset {
+  GRADER
+  CO_TEACHER
+  FULL
+}
+
+// A premium teacher's single-use invitation code (D-W16). Stored as sha256
+// only (a CHECK refuses anything that is not a 64-hex digest); the plaintext
+// is shown once, at creation. Pending = unused, unrevoked and unexpired, and a
+// pending invite holds one of the teacher's 5 slots. Not a tenant table: it
+// names two people and no centre (rule 1 has nothing to scope here).
+model AssistantInvite {
+  id            String          @id @default(uuid())
+  teacherUserId String
+  teacher       User            @relation("AssistantInviteTeacher", fields: [teacherUserId], references: [id], onDelete: Cascade)
+  codeHash      String          @unique
+  preset        AssistantPreset
+  expiresAt     DateTime
+  usedAt        DateTime?
+  usedByUserId  String?
+  usedBy        User?           @relation("AssistantInviteUsedBy", fields: [usedByUserId], references: [id], onDelete: SetNull)
+  revokedAt     DateTime?
+  createdAt     DateTime        @default(now())
+
+  @@index([teacherUserId])
+}
+
+// One person acting for one premium teacher (D-W16). Effective only while
+// the teacher is premium (computed per request, D-W15) and `revokedAt` is
+// null. At most one live link per pair: a hand-written partial unique index
+// `TeacherAssistant_pair_live_key … WHERE "revokedAt" IS NULL` (Prisma cannot
+// express it — CLAUDE.md rule 7), and a CHECK refuses a self-link. An
+// assistant is never a Membership and gains no centre permission (W7a).
+model TeacherAssistant {
+  id              String          @id @default(uuid())
+  teacherUserId   String
+  teacher         User            @relation("TeacherAssistantTeacher", fields: [teacherUserId], references: [id], onDelete: Cascade)
+  assistantUserId String
+  assistant       User            @relation("TeacherAssistantAssistant", fields: [assistantUserId], references: [id], onDelete: Cascade)
+  // The preset last chosen. What the link may do is its grants below.
+  preset          AssistantPreset
+  createdAt       DateTime        @default(now())
+  revokedAt       DateTime?
+
+  grants AssistantPermissionGrant[]
+
+  @@index([teacherUserId])
+  @@index([assistantUserId])
+}
+
+// One permission of the fixed catalogue granted on one link (D-W17).
+// Deny-by-default: no row, no right. `permission` is validated against the
+// catalogue in code before any write (lib/db/assistants.ts).
+model AssistantPermissionGrant {
+  assistantId String
+  assistant   TeacherAssistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  permission  String
+
+  @@id([assistantId, permission])
 }

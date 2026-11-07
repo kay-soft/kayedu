@@ -5,6 +5,7 @@ import {
   Layers,
   Presentation,
   ShieldCheck,
+  UserCog,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -17,6 +18,7 @@ const ICONS: Record<ExperienceIcon, LucideIcon> = {
   student: GraduationCap,
   teacher: Presentation,
   parent: Users,
+  assistant: UserCog,
   admin: ShieldCheck,
 };
 

@@ -464,6 +464,26 @@
 
 ---
 
+## 46. Inviting an assistant by email
+
+**What it is.** The teacher types an assistant's email on `/teacher/assistants` and KayEdu sends the invite: a link to `/assistant-join` with the code in its fragment, so the person never has to be handed the code.
+
+**Why deferred.** W7a (D-W36) ships the code only, shown once and handed over by the teacher (D-W16: "an email invite comes later, behind `EMAIL_ENABLED`"). There is no email sender until M20, and an emailed invite is the first feature that addresses an assistant by contact before they accept, which needs the D-02 / W-C6 rule written for it (an email may address an invitation; it never links).
+
+**Depends on.** M20's SMTP sender and `EMAIL_ENABLED`; the same `createAssistantInvite` (one code, one slot), with the address used only to send and never stored on the invite or the audit row (D-20); a rate limit on sends per teacher; copy in both locales.
+
+---
+
+## 47. A notice when an assistant joins or leaves
+
+**What it is.** An inbox notice to the teacher when someone redeems their code ("<name> is now your assistant"), and when an assistant leaves; optionally one to the assistant when the teacher removes them or changes their permissions.
+
+**Why deferred.** Out of scope at W7a (D-W36): the teacher sees the new assistant on their own page at the next request, and nothing yet acts on an assistant's grants. The planned `ASSISTANT_INVITATION` kind does not fit a code invite at all (nobody is addressed before redemption), so these are new kinds, each a decision about who is told what.
+
+**Depends on.** New `NotificationKind` values (an additive enum migration), written in the redemption's and the leave's own transactions (`notify(tx, …)`, D-W12), ids only in the payload (the link id), names loaded at read time — and only while the link is effective, so a lapsed teacher's name is never shown.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

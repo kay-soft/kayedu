@@ -17,6 +17,7 @@ import {
   Settings,
   ShieldCheck,
   Undo2,
+  UserCog,
   UserRound,
   Users,
   Wallet,
@@ -46,6 +47,7 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hid
   audit: ScrollText,
   profile: UserRound,
   assessments: FileQuestion,
+  assistants: UserCog,
 };
 
 export function ShellIcon({
