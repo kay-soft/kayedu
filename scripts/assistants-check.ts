@@ -279,9 +279,59 @@ function staticChecks() {
     moneyReaders.length === 0,
     moneyReaders.map((file) => relative(ROOT, file)).join(", "),
   );
+  // (a) No Membership, relation or TenantContext is ever built from the
+  // assistant's own identity: only the teacher's, one per branch that
+  // resolveAssistantActing returned.
+  const scopeSource = stripComments(read("lib/auth/assistant-context.ts"));
+  const loader = (() => {
+    const start = scopeSource.indexOf("async function loadAssistantScope(");
+    return start < 0 ? "" : scopeSource.slice(start, scopeSource.indexOf("\n}\n", start));
+  })();
+  const actingCall = loader.indexOf("resolveAssistantActing(prisma, { assistantUserId: user.id, teacherUserId })");
+  const contextsCall = loader.indexOf("getTeacherContexts(acting.teacherUserId)");
   check(
-    "Centre reads go only through getAssistantScope's teacher contexts (getTeacherContexts(teacherUserId))",
-    /getTeacherContexts\(teacherUserId\)/.test(stripComments(read("lib/auth/assistant-context.ts"))),
+    "(a) The scope is built by resolveAssistantActing first, and refused without it",
+    actingCall > 0 && /if \(!acting\) return null;/.test(loader) && actingCall < loader.indexOf("if (!acting) return null;"),
+  );
+  check(
+    "(a) …then the teacher's contexts only — getTeacherContexts(acting.teacherUserId), after the acting is resolved",
+    contextsCall > actingCall && actingCall > 0,
+  );
+  check(
+    "(a) …narrowed to exactly the branches resolveAssistantActing returned (per branch, matched by centre id)",
+    /const branches = acting\.branches\.flatMap\(/.test(loader) &&
+      /contexts\.find\(\(candidate\) => candidate\.center\.id === branch\.centerId/.test(loader) &&
+      /acting: \{ \.\.\.acting, branches: acting\.branches\.filter\(/.test(loader),
+  );
+  const contextBuilders = assistantSurface.filter((file) => /getTeacherContexts\(/.test(stripComments(readSource(file))));
+  check(
+    "(a) getTeacherContexts is called in one place on the assistant surface, never with the session user's id",
+    contextBuilders.length === 1 && /assistant-context\.ts$/.test(contextBuilders[0]) &&
+      !/getTeacherContexts\((user\.id|session\.user\.id|scope\.user\.id|assistantUserId)/.test(scopeSource),
+    contextBuilders.map((file) => relative(ROOT, file)).join(", "),
+  );
+  const relationReaders = assistantSurface.filter((file) =>
+    /getUserCenterRelations\(|resolveCenterRelations\(|buildContext\(|getTeacherContexts\(\s*(user|session|scope)\./.test(stripComments(readSource(file))),
+  );
+  check(
+    "(a) No assistant file resolves centre relations or builds a context of its own (no getUserCenterRelations, resolveCenterRelations, buildContext)",
+    relationReaders.length === 0,
+    relationReaders.map((file) => relative(ROOT, file)).join(", "),
+  );
+  const membershipWriters = assistantSurface.filter((file) =>
+    /\.(membership|permissionGrant|membershipBranchGrant|studentProfile|invitation)\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(|savePermissionGrants\(|grantMembershipBranch\(/.test(stripComments(readSource(file))),
+  );
+  check(
+    "(a) No assistant file writes a Membership, PermissionGrant, branch grant, StudentProfile or invitation",
+    membershipWriters.length === 0,
+    membershipWriters.map((file) => relative(ROOT, file)).join(", "),
+  );
+  const actingSource = stripComments(read("lib/db/assistant-acting.ts"));
+  check(
+    "(a) resolveAssistantActing reads the teacher's memberships only (userId: teacherUserId) and the link from the session user and the teacher",
+    /db\.membership\.findMany\(\{\s*where: \{ userId: teacherUserId, role: "TEACHER", active: true/.test(actingSource) &&
+      !/userId: assistantUserId/.test(actingSource) &&
+      /findEffectiveAssistantLink\(db, \{ assistantUserId, teacherUserId, now \}\)/.test(actingSource),
   );
   const pages = assistantSurface.filter((file) => /[\\/]page\.tsx$/.test(file));
   const ungated = pages.filter((file) => !/getAssistantScope\(teacherId\)|getAssistantSession\(teacherId\)/.test(readSource(file)));
@@ -290,22 +340,65 @@ function staticChecks() {
     pages.length >= 11 && ungated.length === 0,
     ungated.map((file) => relative(ROOT, file)).join(", "),
   );
+  // (b) Every Server Action under (assistant) resolves the acting —
+  // assistantActionScope → loadAssistantScope → resolveAssistantActing, whose
+  // first await it is — before any data-layer call.
+  const scopeEntry = (() => {
+    const start = scopeSource.indexOf("export async function assistantActionScope(");
+    return start < 0 ? "" : scopeSource.slice(start, scopeSource.indexOf("\n}\n", start));
+  })();
+  const loaderAwaits = [...loader.matchAll(/await (\w+)\(/g)].map((m) => m[1]);
+  check(
+    "(b) assistantActionScope reaches loadAssistantScope with no data call before it, and resolveAssistantActing is the loader's first await",
+    /return user \? loadAssistantScope\(user, teacherUserId\) : null;/.test(scopeEntry) &&
+      [...scopeEntry.matchAll(/await (\w+)\(/g)].map((m) => m[1]).join() === "getCurrentUser" &&
+      loaderAwaits[0] === "resolveAssistantActing",
+    `${loaderAwaits.join(" → ")}`,
+  );
   const serverActionFiles = assistantSurface.filter((file) => /^["']use server["']/m.test(readSource(file)));
   const actionProblems: string[] = [];
   for (const file of serverActionFiles) {
     const source = stripComments(readSource(file));
-    const helper = /async function manageScope[\s\S]*?assistantActionScope\(teacherId\)/.test(source);
+    // Everything the file takes from the data layer: the client, and every name imported from lib/db or a data helper.
+    const dataNames = new Set<string>(["prisma", "scoped"]);
+    for (const match of source.matchAll(/import \{([^}]+)\} from "@\/(lib\/db\/[\w-]+|app\/\[locale\]\/\(assistant\)\/assistant\/\[teacherId\]\/assessments\/scope)"/g)) {
+      for (const name of match[1].split(",").map((part) => part.trim().replace(/^type\s+/, ""))) {
+        if (name && !/^[A-Z]/.test(name)) dataNames.add(name);
+      }
+    }
+    dataNames.delete("findAtBranches");
+    const firstData = (body: string) => {
+      let first = -1;
+      for (const name of dataNames) {
+        const at = body.search(new RegExp(`\\b${name}\\b\\s*(\\(|\\.)`));
+        if (at >= 0 && (first < 0 || at < first)) first = at;
+      }
+      return first;
+    };
+    // A file-local helper that does the resolution must itself resolve first.
+    const helperStart = source.indexOf("async function manageScope(");
+    const helper = helperStart < 0 ? "" : source.slice(helperStart, source.indexOf("\n}\n", helperStart));
+    const helperOk = helper === "" || (helper.indexOf("assistantActionScope(teacherId)") >= 0 && helper.indexOf("assistantActionScope(teacherId)") < firstData(helper.slice(helper.indexOf("{"))));
     for (const match of source.matchAll(/export async function (\w+)\(/g)) {
       const start = match.index ?? 0;
       const next = source.indexOf("\nexport ", start + 10);
       const body = source.slice(start, next < 0 ? undefined : next);
-      const gated = /assistantActionScope\(teacherId\)/.test(body) || (helper && /manageScope\(teacherId\)/.test(body));
+      // The function body opens at the first "{" that ends a line (the signature holds none).
+      const signatureEnd = body.indexOf(`{${String.fromCharCode(10)}`) + 2;
+      const inside = body.slice(signatureEnd);
+      const direct = inside.search(/assistantActionScope\(teacherId\)/);
+      const viaHelper = helper ? inside.search(/manageScope\(teacherId\)/) : -1;
+      const gate = direct >= 0 ? direct : viaHelper;
+      const data = firstData(inside);
+      const refusesWithout = /if \(!(scope|managed)\) return FORBIDDEN;/.test(inside);
       const trustsPost = /formData\.get\(["'](userId|actorUserId|teacherUserId|assistantUserId|linkId|centerId)["']\)/.test(body);
-      if (!gated || trustsPost) actionProblems.push(`${relative(ROOT, file)}#${match[1]}`);
+      if (gate < 0 || (data >= 0 && data < gate) || !refusesWithout || trustsPost || (viaHelper >= 0 && !helperOk)) {
+        actionProblems.push(`${relative(ROOT, file)}#${match[1]} (gate ${gate}, first data call ${data})`);
+      }
     }
   }
   check(
-    `Every Server Action under (assistant) (${serverActionFiles.length} files) resolves assistantActionScope first and trusts no posted user, link or centre id`,
+    `(b) Every Server Action under (assistant) (${serverActionFiles.length} files) resolves the acting before its first data-layer call, refuses without it, and trusts no posted user, link or centre id`,
     serverActionFiles.length === 2 && actionProblems.length === 0,
     actionProblems.join(", "),
   );

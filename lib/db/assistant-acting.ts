@@ -6,7 +6,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 // call this outside the Next.js runtime.
 import { isAssistantPermission, type AssistantPermission } from "../assistant-catalog.ts";
 import { can, type Permission, type PermissionGrants } from "../auth/permissions.ts";
-import { findEffectiveAssistantLink } from "./assistants.ts";
+import { findEffectiveAssistantLink, type EffectiveAssistantLink } from "./assistants.ts";
 import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { centreTimeZone } from "../scheduling.ts";
 import {
@@ -57,6 +57,8 @@ export type AssistantActing = {
   actorUserId: string;
   teacherUserId: string;
   linkId: string;
+  /** The effective link itself (the teacher's name, the preset) — read here, once. */
+  link: EffectiveAssistantLink;
   /** The link's grants, catalogue names only. */
   grants: AssistantPermission[];
   teacherHistoryDays: number;
@@ -182,6 +184,7 @@ export async function resolveAssistantActing(
     actorUserId: assistantUserId,
     teacherUserId,
     linkId: link.linkId,
+    link,
     grants: link.permissions,
     teacherHistoryDays: teacher.teacherHistoryDays,
     branches: allowed.map((membership, index) => {

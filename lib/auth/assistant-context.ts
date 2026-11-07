@@ -58,12 +58,18 @@ export type AssistantScope = {
   branches: AssistantBranch[];
 };
 
+/**
+ * The one way an assistant's scope is built (D-W37 items 1 and 13):
+ * `resolveAssistantActing` first — the effective link and the teacher's
+ * branches — and only then the **teacher's** contexts, one per branch it
+ * returned. Nothing is ever resolved from the assistant's own identity: no
+ * relation, no Membership, no context (`check:assistants`, statically).
+ */
 async function loadAssistantScope(user: User, teacherUserId: string): Promise<AssistantScope | null> {
-  const link = await findEffectiveAssistantLink(prisma, { assistantUserId: user.id, teacherUserId });
-  if (!link) return null;
   const acting = await resolveAssistantActing(prisma, { assistantUserId: user.id, teacherUserId });
   if (!acting) return null;
-  const contexts = await getTeacherContexts(teacherUserId);
+  const link = acting.link;
+  const contexts = await getTeacherContexts(acting.teacherUserId);
   const now = new Date();
   const branches = acting.branches.flatMap((branch): AssistantBranch[] => {
     const ctx = contexts.find((candidate) => candidate.center.id === branch.centerId && !candidate.experienceDenied);
