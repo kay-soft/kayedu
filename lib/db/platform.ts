@@ -234,6 +234,13 @@ export async function provisionBranch(
 /** The name a workspace's hidden default room carries (W8a; never shown in the UI). */
 export const WORKSPACE_DEFAULT_ROOM_NAME = "Workspace";
 
+/**
+ * W8c (D-W40 item 2): a workspace's one payment method — hidden (no screen
+ * lists or edits it), the method every workspace payment freezes. Not the
+ * branch baseline's three defaults (`DEFAULT_PAYMENT_METHOD_NAMES`).
+ */
+export const WORKSPACE_PAYMENT_METHOD_NAME = "Cash";
+
 export type PersonalWorkspaceRowInput = {
   /** The teacher who owns it — their personal organization is created on first use. */
   owner: { id: string; firstName: string; lastName: string; email: string | null; phone: string | null };
@@ -257,11 +264,14 @@ export type PersonalWorkspaceRows = { center: Center; organizationId: string; me
  * - the teacher's ACTIVE TEACHER `Membership`, its local record seeded from
  *   the account (CLAUDE.md rule 4);
  * - one default `Room` (capacity 0 = no seat limit), hidden from the UI: the
- *   class engine requires a primary room on every class and session.
+ *   class engine requires a primary room on every class and session;
+ * - W8c (D-W40 item 2): **one hidden "Cash" method**
+ *   (`WORKSPACE_PAYMENT_METHOD_NAME`) — `recordPayment` needs an active
+ *   method of the same centre, and no screen lists or edits it.
  *
  * It does **not** call `provisionCenterBaseline`: no `PermissionGrant` rows,
- * no payment methods. A workspace's authority is owning it
- * (`workspaceCan`), never the centre matrix (W-C3).
+ * not the baseline's three default methods. A workspace's authority is owning
+ * it (`workspaceCan`), never the centre matrix (W-C3).
  */
 export async function createPersonalWorkspace(
   tx: Prisma.TransactionClient,
@@ -289,6 +299,7 @@ export async function createPersonalWorkspace(
     data: { centerId: created.id, timezone: "Africa/Cairo", scheduleConflictPolicy: "WARN" },
   });
   await tx.room.create({ data: { centerId: created.id, name: WORKSPACE_DEFAULT_ROOM_NAME, capacity: 0 } });
+  await tx.centerPaymentMethod.create({ data: { centerId: created.id, name: WORKSPACE_PAYMENT_METHOD_NAME } });
   const membership = await tx.membership.create({
     data: {
       userId: input.owner.id,

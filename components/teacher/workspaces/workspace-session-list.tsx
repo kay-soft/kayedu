@@ -7,11 +7,13 @@ import {
   RescheduleWorkspaceSessionButton,
 } from "@/components/teacher/workspaces/workspace-session-controls";
 import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import type { WorkspaceSessionRow } from "@/lib/db/workspaces";
 import { formatDate, formatDay, formatMoney, formatTime, formatTimeRange } from "@/lib/format";
+import { ROUTES } from "@/lib/routes";
 import { dateKey } from "@/lib/scheduling";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 
@@ -28,6 +30,8 @@ const STATUS_BADGE = {
  * card the teacher's Sessions list draws, with the verbs the engine allows on
  * a session that has not started: Reschedule and Cancel, and Delete for an
  * extra or one-time one. Write controls only while the workspace takes writes.
+ * W8c: every row opens its session page (roster, payments, receipt), read-only
+ * included.
  */
 export async function WorkspaceSessionList({
   workspaceId,
@@ -84,8 +88,12 @@ export async function WorkspaceSessionList({
                 {tStatus(status)}
               </Badge>
             </div>
-            {actionable ? (
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <LinkButton href={ROUTES.teacherWorkspaceSession(workspaceId, row.id)} className="w-full sm:w-fit">
+                {t("open")}
+              </LinkButton>
+              {actionable ? (
+              <>
                 <RescheduleWorkspaceSessionButton
                   workspaceId={workspaceId}
                   sessionId={row.id}
@@ -94,8 +102,9 @@ export async function WorkspaceSessionList({
                 />
                 <CancelWorkspaceSessionButton workspaceId={workspaceId} sessionId={row.id} />
                 {kind !== "class" ? <DeleteWorkspaceSessionButton workspaceId={workspaceId} sessionId={row.id} /> : null}
-              </div>
-            ) : null}
+              </>
+              ) : null}
+            </div>
           </li>
         );
       })}

@@ -1782,6 +1782,7 @@
       "futureRange": "The end date can't be in the future — settle days that have already happened.",
       "rangeTooLong": "A settlement can cover at most 366 days.",
       "totalTooLarge": "That total is too large to record in one settlement — split the period.",
+      "workspaceNotSettled": "A teacher's private workspace is never settled — its payments are already the teacher's.",
       "required": "This field is required."
     },
     "emptyHint": "A settlement rolls up what a teacher has earned across a period. Create the first one below.",
@@ -4675,7 +4676,8 @@
       "deleted": "Session deleted.",
       "empty": "No sessions",
       "emptyHint": "Sessions appear here once a class has weekly slots.",
-      "untitledClass": "Class"
+      "untitledClass": "Class",
+      "open": "Open session"
     },
     "settings": {
       "title": "Workspace settings",
@@ -4718,6 +4720,48 @@
       "gradeNotFound": "Choose an available grade.",
       "subjectNotFound": "Choose an available subject.",
       "titleRequired": "Enter a title."
+    }
+  },
+  "WorkspaceSession": {
+    "metaTitle": "Session",
+    "back": "Back to sessions",
+    "rosterTitle": "Roster",
+    "rosterDescription": "The students enrolled in this class. Check a student in — Present or Late is set from the arrival time — then record their payment. Corrections are possible until the session is ended.",
+    "oneTimeNote": "A one-time session has no enrolled students, so there is nobody to check in here.",
+    "rosterEmpty": "No students enrolled",
+    "rosterEmptyHint": "Enrol students in this class from the class page; they appear here.",
+    "notCheckedIn": "Not checked in",
+    "noLongerEnrolled": "No longer enrolled",
+    "amount": "Amount: {amount}",
+    "amountNote": "The session's price, frozen when you record the payment. It is all yours — no cut is taken in your workspace.",
+    "refundHelp": "Records that you gave the money back to the student, in cash.",
+    "receiptTitle": "Receipt",
+    "receiptDescription": "What this session collected, your share (all of it) and who came.",
+    "detailsTitle": "Details",
+    "errors": {
+      "generic": "That didn't work. Try again.",
+      "forbidden": "You can't do that in this workspace.",
+      "notFound": "Not found. It may have been removed.",
+      "premiumRequired": "Read-only — renew premium to make changes.",
+      "workspaceArchived": "This workspace is archived. Unarchive it to make changes.",
+      "notEnrolled": "Only a student enrolled in this class can be checked in.",
+      "alreadyCheckedIn": "This student is already checked in.",
+      "notCheckedIn": "This student hasn't been checked in yet. Check them in first.",
+      "sessionCancelled": "This session is cancelled — attendance and payment can no longer be recorded on it.",
+      "sessionRescheduled": "This session was rescheduled — attendance and payment can no longer be recorded on it. Use the new session instead.",
+      "sessionClosed": "This session is closed — attendance and payments can no longer be changed on it.",
+      "reasonRequired": "Give a reason — switching a paid student to Absent voids their payment.",
+      "voidConfirmationRequired": "This student has paid. Confirm that marking them absent voids the payment.",
+      "attendanceNotPayable": "Only a Present or Late student can have a payment recorded.",
+      "alreadyPaid": "This student already has a payment. Void it first to record a new one.",
+      "invalidMethod": "This workspace can't record a payment right now. Try again later.",
+      "missingCut": "This session can't take a payment. Try again later.",
+      "alreadyVoided": "This payment was already voided.",
+      "alreadyRefunded": "This payment was already refunded.",
+      "alreadyClosed": "This session is already closed.",
+      "notStarted": "This session hasn't started yet, so it can't be ended.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long."
     }
   },
   "WorkspaceStudents": {

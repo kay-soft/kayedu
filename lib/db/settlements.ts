@@ -5,6 +5,7 @@ import { MAX_STORED_PIASTRES } from "../money.ts";
 import { addDays, dateKey, todayInTimezone } from "../scheduling.ts";
 // The longest period one settlement may cover — a year and a day (D-16).
 import { MAX_SETTLEMENT_PERIOD_DAYS } from "../validation/settlements.ts";
+import { BRANCH_ONLY } from "./center-kind.ts";
 import {
   centerTimeZone,
   sessionsDueForAutoClose,
@@ -37,6 +38,14 @@ import {
  * conditional updates on the expected status, so a double click changes
  * nothing twice.
  *
+ * **PERSONAL workspaces are never settled (W8c, D-W24, D-W40 item 3, CLAUDE.md
+ * rule 15).** A workspace payment is the teacher's own money from the moment
+ * it is recorded. Both creators refuse a PERSONAL centre
+ * (`workspaceNotSettled`) before anything is locked or written,
+ * `claimablePayments` reads BRANCH payments only, and the database refuses a
+ * `Settlement` or `SettlementClaim` row in a PERSONAL centre (the W8c
+ * triggers) — three guards, so no path reaches a workspace payment.
+ *
  * Takes a `Prisma.TransactionClient` exactly like `lib/db/payments.ts`'s
  * `recordPayment`/`voidPayment` and `lib/db/refunds.ts`'s `refundPayment` —
  * the caller wraps every write here in `prisma.$transaction()` and writes its
@@ -49,6 +58,16 @@ type Db = PrismaClient | Prisma.TransactionClient;
 const UNPAID_SETTLEMENT_STATUSES: SettlementStatus[] = ["DRAFT", "APPROVED"];
 const CANCELLED: SettlementStatus = "CANCELLED";
 
+
+/**
+ * Whether `centerId` may hold settlements at all: false only for a PERSONAL
+ * workspace (D-W24). Any other id — a branch, or one that names no centre —
+ * goes on exactly as before, so branch behaviour is unchanged.
+ */
+async function isSettleableCenter(tx: Db, centerId: string): Promise<boolean> {
+  const personal = await tx.center.count({ where: { id: centerId, kind: "PERSONAL" } });
+  return personal === 0;
+}
 
 /** Enough for a year of one teacher's sessions; the close sweep's own cap. */
 const PERIOD_CLOSE_SWEEP_LIMIT = 5_000;
@@ -165,6 +184,8 @@ async function claimablePayments(
       voided: false,
       refunded: false,
       settlementClaims: { none: { releasedAt: null } },
+      // D-W24: never a PERSONAL workspace's payment, whatever centre id is passed.
+      center: BRANCH_ONLY,
       ...scopeWhere,
     },
     select: { id: true, teacherShareSnapshot: true },
@@ -209,7 +230,9 @@ export type CreateSettlementResult =
         | "futureRange"
         | "rangeTooLong"
         | "overlappingSettlement"
-        | "totalTooLarge";
+        | "totalTooLarge"
+        // W8c (D-W24, D-W40 item 3): a PERSONAL workspace is never settled.
+        | "workspaceNotSettled";
     };
 
 /**
@@ -233,6 +256,7 @@ export async function createSessionSettlement(
   createdBy: string,
   options: { now?: Date } = {},
 ): Promise<CreateSettlementResult> {
+  if (!(await isSettleableCenter(tx, centerId))) return { ok: false, error: "workspaceNotSettled" };
   const gate = await ensureSessionOpenOrAutoClose(tx, sessionId, centerId, options.now, {
     allowTerminal: true,
   });
@@ -309,6 +333,7 @@ export async function createPeriodSettlement(
   createdBy: string,
   options: { now?: Date } = {},
 ): Promise<CreateSettlementResult> {
+  if (!(await isSettleableCenter(tx, centerId))) return { ok: false, error: "workspaceNotSettled" };
   const now = options.now ?? new Date();
   const timeZone = await centerTimeZone(tx, centerId);
   const rangeError = settlementRangeError(from, to, todayInTimezone(timeZone, now));

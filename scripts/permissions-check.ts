@@ -377,10 +377,17 @@ function checkBranchCreatePermission() {
       (workspaceBody.match(/\.center\.create\(/g) ?? []).length === 1 &&
       /\.center\.create\([\s\S]{0,1200}provisionCenterBaseline\(tx, created\.id\)/.test(branchBody),
   );
+  // W8c old → new (approved in the W8c prompt): the forbidden list no longer
+  // matches any "paymentMethod" text — a workspace now writes one hidden Cash
+  // method (D-W40 item 2) — but still fails on the baseline, a grant, or the
+  // baseline's three default methods by any of their helpers, and allows at
+  // most that one method row.
   check(
     "Only createPersonalWorkspace creates a PERSONAL centre, and it never provisions the baseline (static)",
     /kind:\s*"PERSONAL"/.test(workspaceBody) &&
-      !/provisionCenterBaseline\(|permissionGrant|paymentMethod/i.test(workspaceBody) &&
+      !/provisionCenterBaseline\(|permissionGrant|defaultPaymentMethodRows|ensureDefaultPaymentMethods|DEFAULT_PAYMENT_METHOD_NAMES/i.test(workspaceBody) &&
+      (workspaceBody.match(/centerPaymentMethod\.create(Many)?\(/g) ?? []).length <= 1 &&
+      !/centerPaymentMethod\.createMany\(/.test(workspaceBody) &&
       !/kind:\s*"PERSONAL"/.test(platform.replace(workspaceBody, "")),
   );
   check(

@@ -78,6 +78,10 @@ export const WORKSPACE_OWNER_CAPABILITIES = [
   // W8b (D-W39 item 11): adding students, inviting them, enrolling and
   // removing them from classes (`lib/db/workspace-students.ts`).
   "workspace.students.manage",
+  // W8c (D-W40 item 6): check-in and attendance corrections, and recording,
+  // voiding and refunding payments (`lib/db/workspace-attendance.ts`).
+  "workspace.attendance.manage",
+  "workspace.payments.manage",
 ] as const;
 
 export type WorkspaceCapability = (typeof WORKSPACE_OWNER_CAPABILITIES)[number];

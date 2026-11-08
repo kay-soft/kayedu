@@ -2,9 +2,10 @@ import { PrismaClient } from "@prisma/client";
 import type { Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-import { createWorkspace, createWorkspaceClass } from "@/lib/db/workspaces";
-import { formatDay, formatNumber } from "@/lib/format";
-import { addDays, todayInTimezone } from "@/lib/scheduling";
+import { acceptWorkspaceInvitation, addWorkspaceStudent, enrolWorkspaceStudent } from "@/lib/db/workspace-students";
+import { createWorkspace, createWorkspaceClass, createWorkspaceSession } from "@/lib/db/workspaces";
+import { formatDay, formatMoney, formatNumber } from "@/lib/format";
+import { addDays, dateKey, todayInTimezone, zonedClock } from "@/lib/scheduling";
 
 import { deleteAuditRows } from "../scripts/lib/audit-maintenance";
 import { assertSafeToWrite } from "../scripts/lib/env";
@@ -37,6 +38,18 @@ import { choose, dayFromToday, field, openDialog, pickDate, submitConfirmingConf
  * `removeE2eUsers(db, tag)` (the workspace, its profiles, invitations and
  * enrolments go with it; an unlinked placeholder carries the tag in its
  * surname), and the run asserts nothing of it is left.
+ *
+ * W8c (D-W40), the third test: a premium teacher with a linked, enrolled
+ * student and a session that started 20 minutes ago (all set up directly,
+ * staging-guarded — the hub flow is the second test's) opens the session from
+ * the Sessions list, checks the student in (Late, from the clock), records the
+ * payment at the read-only price, voids it with a reason (the student reads
+ * Not arrived), checks them in again, pays again, ends the session and reads
+ * the receipt: collected = the price, centre share 0, teacher share = the
+ * price. The student then sees the session on their calendar as Late, with no
+ * amount. The same `removeE2eUsers` teardown; the run asserts no payment,
+ * roster row, method, change row, session or audit row of it is left.
+ * Skipped too close to midnight (the session must have started today).
  */
 
 function escapeRegExp(text: string): string {
@@ -363,5 +376,182 @@ test("@write workspace students: add by phone, enrol, the student confirms on th
     await studentLeftovers(db, e2eTag, [teacher.email, pupil.email], userIds, centerIds),
     "the teardown leaves nothing of this run behind",
   ).toEqual({ users: 0, organizations: 0, centers: 0, profiles: 0, invitations: 0, enrollments: 0, notifications: 0, audit: 0 });
+  await db.$disconnect();
+});
+
+/** What the W8c run left behind, by its own ids — never a whole-table count. */
+async function moneyLeftovers(db: PrismaClient, tag: string, emails: string[], userIds: string[], centerIds: string[]) {
+  const [users, centers, sessions, attendees, payments, methods, changes, audit] = await Promise.all([
+    db.user.count({ where: { OR: [{ email: { in: emails } }, { lastName: { contains: ` ${tag}` } }] } }),
+    db.center.count({ where: { id: { in: centerIds } } }),
+    db.session.count({ where: { centerId: { in: centerIds } } }),
+    db.sessionAttendee.count({ where: { centerId: { in: centerIds } } }),
+    db.payment.count({ where: { centerId: { in: centerIds } } }),
+    db.centerPaymentMethod.count({ where: { centerId: { in: centerIds } } }),
+    db.sessionAttendanceChange.count({ where: { centerId: { in: centerIds } } }),
+    db.auditLog.count({ where: { OR: [{ actorUserId: { in: userIds } }, { centerId: { in: centerIds } }] } }),
+  ]);
+  return { users, centers, sessions, attendees, payments, methods, changes, audit };
+}
+
+const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+test("@write workspace money: check in, record a payment, void it, check in again, pay, end the session and read the receipt; the student sees Late, no money", async ({
+  page,
+  browser,
+  appLocale,
+  msg,
+  e2eTag,
+}, testInfo) => {
+  assertSafeToWrite("e2e: workspace money fixtures");
+  const clock = zonedClock(new Date(), "Africa/Cairo");
+  test.skip(clock.minutes < 40 || clock.minutes > 22 * 60 + 30, "needs a session that started today and is not over (Cairo time)");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e workspace money: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const db = new PrismaClient();
+  const locale: AppLocale = appLocale;
+  const teacher = { email: e2eEmail(e2eTag, "wsm-teacher"), first: "Wmt", last: `Teacher ${e2eTag}` };
+  const pupil = { email: e2eEmail(e2eTag, "wsm-student"), first: "Wms", last: `Student ${e2eTag}` };
+  const typed = { firstName: "Typed", lastName: `Payer ${e2eTag}` };
+  const phone = `+2011${String(Math.floor(Math.random() * 100_000_000)).padStart(8, "0")}`;
+  const userIds: string[] = [];
+  const centerIds: string[] = [];
+  const authIds: string[] = [];
+  const studentContext = await browser.newContext({ ...testInfo.project.use });
+  const price = 12_000;
+
+  try {
+    for (const person of [teacher, pupil]) {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: person.email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: { first_name: person.first, last_name: person.last, locale },
+      });
+      if (error || !data.user) throw error ?? new Error("e2e workspace money: could not create a login");
+      authIds.push(data.user.id);
+    }
+    const studentPage = await studentContext.newPage();
+    await signInWith(studentPage, locale, pupil.email);
+    await signInWith(page, locale, teacher.email);
+    const teacherRow = await db.user.findUniqueOrThrow({ where: { email: teacher.email } });
+    const pupilRow = await db.user.findUniqueOrThrow({ where: { email: pupil.email } });
+    userIds.push(teacherRow.id, pupilRow.id);
+
+    // Staging-guarded setup: premium, a workspace, a class, the linked enrolled student, a session 20 minutes in.
+    await db.user.update({ where: { id: teacherRow.id }, data: { premiumUntil: new Date(Date.now() + 30 * 86_400_000) } });
+    await db.user.update({ where: { id: pupilRow.id }, data: { phone } });
+    const workspaceName = `Chemistry ${e2eTag}`;
+    const created = await createWorkspace(db, teacherRow.id, { name: workspaceName });
+    if (!created.ok) throw new Error(`e2e workspace money: ${created.error}`);
+    const workspaceId = created.workspaceId;
+    centerIds.push(workspaceId);
+    const today = todayInTimezone("Africa/Cairo");
+    const klass = await createWorkspaceClass(
+      db,
+      teacherRow.id,
+      workspaceId,
+      {
+        educationSystemId: null,
+        gradeId: null,
+        subjectId: null,
+        price,
+        lateThresholdMinutes: 10,
+        startDate: today,
+        endDate: addDays(today, 21),
+        slots: [{ dayOfWeek: addDays(today, 1).getUTCDay(), startTime: "17:00", endTime: "18:00" }],
+      },
+      { confirmConflicts: true, locale },
+    );
+    if (!klass.ok) throw new Error(`e2e workspace money: ${klass.error}`);
+    const added = await addWorkspaceStudent(db, teacherRow.id, workspaceId, { ...typed, phone, gradeId: null });
+    if (!added.ok) throw new Error(`e2e workspace money: ${added.error}`);
+    const invitation = await db.workspaceInvitation.findFirstOrThrow({ where: { centerId: workspaceId, targetUserId: pupilRow.id, status: "PENDING" } });
+    const accepted = await acceptWorkspaceInvitation(db, pupilRow.id, invitation.id);
+    if (!accepted.ok) throw new Error(`e2e workspace money: ${accepted.error}`);
+    await enrolWorkspaceStudent(db, teacherRow.id, workspaceId, klass.classGroupId, added.studentProfileId);
+    const start = Math.floor((clock.minutes - 20) / 5) * 5;
+    const session = await createWorkspaceSession(
+      db,
+      teacherRow.id,
+      workspaceId,
+      { kind: "extra", classGroupId: klass.classGroupId, date: today, startTime: hhmm(start), endTime: hhmm(Math.min(start + 120, 23 * 60 + 55)) },
+      { confirmConflicts: true, locale },
+    );
+    if (!session.ok) throw new Error(`e2e workspace money: ${"error" in session ? session.error : "session"}`);
+    const sessionId = session.sessionId;
+
+    // The session page, from the Sessions list.
+    await page.goto(`/${locale}/teacher/workspaces/${workspaceId}/sessions`);
+    await expectHealthy(page, locale);
+    await page.locator(`a[href$="/teacher/workspaces/${workspaceId}/sessions/${sessionId}"]`).first().click();
+    await page.waitForURL(new RegExp(`/${locale}/teacher/workspaces/${workspaceId}/sessions/${sessionId}$`));
+    await expectHealthy(page, locale);
+    const row = page.getByRole("listitem").filter({ hasText: typed.lastName });
+    await expect(row.getByText(msg("WorkspaceSession.notCheckedIn"), { exact: true })).toBeVisible();
+
+    // Check in: Late (20 minutes in, a 10-minute threshold). The amount is read-only.
+    await row.getByRole("button", { name: msg("Sessions.roster.checkIn"), exact: true }).click();
+    await expect(row.getByText(msg("Sessions.attendance.LATE"), { exact: true }).first()).toBeVisible();
+    await expect(row.getByText(msg("WorkspaceSession.amount", { amount: formatMoney(price, locale) }))).toBeVisible();
+    await expect(row.getByRole("textbox")).toHaveCount(0);
+    await row.getByRole("button", { name: msg("Sessions.roster.recordPayment"), exact: true }).click();
+    const paidText = msg("Sessions.roster.paid", { amount: formatMoney(price, locale), method: "Cash" });
+    await expect(row.getByText(paidText)).toBeVisible();
+
+    // Void it, with a reason: the student goes back to Not arrived.
+    await row.getByRole("button", { name: msg("Sessions.roster.void"), exact: true }).click();
+    await row.getByLabel(msg("Sessions.roster.voidReasonPlaceholder")).fill("Recorded twice");
+    await row.getByRole("button", { name: msg("Sessions.roster.confirmVoid"), exact: true }).click();
+    await expect(row.getByText(msg("Sessions.attendance.NOT_ARRIVED"), { exact: true })).toBeVisible();
+
+    // Check in again and pay again — a new payment at the same frozen price.
+    await row.getByRole("button", { name: msg("Sessions.roster.checkIn"), exact: true }).click();
+    await expect(row.getByText(msg("Sessions.attendance.LATE"), { exact: true }).first()).toBeVisible();
+    await row.getByRole("button", { name: msg("Sessions.roster.recordPayment"), exact: true }).click();
+    await expect(row.getByText(paidText)).toBeVisible();
+
+    // End the session: closed, and the receipt reads collected = teacher share = the price, centre share 0.
+    await page.getByRole("button", { name: msg("Sessions.endSession.button"), exact: true }).click();
+    await openDialog(page).getByRole("button", { name: msg("Sessions.endSession.confirm"), exact: true }).click();
+    await expect(page.getByText(msg("Sessions.closure.locked"))).toBeVisible();
+    const receipt = page.locator("dl").filter({ hasText: msg("Sessions.receipt.collected") }).first();
+    const line = (label: string) => receipt.locator("div").filter({ hasText: label }).first();
+    await expect(line(msg("Sessions.receipt.collected"))).toContainText(formatMoney(price, locale));
+    await expect(line(msg("Sessions.receipt.teacherShare"))).toContainText(formatMoney(price, locale));
+    await expect(line(msg("Sessions.receipt.centerShare"))).toContainText(formatMoney(0, locale));
+    await expect(page.getByRole("button", { name: msg("Sessions.roster.checkIn"), exact: true })).toHaveCount(0);
+    const payments = await db.payment.findMany({ where: { centerId: workspaceId }, orderBy: [{ recordedAt: "asc" }, { id: "asc" }] });
+    expect(
+      payments.map((payment) => [payment.amount, payment.centerShareSnapshot, payment.teacherShareSnapshot, payment.voided]),
+      "two payments, the first voided, both 100% the teacher's",
+    ).toEqual([
+      [price, 0, price, true],
+      [price, 0, price, false],
+    ]);
+
+    // The student sees the session on their calendar as Late — and no amount.
+    const day = dateKey(today);
+    await studentPage.goto(`/${locale}/student/calendar?month=${day.slice(0, 7)}&day=${day}`);
+    await expectHealthy(studentPage, locale);
+    const entry = studentPage.getByRole("listitem").filter({ hasText: workspaceName }).first();
+    await expect(entry).toBeVisible();
+    await expect(entry.getByText(msg("Calendar.tone.late"), { exact: true })).toBeVisible();
+    await expect(entry.getByText(msg("WorkspaceStudents.student.privateClass"), { exact: true })).toBeVisible();
+    await expect(studentPage.getByText(formatMoney(price, locale))).toHaveCount(0);
+  } finally {
+    await studentContext.close();
+    await removeE2eUsers(db, e2eTag);
+    for (const authId of authIds) {
+      if ((await db.user.count({ where: { authId } })) === 0) await supabase.auth.admin.deleteUser(authId).catch(() => undefined);
+    }
+  }
+
+  expect(
+    await moneyLeftovers(db, e2eTag, [teacher.email, pupil.email], userIds, centerIds),
+    "the teardown leaves nothing of this run behind",
+  ).toEqual({ users: 0, centers: 0, sessions: 0, attendees: 0, payments: 0, methods: 0, changes: 0, audit: 0 });
   await db.$disconnect();
 });

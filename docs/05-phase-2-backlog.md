@@ -604,6 +604,56 @@
 
 ---
 
+## 60. Drop-in attendees in a workspace
+
+**What it is.** Checking in a workspace student who is not enrolled in the session's class — and so any check-in or payment on a workspace **one-time session**, which has no class and therefore no enrolled students.
+
+**Why deferred.** W8c (D-W40 item 4) checks in ACTIVE-enrolled students only, by direct call, so a workspace's roster is exactly its class. Drop-ins raise questions a branch answers with its desk (search, the confirm panel's photo, blocks) that a workspace does not have yet.
+
+**Depends on.** W8c's `workspaceCheckIn` with an `isDropIn: true` branch, a student picker over the workspace's own profiles, and a decision on whether a one-time session lists the whole workspace.
+
+---
+
+## 61. Expenses in a workspace
+
+**What it is.** A teacher recording their own costs (rent, printing) against a workspace, as a branch records expenses.
+
+**Why deferred.** W8c is about money in (payments), not money out; a workspace has no expense categories and no Expenses screen, and the Earnings page (W8d) shows the teacher share collected only.
+
+**Depends on.** The branch expense model (`Expense`, `ExpenseCategory`) under `workspaceCan`, and a place on the Earnings page for "net of expenses".
+
+---
+
+## 62. A refunds report for the workspace teacher
+
+**What it is.** A list of every refund in a workspace over a period — the branches' Refunds page for the teacher.
+
+**Why deferred.** W8c records refunds and shows them on each session's receipt; a period report belongs with the Earnings page and is not in W8d's scope.
+
+**Depends on.** W8d (Earnings), then a scoped `Refund` read per workspace.
+
+---
+
+## 63. Receipts shared with workspace students
+
+**What it is.** A student (or parent) seeing or downloading the receipt of what they paid for a workspace session.
+
+**Why deferred.** D-W40 item 10: a Private class row shows attendance and no money. Showing a student their own payments in a workspace is a separate decision from a branch's, where the past list shows the amount.
+
+**Depends on.** A decision on what a student may see of a workspace's money, and a student-side receipt view.
+
+---
+
+## 64. Payment methods other than Cash in a workspace
+
+**What it is.** InstaPay, Vodafone Cash or a teacher-named method in a workspace, with a picker on the payment form.
+
+**Why deferred.** W8c gives each workspace one hidden "Cash" method (D-W40 item 2) so `recordPayment` has the active method it requires, with nothing to configure. Several methods need a workspace settings screen and the picker.
+
+**Depends on.** `lib/db/payment-methods.ts`'s writers under `workspaceCan`, and the payment form's `PaymentMethodSelector`.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

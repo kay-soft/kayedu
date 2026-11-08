@@ -119,7 +119,9 @@ async function loadCenterSchedule(
     ...sessionLabelParts(locale, row.session),
     attendanceStatus: row.attendanceStatus,
     isDropIn: row.isDropIn,
-    paidAmount: row.payments[0]?.amount ?? null,
+    // W8c (D-W40 item 10): a Private class row shows attendance, never money —
+    // a branch row keeps its paid amount, as before.
+    paidAmount: privateClass ? null : (row.payments[0]?.amount ?? null),
     teacherName: names.get(row.session.teacherId) ?? "—",
     privateClass,
   }));

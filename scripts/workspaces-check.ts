@@ -14,6 +14,17 @@
  * student reads, the session producers and the re-check, leave, premium and
  * archive refusals, the rate limits, isolation, and the statics.
  *
+ * W8c (D-W24, D-W40), section 14: the hidden Cash method and its backfill;
+ * check-in of enrolled students only (the late rule, no drop-ins); the frozen
+ * snapshot in integer piastres with centre share 0 and teacher share = amount
+ * through lib/money.ts; the price frozen across a class price edit; SEC-05
+ * (also under concurrency) and SEC-12; void with and without a reason, the
+ * refund, the Absent switch; close and the lazy close; every settlement path
+ * refused by direct call and by the database; analytics and roll-ups; the
+ * receipt; premium lapse and archive; every other actor; isolation; the
+ * student's history without money and the parent's nothing; ids-only audit;
+ * the statics.
+ *
  * Writes and cleans up its own fixtures (users `workspaces-check-…`, the
  * branch and catalogue rows `workspaces-check-…`, every centre under the
  * fixture users' personal organizations, and — W8b — the placeholder users
@@ -76,10 +87,11 @@ import {
   workspaceCan,
   workspaceClasses,
   workspaceSessions,
+  workspaceRoomId,
   writeWorkspaceClassSlot,
 } from "../lib/db/workspaces.ts";
 import { ROUTES } from "../lib/routes.ts";
-import { addDays, todayInTimezone } from "../lib/scheduling.ts";
+import { addDays, dateKey, todayInTimezone, zonedDateTimeToUtc } from "../lib/scheduling.ts";
 import { visibleWhere } from "../lib/db/notifications.ts";
 import { leaveClass } from "../lib/db/reservations.ts";
 import { studentCalendarMonth, studentPastAttendance, studentUpcomingSessions } from "../lib/db/student-portal.ts";
@@ -102,6 +114,24 @@ import {
   workspaceClassRoster,
 } from "../lib/db/workspace-students.ts";
 import { RATE_LIMITS } from "../lib/rate-limit.ts";
+import { splitShare } from "../lib/money.ts";
+import { revenueTotals } from "../lib/db/analytics.ts";
+import { activeChildLinks } from "../lib/db/parents.ts";
+import { attendedSessionsToRate, skipSessionRating, submitSessionRating } from "../lib/db/ratings.ts";
+import { DEFAULT_PAYMENT_METHOD_NAMES } from "../lib/db/payment-methods.ts";
+import { sessionReceiptTotals } from "../lib/db/payments.ts";
+import { WORKSPACE_PAYMENT_METHOD_NAME } from "../lib/db/platform.ts";
+import { createPeriodSettlement, createSessionSettlement } from "../lib/db/settlements.ts";
+import {
+  workspaceCheckIn,
+  workspaceCloseSession,
+  workspaceRecordPayment,
+  workspaceRefundPayment,
+  workspaceSessionRoster,
+  workspaceSetAttendance,
+  workspaceVoidPayment,
+} from "../lib/db/workspace-attendance.ts";
+import { workspaceRecordPaymentSchema } from "../lib/validation/workspace-sessions.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -256,10 +286,14 @@ async function main() {
     membershipsA.length === 1 && membershipsA[0].userId === ownerA.id && membershipsA[0].role === "TEACHER" && membershipsA[0].active,
   );
   const gaps = await centerBaselineGaps(prisma, wsA);
+  // W8c old → new (approved in the W8c prompt): "no payment method" →
+  // "exactly one active method named Cash" (D-W40 item 2); still no grants and
+  // no baseline rows.
+  const methodsA = await prisma.centerPaymentMethod.findMany({ where: { centerId: wsA } });
   check(
-    "No baseline: no PermissionGrant row, no payment method (by design — not a gap to fill)",
+    "No baseline: no PermissionGrant row, exactly one active method named Cash (hidden), no baseline rows (by design — not a gap to fill)",
     (await prisma.permissionGrant.count({ where: { centerId: wsA } })) === 0 &&
-      (await prisma.centerPaymentMethod.count({ where: { centerId: wsA } })) === 0 &&
+      methodsA.length === 1 && methodsA[0].name === "Cash" && methodsA[0].active &&
       gaps.missingGrants.length > 0,
   );
   check("One hidden default room, capacity 0 (no seat limit)", (await prisma.room.findMany({ where: { centerId: wsA } })).map((room) => room.capacity).join() === "0");
@@ -684,6 +718,16 @@ async function main() {
     ownerA,
     ownerB,
     student,
+    others,
+  });
+
+  await workspaceMoney({
+    today,
+    branchId: branch.id,
+    branchOrganizationId: branchOrg.id,
+    wsA,
+    classInput,
+    ownerA,
     others,
   });
 }
@@ -1144,6 +1188,515 @@ async function workspaceStudents(fx: {
     "The W8b migration is additive: RLS on, the partial index, no DROP (static)",
     /ENABLE ROW LEVEL SECURITY/.test(w8bMigration) && /WorkspaceInvitation_one_pending_per_profile/.test(w8bMigration) &&
       !/^\s*DROP\s/im.test(w8bMigration) && !/POLICY/i.test(w8bMigration),
+  );
+}
+
+// ── 14. W8c: check-in, payments, close and the settlement refusal (D-W24, D-W40) ──
+
+/** A Cairo wall-clock instant on `day` (the gate drives the engine's clock explicitly). */
+const cairoAt = (day: Date, hour: number, minute = 0) => zonedDateTimeToUtc(dateKey(day), hour * 60 + minute, TZ);
+
+type Refusal = { ok: false; error: string };
+const refusedWith = (result: { ok: boolean } | null, error: string) => result !== null && !result.ok && (result as Refusal).error === error;
+const errorOf = (result: { ok: boolean } | null) => (result === null ? "null" : result.ok ? "ok" : (result as Refusal).error);
+
+async function workspaceMoney(fx: {
+  today: Date;
+  branchId: string;
+  branchOrganizationId: string;
+  wsA: string;
+  classInput: { educationSystemId: null; gradeId: string; subjectId: string; price: number; lateThresholdMinutes: number; startDate: Date; endDate: Date };
+  ownerA: FixtureUser;
+  others: [string, string][];
+}) {
+  const { today, branchId } = fx;
+  console.log("\n14. W8c: workspace check-in, payments, void, refund, close; never settled");
+  const yesterday = addDays(today, -1);
+  const tomorrow = addDays(today, 1);
+  const owner = await makeUser("money-teacher", { premium: true });
+  const created = await createWorkspace(prisma, owner.id, { name: "Money" });
+  check("A fresh workspace for the money matrix", created.ok);
+  if (!created.ok) return;
+  const ws = created.workspaceId;
+  const actor = { actorUserId: owner.id, teacherUserId: owner.id };
+
+  // ── 14a. The hidden Cash method and its backfill ───────────────────────
+  const methods = await prisma.centerPaymentMethod.findMany({ where: { centerId: ws } });
+  check(
+    "createPersonalWorkspace writes exactly one active method named Cash",
+    methods.length === 1 && methods[0].name === WORKSPACE_PAYMENT_METHOD_NAME && methods[0].active,
+  );
+  const cash = methods[0];
+  const w8cDir = readdirSync(join(ROOT, "prisma", "migrations")).find((dir) => dir.endsWith("_w8c_workspace_payments"));
+  const w8cMigration = w8cDir ? read(`prisma/migrations/${w8cDir}/migration.sql`) : "";
+  const backfill = w8cMigration.match(/INSERT INTO "CenterPaymentMethod"[\s\S]*?;/)?.[0] ?? "";
+  const bare = await createWorkspace(prisma, owner.id, { name: "Pre-W8c" });
+  if (bare.ok && backfill) {
+    await prisma.centerPaymentMethod.deleteMany({ where: { centerId: bare.workspaceId } });
+    await prisma.$executeRawUnsafe(backfill);
+    const once = await prisma.centerPaymentMethod.findMany({ where: { centerId: bare.workspaceId } });
+    await prisma.$executeRawUnsafe(backfill);
+    const twice = await prisma.centerPaymentMethod.count({ where: { centerId: bare.workspaceId } });
+    check(
+      "The migration's backfill gives a method-less workspace one active Cash, and a re-run adds nothing (idempotent)",
+      once.length === 1 && once[0].name === "Cash" && once[0].active && twice === 1 &&
+        (await prisma.centerPaymentMethod.count({ where: { centerId: ws } })) === 1 &&
+        (await prisma.centerPaymentMethod.count({ where: { centerId: branchId } })) === DEFAULT_PAYMENT_METHOD_NAMES.length,
+    );
+  } else {
+    check("The migration's backfill gives a method-less workspace one active Cash, and a re-run adds nothing (idempotent)", false, "no backfill statement found");
+  }
+
+  // ── 14b. Fixtures: a class, four students, today's 08:00 session ──────
+  const options = { confirmConflicts: true, locale: "en", now: cairoAt(today, 7) };
+  const cls = await createWorkspaceClass(
+    prisma,
+    owner.id,
+    ws,
+    { ...fx.classInput, startDate: today, endDate: addDays(today, 27), slots: [{ dayOfWeek: tomorrow.getUTCDay(), startTime: "16:00", endTime: "18:00" }] },
+    options,
+  );
+  const classId = cls.ok ? cls.classGroupId : "";
+  const loginStudent = await makeUser("money-student");
+  const linkedPhone = freshPhone();
+  await prisma.user.update({ where: { id: loginStudent.id }, data: { phone: linkedPhone, authId: `${STEM}-auth-money-${RUN}` } });
+  const addOne = async (tag: string, phone: string) => {
+    const result = await addWorkspaceStudent(prisma, owner.id, ws, { ...PLACEHOLDER(tag), phone, gradeId: null });
+    return result.ok ? result.studentProfileId : "";
+  };
+  const s1 = await addOne("m1", linkedPhone);
+  const s2 = await addOne("m2", freshPhone());
+  const s4 = await addOne("m4", freshPhone());
+  const s3 = await addOne("m3", freshPhone()); // a workspace student never enrolled
+  const invitation = await prisma.workspaceInvitation.findFirst({ where: { centerId: ws, targetUserId: loginStudent.id, status: "PENDING" } });
+  const accepted = invitation ? await acceptWorkspaceInvitation(prisma, loginStudent.id, invitation.id) : null;
+  for (const profile of [s1, s2, s4]) await enrolWorkspaceStudent(prisma, owner.id, ws, classId, profile);
+  const extra = await createWorkspaceSession(prisma, owner.id, ws, { kind: "extra", classGroupId: classId, date: today, startTime: "08:00", endTime: "09:00" }, options);
+  const sessionId = extra.ok ? extra.sessionId : "";
+  const oneOff = await createWorkspaceSession(prisma, owner.id, ws, { kind: "oneOff", title: "Revision", price: 5_000, date: today, startTime: "10:00", endTime: "11:00" }, options);
+  const oneOffId = oneOff.ok ? oneOff.sessionId : "";
+  check(
+    "Fixtures: a class at 150 EGP with a 10-minute threshold, three enrolled students (one linked), one not enrolled, today's 08:00 session",
+    cls.ok && accepted !== null && accepted.ok && Boolean(s1 && s2 && s3 && s4 && sessionId && oneOffId),
+    JSON.stringify({ cls: cls.ok, accepted, extra: extra.ok, oneOff: oneOff.ok }),
+  );
+  const branchRevenueBefore = JSON.stringify(await revenueTotals(prisma, branchId, { from: null, to: null }));
+
+  // ── 14c. Check-in: the late rule, enrolled only, no drop-ins ───────────
+  const in1 = await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: s1 }, cairoAt(today, 8, 5));
+  const in2 = await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: s2 }, cairoAt(today, 8, 20));
+  check(
+    "Check-in sets Present within the class's 10-minute threshold and Late beyond it (the branch rule), enrolled, not a drop-in",
+    in1.ok && in1.attendee.attendanceStatus === "PRESENT" && !in1.attendee.isDropIn && in1.attendee.enrollmentId !== null &&
+      in2.ok && in2.attendee.attendanceStatus === "LATE",
+  );
+  check(
+    "The threshold is the workspace class row's own (lateThresholdMinutes 10; the settings default is only the engine's fallback)",
+    (await prisma.classGroup.findUniqueOrThrow({ where: { id: classId } })).lateThresholdMinutes === 10,
+  );
+  const again = await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: s1 }, cairoAt(today, 8, 6));
+  check("A second check-in of the same student is alreadyCheckedIn (no second row)", refusedWith(again, "alreadyCheckedIn"));
+  const notEnrolled = await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: s3 }, cairoAt(today, 8, 6));
+  const dropInOneOff = await workspaceCheckIn(prisma, actor, ws, { sessionId: oneOffId, studentProfileId: s1 }, cairoAt(today, 10, 5));
+  check(
+    "A non-enrolled workspace student is refused (notEnrolled) and no drop-in row is written — a one-time session takes nobody",
+    refusedWith(notEnrolled, "notEnrolled") && refusedWith(dropInOneOff, "notEnrolled") &&
+      (await prisma.sessionAttendee.count({ where: { centerId: ws, OR: [{ studentProfileId: s3 }, { isDropIn: true }] } })) === 0,
+  );
+  const otherWsStudent = await prisma.studentProfile.findFirst({ where: { centerId: fx.wsA }, select: { id: true } });
+  const crossStudent = otherWsStudent ? await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: otherWsStudent.id }, cairoAt(today, 8, 6)) : null;
+  check("Another workspace's student is refused (notEnrolled)", refusedWith(crossStudent, "notEnrolled"));
+
+  // ── 14d. Record a payment: the frozen snapshot, 100% the teacher's ──────
+  const attendee1 = await prisma.sessionAttendee.findFirstOrThrow({ where: { centerId: ws, sessionId, studentProfileId: s1 } });
+  const attendee2 = await prisma.sessionAttendee.findFirstOrThrow({ where: { centerId: ws, sessionId, studentProfileId: s2 } });
+  const pay1 = await workspaceRecordPayment(prisma, actor, ws, { attendeeId: attendee1.id }, cairoAt(today, 8, 10));
+  const expected = splitShare(15_000, "PERCENTAGE", 0);
+  const p1 = pay1.ok ? pay1.payment : null;
+  check(
+    "The payment freezes the session price in integer piastres: amount = price = 15000, centre share 0, teacher share = amount (lib/money.ts on PERCENTAGE 0)",
+    p1 !== null && p1.amount === 15_000 && p1.priceSnapshot === 15_000 &&
+      p1.centerShareSnapshot === expected.centerShare && p1.teacherShareSnapshot === expected.teacherShare &&
+      expected.centerShare === 0 && expected.teacherShare === 15_000 &&
+      [p1.amount, p1.priceSnapshot, p1.centerShareSnapshot, p1.teacherShareSnapshot].every(Number.isSafeInteger),
+    JSON.stringify(p1),
+  );
+  check(
+    "It carries the hidden Cash method and its frozen label, the owner as teacher, the student's profile",
+    p1 !== null && p1.paymentMethodId === cash.id && p1.methodLabelSnapshot === "Cash" && p1.teacherId === owner.id &&
+      p1.studentProfileId === s1 && p1.centerId === ws && !p1.voided && !p1.refunded,
+  );
+  const secondPay = await workspaceRecordPayment(prisma, actor, ws, { attendeeId: attendee1.id }, cairoAt(today, 8, 11));
+  check("SEC-05: a second payment for the same student is alreadyPaid", refusedWith(secondPay, "alreadyPaid"));
+  const race = await Promise.all([
+    workspaceRecordPayment(prisma, actor, ws, { attendeeId: attendee2.id }, cairoAt(today, 8, 21)),
+    workspaceRecordPayment(prisma, actor, ws, { attendeeId: attendee2.id }, cairoAt(today, 8, 21)),
+  ]);
+  check(
+    "SEC-05 under concurrency: two simultaneous payments for one student record exactly one",
+    race.filter((result) => result.ok).length === 1 &&
+      (await prisma.payment.count({ where: { centerId: ws, sessionAttendeeId: attendee2.id, voided: false, refunded: false } })) === 1,
+  );
+  const paid2 = race.find((result) => result.ok);
+  const p2Id = paid2 && paid2.ok ? paid2.payment.id : "";
+
+  // ── 14e. Price frozen: a later class price edit changes no payment ──────
+  const edited = await updateWorkspaceClass(prisma, owner.id, ws, classId, { ...fx.classInput, price: 20_000, startDate: today, endDate: addDays(today, 27) }, options);
+  const afterEdit = await prisma.session.findUniqueOrThrow({ where: { id: sessionId } });
+  const p1After = p1 ? await prisma.payment.findUniqueOrThrow({ where: { id: p1.id } }) : null;
+  const unpaidOpen = await prisma.session.findMany({ where: { centerId: ws, classGroupId: classId, date: { gt: today }, closedAt: null } });
+  check(
+    "A class price edit leaves the paid session at 150 EGP and every recorded payment exactly as frozen (unpaid open sessions take 200 EGP)",
+    edited.ok && afterEdit.priceSnapshot === 15_000 && p1After !== null && p1 !== null &&
+      (["amount", "priceSnapshot", "centerShareSnapshot", "teacherShareSnapshot", "paymentMethodId", "methodLabelSnapshot", "voided", "refunded"] as const).every(
+        (field) => p1After[field] === p1[field],
+      ) &&
+      unpaidOpen.length > 0 && unpaidOpen.every((row) => row.priceSnapshot === 20_000),
+    JSON.stringify({ edited: edited.ok, price: afterEdit.priceSnapshot, unpaidOpen: unpaidOpen.map((row) => row.priceSnapshot) }),
+  );
+
+  // ── 14f. Void: a reason, the T5 reset, SEC-12 ───────────────────────────
+  const p1Id = p1?.id ?? "";
+  const noReason = await workspaceVoidPayment(prisma, actor, ws, { paymentId: p1Id, reason: "   " }, cairoAt(today, 8, 25));
+  check("A void without a reason is refused (reasonRequired) and changes nothing", refusedWith(noReason, "reasonRequired") && !(await prisma.payment.findUniqueOrThrow({ where: { id: p1Id } })).voided);
+  const voided1 = await workspaceVoidPayment(prisma, actor, ws, { paymentId: p1Id, reason: "Wrong student" }, cairoAt(today, 8, 25));
+  const v1 = await prisma.payment.findUniqueOrThrow({ where: { id: p1Id } });
+  const reset1 = await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: attendee1.id } });
+  const voidChange = await prisma.sessionAttendanceChange.findFirst({ where: { centerId: ws, voidedPaymentId: p1Id } });
+  check(
+    "A void with a reason keeps the money fields, flags it voided with the reason, and resets the student to Not arrived (one change row)",
+    voided1.ok && v1.voided && v1.voidReason === "Wrong student" && v1.amount === 15_000 && v1.teacherShareSnapshot === 15_000 &&
+      v1.centerShareSnapshot === 0 && reset1.attendanceStatus === "ABSENT" && voidChange !== null && voidChange.toStatus === "ABSENT",
+  );
+  const voidTwice = await workspaceVoidPayment(prisma, actor, ws, { paymentId: p1Id, reason: "Again" }, cairoAt(today, 8, 26));
+  const refundVoided = await workspaceRefundPayment(prisma, actor, ws, { paymentId: p1Id, reason: "Back" }, cairoAt(today, 8, 26));
+  check("SEC-12: a voided payment is neither voided again nor refunded", refusedWith(voidTwice, "alreadyVoided") && refusedWith(refundVoided, "alreadyVoided"));
+
+  // ── 14g. Re-check-in and pay again: a NEW row at the session's price ────
+  const recheck = await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: s1 }, cairoAt(today, 8, 30));
+  const pay3 = await workspaceRecordPayment(prisma, actor, ws, { attendeeId: attendee1.id }, cairoAt(today, 8, 31));
+  check(
+    "The Not-arrived student is checked in again on the same row (Late, from this arrival) and pays a new row at the frozen 150 EGP",
+    recheck.ok && recheck.attendee.id === attendee1.id && recheck.attendee.attendanceStatus === "LATE" &&
+      pay3.ok && pay3.payment.id !== p1Id && pay3.payment.amount === 15_000 && pay3.payment.teacherShareSnapshot === 15_000 && pay3.payment.centerShareSnapshot === 0,
+  );
+
+  // ── 14h. Refund: cash back, both shares reversed, SEC-12 ────────────────
+  const p3Id = pay3.ok ? pay3.payment.id : "";
+  const refunded = await workspaceRefundPayment(prisma, actor, ws, { paymentId: p3Id, reason: "Left early" }, cairoAt(today, 8, 40));
+  const p3After = await prisma.payment.findUniqueOrThrow({ where: { id: p3Id } });
+  check(
+    "A refund keeps the payment's money fields, writes a Refund reversing amount 15000, centre 0 and teacher 15000, and resets to Not arrived",
+    refunded.ok && refunded.refund !== null && p3After.refunded && !p3After.voided && p3After.amount === 15_000 && p3After.teacherShareSnapshot === 15_000 &&
+      refunded.refund.amount === 15_000 && refunded.refund.centerShareReversed === 0 && refunded.refund.teacherShareReversed === 15_000 &&
+      (await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: attendee1.id } })).attendanceStatus === "ABSENT",
+  );
+  const voidRefunded = await workspaceVoidPayment(prisma, actor, ws, { paymentId: p3Id, reason: "x" }, cairoAt(today, 8, 41));
+  const refundTwice = await workspaceRefundPayment(prisma, actor, ws, { paymentId: p3Id, reason: "x" }, cairoAt(today, 8, 41));
+  check(
+    "SEC-12: a refunded payment is neither voided nor refunded again (never both on one row)",
+    refusedWith(voidRefunded, "alreadyRefunded") && refusedWith(refundTwice, "alreadyRefunded") &&
+      (await prisma.payment.count({ where: { centerId: ws, voided: true, refunded: true } })) === 0,
+  );
+
+  // ── 14i. The Absent switch voids, with its confirmation and reason ──────
+  const unconfirmed = await workspaceSetAttendance(prisma, actor, ws, { sessionId, studentProfileId: s2, status: "ABSENT", confirmVoid: false }, cairoAt(today, 8, 42));
+  const noAbsentReason = await workspaceSetAttendance(prisma, actor, ws, { sessionId, studentProfileId: s2, status: "ABSENT", confirmVoid: true }, cairoAt(today, 8, 42));
+  check(
+    "Switching a paid student to Absent needs the confirmation (voidConfirmationRequired) and a reason (reasonRequired), writing nothing",
+    refusedWith(unconfirmed, "voidConfirmationRequired") && refusedWith(noAbsentReason, "reasonRequired") &&
+      (await prisma.sessionAttendee.findUniqueOrThrow({ where: { id: attendee2.id } })).attendanceStatus === "LATE",
+  );
+  const absent2 = await workspaceSetAttendance(prisma, actor, ws, { sessionId, studentProfileId: s2, status: "ABSENT", reason: "Never came", confirmVoid: true }, cairoAt(today, 8, 43));
+  const p2Row = await prisma.payment.findUniqueOrThrow({ where: { id: p2Id } });
+  const absentChange = await prisma.sessionAttendanceChange.findFirst({ where: { centerId: ws, voidedPaymentId: p2Id } });
+  check(
+    "The Absent switch voids the payment in the same change, keeps its change row (reason on both) and the student reads Absent",
+    absent2.ok && absent2.voidedPayment?.id === p2Id && p2Row.voided && p2Row.voidReason === "Never came" &&
+      absentChange !== null && absentChange.fromStatus === "LATE" && absentChange.toStatus === "ABSENT" && absentChange.reason === "Never came",
+  );
+
+  // A last check-in and payment, so the receipt has money that stood.
+  await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: s1 }, cairoAt(today, 8, 45));
+  const pay4 = await workspaceRecordPayment(prisma, actor, ws, { attendeeId: attendee1.id }, cairoAt(today, 8, 46));
+  const p4 = pay4.ok ? pay4.payment : null;
+  check("The re-checked-in student pays once more (the money the receipt keeps)", p4 !== null && p4.amount === 15_000);
+
+  // ── 14j. Settlements can never see or claim a workspace payment ────────
+  const sessionSettle = await prisma.$transaction((tx) => createSessionSettlement(tx, ws, sessionId, owner.id, { now: cairoAt(today, 9, 30) }));
+  const periodSettle = await prisma.$transaction((tx) => createPeriodSettlement(tx, ws, owner.id, addDays(today, -7), today, owner.id, { now: cairoAt(today, 9, 30) }));
+  check(
+    "createSessionSettlement and createPeriodSettlement refuse a PERSONAL centre (workspaceNotSettled) by direct call",
+    refusedWith(sessionSettle, "workspaceNotSettled") && refusedWith(periodSettle, "workspaceNotSettled") &&
+      (await prisma.settlement.count({ where: { centerId: ws } })) === 0,
+  );
+  let settlementRefused = false;
+  try {
+    await prisma.settlement.create({ data: { centerId: ws, teacherId: owner.id, totalAmount: 0, createdBy: owner.id, periodFrom: today, periodTo: today } });
+  } catch {
+    settlementRefused = true;
+  }
+  check("The database refuses a Settlement row in a PERSONAL centre (trigger)", settlementRefused);
+  const branchSettlement = await prisma.$transaction((tx) =>
+    createPeriodSettlement(tx, branchId, owner.id, addDays(today, -7), yesterday, owner.id, { now: cairoAt(today, 9, 30) }),
+  );
+  let claimRefused = false;
+  let claimInWorkspaceRefused = false;
+  if (branchSettlement.ok && p4) {
+    try {
+      await prisma.settlementClaim.create({
+        data: { centerId: branchId, settlementId: branchSettlement.settlement.id, paymentId: p4.id, teacherShare: p4.teacherShareSnapshot },
+      });
+    } catch {
+      claimRefused = true;
+    }
+    try {
+      await prisma.settlementClaim.create({
+        data: { centerId: ws, settlementId: branchSettlement.settlement.id, paymentId: p4.id, teacherShare: p4.teacherShareSnapshot },
+      });
+    } catch {
+      claimInWorkspaceRefused = true;
+    }
+  }
+  check(
+    "A branch settlement for the same teacher claims none of the workspace's payments, and the database refuses a claim naming one or the workspace (trigger)",
+    branchSettlement.ok && branchSettlement.claimedPayments === 0 && claimRefused && claimInWorkspaceRefused &&
+      (await prisma.settlementClaim.count({ where: { payment: { centerId: ws } } })) === 0,
+  );
+  const triggers = await prisma.$queryRaw<{ tgname: string }[]>`SELECT tgname FROM pg_trigger WHERE tgname IN ('Settlement_branch_only', 'SettlementClaim_branch_only')`;
+  check("Both W8c triggers exist in the database", triggers.length === 2);
+  check(
+    "No settlement row of any kind sits in the workspace, and no settlement.* audit row was written there",
+    (await prisma.settlement.count({ where: { centerId: ws } })) === 0 &&
+      (await prisma.auditLog.count({ where: { centerId: ws, action: { startsWith: "settlement." } } })) === 0,
+  );
+
+  // ── 14k. Analytics and branch roll-ups exclude them ─────────────────────
+  check(
+    "The branch's revenue (for this teacher too) is unchanged by workspace payments",
+    JSON.stringify(await revenueTotals(prisma, branchId, { from: null, to: null })) === branchRevenueBefore &&
+      (await revenueTotals(prisma, branchId, { from: null, to: null }, owner.id)).paymentCount === 0,
+  );
+  const ownerOrg = await prisma.center.findUniqueOrThrow({ where: { id: ws }, select: { organizationId: true } });
+  check(
+    "No roll-up reaches the workspace: the branch organization's branches, the personal organization's (none), the teacher's centre relations, the accessible centres",
+    !(await organizationBranches(prisma, fx.branchOrganizationId)).some((row) => row.id === ws) &&
+      (await organizationBranches(prisma, ownerOrg.organizationId)).length === 0 &&
+      !(await resolveCenterRelations(prisma, owner.id)).some((row) => row.center.id === ws) &&
+      !(await listAccessibleCenters(prisma)).some((row) => row.id === ws),
+  );
+
+  // ── 14l. Receipt totals, live then closed ───────────────────────────────
+  const live = await sessionReceiptTotals(prisma, ws, sessionId);
+  check(
+    "The live receipt: collected 150 EGP net of the refund, centre 0, teacher 150 EGP, two voided, one refunded, one late, one not arrived",
+    live.collected === 15_000 && live.centerShare === 0 && live.teacherShare === 15_000 &&
+      live.voidedCount === 2 && live.voidedAmount === 30_000 && live.refundedCount === 1 && live.refundedAmount === 15_000 &&
+      live.lateCount === 1 && live.presentCount === 0 && live.notArrivedCount === 1 && !live.sessionClosed,
+    JSON.stringify(live),
+  );
+  const early = await workspaceCloseSession(prisma, actor, ws, { sessionId: oneOffId }, cairoAt(today, 9, 50));
+  check("Closing a session before it starts is refused (notStarted)", refusedWith(early, "notStarted"));
+  const closed = await workspaceCloseSession(prisma, actor, ws, { sessionId }, cairoAt(today, 9, 0));
+  const s4Row = await prisma.sessionAttendee.findFirst({ where: { centerId: ws, sessionId, studentProfileId: s4 } });
+  check(
+    "Close marks the enrolled no-show Absent (one row, enrolled, not a drop-in)",
+    closed.ok && closed.absentCreated === 1 && s4Row !== null && s4Row.attendanceStatus === "ABSENT" && !s4Row.isDropIn && s4Row.enrollmentId !== null,
+  );
+  const finalTotals = await sessionReceiptTotals(prisma, ws, sessionId);
+  check(
+    "The closed receipt matches: collected 150 EGP, centre 0, teacher 150 EGP, Present 0, Late 1, Absent 2",
+    finalTotals.sessionClosed && finalTotals.collected === 15_000 && finalTotals.centerShare === 0 && finalTotals.teacherShare === 15_000 &&
+      finalTotals.presentCount === 0 && finalTotals.lateCount === 1 && finalTotals.absentCount === 2 && finalTotals.paidCount === 2,
+    JSON.stringify(finalTotals),
+  );
+  const p4Id = p4?.id ?? "";
+  const closedWrites = [
+    await workspaceCheckIn(prisma, actor, ws, { sessionId, studentProfileId: s2 }, cairoAt(today, 9, 5)),
+    await workspaceSetAttendance(prisma, actor, ws, { sessionId, studentProfileId: s1, status: "PRESENT" }, cairoAt(today, 9, 5)),
+    await workspaceRecordPayment(prisma, actor, ws, { attendeeId: attendee2.id }, cairoAt(today, 9, 5)),
+    await workspaceVoidPayment(prisma, actor, ws, { paymentId: p4Id, reason: "late" }, cairoAt(today, 9, 5)),
+    await workspaceRefundPayment(prisma, actor, ws, { paymentId: p4Id, reason: "late" }, cairoAt(today, 9, 5)),
+  ];
+  const closeAgain = await workspaceCloseSession(prisma, actor, ws, { sessionId }, cairoAt(today, 9, 6));
+  check(
+    "A closed session is immutable: check-in, correction, payment, void and refund answer sessionClosed; closing again alreadyClosed",
+    closedWrites.every((result) => refusedWith(result, "sessionClosed")) && refusedWith(closeAgain, "alreadyClosed"),
+    JSON.stringify(closedWrites.map(errorOf)),
+  );
+
+  // ── 14m. The end-of-day lazy close ──────────────────────────────────────
+  const roomId = await workspaceRoomId(prisma, ws);
+  const past = await prisma.session.create({
+    data: { centerId: ws, classGroupId: classId, teacherId: owner.id, roomId, date: yesterday, startTime: "08:00", endTime: "09:00", priceSnapshot: 15_000, timezone: TZ, isManual: true },
+  });
+  await prisma.enrollment.updateMany({ where: { centerId: ws, classGroupId: classId }, data: { enrolledAt: addDays(today, -3) } });
+  const lazy = await workspaceCheckIn(prisma, actor, ws, { sessionId: past.id, studentProfileId: s1 });
+  const pastAfter = await prisma.session.findUniqueOrThrow({ where: { id: past.id } });
+  check(
+    "A session whose day ended is closed by the next touch (AUTO), its enrolled no-shows Absent, and the check-in refused",
+    refusedWith(lazy, "sessionClosed") && pastAfter.closedAt !== null && pastAfter.closeMode === "AUTO" &&
+      (await prisma.sessionAttendee.count({ where: { centerId: ws, sessionId: past.id, attendanceStatus: "ABSENT", isDropIn: false } })) === 3,
+  );
+
+  // ── 14n. Premium lapse and archive refuse every write; reads continue ───
+  const fresh = await createWorkspaceSession(prisma, owner.id, ws, { kind: "extra", classGroupId: classId, date: today, startTime: "12:00", endTime: "13:00" }, options);
+  const freshId = fresh.ok ? fresh.sessionId : "";
+  await workspaceCheckIn(prisma, actor, ws, { sessionId: freshId, studentProfileId: s2 }, cairoAt(today, 12, 1));
+  const freshAttendee = await prisma.sessionAttendee.findFirst({ where: { centerId: ws, sessionId: freshId, studentProfileId: s2 } });
+  const freshPay = freshAttendee ? await workspaceRecordPayment(prisma, actor, ws, { attendeeId: freshAttendee.id }, cairoAt(today, 12, 2)) : null;
+  const freshPaymentId = freshPay && freshPay.ok ? freshPay.payment.id : "missing";
+  check(
+    "A session created after the price edit freezes the new price: 200 EGP, still centre 0 (one paid student, for the refusals)",
+    Boolean(freshId) && freshPay !== null && freshPay.ok && freshPay.payment.amount === 20_000 && freshPay.payment.centerShareSnapshot === 0,
+  );
+  const everyWrite = async (as: { actorUserId: string; teacherUserId: string }, workspaceId: string) => [
+    await workspaceCheckIn(prisma, as, workspaceId, { sessionId: freshId, studentProfileId: s1 }, cairoAt(today, 12, 3)),
+    await workspaceSetAttendance(prisma, as, workspaceId, { sessionId: freshId, studentProfileId: s2, status: "PRESENT" }, cairoAt(today, 12, 3)),
+    await workspaceRecordPayment(prisma, as, workspaceId, { attendeeId: freshAttendee?.id ?? "missing" }, cairoAt(today, 12, 3)),
+    await workspaceVoidPayment(prisma, as, workspaceId, { paymentId: freshPaymentId, reason: "x" }, cairoAt(today, 12, 3)),
+    await workspaceRefundPayment(prisma, as, workspaceId, { paymentId: freshPaymentId, reason: "x" }, cairoAt(today, 12, 3)),
+    await workspaceCloseSession(prisma, as, workspaceId, { sessionId: freshId }, cairoAt(today, 12, 30)),
+  ];
+  // Lapsed before every instant this section drives the engine with (the
+  // writers judge premium at the `now` they are given, as the app does at the
+  // request's time).
+  await setPremium(owner.id, addDays(today, -2));
+  const lapsed = await everyWrite(actor, ws);
+  const lapsedRoster = await workspaceSessionRoster(prisma, ws, { id: freshId, classGroupId: classId, closedAt: null }, false);
+  check(
+    "Lapsed premium: check-in, correction, record, void, refund and close all answer premiumRequired",
+    lapsed.every((result) => refusedWith(result, "premiumRequired")),
+    JSON.stringify(lapsed.map(errorOf)),
+  );
+  check(
+    "Lapsed: reads continue — the roster and the receipt",
+    lapsedRoster.length === 3 && (await sessionReceiptTotals(prisma, ws, freshId)).collected === 20_000,
+  );
+  await setPremium(owner.id, inDays(30));
+  await prisma.center.update({ where: { id: ws }, data: { archivedAt: new Date(), archivedByUserId: owner.id } });
+  const archived = await everyWrite(actor, ws);
+  check("Archived: every write answers workspaceArchived", archived.every((result) => refusedWith(result, "workspaceArchived")), JSON.stringify(archived.map(errorOf)));
+  await prisma.center.update({ where: { id: ws }, data: { archivedAt: null, archivedByUserId: null } });
+  check(
+    "Nothing moved while refused: the payment is still the one active row, the session still open",
+    (await prisma.payment.count({ where: { centerId: ws, sessionId: freshId, voided: false, refunded: false } })) === 1 &&
+      (await prisma.session.findUniqueOrThrow({ where: { id: freshId } })).closedAt === null,
+  );
+
+  // ── 14o. Everyone else, by direct call ──────────────────────────────────
+  for (const [label, other] of [...fx.others, ["another workspace owner (A)", fx.ownerA.id] as [string, string]]) {
+    const results = await everyWrite({ actorUserId: other, teacherUserId: other }, ws);
+    check(`${label}: every W8c writer answers notFound`, results.every((result) => refusedWith(result, "notFound")), JSON.stringify(results.map(errorOf)));
+  }
+  const swappedTeacher = await everyWrite({ actorUserId: owner.id, teacherUserId: fx.ownerA.id }, ws);
+  check("The owner acting for a teacher who does not own the workspace is notFound", swappedTeacher.every((result) => refusedWith(result, "notFound")));
+
+  // ── 14p. Cross-workspace and cross-centre isolation ─────────────────────
+  const otherWs = await createWorkspace(prisma, owner.id, { name: "Money two" });
+  const otherId = otherWs.ok ? otherWs.workspaceId : "";
+  const cross = [...(await everyWrite(actor, otherId)), ...(await everyWrite(actor, branchId))];
+  check(
+    "The same owner's other workspace, and a branch id, reach none of this workspace's sessions, rows or payments (notFound)",
+    Boolean(otherId) && cross.every((result) => refusedWith(result, "notFound")),
+    JSON.stringify(cross.map(errorOf)),
+  );
+  check(
+    "The other workspace has its own one Cash method and no payment",
+    (await prisma.centerPaymentMethod.count({ where: { centerId: otherId } })) === 1 && (await prisma.payment.count({ where: { centerId: otherId } })) === 0,
+  );
+
+  // ── 14q. The student sees attendance, never money; parents see nothing ──
+  const history = await studentPastAttendance(prisma, ws, s1, tomorrow);
+  check(
+    "The linked student's own history reads this workspace's sessions with their status (through their linked profile)",
+    (await studentWorkspaceProfiles(prisma, loginStudent.id)).some((row) => row.centerId === ws) &&
+      history.some((row) => row.sessionId === sessionId && row.attendanceStatus === "LATE"),
+  );
+  check(
+    "The schedule hides the paid amount on a Private class row and keeps it on a branch row (static)",
+    /paidAmount: privateClass \? null : \(row\.payments\[0\]\?\.amount \?\? null\)/.test(read("app/[locale]/(student)/student/schedule/page.tsx")),
+  );
+  const toRate = await attendedSessionsToRate(prisma, loginStudent.id, cairoAt(today, 20));
+  const rated = await submitSessionRating(prisma, { studentUserId: loginStudent.id, sessionId, score: 5, now: cairoAt(today, 20) });
+  await skipSessionRating(prisma, { studentUserId: loginStudent.id, sessionId });
+  check(
+    "Ratings stay branch-only (D-W39): the attended workspace session is never offered, rated (notAttended) or skipped",
+    !toRate.some((row) => row.centerId === ws) && !rated.ok && rated.error === "notAttended" &&
+      (await prisma.sessionRating.count({ where: { sessionId } })) === 0 &&
+      (await prisma.sessionRatingSkip.count({ where: { sessionId } })) === 0,
+  );
+  const parent = await makeUser("money-parent");
+  await prisma.familyLink.create({ data: { parentUserId: parent.id, studentUserId: loginStudent.id, source: "LEGACY_VERIFIED" } });
+  const links = await activeChildLinks(prisma, parent.id);
+  check(
+    "A parent linked to the student sees no workspace profile (activeChildLinks reads accessible branches only)",
+    links.length === 1 && !links[0].studentUser.studentProfiles.some((profile) => profile.centerId === ws || profile.center.kind === "PERSONAL"),
+  );
+
+  // ── 14r. Audit: the branches' actions, ids only ─────────────────────────
+  const W8C_ACTIONS = ["payment.record", "payment.void", "payment.refund", "attendance.correct", "session.close"];
+  const auditRows = await prisma.auditLog.findMany({ where: { centerId: ws, action: { in: W8C_ACTIONS } } });
+  const auditActions = new Set(auditRows.map((row) => row.action));
+  check(
+    "payment.record, payment.void, payment.refund, attendance.correct and session.close (manual and AUTO) are written",
+    W8C_ACTIONS.every((action) => auditActions.has(action)) &&
+      auditRows.some((row) => row.action === "session.close" && row.actorUserId === null) &&
+      auditRows.some((row) => row.action === "session.close" && row.actorUserId === owner.id),
+    [...auditActions].join(", "),
+  );
+  check(
+    "Every W8c audit row is ids and amounts only, by the owner (or the system), on behalf of no one",
+    auditRows.every((row) => forbiddenAuditKey(row.before) === null && forbiddenAuditKey(row.after) === null && row.onBehalfOfUserId === null &&
+      (row.actorUserId === owner.id || row.actorUserId === null)),
+  );
+  const recordRow = auditRows.find((row) => row.action === "payment.record" && row.entityId === p4Id);
+  const recordAfter = (recordRow?.after ?? {}) as Record<string, unknown>;
+  check(
+    "The payment.record row carries the frozen split: centre 0, teacher = amount, the hidden method's id",
+    recordRow !== undefined && Object.keys(recordAfter).sort().join() === "amount,centerShareSnapshot,paymentMethodId,sessionId,teacherShareSnapshot" &&
+      recordAfter.amount === 15_000 && recordAfter.centerShareSnapshot === 0 && recordAfter.teacherShareSnapshot === 15_000 &&
+      recordAfter.sessionId === sessionId && recordAfter.paymentMethodId === cash.id,
+    JSON.stringify(recordRow?.after),
+  );
+
+  // ── 14s. Statics ────────────────────────────────────────────────────────
+  const sessionActions = read("app/[locale]/(teacher)/teacher/workspaces/session-actions.ts");
+  const w8cExported = [...sessionActions.matchAll(/export async function (\w+)\([\s\S]*?\n\}/g)];
+  check(
+    "Every W8c action takes the actor from the session and posts no user, amount or method; no centre matrix (static)",
+    w8cExported.length === 6 &&
+      w8cExported.every(([body]) => /await getCurrentUser\(\)/.test(body) && /actorUserId: user\.id, teacherUserId: user\.id/.test(body)) &&
+      !/formData\.get\(|paymentMethodId|amount/.test(sessionActions.replace(/\/\*\*[\s\S]*?\*\//g, "")) &&
+      !/ctxCan\(|getTenantContext\(|requireExperience\(/.test(sessionActions),
+    `${w8cExported.length} actions`,
+  );
+  const parsedPay = workspaceRecordPaymentSchema.safeParse({ locale: "en", workspaceId: ws, sessionId, attendeeId: "a", amount: "1", paymentMethodId: "m", userId: "u" });
+  check(
+    "The payment schema strips a posted amount, method or user (the real schema)",
+    parsedPay.success && !("amount" in parsedPay.data) && !("paymentMethodId" in parsedPay.data) && !("userId" in parsedPay.data),
+  );
+  const page = read("app/[locale]/(teacher)/teacher/workspaces/[id]/sessions/[sessionId]/page.tsx");
+  check(
+    "The session page resolves its own context and offers no settlement verb (static)",
+    /getWorkspaceContext\(id\)/.test(page) && /notFound\(\)/.test(page) && !/getTenantContext\(|getTeacherScope|SessionSettlementAction|settlements\./.test(page),
+  );
+  const workspaceUi = [page, read("components/teacher/workspaces/workspace-session-roster.tsx"), sessionActions].join("\n");
+  check(
+    "The hidden method is listed nowhere: no workspace screen or action reads or offers payment methods (static)",
+    !/listActivePaymentMethods|PaymentMethodSelector|paymentMethods/.test(workspaceUi),
+  );
+  const settlementsSource = read("lib/db/settlements.ts");
+  check(
+    "Both settlement creators refuse a PERSONAL centre first, and claimablePayments reads BRANCH payments only (static)",
+    (settlementsSource.match(/if \(!\(await isSettleableCenter\(tx, centerId\)\)\) return \{ ok: false, error: "workspaceNotSettled" \};/g) ?? []).length === 2 &&
+      /settlementClaims: \{ none: \{ releasedAt: null \} \},[\s\S]{0,160}center: BRANCH_ONLY/.test(settlementsSource),
+  );
+  check(
+    "The W8c migration is additive: the backfill and two triggers, no DROP, no policy, no table change (static)",
+    /CREATE TRIGGER "Settlement_branch_only"/.test(w8cMigration) && /CREATE TRIGGER "SettlementClaim_branch_only"/.test(w8cMigration) &&
+      /NOT EXISTS \(SELECT 1 FROM "CenterPaymentMethod"/.test(w8cMigration) &&
+      !/^\s*DROP\s/im.test(w8cMigration) && !/POLICY|ALTER TABLE|CREATE TABLE/i.test(w8cMigration),
   );
 }
 
