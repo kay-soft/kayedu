@@ -461,6 +461,8 @@ export type StudentCalendarEntry = {
   roomName: string | null;
   /** U8 — the class an enrolled session belongs to (the student's "Leave class"). */
   classGroupId: string | null;
+  /** W8b — who teaches it, for a workspace row's teacher name (`teacherDisplayNames`). */
+  teacherId: string;
   /** U8 — a booked or requested session's booking, and whether it can still be cancelled. */
   bookingId?: string;
   canCancel?: boolean;
@@ -469,6 +471,7 @@ export type StudentCalendarEntry = {
 type CalendarSessionRow = SessionLabelSource & {
   id: string;
   classGroupId: string | null;
+  teacherId: string;
   date: Date;
   startTime: string;
   endTime: string;
@@ -514,6 +517,7 @@ export async function studentCalendarMonth(
     session,
     roomName: session.room?.name ?? session.classGroup?.room?.name ?? null,
     classGroupId: session.classGroupId,
+    teacherId: session.teacherId,
   });
 
   for (const session of enrolled) {
@@ -553,6 +557,7 @@ export function bookedCalendarEntries(
       session: entry.session,
       roomName: entry.session.room?.name ?? entry.session.classGroup?.room?.name ?? null,
       classGroupId: entry.session.classGroupId,
+      teacherId: entry.session.teacherId,
       bookingId: entry.bookingId,
       // Until the session starts — the same rule `cancelBookingByStudent` re-checks.
       canCancel: isBookableNow(entry.session, now),

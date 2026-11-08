@@ -247,6 +247,18 @@ enum NotificationKind {
   ASSESSMENT_EXTENDED
   ASSESSMENT_OPENS_SOON
   ASSESSMENT_DUE_SOON
+  // W8b (D-W39): a premium teacher's workspace invited this account to link
+  // a student profile. Payload {invitationId}; deep link the hub.
+  WORKSPACE_INVITATION
+}
+
+// W8b (D-W39): a workspace student invitation's state. At most one PENDING
+// per profile (a hand-written partial unique index, CLAUDE.md rule 7).
+enum WorkspaceInvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -348,6 +360,8 @@ model User {
   // W8a (D-W38) — this teacher's personal organization, the parent of their
   // PERSONAL workspaces (at most one).
   personalOrganization   Organization?      @relation("PersonalOrganization")
+  // W8b (D-W39) — workspace invitations addressed to this account.
+  workspaceInvitations   WorkspaceInvitation[]
 }
 
 /**
@@ -511,6 +525,8 @@ model Center {
   // W3a — students' attempts and their saved answers.
   assessmentAttempts  AssessmentAttempt[]
   assessmentAnswers   AssessmentAnswer[]
+  // W8b — a PERSONAL workspace's student invitations (D-W39).
+  workspaceInvitations WorkspaceInvitation[]
 
   @@index([organizationId])
 }
@@ -1061,6 +1077,8 @@ model StudentProfile {
   promotionItems    GradePromotionItem[]
   // W3a — this student's exam and homework attempts (one per assessment).
   assessmentAttempts AssessmentAttempt[]
+  // W8b — the invitations a workspace sent for this (unlinked) profile.
+  workspaceInvitations WorkspaceInvitation[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
@@ -2253,4 +2271,33 @@ model AssistantPermissionGrant {
   permission  String
 
   @@id([assistantId, permission])
+}
+
+/**
+ * W8b (D-W27, D-W39): a PERSONAL workspace's invitation to the account whose
+ * `User.phone` (never `contactPhone`, never another tenant's profile phone)
+ * equals the phone the teacher typed, and which has a login (`authId` set).
+ * Written only on such a match, in the add's own transaction; with no match
+ * nothing is written beyond the audit row, and the teacher's answer is the
+ * same either way. Accepting moves the profile from its placeholder `User` to
+ * the account (`lib/db/workspace-students.ts`), declining leaves it unlinked.
+ * A tenant table: `centerId` is the workspace. At most one PENDING per
+ * profile (the hand-written partial unique index
+ * `WorkspaceInvitation_one_pending_per_profile`, CLAUDE.md rule 7). Ids only.
+ */
+model WorkspaceInvitation {
+  id               String                    @id @default(uuid())
+  centerId         String
+  center           Center                    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile            @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  targetUserId     String
+  targetUser       User                      @relation(fields: [targetUserId], references: [id], onDelete: Cascade)
+  status           WorkspaceInvitationStatus @default(PENDING)
+  createdAt        DateTime                  @default(now())
+  respondedAt      DateTime?
+
+  @@index([centerId])
+  @@index([studentProfileId])
+  @@index([targetUserId, status])
 }

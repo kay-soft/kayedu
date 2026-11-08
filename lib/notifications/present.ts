@@ -104,6 +104,15 @@ export async function presentNotifications(
         });
         break;
       }
+      // W8b (D-W39 item 7): the workspace's current name and its teacher's.
+      case "WORKSPACE_INVITATION": {
+        const teacher = row.centerId ? subjects.workspaceTeachers.get(row.centerId) : undefined;
+        text = t("kinds.WORKSPACE_INVITATION", {
+          teacher: teacher ? isolate(teacher) : fallback,
+          workspace: branchRow ? isolate(branchRow.name) : fallback,
+        });
+        break;
+      }
     }
     return {
       id: row.id,

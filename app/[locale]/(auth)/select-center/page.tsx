@@ -12,11 +12,14 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SubmitButton } from "@/components/shared/submit-button";
 import { ExperienceGlyph } from "@/components/shell/experience-glyph";
 import { ForgetStaleExperience } from "@/components/shell/forget-stale-experience";
+import { WorkspaceInvitationCard } from "@/components/shell/workspace-invitation-card";
 import { Badge } from "@/components/ui/badge";
 import { getActiveCenterId, getLastExperienceCookie } from "@/lib/auth/active-center";
 import { resolveLastExperience, type ExperienceEntry } from "@/lib/auth/experiences";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getUserCenterRelations, listExperiences } from "@/lib/auth/tenant";
+import { prisma } from "@/lib/db/client";
+import { pendingWorkspaceInvitations } from "@/lib/db/workspace-students";
 import { redirect } from "@/lib/i18n/navigation";
 import { ACCOUNT_HUB_HINT, ROUTES, accountPath } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -40,18 +43,21 @@ export default async function SelectCenterPage({
   const tShell = await getTranslations("Shell");
 
   const { switch: switchMode } = await searchParams;
-  const [relations, experiences, activeId, rememberedExperience] = await Promise.all([
+  const [relations, experiences, activeId, rememberedExperience, invitations] = await Promise.all([
     getUserCenterRelations(user!.id),
     listExperiences(user!.id),
     getActiveCenterId(),
     getLastExperienceCookie(),
+    pendingWorkspaceInvitations(prisma, user!.id),
   ]);
 
   // U7: one experience → straight into it, never the hub (a parent with no
   // branch, SYS; a student or a teacher at several branches; one staff
   // branch, which `getTenantContext` resolves on its own). An Owner of a
   // multi-branch organization always has several: each branch and the roll-up.
-  if (experiences.length === 1 && switchMode !== "1") {
+  // W8b (D-W39 item 7): a pending workspace invitation keeps the hub open —
+  // its card lives here, and the invitation notice links here.
+  if (experiences.length === 1 && switchMode !== "1" && invitations.length === 0) {
     redirect({ href: experiences[0].href, locale });
   }
 
@@ -155,6 +161,19 @@ export default async function SelectCenterPage({
         description={connected ? (hasPortal ? t("subtitleExperiences") : t("subtitle")) : undefined}
       >
         <div className="flex flex-col gap-3">
+          {invitations.length > 0 ? (
+            <section aria-label={t("invitationsLabel")} className="flex flex-col gap-3">
+              {invitations.map((invitation) => (
+                <WorkspaceInvitationCard
+                  key={invitation.id}
+                  invitationId={invitation.id}
+                  teacherName={invitation.teacherName ?? t("invitationTeacherFallback")}
+                  workspaceName={invitation.workspaceName}
+                />
+              ))}
+            </section>
+          ) : null}
+
           {lastUsed ? (
             <div className={cn("flex flex-col gap-3 rounded-xl border p-3 sm:p-4", CHOICE_SELECTED)}>
               <div className="flex items-center gap-3">

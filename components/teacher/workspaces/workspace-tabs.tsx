@@ -7,24 +7,27 @@ import { ROUTES } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
 /**
- * A workspace's three sections — Classes (its home, and every class page
- * under it), Sessions, Settings (W8a, docs/04 §11.37). Three even columns at
- * every width, so they never wrap or scroll sideways at 375px; each a 44px
- * target.
+ * A workspace's sections — Classes (its home, and every class page under it),
+ * Students (W8b), Sessions, Settings (W8a, docs/04 §11.37). Two even columns
+ * below `sm` (two rows of two), so they never scroll sideways at 375px; one
+ * row from `sm` up; each a 44px target.
  */
 export function WorkspaceTabs({ workspaceId }: { workspaceId: string }) {
   const t = useTranslations("Workspaces.tabs");
   const pathname = usePathname();
+  const students = ROUTES.teacherWorkspaceStudents(workspaceId);
   const sessions = ROUTES.teacherWorkspaceSessions(workspaceId);
   const settings = ROUTES.teacherWorkspaceSettings(workspaceId);
+  const elsewhere = [students, sessions, settings].some((href) => pathname.startsWith(href));
   const tabs = [
-    { href: ROUTES.teacherWorkspace(workspaceId), label: t("classes"), active: !pathname.startsWith(sessions) && !pathname.startsWith(settings) },
+    { href: ROUTES.teacherWorkspace(workspaceId), label: t("classes"), active: !elsewhere },
+    { href: students, label: t("students"), active: pathname.startsWith(students) },
     { href: sessions, label: t("sessions"), active: pathname.startsWith(sessions) },
     { href: settings, label: t("settings"), active: pathname.startsWith(settings) },
   ];
   return (
     <nav aria-label={t("label")}>
-      <ul className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
+      <ul className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {tabs.map((tab) => (
           <li key={tab.href}>
             <Link

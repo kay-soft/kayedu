@@ -23,8 +23,16 @@ import { ROUTES } from "../routes.ts";
  *    profile needed (a first request that was declined never made one). It
  *    is visible while the branch itself is accessible, and through a relation
  *    there as well.
+ *  - `invitation` (W8b, D-W39) — a PERSONAL workspace's invitation to this
+ *    account: visible only while the reader holds a PENDING invitation from
+ *    that live workspace (`NotificationReach.invitationCenterIds`). Accepted,
+ *    declined or cancelled, it is hidden, never deleted.
+ *
+ * W8b also lets the two session kinds reach a student through a **linked
+ * workspace profile** (`NotificationReach.workspaceCenterIds`) — never the
+ * assessment kinds, which wait for W9.
  */
-export type NotificationAudience = "relation" | "requester";
+export type NotificationAudience = "relation" | "requester" | "invitation";
 
 type KindSpec = {
   /** The payload's keys — every value an id (a uuid). */
@@ -88,6 +96,14 @@ export const NOTIFICATION_KINDS = {
     audience: "relation",
     href: (payload) => ROUTES.studentAssessment(payload.assessmentId),
   },
+  // W8b (D-W39 item 5): written with the invitation, to the matched account.
+  // The hub carries the card with Confirm and Cancel, and stays open while one
+  // is pending (it does not skip to a single experience).
+  WORKSPACE_INVITATION: {
+    ids: ["invitationId"],
+    audience: "invitation",
+    href: () => ROUTES.selectCenter,
+  },
 } as const satisfies Record<NotificationKind, KindSpec>;
 
 export const NOTIFICATION_KIND_LIST = Object.keys(NOTIFICATION_KINDS) as NotificationKind[];
@@ -96,6 +112,12 @@ export const NOTIFICATION_KIND_LIST = Object.keys(NOTIFICATION_KINDS) as Notific
 export const REQUESTER_KINDS = NOTIFICATION_KIND_LIST.filter(
   (kind) => NOTIFICATION_KINDS[kind].audience === "requester",
 );
+
+/** W8b: the kinds a linked workspace profile reaches (its sessions only — no assessment until W9). */
+export const WORKSPACE_SESSION_KINDS = [
+  "SESSION_CANCELLED",
+  "SESSION_RESCHEDULED",
+] as const satisfies readonly NotificationKind[];
 
 /** Every notice about an exam or homework (W3b, D-W32): only a student at that branch ever sees one. */
 export const ASSESSMENT_NOTICE_KINDS = [
@@ -185,6 +207,8 @@ export const dedupeKeys = {
     `booking-${outcome}:${bookingId}:${requestedAt.getTime()}`,
   sessionCancelled: (sessionId: string) => `session-cancelled:${sessionId}`,
   sessionRescheduled: (sessionId: string) => `session-rescheduled:${sessionId}`,
+  // W8b: one notice per invitation row ("Invite again" writes a new row).
+  workspaceInvitation: (invitationId: string) => `workspace-invitation:${invitationId}`,
   // W3b: every assessment key opens with this prefix, which is how deleting an
   // assessment finds its notices. Republishing and each new end time are new notices.
   assessmentPrefix: (assessmentId: string) => `assessment:${assessmentId}:`,

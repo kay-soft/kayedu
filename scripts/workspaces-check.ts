@@ -7,9 +7,18 @@
  * by a read, isolation, ids-only audit, the workspace-only teacher's
  * experience, and the statics.
  *
+ * W8b (D-W27, D-W39), section 13: adding students by phone with one answer
+ * and one audit shape whether or not an account matched, the `User.phone`-only
+ * match, invitations (one PENDING per profile, "Invite again", cancel,
+ * decline, accept with the placeholder's removal), enrolment, what a linked
+ * student reads, the session producers and the re-check, leave, premium and
+ * archive refusals, the rate limits, isolation, and the statics.
+ *
  * Writes and cleans up its own fixtures (users `workspaces-check-…`, the
- * branch and catalogue rows `workspaces-check-…`, and every centre under the
- * fixture users' personal organizations). Fenced by S1 (`gatePrisma`): staging
+ * branch and catalogue rows `workspaces-check-…`, every centre under the
+ * fixture users' personal organizations, and — W8b — the placeholder users
+ * behind unlinked workspace students, which carry no email: their surname
+ * starts `workspaces-check`). Fenced by S1 (`gatePrisma`): staging
  * or a local database only.
  */
 import { randomUUID } from "node:crypto";
@@ -71,6 +80,28 @@ import {
 } from "../lib/db/workspaces.ts";
 import { ROUTES } from "../lib/routes.ts";
 import { addDays, todayInTimezone } from "../lib/scheduling.ts";
+import { visibleWhere } from "../lib/db/notifications.ts";
+import { leaveClass } from "../lib/db/reservations.ts";
+import { studentCalendarMonth, studentPastAttendance, studentUpcomingSessions } from "../lib/db/student-portal.ts";
+import {
+  INVITE_AGAIN_WINDOW_MS,
+  acceptWorkspaceInvitation,
+  addWorkspaceStudent,
+  cancelWorkspaceInvitation,
+  copyWorkspaceStudent,
+  copyableWorkspaceStudents,
+  declineWorkspaceInvitation,
+  enrolWorkspaceStudent,
+  hasWorkspaceStudentProfile,
+  inviteWorkspaceStudentAgain,
+  listWorkspaceStudents,
+  pendingInvitationCenterIds,
+  pendingWorkspaceInvitations,
+  removeWorkspaceEnrollment,
+  studentWorkspaceProfiles,
+  workspaceClassRoster,
+} from "../lib/db/workspace-students.ts";
+import { RATE_LIMITS } from "../lib/rate-limit.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -113,6 +144,10 @@ async function cleanup() {
   await prisma.catalogSubject.deleteMany({ where: { nameEn: { startsWith: STEM } } });
   await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: STEM } } });
   await prisma.user.deleteMany({ where: { email: { startsWith: EMAIL_PREFIX } } });
+  // W8b: placeholders (no email, no login), once their workspace profiles went with the centres.
+  await prisma.user.deleteMany({
+    where: { email: null, authId: null, lastName: { startsWith: STEM }, studentProfiles: { none: {} }, memberships: { none: {} } },
+  });
 }
 
 let seq = 0;
@@ -633,6 +668,482 @@ async function main() {
       const source = read(`app/[locale]/(teacher)/teacher/workspaces/[id]/${file}`);
       return /getWorkspaceContext\(id\)/.test(source) && /notFound\(\)/.test(source) && !/getTeacherScope|getTenantContext\(/.test(source);
     }),
+  );
+
+  await workspaceStudents({
+    now,
+    today,
+    branchId: branch.id,
+    wsA,
+    wsB,
+    secondA: secondA.ok ? secondA.workspaceId : "",
+    classId,
+    classInput,
+    slot,
+    options,
+    ownerA,
+    ownerB,
+    student,
+    others,
+  });
+}
+
+// ── 13. W8b: workspace students and invitations (D-W27, D-W39) ─────────────
+
+type FixtureUser = Awaited<ReturnType<typeof makeUser>>;
+
+/** A fresh, run-unique Egyptian mobile in the stored E.164 form (`+2010` + 8 digits). */
+function freshPhone(): string {
+  return `+2010${String(Math.floor(Math.random() * 100_000_000)).padStart(8, "0")}`;
+}
+
+/** The typed-name stem the cleanup finds placeholders by. */
+const PLACEHOLDER = (tag: string) => ({ firstName: "Typed", lastName: `${STEM}-${tag}-${RUN}` });
+
+async function addAuditShape(centerId: string, profileId: string) {
+  const row = await prisma.auditLog.findFirst({ where: { centerId, entityType: "StudentProfile", entityId: profileId, action: "workspace.student.add" } });
+  return row ? JSON.stringify({ action: row.action, entityType: row.entityType, before: row.before, afterKeys: Object.keys((row.after ?? {}) as object).sort(), actor: row.actorUserId, onBehalf: row.onBehalfOfUserId }) : "missing";
+}
+
+async function workspaceStudents(fx: {
+  now: Date;
+  today: Date;
+  branchId: string;
+  wsA: string;
+  wsB: string;
+  secondA: string;
+  classId: string;
+  classInput: { educationSystemId: null; gradeId: string; subjectId: string; price: number; lateThresholdMinutes: number; startDate: Date; endDate: Date };
+  slot: { dayOfWeek: number; startTime: string; endTime: string };
+  options: { confirmConflicts: boolean; locale: string };
+  ownerA: FixtureUser;
+  ownerB: FixtureUser;
+  student: FixtureUser;
+  others: [string, string][];
+}) {
+  const { today, wsA, wsB, secondA, classId, ownerA, ownerB, student } = fx;
+  console.log("\n13. W8b: workspace students, invitations, enrolment and the student's reads");
+
+  // Accounts: a student with a login and a staff-typed User.phone (a branch
+  // student, too); one whose number is only a self-declared contactPhone; a
+  // login-less person holding a User.phone; another tenant's local profile phone.
+  const P1 = freshPhone();
+  const P2 = freshPhone();
+  const P3 = freshPhone();
+  const P4 = freshPhone();
+  const P5 = freshPhone();
+  const P6 = freshPhone();
+  await prisma.user.update({
+    where: { id: student.id },
+    data: { phone: P1, authId: `${STEM}-auth-student-${RUN}`, firstName: "RealFirst", lastName: `RealLast${RUN}` },
+  });
+  const contactOnly = await makeUser("contact-only");
+  await prisma.user.update({ where: { id: contactOnly.id }, data: { contactPhone: P2, authId: `${STEM}-auth-contact-${RUN}` } });
+  const noLogin = await makeUser("no-login");
+  await prisma.user.update({ where: { id: noLogin.id }, data: { phone: P3 } });
+  const tenantLocal = await makeUser("tenant-local");
+  await prisma.user.update({ where: { id: tenantLocal.id }, data: { authId: `${STEM}-auth-tenant-${RUN}` } });
+  await prisma.studentProfile.create({ data: { userId: tenantLocal.id, centerId: fx.branchId, studentCode: `${STEM}-tl-${RUN}`, phone: P4 } });
+  const second = await makeUser("student-two");
+  await prisma.user.update({ where: { id: second.id }, data: { phone: P6, authId: `${STEM}-auth-two-${RUN}` } });
+
+  // ── 13a. One answer, one audit shape ───────────────────────────────────
+  // A warm-up add first, so the informational timing below compares like with
+  // like (the first add pays for this teacher's rate-limit row and the
+  // workspace's code counter).
+  await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("warm"), phone: freshPhone(), gradeId: null });
+  const t0 = Date.now();
+  const matched = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("p1"), phone: P1, gradeId: fx.classInput.gradeId });
+  const t1 = Date.now();
+  const unmatched = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("p5"), phone: P5, gradeId: fx.classInput.gradeId });
+  const t2 = Date.now();
+  check("Adding by phone succeeds with or without a matching account", matched.ok && unmatched.ok, JSON.stringify({ matched, unmatched }));
+  if (!matched.ok || !unmatched.ok) return;
+  check(
+    "The answer has the same shape either way ({ ok, studentProfileId } — nothing about a match)",
+    JSON.stringify(Object.keys(matched).sort()) === JSON.stringify(Object.keys(unmatched).sort()),
+  );
+  check(
+    "The audit row has the same shape either way (workspace.student.add, ids only)",
+    (await addAuditShape(wsA, matched.studentProfileId)) === (await addAuditShape(wsA, unmatched.studentProfileId)),
+  );
+  console.log(`        (timing, informational: matched ${t1 - t0} ms, unmatched ${t2 - t1} ms)`);
+  const p1Profile = matched.studentProfileId;
+  const p5Profile = unmatched.studentProfileId;
+  const pendingFor = (profileId: string) => prisma.workspaceInvitation.findMany({ where: { studentProfileId: profileId, status: "PENDING" } });
+  const p1Pending = await pendingFor(p1Profile);
+  check("A match writes one PENDING invitation, addressed to the account", p1Pending.length === 1 && p1Pending[0].targetUserId === student.id && p1Pending[0].centerId === wsA);
+  check("No match writes no invitation", (await prisma.workspaceInvitation.count({ where: { studentProfileId: p5Profile } })) === 0);
+  const notice = await prisma.notification.findMany({ where: { userId: student.id, kind: "WORKSPACE_INVITATION" } });
+  check(
+    "The match also writes one WORKSPACE_INVITATION notice, ids only ({ invitationId }), on the workspace",
+    notice.length === 1 && notice[0].centerId === wsA && JSON.stringify(notice[0].payload) === JSON.stringify({ invitationId: p1Pending[0].id }),
+  );
+  const placeholders = await prisma.studentProfile.findMany({ where: { id: { in: [p1Profile, p5Profile] } }, include: { user: true } });
+  check(
+    "Both profiles sit on a placeholder with no login and no global contact (User.phone never set, D-W39 item 2)",
+    placeholders.length === 2 && placeholders.every((row) => row.user.authId === null && row.user.email === null && row.user.phone === null && row.user.id !== student.id),
+  );
+  check("The profile keeps the typed phone and grade as its local record", placeholders.every((row) => row.phone !== null && row.gradeId === fx.classInput.gradeId && row.profileCompletedAt !== null));
+
+  // ── 13b. Only User.phone of an account with a login matches ────────────
+  const viaContact = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("p2"), phone: P2, gradeId: null });
+  const viaNoLogin = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("p3"), phone: P3, gradeId: null });
+  const viaTenant = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("p4"), phone: P4, gradeId: null });
+  check("contactPhone, a login-less User.phone and another tenant's profile phone are added too", viaContact.ok && viaNoLogin.ok && viaTenant.ok);
+  check(
+    "…and none of them invites anyone (User.phone of an account with a login only)",
+    (await prisma.workspaceInvitation.count({ where: { targetUserId: { in: [contactOnly.id, noLogin.id, tenantLocal.id] } } })) === 0 &&
+      (await prisma.workspaceInvitation.count({ where: { centerId: wsA } })) === 1,
+  );
+
+  // ── 13c. The teacher's reads never carry the account ───────────────────
+  const listed = await listWorkspaceStudents(prisma, wsA);
+  const listedJson = JSON.stringify(listed);
+  check(
+    "The teacher's list carries neither the account's id, email nor real name — only Linked / Not linked",
+    !listedJson.includes(student.id) && !listedJson.includes(student.email ?? "@@") && !listedJson.includes(`RealLast${RUN}`) &&
+      listed.every((row) => row.linked === false) && !("userId" in (listed[0] ?? {})),
+  );
+  check("The add's result carries none of them either", !JSON.stringify(matched).includes(student.id));
+
+  // ── 13d. Duplicates and the partial index ──────────────────────────────
+  const duplicate = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("dup"), phone: P5, gradeId: null });
+  check("A duplicate phone in the same workspace is refused (duplicatePhone)", !duplicate.ok && duplicate.error === "duplicatePhone");
+  let indexRefused = false;
+  try {
+    await prisma.workspaceInvitation.create({ data: { centerId: wsA, studentProfileId: p1Profile, targetUserId: student.id } });
+  } catch {
+    indexRefused = true;
+  }
+  check("A second PENDING invitation for one profile is refused by the partial unique index", indexRefused);
+  const [index] = await prisma.$queryRaw<{ count: bigint }[]>`
+    SELECT count(*) AS count FROM pg_indexes
+    WHERE schemaname = 'public' AND indexname = 'WorkspaceInvitation_one_pending_per_profile' AND indexdef ILIKE '%WHERE%PENDING%'`;
+  check("The hand-written partial index exists (CLAUDE.md rule 7)", Number(index?.count ?? 0) === 1);
+  const [rls] = await prisma.$queryRaw<{ on: boolean }[]>`
+    SELECT c.relrowsecurity AS on FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'WorkspaceInvitation'`;
+  check("RLS is on for WorkspaceInvitation", rls?.on === true);
+
+  // ── 13e. Invite again: the window, the answer, one pending ─────────────
+  const soonMatched = await inviteWorkspaceStudentAgain(prisma, ownerA.id, wsA, p1Profile);
+  const soonUnmatched = await inviteWorkspaceStudentAgain(prisma, ownerA.id, wsA, p5Profile);
+  check(
+    "Invite again within 24 hours of the add is refused the same way either way (inviteTooSoon)",
+    !soonMatched.ok && soonMatched.error === "inviteTooSoon" && !soonUnmatched.ok && soonUnmatched.error === "inviteTooSoon",
+  );
+  const later = (hours: number) => new Date(Date.now() + hours * 3_600_000);
+  const againMatched = await inviteWorkspaceStudentAgain(prisma, ownerA.id, wsA, p1Profile, later(25));
+  const againUnmatched = await inviteWorkspaceStudentAgain(prisma, ownerA.id, wsA, p5Profile, later(25));
+  check("After the window it answers { ok: true } either way", againMatched.ok && againUnmatched.ok && JSON.stringify(againMatched) === JSON.stringify(againUnmatched));
+  const afterAgain = await prisma.workspaceInvitation.findMany({ where: { studentProfileId: p1Profile }, orderBy: { createdAt: "asc" } });
+  check(
+    "It cancelled the older pending one and wrote a new one: one PENDING per profile",
+    afterAgain.length === 2 && afterAgain[0].status === "CANCELLED" && afterAgain[1].status === "PENDING",
+  );
+  check("…and still nothing for the unmatched profile", (await prisma.workspaceInvitation.count({ where: { studentProfileId: p5Profile } })) === 0);
+  const inviteRows = await prisma.auditLog.findMany({ where: { centerId: wsA, action: "workspace.student.invite", entityId: { in: [p1Profile, p5Profile] } } });
+  check(
+    "Invite again's audit rows have one shape either way",
+    inviteRows.length === 2 && new Set(inviteRows.map((row) => JSON.stringify([row.before, row.after]))).size === 1,
+  );
+  check(`The window is ${INVITE_AGAIN_WINDOW_MS / 3_600_000} hours`, INVITE_AGAIN_WINDOW_MS === 24 * 3_600_000);
+
+  // ── 13f. The notice's re-check; cancel; decline ────────────────────────
+  const reachFor = async (userId: string, workspaceCenterIds: string[] = []) => ({
+    relationCenterIds: (await resolveCenterRelations(prisma, userId)).map((relation) => relation.center.id),
+    workspaceCenterIds,
+    invitationCenterIds: await pendingInvitationCenterIds(prisma, userId),
+  });
+  const visibleInvitationNotices = async (userId: string) =>
+    prisma.notification.count({ where: { AND: [visibleWhere(userId, await reachFor(userId)), { kind: "WORKSPACE_INVITATION" }] } });
+  check("A pending invitation's notice is visible to its account", (await visibleInvitationNotices(student.id)) >= 1);
+  const hubCards = await pendingWorkspaceInvitations(prisma, student.id);
+  check(
+    "The hub card: the workspace's name and the teacher's, and no other field",
+    hubCards.length === 1 && hubCards[0].workspaceName.length > 0 && hubCards[0].teacherName === `${ownerA.firstName} ${ownerA.lastName}` &&
+      JSON.stringify(Object.keys(hubCards[0]).sort()) === JSON.stringify(["createdAt", "id", "teacherName", "workspaceName"]),
+  );
+  const cancelMatched = await cancelWorkspaceInvitation(prisma, ownerA.id, wsA, p1Profile);
+  const cancelUnmatched = await cancelWorkspaceInvitation(prisma, ownerA.id, wsA, p5Profile);
+  check("Cancel invitation answers { ok: true } either way", cancelMatched.ok && cancelUnmatched.ok);
+  check("The teacher's cancel sets CANCELLED", (await pendingFor(p1Profile)).length === 0);
+  check("A cancelled invitation's notice is hidden, not deleted", (await visibleInvitationNotices(student.id)) === 0 && (await prisma.notification.count({ where: { userId: student.id, kind: "WORKSPACE_INVITATION" } })) === 2);
+  await inviteWorkspaceStudentAgain(prisma, ownerA.id, wsA, p1Profile, later(50));
+  const toDecline = (await pendingFor(p1Profile))[0];
+  const wrongDecline = await declineWorkspaceInvitation(prisma, ownerB.id, toDecline.id);
+  check("Another account cannot decline it (notFound)", !wrongDecline.ok && wrongDecline.error === "notFound");
+  const declined = await declineWorkspaceInvitation(prisma, student.id, toDecline.id);
+  check(
+    "Decline sets DECLINED; the profile stays on its placeholder and reads Not linked",
+    declined.ok &&
+      (await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: toDecline.id } })).status === "DECLINED" &&
+      (await listWorkspaceStudents(prisma, wsA)).find((row) => row.id === p1Profile)?.linked === false,
+  );
+
+  // ── 13g. Enrolment ─────────────────────────────────────────────────────
+  const class2 = await createWorkspaceClass(prisma, ownerA.id, wsA, { ...fx.classInput, slots: [{ ...fx.slot, startTime: "08:00", endTime: "09:00" }] }, { ...fx.options, confirmConflicts: true });
+  check("A second workspace class (for the unenrolled check)", class2.ok);
+  const enrolled = await enrolWorkspaceStudent(prisma, ownerA.id, wsA, classId, p1Profile);
+  const enrolledUnmatched = await enrolWorkspaceStudent(prisma, ownerA.id, wsA, classId, p5Profile);
+  check("The owner enrols the workspace's own profiles (no approval, no seat cap)", enrolled.ok && enrolledUnmatched.ok);
+  const twiceEnrolled = await enrolWorkspaceStudent(prisma, ownerA.id, wsA, classId, p1Profile);
+  check("Enrolling twice is refused (alreadyEnrolled)", !twiceEnrolled.ok && twiceEnrolled.error === "alreadyEnrolled");
+  const bStudent = await addWorkspaceStudent(prisma, ownerB.id, wsB, { ...PLACEHOLDER("b"), phone: freshPhone(), gradeId: null });
+  const crossProfile = bStudent.ok ? await enrolWorkspaceStudent(prisma, ownerA.id, wsA, classId, bStudent.studentProfileId) : { ok: false as const, error: "setup" };
+  check("A profile of another workspace cannot be enrolled (notFound)", !crossProfile.ok && crossProfile.error === "notFound");
+  const crossClass = await enrolWorkspaceStudent(prisma, ownerB.id, wsB, classId, bStudent.ok ? bStudent.studentProfileId : "");
+  check("A class of another workspace cannot be used (notFound)", !crossClass.ok && crossClass.error === "notFound");
+  const roster = await workspaceClassRoster(prisma, wsA, classId);
+  check("The roster lists both, Not linked", roster.roster.length === 2 && roster.roster.every((row) => !row.student.linked));
+
+  // ── 13h. Before accepting, the account sees nothing of the workspace ───
+  check("Before accepting, the account holds no workspace profile", (await studentWorkspaceProfiles(prisma, student.id)).length === 0);
+
+  // ── 13i. Accept: atomic, the placeholder removed only when empty ───────
+  await inviteWorkspaceStudentAgain(prisma, ownerA.id, wsA, p1Profile, later(75));
+  const toAccept = (await pendingFor(p1Profile))[0];
+  const placeholderId = (await prisma.studentProfile.findUniqueOrThrow({ where: { id: p1Profile } })).userId;
+  check("Another account cannot accept it (notFound)", !(await acceptWorkspaceInvitation(prisma, ownerB.id, toAccept.id)).ok);
+  const accepted = await acceptWorkspaceInvitation(prisma, student.id, toAccept.id);
+  check("Accept succeeds", accepted.ok, JSON.stringify(accepted));
+  const linkedProfile = await prisma.studentProfile.findUniqueOrThrow({ where: { id: p1Profile } });
+  check(
+    "The profile moved to the account; the invitation is ACCEPTED; the placeholder (holding nothing else) is gone",
+    linkedProfile.userId === student.id &&
+      (await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: toAccept.id } })).status === "ACCEPTED" &&
+      (await prisma.user.count({ where: { id: placeholderId } })) === 0 &&
+      accepted.ok && accepted.placeholderRemoved,
+  );
+  check(
+    "The local record is untouched (the teacher-typed name and phone stay)",
+    linkedProfile.lastName === PLACEHOLDER("p1").lastName && linkedProfile.phone === P1,
+  );
+  check(
+    "The enrolment moved with the profile",
+    (await prisma.enrollment.count({ where: { studentProfileId: p1Profile, classGroupId: classId, status: "ACTIVE" } })) === 1,
+  );
+  const acceptRow = await prisma.auditLog.findFirst({ where: { centerId: wsA, action: "workspace.invitation.accept", entityId: toAccept.id } });
+  check("Accept is audited, ids only, with the student as actor", acceptRow !== null && acceptRow.actorUserId === student.id && forbiddenAuditKey(acceptRow.after) === null);
+  check("Accepting twice is notFound", !(await acceptWorkspaceInvitation(prisma, student.id, toAccept.id)).ok);
+  check("The teacher now reads Linked, still without the account", (await listWorkspaceStudents(prisma, wsA)).find((row) => row.id === p1Profile)?.linked === true && !JSON.stringify(await listWorkspaceStudents(prisma, wsA)).includes(student.id));
+
+  // A placeholder holding another relation stays; an account already here is refused.
+  const p6 = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("p6"), phone: P6, gradeId: null });
+  if (p6.ok) {
+    const p6Placeholder = (await prisma.studentProfile.findUniqueOrThrow({ where: { id: p6.studentProfileId } })).userId;
+    await prisma.studentProfile.create({ data: { userId: p6Placeholder, centerId: secondA, studentCode: `${STEM}-p6-${RUN}` } });
+    const p6Invitation = (await pendingFor(p6.studentProfileId))[0];
+    const p6Accepted = p6Invitation ? await acceptWorkspaceInvitation(prisma, second.id, p6Invitation.id) : null;
+    check(
+      "A placeholder that holds another relation is kept (placeholderRemoved false)",
+      p6Accepted?.ok === true && !p6Accepted.placeholderRemoved && (await prisma.user.count({ where: { id: p6Placeholder } })) === 1,
+    );
+  } else check("Setup: a second matched profile", false, JSON.stringify(p6));
+  const strayInvitation = await prisma.workspaceInvitation.create({ data: { centerId: wsA, studentProfileId: p5Profile, targetUserId: student.id } });
+  const refusedHere = await acceptWorkspaceInvitation(prisma, student.id, strayInvitation.id);
+  check(
+    "An account already holding a profile in the workspace is refused (alreadyInWorkspace), and nothing moves",
+    !refusedHere.ok && refusedHere.error === "alreadyInWorkspace" &&
+      (await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: strayInvitation.id } })).status === "PENDING" &&
+      (await prisma.studentProfile.findUniqueOrThrow({ where: { id: p5Profile } })).userId !== student.id,
+  );
+  await prisma.workspaceInvitation.update({ where: { id: strayInvitation.id }, data: { status: "CANCELLED" } });
+
+  // ── 13j. What the linked student reads ─────────────────────────────────
+  const profiles = await studentWorkspaceProfiles(prisma, student.id);
+  check("The opt-in resolver's input: exactly the linked workspace profile", profiles.length === 1 && profiles[0].centerId === wsA);
+  const upcoming = await studentUpcomingSessions(prisma, wsA, p1Profile, today);
+  check(
+    "Schedule: the enrolled workspace class's sessions, and none of the unenrolled class",
+    upcoming.length > 0 && upcoming.every((session) => session.classGroupId === classId),
+  );
+  const month = await studentCalendarMonth(prisma, wsA, p1Profile, { start: today, end: addDays(today, 30) }, today);
+  check("Calendar: the same class only", month.length > 0 && month.every((entry) => entry.classGroupId === classId));
+  check("History: readable (no check-in before W8c, so empty)", Array.isArray(await studentPastAttendance(prisma, wsA, p1Profile, addDays(today, 31))));
+  check("Another teacher's workspace holds nothing for this student", (await prisma.studentProfile.count({ where: { userId: student.id, centerId: wsB } })) === 0);
+  check("Discover still leaves the workspace out", !(await listAccessibleCenters(prisma)).some((center) => center.id === wsA));
+  const relations = await resolveCenterRelations(prisma, student.id);
+  check("A branch student is unaffected: their relations are the branch only", relations.length === 1 && relations[0].center.id === fx.branchId);
+  const studentEntries = (await loadExperiences(prisma, student.id)).filter((entry) => entry.kind === "student");
+  check("One Student experience (branch + workspace)", studentEntries.length === 1 && studentEntries[0].href === ROUTES.studentSchedule);
+  const workspaceOnly = await loadExperiences(prisma, second.id);
+  check(
+    "A student with only workspace profiles has the Student experience, landing on the schedule",
+    (await hasWorkspaceStudentProfile(prisma, second.id)) && workspaceOnly.length === 1 && workspaceOnly[0].kind === "student" && workspaceOnly[0].href === ROUTES.studentSchedule,
+    workspaceOnly.map((entry) => entry.key).join(","),
+  );
+  check("An unlinked profile reaches no one: its placeholder has no login", (await prisma.studentProfile.findUniqueOrThrow({ where: { id: p5Profile }, include: { user: true } })).user.authId === null);
+
+  // ── 13k. Producers and the re-check ────────────────────────────────────
+  // Only sessions after today: none of them can have started.
+  const [toCancel, toMove] = upcoming.filter((session) => session.date.getTime() > today.getTime());
+  if (toCancel && toMove) {
+    await cancelWorkspaceSession(prisma, ownerA.id, wsA, toCancel.id);
+    await rescheduleWorkspaceSession(prisma, ownerA.id, wsA, toMove.id, { date: addDays(toMove.date, 1), startTime: "20:00", endTime: "21:00" }, { ...fx.options, confirmConflicts: true });
+    const sessionNotices = await prisma.notification.findMany({ where: { userId: student.id, centerId: wsA, kind: { in: ["SESSION_CANCELLED", "SESSION_RESCHEDULED"] } } });
+    check("Cancel and reschedule notify the linked enrolled student", new Set(sessionNotices.map((row) => row.kind)).size === 2);
+    const visible = async (workspaceCenterIds: string[]) =>
+      prisma.notification.count({ where: { AND: [visibleWhere(student.id, await reachFor(student.id, workspaceCenterIds)), { centerId: wsA, kind: { in: ["SESSION_CANCELLED", "SESSION_RESCHEDULED"] } }] } });
+    check("They are visible through the linked workspace profile, and hidden without it", (await visible([wsA])) === 2 && (await visible([])) === 0);
+    await prisma.studentProfile.update({ where: { id: p1Profile }, data: { active: false } });
+    const deactivatedReach = (await studentWorkspaceProfiles(prisma, student.id)).map((row) => row.centerId);
+    check("A deactivated profile drops out of the reach, so its notices hide", !deactivatedReach.includes(wsA) && (await visible(deactivatedReach)) === 0);
+    await prisma.studentProfile.update({ where: { id: p1Profile }, data: { active: true } });
+  } else check("Setup: two upcoming sessions to cancel and move", false, `${upcoming.length}`);
+
+  // ── 13l. Leave (U8) ────────────────────────────────────────────────────
+  const left = await prisma.$transaction((tx) => leaveClass(tx, { centerId: wsA, classGroupId: classId, studentUserId: student.id }));
+  check(
+    "The student leaves the workspace class (U8); its sessions leave their schedule",
+    left.ok && (await studentUpcomingSessions(prisma, wsA, p1Profile, today)).length === 0,
+  );
+
+  // ── 13m. Copy from another workspace ───────────────────────────────────
+  const copyable = await copyableWorkspaceStudents(prisma, ownerA.id, secondA);
+  check("The copy picker lists A's own profiles from A's other workspaces only", copyable.length >= 1 && copyable.every((group) => group.workspaceId !== wsB && group.workspaceId !== secondA));
+  const copied = await copyWorkspaceStudent(prisma, ownerA.id, secondA, { workspaceId: wsA, studentProfileId: p5Profile });
+  const copiedRow = copied.ok ? await prisma.studentProfile.findUniqueOrThrow({ where: { id: copied.studentProfileId } }) : null;
+  check(
+    "Copy creates a fresh profile there with the name, phone and grade copied, on a new placeholder",
+    copiedRow !== null && copiedRow.centerId === secondA && copiedRow.phone === P5 && copiedRow.gradeId === fx.classInput.gradeId &&
+      copiedRow.lastName === PLACEHOLDER("p5").lastName && copiedRow.id !== p5Profile,
+  );
+  const copiedByB = await copyWorkspaceStudent(prisma, ownerB.id, wsB, { workspaceId: wsA, studentProfileId: p5Profile });
+  check("Another teacher cannot copy from A's workspace (notFound)", !copiedByB.ok && copiedByB.error === "notFound");
+  check("B's picker never lists A's students", (await copyableWorkspaceStudents(prisma, ownerB.id, wsB)).every((group) => group.workspaceId !== wsA));
+
+  // ── 13n. Isolation and every other role, by direct call ────────────────
+  const intoA = await addWorkspaceStudent(prisma, ownerB.id, wsA, { ...PLACEHOLDER("x"), phone: freshPhone(), gradeId: null });
+  check("B cannot add to A's workspace (notFound)", !intoA.ok && intoA.error === "notFound");
+  for (const [label, actor] of fx.others) {
+    const results = [
+      await addWorkspaceStudent(prisma, actor, wsA, { ...PLACEHOLDER("o"), phone: freshPhone(), gradeId: null }),
+      await copyWorkspaceStudent(prisma, actor, wsA, { workspaceId: secondA, studentProfileId: p5Profile }),
+      await inviteWorkspaceStudentAgain(prisma, actor, wsA, p5Profile, later(100)),
+      await cancelWorkspaceInvitation(prisma, actor, wsA, p5Profile),
+      await enrolWorkspaceStudent(prisma, actor, wsA, classId, p5Profile),
+      await removeWorkspaceEnrollment(prisma, actor, wsA, "00000000-0000-0000-0000-000000000000"),
+    ];
+    check(
+      `${label}: all 6 W8b writers answer notFound`,
+      results.every((result) => !result.ok && result.error === "notFound"),
+      results.map((result) => (result.ok ? "ok" : result.error)).join(","),
+    );
+  }
+
+  // ── 13o. Premium lapse and archive: reads stay, writes refused ─────────
+  const enrolmentForRemove = await prisma.enrollment.findFirstOrThrow({ where: { studentProfileId: p5Profile, classGroupId: classId } });
+  await setPremium(ownerA.id, new Date(Date.now() - 60_000));
+  const lapsedWrites = [
+    await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("l"), phone: freshPhone(), gradeId: null }),
+    await inviteWorkspaceStudentAgain(prisma, ownerA.id, wsA, p5Profile, later(125)),
+    await enrolWorkspaceStudent(prisma, ownerA.id, wsA, classId, p1Profile),
+    await removeWorkspaceEnrollment(prisma, ownerA.id, wsA, enrolmentForRemove.id),
+  ];
+  check(
+    "Lapsed: add, invite again, enrol and remove answer premiumRequired",
+    lapsedWrites.every((result) => !result.ok && result.error === "premiumRequired"),
+    lapsedWrites.map((result) => (result.ok ? "ok" : result.error)).join(","),
+  );
+  check("Lapsed: cancel invitation still works (it only withdraws)", (await cancelWorkspaceInvitation(prisma, ownerA.id, wsA, p5Profile)).ok);
+  check("Lapsed: the teacher's list and the linked student's reads continue", (await listWorkspaceStudents(prisma, wsA)).length > 0 && (await studentWorkspaceProfiles(prisma, student.id)).length === 1);
+  await setPremium(ownerA.id, inDays(30));
+  const removed = await removeWorkspaceEnrollment(prisma, ownerA.id, wsA, enrolmentForRemove.id);
+  check("Renewed: remove from a class works (REMOVED)", removed.ok && (await prisma.enrollment.findUniqueOrThrow({ where: { id: enrolmentForRemove.id } })).status === "REMOVED");
+  await prisma.center.update({ where: { id: wsA }, data: { archivedAt: new Date(), archivedByUserId: ownerA.id } });
+  const archivedAdd = await addWorkspaceStudent(prisma, ownerA.id, wsA, { ...PLACEHOLDER("ar"), phone: freshPhone(), gradeId: null });
+  const archivedEnrol = await enrolWorkspaceStudent(prisma, ownerA.id, wsA, classId, p5Profile);
+  check("Archived: add and enrol answer workspaceArchived", !archivedAdd.ok && archivedAdd.error === "workspaceArchived" && !archivedEnrol.ok && archivedEnrol.error === "workspaceArchived");
+  check("Archived: the linked student still reads the workspace (history is not hidden)", (await studentWorkspaceProfiles(prisma, student.id)).length === 1);
+  await prisma.center.update({ where: { id: wsA }, data: { archivedAt: null, archivedByUserId: null } });
+
+  // ── 13p. Rate limits (the existing limiter) ────────────────────────────
+  const limiter = await makeUser("limits", { premium: true });
+  const limitWs = await createWorkspace(prisma, limiter.id, { name: "Limits" });
+  if (limitWs.ok) {
+    const hourBefore = Math.floor(Date.now() / RATE_LIMITS.workspaceStudentAddPerUser.windowMs);
+    let added = 0;
+    let firstRefusal: string | null = null;
+    let firstProfile = "";
+    for (let index = 0; index < RATE_LIMITS.workspaceStudentAddPerUser.limit + 1; index += 1) {
+      const result = await addWorkspaceStudent(prisma, limiter.id, limitWs.workspaceId, { ...PLACEHOLDER(`lim${index}`), phone: freshPhone(), gradeId: null });
+      if (result.ok) {
+        added += 1;
+        firstProfile ||= result.studentProfileId;
+      } else {
+        firstRefusal ??= result.error;
+      }
+    }
+    const crossed = Math.floor(Date.now() / RATE_LIMITS.workspaceStudentAddPerUser.windowMs) !== hourBefore;
+    check(
+      "60 adds an hour per teacher, the 61st rateLimited",
+      crossed || (added === 60 && firstRefusal === "rateLimited"),
+      crossed ? "the hour turned mid-run; not judged" : `${added} added, then ${firstRefusal}`,
+    );
+    const dayBefore = Math.floor(Date.now() / RATE_LIMITS.workspaceInvitePerUser.windowMs);
+    let invited = 0;
+    let inviteRefusal: string | null = null;
+    for (let index = 0; index < RATE_LIMITS.workspaceInvitePerUser.limit + 1; index += 1) {
+      const result = await inviteWorkspaceStudentAgain(prisma, limiter.id, limitWs.workspaceId, firstProfile, later(25 + index));
+      if (result.ok) invited += 1;
+      else inviteRefusal ??= result.error;
+    }
+    const dayCrossed = Math.floor(Date.now() / RATE_LIMITS.workspaceInvitePerUser.windowMs) !== dayBefore;
+    check(
+      "20 invitations a day per teacher, the 21st rateLimited (counted whether or not anyone matched)",
+      dayCrossed || (invited === 20 && inviteRefusal === "rateLimited"),
+      dayCrossed ? "the day turned mid-run; not judged" : `${invited} invited, then ${inviteRefusal}`,
+    );
+  } else check("Setup: the limits workspace", false, JSON.stringify(limitWs));
+
+  // ── 13q. Audit and statics ─────────────────────────────────────────────
+  const w8bRows = await prisma.auditLog.findMany({ where: { action: { startsWith: "workspace.student." } } });
+  const invitationRows = await prisma.auditLog.findMany({ where: { centerId: wsA, action: { startsWith: "workspace.invitation." } } });
+  check(
+    "Every W8b audit row is ids only and on behalf of no one",
+    [...w8bRows, ...invitationRows].every((row) => forbiddenAuditKey(row.before) === null && forbiddenAuditKey(row.after) === null && row.onBehalfOfUserId === null),
+  );
+  const studentActions = read("app/[locale]/(teacher)/teacher/workspaces/student-actions.ts");
+  const invitationActions = read("app/[locale]/(auth)/workspace-invitation-actions.ts");
+  const exported = [...studentActions.matchAll(/export async function (\w+)\([\s\S]*?\n\}/g), ...invitationActions.matchAll(/export async function (\w+)\([\s\S]*?\n\}/g)];
+  check(
+    "Every W8b action takes the actor from the session, never a posted user, and consults no centre matrix (static)",
+    exported.length === 8 &&
+      exported.every(([body]) => /await getCurrentUser\(\)/.test(body) && /user\.id/.test(body)) &&
+      !/formData\.get\(["'](userId|actorUserId|teacherId|targetUserId)/.test(studentActions + invitationActions) &&
+      !/ctxCan\(|getTenantContext\(|requireExperience\(/.test(studentActions + invitationActions),
+    `${exported.length} actions`,
+  );
+  const studentsModule = read("lib/db/workspace-students.ts");
+  check(
+    "The match reads User.phone of an account with a login, never contactPhone, in the one statement every add runs (static)",
+    /u\."phone" = \$\{phone\} AND u\."authId" IS NOT NULL/.test(studentsModule) && !/contactPhone/i.test(studentsModule.replace(/\/\*\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")) &&
+      (studentsModule.match(/await inviteIfMatched\(/g) ?? []).length === 2,
+  );
+  check("The placeholder writes no global contact (static)", /email: null, phone: null, altPhone: null/.test(read("lib/db/identity.ts")));
+  check(
+    "The students page resolves its own context (static)",
+    /getWorkspaceContext\(id\)/.test(read("app/[locale]/(teacher)/teacher/workspaces/[id]/students/page.tsx")),
+  );
+  const scheduleUsers = ["app/[locale]/(student)/student/schedule/page.tsx", "app/[locale]/(student)/student/calendar/page.tsx"];
+  check(
+    "The opt-in student resolver is used by the schedule and the calendar; assessments keep the branch-only one (static)",
+    scheduleUsers.every((file) => /getStudentScheduleContexts\(/.test(read(file))) &&
+      /getStudentContexts\(/.test(read("app/[locale]/(student)/student/assessments/scope.ts")) &&
+      !/getStudentScheduleContexts/.test(read("app/[locale]/(student)/student/assessments/scope.ts")),
+  );
+  check(
+    "The hub stays open while an invitation is pending (static)",
+    /experiences\.length === 1 && switchMode !== "1" && invitations\.length === 0/.test(read("app/[locale]/(auth)/select-center/page.tsx")),
+  );
+  const w8bDir = readdirSync(join(ROOT, "prisma", "migrations")).find((dir) => dir.endsWith("_w8b_workspace_invitations"));
+  const w8bMigration = w8bDir ? read(`prisma/migrations/${w8bDir}/migration.sql`) : "";
+  check(
+    "The W8b migration is additive: RLS on, the partial index, no DROP (static)",
+    /ENABLE ROW LEVEL SECURITY/.test(w8bMigration) && /WorkspaceInvitation_one_pending_per_profile/.test(w8bMigration) &&
+      !/^\s*DROP\s/im.test(w8bMigration) && !/POLICY/i.test(w8bMigration),
   );
 }
 

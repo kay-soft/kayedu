@@ -2,6 +2,7 @@ import { cache } from "react";
 
 import { getUserCenterRelations } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
+import { pendingInvitationCenterIds, studentWorkspaceProfiles } from "@/lib/db/workspace-students";
 import {
   countUnread,
   hiddenAssessmentNoticeIds,
@@ -15,17 +16,28 @@ import {
  * the same per-request `cache()` the shells and the hub already use, so the
  * bell adds no relation query to a page that has one. A person who is not a
  * student anywhere adds no assessment query either (D-W32).
+ *
+ * W8b (D-W39 item 10): the workspaces the reader studies at through a linked
+ * profile — the opt-in student resolver's own input (`studentWorkspaceProfiles`,
+ * without building a context per workspace on every bell), reaching only the
+ * session kinds — and the workspaces with a PENDING invitation to the reader.
  */
 export async function notificationReach(
   userId: string,
   options: { unreadOnly?: boolean } = {},
 ): Promise<NotificationReach> {
-  const relations = await getUserCenterRelations(userId);
+  const [relations, workspaceProfiles, invitationCenterIds] = await Promise.all([
+    getUserCenterRelations(userId),
+    studentWorkspaceProfiles(prisma, userId),
+    pendingInvitationCenterIds(prisma, userId),
+  ]);
   const studentCenterIds = relations.filter((relation) => relation.studentProfile).map((relation) => relation.center.id);
   return {
     relationCenterIds: relations.map((relation) => relation.center.id),
     studentCenterIds,
     hiddenNoticeIds: await hiddenAssessmentNoticeIds(prisma, userId, studentCenterIds, new Date(), options),
+    workspaceCenterIds: workspaceProfiles.map((profile) => profile.centerId),
+    invitationCenterIds,
   };
 }
 

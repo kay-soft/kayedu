@@ -564,6 +564,46 @@
 
 ---
 
+## 56. A share code or link to link a workspace student — high priority
+
+**What it is.** A per-profile, single-use code (or a link carrying it) the teacher gives a workspace student in person, which the student redeems from their own account to link the profile — stored as **sha256** like the parent codes (F3) and the assistant codes (W7a), shown once, expiring, rate-limited at redemption.
+
+**Why deferred.** W8b (D-W39) invites by phone only, and the match is `User.phone`. Sign-up never writes `User.phone` and Account settings writes only `contactPhone` (D-02 (a), F2), so a student who registered on their own can never be matched: the invitation reaches only an account a centre created with that phone and that was later claimed. The founder accepted that narrow reach for W8b and asked for this entry, at high priority.
+
+**Depends on.** Nothing new in the model beyond a code table like `FamilyInvitation`; the accept path is W8b's `acceptWorkspaceInvitation` (the profile moved, the placeholder removed when empty), reached by a code instead of a phone match.
+
+---
+
+## 57. Parent visibility of workspace classes
+
+**What it is.** A linked child's private classes and sessions on the parent portal's schedule and calendar.
+
+**Why deferred.** The parent portal reads only `activeChildLinks` at accessible **branches** (`BRANCH_ONLY`), and W8b's opt-in student resolver is the student's own. Showing a teacher's private classes to a parent is a separate consent question the W8b prompt left out.
+
+**Depends on.** A parent-side counterpart of `getStudentScheduleContexts`, and a decision on whether the workspace teacher or the student consents to it.
+
+---
+
+## 58. Editing a workspace student's record after creation
+
+**What it is.** Changing a workspace student's phone (and name or grade) after they were added.
+
+**Why deferred.** The phone is what an invitation matched on; changing it after an invitation exists raises "re-match, cancel, or keep?" questions W8b did not need. The add dialog says the phone cannot be changed later.
+
+**Depends on.** A rule for pending invitations when the phone changes (cancel them, then the 24-hour "Invite again" window), and the centre's local-record editor (`components/center/person-fields.tsx`) reused for the workspace.
+
+---
+
+## 59. Deactivating or removing a workspace student
+
+**What it is.** Taking a student out of a workspace — deactivating the profile (history kept) or deleting one that never attended or paid.
+
+**Why deferred.** W8b adds, invites and enrols; removing a student from a class (REMOVED) covers the day-to-day need. A delete must honour the delete blockers (`studentDeleteBlockers`) and the placeholder's own removal, which waits for attendance and payments in workspaces (W8c).
+
+**Depends on.** W8c (attendance and payments in workspaces), then the centre's deactivate / delete rules applied with `workspaceCan`.
+
+---
+
 ## Also deferred (carried forward, no change in reasoning)
 
 Already listed in `00-master-product-spec.md` §6 before it became a pointer. Recorded here so the single list is complete.

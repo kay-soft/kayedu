@@ -261,7 +261,9 @@
       "lastUsed": "آخر استخدام",
       "continue": "متابعة",
       "assistantPortal": "مساعد {teacher}",
-      "assistantPortalHint": "اعمل نيابةً عن هذا المدرس في حدود ما يسمح به"
+      "assistantPortalHint": "اعمل نيابةً عن هذا المدرس في حدود ما يسمح به",
+      "invitationsLabel": "الدعوات",
+      "invitationTeacherFallback": "مدرّس"
     },
     "invite": {
       "title": "دعوة للانضمام",
@@ -4172,7 +4174,8 @@
       "ASSESSMENT_PUBLISHED": "{type, select, EXAM {امتحان جديد «{title}» لـ{className} في {branch}. يفتح {start} ويُغلق {end}.} other {واجب جديد «{title}» لـ{className} في {branch}. موعد التسليم {end}.}}",
       "ASSESSMENT_EXTENDED": "{type, select, EXAM {وقت إضافي لامتحان «{title}» لـ{className} في {branch}. يُغلق الآن {end}.} other {وقت إضافي لواجب «{title}» لـ{className} في {branch}. موعد التسليم الآن {end}.}}",
       "ASSESSMENT_OPENS_SOON": "يفتح امتحان «{title}» لـ{className} في {branch} قريبًا: {start}. ويُغلق {end}.",
-      "ASSESSMENT_DUE_SOON": "يحين قريبًا موعد تسليم واجب «{title}» لـ{className} في {branch}: {end}."
+      "ASSESSMENT_DUE_SOON": "يحين قريبًا موعد تسليم واجب «{title}» لـ{className} في {branch}: {end}.",
+      "WORKSPACE_INVITATION": "دعاك {teacher} إلى فصوله الخاصة في «{workspace}». افتح صفحتك الرئيسية للتأكيد أو الإلغاء."
     }
   },
   "StudentAssessments": {
@@ -4594,7 +4597,8 @@
       "label": "أقسام مساحة العمل",
       "classes": "الفصول",
       "sessions": "الحصص",
-      "settings": "الإعدادات"
+      "settings": "الإعدادات",
+      "students": "الطلاب"
     },
     "classes": {
       "title": "الفصول",
@@ -4714,6 +4718,91 @@
       "gradeNotFound": "اختر صفًا متاحًا.",
       "subjectNotFound": "اختر مادة متاحة.",
       "titleRequired": "أدخل عنوانًا."
+    }
+  },
+  "WorkspaceStudents": {
+    "title": "الطلاب",
+    "description": "طلاب مساحة العمل هذه. كل طالب سجلّك الخاص هنا، ولا ترى إلا إن كان قد ربطه بحسابه.",
+    "empty": "لا طلاب بعد",
+    "emptyHint": "أضف طالبًا برقم هاتفه، ثم سجّله في فصولك.",
+    "code": "الكود {code}",
+    "classes": "{count, plural, =0 {ليس في أي فصل} one {في فصل واحد} two {في فصلين} few {في # فصول} many {في # فصلًا} other {في # فصل}}",
+    "add": {
+      "button": "إضافة طالب",
+      "title": "إضافة طالب",
+      "description": "يُنشأ سجلّه في مساحة العمل هذه. إن كان الرقم لحساب على KayEdu فيمكن لصاحبه ربط هذا السجل من حسابه — وسترى «مرتبط» عندما يفعل.",
+      "phoneHint": "رقم موبايل مصري، مثل 01012345678. لا يمكن تغييره لاحقًا.",
+      "grade": "الصف (اختياري)",
+      "noGrade": "بلا صف",
+      "cancel": "إلغاء",
+      "submit": "إضافة طالب",
+      "added": "تمت إضافة الطالب."
+    },
+    "copy": {
+      "button": "إضافة من مساحات عملي الأخرى",
+      "title": "إضافة من مساحات عملي الأخرى",
+      "description": "تنسخ اسم أحد طلابك في مساحة عمل أخرى لك ورقم هاتفه وصفّه إلى سجل جديد هنا.",
+      "student": "الطالب",
+      "pick": "اختر طالبًا",
+      "cancel": "إلغاء",
+      "submit": "إضافة طالب",
+      "added": "تمت إضافة الطالب."
+    },
+    "row": {
+      "linked": "مرتبط",
+      "notLinked": "غير مرتبط",
+      "inviteAgain": "إعادة الدعوة",
+      "invited": "تم. إن كان هذا الرقم لحساب فقد طُلب من صاحبه مرة أخرى.",
+      "cancelInvitation": "إلغاء الدعوة",
+      "cancelTitle": "إلغاء أي دعوة؟",
+      "cancelDescription": "إن كانت هناك دعوة معلّقة لربط هذا السجل فستُسحب. يبقى السجل كما هو.",
+      "cancelConfirm": "إلغاء الدعوة",
+      "cancelled": "تم. لا شيء معلّق لهذا السجل الآن."
+    },
+    "roster": {
+      "title": "الطلاب",
+      "description": "{count, plural, =0 {لم يُسجَّل أحد بعد.} one {طالب واحد مسجّل.} two {طالبان مسجّلان.} few {# طلاب مسجّلين.} many {# طالبًا مسجّلًا.} other {# طالب مسجّل.}}",
+      "empty": "لم يُسجَّل أحد في هذا الفصل بعد.",
+      "student": "الطالب",
+      "pick": "اختر طالبًا",
+      "enrol": "تسجيل",
+      "enrolled": "تم تسجيل الطالب.",
+      "nobodyToEnrol": "كل طلاب مساحة العمل هذه في هذا الفصل بالفعل. أضف طلابًا من تبويب الطلاب.",
+      "remove": "إزالة {name} من هذا الفصل",
+      "removeTitle": "إزالة من هذا الفصل؟",
+      "removeDescription": "يغادر حصص الفصل القادمة. يبقى سجلّه السابق.",
+      "removeConfirm": "إزالة",
+      "removed": "تمت الإزالة من الفصل."
+    },
+    "invitation": {
+      "badge": "دعوة",
+      "title": "دعاك {teacher} إلى فصوله الخاصة في «{workspace}»",
+      "body": "أكّد لربط سجلّك لديه بحسابك: سترى بعدها الفصول التي يسجّلك فيها. ألغِ إن لم تكن أنت المقصود.",
+      "confirm": "تأكيد",
+      "cancel": "إلغاء",
+      "accepted": "تم الربط. فصولك الخاصة في تقويمك.",
+      "declined": "تم رفض الدعوة.",
+      "declinedInPlace": "رفضت الدعوة من «{workspace}»."
+    },
+    "student": {
+      "privateClass": "فصل خاص"
+    },
+    "errors": {
+      "phoneRequired": "أدخل رقم هاتف الطالب.",
+      "invalidPhone": "أدخل رقم موبايل مصريًا، مثل 01012345678.",
+      "duplicatePhone": "يوجد طالب بهذا الرقم في مساحة العمل هذه بالفعل.",
+      "nameRequired": "أدخل اسمًا.",
+      "tooLong": "استخدم 60 حرفًا أو أقل.",
+      "gradeNotFound": "اختر صفًا متاحًا.",
+      "rateLimited": "محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.",
+      "inviteTooSoon": "يمكنك دعوة هذا الطالب مرة أخرى بعد 24 ساعة من آخر دعوة.",
+      "alreadyLinked": "هذا الطالب مرتبط بالفعل.",
+      "pickStudent": "اختر طالبًا.",
+      "classInactive": "هذا الفصل معطّل. أعد تفعيله أولًا.",
+      "studentInactive": "هذا الطالب معطّل.",
+      "alreadyEnrolled": "هذا الطالب في هذا الفصل بالفعل.",
+      "invitationGone": "لم تعد هذه الدعوة متاحة.",
+      "alreadyInWorkspace": "لديك سجل في مساحة العمل هذه بالفعل، لذا لا يمكن استخدام هذه الدعوة."
     }
   }
 }

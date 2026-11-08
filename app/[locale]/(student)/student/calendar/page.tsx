@@ -7,7 +7,7 @@ import { assessmentCalendarEntry, type AssessmentCalendarLabels } from "@/compon
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionCalendar, type CalendarEntry } from "@/components/shared/session-calendar";
 import { studentCalendarEntry } from "@/components/shared/student-calendar-entry";
-import { getStudentContexts, requireStudentUser } from "@/lib/auth/tenant";
+import { getStudentScheduleContexts, requireStudentUser } from "@/lib/auth/tenant";
 import {
   ASSESSMENT_CALENDAR_TONES,
   STUDENT_CALENDAR_TONES,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/calendar";
 import { STUDENT_STATE_BADGE, listStudentAssessments } from "@/lib/db/assessment-attempts";
 import { prisma } from "@/lib/db/client";
+import { teacherDisplayNames } from "@/lib/db/discover";
 import {
   bookedCalendarEntries,
   studentBookedUpcoming,
@@ -42,6 +43,11 @@ import { sessionDisplayName } from "@/lib/session-label";
  * list's own read and rules (`listStudentAssessments`), one per branch, limited
  * to the month and placed on the day of the session's frozen timezone, else the
  * branch's. The parent's calendar shares the component and never these rows.
+ *
+ * W8b (D-W39 item 8): the sessions read through `getStudentScheduleContexts`,
+ * so a linked workspace profile's ACTIVE enrolled classes show too, with the
+ * workspace's name, the teacher's and "Private class" — and never the
+ * workspace's internal room. Assessments keep the branch-only resolver (W9).
  */
 export default async function StudentCalendarPage({
   searchParams,
@@ -49,11 +55,12 @@ export default async function StudentCalendarPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireStudentUser();
-  const contexts = (await getStudentContexts(session.user.id)).filter((ctx) => ctx.studentProfile);
+  const contexts = (await getStudentScheduleContexts(session.user.id)).filter((ctx) => ctx.studentProfile);
   const rawParams = await searchParams;
   const t = await getTranslations("Calendar");
   const tAssessments = await getTranslations("StudentAssessments");
   const tCommon = await getTranslations("Settings.common");
+  const tPrivate = await getTranslations("WorkspaceStudents.student");
   const locale = await getLocale();
   const now = new Date();
 
@@ -67,16 +74,20 @@ export default async function StudentCalendarPage({
 
   const [perBranch, booked, assessments] = await Promise.all([
     Promise.all(
-      contexts.map(async (ctx) => ({
-        branch: ctx.center.name,
-        entries: await studentCalendarMonth(
+      contexts.map(async (ctx) => {
+        const entries = await studentCalendarMonth(
           prisma,
           ctx.center.id,
           ctx.studentProfile!.id,
           range,
           todayInTimezone(centreTimeZone(ctx.settings), now),
-        ),
-      })),
+        );
+        const isPrivate = ctx.center.kind === "PERSONAL";
+        const teachers = isPrivate
+          ? await teacherDisplayNames(prisma, ctx.center.id, [...new Set(entries.map((row) => row.teacherId))])
+          : null;
+        return { branch: ctx.center.name, entries, teachers };
+      }),
     ),
     studentBookedUpcoming(prisma, session.user.id, now),
     studentBranches(session.user.id).then((branches) =>
@@ -109,8 +120,15 @@ export default async function StudentCalendarPage({
     window: (start, end) => t("assessmentWindow", { start, end }),
   };
   const entries: CalendarEntry[] = [
-    ...perBranch.flatMap(({ branch, entries: rows }) =>
-      rows.map((row) => withActions(row, studentCalendarEntry(row, branch, locale, tCommon("none")))),
+    ...perBranch.flatMap(({ branch, entries: rows, teachers }) =>
+      rows.map((row) => {
+        const entry = studentCalendarEntry(row, branch, locale, tCommon("none"));
+        // A workspace's one room is internal (D-W38): its rows carry the teacher and the tag instead.
+        const shown = teachers
+          ? { ...entry, room: null, privateClass: { label: tPrivate("privateClass"), teacher: teachers.get(row.teacherId) ?? "—" } }
+          : entry;
+        return withActions(row, shown);
+      }),
     ),
     ...bookedCalendarEntries(booked, range, enrolledIds, now).map((row) =>
       withActions(row, studentCalendarEntry(row, branchName.get(row.centerId) ?? null, locale, tCommon("none"))),

@@ -75,6 +75,7 @@ Branch cards had hover but **no selected state** — the branch you are already 
 **F4:** the three starts are ordered by the person's sign-up intent (theirs first and highlighted); no intent keeps the old order and emphasis.
 
 ---
+**W8b:** a pending workspace invitation (D-W39) shows as a card above the choices — an amber-tinted `article` with an Invitation badge, "<teacher> invited you to their private classes in “<workspace>”", one line of what Confirm does, and **Cancel** (outline) / **Confirm** (primary), 44px, full width and stacked below `sm`; Cancel turns the card into a one-line "You declined…" status in place, Confirm opens the student calendar. While one is pending the hub no longer skips straight to a single experience.
 
 ## Account (every experience)
 
@@ -227,10 +228,13 @@ Workspaces (D-W38). `PageHeader`, then one card: with premium, "n of 100 active"
 A workspace's Classes, under the workspace layout: `PageHeader` (the name, a back link to Workspaces, the Active/Archived badge and a "Read-only" amber badge when writes are off), an amber `role="status"` banner on lapsed premium and a neutral one when archived, then three even tab pills (Classes, Sessions, Settings; 44px, `aria-current`, no wrap at 375). A `PageSection` with **New class** (the branch class dialog's sections — catalogue picker, a teacher note, price with a "no cut" note, the period without terms, the late threshold, the weekly rows — minus teacher, rooms, cut, booking and terms) and one card per class (name, Active/Inactive badge, weekly slots line, period, price, upcoming count); one column until `xl`. `04-design-system.md` §11.37.
 
 ### `app/[locale]/(teacher)/teacher/workspaces/[id]/classes/[classId]/page.tsx` — **W8a (new)**
-One workspace class: a card with the name and status, **Edit class** / **Deactivate** (confirmed) or **Reactivate** (with the conflict notice) / **Delete class** (confirmed) — stacked full-width on a phone — and its facts as `DetailRow`s with the "no cut" note; a `PageSection` of weekly slots (44px rows with an icon-only Remove behind `ConfirmAction`, then an inline add-slot form: weekday, time range, the conflict notice); a `PageSection` of the class's sessions (the session cards below) with **Add a session**. `04-design-system.md` §11.37.
+One workspace class: a card with the name and status, **Edit class** / **Deactivate** (confirmed) or **Reactivate** (with the conflict notice) / **Delete class** (confirmed) — stacked full-width on a phone — and its facts as `DetailRow`s with the "no cut" note; a `PageSection` of weekly slots (44px rows with an icon-only Remove behind `ConfirmAction`, then an inline add-slot form: weekday, time range, the conflict notice); a `PageSection` of the class's sessions (the session cards below) with **Add a session**. `04-design-system.md` §11.37. **W8b:** a `PageSection` **Students** between the slots and the sessions — the ACTIVE roster as 44px rows (name, the Linked / Not linked badge, an icon-only **Remove** behind `ConfirmAction`) and an inline **Enrol** form (one `Select` of the workspace's own students, full width on a phone).
 
 ### `app/[locale]/(teacher)/teacher/workspaces/[id]/sessions/page.tsx` — **W8a (new)**
 The workspace's sessions from the teacher's window on, oldest first: stacked cards at every width (name and kind badge, date, time, price, "Moved from …" on a replacement, the status badge), each with **Reschedule** (a narrow `DialogShell`: date, time range, conflict notice), **Cancel session** and, for an extra or one-time session, **Delete** — only on a session that has not started and only while writes are on. **New session** is a narrow `DialogShell` (type, class or title + price, date, time range). `04-design-system.md` §11.37.
+
+### `app/[locale]/(teacher)/teacher/workspaces/[id]/students/page.tsx` — **W8b (new)**
+A workspace's Students (D-W39), under the workspace layout (whose tab pills are now four — Classes, Students, Sessions, Settings — two per row below `sm`, one row from `sm`). A `PageSection` with **Add student** (a narrow `DialogShell`: first and last name, the phone in an LTR field with its "can't be changed later" hint, an optional grade `Select`) and, when the teacher has students in other workspaces, **Add from my other workspaces** (a narrow `DialogShell` with one `Select`, each option "name · phone · workspace"); both only while writes are on. One card per student — name, code, phone (LTR), grade, "In n classes" and a **Linked** (green) / **Not linked** (neutral) text badge; an unlinked card carries **Invite again** (while writes are on) and **Cancel invitation** (behind `ConfirmAction`, always). Never a pending-invitation state. One column until `xl`. An `EmptyState` otherwise. `04-design-system.md` §11.37.
 
 ### `app/[locale]/(teacher)/teacher/workspaces/[id]/settings/page.tsx` — **W8a (new)**
 Two `PageSection`s: **Name** (a card with one field and Save, disabled while read-only) and **Archive** / **Unarchive** (a card with what it does and the confirmed button; Unarchive disabled with its reason without premium or at the cap). `04-design-system.md` §11.37.
@@ -294,9 +298,11 @@ Consistent. No change.
 **T7:** booked single sessions join the upcoming list with a **Booked** (`info`) or **Requested** (`warning`) badge in place of "Upcoming"; the header description says so (docs/04 §11.25).
 
 **DES:** upcoming sessions show eight, then "Show N more" (`CappedList`, docs/04 §14.9).
+**W8b:** a linked workspace profile's sessions join both lists under the workspace's name and the teacher's, with a neutral **Private class** text badge; no room is shown for them (D-W39).
 
 ### `app/[locale]/(student)/student/calendar/page.tsx` — **U7 (new)**
 The student's month calendar on the shared `SessionCalendar` (docs/04 §11.28) across every branch: Present green, Late amber, Absent red, Upcoming blue, Booked blue ring, Requested dashed amber, Cancelled grey struck through; a legend; the tapped day's sessions below, each with a text badge, its branch and room. No branch switcher anywhere in the student shell (U7).
+**W8b:** a workspace session's day-list row carries the workspace's name, the teacher's name (`CalendarEntry.privateClass`) and a neutral **Private class** badge, and no room (D-W39). The parent calendar never sets it.
 
 ### `app/[locale]/(student)/student/discover/page.tsx`
 Filter labels hand-built (in `discover-filters.tsx`). **R10a:** `FilterField`. The class card's subject-accent top border is the documented rotating subject palette (docs/04 §2), not a status colour.

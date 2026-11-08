@@ -101,6 +101,11 @@ export const RATE_LIMITS = {
   // W3a: autosave and start, per account only — a whole class shares one Wi-Fi
   // address, and each pick of an option is one call.
   assessmentWritePerUser: { limit: 120, windowMs: 60_000 },
+  // W8b (D-W39 item 13), per teacher and counted whether or not an account
+  // matched (so the limit itself never tells a teacher anything): adding a
+  // student to a workspace, and each "Invite again".
+  workspaceStudentAddPerUser: { limit: 60, windowMs: 60 * 60_000 },
+  workspaceInvitePerUser: { limit: 20, windowMs: 24 * 60 * 60_000 },
 } as const;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

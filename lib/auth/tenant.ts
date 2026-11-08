@@ -30,6 +30,7 @@ import { onboardingPath } from "@/lib/auth/onboarding";
 import { loadPermissionGrants } from "@/lib/db/permissions";
 import { activeChildLinks } from "@/lib/db/parents";
 import { ownsAnyWorkspace } from "@/lib/db/workspaces";
+import { hasWorkspaceStudentProfile, studentWorkspaceProfiles } from "@/lib/db/workspace-students";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import {
@@ -135,6 +136,8 @@ export const listExperiences = cache(
       assistantLinks: (id) => assistantExperienceSources(prisma, id),
       // W8a (D-W38 item 11): owning a workspace gives the Teacher entry.
       ownsWorkspace: (id) => ownsAnyWorkspace(prisma, id),
+      // W8b (D-W39 item 9): a linked workspace profile gives the Student entry.
+      studentInWorkspace: (id) => hasWorkspaceStudentProfile(prisma, id),
     }),
 );
 
@@ -333,6 +336,39 @@ export const getStudentContexts = cache(
     return Promise.all(
       studentRelations.map((relation) => buildContext(user, relation, "student")),
     );
+  },
+);
+
+/**
+ * **The opt-in student resolver** (W8b, D-W39 item 8): `getStudentContexts`
+ * plus one context per PERSONAL workspace where this account holds its **own**
+ * active, linked profile (`studentWorkspaceProfiles` — archived workspaces
+ * included, so history stays). Used **only** by the schedule, the calendar
+ * and the attendance history they carry, U8's leave (which those rows
+ * render), and — through its input, `studentWorkspaceProfiles` — the
+ * session-notice re-check (`lib/notifications/reach.ts`).
+ * Everything else — the hub, the switcher, staff and teacher resolution,
+ * assessments, ratings, My requests, Discover and Explore — keeps
+ * `getStudentContexts` / `getUserCenterRelations` and so `BRANCH_ONLY`.
+ *
+ * A workspace context is a STUDENT context like a branch's (no grants), and is
+ * told apart by `center.kind === "PERSONAL"`, which the pages read to tag
+ * "Private class".
+ */
+export const getStudentScheduleContexts = cache(
+  async (userId: string): Promise<TenantContext[]> => {
+    const [branchContexts, user, profiles] = await Promise.all([
+      getStudentContexts(userId),
+      prisma.user.findUnique({ where: { id: userId } }),
+      studentWorkspaceProfiles(prisma, userId),
+    ]);
+    if (!user || profiles.length === 0) return branchContexts;
+    const workspaceContexts = await Promise.all(
+      profiles.map(({ center, ...profile }) =>
+        buildContext(user, { center, memberships: [], studentProfile: profile, roles: ["STUDENT"] }, "student"),
+      ),
+    );
+    return [...branchContexts, ...workspaceContexts];
   },
 );
 

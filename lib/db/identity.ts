@@ -368,13 +368,35 @@ export async function createPerson(
 }
 
 /**
+ * W8b (D-W39 item 2): the placeholder `User` behind a PERSONAL workspace's
+ * student profile. Unlike `createPerson`, it **never** writes a global
+ * contact — no email, no phone, no alt phone — so a teacher typing a number
+ * can never occupy anyone's `User.phone` (which D-W27's invitation match
+ * reads). The typed phone lives only on the workspace profile's local record.
+ * Accepting an invitation moves the profile off this row and removes it when
+ * it holds nothing else (`lib/db/workspace-students.ts`).
+ */
+export function createPlaceholderPerson(
+  data: { firstName: string; lastName: string; locale: string },
+  tx: Db = prisma,
+): Promise<User> {
+  return tx.user.create({
+    data: { firstName: data.firstName, lastName: data.lastName, email: null, phone: null, altPhone: null, locale: data.locale },
+  });
+}
+
+/**
  * Removes the `User` row after its last center relationship is deleted — but
  * only for someone this platform created and who exists nowhere else. A person
  * who has signed in owns their identity; a person another center still knows
  * is not ours to delete. Returns whether the row was removed.
+ *
+ * W8b (D-W39 item 7): `db` lets the workspace-invitation accept run it on its
+ * own transaction; the default is the shared client, so every existing caller
+ * behaves exactly as before.
  */
-export async function deletePersonIfOrphaned(userId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
+export async function deletePersonIfOrphaned(userId: string, db: Db = prisma): Promise<boolean> {
+  const user = await db.user.findUnique({
     where: { id: userId },
     include: {
       _count: { select: { memberships: true, studentProfiles: true } },
@@ -387,7 +409,7 @@ export async function deletePersonIfOrphaned(userId: string): Promise<boolean> {
     return false;
   }
 
-  await prisma.user.delete({ where: { id: userId } });
+  await db.user.delete({ where: { id: userId } });
   return true;
 }
 

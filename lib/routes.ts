@@ -110,6 +110,7 @@ export const ROUTES = {
   teacherWorkspace: (id: string) => `/teacher/workspaces/${id}`,
   teacherWorkspaceClass: (id: string, classId: string) => `/teacher/workspaces/${id}/classes/${classId}`,
   teacherWorkspaceSessions: (id: string) => `/teacher/workspaces/${id}/sessions`,
+  teacherWorkspaceStudents: (id: string) => `/teacher/workspaces/${id}/students`,
   teacherWorkspaceSettings: (id: string) => `/teacher/workspaces/${id}/settings`,
   // W7a: the assistant experience, one per teacher the account assists.
   assistantHome: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}`,

@@ -261,7 +261,9 @@
       "lastUsed": "Last used",
       "continue": "Continue",
       "assistantPortal": "Assistant of {teacher}",
-      "assistantPortalHint": "Act for this teacher, within what they allow"
+      "assistantPortalHint": "Act for this teacher, within what they allow",
+      "invitationsLabel": "Invitations",
+      "invitationTeacherFallback": "A teacher"
     },
     "invite": {
       "title": "Staff invitation",
@@ -4172,7 +4174,8 @@
       "ASSESSMENT_PUBLISHED": "{type, select, EXAM {New exam “{title}” for {className} at {branch}. Opens {start}, closes {end}.} other {New homework “{title}” for {className} at {branch}. Due {end}.}}",
       "ASSESSMENT_EXTENDED": "{type, select, EXAM {More time on the exam “{title}” for {className} at {branch}. It now closes {end}.} other {More time on the homework “{title}” for {className} at {branch}. It is now due {end}.}}",
       "ASSESSMENT_OPENS_SOON": "The exam “{title}” for {className} at {branch} opens soon: {start}. It closes {end}.",
-      "ASSESSMENT_DUE_SOON": "The homework “{title}” for {className} at {branch} is due soon: {end}."
+      "ASSESSMENT_DUE_SOON": "The homework “{title}” for {className} at {branch} is due soon: {end}.",
+      "WORKSPACE_INVITATION": "{teacher} invited you to their private classes in “{workspace}”. Open your hub to confirm or cancel."
     }
   },
   "StudentAssessments": {
@@ -4594,7 +4597,8 @@
       "label": "Workspace sections",
       "classes": "Classes",
       "sessions": "Sessions",
-      "settings": "Settings"
+      "settings": "Settings",
+      "students": "Students"
     },
     "classes": {
       "title": "Classes",
@@ -4714,6 +4718,91 @@
       "gradeNotFound": "Choose an available grade.",
       "subjectNotFound": "Choose an available subject.",
       "titleRequired": "Enter a title."
+    }
+  },
+  "WorkspaceStudents": {
+    "title": "Students",
+    "description": "The students of this workspace. Each one is your own record here; you see only whether they have linked it to their account.",
+    "empty": "No students yet",
+    "emptyHint": "Add a student by their phone number, then enrol them in your classes.",
+    "code": "Code {code}",
+    "classes": "{count, plural, =0 {In no class} one {In # class} other {In # classes}}",
+    "add": {
+      "button": "Add student",
+      "title": "Add a student",
+      "description": "Their record is created in this workspace. If the phone belongs to a KayEdu account, its owner can link to this record from their account — you will see “Linked” once they do.",
+      "phoneHint": "Egyptian mobile, e.g. 01012345678. It can't be changed later.",
+      "grade": "Grade (optional)",
+      "noGrade": "No grade",
+      "cancel": "Cancel",
+      "submit": "Add student",
+      "added": "Student added."
+    },
+    "copy": {
+      "button": "Add from my other workspaces",
+      "title": "Add from my other workspaces",
+      "description": "Copies the name, phone and grade of one of your students in another of your workspaces into a new record here.",
+      "student": "Student",
+      "pick": "Choose a student",
+      "cancel": "Cancel",
+      "submit": "Add student",
+      "added": "Student added."
+    },
+    "row": {
+      "linked": "Linked",
+      "notLinked": "Not linked",
+      "inviteAgain": "Invite again",
+      "invited": "Done. If this phone belongs to an account, its owner has been asked again.",
+      "cancelInvitation": "Cancel invitation",
+      "cancelTitle": "Cancel any invitation?",
+      "cancelDescription": "If an invitation to link this record is waiting, it is withdrawn. The record stays as it is.",
+      "cancelConfirm": "Cancel invitation",
+      "cancelled": "Done. Nothing is waiting for this record now."
+    },
+    "roster": {
+      "title": "Students",
+      "description": "{count, plural, =0 {Nobody is enrolled yet.} one {# student enrolled.} other {# students enrolled.}}",
+      "empty": "Nobody is enrolled in this class yet.",
+      "student": "Student",
+      "pick": "Choose a student",
+      "enrol": "Enrol",
+      "enrolled": "Student enrolled.",
+      "nobodyToEnrol": "Every student of this workspace is already in this class. Add students on the Students tab.",
+      "remove": "Remove {name} from this class",
+      "removeTitle": "Remove from this class?",
+      "removeDescription": "They leave the class's future sessions. Their history stays.",
+      "removeConfirm": "Remove",
+      "removed": "Removed from the class."
+    },
+    "invitation": {
+      "badge": "Invitation",
+      "title": "{teacher} invited you to their private classes in “{workspace}”",
+      "body": "Confirm to link their student record to your account: you will then see the classes they enrol you in. Cancel if this isn't you.",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "accepted": "Linked. Your private classes are on your calendar.",
+      "declined": "Invitation declined.",
+      "declinedInPlace": "You declined the invitation from “{workspace}”."
+    },
+    "student": {
+      "privateClass": "Private class"
+    },
+    "errors": {
+      "phoneRequired": "Enter the student's phone number.",
+      "invalidPhone": "Enter an Egyptian mobile number, e.g. 01012345678.",
+      "duplicatePhone": "A student with this phone is already in this workspace.",
+      "nameRequired": "Enter a name.",
+      "tooLong": "Use 60 characters or fewer.",
+      "gradeNotFound": "Choose an available grade.",
+      "rateLimited": "Too many tries. Wait a while and try again.",
+      "inviteTooSoon": "You can invite this student again 24 hours after the last invitation.",
+      "alreadyLinked": "This student is already linked.",
+      "pickStudent": "Choose a student.",
+      "classInactive": "This class is deactivated. Reactivate it first.",
+      "studentInactive": "This student is deactivated.",
+      "alreadyEnrolled": "This student is already in this class.",
+      "invitationGone": "This invitation is no longer available.",
+      "alreadyInWorkspace": "You already have a record in this workspace, so this invitation can't be used."
     }
   }
 }

@@ -11,6 +11,8 @@ import {
 import { WorkspaceClassButton } from "@/components/teacher/workspaces/workspace-class-dialog";
 import { NewWorkspaceSessionButton } from "@/components/teacher/workspaces/workspace-session-controls";
 import { WorkspaceSessionList } from "@/components/teacher/workspaces/workspace-session-list";
+import { LinkedBadge } from "@/components/teacher/workspaces/linked-badge";
+import { EnrolStudentForm, RemoveEnrollmentButton } from "@/components/teacher/workspaces/workspace-student-controls";
 import { workspaceCatalogPicker, workspaceClassLabel } from "@/components/teacher/workspaces/labels";
 import { DetailRow } from "@/components/shared/field";
 import { PageSection } from "@/components/shared/page-section";
@@ -21,6 +23,8 @@ import { listCatalogEducationSystems, listCatalogGrades, listCatalogSubjects } f
 import { prisma } from "@/lib/db/client";
 import { teacherPortalHistoryFloor } from "@/lib/db/teacher-portal";
 import { workspaceClass, workspaceSessions } from "@/lib/db/workspaces";
+import { workspaceClassRoster } from "@/lib/db/workspace-students";
+import { fullName } from "@/lib/identity";
 import { catalogLabel } from "@/lib/catalog";
 import { formatDayRange, formatMoney, formatNumber, formatTimeRange } from "@/lib/format";
 import { piastresToInputValue } from "@/lib/money";
@@ -37,6 +41,10 @@ export async function generateMetadata(): Promise<Metadata> {
  * delete — each the class engine's own rule — and its sessions with the
  * session verbs. The class id is looked up inside this workspace only, so an
  * id from anywhere else is not-found.
+ *
+ * W8b (D-W39 item 11): its Students — the ACTIVE roster with Linked / Not
+ * linked, Enrol (one of the workspace's own profiles; no approval, no seat
+ * cap) and Remove, both offered only while the workspace takes writes.
  */
 export default async function WorkspaceClassPage({ params }: { params: Promise<{ id: string; classId: string }> }) {
   const { id, classId } = await params;
@@ -47,17 +55,19 @@ export default async function WorkspaceClassPage({ params }: { params: Promise<{
   const row = await workspaceClass(prisma, ctx.center.id, classId, today);
   if (!row) notFound();
 
-  const [t, tClasses, tFields, tSchedule, tCommon, locale] = await Promise.all([
+  const [t, tClasses, tFields, tSchedule, tCommon, tRoster, locale] = await Promise.all([
     getTranslations("Workspaces.classes"),
     getTranslations("Classes"),
     getTranslations("Classes.fields"),
     getTranslations("Classes.schedule"),
     getTranslations("Settings.common"),
+    getTranslations("WorkspaceStudents.roster"),
     getLocale(),
   ]);
   const writable = workspaceOffersWrites(ctx);
-  const [sessions, systems, grades, subjects] = await Promise.all([
+  const [sessions, roster, systems, grades, subjects] = await Promise.all([
     workspaceSessions(prisma, ctx.center.id, { from: teacherPortalHistoryFloor(ctx), classId: row.id }),
+    workspaceClassRoster(prisma, ctx.center.id, row.id),
     writable ? listCatalogEducationSystems(prisma, false) : Promise.resolve([]),
     writable ? listCatalogGrades(prisma, undefined, false) : Promise.resolve([]),
     writable ? listCatalogSubjects(prisma, undefined, false) : Promise.resolve([]),
@@ -136,6 +146,40 @@ export default async function WorkspaceClassPage({ params }: { params: Promise<{
             </ul>
           )}
           {writable ? <AddSlotForm workspaceId={ctx.center.id} classId={row.id} /> : null}
+        </div>
+      </PageSection>
+
+      <PageSection title={tRoster("title")} description={tRoster("description", { count: roster.roster.length })}>
+        <div className="flex flex-col gap-4">
+          {roster.roster.length === 0 ? (
+            <p className="text-sm text-text-secondary">{tRoster("empty")}</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {roster.roster.map(({ enrollmentId, student }) => (
+                <li key={enrollmentId} className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+                  <span className="min-w-0 break-words text-sm text-text-primary">{fullName(student)}</span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <LinkedBadge linked={student.linked} />
+                    {writable ? (
+                      <RemoveEnrollmentButton
+                        workspaceId={ctx.center.id}
+                        classId={row.id}
+                        enrollmentId={enrollmentId}
+                        studentName={fullName(student)}
+                      />
+                    ) : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {writable && row.active ? (
+            <EnrolStudentForm
+              workspaceId={ctx.center.id}
+              classId={row.id}
+              students={roster.enrollable.map((student) => ({ id: student.id, label: fullName(student) }))}
+            />
+          ) : null}
         </div>
       </PageSection>
 

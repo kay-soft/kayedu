@@ -75,6 +75,9 @@ export const WORKSPACE_OWNER_CAPABILITIES = [
   "workspace.sessions.manage",
   "workspace.rooms.manage",
   "workspace.archive",
+  // W8b (D-W39 item 11): adding students, inviting them, enrolling and
+  // removing them from classes (`lib/db/workspace-students.ts`).
+  "workspace.students.manage",
 ] as const;
 
 export type WorkspaceCapability = (typeof WORKSPACE_OWNER_CAPABILITIES)[number];
@@ -176,8 +179,12 @@ export async function assertWorkspaceWritable(
 
 export type WorkspaceAuthError = "notFound" | "forbidden" | WorkspaceWriteRefusal;
 
-/** resolve → `workspaceCan` → `assertWorkspaceWritable`, the gate every writer below opens with. */
-async function authorizeWrite(
+/**
+ * resolve → `workspaceCan` → `assertWorkspaceWritable`, the gate every writer
+ * below opens with — and `lib/db/workspace-students.ts`'s (W8b), which is why
+ * it is exported. Nothing else may skip it.
+ */
+export async function authorizeWrite(
   db: Db,
   actorUserId: string,
   workspaceId: string,

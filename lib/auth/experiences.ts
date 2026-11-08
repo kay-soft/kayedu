@@ -12,6 +12,7 @@ import {
 } from "./relations.ts";
 import { effectiveAssistantLinks } from "../db/assistants.ts";
 import { ownsAnyWorkspace } from "../db/workspaces.ts";
+import { hasWorkspaceStudentProfile } from "../db/workspace-students.ts";
 import { activeChildLinks } from "../db/parents.ts";
 import { ROUTES } from "../routes.ts";
 import { centerLogoSrc } from "../storage-paths.ts";
@@ -89,6 +90,8 @@ export type ExperienceSources = {
   assistantLinks?: AssistantExperienceSource[];
   /** W8a: the account owns a PERSONAL workspace (archived included). */
   ownsWorkspace?: boolean;
+  /** W8b: the account holds a linked, active profile at a live PERSONAL workspace. */
+  studentInWorkspace?: boolean;
 };
 
 export function staffExperienceKey(centerId: string): string {
@@ -121,10 +124,13 @@ export function buildExperiences(sources: ExperienceSources): ExperienceEntry[] 
     organizationNames,
     assistantLinks = [],
     ownsWorkspace = false,
+    studentInWorkspace = false,
   } = sources;
   const entries: ExperienceEntry[] = [];
 
-  if (relations.some((relation) => relation.roles.includes("STUDENT"))) {
+  // W8b (D-W39 item 9): a student whose only profiles are in workspaces still
+  // has the Student experience — one entry, landing on the schedule.
+  if (studentInWorkspace || relations.some((relation) => relation.roles.includes("STUDENT"))) {
     entries.push({
       key: "student",
       kind: "student",
@@ -237,6 +243,8 @@ export type ExperienceReads = {
   assistantLinks: (userId: string) => Promise<AssistantExperienceSource[]>;
   /** W8a: whether the account owns a PERSONAL workspace. */
   ownsWorkspace: (userId: string) => Promise<boolean>;
+  /** W8b: whether the account holds a linked workspace student profile. Optional: a read that omits it adds no entry. */
+  studentInWorkspace?: (userId: string) => Promise<boolean>;
 };
 
 /** The same resolvers with no request cache: what a gate runs. */
@@ -249,6 +257,7 @@ export function directExperienceReads(prisma: PrismaClient): ExperienceReads {
       (await prisma.user.findUnique({ where: { id: userId }, select: { isPlatformAdmin: true } }))?.isPlatformAdmin ?? false,
     assistantLinks: (userId) => assistantExperienceSources(prisma, userId),
     ownsWorkspace: (userId) => ownsAnyWorkspace(prisma, userId),
+    studentInWorkspace: (userId) => hasWorkspaceStudentProfile(prisma, userId),
   };
 }
 
@@ -269,13 +278,14 @@ export async function loadExperiences(
   userId: string,
   reads: ExperienceReads = directExperienceReads(prisma),
 ): Promise<ExperienceEntry[]> {
-  const [relations, orgGroups, hasLinkedChild, isPlatformAdmin, assistantLinks, ownsWorkspace] = await Promise.all([
+  const [relations, orgGroups, hasLinkedChild, isPlatformAdmin, assistantLinks, ownsWorkspace, studentInWorkspace] = await Promise.all([
     reads.relations(userId),
     reads.orgGroups(userId),
     reads.hasLinkedChild(userId),
     reads.isPlatformAdmin(userId),
     reads.assistantLinks(userId),
     reads.ownsWorkspace(userId),
+    reads.studentInWorkspace ? reads.studentInWorkspace(userId) : Promise.resolve(false),
   ]);
   // `Organization` is global, not a tenant table (CLAUDE.md rule 1): only the
   // names of organizations these relations already resolved.
@@ -298,6 +308,7 @@ export async function loadExperiences(
     organizationNames: new Map(organizations.map((organization) => [organization.id, organization.name])),
     assistantLinks,
     ownsWorkspace,
+    studentInWorkspace,
   });
 }
 

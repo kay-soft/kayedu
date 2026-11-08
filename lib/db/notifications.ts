@@ -13,12 +13,14 @@ import type {
 // module directly, outside the Next.js runtime (same reasoning as
 // lib/db/reservations.ts and lib/db/student-portal.ts).
 import { finalisationDue } from "../assessments.ts";
+import { fullName, localName } from "../identity.ts";
 import {
   ASSESSMENT_NOTICE_KINDS,
   ASSESSMENT_SOON_KINDS,
   REQUESTER_KINDS,
   assessmentSoonBounds,
   assessmentSoonNotice,
+  WORKSPACE_SESSION_KINDS,
   dedupeKeys,
   isIdsOnlyPayload,
 } from "../notifications/kinds.ts";
@@ -59,6 +61,7 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 const ACTIVE_ENROLLMENT: EnrollmentStatus = "ACTIVE";
 const CONFIRMED_BOOKING: SessionBookingStatus = "CONFIRMED";
+const WORKSPACE_INVITATION: NotificationKind = "WORKSPACE_INVITATION";
 
 export type NotificationInput = {
   userId: string;
@@ -511,11 +514,19 @@ export async function hiddenAssessmentNoticeIds(
  * W3b adds two things for assessment notices (D-W32): the branches where the
  * reader is a **student** (a teacher or a receptionist at the branch reaches
  * none of them, deny by default), and the ids the assessment re-check hid.
+ *
+ * W8b (D-W39 item 10) adds the PERSONAL workspaces where the reader holds a
+ * **linked, active** student profile — only the session kinds reach them
+ * there (`WORKSPACE_SESSION_KINDS`) — and the live workspaces with a PENDING
+ * invitation to the reader, the only place a `WORKSPACE_INVITATION` shows.
+ * Neither is a relation: a workspace never joins `relationCenterIds`.
  */
 export type NotificationReach = {
   relationCenterIds: string[];
   studentCenterIds?: string[];
   hiddenNoticeIds?: string[];
+  workspaceCenterIds?: string[];
+  invitationCenterIds?: string[];
 };
 
 /** The reader's own notices that pass the access re-check — one `where`, every read. */
@@ -526,9 +537,11 @@ export function visibleWhere(userId: string, reach: NotificationReach): Prisma.N
     ...(hidden.length > 0 ? { id: { notIn: hidden } } : {}),
     OR: [
       { centerId: null },
-      { centerId: { in: reach.relationCenterIds }, kind: { notIn: [...ASSESSMENT_NOTICE_KINDS] } },
+      { centerId: { in: reach.relationCenterIds }, kind: { notIn: [...ASSESSMENT_NOTICE_KINDS, WORKSPACE_INVITATION] } },
       { centerId: { in: reach.studentCenterIds ?? [] }, kind: { in: [...ASSESSMENT_NOTICE_KINDS] } },
       { kind: { in: REQUESTER_KINDS }, center: ACCESSIBLE_CENTER },
+      { centerId: { in: reach.workspaceCenterIds ?? [] }, kind: { in: [...WORKSPACE_SESSION_KINDS] } },
+      { centerId: { in: reach.invitationCenterIds ?? [] }, kind: WORKSPACE_INVITATION },
     ],
   };
 }
@@ -624,7 +637,36 @@ export type NotificationSubjects = {
   classes: Map<string, NotificationClass>;
   sessions: Map<string, NotificationSession>;
   assessments: Map<string, NotificationAssessment>;
+  /** W8b: a workspace's teacher (its owner's local name there), for an invitation notice. */
+  workspaceTeachers: Map<string, string>;
 };
+
+/**
+ * W8b (D-W39 item 7): the name a student is shown for a workspace's teacher —
+ * the owner's own TEACHER record in that workspace (rule 4: a relationship's
+ * local name), one scoped read per workspace. Only ever for workspaces the
+ * reader holds an invitation from or a linked profile at.
+ */
+export async function workspaceTeacherNames(db: Db, centerIds: readonly string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(centerIds)];
+  if (unique.length === 0) return new Map();
+  const centers = await db.center.findMany({
+    where: { id: { in: unique }, kind: "PERSONAL" },
+    select: { id: true, organization: { select: { ownerUserId: true } } },
+  });
+  const rows = await Promise.all(
+    centers.map(async (center) => {
+      const ownerUserId = center.organization.ownerUserId;
+      if (!ownerUserId) return null;
+      const membership = await db.membership.findFirst({
+        where: scopedWhere(center.id, { userId: ownerUserId, role: "TEACHER" as const }),
+        select: { firstName: true, lastName: true, user: { select: { firstName: true, lastName: true } } },
+      });
+      return membership ? ([center.id, fullName(localName(membership, membership.user))] as const) : null;
+    }),
+  );
+  return new Map(rows.filter((row): row is readonly [string, string] => row !== null));
+}
 
 /**
  * The current names a page of notices needs, loaded from their ids: the
@@ -657,7 +699,10 @@ export async function loadNotificationSubjects(
   }
 
   const centerIds = [...byCenter.keys()];
-  const [branches, perCenter] = await Promise.all([
+  const invitationCenterIds = rows
+    .filter((row) => row.kind === WORKSPACE_INVITATION && row.centerId)
+    .map((row) => row.centerId as string);
+  const [branches, perCenter, workspaceTeachers] = await Promise.all([
     centerIds.length
       ? db.center.findMany({
           where: { id: { in: centerIds } },
@@ -700,6 +745,7 @@ export async function loadNotificationSubjects(
         return { classes, sessions, assessments };
       }),
     ),
+    workspaceTeacherNames(db, invitationCenterIds),
   ]);
 
   return {
@@ -712,5 +758,6 @@ export async function loadNotificationSubjects(
     classes: new Map(perCenter.flatMap((entry) => entry.classes.map((row) => [row.id, row] as const))),
     sessions: new Map(perCenter.flatMap((entry) => entry.sessions.map((row) => [row.id, row] as const))),
     assessments: new Map(perCenter.flatMap((entry) => entry.assessments.map((row) => [row.id, row] as const))),
+    workspaceTeachers,
   };
 }

@@ -2,7 +2,9 @@ import { PrismaClient } from "@prisma/client";
 import type { Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
+import { createWorkspace, createWorkspaceClass } from "@/lib/db/workspaces";
 import { formatDay, formatNumber } from "@/lib/format";
+import { addDays, todayInTimezone } from "@/lib/scheduling";
 
 import { deleteAuditRows } from "../scripts/lib/audit-maintenance";
 import { assertSafeToWrite } from "../scripts/lib/env";
@@ -11,7 +13,7 @@ import { e2eEmail, removeE2eUsers } from "../scripts/lib/e2e-users";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import type { AppLocale } from "./support/i18n";
 import { E2E_PASSWORD, signInWith } from "./support/signup";
-import { dayFromToday, field, openDialog, pickDate, submitConfirmingConflicts } from "./support/ui";
+import { choose, dayFromToday, field, openDialog, pickDate, submitConfirmingConflicts } from "./support/ui";
 
 /**
  * PERSONAL workspaces (W8a, D-W38): a platform admin gives a tagged fixture
@@ -25,6 +27,16 @@ import { dayFromToday, field, openDialog, pickDate, submitConfirmingConflicts } 
  * workspace centres and personal organization first (their membership, room,
  * class and sessions cascade) — and the run asserts nothing of it is left.
  * Everything rule-level is `check:workspaces`.
+ *
+ * W8b (D-W39), the second test: a premium teacher (premium and a workspace
+ * with one class set up directly, staging-guarded) adds a student by the phone
+ * of a tagged student account — whose `User.phone` is set by a guarded direct
+ * update, since sign-up never writes one — and enrols them; the student sees
+ * the invitation on the hub, confirms, and finds the class on their calendar
+ * as a "Private class"; the teacher then reads "Linked". The teardown is
+ * `removeE2eUsers(db, tag)` (the workspace, its profiles, invitations and
+ * enrolments go with it; an unlinked placeholder carries the tag in its
+ * surname), and the run asserts nothing of it is left.
  */
 
 function escapeRegExp(text: string): string {
@@ -202,5 +214,154 @@ test("@write workspaces: premium teacher creates a workspace and a class, sessio
     sessions: 0,
     audit: 0,
   });
+  await db.$disconnect();
+});
+
+/** What the W8b run left behind, by its own ids and tag — never a whole-table count. */
+async function studentLeftovers(db: PrismaClient, tag: string, emails: string[], userIds: string[], centerIds: string[]) {
+  const [users, organizations, centers, profiles, invitations, enrollments, notifications, audit] = await Promise.all([
+    db.user.count({ where: { OR: [{ email: { in: emails } }, { lastName: { contains: ` ${tag}` } }] } }),
+    db.organization.count({ where: { ownerUserId: { in: userIds } } }),
+    db.center.count({ where: { id: { in: centerIds } } }),
+    db.studentProfile.count({ where: { OR: [{ centerId: { in: centerIds } }, { userId: { in: userIds } }] } }),
+    db.workspaceInvitation.count({ where: { OR: [{ centerId: { in: centerIds } }, { targetUserId: { in: userIds } }] } }),
+    db.enrollment.count({ where: { centerId: { in: centerIds } } }),
+    db.notification.count({ where: { userId: { in: userIds } } }),
+    db.auditLog.count({ where: { OR: [{ actorUserId: { in: userIds } }, { centerId: { in: centerIds } }] } }),
+  ]);
+  return { users, organizations, centers, profiles, invitations, enrollments, notifications, audit };
+}
+
+test("@write workspace students: add by phone, enrol, the student confirms on the hub and sees the private class; the teacher reads Linked", async ({
+  page,
+  browser,
+  appLocale,
+  msg,
+  e2eTag,
+}, testInfo) => {
+  assertSafeToWrite("e2e: workspace students fixtures");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e workspace students: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const db = new PrismaClient();
+  const locale: AppLocale = appLocale;
+  const teacher = { email: e2eEmail(e2eTag, "ws-teacher"), first: "Wst", last: `Teacher ${e2eTag}` };
+  const pupil = { email: e2eEmail(e2eTag, "ws-student"), first: "Wss", last: `Student ${e2eTag}` };
+  // The name the teacher types: the profile's own local record (it carries the tag for the teardown).
+  const typed = { first: "Typed", last: `Pupil ${e2eTag}` };
+  const national = `011${String(Math.floor(Math.random() * 100_000_000)).padStart(8, "0")}`;
+  const userIds: string[] = [];
+  const centerIds: string[] = [];
+  const authIds: string[] = [];
+  const studentContext = await browser.newContext({ ...testInfo.project.use });
+
+  try {
+    for (const person of [teacher, pupil]) {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: person.email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: { first_name: person.first, last_name: person.last, locale },
+      });
+      if (error || !data.user) throw error ?? new Error("e2e workspace students: could not create a login");
+      authIds.push(data.user.id);
+    }
+    const studentPage = await studentContext.newPage();
+    // Each sign-in makes the app's own User (syncUserFromAuth: authId set, no phone).
+    await signInWith(studentPage, locale, pupil.email);
+    await signInWith(page, locale, teacher.email);
+    const teacherRow = await db.user.findUniqueOrThrow({ where: { email: teacher.email } });
+    const pupilRow = await db.user.findUniqueOrThrow({ where: { email: pupil.email } });
+    userIds.push(teacherRow.id, pupilRow.id);
+
+    // Staging-guarded setup: premium, the student's staff-typed User.phone, one workspace with one class.
+    await db.user.update({ where: { id: teacherRow.id }, data: { premiumUntil: new Date(Date.now() + 30 * 86_400_000) } });
+    await db.user.update({ where: { id: pupilRow.id }, data: { phone: `+20${national.slice(1)}` } });
+    const workspaceName = `Biology ${e2eTag}`;
+    const created = await createWorkspace(db, teacherRow.id, { name: workspaceName });
+    if (!created.ok) throw new Error(`e2e workspace students: ${created.error}`);
+    const workspaceId = created.workspaceId;
+    centerIds.push(workspaceId);
+    const today = todayInTimezone("Africa/Cairo");
+    const tomorrow = addDays(today, 1);
+    const klass = await createWorkspaceClass(
+      db,
+      teacherRow.id,
+      workspaceId,
+      {
+        educationSystemId: null,
+        gradeId: null,
+        subjectId: null,
+        price: 10_000,
+        lateThresholdMinutes: 10,
+        startDate: today,
+        endDate: addDays(today, 21),
+        slots: [{ dayOfWeek: tomorrow.getUTCDay(), startTime: "17:00", endTime: "18:00" }],
+      },
+      { confirmConflicts: true, locale },
+    );
+    if (!klass.ok) throw new Error(`e2e workspace students: ${klass.error}`);
+    const classId = klass.classGroupId;
+    const firstSession = await db.session.findFirstOrThrow({
+      where: { classGroupId: classId, date: { gt: today } },
+      orderBy: [{ date: "asc" }, { startTime: "asc" }],
+    });
+
+    // The teacher adds the student by phone: one answer, "Not linked".
+    await page.goto(`/${locale}/teacher/workspaces/${workspaceId}/students`);
+    await expectHealthy(page, locale);
+    await page.getByRole("button", { name: msg("WorkspaceStudents.add.button"), exact: true }).first().click();
+    const dialog = openDialog(page);
+    await dialog.getByLabel(field(msg("People.fields.firstName"))).fill(typed.first);
+    await dialog.getByLabel(field(msg("People.fields.lastName"))).fill(typed.last);
+    await dialog.getByLabel(field(msg("People.fields.phone"))).fill(national);
+    await dialog.getByRole("button", { name: msg("WorkspaceStudents.add.submit"), exact: true }).click();
+    await expect(dialog).toBeHidden();
+    const card = page.getByRole("listitem").filter({ hasText: typed.last });
+    await expect(card).toBeVisible();
+    await expect(card.getByText(msg("WorkspaceStudents.row.notLinked"), { exact: true })).toBeVisible();
+
+    // …and enrols them in the class.
+    await page.goto(`/${locale}/teacher/workspaces/${workspaceId}/classes/${classId}`);
+    await expectHealthy(page, locale);
+    await choose(page, msg("WorkspaceStudents.roster.student"), `${typed.first} ${typed.last}`);
+    await page.getByRole("button", { name: msg("WorkspaceStudents.roster.enrol"), exact: true }).click();
+    await expect(page.getByRole("listitem").filter({ hasText: typed.last })).toBeVisible();
+
+    // The student finds the invitation on the hub, with the teacher's and the workspace's names, and confirms.
+    await studentPage.goto(`/${locale}/select-center`);
+    await expectHealthy(studentPage, locale);
+    const teacherName = `${teacher.first} ${teacher.last}`;
+    await expect(studentPage.getByText(msg("WorkspaceStudents.invitation.title", { teacher: teacherName, workspace: workspaceName }))).toBeVisible();
+    await studentPage.getByRole("button", { name: msg("WorkspaceStudents.invitation.confirm"), exact: true }).click();
+    await studentPage.waitForURL(new RegExp(`/${locale}/student/calendar`));
+
+    // The class is on their calendar, as a private class of that workspace.
+    const day = firstSession.date.toISOString().slice(0, 10);
+    await studentPage.goto(`/${locale}/student/calendar?month=${day.slice(0, 7)}&day=${day}`);
+    await expectHealthy(studentPage, locale);
+    await expect(studentPage.getByText(msg("WorkspaceStudents.student.privateClass"), { exact: true }).first()).toBeVisible();
+    await expect(studentPage.getByText(workspaceName, { exact: true }).first()).toBeVisible();
+    await expect(studentPage.getByText(teacherName, { exact: true }).first()).toBeVisible();
+
+    // The teacher now reads "Linked" — and still the typed record, never the account's own name.
+    await page.goto(`/${locale}/teacher/workspaces/${workspaceId}/students`);
+    await expectHealthy(page, locale);
+    const linkedCard = page.getByRole("listitem").filter({ hasText: typed.last });
+    await expect(linkedCard.getByText(msg("WorkspaceStudents.row.linked"), { exact: true })).toBeVisible();
+    await expect(page.getByText(pupil.last)).toHaveCount(0);
+  } finally {
+    await studentContext.close();
+    await removeE2eUsers(db, e2eTag);
+    for (const authId of authIds) {
+      if ((await db.user.count({ where: { authId } })) === 0) await supabase.auth.admin.deleteUser(authId).catch(() => undefined);
+    }
+  }
+
+  expect(
+    await studentLeftovers(db, e2eTag, [teacher.email, pupil.email], userIds, centerIds),
+    "the teardown leaves nothing of this run behind",
+  ).toEqual({ users: 0, organizations: 0, centers: 0, profiles: 0, invitations: 0, enrollments: 0, notifications: 0, audit: 0 });
   await db.$disconnect();
 });
