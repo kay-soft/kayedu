@@ -1,12 +1,17 @@
-/** One-off sweep of every leftover e2e account (`npm run e2e:clean-users`, staging only). */
+/**
+ * One-off sweep of every leftover e2e account (`npm run e2e:clean-users`, staging
+ * only), and since V9 of every e2e one-time session a killed run left behind.
+ */
 import { PrismaClient } from "@prisma/client";
 
 import { assertSafeToWrite } from "./lib/env.ts";
+import { removeE2eOneOffSessions } from "./lib/e2e-sessions.ts";
 import { removeE2eUsers } from "./lib/e2e-users.ts";
 
 assertSafeToWrite("npm run e2e:clean-users");
 const db = new PrismaClient();
 try {
+  console.log(`removed ${await removeE2eOneOffSessions(db)} e2e one-time session(s)`);
   console.log(`removed ${await removeE2eUsers(db)} e2e user(s)`);
 } finally {
   await db.$disconnect();

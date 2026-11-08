@@ -175,11 +175,52 @@ function staticChecks() {
     "The class actions never create a person or a teacher membership themselves",
     !/createPerson\(/.test(classActions) && !/membership\.create\(/.test(classActions) && !/teachers\.create\(/.test(classActions),
   );
+  // V9 old → new (W8a, D-W38): "Only lib/db/teacher-membership.ts creates a
+  // TEACHER membership" → exactly two creators: teacher-membership.ts and
+  // createPersonalWorkspace (lib/db/platform.ts), which creates only its owner's
+  // membership, in the PERSONAL centre it has just made under the owner's own
+  // personal organization, and is reached only from createWorkspace.
+  const teacherCreate = /membership\.create\([\s\S]{0,200}?role:\s*(?:"TEACHER"|TEACHER)/g;
+  const platformSource = read("lib/db/platform.ts");
+  const workspaceStart = platformSource.indexOf("export async function createPersonalWorkspace(");
+  const workspaceNext = workspaceStart < 0 ? -1 : platformSource.indexOf("\nexport ", workspaceStart + 1);
+  const workspaceBody = workspaceStart < 0 ? "" : platformSource.slice(workspaceStart, workspaceNext < 0 ? undefined : workspaceNext);
+  const teacherCreators = [...listFiles("app"), ...listFiles("lib/db")]
+    .filter((file) => /\.(ts|tsx)$/.test(file) && !norm(file).endsWith("lib/db/teacher-membership.ts") && !norm(file).endsWith("prisma/seed.ts"))
+    .flatMap((file) => {
+      const text = read(file);
+      return [...text.matchAll(teacherCreate)].map((match) => {
+        const at = match.index ?? 0;
+        const inWorkspace =
+          norm(file).endsWith("lib/db/platform.ts") && workspaceStart >= 0 && at > workspaceStart && at < workspaceStart + workspaceBody.length;
+        return inWorkspace ? "createPersonalWorkspace" : `${norm(file)}:${text.slice(0, at).split("\n").length}`;
+      });
+    });
   check(
-    "Only lib/db/teacher-membership.ts creates a TEACHER membership (no `role: TEACHER` create elsewhere in app/ or lib/db/)",
-    [...listFiles("app"), ...listFiles("lib/db")]
-      .filter((file) => /\.(ts|tsx)$/.test(file) && !norm(file).endsWith("lib/db/teacher-membership.ts") && !norm(file).endsWith("prisma/seed.ts"))
-      .every((file) => !/membership\.create\([\s\S]{0,200}?role:\s*(?:"TEACHER"|TEACHER)/.test(read(file))),
+    "Exactly two places create a TEACHER membership in app/ and lib/db/: lib/db/teacher-membership.ts and createPersonalWorkspace (lib/db/platform.ts), once",
+    teacherCreators.join(",") === "createPersonalWorkspace",
+    teacherCreators.join(", "),
+  );
+  const workspaceMembership = /\.membership\.create\(\{\s*data:\s*\{([\s\S]*?)\}/.exec(workspaceBody)?.[1] ?? "";
+  const workspaceCallers = [...listFiles("app"), ...listFiles("lib")]
+    .filter((file) => /\.(ts|tsx)$/.test(file) && /\bcreatePersonalWorkspace\(/.test(read(file).replace(/export async function createPersonalWorkspace\(/, "")))
+    .map(norm);
+  check(
+    "createPersonalWorkspace creates only the membership of the account that owns the personal organization, for the PERSONAL centre it creates under it",
+    /tx\.organization\.findUnique\(\{\s*where:\s*\{\s*ownerUserId:\s*input\.owner\.id\s*\}/.test(workspaceBody) &&
+      /tx\.organization\.create\(\{\s*data:\s*\{[^;]*?ownerUserId:\s*input\.owner\.id/.test(workspaceBody) &&
+      /const created = await tx\.center\.create\(\{\s*data:\s*\{[^;]*?kind:\s*"PERSONAL"[^;]*?organizationId:\s*organization\.id/.test(workspaceBody) &&
+      /\buserId:\s*input\.owner\.id,/.test(workspaceMembership) &&
+      /\bcenterId:\s*created\.id,/.test(workspaceMembership) &&
+      (workspaceBody.match(/\.membership\.create\(/g) ?? []).length === 1,
+  );
+  check(
+    "createPersonalWorkspace is reached only from lib/db/workspaces.ts (createWorkspace: the owner's row locked, premium re-read)",
+    workspaceCallers.join(",") === "lib/db/workspaces.ts" &&
+      /export async function createWorkspace\([\s\S]*?lockTeacher\(tx, actorUserId\)[\s\S]*?requirePremium\(tx, actorUserId, now\)[\s\S]*?createPersonalWorkspace\(tx, \{ owner, name \}\)/.test(
+        read("lib/db/workspaces.ts"),
+      ),
+    workspaceCallers.join(", "),
   );
   check(
     "The New teacher fields are the Add teacher form's own components (NewTeacherFields) — not a fork",
