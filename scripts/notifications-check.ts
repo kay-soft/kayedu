@@ -1072,9 +1072,10 @@ async function main() {
     "ENROLLMENT_DECLINED",
     "SESSION_CANCELLED",
     "SESSION_RESCHEDULED",
+    "WORKSPACE_INVITATION",
   ];
   check(
-    "Every kind declares its ids (the catalogue is exactly the ten expected kinds)",
+    "Every kind declares its ids (the catalogue is exactly the eleven expected kinds)",
     [...NOTIFICATION_KIND_LIST].sort().join() === EXPECTED_KINDS.join(),
     NOTIFICATION_KIND_LIST.join(),
   );
