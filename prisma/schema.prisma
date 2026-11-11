@@ -362,6 +362,9 @@ model User {
   personalOrganization   Organization?      @relation("PersonalOrganization")
   // W8b (D-W39) — workspace invitations addressed to this account.
   workspaceInvitations   WorkspaceInvitation[]
+  // W10 (D-W43) — workspace share codes this teacher issued / this account redeemed.
+  workspaceShareCodesIssued WorkspaceShareCode[] @relation("WorkspaceShareCodeCreatedBy")
+  workspaceShareCodesUsed   WorkspaceShareCode[] @relation("WorkspaceShareCodeUsedBy")
 }
 
 /**
@@ -527,6 +530,8 @@ model Center {
   assessmentAnswers   AssessmentAnswer[]
   // W8b — a PERSONAL workspace's student invitations (D-W39).
   workspaceInvitations WorkspaceInvitation[]
+  // W10 — a PERSONAL workspace's student share codes (D-W43).
+  workspaceShareCodes  WorkspaceShareCode[]
 
   @@index([organizationId])
 }
@@ -1079,6 +1084,8 @@ model StudentProfile {
   assessmentAttempts AssessmentAttempt[]
   // W8b — the invitations a workspace sent for this (unlinked) profile.
   workspaceInvitations WorkspaceInvitation[]
+  // W10 (D-W43) — the share codes a workspace issued for this (unlinked) profile.
+  workspaceShareCodes  WorkspaceShareCode[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
@@ -2300,4 +2307,35 @@ model WorkspaceInvitation {
   @@index([centerId])
   @@index([studentProfileId])
   @@index([targetUserId, status])
+}
+
+/**
+ * W10 (D-W43): a one-time share code a premium workspace owner gives an
+ * unlinked workspace student, which any signed-in account redeems after a
+ * confirmation — moving the profile from its placeholder to that account
+ * (the W8b move, `lib/db/workspace-share-codes.ts`). Stored as **sha256
+ * only**, shown once, single use (a conditional claim), expires after 7 days.
+ * A tenant table: `centerId` is the workspace. At most one active code per
+ * profile (the hand-written partial unique index
+ * `WorkspaceShareCode_one_active_per_profile … WHERE "usedAt" IS NULL AND
+ * "revokedAt" IS NULL`, CLAUDE.md rule 7). Ids only — never the code.
+ */
+model WorkspaceShareCode {
+  id               String         @id @default(uuid())
+  centerId         String
+  center           Center         @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  createdByUserId  String
+  createdBy        User           @relation("WorkspaceShareCodeCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  codeHash         String         @unique
+  expiresAt        DateTime
+  usedAt           DateTime?
+  usedByUserId     String?
+  usedBy           User?          @relation("WorkspaceShareCodeUsedBy", fields: [usedByUserId], references: [id], onDelete: SetNull)
+  revokedAt        DateTime?
+  createdAt        DateTime       @default(now())
+
+  @@index([centerId])
+  @@index([studentProfileId])
 }

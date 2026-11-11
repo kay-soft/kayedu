@@ -382,6 +382,38 @@ async function placeholderHoldsNothingElse(tx: Tx, userId: string): Promise<bool
   return Object.values(row._count).every((count) => count === 0);
 }
 
+export type WorkspaceProfileMove = { moved: false } | { moved: true; placeholderRemoved: boolean };
+
+/**
+ * **The W8b move** (D-W39 item 7), on the caller's transaction — the one path
+ * that attaches a workspace profile to an account, shared by accepting an
+ * invitation and (W10, D-W43) redeeming a share code. The profile's `userId`
+ * moves from its placeholder to the account **only if it still sits on that
+ * placeholder** (a concurrent move finds nothing: `{ moved: false }`, and the
+ * caller rolls back); its enrolments move with it and its local record is
+ * untouched. Then any PENDING invitation to the account from this workspace
+ * is cancelled (it now holds a profile here), and the placeholder is deleted
+ * only when it holds nothing else.
+ */
+export async function moveWorkspaceProfileToAccount(
+  tx: Tx,
+  input: { centerId: string; studentProfileId: string; placeholderUserId: string; accountUserId: string; now: Date },
+): Promise<WorkspaceProfileMove> {
+  const moved = await tx.studentProfile.updateMany({
+    where: scopedWhere(input.centerId, { id: input.studentProfileId, userId: input.placeholderUserId }),
+    data: { userId: input.accountUserId },
+  });
+  if (moved.count !== 1) return { moved: false };
+  await tx.workspaceInvitation.updateMany({
+    where: scopedWhere(input.centerId, { targetUserId: input.accountUserId, status: PENDING }),
+    data: { status: "CANCELLED", respondedAt: input.now },
+  });
+  const placeholderRemoved =
+    (await placeholderHoldsNothingElse(tx, input.placeholderUserId)) &&
+    (await deletePersonIfOrphaned(input.placeholderUserId, tx));
+  return { moved: true, placeholderRemoved };
+}
+
 export type AcceptInvitationResult =
   | { ok: true; studentProfileId: string; placeholderRemoved: boolean }
   | { ok: false; error: "notFound" | "alreadyInWorkspace" };
@@ -419,18 +451,15 @@ export async function acceptWorkspaceInvitation(
       data: { status: "ACCEPTED", respondedAt: now },
     });
     if (claimed.count !== 1) return { ok: false, error: "notFound" };
-    const moved = await tx.studentProfile.updateMany({
-      where: scopedWhere(invitation.centerId, { id: profile.id, userId: profile.userId }),
-      data: { userId: actorUserId },
+    const move = await moveWorkspaceProfileToAccount(tx, {
+      centerId: invitation.centerId,
+      studentProfileId: profile.id,
+      placeholderUserId: profile.userId,
+      accountUserId: actorUserId,
+      now,
     });
-    if (moved.count !== 1) throw new Error("workspace profile moved concurrently");
-    await tx.workspaceInvitation.updateMany({
-      where: scopedWhere(invitation.centerId, { targetUserId: actorUserId, status: PENDING }),
-      data: { status: "CANCELLED", respondedAt: now },
-    });
-
-    const placeholderRemoved =
-      (await placeholderHoldsNothingElse(tx, profile.userId)) && (await deletePersonIfOrphaned(profile.userId, tx));
+    if (!move.moved) throw new Error("workspace profile moved concurrently");
+    const placeholderRemoved = move.placeholderRemoved;
 
     await writeAuditRow(tx, {
       centerId: invitation.centerId,

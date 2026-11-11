@@ -1,6 +1,6 @@
 import type { SignupIntent } from "@prisma/client";
 import { getLocale, getTranslations } from "next-intl/server";
-import { Building2, Check, ChevronLeft } from "lucide-react";
+import { Building2, Check, ChevronLeft, GraduationCap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { switchExperienceAction } from "@/app/[locale]/(auth)/actions";
@@ -250,6 +250,18 @@ export default async function SelectCenterPage({
               </SubmitButton>,
             ),
           )}
+
+          {/* W10 (D-W43): a teacher's share code links a private class — every account. */}
+          <a href={`/${locale}${ROUTES.workspaceJoin}`} className={cn(CHOICE_CARD, CHOICE_IDLE)}>
+            <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+              <GraduationCap className="size-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold">{t("joinPrivateClass")}</span>
+              <span className="block text-xs text-text-secondary">{t("joinPrivateClassHint")}</span>
+            </span>
+            <ChoiceMark selected={false} />
+          </a>
         </div>
       </AuthCard>
 

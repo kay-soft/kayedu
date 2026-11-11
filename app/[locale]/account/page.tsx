@@ -6,6 +6,7 @@ import {
   AssistantSection,
   FamilySection,
   PremiumSection,
+  PrivateClassSection,
   StudyDetailsSection,
   TeacherHistorySection,
 } from "@/app/[locale]/account/extension-points";
@@ -96,6 +97,8 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
 
         {/* W7a (D-W36): the assistant roles sit with the roles above — every account. */}
         <AssistantSection user={user} />
+        {/* W10 (D-W43): "Join a private class" — every account. */}
+        <PrivateClassSection />
 
         {/* Extension points (F4 Study details, F3 Family) — each renders nothing for an account it does not apply to. */}
         <StudyDetailsSection user={user} />

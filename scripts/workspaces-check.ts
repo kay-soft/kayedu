@@ -44,6 +44,18 @@
  * student's; archive; notices and the re-check; the assistant matrix; audit
  * with both ids; centre-side, hub and switcher reads; the statics.
  *
+ * W10 (D-W43), section 18: workspace share codes — sha256-only storage, one
+ * active code per profile (the partial index) and regeneration revoking, one
+ * answer for unknown, malformed, expired, used and revoked codes, the expiry
+ * boundary, single use under two concurrent redemptions, the refusals
+ * (already in the workspace, already linked, own workspace, no login), the
+ * atomic W8b move with the placeholder kept when it holds anything else and a
+ * pending invitation cancelled, owner-only authority by direct call
+ * (assistants, other teachers, centre staff), isolation, premium and archive
+ * (generation refused; revoke and redeem allowed), the rate limits, the
+ * teacher's reads never carrying the redeemer, the linked student's W8b set,
+ * ids-only audit with no code, and the statics.
+ *
  * Writes and cleans up its own fixtures (users `workspaces-check-…`, the
  * branch and catalogue rows `workspaces-check-…`, every centre under the
  * fixture users' personal organizations, and — W8b — the placeholder users
@@ -51,7 +63,7 @@
  * starts `workspaces-check`). Fenced by S1 (`gatePrisma`): staging
  * or a local database only.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -152,7 +164,7 @@ import {
 } from "../lib/db/workspace-attendance.ts";
 import { workspaceRecordPaymentSchema } from "../lib/validation/workspace-sessions.ts";
 // W8d (D-W41): Earnings and assistants in workspaces.
-import { ASSISTANT_PERMISSIONS, PRESET_PERMISSIONS } from "../lib/assistant-catalog.ts";
+import { ASSISTANT_CODE_ALPHABET, ASSISTANT_PERMISSIONS, PRESET_PERMISSIONS } from "../lib/assistant-catalog.ts";
 import { createAttendance } from "../lib/db/attendance.ts";
 import { paidOutTeacherShare, revenueByTeacher } from "../lib/db/analytics.ts";
 import { assistantCan, assistantFloorAt, assistantWorkspaceFloor, resolveAssistantActing } from "../lib/db/assistant-acting.ts";
@@ -201,6 +213,16 @@ import { loadAuditFeed } from "../lib/db/audit-feed.ts";
 import { hiddenAssessmentNoticeIds, syncAssessmentSoonNotices } from "../lib/db/notifications.ts";
 import { TEACHER_WORKSPACE_ONLY_NAV } from "../components/shell/nav.ts";
 import { EXPECTED_WORKSPACE_ONLY_TEACHER_NAV } from "./lib/expected-nav.ts";
+// W10 (D-W43): workspace share codes.
+import { generateAssistantCode } from "../lib/db/assistants.ts";
+import {
+  activeShareCodeExpiries,
+  createWorkspaceShareCode,
+  previewWorkspaceShareCode,
+  redeemWorkspaceShareCode,
+  revokeWorkspaceShareCode,
+} from "../lib/db/workspace-share-codes.ts";
+import { WORKSPACE_SHARE_CODE_ALPHABET, formatWorkspaceShareCodeForDisplay } from "../lib/workspace-share-code.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -816,6 +838,9 @@ async function main() {
 
   // W9 (D-W42): exams and homework in workspaces.
   await workspaceAssessments({ today, gradeId: grade.id, subjectId: subject.id, branchId: branch.id });
+
+  // W10 (D-W43): workspace share codes.
+  await workspaceShareCodes({ today, classInput, slot, others });
 }
 
 // ── 13. W8b: workspace students and invitations (D-W27, D-W39) ─────────────
@@ -3022,6 +3047,472 @@ async function workspaceAssessments(fx: W9Fixture) {
     "The workspace-only teacher shell is the shared constant, and it matches the hand-written oracle",
     TEACHER_WORKSPACE_ONLY_NAV.map((item) => item.labelKey).join() === EXPECTED_WORKSPACE_ONLY_TEACHER_NAV.join() &&
       /nav: session\.workspaceOnly\s*\?\s*TEACHER_WORKSPACE_ONLY_NAV/.test(read("app/[locale]/(teacher)/teacher-shell.ts")),
+  );
+}
+
+// ── 18. W10: workspace share codes (D-W43) ─────────────────────────────────
+
+let ipSeq = 0;
+/** A run-unique client IP key per call, unless a test shares one on purpose. */
+const freshIp = () => `w10-${RUN}-${(ipSeq += 1)}`;
+
+/** An account that signed up on its own: an email, a login, no User.phone. */
+async function selfRegistered(tag: string) {
+  const user = await makeUser(tag);
+  return prisma.user.update({
+    where: { id: user.id },
+    data: { authId: `${STEM}-auth-${tag}-${RUN}-${user.id.slice(0, 8)}`, firstName: `Redeemer${RUN}`, lastName: `Real${tag}${RUN}` },
+  });
+}
+
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+async function workspaceShareCodes(fx: {
+  today: Date;
+  classInput: { educationSystemId: null; gradeId: string; subjectId: string; price: number; lateThresholdMinutes: number; startDate: Date; endDate: Date };
+  slot: { dayOfWeek: number; startTime: string; endTime: string };
+  others: [string, string][];
+}) {
+  const { today } = fx;
+  console.log("\n18. W10: workspace share codes — sha256, single use, expiry, the W8b move, authority, limits, audit, the student's reads");
+
+  // ── 18a. Fixtures: two premium teachers, three workspaces, a class ─────
+  // A real teacher signs in: a login, so the owner refusal is reached past the account gate.
+  const teacherX = await prisma.user.update({
+    where: { id: (await makeUser("w10-teacher-x", { premium: true })).id },
+    data: { authId: `${STEM}-auth-w10-teacher-x-${RUN}` },
+  });
+  const teacherY = await makeUser("w10-teacher-y", { premium: true });
+  const assistantX = await makeUser("w10-assistant", { premium: true });
+  await prisma.teacherAssistant.create({ data: { teacherUserId: teacherX.id, assistantUserId: assistantX.id, preset: "FULL" } });
+  const createdX = await createWorkspace(prisma, teacherX.id, { name: "X Physics" });
+  const createdX2 = await createWorkspace(prisma, teacherX.id, { name: "X Maths" });
+  const createdY = await createWorkspace(prisma, teacherY.id, { name: "Y Biology" });
+  if (!createdX.ok || !createdX2.ok || !createdY.ok) {
+    check("Setup: the W10 workspaces", false, JSON.stringify({ createdX, createdX2, createdY }));
+    return;
+  }
+  const wsX = createdX.workspaceId;
+  const wsX2 = createdX2.workspaceId;
+  const wsY = createdY.workspaceId;
+  const cls = await createWorkspaceClass(prisma, teacherX.id, wsX, { ...fx.classInput, slots: [{ ...fx.slot, startTime: "19:00", endTime: "20:00" }] }, { confirmConflicts: true, locale: "en" });
+  const otherCls = await createWorkspaceClass(prisma, teacherX.id, wsX, { ...fx.classInput, slots: [{ ...fx.slot, startTime: "07:00", endTime: "08:00" }] }, { confirmConflicts: true, locale: "en" });
+  if (!cls.ok || !otherCls.ok) {
+    check("Setup: the W10 classes", false, JSON.stringify({ cls, otherCls }));
+    return;
+  }
+  const classId = cls.classGroupId;
+  const add = async (ws: string, owner: string, tag: string) => {
+    const result = await addWorkspaceStudent(prisma, owner, ws, { ...PLACEHOLDER(tag), phone: freshPhone(), gradeId: null });
+    if (!result.ok) throw new Error(`setup add ${tag}: ${result.error}`);
+    return result.studentProfileId;
+  };
+  const pMain = await add(wsX, teacherX.id, "w10-main");
+  const pRace = await add(wsX, teacherX.id, "w10-race");
+  const pKeep = await add(wsX, teacherX.id, "w10-keep");
+  const pTwinA = await add(wsX, teacherX.id, "w10-twin-a");
+  const pTwinB = await add(wsX, teacherX.id, "w10-twin-b");
+  const pMisc = await add(wsX, teacherX.id, "w10-misc");
+  const pY = await add(wsY, teacherY.id, "w10-y");
+  check("W10 fixtures built", (await enrolWorkspaceStudent(prisma, teacherX.id, wsX, classId, pMain)).ok);
+
+  const issued: string[] = [];
+  const create = async (profileId: string, actor = teacherX.id, ws = wsX, now?: Date) => {
+    const result = await createWorkspaceShareCode(prisma, actor, ws, profileId, now);
+    if (result.ok) issued.push(result.code);
+    return result;
+  };
+  const preview = (userId: string, code: unknown, now?: Date) => previewWorkspaceShareCode(prisma, { userId, code, ip: freshIp(), now });
+  const redeem = (userId: string, code: unknown, now?: Date) => redeemWorkspaceShareCode(prisma, { userId, code, ip: freshIp(), now });
+
+  // ── 18b. sha256-only storage, shown once ───────────────────────────────
+  const first = await create(pMain);
+  check("Share code succeeds for the owner's unlinked profile", first.ok, JSON.stringify(first));
+  if (!first.ok) return;
+  const firstRow = await prisma.workspaceShareCode.findUniqueOrThrow({ where: { id: first.codeId } });
+  check(
+    "The code is 12 symbols of the parent/assistant alphabet",
+    first.code.length === 12 && [...first.code].every((char) => WORKSPACE_SHARE_CODE_ALPHABET.includes(char)) && WORKSPACE_SHARE_CODE_ALPHABET === ASSISTANT_CODE_ALPHABET,
+  );
+  check(
+    "Only its sha256 is stored — no column holds the code",
+    firstRow.codeHash === sha256(first.code) && /^[0-9a-f]{64}$/.test(firstRow.codeHash) && !JSON.stringify(firstRow).includes(first.code),
+  );
+  check(
+    "It expires 7 days after creation, on the workspace, by the owner",
+    Math.abs(firstRow.expiresAt.getTime() - firstRow.createdAt.getTime() - 7 * 86_400_000) < 1000 &&
+      firstRow.centerId === wsX && firstRow.createdByUserId === teacherX.id && firstRow.usedAt === null,
+  );
+  check(
+    "The teacher's read of codes is the expiry only — never retrievable",
+    (await activeShareCodeExpiries(prisma, wsX)).get(pMain)?.getTime() === firstRow.expiresAt.getTime(),
+  );
+
+  // ── 18c. One active per profile; a new code revokes the old ────────────
+  const second = await create(pMain);
+  check("Share code again succeeds and says it replaced an active one", second.ok && second.replaced);
+  if (!second.ok) return;
+  check(
+    "The first code is revoked; one active code remains for the profile",
+    (await prisma.workspaceShareCode.findUniqueOrThrow({ where: { id: first.codeId } })).revokedAt !== null &&
+      (await prisma.workspaceShareCode.count({ where: { studentProfileId: pMain, usedAt: null, revokedAt: null } })) === 1,
+  );
+  let partialRefused = false;
+  try {
+    await prisma.workspaceShareCode.create({
+      data: { centerId: wsX, studentProfileId: pMain, createdByUserId: teacherX.id, codeHash: sha256(`stray-${RUN}`), expiresAt: inDays(7) },
+    });
+  } catch {
+    partialRefused = true;
+  }
+  check("A second active code for one profile is refused by the partial unique index", partialRefused);
+  const [index] = await prisma.$queryRaw<{ count: bigint }[]>`
+    SELECT count(*) AS count FROM pg_indexes
+    WHERE schemaname = 'public' AND indexname = 'WorkspaceShareCode_one_active_per_profile'
+      AND indexdef ILIKE '%usedAt%IS NULL%' AND indexdef ILIKE '%revokedAt%IS NULL%'`;
+  check("The hand-written partial index exists (CLAUDE.md rule 7)", Number(index?.count ?? 0) === 1);
+  const [rls] = await prisma.$queryRaw<{ on: boolean }[]>`
+    SELECT c.relrowsecurity AS on FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'WorkspaceShareCode'`;
+  check("RLS is on for WorkspaceShareCode", rls?.on === true);
+
+  // ── 18d. One answer for unknown, expired, used and revoked ─────────────
+  const prober = await selfRegistered("w10-prober");
+  const revokedAnswer = await preview(prober.id, first.code);
+  const unknownAnswer = await preview(prober.id, generateAssistantCode());
+  const malformedAnswer = await preview(prober.id, "not a code");
+  const expiredCode = await create(pMisc, teacherX.id, wsX, new Date(Date.now() - 8 * 86_400_000));
+  const expiredAnswer = expiredCode.ok ? await preview(prober.id, expiredCode.code) : null;
+  // `used` is checked after 18f; keep the shape here.
+  const generic = JSON.stringify({ ok: false, error: "invalidCode" });
+  check(
+    "Revoked, unknown, malformed and expired codes give the same answer (invalidCode)",
+    [revokedAnswer, unknownAnswer, malformedAnswer, expiredAnswer].every((answer) => JSON.stringify(answer) === generic),
+    [revokedAnswer, unknownAnswer, malformedAnswer, expiredAnswer].map((answer) => JSON.stringify(answer)).join(" "),
+  );
+
+  // ── 18e. The expiry boundary ───────────────────────────────────────────
+  const boundary = await create(pKeep);
+  if (boundary.ok) {
+    const just = new Date(boundary.expiresAt.getTime() - 1);
+    const at = new Date(boundary.expiresAt.getTime());
+    const before = await preview(prober.id, boundary.code, just);
+    const atExpiry = await preview(prober.id, boundary.code, at);
+    const redeemAt = await redeem(prober.id, boundary.code, at);
+    check("One millisecond before expiresAt the code previews", before.ok, JSON.stringify(before));
+    check(
+      "At expiresAt it is invalidCode, preview and confirm alike, and nothing moved",
+      JSON.stringify(atExpiry) === generic && JSON.stringify(redeemAt) === generic &&
+        (await prisma.studentProfile.findUniqueOrThrow({ where: { id: pKeep } })).userId !== prober.id,
+    );
+  } else check("Setup: the boundary code", false, JSON.stringify(boundary));
+
+  // ── 18f. Preview writes nothing; Confirm links, atomically ─────────────
+  const student = await selfRegistered("w10-student");
+  const shown = await preview(student.id, formatWorkspaceShareCodeForDisplay(second.code).toLowerCase());
+  check(
+    "The preview reads the workspace's name and the teacher's only (dashes and case ignored)",
+    shown.ok && shown.workspaceName === "X Physics" && shown.teacherName === `${teacherX.firstName} ${teacherX.lastName}` &&
+      JSON.stringify(Object.keys(shown).sort()) === JSON.stringify(["ok", "teacherName", "workspaceName"]),
+    JSON.stringify(shown),
+  );
+  check(
+    "The preview wrote nothing",
+    (await prisma.workspaceShareCode.findUniqueOrThrow({ where: { id: second.codeId } })).usedAt === null &&
+      (await prisma.studentProfile.findUniqueOrThrow({ where: { id: pMain } })).userId !== student.id,
+  );
+  // A pending invitation for this profile (to someone else) must be cancelled by the redemption.
+  const bystander = await selfRegistered("w10-bystander");
+  const pending = await prisma.workspaceInvitation.create({ data: { centerId: wsX, studentProfileId: pMain, targetUserId: bystander.id } });
+  const placeholderId = (await prisma.studentProfile.findUniqueOrThrow({ where: { id: pMain } })).userId;
+  const linked = await redeem(student.id, second.code);
+  check("Confirm succeeds", linked.ok, JSON.stringify(linked));
+  const moved = await prisma.studentProfile.findUniqueOrThrow({ where: { id: pMain } });
+  const usedRow = await prisma.workspaceShareCode.findUniqueOrThrow({ where: { id: second.codeId } });
+  check(
+    "The profile moved to the redeemer; the code is used by them; the placeholder (holding nothing else) is gone",
+    moved.userId === student.id && usedRow.usedAt !== null && usedRow.usedByUserId === student.id &&
+      (await prisma.user.count({ where: { id: placeholderId } })) === 0 && linked.ok && linked.placeholderRemoved,
+  );
+  check(
+    "The local record and the enrolment are untouched",
+    moved.lastName === PLACEHOLDER("w10-main").lastName && moved.phone !== null &&
+      (await prisma.enrollment.count({ where: { studentProfileId: pMain, classGroupId: classId, status: "ACTIVE" } })) === 1,
+  );
+  check("The pending invitation for the profile is CANCELLED", (await prisma.workspaceInvitation.findUniqueOrThrow({ where: { id: pending.id } })).status === "CANCELLED");
+  const prober2 = await selfRegistered("w10-prober-two");
+  const usedAnswer = await preview(prober2.id, second.code);
+  const usedAgain = await redeem(student.id, second.code);
+  check("The code works once: used is the same invalidCode, preview and confirm", JSON.stringify(usedAnswer) === generic && JSON.stringify(usedAgain) === generic);
+
+  // A placeholder that holds another relation is kept.
+  const keepPlaceholder = (await prisma.studentProfile.findUniqueOrThrow({ where: { id: pKeep } })).userId;
+  await prisma.studentProfile.create({ data: { userId: keepPlaceholder, centerId: wsX2, studentCode: `${STEM}-w10-keep-${RUN}` } });
+  const keepCode = await create(pKeep);
+  const keeper = await selfRegistered("w10-keeper");
+  const kept = keepCode.ok ? await redeem(keeper.id, keepCode.code) : null;
+  check(
+    "A placeholder that holds another relation is kept (placeholderRemoved false)",
+    kept?.ok === true && !kept.placeholderRemoved && (await prisma.user.count({ where: { id: keepPlaceholder } })) === 1 &&
+      (await prisma.studentProfile.findUniqueOrThrow({ where: { id: pKeep } })).userId === keeper.id,
+    JSON.stringify(kept),
+  );
+
+  // ── 18g. Refusals: already in the workspace, already linked, own workspace ──
+  const twinA = await create(pTwinA);
+  const twinB = await create(pTwinB);
+  if (twinA.ok && twinB.ok) {
+    const already = await preview(student.id, twinA.code);
+    const alreadyConfirm = await redeem(student.id, twinA.code);
+    check(
+      "An account that already has a profile in the workspace is refused (alreadyInWorkspace), and the code stays usable",
+      !already.ok && already.error === "alreadyInWorkspace" && !alreadyConfirm.ok && alreadyConfirm.error === "alreadyInWorkspace" &&
+        (await prisma.workspaceShareCode.findFirstOrThrow({ where: { codeHash: sha256(twinA.code) } })).usedAt === null,
+    );
+    const own = await preview(teacherX.id, twinA.code);
+    check("The workspace's own owner is refused (ownWorkspace)", !own.ok && own.error === "ownWorkspace");
+    // Linked meanwhile (the placeholder gained a login): already linked.
+    const twinPlaceholder = (await prisma.studentProfile.findUniqueOrThrow({ where: { id: pTwinB } })).userId;
+    await prisma.user.update({ where: { id: twinPlaceholder }, data: { authId: `${STEM}-auth-twin-${RUN}` } });
+    const late = await selfRegistered("w10-late");
+    const linkedAnswer = await preview(late.id, twinB.code);
+    const linkedConfirm = await redeem(late.id, twinB.code);
+    check(
+      "A profile already linked is refused (alreadyLinked), preview and confirm",
+      !linkedAnswer.ok && linkedAnswer.error === "alreadyLinked" && !linkedConfirm.ok && linkedConfirm.error === "alreadyLinked",
+    );
+    const onLinked = await create(pTwinB);
+    check("Share code on a linked profile is refused (alreadyLinked)", !onLinked.ok && onLinked.error === "alreadyLinked");
+    await prisma.user.update({ where: { id: twinPlaceholder }, data: { authId: null } });
+  } else check("Setup: the twin codes", false, JSON.stringify({ twinA, twinB }));
+
+  // ── 18h. Concurrency: exactly one wins ─────────────────────────────────
+  const race = await create(pRace);
+  if (race.ok) {
+    const racerA = await selfRegistered("w10-racer-a");
+    const racerB = await selfRegistered("w10-racer-b");
+    const results = await Promise.all([redeem(racerA.id, race.code), redeem(racerB.id, race.code)]);
+    const winners = results.filter((result) => result.ok);
+    const owner = (await prisma.studentProfile.findUniqueOrThrow({ where: { id: pRace } })).userId;
+    check(
+      "Two concurrent redemptions of one code: exactly one links, the other is refused",
+      winners.length === 1 && [racerA.id, racerB.id].includes(owner) &&
+        (await prisma.auditLog.count({ where: { centerId: wsX, action: "workspace.code.redeem", entityId: (await prisma.workspaceShareCode.findFirstOrThrow({ where: { codeHash: sha256(race.code) } })).id } })) === 1,
+      results.map((result) => (result.ok ? "ok" : result.error)).join(","),
+    );
+  } else check("Setup: the race code", false, JSON.stringify(race));
+  // One account, two codes into one workspace at once: at most one profile there.
+  const twinACode = issued.find((code) => code === (twinA.ok ? twinA.code : ""));
+  const freshTwinB = await create(pTwinB);
+  if (twinACode && freshTwinB.ok) {
+    const doubler = await selfRegistered("w10-doubler");
+    const both = await Promise.all([redeem(doubler.id, twinACode), redeem(doubler.id, freshTwinB.code)]);
+    check(
+      "One account racing two codes into one workspace ends with exactly one profile there",
+      both.filter((result) => result.ok).length === 1 &&
+        (await prisma.studentProfile.count({ where: { centerId: wsX, userId: doubler.id } })) === 1,
+      both.map((result) => (result.ok ? "ok" : result.error)).join(","),
+    );
+  } else check("Setup: the double codes", false);
+
+  // ── 18i. Authority: owner only; assistants, other teachers, staff ──────
+  const miscCode = await create(pMisc);
+  check("Setup: an active code on another profile", miscCode.ok);
+  const intruders: [string, string][] = [...fx.others, ["X's own assistant (FULL)", assistantX.id], ["another premium teacher (Y)", teacherY.id]];
+  for (const [label, actor] of intruders) {
+    const created = await createWorkspaceShareCode(prisma, actor, wsX, pMisc);
+    const revoked = await revokeWorkspaceShareCode(prisma, actor, wsX, pMisc);
+    check(
+      `${label}: Share code and Revoke code answer notFound by direct call`,
+      !created.ok && created.error === "notFound" && !revoked.ok && revoked.error === "notFound",
+      `${created.ok ? "ok" : created.error},${revoked.ok ? "ok" : revoked.error}`,
+    );
+  }
+  check("…and the active code is still the owner's one", (await activeShareCodeExpiries(prisma, wsX)).has(pMisc));
+  const crossProfile = await createWorkspaceShareCode(prisma, teacherX.id, wsX, pY);
+  const crossWorkspace = await createWorkspaceShareCode(prisma, teacherX.id, wsY, pY);
+  const crossRevoke = await revokeWorkspaceShareCode(prisma, teacherY.id, wsY, pMisc);
+  check(
+    "Isolation: another workspace's profile, another teacher's workspace and a revoke across teachers are all notFound",
+    !crossProfile.ok && crossProfile.error === "notFound" && !crossWorkspace.ok && crossWorkspace.error === "notFound" && !crossRevoke.ok && crossRevoke.error === "notFound",
+  );
+  check("Another workspace's reads hold none of X's codes", (await activeShareCodeExpiries(prisma, wsY)).size === 0);
+
+  // ── 18j. Premium and archive ───────────────────────────────────────────
+  const pLapseRedeem = await add(wsX, teacherX.id, "w10-lapse-redeem");
+  const pLapseRevoke = await add(wsX, teacherX.id, "w10-lapse-revoke");
+  const pArchRedeem = await add(wsX, teacherX.id, "w10-arch-redeem");
+  const pArchRevoke = await add(wsX, teacherX.id, "w10-arch-revoke");
+  const lapseRedeemCode = await create(pLapseRedeem);
+  const lapseRevokeCode = await create(pLapseRevoke);
+  const archRedeemCode = await create(pArchRedeem);
+  const archRevokeCode = await create(pArchRevoke);
+  check("Setup: four codes before the lapse", lapseRedeemCode.ok && lapseRevokeCode.ok && archRedeemCode.ok && archRevokeCode.ok);
+  await setPremium(teacherX.id, new Date(Date.now() - 60_000));
+  const lapsedCreate = await createWorkspaceShareCode(prisma, teacherX.id, wsX, pMisc);
+  check("Lapsed: Share code is refused (premiumRequired)", !lapsedCreate.ok && lapsedCreate.error === "premiumRequired");
+  const lapsedRedeemer = await selfRegistered("w10-lapsed");
+  const lapsedRedeem = lapseRedeemCode.ok ? await redeem(lapsedRedeemer.id, lapseRedeemCode.code) : null;
+  check("Lapsed: a code issued before still redeems (no premium needed)", lapsedRedeem?.ok === true, JSON.stringify(lapsedRedeem));
+  check("Lapsed: Revoke code still works (it only withdraws)", (await revokeWorkspaceShareCode(prisma, teacherX.id, wsX, pLapseRevoke)).ok);
+  await setPremium(teacherX.id, inDays(30));
+  await prisma.center.update({ where: { id: wsX }, data: { archivedAt: new Date(), archivedByUserId: teacherX.id } });
+  const archivedCreate = await createWorkspaceShareCode(prisma, teacherX.id, wsX, pMisc);
+  check("Archived: Share code is refused (workspaceArchived)", !archivedCreate.ok && archivedCreate.error === "workspaceArchived");
+  const archivedRedeemer = await selfRegistered("w10-archived");
+  const archivedRedeem = archRedeemCode.ok ? await redeem(archivedRedeemer.id, archRedeemCode.code) : null;
+  check("Archived: a code still redeems (as accepting an invitation does)", archivedRedeem?.ok === true, JSON.stringify(archivedRedeem));
+  check("Archived: Revoke code still works", (await revokeWorkspaceShareCode(prisma, teacherX.id, wsX, pArchRevoke)).ok);
+  await prisma.center.update({ where: { id: wsX }, data: { archivedAt: null, archivedByUserId: null } });
+  const loginless = await makeUser("w10-loginless");
+  const noLoginAnswer = await preview(loginless.id, generateAssistantCode());
+  check("An account with no login is refused before any lookup (forbidden)", !noLoginAnswer.ok && noLoginAnswer.error === "forbidden");
+
+  // ── 18k. Rate limits (the existing limiter) ────────────────────────────
+  const limiter = await makeUser("w10-limits", { premium: true });
+  const limitWs = await createWorkspace(prisma, limiter.id, { name: "W10 Limits" });
+  if (limitWs.ok) {
+    const limitProfile = await add(limitWs.workspaceId, limiter.id, "w10-lim");
+    const dayBefore = Math.floor(Date.now() / RATE_LIMITS.workspaceShareCodePerUser.windowMs);
+    let made = 0;
+    let refusal: string | null = null;
+    for (let index = 0; index < RATE_LIMITS.workspaceShareCodePerUser.limit + 1; index += 1) {
+      const result = await create(limitProfile, limiter.id, limitWs.workspaceId);
+      if (result.ok) made += 1;
+      else refusal ??= result.error;
+    }
+    const crossed = Math.floor(Date.now() / RATE_LIMITS.workspaceShareCodePerUser.windowMs) !== dayBefore;
+    check(
+      "30 Share codes a day per teacher, the 31st rateLimited",
+      RATE_LIMITS.workspaceShareCodePerUser.limit === 30 && (crossed || (made === 30 && refusal === "rateLimited")),
+      crossed ? "the day turned mid-run; not judged" : `${made} made, then ${refusal}`,
+    );
+  } else check("Setup: the limits workspace", false, JSON.stringify(limitWs));
+  const guesser = await selfRegistered("w10-guesser");
+  const hourBefore = Math.floor(Date.now() / RATE_LIMITS.workspaceJoinPerUser.windowMs);
+  const guesses = [];
+  for (let index = 0; index < RATE_LIMITS.workspaceJoinPerUser.limit + 1; index += 1) guesses.push(await preview(guesser.id, generateAssistantCode()));
+  const hourCrossed = Math.floor(Date.now() / RATE_LIMITS.workspaceJoinPerUser.windowMs) !== hourBefore;
+  check(
+    "Redemption attempts per account: 10 an hour (valid or not), the 11th rateLimited",
+    hourCrossed || (guesses.slice(0, 10).every((answer) => JSON.stringify(answer) === generic) && !guesses[10].ok && guesses[10].error === "rateLimited"),
+    hourCrossed ? "the hour turned mid-run; not judged" : guesses.map((answer) => (answer.ok ? "ok" : answer.error)).join(","),
+  );
+  const sharedIp = `w10-shared-${RUN}`;
+  const ipUsers = [];
+  for (let index = 0; index < 7; index += 1) ipUsers.push(await selfRegistered(`w10-ip${index}`));
+  const ipHourBefore = Math.floor(Date.now() / RATE_LIMITS.workspaceJoinPerIp.windowMs);
+  const fromIp = [];
+  for (let index = 0; index < RATE_LIMITS.workspaceJoinPerIp.limit + 1; index += 1) {
+    fromIp.push(await previewWorkspaceShareCode(prisma, { userId: ipUsers[index % 7].id, code: generateAssistantCode(), ip: sharedIp }));
+  }
+  const ipCrossed = Math.floor(Date.now() / RATE_LIMITS.workspaceJoinPerIp.windowMs) !== ipHourBefore;
+  check(
+    "Redemption attempts per client IP: 60 an hour, the 61st rateLimited",
+    ipCrossed || (fromIp.slice(0, 60).every((answer) => !answer.ok && answer.error === "invalidCode") && !fromIp[60].ok && fromIp[60].error === "rateLimited"),
+    ipCrossed ? "the hour turned mid-run; not judged" : `${fromIp.filter((answer) => !answer.ok && answer.error === "rateLimited").length} refused`,
+  );
+
+  // ── 18l. The teacher never sees the redeemer ───────────────────────────
+  const teacherReads = JSON.stringify([
+    await listWorkspaceStudents(prisma, wsX),
+    await workspaceClassRoster(prisma, wsX, classId),
+    [...(await activeShareCodeExpiries(prisma, wsX)).entries()],
+    second,
+  ]);
+  const redeemers = [student, keeper, lapsedRedeemer, archivedRedeemer];
+  check(
+    "The teacher's reads (students, roster, codes, the Share code answer) carry no redeemer's id, email or real name",
+    redeemers.every((user) => !teacherReads.includes(user.id) && !teacherReads.includes(user.email ?? "@@") && !teacherReads.includes(user.lastName)) &&
+      !teacherReads.includes(`Redeemer${RUN}`),
+  );
+  check(
+    "The teacher reads Linked for the redeemed profile, and nothing more",
+    (await listWorkspaceStudents(prisma, wsX)).find((row) => row.id === pMain)?.linked === true,
+  );
+
+  // ── 18m. The linked student sees exactly the W8b set ───────────────────
+  const profiles = await studentWorkspaceProfiles(prisma, student.id);
+  check("The opt-in resolver's input: exactly the linked workspace profile", profiles.length === 1 && profiles[0].centerId === wsX);
+  const upcoming = await studentUpcomingSessions(prisma, wsX, pMain, today);
+  check(
+    "Schedule: the enrolled class's sessions only (not the workspace's other class)",
+    upcoming.length > 0 && upcoming.every((session) => session.classGroupId === classId),
+  );
+  const month = await studentCalendarMonth(prisma, wsX, pMain, { start: today, end: addDays(today, 30) }, today);
+  check("Calendar: the enrolled class, which the done-when check opens", month.length > 0 && month.every((entry) => entry.classGroupId === classId));
+  const entries = await loadExperiences(prisma, student.id);
+  check(
+    "A self-registered account linked only by a code has the one Student experience, landing on the schedule",
+    entries.length === 1 && entries[0].kind === "student" && entries[0].href === ROUTES.studentSchedule,
+    entries.map((entry) => entry.key).join(","),
+  );
+  check(
+    "Nothing else: no branch relation (hub, switcher), no Discover listing, no other teacher's workspace",
+    (await resolveCenterRelations(prisma, student.id)).length === 0 &&
+      !(await listAccessibleCenters(prisma)).some((center) => center.id === wsX) &&
+      (await prisma.studentProfile.count({ where: { userId: student.id, centerId: { in: [wsY, wsX2] } } })) === 0,
+  );
+
+  // ── 18n. Audit: ids only, never the code ───────────────────────────────
+  const codeRows = await prisma.auditLog.findMany({ where: { action: { startsWith: "workspace.code." }, centerId: { in: [wsX, wsY] } } });
+  const rowsJson = JSON.stringify(codeRows);
+  check(
+    "workspace.code.create / .revoke / .redeem are written, ids only, on behalf of no one, and never contain a code",
+    ["workspace.code.create", "workspace.code.revoke", "workspace.code.redeem"].every((action) => codeRows.some((row) => row.action === action)) &&
+      codeRows.every((row) => forbiddenAuditKey(row.before) === null && forbiddenAuditKey(row.after) === null && row.onBehalfOfUserId === null) &&
+      issued.every((code) => !rowsJson.includes(code) && !rowsJson.includes(sha256(code))),
+    `${codeRows.length} rows`,
+  );
+  const redeemRow = codeRows.find((row) => row.action === "workspace.code.redeem" && row.entityId === second.codeId);
+  check("Redeem is audited with the redeemer as actor", redeemRow?.actorUserId === student.id);
+
+  // ── 18o. Statics ───────────────────────────────────────────────────────
+  const teacherActions = read("app/[locale]/(teacher)/teacher/workspaces/share-code-actions.ts");
+  const joinActions = read("app/[locale]/(auth)/workspace-join-actions.ts");
+  const w10Exported = [...teacherActions.matchAll(/export async function (\w+)\([\s\S]*?\n\}/g), ...joinActions.matchAll(/export async function (\w+)\([\s\S]*?\n\}/g)];
+  check(
+    "Every W10 action takes the actor from the session, never a posted user, and consults no centre matrix (static)",
+    w10Exported.length === 4 &&
+      w10Exported.every(([body]) => /await getCurrentUser\(\)/.test(body) && /user\.id/.test(body)) &&
+      !/formData\.get\(["'](userId|actorUserId|teacherId|targetUserId|usedByUserId)/.test(teacherActions + joinActions) &&
+      !/ctxCan\(|getTenantContext\(|requireExperience\(/.test(teacherActions + joinActions),
+    `${w10Exported.length} actions`,
+  );
+  const codesModule = read("lib/db/workspace-share-codes.ts");
+  const codesCode = codesModule.replace(/\/\*\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  check("The share-code module reads no phone and no contactPhone (CLAUDE.md rule 4) (static)", !/phone/i.test(codesCode));
+  check(
+    "Accepting an invitation and redeeming a code share the one W8b move (static)",
+    /await moveWorkspaceProfileToAccount\(tx, \{/.test(codesCode) &&
+      (read("lib/db/workspace-students.ts").match(/await moveWorkspaceProfileToAccount\(tx, \{/g) ?? []).length === 1 &&
+      (read("lib/db/workspace-students.ts").match(/data: \{ userId: input\.accountUserId \}/g) ?? []).length === 1,
+  );
+  check(
+    "Share code re-runs authorizeWrite inside its transaction; Revoke needs ownership and the capability only (static)",
+    (codesCode.match(/await authorizeWrite\(/g) ?? []).length === 2 &&
+      /revokeWorkspaceShareCode[\s\S]*?resolveWorkspaceAccess\(tx[\s\S]*?workspaceCan\(/.test(codesCode) &&
+      !/revokeWorkspaceShareCode[\s\S]*?assertWorkspaceWritable/.test(codesCode.slice(codesCode.indexOf("export async function revokeWorkspaceShareCode"), codesCode.indexOf("export async function activeShareCodeExpiries"))),
+  );
+  const assistantSurface = [...walk(join(ROOT, "app", "[locale]", "(assistant)")), ...walk(join(ROOT, "lib", "db")).filter((file) => /assistant-/.test(file))];
+  const reachingCodes = assistantSurface.filter((file) => /createWorkspaceShareCode|revokeWorkspaceShareCode|share-code-actions/.test(readSource(file)));
+  check("The assistant surface never reaches a share-code writer (static)", reachingCodes.length === 0, reachingCodes.join(", "));
+  const joinForm = read("components/workspaces/join-workspace-form.tsx");
+  check(
+    "The join page takes the code from the fragment, clears the address bar, and never puts it in a query (static)",
+    /window\.location\.hash/.test(joinForm) && /window\.history\.replaceState/.test(joinForm) &&
+      /ROUTES\.workspaceJoin\}#\$\{code\}/.test(read("lib/routes.ts")) && !/searchParams/.test(read("app/[locale]/(auth)/workspace-join/page.tsx")),
+  );
+  check(
+    "The WhatsApp share is wa.me with the text only — no phone number (static)",
+    /https:\/\/wa\.me\/\?text=\$\{encodeURIComponent\(text\)\}/.test(read("lib/routes.ts")),
+  );
+  const w10Dir = readdirSync(join(ROOT, "prisma", "migrations")).find((dir) => dir.endsWith("_w10_workspace_share_codes"));
+  const w10Migration = w10Dir ? read(`prisma/migrations/${w10Dir}/migration.sql`) : "";
+  check(
+    "The W10 migration is additive: the table, RLS on, the partial index, no DROP, no policy (static)",
+    /CREATE TABLE "WorkspaceShareCode"/.test(w10Migration) && /ENABLE ROW LEVEL SECURITY/.test(w10Migration) &&
+      /WorkspaceShareCode_one_active_per_profile/.test(w10Migration) && !/^\s*DROP\s/im.test(w10Migration) && !/POLICY/i.test(w10Migration),
   );
 }
 

@@ -10,15 +10,19 @@ import {
   CopyWorkspaceStudentButton,
   InviteAgainButton,
 } from "@/components/teacher/workspaces/workspace-student-controls";
+import { RevokeShareCodeButton, ShareCodeButton } from "@/components/teacher/workspaces/workspace-share-code-controls";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSection } from "@/components/shared/page-section";
 import { getWorkspaceContext, workspaceOffersWrites } from "@/lib/auth/workspace-context";
 import { catalogLabel } from "@/lib/catalog";
 import { listCatalogGrades } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
+import { activeShareCodeExpiries } from "@/lib/db/workspace-share-codes";
 import { copyableWorkspaceStudents, listWorkspaceStudents } from "@/lib/db/workspace-students";
+import { formatDateTime } from "@/lib/format";
 import { fullName } from "@/lib/identity";
 import { formatPhone } from "@/lib/phone";
+import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("WorkspaceStudents");
@@ -32,6 +36,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * **Linked** or **Not linked** — never the account behind it, and never a
  * pending invitation. Add, copy and "Invite again" show only while the
  * workspace takes writes; "Cancel invitation" stays, since it only withdraws.
+ * W10 (D-W43): "Share code" joins them on an unlinked profile (writes only),
+ * and "Revoke code" shows while one of the teacher's own codes is active —
+ * the code's expiry is the teacher's own fact; who redeemed it is never read.
  * Stacked cards at every width (no table to scroll).
  */
 export default async function WorkspaceStudentsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -40,11 +47,13 @@ export default async function WorkspaceStudentsPage({ params }: { params: Promis
   if (!ctx) notFound();
   const [t, locale] = await Promise.all([getTranslations("WorkspaceStudents"), getLocale()]);
   const writable = workspaceOffersWrites(ctx);
-  const [students, grades, copyable] = await Promise.all([
+  const [students, grades, copyable, activeCodes] = await Promise.all([
     listWorkspaceStudents(prisma, ctx.center.id),
     writable ? listCatalogGrades(prisma) : Promise.resolve([]),
     writable ? copyableWorkspaceStudents(prisma, ctx.user.id, ctx.center.id) : Promise.resolve([]),
+    activeShareCodeExpiries(prisma, ctx.center.id),
   ]);
+  const dateLocale = locale === "en" ? "en" : "ar";
   const gradeOptions = grades.map((grade) => ({ id: grade.id, label: catalogLabel(locale, grade) }));
   const copyGroups = copyable.map((group) => ({
     workspaceId: group.workspaceId,
@@ -92,8 +101,23 @@ export default async function WorkspaceStudentsPage({ params }: { params: Promis
               </div>
               {!student.linked ? (
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  {writable ? (
+                    <ShareCodeButton
+                      workspaceId={ctx.center.id}
+                      studentProfileId={student.id}
+                      studentName={fullName(student)}
+                      hasActiveCode={activeCodes.has(student.id)}
+                    />
+                  ) : null}
                   {writable ? <InviteAgainButton workspaceId={ctx.center.id} studentProfileId={student.id} /> : null}
                   <CancelInvitationButton workspaceId={ctx.center.id} studentProfileId={student.id} />
+                  {activeCodes.has(student.id) ? (
+                    <RevokeShareCodeButton
+                      workspaceId={ctx.center.id}
+                      studentProfileId={student.id}
+                      expiresLabel={formatDateTime(activeCodes.get(student.id)!, dateLocale, DEFAULT_TIMEZONE)}
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </li>

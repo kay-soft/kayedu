@@ -69,6 +69,9 @@ Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on
 ### `app/[locale]/(auth)/assistant-join/page.tsx` — **W7a (new)**
 Where any account redeems an assistant code; open to guests. `AuthCard` (title "Join as an assistant"), "Signed in as {name}" when signed in, the code field (LTR, monospaced, upper-case, `one-time-code`, hint "12 letters and numbers") and **Continue** (full width on a phone). Continue writes nothing: it swaps the field for a bordered confirmation — "Become {teacher}'s assistant?", the preset, the permission list with a check per line, a note that the teacher can change or remove it — with **Cancel** and **Confirm** (stacked full width at 375px, end-aligned from `sm`). A guest gets an info notice and **Sign in** / **Create an account**, both returning here with the code kept in the tab (never in a query). One `FormMessage` above the field for any refusal; success toasts and opens the assistant experience. `04-design-system.md` §11.36.
 
+### `app/[locale]/(auth)/workspace-join/page.tsx` — **W10 (new)**
+Where any signed-in account redeems a teacher's private-class share code (D-W43); open to guests. `AuthCard` (title "Join a private class"), "Signed in as {name}" when signed in, the same code field as `/assistant-join` (LTR, monospaced, upper-case, `one-time-code`, hint "12 letters and numbers") and **Continue** (full width on a phone, 44px). Continue writes nothing: it swaps the field for a bordered confirmation — "Join {teacher}'s private classes in “{workspace}”?", "Nothing is linked until you confirm", a muted note that the teacher sees only that the record is linked — with **Cancel** and **Confirm** (stacked full width at 375px, end-aligned from `sm`). A guest gets an info notice and **Sign in** / **Create an account**, both returning here with the code kept in the tab (never in a query). One `FormMessage` above the field for every refusal (one generic line for an unknown, expired, used or revoked code); success toasts and opens the student calendar. A ghost **Back** to the hub. `04-design-system.md` §11.37.
+
 ### `app/[locale]/(auth)/select-center/page.tsx`
 Branch cards had hover but **no selected state** — the branch you are already in looked like the others — and the "Whole Management" card was always brand-tinted, even when not selected. **R10a:** `AuthCard`; the active branch/roll-up gets a brand outline, tint and a check (not colour alone); idle cards share one hover state.
 **F3:** the empty state gains a third start, **I'm a parent: link my child** (to `/family/join`); a staff member or teacher who is also a parent gets a ghost **Your children (parent view)** link under their branches.
@@ -76,6 +79,7 @@ Branch cards had hover but **no selected state** — the branch you are already 
 
 ---
 **W8b:** a pending workspace invitation (D-W39) shows as a card above the choices — an amber-tinted `article` with an Invitation badge, "<teacher> invited you to their private classes in “<workspace>”", one line of what Confirm does, and **Cancel** (outline) / **Confirm** (primary), 44px, full width and stacked below `sm`; Cancel turns the card into a one-line "You declined…" status in place, Confirm opens the student calendar. While one is pending the hub no longer skips straight to a single experience.
+**W10:** a last choice card, **Join a private class** ("Have a code from a teacher? Enter it here"), in the idle choice style with a graduation-cap mark and the chevron, opening `/workspace-join` (D-W43).
 
 ## Account (every experience)
 

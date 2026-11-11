@@ -566,13 +566,9 @@
 
 ---
 
-## 56. A share code or link to link a workspace student — high priority
+## 56. ~~A share code or link to link a workspace student~~ — delivered at W10 (D-W43)
 
-**What it is.** A per-profile, single-use code (or a link carrying it) the teacher gives a workspace student in person, which the student redeems from their own account to link the profile — stored as **sha256** like the parent codes (F3) and the assistant codes (W7a), shown once, expiring, rate-limited at redemption.
-
-**Why deferred.** W8b (D-W39) invites by phone only, and the match is `User.phone`. Sign-up never writes `User.phone` and Account settings writes only `contactPhone` (D-02 (a), F2), so a student who registered on their own can never be matched: the invitation reaches only an account a centre created with that phone and that was later claimed. The founder accepted that narrow reach for W8b and asked for this entry, at high priority.
-
-**Depends on.** Nothing new in the model beyond a code table like `FamilyInvitation`; the accept path is W8b's `acceptWorkspaceInvitation` (the profile moved, the placeholder removed when empty), reached by a code instead of a phone match.
+**Delivered, not dropped.** Built as `WorkspaceShareCode` and `/workspace-join` (`03-build-order.md` W10, `00-master-product-spec.md` §5.1 D-W43): a per-profile, single-use, sha256-stored code the teacher shares by WhatsApp or a copied link, redeemed from the student's own account after a confirmation, through W8b's move. The number is kept so older references still resolve; an item lives in one list only. What W10 left out is entries 73–76.
 
 ---
 
@@ -733,6 +729,46 @@
 **Why deferred.** Out of scope for W9 by decision (D-W42). A copy crosses centres, so it is a read in one tenant and a write in another, and it must never copy attempts, scores or notices.
 
 **Depends on.** A copy through the builder's own `createAssessment` in the target (its authority and gate, never a raw insert), the source re-resolved for the same teacher, and a decision on copying between a branch and a workspace (a branch's row belongs to the centre's records). A reusable question bank (entry 5) would supersede it.
+
+---
+
+## 73. Emailing a workspace share code
+
+**What it is.** A "Send by email" beside Copy code, Copy link and WhatsApp on the Share code dialog: the join link mailed to an address the teacher types.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). Email is off (`EMAIL_ENABLED`, W1), and a typed address is a contact the teacher would be handing to the platform for someone who has not agreed to anything.
+
+**Depends on.** `EMAIL_ENABLED` and a real provider (M20), a decision on whether the typed address is stored (it must not become a matching key — CLAUDE.md rule 4), and the same rate limit as Share code.
+
+---
+
+## 74. Generating share codes in bulk
+
+**What it is.** "Share codes for all unlinked students": one code per unlinked profile of a workspace at once, listed for copying or printing.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). Each code is shown once, so a bulk list is a page of secrets the teacher must hand out one by one without mixing them up; one at a time keeps each code beside its student's name.
+
+**Depends on.** A printable or exportable list that is never stored (the codes stay sha256-only), the 30-a-day limit reconsidered for a batch, and each code still revoking that profile's previous one.
+
+---
+
+## 75. A class-wide join link
+
+**What it is.** One link per workspace class that any student can open to join it, creating or linking their own profile — not tied to a profile the teacher typed.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). W10's code links an existing profile the teacher created; a class link would let anyone holding it create a record in the workspace, which is enrolment by self-service — something a workspace has never had (it is never browsable, D-W20, D-W22).
+
+**Depends on.** A decision on approval (the teacher confirms each joiner, or not), on the profile's local record (who types the name and phone), on a cap and expiry for the link, and on how it interacts with the one-profile-per-account rule.
+
+---
+
+## 76. A parent redeeming a workspace share code
+
+**What it is.** A parent redeeming the code on their child's behalf, so the child's account is linked from the parent's.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). Parents see nothing from a workspace yet (entry 57), and redemption links the profile to the **redeemer's own** account — a parent redeeming would link the parent, not the child.
+
+**Depends on.** Entry 57 (parent visibility of workspace classes), and a redemption that targets a linked child's account through an ACTIVE `FamilyLink` with the child's consent rules decided.
 
 ---
 

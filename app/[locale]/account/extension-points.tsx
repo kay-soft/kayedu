@@ -1,5 +1,5 @@
 import type { User } from "@prisma/client";
-import { Baby, Check, KeyRound, Users } from "lucide-react";
+import { Baby, Check, GraduationCap, KeyRound, Users } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import {
@@ -293,6 +293,35 @@ export async function PremiumSection({ user }: AccountSectionProps) {
           <p className="text-sm text-text-secondary">{t("contact")}</p>
         </CardContent>
       </Card>
+    </PageSection>
+  );
+}
+
+/**
+ * Account → Private classes (W10, D-W43, docs/04 §11.37): every account. One
+ * card, "Join a private class", opening `/workspace-join`, where a teacher's
+ * share code is redeemed after a confirmation. It lists nothing: a linked
+ * private class is on the student's Sessions and Calendar, and its record is
+ * among the records on file above.
+ */
+export async function PrivateClassSection() {
+  const tPrivate = await getTranslations("Account.privateClass");
+  return (
+    <PageSection title={tPrivate("title")} description={tPrivate("description")}>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle as="h3">{tPrivate("joinTitle")}</CardTitle>
+            <CardDescription>{tPrivate("joinDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <LinkButton href={ROUTES.workspaceJoin} className="w-full sm:w-auto">
+              <GraduationCap className="size-4" aria-hidden />
+              {tPrivate("open")}
+            </LinkButton>
+          </CardContent>
+        </Card>
+      </div>
     </PageSection>
   );
 }

@@ -31,6 +31,12 @@ export const ROUTES = {
    * fragment (`assistantJoinUrl`), never a query.
    */
   assistantJoin: "/assistant-join",
+  /**
+   * W10 (D-W43): any signed-in account redeems a workspace share code here —
+   * guests sign in or sign up and come back. The code travels in the URL
+   * fragment (`workspaceJoinUrl`), never a query.
+   */
+  workspaceJoin: "/workspace-join",
   invite: (token: string) => `/invite/${token}`,
   // F5: the public Explore pages — guests, no sign-in (`(public)` route group).
   explore: "/explore",
@@ -222,6 +228,19 @@ export function familyJoinUrl(origin: string, locale: "ar" | "en", code: string)
 /** The link an assistant code is shared with (W7a): `<origin>/<locale>/assistant-join#CODE`. */
 export function assistantJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
   return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.assistantJoin}#${code}`;
+}
+
+/** The link a workspace share code is shared with (W10): `<origin>/<locale>/workspace-join#CODE`. */
+export function workspaceJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
+  return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.workspaceJoin}#${code}`;
+}
+
+/**
+ * The WhatsApp share for a join link (W10, D-W43 item 2): `wa.me` with the
+ * text only — never a phone number, so WhatsApp asks whom to send it to.
+ */
+export function whatsAppShareUrl(text: string): string {
+  return `https://wa.me/?text=${encodeURIComponent(text)}`;
 }
 
 /** The signed-in experiences, each with its own shell (docs/02 §2). */

@@ -106,6 +106,13 @@ export const RATE_LIMITS = {
   // student to a workspace, and each "Invite again".
   workspaceStudentAddPerUser: { limit: 60, windowMs: 60 * 60_000 },
   workspaceInvitePerUser: { limit: 20, windowMs: 24 * 60 * 60_000 },
+  // W10 (D-W43 item 7): "Share code" per teacher, and redeeming a share code
+  // (/workspace-join) per account and per client IP — the preview and the
+  // confirm each count, valid or not, before any lookup. The IP limit is
+  // generous on purpose: a private class may sit on one Wi-Fi address.
+  workspaceShareCodePerUser: { limit: 30, windowMs: 24 * 60 * 60_000 },
+  workspaceJoinPerUser: { limit: 10, windowMs: 60 * 60_000 },
+  workspaceJoinPerIp: { limit: 60, windowMs: 60 * 60_000 },
 } as const;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

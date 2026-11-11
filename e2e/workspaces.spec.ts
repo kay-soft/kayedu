@@ -55,6 +55,17 @@ import { choose, dayFromToday, field, openDialog, pickDate, submitConfirmingConf
  * amount. The same `removeE2eUsers` teardown; the run asserts no payment,
  * roster row, method, change row, session or audit row of it is left.
  * Skipped too close to midnight (the session must have started today).
+ *
+ * W10 (D-W43), the share-code test: a premium teacher with an unlinked,
+ * enrolled workspace profile (set up directly, staging-guarded) opens Share
+ * code on its card and reads the code once, with the WhatsApp link (wa.me,
+ * the join link as text, no phone); a tagged self-registered student account
+ * (a login, no User.phone) opens the link, the code leaves the address bar,
+ * the confirmation names the teacher and the workspace, Confirm opens the
+ * calendar with the private class on it, and the code then answers the one
+ * invalid message; the teacher reads "Linked" with no Share code and never the
+ * account's name or email. The same `removeE2eUsers` teardown (the codes go
+ * with the workspace); the run asserts nothing of it, codes included, is left.
  */
 
 function escapeRegExp(text: string): string {
@@ -381,6 +392,182 @@ test("@write workspace students: add by phone, enrol, the student confirms on th
     await studentLeftovers(db, e2eTag, [teacher.email, pupil.email], userIds, centerIds),
     "the teardown leaves nothing of this run behind",
   ).toEqual({ users: 0, organizations: 0, centers: 0, profiles: 0, invitations: 0, enrollments: 0, notifications: 0, audit: 0 });
+  await db.$disconnect();
+});
+
+/** What the W10 run left behind, by its own ids — never a whole-table count. */
+async function shareCodeLeftovers(db: PrismaClient, tag: string, emails: string[], userIds: string[], centerIds: string[]) {
+  const [base, codes] = await Promise.all([
+    studentLeftovers(db, tag, emails, userIds, centerIds),
+    db.workspaceShareCode.count({ where: { OR: [{ centerId: { in: centerIds } }, { createdByUserId: { in: userIds } }, { usedByUserId: { in: userIds } }] } }),
+  ]);
+  return { ...base, codes };
+}
+
+/**
+ * The redemption limiter counts per account and per client IP. The local dev
+ * server sees every e2e request from one address, so a journey run a few times
+ * an hour would refuse itself: the workspace-join buckets are cleared before
+ * and after (staging or local only — `assertSafeToWrite`).
+ */
+async function resetWorkspaceJoinLimits(db: PrismaClient) {
+  await db.rateLimitBucket.deleteMany({
+    where: { OR: [{ key: { startsWith: "workspaceJoinPerIp:" } }, { key: { startsWith: "workspaceJoinPerUser:" } }] },
+  });
+}
+
+test("@write workspace share code: the teacher shares a code for an unlinked student; a self-registered account opens the link, confirms and sees the private class; the teacher reads Linked", async ({
+  page,
+  browser,
+  appLocale,
+  msg,
+  e2eTag,
+}, testInfo) => {
+  assertSafeToWrite("e2e: workspace share code fixtures");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e workspace share code: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const db = new PrismaClient();
+  const locale: AppLocale = appLocale;
+  const teacher = { email: e2eEmail(e2eTag, "wsc-teacher"), first: "Wsct", last: `Teacher ${e2eTag}` };
+  // A self-registered student: a login and an app User, and no User.phone (sign-up never writes one).
+  const pupil = { email: e2eEmail(e2eTag, "wsc-student"), first: "Wscs", last: `Student ${e2eTag}` };
+  const typed = { firstName: "Coded", lastName: `Pupil ${e2eTag}` };
+  const userIds: string[] = [];
+  const centerIds: string[] = [];
+  const authIds: string[] = [];
+  const studentContext = await browser.newContext({ ...testInfo.project.use });
+  await resetWorkspaceJoinLimits(db);
+
+  try {
+    for (const person of [teacher, pupil]) {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: person.email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: { first_name: person.first, last_name: person.last, locale },
+      });
+      if (error || !data.user) throw error ?? new Error("e2e workspace share code: could not create a login");
+      authIds.push(data.user.id);
+    }
+    const studentPage = await studentContext.newPage();
+    await signInWith(studentPage, locale, pupil.email);
+    await signInWith(page, locale, teacher.email);
+    const teacherRow = await db.user.findUniqueOrThrow({ where: { email: teacher.email } });
+    const pupilRow = await db.user.findUniqueOrThrow({ where: { email: pupil.email } });
+    userIds.push(teacherRow.id, pupilRow.id);
+    expect(pupilRow.phone, "a self-registered account has no User.phone, so no phone invitation can reach it").toBeNull();
+
+    // Staging-guarded setup: premium, one workspace with one class, one unlinked enrolled profile.
+    await db.user.update({ where: { id: teacherRow.id }, data: { premiumUntil: new Date(Date.now() + 30 * 86_400_000) } });
+    const workspaceName = `Chemistry ${e2eTag}`;
+    const created = await createWorkspace(db, teacherRow.id, { name: workspaceName });
+    if (!created.ok) throw new Error(`e2e workspace share code: ${created.error}`);
+    const workspaceId = created.workspaceId;
+    centerIds.push(workspaceId);
+    const today = todayInTimezone("Africa/Cairo");
+    const tomorrow = addDays(today, 1);
+    const klass = await createWorkspaceClass(
+      db,
+      teacherRow.id,
+      workspaceId,
+      {
+        educationSystemId: null,
+        gradeId: null,
+        subjectId: null,
+        price: 10_000,
+        lateThresholdMinutes: 10,
+        startDate: today,
+        endDate: addDays(today, 21),
+        slots: [{ dayOfWeek: tomorrow.getUTCDay(), startTime: "17:00", endTime: "18:00" }],
+      },
+      { confirmConflicts: true, locale },
+    );
+    if (!klass.ok) throw new Error(`e2e workspace share code: ${klass.error}`);
+    const classId = klass.classGroupId;
+    const added = await addWorkspaceStudent(db, teacherRow.id, workspaceId, {
+      ...typed,
+      phone: `+2011${String(Math.floor(Math.random() * 100_000_000)).padStart(8, "0")}`,
+      gradeId: null,
+    });
+    if (!added.ok) throw new Error(`e2e workspace share code: ${added.error}`);
+    const enrolled = await enrolWorkspaceStudent(db, teacherRow.id, workspaceId, classId, added.studentProfileId);
+    if (!enrolled.ok) throw new Error(`e2e workspace share code: ${enrolled.error}`);
+    const firstSession = await db.session.findFirstOrThrow({
+      where: { classGroupId: classId, date: { gt: today } },
+      orderBy: [{ date: "asc" }, { startTime: "asc" }],
+    });
+
+    // The teacher: Share code on the unlinked card, the code once, Copy and WhatsApp.
+    await page.goto(`/${locale}/teacher/workspaces/${workspaceId}/students`);
+    await expectHealthy(page, locale);
+    const card = page.getByRole("listitem").filter({ hasText: typed.lastName });
+    await expect(card.getByText(msg("WorkspaceStudents.row.notLinked"), { exact: true })).toBeVisible();
+    await card.getByRole("button", { name: msg("WorkspaceStudents.shareCode.share"), exact: true }).click();
+    const dialog = openDialog(page);
+    await dialog.getByRole("button", { name: msg("WorkspaceStudents.shareCode.submit"), exact: true }).click();
+    await expect(dialog.getByText(msg("WorkspaceStudents.shareCode.onceWarning"))).toBeVisible();
+    const code = (await dialog.textContent())?.match(/[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}/)?.[0];
+    expect(code, "the code is shown once in the dialog").toBeTruthy();
+    const whatsApp = dialog.getByRole("link", { name: msg("WorkspaceStudents.shareCode.whatsApp") });
+    const href = (await whatsApp.getAttribute("href")) ?? "";
+    expect(href.startsWith("https://wa.me/?text="), "WhatsApp is wa.me with the text only, no phone number").toBe(true);
+    expect(decodeURIComponent(href)).toContain(`/${locale}/workspace-join#${code!.replace(/-/g, "")}`);
+    const stored = await db.workspaceShareCode.findFirstOrThrow({ where: { studentProfileId: added.studentProfileId } });
+    expect(JSON.stringify(stored).includes(code!.replace(/-/g, "")), "only the sha256 is stored").toBe(false);
+    await dialog.getByRole("button", { name: msg("WorkspaceStudents.shareCode.done"), exact: true }).first().click();
+    await expect(page.getByText(code!), "never retrievable later").toHaveCount(0);
+    await expect(card.getByRole("button", { name: msg("WorkspaceStudents.shareCode.revoke"), exact: true })).toBeVisible();
+
+    // The student opens the shared link: the code leaves the address bar, the confirmation names the teacher and the workspace.
+    await studentPage.goto(`/${locale}/workspace-join#${code!.replace(/-/g, "")}`);
+    await expectHealthy(studentPage, locale);
+    await expect(studentPage.getByLabel(field(msg("WorkspaceJoin.codeLabel")))).toHaveValue(code!.replace(/-/g, ""));
+    await expect.poll(() => new URL(studentPage.url()).hash, { message: "the code is cleared from the address bar" }).toBe("");
+    await studentPage.getByRole("button", { name: msg("WorkspaceJoin.continue"), exact: true }).click();
+    const teacherName = `${teacher.first} ${teacher.last}`;
+    await expect(studentPage.getByRole("heading", { name: msg("WorkspaceJoin.confirmTitle", { teacher: teacherName, workspace: workspaceName }) })).toBeVisible();
+    expect(
+      (await db.studentProfile.findUniqueOrThrow({ where: { id: added.studentProfileId } })).userId,
+      "nothing links before Confirm",
+    ).not.toBe(pupilRow.id);
+    await studentPage.getByRole("button", { name: msg("WorkspaceJoin.confirm"), exact: true }).click();
+    await studentPage.waitForURL(new RegExp(`/${locale}/student/calendar`));
+
+    // The class is on their calendar, as a private class of that workspace.
+    const day = firstSession.date.toISOString().slice(0, 10);
+    await studentPage.goto(`/${locale}/student/calendar?month=${day.slice(0, 7)}&day=${day}`);
+    await expectHealthy(studentPage, locale);
+    await expect(studentPage.getByText(msg("WorkspaceStudents.student.privateClass"), { exact: true }).first()).toBeVisible();
+    await expect(studentPage.getByText(workspaceName, { exact: true }).first()).toBeVisible();
+
+    // The code works once.
+    await studentPage.goto(`/${locale}/workspace-join#${code!.replace(/-/g, "")}`);
+    await studentPage.getByRole("button", { name: msg("WorkspaceJoin.continue"), exact: true }).click();
+    await expect(studentPage.getByText(msg("WorkspaceJoin.errors.invalidCode"))).toBeVisible();
+
+    // The teacher reads "Linked" — still the typed record, never the account's own name — and no Share code.
+    await page.goto(`/${locale}/teacher/workspaces/${workspaceId}/students`);
+    await expectHealthy(page, locale);
+    const linkedCard = page.getByRole("listitem").filter({ hasText: typed.lastName });
+    await expect(linkedCard.getByText(msg("WorkspaceStudents.row.linked"), { exact: true })).toBeVisible();
+    await expect(linkedCard.getByRole("button", { name: msg("WorkspaceStudents.shareCode.share"), exact: true })).toHaveCount(0);
+    await expect(page.getByText(pupil.last)).toHaveCount(0);
+    await expect(page.getByText(pupil.email)).toHaveCount(0);
+  } finally {
+    await studentContext.close();
+    await removeE2eUsers(db, e2eTag);
+    for (const authId of authIds) {
+      if ((await db.user.count({ where: { authId } })) === 0) await supabase.auth.admin.deleteUser(authId).catch(() => undefined);
+    }
+    await resetWorkspaceJoinLimits(db);
+  }
+
+  expect(
+    await shareCodeLeftovers(db, e2eTag, [teacher.email, pupil.email], userIds, centerIds),
+    "the teardown leaves nothing of this run behind",
+  ).toEqual({ users: 0, organizations: 0, centers: 0, profiles: 0, invitations: 0, enrollments: 0, notifications: 0, audit: 0, codes: 0 });
   await db.$disconnect();
 });
 
