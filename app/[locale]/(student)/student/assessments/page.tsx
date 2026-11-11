@@ -1,7 +1,7 @@
 import { FileQuestion } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { studentBranches } from "@/app/[locale]/(student)/student/assessments/scope";
+import { privateTeacherNames, studentBranches } from "@/app/[locale]/(student)/student/assessments/scope";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -25,17 +25,25 @@ import { sessionDisplayName } from "@/lib/session-label";
  * can see, across every branch, grouped by state and then by branch. One
  * `listStudentAssessments` per profile, unioned in memory (U7, rule 1). Each row's
  * times are in its session's frozen timezone, else its branch's.
+ *
+ * W9 (D-W42 item 4): a linked PERSONAL workspace is one more group, headed by
+ * the workspace's name and the teacher's, tagged "Private class", its times in
+ * the workspace's timezone.
  */
 export default async function StudentAssessmentsPage() {
   const session = await requireStudentUser();
   const t = await getTranslations("StudentAssessments");
+  const tPrivate = await getTranslations("WorkspaceStudents.student");
   const locale = await getLocale();
   const now = new Date();
 
   const branches = await studentBranches(session.user.id);
+  const teachers = await privateTeacherNames(branches);
   const perBranch = await Promise.all(
     branches.map(async ({ ctx, student }) => ({
+      centerId: ctx.center.id,
       branch: ctx.center.name,
+      teacher: teachers.get(ctx.center.id) ?? null,
       zone: centreTimeZone(ctx.settings),
       items: await listStudentAssessments(prisma, student, now),
     })),
@@ -74,8 +82,16 @@ export default async function StudentAssessmentsPage() {
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 {groups.map((group) => (
-                  <section key={group.branch} className="flex flex-col gap-2">
-                    <h3 className="text-xs font-medium text-text-secondary">{group.branch}</h3>
+                  <section key={group.centerId} className="flex flex-col gap-2">
+                    <h3 className="flex flex-wrap items-center gap-2 text-xs font-medium text-text-secondary">
+                      <span dir="auto">{group.branch}</span>
+                      {group.teacher !== null ? (
+                        <>
+                          <span dir="auto">{group.teacher}</span>
+                          <Badge variant="neutral">{tPrivate("privateClass")}</Badge>
+                        </>
+                      ) : null}
+                    </h3>
                     <ul className="flex flex-col gap-2">
                       {group.items.map((item) => (
                         <li key={item.id}>

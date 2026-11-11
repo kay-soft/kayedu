@@ -36,6 +36,14 @@
  * and another teacher's workspace, the window, phones, both ids on every
  * audit row, and every workspace function an assistant must never reach.
  *
+ * W9 (D-W26, D-W42), section 17: exams and homework in workspaces — the
+ * owner's fixed capability, the engine's defaults, validation, publish, locks,
+ * extend, attempts, lazy finalisation, reveal and frozen scores; eligibility
+ * (unlinked, unenrolled, left, linked enrolled, another workspace, another
+ * teacher); premium lapse refusing every teacher write and none of a
+ * student's; archive; notices and the re-check; the assistant matrix; audit
+ * with both ids; centre-side, hub and switcher reads; the statics.
+ *
  * Writes and cleans up its own fixtures (users `workspaces-check-…`, the
  * branch and catalogue rows `workspaces-check-…`, every centre under the
  * fixture users' personal organizations, and — W8b — the placeholder users
@@ -44,8 +52,8 @@
  * or a local database only.
  */
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
@@ -165,6 +173,34 @@ import { scopedData, scopedWhere } from "../lib/db/tenant-scope.ts";
 import { clampRangeToVisibility, teacherHistoryFloor } from "../lib/db/visibility.ts";
 import { monthRangeUtc, weekRangeUtc } from "../lib/scheduling.ts";
 import { parseEarningsPeriod } from "../lib/validation/earnings.ts";
+// W9 (D-W42): assessments in workspaces.
+import { assessmentDefaults, type AssessmentDraft, type DraftQuestion } from "../lib/assessments.ts";
+import {
+  createAssessment,
+  deleteAssessment,
+  extendAssessment,
+  findTeacherAssessment,
+  homeworkDeadlineFor,
+  listTeacherAssessments,
+  publishAssessment,
+  resolveAssessmentTeacher,
+  saveAssessmentDraft,
+  unpublishAssessment,
+} from "../lib/db/assessments.ts";
+import {
+  listStudentAssessments,
+  readAttemptReveal,
+  readStudentAssessment,
+  resolveAssessmentStudent,
+  saveAnswer,
+  startAttempt,
+  submitAttempt,
+} from "../lib/db/assessment-attempts.ts";
+import { assessmentResultProgress, readAssessmentResults, readAttemptResult } from "../lib/db/assessment-results.ts";
+import { loadAuditFeed } from "../lib/db/audit-feed.ts";
+import { hiddenAssessmentNoticeIds, syncAssessmentSoonNotices } from "../lib/db/notifications.ts";
+import { TEACHER_WORKSPACE_ONLY_NAV } from "../components/shell/nav.ts";
+import { EXPECTED_WORKSPACE_ONLY_TEACHER_NAV } from "./lib/expected-nav.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -234,6 +270,16 @@ const setPremium = (userId: string, until: Date | null) =>
   prisma.user.update({ where: { id: userId }, data: { premiumUntil: until } });
 
 const read = (path: string) => readSource(join(ROOT, path));
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (/node_modules|\.next/.test(full)) continue;
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (/\.(ts|tsx)$/.test(entry)) out.push(full);
+  }
+  return out;
+}
 
 async function main() {
   await cleanup();
@@ -767,6 +813,9 @@ async function main() {
   // W8d (D-W41): Earnings, then assistants in workspaces.
   const earnings = await workspaceEarnings({ today, gradeId: grade.id, subjectId: subject.id });
   if (earnings) await workspaceAssistants({ today, gradeId: grade.id, subjectId: subject.id, earnings, ownerB });
+
+  // W9 (D-W42): exams and homework in workspaces.
+  await workspaceAssessments({ today, gradeId: grade.id, subjectId: subject.id, branchId: branch.id });
 }
 
 // ── 13. W8b: workspace students and invitations (D-W27, D-W39) ─────────────
@@ -1209,11 +1258,19 @@ async function workspaceStudents(fx: {
     /getWorkspaceContext\(id\)/.test(read("app/[locale]/(teacher)/teacher/workspaces/[id]/students/page.tsx")),
   );
   const scheduleUsers = ["app/[locale]/(student)/student/schedule/page.tsx", "app/[locale]/(student)/student/calendar/page.tsx"];
+  // W9 old → new (B, approved in the W9 follow-up, D-W42): the student assessments scope now reads
+  // through the opt-in resolver; the hub, switcher, staff and teacher resolvers stay branch-only.
   check(
-    "The opt-in student resolver is used by the schedule and the calendar; assessments keep the branch-only one (static)",
+    "The opt-in student resolver is used by the schedule, the calendar and (W9) the assessments scope (static)",
     scheduleUsers.every((file) => /getStudentScheduleContexts\(/.test(read(file))) &&
-      /getStudentContexts\(/.test(read("app/[locale]/(student)/student/assessments/scope.ts")) &&
-      !/getStudentScheduleContexts/.test(read("app/[locale]/(student)/student/assessments/scope.ts")),
+      /getStudentScheduleContexts\(/.test(read("app/[locale]/(student)/student/assessments/scope.ts")) &&
+      !/getStudentContexts\(/.test(read("app/[locale]/(student)/student/assessments/scope.ts")),
+  );
+  check(
+    "The hub, switcher, staff and teacher resolvers never read the opt-in resolver or its input (static)",
+    ["lib/auth/relations.ts", "lib/auth/experiences.ts", "lib/auth/teacher-scope.ts", "app/[locale]/(auth)/select-center/page.tsx", "components/shell/experience-switcher-data.ts"].every(
+      (file) => !/getStudentScheduleContexts|studentWorkspaceProfiles/.test(read(file)),
+    ),
   );
   check(
     "The hub stays open while an invitation is pending (static)",
@@ -2198,10 +2255,12 @@ async function workspaceAssistants(fx: W8dFixture & { earnings: NonNullable<Awai
     coActing !== null && coActing.workspaces.length === 1 && coActing.workspaces[0].centerId === ws && coActing.workspaces[0].teacherMembershipId !== null &&
       coActing.branches.some((branch) => branch.centerId === b1.id),
   );
+  // W9 old → new (C, approved in the W9 follow-up, D-W42): Co-teacher and Full gain both assessment
+  // keys in a workspace, Grader gains assessments.review; the other three rows are unchanged.
   const matrix: [string, FixtureUser, string[]][] = [
-    ["Co-teacher", co.assistant, ["classes.view", "checkin.workspace", "payments.workspace"]],
-    ["Full", full.assistant, ["classes.view", "checkin.workspace", "payments.workspace", "analytics.view"]],
-    ["Grader", grader.assistant, []],
+    ["Co-teacher", co.assistant, ["assessments.review", "assessments.manage", "classes.view", "checkin.workspace", "payments.workspace"]],
+    ["Full", full.assistant, ["assessments.review", "assessments.manage", "classes.view", "checkin.workspace", "payments.workspace", "analytics.view"]],
+    ["Grader", grader.assistant, ["assessments.review"]],
     ["check-in only", checkinOnly.assistant, ["checkin.workspace"]],
     ["payments only", payOnly.assistant, ["payments.workspace"]],
     ["classes + phones", phones.assistant, ["classes.view", "students.phones"]],
@@ -2211,10 +2270,11 @@ async function workspaceAssistants(fx: W8dFixture & { earnings: NonNullable<Awai
     const got = ASSISTANT_PERMISSIONS.filter((permission) => assistantCan(acting, permission, ws));
     check(`${label}: assistantCan in the workspace grants exactly ${allowed.join(", ") || "nothing"}`, got.join() === allowed.join(), got.join());
   }
+  // W9 old → new (D, approved in the W9 follow-up, D-W42): the assessment keys now act in a workspace.
   check(
-    "The workspace keys still grant nothing at a branch, and the assessment and request keys nothing in a workspace",
+    "The workspace keys still grant nothing at a branch, and requests.manage nothing in a workspace",
     !assistantCan(coActing, "checkin.workspace", b1.id) && !assistantCan(coActing, "payments.workspace", b1.id) &&
-      !assistantCan(coActing, "assessments.manage", ws) && !assistantCan(coActing, "requests.manage", ws),
+      !assistantCan(coActing, "requests.manage", ws),
   );
 
   // ── 16b. Writes, allowed: Co-teacher checks in and records a payment as the teacher ──
@@ -2456,6 +2516,513 @@ async function workspaceAssistants(fx: W8dFixture & { earnings: NonNullable<Awai
   check("createWorkspace makes nothing for the teacher: the assistant (not premium) is refused, and the teacher's count is unchanged", !ownWorkspace.ok && (await countActiveWorkspaces(prisma, teacher.id)) === 1);
   const settled = await prisma.$transaction((tx) => createSessionSettlement(tx, ws, sessionId, co.assistant.id));
   check("No settlement can be made of the workspace by anyone (workspaceNotSettled)", !settled.ok && settled.error === "workspaceNotSettled");
+}
+
+// ── 17. W9: exams and homework in workspaces (D-W26, D-W42) ────────────────
+
+type W9Fixture = { today: Date; gradeId: string; subjectId: string; branchId: string };
+
+/** A workspace context as `resolveAssessmentTeacher` reads it (what `getWorkspaceContext` builds, minus the Next runtime). */
+async function workspaceAuthority(userId: string, centerId: string, experienceDenied = false) {
+  const access = await resolveWorkspaceAccess(prisma, userId, centerId);
+  return {
+    center: { id: centerId },
+    user: { id: userId },
+    role: "TEACHER" as const,
+    grants: {},
+    experienceDenied,
+    ...(access ? { workspace: access } : {}),
+  };
+}
+
+function w9Question(points: number, correct = 0): DraftQuestion {
+  return { text: `Q${points}`, points, options: Array.from({ length: 4 }, (_, i) => ({ text: `O${i}`, isCorrect: i === correct })) };
+}
+
+function w9Draft(type: "EXAM" | "HOMEWORK", extra: Partial<AssessmentDraft> = {}): AssessmentDraft {
+  const now = Date.now();
+  return {
+    ...assessmentDefaults(type),
+    title: type === "EXAM" ? "W9 exam" : "W9 homework",
+    instructions: null,
+    windowStart: type === "EXAM" ? new Date(now - 3_600_000) : null,
+    windowEnd: type === "EXAM" ? new Date(now + 3 * 3_600_000) : null,
+    deadline: type === "HOMEWORK" ? new Date(now + 2 * 3_600_000) : null,
+    questions: [w9Question(2), w9Question(3), w9Question(5)],
+    ...extra,
+  };
+}
+
+async function workspaceAssessments(fx: W9Fixture) {
+  const { today } = fx;
+  console.log("\n17. W9: assessments in workspaces — authority, the engine, eligibility, lapse, archive, notices, assistants, audit, isolation");
+  const now = new Date();
+  const HOUR = 3_600_000;
+  const later = (ms: number) => new Date(now.getTime() + ms);
+  const options = { confirmConflicts: true, locale: "en", now };
+
+  // ── 17a. Fixtures ──────────────────────────────────────────────────────
+  const teacher = await makeUser("w9-teacher", { premium: true });
+  const rival = await makeUser("w9-rival", { premium: true });
+  const created = await createWorkspace(prisma, teacher.id, { name: "W9 Physics" });
+  const second = await createWorkspace(prisma, teacher.id, { name: "W9 Second" });
+  const rivalWs = await createWorkspace(prisma, rival.id, { name: "W9 Rival" });
+  if (!created.ok || !second.ok || !rivalWs.ok) {
+    check("W9 fixtures: three workspaces", false);
+    return;
+  }
+  const ws = created.workspaceId;
+  const ws2 = second.workspaceId;
+  const wsRival = rivalWs.workspaceId;
+  // The teacher also teaches at the branch: its assessment list must never hold a workspace row.
+  await prisma.membership.create({ data: { userId: teacher.id, centerId: fx.branchId, role: "TEACHER", firstName: "W9", lastName: "Teacher", joinedAt: now } });
+  const classInput = {
+    educationSystemId: null,
+    gradeId: fx.gradeId,
+    subjectId: fx.subjectId,
+    price: 10_000,
+    lateThresholdMinutes: 10,
+    startDate: today,
+    endDate: addDays(today, 27),
+    slots: [{ dayOfWeek: addDays(today, 1).getUTCDay(), startTime: "16:00", endTime: "18:00" }],
+  };
+  const cls = await createWorkspaceClass(prisma, teacher.id, ws, classInput, options);
+  const rivalCls = await createWorkspaceClass(prisma, rival.id, wsRival, classInput, options);
+  const classId = cls.ok ? cls.classGroupId : "";
+  const rivalClassId = rivalCls.ok ? rivalCls.classGroupId : "";
+  const today8 = await createWorkspaceSession(prisma, teacher.id, ws, { kind: "extra", classGroupId: classId, date: today, startTime: "08:00", endTime: "09:00" }, options);
+  const sessionId = today8.ok ? today8.sessionId : "";
+
+  // Students: three linked accounts (enrolled, never enrolled, leaves) and one unlinked profile.
+  const linkedStudent = async (tag: string) => {
+    const user = await makeUser(`w9-${tag}`);
+    const phone = freshPhone();
+    await prisma.user.update({ where: { id: user.id }, data: { phone, authId: `${STEM}-auth-w9-${tag}-${RUN}` } });
+    const added = await addWorkspaceStudent(prisma, teacher.id, ws, { ...PLACEHOLDER(`w9${tag}`), phone, gradeId: null }, { now });
+    const invitation = await prisma.workspaceInvitation.findFirst({ where: { centerId: ws, targetUserId: user.id, status: "PENDING" } });
+    const accepted = invitation ? await acceptWorkspaceInvitation(prisma, user.id, invitation.id) : null;
+    return { user, profileId: added.ok ? added.studentProfileId : "", linked: accepted !== null && accepted.ok };
+  };
+  const enrolled = await linkedStudent("enrolled");
+  const unenrolled = await linkedStudent("unenrolled");
+  const leaver = await linkedStudent("leaver");
+  const unlinkedAdd = await addWorkspaceStudent(prisma, teacher.id, ws, { ...PLACEHOLDER("w9unlinked"), phone: freshPhone(), gradeId: null }, { now });
+  const unlinkedProfileId = unlinkedAdd.ok ? unlinkedAdd.studentProfileId : "";
+  const unlinkedProfile = await prisma.studentProfile.findUniqueOrThrow({ where: { id: unlinkedProfileId }, include: { user: true } });
+  for (const profileId of [enrolled.profileId, leaver.profileId, unlinkedProfileId]) {
+    await enrolWorkspaceStudent(prisma, teacher.id, ws, classId, profileId, now);
+  }
+  check(
+    "W9 fixtures: a class, today's session, three linked students (one never enrolled) and one unlinked enrolled profile on a login-less placeholder",
+    cls.ok && rivalCls.ok && today8.ok && enrolled.linked && unenrolled.linked && leaver.linked && unlinkedAdd.ok && unlinkedProfile.user.authId === null,
+  );
+
+  // ── 17b. Authority: workspace.assessments.manage, decided by workspaceCan ─
+  const access = await resolveWorkspaceAccess(prisma, teacher.id, ws);
+  check(
+    "The owner holds the fixed capability workspace.assessments.manage (workspaceCan)",
+    access !== null && (WORKSPACE_OWNER_CAPABILITIES as readonly string[]).includes("workspace.assessments.manage") &&
+      workspaceCan({ workspace: access }, "workspace.assessments.manage"),
+  );
+  const owner = await resolveAssessmentTeacher(prisma, await workspaceAuthority(teacher.id, ws));
+  check("The owner resolves as the assessment teacher, with the workspace membership", owner !== null && owner.centerId === ws && owner.membershipId === access?.membershipId);
+  if (!owner || !access) return;
+  check(
+    "Nobody else resolves: another teacher, a student, a denied experience, a branch-shaped context with no grants",
+    (await resolveAssessmentTeacher(prisma, await workspaceAuthority(rival.id, ws))) === null &&
+      (await resolveAssessmentTeacher(prisma, await workspaceAuthority(enrolled.user.id, ws))) === null &&
+      (await resolveAssessmentTeacher(prisma, await workspaceAuthority(teacher.id, ws, true))) === null &&
+      (await resolveAssessmentTeacher(prisma, { center: { id: ws }, user: { id: teacher.id }, role: "TEACHER", grants: {}, experienceDenied: false })) === null,
+  );
+  const me = { userId: teacher.id };
+  const rivalOwner = await resolveAssessmentTeacher(prisma, await workspaceAuthority(rival.id, wsRival));
+
+  // ── 17c. The engine: defaults, validation, create, publish, locks ───────
+  const invalid = await createAssessment(prisma, me, owner, {
+    type: "EXAM",
+    classGroupId: classId,
+    draft: w9Draft("EXAM", { questions: [{ text: "Q", points: 1, options: [{ text: "a", isCorrect: true }, { text: "b", isCorrect: true }] }] }),
+  });
+  check("Validation at a workspace: two correct options are refused (invalid, multipleCorrect)", !invalid.ok && invalid.error === "invalid" && (invalid.errors ?? []).some((error) => error.code === "multipleCorrect"));
+  const exam = await createAssessment(prisma, me, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") });
+  const deadline = await homeworkDeadlineFor(prisma, ws, { ...(await prisma.session.findUniqueOrThrow({ where: { id: sessionId } })), classGroupId: classId }, TZ);
+  const homework = await createAssessment(prisma, me, owner, { type: "HOMEWORK", sessionId, draft: w9Draft("HOMEWORK") });
+  const examRow = exam.ok ? await prisma.assessment.findUniqueOrThrow({ where: { id: exam.id } }) : null;
+  const homeworkRow = homework.ok ? await prisma.assessment.findUniqueOrThrow({ where: { id: homework.id } }) : null;
+  const examDefaults = assessmentDefaults("EXAM");
+  const homeworkDefaults = assessmentDefaults("HOMEWORK");
+  check(
+    "The owner creates an exam on the class and a homework on the session, with the per-type defaults (exam: shuffle on, reveal off; homework: untimed, reveal on)",
+    examRow !== null && homeworkRow !== null && examRow.status === "DRAFT" && homeworkRow.classGroupId === classId &&
+      examRow.shuffle === examDefaults.shuffle && examRow.showScore === examDefaults.showScore && examRow.showCorrectAnswers === examDefaults.showCorrectAnswers &&
+      homeworkRow.durationMinutes === homeworkDefaults.durationMinutes && homeworkRow.showCorrectAnswers === homeworkDefaults.showCorrectAnswers &&
+      examRow.teacherMembershipId === owner.membershipId,
+  );
+  check("The default homework deadline at a workspace is D-W03's: the next session − 30 min", deadline.basis === "nextSession");
+  if (!exam.ok || !homework.ok) return;
+  const listed = await listTeacherAssessments(prisma, owner, {});
+  check("The workspace list holds both, the drafts included", [exam.id, homework.id].every((id) => listed.some((row) => row.id === id)));
+  check(
+    "Another teacher reaches nothing: the rival's handle finds neither and cannot write them (notFound)",
+    rivalOwner !== null &&
+      (await findTeacherAssessment(prisma, rivalOwner, exam.id)) === null &&
+      errorOf(await publishAssessment(prisma, { userId: rival.id }, rivalOwner, exam.id, now)) === "notFound" &&
+      errorOf(await createAssessment(prisma, { userId: rival.id }, rivalOwner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") })) === "notFound",
+  );
+  check(
+    "A forged handle — the teacher's membership on another workspace's id — is forbidden",
+    errorOf(await publishAssessment(prisma, me, { ...owner, centerId: wsRival }, exam.id, now)) === "forbidden",
+  );
+
+  const publishedAt = now;
+  const pub = await publishAssessment(prisma, me, owner, exam.id, publishedAt);
+  const pubHw = await publishAssessment(prisma, me, owner, homework.id, publishedAt);
+  check("Publish works at a workspace (exam and homework)", pub.ok && pubHw.ok);
+  const noticesFor = (userId: string, kind: string, assessmentId: string) =>
+    prisma.notification.count({ where: { userId, centerId: ws, kind: kind as "ASSESSMENT_PUBLISHED", dedupeKey: { startsWith: `assessment:${assessmentId}:` } } });
+  check(
+    "Publish notifies only linked enrolled students: the enrolled and the (still enrolled) leaver, never the unlinked placeholder or the unenrolled",
+    (await noticesFor(enrolled.user.id, "ASSESSMENT_PUBLISHED", exam.id)) === 1 && (await noticesFor(leaver.user.id, "ASSESSMENT_PUBLISHED", exam.id)) === 1 &&
+      (await noticesFor(unlinkedProfile.userId, "ASSESSMENT_PUBLISHED", exam.id)) === 0 && (await noticesFor(unenrolled.user.id, "ASSESSMENT_PUBLISHED", exam.id)) === 0,
+  );
+  const payloads = await prisma.notification.findMany({ where: { centerId: ws, kind: { in: ["ASSESSMENT_PUBLISHED", "ASSESSMENT_EXTENDED", "ASSESSMENT_OPENS_SOON", "ASSESSMENT_DUE_SOON"] } }, select: { payload: true } });
+  check("Every workspace assessment notice carries ids only ({assessmentId})", payloads.length > 0 && payloads.every((row) => JSON.stringify(Object.keys(row.payload as object)) === '["assessmentId"]'));
+
+  // ── 17d. Eligibility at start (D-W07, D-W42 item 3) ─────────────────────
+  await prisma.$transaction((tx) => leaveClass(tx, { centerId: ws, classGroupId: classId, studentUserId: leaver.user.id, now }));
+  const asStudent = async (userId: string) => resolveAssessmentStudent(prisma, ws, userId);
+  const stEnrolled = await asStudent(enrolled.user.id);
+  const stUnenrolled = await asStudent(unenrolled.user.id);
+  const stLeaver = await asStudent(leaver.user.id);
+  const stUnlinked = { centerId: ws, studentProfileId: unlinkedProfileId, userId: unlinkedProfile.userId };
+  const beforeStart = stEnrolled ? await readStudentAssessment(prisma, stEnrolled, exam.id, now) : null;
+  check(
+    "Before starting, the linked enrolled student reads it with Start and no question and no correctness in the payload",
+    beforeStart !== null && beforeStart.canStart && beforeStart.taking === null && !/isCorrect/.test(JSON.stringify(beforeStart)),
+  );
+  const startUnlinked = await startAttempt(prisma, stUnlinked, exam.id, now);
+  const startUnenrolled = stUnenrolled ? await startAttempt(prisma, stUnenrolled, exam.id, now) : null;
+  const startLeaver = stLeaver ? await startAttempt(prisma, stLeaver, exam.id, now) : null;
+  check("An unlinked profile is refused at start by direct call (notEligible) — on top of the enrolment check", errorOf(startUnlinked) === "notEligible");
+  check("A linked student never enrolled is refused (notEligible)", errorOf(startUnenrolled) === "notEligible");
+  check("A linked student who left the class is refused (notEligible)", errorOf(startLeaver) === "notEligible");
+  check(
+    "The unenrolled and the leaver do not even see it in their list",
+    stUnenrolled !== null && stLeaver !== null &&
+      !(await listStudentAssessments(prisma, stUnenrolled, now)).some((item) => item.id === exam.id) &&
+      !(await listStudentAssessments(prisma, stLeaver, now)).some((item) => item.id === exam.id),
+  );
+  check(
+    "Another workspace: the student has no profile in the teacher's second workspace, and its id does not find this exam",
+    (await resolveAssessmentStudent(prisma, ws2, enrolled.user.id)) === null &&
+      errorOf(await startAttempt(prisma, { centerId: ws2, studentProfileId: enrolled.profileId, userId: enrolled.user.id }, exam.id, now)) === "notFound",
+  );
+  if (!stEnrolled) return;
+  const started = await startAttempt(prisma, stEnrolled, exam.id, now);
+  check("The linked enrolled student starts", started.ok && !started.resumed);
+  if (!started.ok) return;
+  const taking = await readStudentAssessment(prisma, stEnrolled, exam.id, now);
+  check(
+    "The taking payload (the W2 serializer) carries no correctness: no isCorrect anywhere",
+    taking?.taking !== null && taking?.taking !== undefined && taking.taking.questions.length === 3 && !/isCorrect/.test(JSON.stringify(taking)),
+  );
+  const questions = await prisma.assessmentQuestion.findMany({ where: { assessmentId: exam.id }, include: { options: true }, orderBy: { position: "asc" } });
+  const correctOf = (q: (typeof questions)[number]) => q.options.find((option) => option.isCorrect)!.id;
+  const wrongOf = (q: (typeof questions)[number]) => q.options.find((option) => !option.isCorrect)!.id;
+  const saved = [
+    await saveAnswer(prisma, stEnrolled, started.attemptId, { questionId: questions[0].id, optionId: correctOf(questions[0]) }, later(60_000)),
+    await saveAnswer(prisma, stEnrolled, started.attemptId, { questionId: questions[1].id, optionId: wrongOf(questions[1]) }, later(61_000)),
+  ];
+  check("Autosave works at a workspace and answers nothing about correctness", saved.every((result) => result.ok) && !/isCorrect|correct/.test(JSON.stringify(saved)));
+
+  // ── 17e. Locks and extend ───────────────────────────────────────────────
+  check(
+    "After the first attempt: no edit (notDraft), no unpublish and no delete (locked)",
+    errorOf(await saveAssessmentDraft(prisma, me, owner, exam.id, w9Draft("EXAM"))) === "notDraft" &&
+      errorOf(await unpublishAssessment(prisma, me, owner, exam.id)) === "locked" &&
+      errorOf(await deleteAssessment(prisma, me, owner, exam.id)) === "locked",
+  );
+  const oldEnd = examRow!.windowEnd!;
+  const extended = await extendAssessment(prisma, me, owner, exam.id, new Date(oldEnd.getTime() + HOUR), later(2 * 60_000));
+  check(
+    "Extend works and tells the enrolled linked student with no final attempt (ASSESSMENT_EXTENDED), never the placeholder",
+    extended.ok && (await noticesFor(enrolled.user.id, "ASSESSMENT_EXTENDED", exam.id)) === 1 && (await noticesFor(unlinkedProfile.userId, "ASSESSMENT_EXTENDED", exam.id)) === 0,
+  );
+  check("Extend only later (notLater)", errorOf(await extendAssessment(prisma, me, owner, exam.id, oldEnd, later(3 * 60_000))) === "notLater");
+
+  // ── 17f. Premium lapse: every teacher write refused, none of the student's ─
+  const draftForLapse = await createAssessment(prisma, me, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") });
+  const publishedNoAttempt = await createAssessment(prisma, me, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") });
+  if (publishedNoAttempt.ok) await publishAssessment(prisma, me, owner, publishedNoAttempt.id, now);
+  // Lapsed before this section's `now` too: every writer reads premium at the `now` it is given.
+  await setPremium(teacher.id, new Date(now.getTime() - 60_000));
+  const lapsedWrites = draftForLapse.ok && publishedNoAttempt.ok
+    ? [
+        await createAssessment(prisma, me, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") }),
+        await saveAssessmentDraft(prisma, me, owner, draftForLapse.id, w9Draft("EXAM")),
+        await publishAssessment(prisma, me, owner, draftForLapse.id, now),
+        await unpublishAssessment(prisma, me, owner, publishedNoAttempt.id),
+        await extendAssessment(prisma, me, owner, exam.id, new Date(oldEnd.getTime() + 2 * HOUR), later(4 * 60_000)),
+        await deleteAssessment(prisma, me, owner, draftForLapse.id),
+      ]
+    : [];
+  check(
+    "Premium lapsed: create, save, publish, unpublish, extend and delete are all refused (premiumRequired), nothing written",
+    lapsedWrites.length === 6 && lapsedWrites.every((result) => refusedWith(result, "premiumRequired")) &&
+      (await prisma.assessment.count({ where: { centerId: ws } })) === 4,
+    JSON.stringify(lapsedWrites.map(errorOf)),
+  );
+  const lapsedSave = await saveAnswer(prisma, stEnrolled, started.attemptId, { questionId: questions[2].id, optionId: wrongOf(questions[2]) }, later(5 * 60_000));
+  const lapsedSubmit = await submitAttempt(prisma, stEnrolled, started.attemptId, later(6 * 60_000));
+  check("Premium lapsed: the student's autosave and submit still work (a lapse never blocks an attempt)", lapsedSave.ok && lapsedSubmit.ok && lapsedSubmit.finalisedBy === "STUDENT");
+  const lapsedResults = await readAssessmentResults(prisma, me, owner, exam.id, later(7 * 60_000));
+  check("Premium lapsed: the owner still reads the results (reads never need premium)", lapsedResults.ok);
+  await setPremium(teacher.id, inDays(30));
+
+  // ── 17g. Scoring frozen, results, reveal ────────────────────────────────
+  const attemptRow = await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
+  check("The score is frozen at submit: 2 of 10 (only the 2-point question right)", attemptRow.score === 2 && attemptRow.maxScore === 10);
+  await prisma.assessmentQuestion.update({ where: { id: questions[0].id }, data: { points: 50 } });
+  const resultsAfter = await readAssessmentResults(prisma, me, owner, exam.id, later(8 * 60_000));
+  check(
+    "Results read the frozen score — a later change to the question's points recomputes nothing",
+    resultsAfter.ok && resultsAfter.results.students.some((row) => row.score === 2 && row.maxScore === 10),
+  );
+  await prisma.assessmentQuestion.update({ where: { id: questions[0].id }, data: { points: 2 } });
+  const answers = await readAttemptResult(prisma, me, owner, exam.id, started.attemptId, later(8 * 60_000));
+  check("The owner reads the submitted attempt's answers", answers.ok && answers.attempt.answers?.length === 3);
+  check(
+    "No reveal before the close, and none after it while showCorrectAnswers is off (the exam's default)",
+    (await readAttemptReveal(prisma, stEnrolled, started.attemptId, later(9 * 60_000))) === null &&
+      (await readAttemptReveal(prisma, stEnrolled, started.attemptId, new Date(oldEnd.getTime() + 3 * HOUR))) === null,
+  );
+  const hwStart = await startAttempt(prisma, stEnrolled, homework.id, later(10 * 60_000));
+  if (hwStart.ok) {
+    const hwQuestions = await prisma.assessmentQuestion.findMany({ where: { assessmentId: homework.id }, include: { options: true }, orderBy: { position: "asc" } });
+    await saveAnswer(prisma, stEnrolled, hwStart.attemptId, { questionId: hwQuestions[0].id, optionId: hwQuestions[0].options.find((o) => o.isCorrect)!.id }, later(11 * 60_000));
+  }
+  const hwDeadline = homeworkRow!.deadline!;
+  check(
+    "Homework reveal is closed before the deadline (the attempt is not even final)",
+    hwStart.ok && (await readAttemptReveal(prisma, stEnrolled, hwStart.attemptId, later(12 * 60_000))) === null,
+  );
+  const afterDeadline = new Date(hwDeadline.getTime() + 60_000);
+  const hwList = await listStudentAssessments(prisma, stEnrolled, afterDeadline);
+  const hwAttempt = hwStart.ok ? await prisma.assessmentAttempt.findUniqueOrThrow({ where: { id: hwStart.attemptId } }) : null;
+  check(
+    "Lazy finalisation: an untouched attempt past its deadline is finalised by the next read (DEADLINE), stamped with the deadline, scored 2 of 10",
+    hwAttempt !== null && hwAttempt.finalisedBy === "DEADLINE" && hwAttempt.submittedAt?.getTime() === hwDeadline.getTime() &&
+      hwAttempt.score === 2 && hwAttempt.maxScore === 10 && hwList.some((item) => item.id === homework.id && item.state === "CLOSED"),
+  );
+  const reveal = hwStart.ok ? await readAttemptReveal(prisma, stEnrolled, hwStart.attemptId, afterDeadline) : null;
+  check("After the deadline, with showCorrectAnswers on, the reveal opens", reveal !== null && reveal.length === 3);
+
+  // ── 17h. Notices: computed "soon", the access re-check ──────────────────
+  const soonExam = await createAssessment(prisma, me, owner, {
+    type: "EXAM",
+    classGroupId: classId,
+    draft: w9Draft("EXAM", { windowStart: later(30 * 60_000), windowEnd: later(3 * HOUR) }),
+  });
+  if (soonExam.ok) await publishAssessment(prisma, me, owner, soonExam.id, now);
+  await syncAssessmentSoonNotices(prisma, enrolled.user.id, [ws], now);
+  await syncAssessmentSoonNotices(prisma, unlinkedProfile.userId, [ws], now);
+  check(
+    "The computed \"opens soon\" notice covers a workspace exam for the linked student, and nothing for the placeholder",
+    soonExam.ok && (await noticesFor(enrolled.user.id, "ASSESSMENT_OPENS_SOON", soonExam.id)) === 1 &&
+      (await prisma.notification.count({ where: { userId: unlinkedProfile.userId } })) === 0,
+  );
+  const reachOf = async (userId: string, withWorkspace: boolean) => {
+    const studentCenterIds = withWorkspace ? [ws] : [];
+    return {
+      relationCenterIds: [],
+      studentCenterIds,
+      hiddenNoticeIds: await hiddenAssessmentNoticeIds(prisma, userId, studentCenterIds, now),
+      workspaceCenterIds: withWorkspace ? [ws] : [],
+    };
+  };
+  const visibleAssessmentNotices = async (userId: string, withWorkspace = true) =>
+    prisma.notification.count({ where: { AND: [visibleWhere(userId, await reachOf(userId, withWorkspace)), { centerId: ws, kind: { in: ["ASSESSMENT_PUBLISHED", "ASSESSMENT_EXTENDED", "ASSESSMENT_OPENS_SOON", "ASSESSMENT_DUE_SOON"] } }] } });
+  check(
+    "The re-check shows the linked student's workspace notices through the opt-in reach, and none without it",
+    (await visibleAssessmentNotices(enrolled.user.id)) >= 3 && (await visibleAssessmentNotices(enrolled.user.id, false)) === 0,
+  );
+  check("The student who left sees none of their earlier notices (enrolment gone — hidden, not deleted)", (await visibleAssessmentNotices(leaver.user.id)) === 0 && (await noticesFor(leaver.user.id, "ASSESSMENT_PUBLISHED", exam.id)) === 1);
+  const beforeUnpublish = await visibleAssessmentNotices(enrolled.user.id);
+  if (soonExam.ok) await unpublishAssessment(prisma, me, owner, soonExam.id);
+  check("Unpublishing hides that assessment's notices", (await visibleAssessmentNotices(enrolled.user.id)) === beforeUnpublish - 2);
+  check(
+    "A deactivated profile drops out of the opt-in resolver's input, so its notices hide",
+    await (async () => {
+      await prisma.studentProfile.update({ where: { id: enrolled.profileId }, data: { active: false } });
+      const gone = !(await studentWorkspaceProfiles(prisma, enrolled.user.id)).some((row) => row.centerId === ws);
+      await prisma.studentProfile.update({ where: { id: enrolled.profileId }, data: { active: true } });
+      return gone;
+    })(),
+  );
+
+  // ── 17i. Assistants: each grant × each action ───────────────────────────
+  const link = async (tag: string, permissions: readonly string[], preset: "GRADER" | "CO_TEACHER" | "FULL" = "CO_TEACHER") => {
+    const user = await makeUser(`w9-assistant-${tag}`);
+    const row = await prisma.teacherAssistant.create({ data: { teacherUserId: teacher.id, assistantUserId: user.id, preset } });
+    if (permissions.length > 0) await prisma.assistantPermissionGrant.createMany({ data: permissions.map((permission) => ({ assistantId: row.id, permission })) });
+    return { user, linkId: row.id };
+  };
+  const co = await link("co", PRESET_PERMISSIONS.CO_TEACHER);
+  const grader = await link("grader", PRESET_PERMISSIONS.GRADER, "GRADER");
+  const full = await link("full", PRESET_PERMISSIONS.FULL, "FULL");
+  const checkinOnly = await link("checkin", ["checkin.workspace"]);
+  const actingOf = async (userId: string) => resolveAssistantActing(prisma, { assistantUserId: userId, teacherUserId: teacher.id, now });
+  const coActing = await actingOf(co.user.id);
+  const graderActing = await actingOf(grader.user.id);
+  const fullActing = await actingOf(full.user.id);
+  const checkinActing = await actingOf(checkinOnly.user.id);
+  const granted = (acting: Awaited<ReturnType<typeof actingOf>>) => ASSISTANT_PERMISSIONS.filter((permission) => assistantCan(acting, permission, ws)).join();
+  check(
+    "assistantCan in the workspace: Grader → assessments.review; Co-teacher and Full → both assessment keys (+ their W8d keys); check-in only → check-in",
+    granted(graderActing) === "assessments.review" &&
+      granted(coActing) === "assessments.review,assessments.manage,classes.view,checkin.workspace,payments.workspace" &&
+      granted(fullActing) === "assessments.review,assessments.manage,classes.view,checkin.workspace,payments.workspace,analytics.view" &&
+      granted(checkinActing) === "checkin.workspace",
+    [granted(graderActing), granted(coActing), granted(fullActing), granted(checkinActing)].join(" | "),
+  );
+  check(
+    "requests.manage grants nothing in a workspace, and the workspace keys still nothing at a branch",
+    !assistantCan(coActing, "requests.manage", ws) && !assistantCan(coActing, "checkin.workspace", fx.branchId) && !assistantCan(coActing, "payments.workspace", fx.branchId),
+  );
+  const asCo = { userId: co.user.id };
+  const coHw = await createAssessment(prisma, asCo, owner, { type: "HOMEWORK", sessionId, draft: w9Draft("HOMEWORK") });
+  const coSave = coHw.ok ? await saveAssessmentDraft(prisma, asCo, owner, coHw.id, w9Draft("HOMEWORK", { title: "Co edit" })) : null;
+  const coPublish = coHw.ok ? await publishAssessment(prisma, asCo, owner, coHw.id, now) : null;
+  const coExtend = coHw.ok ? await extendAssessment(prisma, asCo, owner, coHw.id, later(5 * HOUR), now) : null;
+  const coUnpublish = coHw.ok ? await unpublishAssessment(prisma, asCo, owner, coHw.id) : null;
+  const coDraft = await createAssessment(prisma, asCo, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") });
+  const coDelete = coDraft.ok ? await deleteAssessment(prisma, asCo, owner, coDraft.id) : null;
+  check(
+    "Co-teacher (assessments.manage): create a homework, save, publish, extend, unpublish, create and delete a draft — every one allowed",
+    [coHw, coSave, coPublish, coExtend, coUnpublish, coDraft, coDelete].every((result) => result !== null && result.ok),
+    JSON.stringify([coHw, coSave, coPublish, coExtend, coUnpublish, coDraft, coDelete].map(errorOf)),
+  );
+  check(
+    "Co-teacher reads results and answers (Manage covers Review)",
+    (await readAssessmentResults(prisma, asCo, owner, exam.id, now)).ok && (await readAttemptResult(prisma, asCo, owner, exam.id, started.attemptId, now)).ok,
+  );
+  const asGrader = { userId: grader.user.id };
+  check(
+    "Grader (assessments.review only): results and answers allowed; create, save, publish, extend, unpublish, delete all forbidden",
+    (await readAssessmentResults(prisma, asGrader, owner, exam.id, now)).ok &&
+      (await readAttemptResult(prisma, asGrader, owner, exam.id, started.attemptId, now)).ok &&
+      [
+        await createAssessment(prisma, asGrader, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") }),
+        await saveAssessmentDraft(prisma, asGrader, owner, draftForLapse.ok ? draftForLapse.id : "", w9Draft("EXAM")),
+        await publishAssessment(prisma, asGrader, owner, draftForLapse.ok ? draftForLapse.id : "", now),
+        await extendAssessment(prisma, asGrader, owner, exam.id, new Date(oldEnd.getTime() + 2 * HOUR), now),
+        await unpublishAssessment(prisma, asGrader, owner, publishedNoAttempt.ok ? publishedNoAttempt.id : ""),
+        await deleteAssessment(prisma, asGrader, owner, draftForLapse.ok ? draftForLapse.id : ""),
+      ].every((result) => refusedWith(result, "forbidden")),
+  );
+  const asCheckin = { userId: checkinOnly.user.id };
+  check(
+    "No assessment grant (check-in only): every assessment write and read is refused",
+    refusedWith(await createAssessment(prisma, asCheckin, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") }), "forbidden") &&
+      errorOf(await readAssessmentResults(prisma, asCheckin, owner, exam.id, now)) === "forbidden" &&
+      (await assessmentResultProgress(prisma, asCheckin, owner, [exam.id], now)).size === 0,
+  );
+  check(
+    "A swapped teacher (the rival's handle) and another teacher's workspace by id are refused for the assistant",
+    rivalOwner !== null &&
+      refusedWith(await createAssessment(prisma, asCo, rivalOwner, { type: "EXAM", classGroupId: rivalClassId, draft: w9Draft("EXAM") }), "forbidden") &&
+      refusedWith(await createAssessment(prisma, asCo, { ...owner, centerId: wsRival }, { type: "EXAM", classGroupId: rivalClassId, draft: w9Draft("EXAM") }), "forbidden") &&
+      errorOf(await readAssessmentResults(prisma, asCo, { ...owner, centerId: wsRival }, exam.id, now)) === "forbidden",
+  );
+  // Lapsed before this section's `now` too: every writer reads premium at the `now` it is given.
+  await setPremium(teacher.id, new Date(now.getTime() - 60_000));
+  check(
+    "The teacher's premium lapsed: the assistant's link is not effective, so writes and reads are refused",
+    refusedWith(await createAssessment(prisma, asCo, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") }), "forbidden") &&
+      errorOf(await readAssessmentResults(prisma, asCo, owner, exam.id, now)) === "forbidden",
+  );
+  await setPremium(teacher.id, inDays(30));
+  await prisma.teacherAssistant.update({ where: { id: full.linkId }, data: { revokedAt: new Date() } });
+  check(
+    "A removed link is refused",
+    refusedWith(await createAssessment(prisma, { userId: full.user.id }, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") }), "forbidden"),
+  );
+  const coAudit = await prisma.auditLog.findMany({ where: { centerId: ws, actorUserId: co.user.id } });
+  check(
+    "Every assistant write is audited with actor = the assistant and onBehalfOf = the teacher, the teacher's action names, ids only",
+    coAudit.length >= 7 && coAudit.every((row) => row.onBehalfOfUserId === teacher.id && row.action.startsWith("assessment.") && forbiddenAuditKey(row.before) === null && forbiddenAuditKey(row.after) === null),
+    `${coAudit.length} rows`,
+  );
+  const ownAudit = await prisma.auditLog.findMany({ where: { centerId: ws, actorUserId: teacher.id, action: { startsWith: "assessment." } } });
+  check("The owner's own writes carry no onBehalfOf", ownAudit.length > 0 && ownAudit.every((row) => row.onBehalfOfUserId === null));
+
+  // ── 17j. Nothing reaches a centre-side surface, the hub or the switcher ──
+  const branchCtx = {
+    center: { id: fx.branchId },
+    user: { id: teacher.id },
+    role: "TEACHER" as const,
+    grants: Object.fromEntries((await prisma.permissionGrant.findMany({ where: { centerId: fx.branchId, role: "TEACHER" } })).map((row) => [row.action, row.allowed])),
+    experienceDenied: false,
+  };
+  const branchTeacher = await resolveAssessmentTeacher(prisma, branchCtx);
+  const wsIds = new Set((await prisma.assessment.findMany({ where: { centerId: ws }, select: { id: true } })).map((row) => row.id));
+  check(
+    "The teacher's branch handle lists no workspace assessment (one scoped read per place)",
+    branchTeacher !== null && !(await listTeacherAssessments(prisma, branchTeacher, {})).some((row) => wsIds.has(row.id)),
+  );
+  const feed = await loadAuditFeed(prisma, fx.branchId, "all", { take: 200, skip: 0 });
+  check("The branch's audit feed holds no workspace assessment row", !feed.entries.some((entry) => wsIds.has((entry as { entityId?: string }).entityId ?? "")));
+  const relationsT = await resolveCenterRelations(prisma, teacher.id);
+  const relationsS = await resolveCenterRelations(prisma, enrolled.user.id);
+  const expS = await loadExperiences(prisma, enrolled.user.id);
+  check(
+    "The hub, switcher, staff and teacher resolvers never include a PERSONAL centre: the teacher resolves the branch only, the student nothing, the experiences no workspace",
+    relationsT.every((relation) => relation.center.kind !== "PERSONAL") && relationsT.some((relation) => relation.center.id === fx.branchId) &&
+      relationsS.every((relation) => relation.center.kind !== "PERSONAL") &&
+      expS.every((entry) => entry.centerId !== ws),
+  );
+  check("Admin and directory reads leave the workspace out", !(await platformCenterList(prisma)).some((center) => center.id === ws) && !(await listAccessibleCenters(prisma)).some((center) => center.id === ws));
+
+  // ── 17k. Archived: new attempts blocked, results kept, writes refused ───
+  const lastExam = await createAssessment(prisma, me, owner, { type: "EXAM", classGroupId: classId, draft: w9Draft("EXAM") });
+  if (lastExam.ok) await publishAssessment(prisma, me, owner, lastExam.id, now);
+  const archived = await archiveWorkspace(prisma, teacher.id, ws, now);
+  check(
+    "Archived: the class is deactivated, the published exam is hidden and a new attempt refused (notFound)",
+    archived.ok && lastExam.ok &&
+      errorOf(await startAttempt(prisma, stEnrolled, lastExam.id, now)) === "notFound" &&
+      !(await listStudentAssessments(prisma, stEnrolled, now)).some((item) => item.id === lastExam.id),
+  );
+  check("Archived: the owner keeps every result", (await readAssessmentResults(prisma, me, owner, exam.id, now)).ok);
+  check(
+    "Archived: teacher and assistant writes are refused (workspaceArchived)",
+    lastExam.ok &&
+      refusedWith(await extendAssessment(prisma, me, owner, lastExam.id, later(6 * HOUR), now), "workspaceArchived") &&
+      refusedWith(await createAssessment(prisma, asCo, owner, { type: "HOMEWORK", sessionId, draft: w9Draft("HOMEWORK") }), "workspaceArchived"),
+  );
+
+  // ── 17l. Statics ────────────────────────────────────────────────────────
+  const optIn = [...walk(join(ROOT, "app")), ...walk(join(ROOT, "lib"))].filter((file) => /getStudentScheduleContexts\(/.test(readSource(file))).map((file) => relative(ROOT, file).replace(/\\/g, "/"));
+  check(
+    "The opt-in student resolver is called only by the student surfaces listed: the schedule, the calendar and the assessments scope",
+    optIn.sort().join() === ["app/[locale]/(student)/student/assessments/scope.ts", "app/[locale]/(student)/student/calendar/page.tsx", "app/[locale]/(student)/student/schedule/page.tsx"].join(),
+    optIn.join(", "),
+  );
+  check(
+    "Every teacher assessment write re-runs the workspace gate inside its transaction (static)",
+    (read("lib/db/assessments.ts").match(/const refused = await writeGate\(tx, actor, teacher, now\);/g) ?? []).length === 6 &&
+      /workspaceCan\(\{ workspace: access \}, "workspace\.assessments\.manage"\)/.test(read("lib/db/assessments.ts")) &&
+      /assertWorkspaceWritable\(tx, access, now\)/.test(read("lib/db/assessments.ts")),
+  );
+  check(
+    "No student path runs the workspace write gate (a lapse never blocks an attempt) (static)",
+    !/workspaceWriteGate|assertWorkspaceWritable|requirePremium/.test(read("lib/db/assessment-attempts.ts")),
+  );
+  check(
+    "The workspace-only teacher shell is the shared constant, and it matches the hand-written oracle",
+    TEACHER_WORKSPACE_ONLY_NAV.map((item) => item.labelKey).join() === EXPECTED_WORKSPACE_ONLY_TEACHER_NAV.join() &&
+      /nav: session\.workspaceOnly\s*\?\s*TEACHER_WORKSPACE_ONLY_NAV/.test(read("app/[locale]/(teacher)/teacher-shell.ts")),
+  );
 }
 
 main()

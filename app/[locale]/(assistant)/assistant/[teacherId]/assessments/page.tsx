@@ -30,6 +30,10 @@ export async function generateMetadata(): Promise<Metadata> {
  * merged (U7), each within the assistant's window (D-W19). Drafts are listed
  * only with `assessments.manage` (D-W01): a Grader sees published rows only.
  * Filters as the teacher's list.
+ *
+ * W9 (D-W42 items 7, 9): the teacher's PERSONAL workspaces where `assistantCan`
+ * grants the key are listed too, named and tagged Private, and the Branch
+ * filter becomes the Source filter (branches, then workspaces).
  */
 export default async function AssistantAssessmentsPage({
   params,
@@ -48,10 +52,11 @@ export default async function AssistantAssessmentsPage({
   if (reviewing.length === 0) notFound();
   const managing = new Set((await assistantAssessmentBranches(scope, "assessments.manage")).map((entry) => entry.branch.centerId));
 
-  const withBranch = reviewing.length > 1;
+  const withBranch = reviewing.filter((entry) => !entry.isPrivate).length > 1;
+  const withSource = reviewing.length > 1;
   const named = reviewing.find((entry) => entry.branch.centerId === query.branch);
   const listed = named ? [named] : reviewing;
-  const branchFilter = withBranch && named ? named.branch.centerId : "";
+  const branchFilter = withSource && named ? named.branch.centerId : "";
   const type = query.type === "EXAM" || query.type === "HOMEWORK" ? query.type : undefined;
 
   const t = await getTranslations("TeacherAssessments");
@@ -73,11 +78,17 @@ export default async function AssistantAssessmentsPage({
     }),
   );
   const all = perBranch.flatMap(({ entry, rows, progress }) =>
-    rows.map((row) => ({ row, branchName: entry.branch.centerName, branchZone: entry.zone, progress: progress.get(row.id) })),
+    rows.map((row) => ({
+      row,
+      branchName: entry.branch.centerName,
+      branchZone: entry.zone,
+      progress: progress.get(row.id),
+      isPrivate: entry.isPrivate,
+    })),
   );
   const classOptions = [...new Map(all.map((item) => [item.row.classGroupId, item])).values()].map((item) => ({
     value: item.row.classGroupId,
-    label: withBranch
+    label: withBranch || item.isPrivate
       ? `${sessionDisplayName(locale, { classGroup: item.row.classGroup })} · ${item.branchName}`
       : sessionDisplayName(locale, { classGroup: item.row.classGroup }),
   }));
@@ -107,7 +118,8 @@ export default async function AssistantAssessmentsPage({
             type={type ?? ""}
             classGroupId={classFilter}
             classes={classOptions}
-            branches={withBranch ? reviewing.map((entry) => ({ id: entry.branch.centerId, name: entry.branch.centerName })) : []}
+            branches={withSource ? reviewing.filter((entry) => !entry.isPrivate).map((entry) => ({ id: entry.branch.centerId, name: entry.branch.centerName })) : []}
+            workspaces={withSource ? reviewing.filter((entry) => entry.isPrivate).map((entry) => ({ id: entry.branch.centerId, name: entry.branch.centerName })) : []}
             branch={branchFilter}
           />
           <ResultsRegion className="flex flex-col gap-4">

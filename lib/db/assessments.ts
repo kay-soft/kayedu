@@ -25,6 +25,7 @@ import { assistantMayAt, onBehalfOf } from "./assistant-acting.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { deleteAssessmentNotices, notifyAssessmentExtended, notifyAssessmentPublished } from "./notifications.ts";
 import { scopedData, scopedWhere } from "./tenant-scope.ts";
+import { assertWorkspaceWritable, resolveWorkspaceAccess, workspaceCan, type WorkspaceAccess } from "./workspaces.ts";
 
 /**
  * Teachers' exams and homework (W2, D-W01–D-W06, D-W11, D-W30) — the one data
@@ -40,6 +41,13 @@ import { scopedData, scopedWhere } from "./tenant-scope.ts";
  * teacher** as separate parameters, so W7's on-behalf writes (actor = the
  * assistant, teacher = T, D-W18) fit without reshaping them. Every
  * question/option write asks `isAssessmentLocked` first (D-W08).
+ *
+ * **PERSONAL workspaces (W9, D-W42).** The same engine, the same rows. The
+ * authority there is the owner's fixed capability `workspace.assessments.manage`
+ * (`workspaceCan`, never the matrix), and every write also passes
+ * `assertWorkspaceWritable` (premium now, not archived) — both re-run inside the
+ * write's transaction by `workspaceWriteGate`, from the ids it is given. Reads
+ * never need premium. A branch row is untouched by any of it.
  */
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -54,6 +62,8 @@ export type AssessmentAuthorityContext = {
   role: TenantRole;
   grants: PermissionGrants;
   experienceDenied: boolean;
+  /** W9: present on a PERSONAL workspace's own context (`getWorkspaceContext`) — then `workspaceCan` decides. */
+  workspace?: WorkspaceAccess;
 };
 
 /**
@@ -62,9 +72,20 @@ export type AssessmentAuthorityContext = {
  * there (the Owner can switch it off; centre staff roles can never hold it —
  * the ceiling), and the person must have an ACTIVE TEACHER membership at that
  * branch, re-read here rather than trusted from the context.
+ *
+ * W9 (D-W42 item 1): on a workspace's own context the matrix is never read —
+ * the owner's `workspace.assessments.manage` (`workspaceCan`) decides, and the
+ * membership must be the workspace's owner's own. No premium for this: reads
+ * never need it, and every write re-checks it (`workspaceWriteGate`).
  */
 export async function resolveAssessmentTeacher(db: Db, ctx: AssessmentAuthorityContext): Promise<AssessmentTeacher | null> {
-  if (ctx.role !== "TEACHER" || !canInContext(ctx, "assessment.manage.own")) return null;
+  if (ctx.role !== "TEACHER" || ctx.experienceDenied) return null;
+  if (ctx.workspace) {
+    if (ctx.workspace.centerId !== ctx.center.id || ctx.workspace.actorUserId !== ctx.user.id) return null;
+    if (!workspaceCan({ workspace: ctx.workspace }, "workspace.assessments.manage")) return null;
+  } else if (!canInContext(ctx, "assessment.manage.own")) {
+    return null;
+  }
   const membership = await db.membership.findFirst({
     where: scopedWhere(ctx.center.id, { userId: ctx.user.id, role: "TEACHER" as const, active: true }),
     select: { id: true },
@@ -310,7 +331,11 @@ export type AssessmentWriteError =
   /** W3a: extend refused — the window or deadline has already passed. */
   | "passed"
   /** W3a: extend refused — the new end is not later than the current one. */
-  | "notLater";
+  | "notLater"
+  /** W9: a workspace write while the owner is not premium (D-W15, D-W42 item 5). */
+  | "premiumRequired"
+  /** W9: a workspace write while the workspace is archived (D-W28). */
+  | "workspaceArchived";
 
 export type AssessmentWriteResult =
   | { ok: true; id: string }
@@ -341,6 +366,44 @@ async function actorMayWrite(tx: Db, actor: AssessmentActor, teacher: Assessment
     centerId: teacher.centerId,
     permission: "assessments.manage",
   });
+}
+
+/**
+ * W9 (D-W42 items 1, 5, 9): the PERSONAL-workspace half of every write's gate,
+ * re-run inside the write's own transaction. At a branch it answers null and
+ * nothing changes. In a workspace: the workspace re-resolved for the owning
+ * teacher (an id that is not their live workspace is `forbidden`, like a stale
+ * membership), the owner's `workspace.assessments.manage` (`workspaceCan`), and
+ * `assertWorkspaceWritable` — premium now and not archived — whoever the actor
+ * is (an assistant writes as the teacher). Only teacher writes call it: no
+ * student path does, so a lapse never blocks an attempt.
+ */
+export async function workspaceWriteGate(
+  tx: Db,
+  teacher: AssessmentTeacher,
+  now: Date,
+): Promise<null | "forbidden" | "premiumRequired" | "workspaceArchived"> {
+  const centre = await tx.center.findUnique({ where: { id: teacher.centerId }, select: { kind: true } });
+  if (!centre) return "forbidden";
+  if (centre.kind !== "PERSONAL") return null;
+  const access = await resolveWorkspaceAccess(tx, teacher.userId, teacher.centerId);
+  if (!access || access.membershipId !== teacher.membershipId) return "forbidden";
+  if (!workspaceCan({ workspace: access }, "workspace.assessments.manage")) return "forbidden";
+  const writable = await assertWorkspaceWritable(tx, access, now);
+  return writable.ok ? null : writable.error;
+}
+
+/** Every writer's opening: the owning membership, the actor, then (W9) the workspace gate. */
+async function writeGate(
+  tx: Db,
+  actor: AssessmentActor,
+  teacher: AssessmentTeacher,
+  now: Date,
+): Promise<null | { ok: false; error: AssessmentWriteError }> {
+  if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" };
+  if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" };
+  const refused = await workspaceWriteGate(tx, teacher, now);
+  return refused ? { ok: false, error: refused } : null;
 }
 
 function draftColumns(draft: AssessmentDraft) {
@@ -406,14 +469,15 @@ export async function createAssessment(
   actor: AssessmentActor,
   teacher: AssessmentTeacher,
   input: CreateAssessmentInput,
+  now: Date = new Date(),
 ): Promise<AssessmentWriteResult> {
   const errors = draftErrors(input.type, input.draft);
   if (errors.length > 0) return { ok: false, error: "invalid", errors };
   const { centerId } = teacher;
 
   return db.$transaction(async (tx) => {
-    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
-    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
+    const refused = await writeGate(tx, actor, teacher, now);
+    if (refused) return refused;
 
     let classGroupId: string;
     let sessionId: string | null = null;
@@ -449,8 +513,8 @@ export async function createAssessment(
       }),
       select: { id: true },
     });
-    const refused = await replaceQuestions(tx, centerId, created.id, input.draft.questions);
-    if (refused) throw new Error("A new assessment cannot be locked.");
+    const lockedNew = await replaceQuestions(tx, centerId, created.id, input.draft.questions);
+    if (lockedNew) throw new Error("A new assessment cannot be locked.");
 
     await writeAuditRow(tx, {
       centerId,
@@ -479,11 +543,12 @@ export async function saveAssessmentDraft(
   teacher: AssessmentTeacher,
   assessmentId: string,
   draft: AssessmentDraft,
+  now: Date = new Date(),
 ): Promise<AssessmentWriteResult> {
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
-    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
-    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
+    const refused = await writeGate(tx, actor, teacher, now);
+    if (refused) return refused;
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
       select: { id: true, type: true, status: true, _count: { select: { questions: true } } },
@@ -536,11 +601,12 @@ export async function deleteAssessment(
   actor: AssessmentActor,
   teacher: AssessmentTeacher,
   assessmentId: string,
+  now: Date = new Date(),
 ): Promise<AssessmentWriteResult> {
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
-    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
-    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
+    const refused = await writeGate(tx, actor, teacher, now);
+    if (refused) return refused;
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
       select: { id: true, type: true, status: true, classGroupId: true, sessionId: true, _count: { select: { questions: true } } },
@@ -592,8 +658,8 @@ export async function publishAssessment(
 ): Promise<AssessmentWriteResult> {
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
-    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
-    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
+    const refused = await writeGate(tx, actor, teacher, now);
+    if (refused) return refused;
     await lockAssessment(tx, centerId, assessmentId);
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
@@ -640,11 +706,12 @@ export async function unpublishAssessment(
   actor: AssessmentActor,
   teacher: AssessmentTeacher,
   assessmentId: string,
+  now: Date = new Date(),
 ): Promise<AssessmentWriteResult> {
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
-    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
-    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
+    const refused = await writeGate(tx, actor, teacher, now);
+    if (refused) return refused;
     await lockAssessment(tx, centerId, assessmentId);
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),
@@ -687,8 +754,8 @@ export async function extendAssessment(
 ): Promise<AssessmentWriteResult> {
   const { centerId } = teacher;
   return db.$transaction(async (tx) => {
-    if (!(await teacherStillActive(tx, teacher))) return { ok: false, error: "forbidden" } as const;
-    if (!(await actorMayWrite(tx, actor, teacher))) return { ok: false, error: "forbidden" } as const;
+    const refused = await writeGate(tx, actor, teacher, now);
+    if (refused) return refused;
     await lockAssessment(tx, centerId, assessmentId);
     const current = await tx.assessment.findFirst({
       where: scopedWhere(centerId, { id: assessmentId, teacherMembershipId: teacher.membershipId }),

@@ -60,6 +60,24 @@ export const getTeacherScope = cache(async (): Promise<TeacherScope> => {
 });
 
 /**
+ * W9 (D-W42 item 7): the scope of the pages that also read the teacher's
+ * PERSONAL workspaces — Exams & homework (list, builder, preview, results) and
+ * the Calendar. The same as `getTeacherScope` for a teacher at a branch; a
+ * workspace-only teacher gets an **empty** branch scope (`inView: []`) instead
+ * of the redirect, because those pages union their workspaces beside the
+ * branches, each under its own context (`getWorkspaceContext`). An account with
+ * neither still goes to the centre directory. Workspaces never join `inView`.
+ */
+export const getTeacherWorkspaceScope = cache(async (): Promise<TeacherScope> => {
+  const user = await getCurrentUser();
+  if (!user) return redirectTo(ROUTES.login);
+  const scope = await resolveTeacherScope(user);
+  if (scope) return scope;
+  if (!(await ownsAnyWorkspace(prisma, user.id))) return redirectTo(ROUTES.teacherCenters);
+  return { user, relations: await getUserCenterRelations(user.id), contexts: [], selected: null, inView: [] };
+});
+
+/**
  * The same scope for a teacher Server Action that reads across branches (the
  * type-aheads): `null` — the caller answers with nothing — instead of a
  * redirect, when there is no user or no TEACHER role anywhere (SEC-44).

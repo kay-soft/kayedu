@@ -11,6 +11,11 @@ import { Select } from "@/components/ui/select";
  * All branches with two or more — branch. State lives in the URL (a soft GET
  * through `UrlFilterForm`, docs/02 §14); the page re-checks the branch against
  * the branches in view, so the filter can only narrow.
+ *
+ * W9 (D-W42 item 7): with any PERSONAL workspace, the branch filter becomes a
+ * **Source** filter — All, each branch, each workspace (tagged Private) — still
+ * the `branch` URL key, still re-checked by the page against the teacher's own
+ * branches and workspaces.
  */
 export function AssessmentFilters({
   type,
@@ -18,19 +23,25 @@ export function AssessmentFilters({
   classes,
   branches,
   branch,
+  workspaces = [],
 }: {
   type: string;
   classGroupId: string;
   classes: { value: string; label: string }[];
   branches: { id: string; name: string }[];
   branch: string;
+  /** W9: the teacher's own workspaces; with any, the filter is the Source filter. */
+  workspaces?: { id: string; name: string }[];
 }) {
   const t = useTranslations("TeacherAssessments.filters");
   const tType = useTranslations("TeacherAssessments.type");
   const tScope = useTranslations("TeacherScope");
+  const tAssessments = useTranslations("TeacherAssessments");
+  const withSource = workspaces.length > 0 && branches.length + workspaces.length > 1;
+  const withFilter = branches.length > 1 || withSource;
 
   return (
-    <UrlFilterForm className={branches.length > 1 ? "grid gap-3 sm:grid-cols-3" : "grid gap-3 sm:grid-cols-2"}>
+    <UrlFilterForm className={withFilter ? "grid gap-3 sm:grid-cols-3" : "grid gap-3 sm:grid-cols-2"}>
       <FilterField label={t("type")} htmlFor="filter-type">
         <Select
           id="filter-type"
@@ -53,16 +64,17 @@ export function AssessmentFilters({
           options={[{ value: "", label: t("allClasses") }, ...classes]}
         />
       </FilterField>
-      {branches.length > 1 ? (
-        <FilterField label={tScope("branch")} htmlFor="filter-branch">
+      {withFilter ? (
+        <FilterField label={withSource ? t("source") : tScope("branch")} htmlFor="filter-branch">
           <Select
             id="filter-branch"
             name="branch"
             defaultValue={branch}
             submitOnChange
             options={[
-              { value: "", label: tScope("allBranches") },
+              { value: "", label: withSource ? t("allSources") : tScope("allBranches") },
               ...branches.map((item) => ({ value: item.id, label: item.name })),
+              ...workspaces.map((item) => ({ value: item.id, label: `${item.name} · ${tAssessments("privateTag")}` })),
             ]}
           />
         </FilterField>

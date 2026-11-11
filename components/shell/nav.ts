@@ -188,6 +188,22 @@ function visible(
 }
 
 /**
+ * The minimal shell of a teacher with no branch but a PERSONAL workspace (W8a,
+ * D-W38 item 11): Workspaces first (their landing), then — W9 (D-W42 item 7) —
+ * the Calendar and Exams & homework their workspaces feed, Earnings (W8d),
+ * Assistants (W8d) and the centre directory. No permission on any item: a
+ * workspace has no matrix, and each page checks ownership on the server.
+ */
+export const TEACHER_WORKSPACE_ONLY_NAV: ShellNavItem[] = [
+  { href: ROUTES.teacherWorkspaces, labelKey: "workspaces", icon: "workspaces" },
+  { href: ROUTES.teacherCalendar, labelKey: "calendar", icon: "calendar" },
+  { href: ROUTES.teacherAssessments, labelKey: "assessments", icon: "assessments" },
+  { href: ROUTES.teacherEarnings, labelKey: "earnings", icon: "earnings" },
+  { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
+  { href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" },
+];
+
+/**
  * The teacher nav under All branches (U7): an item shows when **any** branch
  * in view would show it — each branch's own grants, never a merged grant set —
  * in `TEACHER_NAV`'s order. A page reached this way still gates on the
@@ -195,10 +211,14 @@ function visible(
  */
 export function teacherNavAcross(
   grantsByBranch: { role: TenantRole; grants?: PermissionGrants }[],
+  options: { ownsWorkspace?: boolean } = {},
 ): ShellNavItem[] {
   const shown = new Set(
     grantsByBranch.flatMap(({ role, grants }) => visible(TEACHER_NAV, role, grants).map((item) => item.href)),
   );
+  // W9 (D-W42 item 7): a workspace owner's exams and homework live there too,
+  // whatever the branches' `assessment.manage.own` cells say.
+  if (options.ownsWorkspace) shown.add(ROUTES.teacherAssessments);
   return TEACHER_NAV.filter((item) => shown.has(item.href)).map((item) => ({
     href: item.href,
     labelKey: item.labelKey,

@@ -1,6 +1,6 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { studentBranches } from "@/app/[locale]/(student)/student/assessments/scope";
+import { privateTeacherNames, studentBranches } from "@/app/[locale]/(student)/student/assessments/scope";
 import { CancelBookingButton } from "@/app/[locale]/(student)/student/reservations/cancel-booking-button";
 import { LeaveClassButton } from "@/app/[locale]/(student)/student/reservations/leave-class-button";
 import { assessmentCalendarEntry, type AssessmentCalendarLabels } from "@/components/shared/assessment-calendar-entry";
@@ -90,15 +90,18 @@ export default async function StudentCalendarPage({
       }),
     ),
     studentBookedUpcoming(prisma, session.user.id, now),
-    studentBranches(session.user.id).then((branches) =>
-      Promise.all(
+    studentBranches(session.user.id).then(async (branches) => {
+      // W9 (D-W42 item 4): a workspace's assessments carry the teacher and "Private class".
+      const teachers = await privateTeacherNames(branches);
+      return Promise.all(
         branches.map(async ({ ctx, student }) => ({
           branch: ctx.center.name,
+          teacher: teachers.get(ctx.center.id) ?? null,
           zone: centreTimeZone(ctx.settings),
           items: await listStudentAssessments(prisma, student, now, { within: assessmentCalendarWindow(range) }),
         })),
-      ),
-    ),
+      );
+    }),
   ]);
 
   const enrolledIds = new Set(perBranch.flatMap((entry) => entry.entries.map((row) => row.sessionId)));
@@ -133,24 +136,23 @@ export default async function StudentCalendarPage({
     ...bookedCalendarEntries(booked, range, enrolledIds, now).map((row) =>
       withActions(row, studentCalendarEntry(row, branchName.get(row.centerId) ?? null, locale, tCommon("none"))),
     ),
-    ...assessments.flatMap(({ branch, zone: branchZone, items }) =>
+    ...assessments.flatMap(({ branch, teacher, zone: branchZone, items }) =>
       items.flatMap((item) => {
         const zone = item.timeZone ?? branchZone;
         const placement = assessmentOnCalendar(item, zone, range);
         if (!placement) return [];
-        return [
-          assessmentCalendarEntry({
-            row: item,
-            placement,
-            zone,
-            locale,
-            labels,
-            className: sessionDisplayName(locale, { classGroup: item.classGroup }),
-            branch,
-            href: ROUTES.studentAssessment(item.id),
-            state: { label: tAssessments(`state.${item.state}`), variant: STUDENT_STATE_BADGE[item.state] },
-          }),
-        ];
+        const entry = assessmentCalendarEntry({
+          row: item,
+          placement,
+          zone,
+          locale,
+          labels,
+          className: sessionDisplayName(locale, { classGroup: item.classGroup }),
+          branch,
+          href: ROUTES.studentAssessment(item.id),
+          state: { label: tAssessments(`state.${item.state}`), variant: STUDENT_STATE_BADGE[item.state] },
+        });
+        return [teacher !== null ? { ...entry, privateClass: { label: tPrivate("privateClass"), teacher } } : entry];
       }),
     ),
   ];

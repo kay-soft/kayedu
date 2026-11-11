@@ -4,7 +4,7 @@ import { assessmentCalendarEntry, type AssessmentCalendarLabels } from "@/compon
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionCalendar, type CalendarEntry } from "@/components/shared/session-calendar";
 import { BranchFilter } from "@/components/teacher/branch-filter";
-import { branchesInView, getTeacherScope, showsBranches } from "@/lib/auth/teacher-scope";
+import { branchesInView, getTeacherWorkspaceScope, showsBranches } from "@/lib/auth/teacher-scope";
 import {
   ASSESSMENT_CALENDAR_TONES,
   TEACHER_CALENDAR_TONES,
@@ -47,13 +47,18 @@ import { sessionDisplayName } from "@/lib/session-label";
  * may manage them: the list's own read, limited to the month and the same history
  * floor, drafts included and labelled. A draft exam with no window has no day yet.
  * Started and submitted are read for the selected day's published rows only.
+ *
+ * W9 (D-W42 item 7): each owned workspace adds its own exams and homework the
+ * same way — under its own context, `resolveAssessmentTeacher` deciding by
+ * `workspaceCan`, the same read, floor, badges and counts — named and tagged
+ * Private. A workspace-only teacher reaches the page (`getTeacherWorkspaceScope`).
  */
 export default async function TeacherCalendarPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const scope = await getTeacherScope();
+  const scope = await getTeacherWorkspaceScope();
   const rawParams = await searchParams;
   const branches = branchesInView(scope, rawParams.branch);
   const withBranch = showsBranches(scope);
@@ -143,7 +148,26 @@ export default async function TeacherCalendarPage({
             ).filter((row) => deriveSessionDisplayStatus(row, now, timeZone) !== "RESCHEDULED");
             const onDay = selectedDay ? rows.filter((row) => dateKey(row.date) === selectedDay) : [];
             const counts = await sessionAttendanceCounts(prisma, ctx.center.id, onDay);
-            return { workspace, rows, counts };
+            // W9: the workspace's own exams and homework, as at a branch.
+            const teacher = await resolveAssessmentTeacher(prisma, ctx);
+            const assessments = teacher
+              ? (await listTeacherAssessments(prisma, teacher, { within: assessmentCalendarWindow({ start: from, end: to }) })).flatMap((row) => {
+                  const zone = row.session?.timezone ?? timeZone;
+                  const placement = assessmentOnCalendar(row, zone, { start: from, end: to });
+                  return placement ? [{ row, zone, placement }] : [];
+                })
+              : [];
+            const attemptCounts = teacher
+              ? await assessmentAttemptCounts(
+                  prisma,
+                  teacher,
+                  assessments
+                    .filter(({ row, placement }) => row.status === "PUBLISHED" && placement.day === selectedDay)
+                    .map(({ row }) => row.id),
+                  now,
+                )
+              : new Map<string, { started: number; submitted: number }>();
+            return { workspace, rows, counts, assessments, attemptCounts };
           }),
         )
       ).filter((entry) => entry !== null);
@@ -187,7 +211,31 @@ export default async function TeacherCalendarPage({
       });
     }),
   ]);
-  for (const { workspace, rows, counts } of perWorkspace) {
+  for (const { workspace, rows, counts, assessments, attemptCounts } of perWorkspace) {
+    for (const { row, zone, placement } of assessments) {
+      const attempts = attemptCounts.get(row.id) ?? { started: 0, submitted: 0 };
+      entries.push({
+        ...assessmentCalendarEntry({
+          row,
+          placement,
+          zone,
+          locale,
+          labels,
+          className: sessionDisplayName(locale, { classGroup: row.classGroup }) || tCommon("none"),
+          branch: workspace.name,
+          href: row.status === "PUBLISHED" ? ROUTES.teacherAssessmentResults(row.id) : ROUTES.teacherAssessment(row.id),
+          state: { label: tAssessments(`status.${row.status}`), variant: row.status === "DRAFT" ? "neutral" : "info" },
+          attempts:
+            row.status === "PUBLISHED" && placement.day === selectedDay
+              ? t("assessmentAttempts", {
+                  started: formatNumber(attempts.started, locale),
+                  submitted: formatNumber(attempts.submitted, locale),
+                })
+              : undefined,
+        }),
+        privateClass: { label: t("privateTag") },
+      });
+    }
     for (const row of rows) {
       entries.push({
         id: row.id,

@@ -2385,8 +2385,11 @@
       "type": "النوع",
       "allTypes": "كل الأنواع",
       "class": "المجموعة",
-      "allClasses": "كل المجموعات"
+      "allClasses": "كل المجموعات",
+      "source": "الفرع أو مساحة العمل",
+      "allSources": "كل الفروع ومساحات العمل"
     },
+    "privateTag": "خاص",
     "questionCount": "{count, plural, =0 {لا أسئلة} one {سؤال واحد} two {سؤالان} few {{count, number, arab} أسئلة} many {{count, number, arab} سؤالًا} other {{count, number, arab} سؤال}}",
     "windowValue": "{start} – {end}",
     "windowNotSet": "لم تُحدَّد المواعيد",
@@ -2504,7 +2507,9 @@
       "classInactive": "هذا الفصل غير نشط، فلن يتمكن أي طالب من حله.",
       "notPublished": "لا يمكن تغيير هذا هنا إلا إذا كان منشورًا.",
       "passed": "تم إغلاقه بالفعل، فلم يعد التمديد ممكنًا.",
-      "notLater": "اختر وقتًا بعد الوقت الحالي."
+      "notLater": "اختر وقتًا بعد الوقت الحالي.",
+      "premiumRequired": "للقراءة فقط — جدّد البريميوم لإجراء تغييرات في مساحة العمل هذه.",
+      "workspaceArchived": "مساحة العمل هذه مؤرشفة. ألغِ أرشفتها لإجراء تغييرات."
     },
     "draftErrors": {
       "titleRequired": "أدخل عنوانًا.",

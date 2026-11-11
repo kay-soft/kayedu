@@ -8,6 +8,7 @@ import {
   DeleteClassButton,
   RemoveSlotButton,
 } from "@/components/teacher/workspaces/workspace-class-controls";
+import { LinkedAssessments } from "@/app/[locale]/(teacher)/teacher/assessments/linked-assessments";
 import { WorkspaceClassButton } from "@/components/teacher/workspaces/workspace-class-dialog";
 import { NewWorkspaceSessionButton } from "@/components/teacher/workspaces/workspace-session-controls";
 import { WorkspaceSessionList } from "@/components/teacher/workspaces/workspace-session-list";
@@ -205,6 +206,9 @@ export default async function WorkspaceClassPage({ params }: { params: Promise<{
           writable={writable}
         />
       </PageSection>
+
+      {/* W9 (D-W42 item 7): the class's exams, as on a branch class page; none created while read-only. */}
+      <LinkedAssessments ctx={ctx} kind="class" classGroupId={row.id} canCreate={writable && row.active} />
     </div>
   );
 }

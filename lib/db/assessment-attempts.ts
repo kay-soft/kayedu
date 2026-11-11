@@ -250,6 +250,22 @@ async function studentTouch(tx: Tx, student: AssessmentStudent, attemptId: strin
 
 // ── Eligibility and start (D-W07) ──────────────────────────────────────────
 
+/**
+ * W9 (D-W42 item 3): true at a branch (unchanged), and in a PERSONAL workspace
+ * only when the profile's `User` holds a login (`authId`) — the W8b "Linked".
+ * Read at start only, beside the ACTIVE-enrolment check.
+ */
+async function linkedWhereRequired(tx: Tx, centerId: string, studentProfileId: string): Promise<boolean> {
+  const centre = await tx.center.findUnique({ where: { id: centerId }, select: { kind: true } });
+  if (!centre) return false;
+  if (centre.kind !== "PERSONAL") return true;
+  const profile = await tx.studentProfile.findFirst({
+    where: scopedWhere(centerId, { id: studentProfileId, user: { authId: { not: null } } }),
+    select: { id: true },
+  });
+  return profile !== null;
+}
+
 export type StartAttemptResult =
   | { ok: true; attemptId: string; resumed: boolean }
   | { ok: false; error: "notFound" | "notEligible" | "notOpenYet" | "closed" | "submitted" };
@@ -286,6 +302,9 @@ export async function startAttempt(db: Db, student: AssessmentStudent, assessmen
       select: { id: true },
     });
     if (!enrolled) return { ok: false, error: "notEligible" };
+    // W9 (D-W42 item 3): in a PERSONAL workspace only a linked profile — one whose
+    // `User` holds a login — may start. An unlinked one sits on a placeholder.
+    if (!(await linkedWhereRequired(tx, centerId, studentProfileId))) return { ok: false, error: "notEligible" };
     const refusal = startRefusal(assessment, now);
     if (refusal) return { ok: false, error: refusal };
 

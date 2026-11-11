@@ -1,11 +1,10 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 
-import { assessmentBranches } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
+import { assessmentBranches, requireAssessmentSources } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
 import { PageHeader } from "@/components/shared/page-header";
 import { AssessmentPreviewBody } from "@/components/teacher/assessments/assessment-preview-body";
-import { requirePermission } from "@/lib/auth/tenant";
-import { findInBranches, firstGranting, getTeacherScope } from "@/lib/auth/teacher-scope";
+import { findInBranches, getTeacherWorkspaceScope } from "@/lib/auth/teacher-scope";
 import { drawOrder, toStudentAssessment } from "@/lib/assessments";
 import { findTeacherAssessment, sessionZone } from "@/lib/db/assessments";
 import { prisma } from "@/lib/db/client";
@@ -19,12 +18,12 @@ import { ROUTES } from "@/lib/routes";
  * is recorded: no attempt, no answer.
  */
 export default async function PreviewAssessmentPage({ params }: { params: Promise<{ id: string }> }) {
-  const scope = await getTeacherScope();
-  const ctx = firstGranting(scope, "assessment.manage.own");
-  await requirePermission(ctx, "assessment.manage.own");
+  // W9 (D-W42 item 7): a workspace-only teacher reaches it too; the gate is below.
+  const scope = await getTeacherWorkspaceScope();
   const { id } = await params;
 
   const branches = await assessmentBranches(scope.inView);
+  await requireAssessmentSources(scope, branches);
   const hit = await findInBranches(
     branches.map((branch) => branch.ctx),
     (branchCtx) => {

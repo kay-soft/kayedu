@@ -13,7 +13,9 @@ import { addDays, dateKey, todayInTimezone, zonedClock } from "@/lib/scheduling"
 import { deleteAuditRows } from "../scripts/lib/audit-maintenance";
 import { assertSafeToWrite } from "../scripts/lib/env";
 import { e2eEmail, removeE2eUsers } from "../scripts/lib/e2e-users";
+import { E2E_ASSESSMENT_PREFIX, removeE2eAssessments } from "../scripts/lib/e2e-assessments";
 
+import { fillBuilderQuestions } from "./support/assessment-fixtures";
 import { expect, expectHealthy, primaryNav, test } from "./support/fixtures";
 import type { AppLocale } from "./support/i18n";
 import { E2E_PASSWORD, signInWith } from "./support/signup";
@@ -696,5 +698,212 @@ test("@write workspace earnings: the teacher opens Earnings and reads the frozen
     await moneyLeftovers(db, e2eTag, [teacher.email], userIds, centerIds),
     "the teardown leaves nothing of this run behind",
   ).toEqual({ users: 0, centers: 0, sessions: 0, attendees: 0, payments: 0, methods: 0, changes: 0, audit: 0 });
+  await db.$disconnect();
+});
+
+/**
+ * W9 (D-W42), the fifth test: a premium teacher's workspace with one class and
+ * a linked, enrolled fixture student (all set up directly, staging-guarded —
+ * the hub flow is the second test's). The owner opens the class, starts
+ * **New exam**, builds two questions, saves and publishes. The student's bell
+ * rises and its panel shows the notice; the calendar lists the exam with the
+ * Private class badge; the student starts, answers and submits — and neither
+ * the rendered page nor any document, fetch or XHR response contains
+ * `isCorrect` before reveal (rule 11). The owner opens Results and reads the
+ * student as Submitted. The teardown removes the run's assessments (attempts,
+ * notices, audit rows) and then its accounts and workspace, and asserts nothing
+ * of it is left, so a second run leaves the same row counts.
+ */
+const LEAK = "isCorrect";
+
+/** What the W9 run left behind, by its own ids. */
+async function assessmentLeftovers(db: PrismaClient, tag: string, emails: string[], userIds: string[], centerIds: string[]) {
+  const [users, centers, assessments, attempts, notifications, audit] = await Promise.all([
+    db.user.count({ where: { OR: [{ email: { in: emails } }, { lastName: { contains: ` ${tag}` } }] } }),
+    db.center.count({ where: { id: { in: centerIds } } }),
+    db.assessment.count({ where: { OR: [{ centerId: { in: centerIds } }, { title: { startsWith: `${E2E_ASSESSMENT_PREFIX}${tag}` } }] } }),
+    db.assessmentAttempt.count({ where: { centerId: { in: centerIds } } }),
+    db.notification.count({ where: { OR: [{ userId: { in: userIds } }, { centerId: { in: centerIds } }] } }),
+    db.auditLog.count({ where: { OR: [{ actorUserId: { in: userIds } }, { centerId: { in: centerIds } }] } }),
+  ]);
+  return { users, centers, assessments, attempts, notifications, audit };
+}
+
+test("@write workspace assessments: the owner builds and publishes an exam for a private class; the linked student gets the notice and the calendar entry, takes it with no isCorrect before reveal; the owner opens Results", async ({
+  page,
+  browser,
+  appLocale,
+  msg,
+  e2eTag,
+}, testInfo) => {
+  assertSafeToWrite("e2e: workspace assessment fixtures");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e workspace assessments: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const db = new PrismaClient();
+  const locale: AppLocale = appLocale;
+  const teacher = { email: e2eEmail(e2eTag, "wsa-teacher"), first: "Wat", last: `Teacher ${e2eTag}` };
+  const pupil = { email: e2eEmail(e2eTag, "wsa-student"), first: "Was", last: `Student ${e2eTag}` };
+  const typed = { firstName: "Typed", lastName: `Examinee ${e2eTag}` };
+  const phone = `+2012${String(Math.floor(Math.random() * 100_000_000)).padStart(8, "0")}`;
+  const title = `${E2E_ASSESSMENT_PREFIX}${e2eTag}`;
+  const userIds: string[] = [];
+  const centerIds: string[] = [];
+  const authIds: string[] = [];
+  const studentContext = await browser.newContext({ ...testInfo.project.use });
+
+  try {
+    for (const person of [teacher, pupil]) {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: person.email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: { first_name: person.first, last_name: person.last, locale },
+      });
+      if (error || !data.user) throw error ?? new Error("e2e workspace assessments: could not create a login");
+      authIds.push(data.user.id);
+    }
+    const studentPage = await studentContext.newPage();
+    const bodies: string[] = [];
+    studentPage.on("response", (response) => {
+      const type = response.request().resourceType();
+      if (type !== "document" && type !== "fetch" && type !== "xhr") return;
+      void response.text().then(
+        (text) => bodies.push(text),
+        () => undefined,
+      );
+    });
+    await signInWith(studentPage, locale, pupil.email);
+    await signInWith(page, locale, teacher.email);
+    const teacherRow = await db.user.findUniqueOrThrow({ where: { email: teacher.email } });
+    const pupilRow = await db.user.findUniqueOrThrow({ where: { email: pupil.email } });
+    userIds.push(teacherRow.id, pupilRow.id);
+
+    // Staging-guarded setup: premium, a workspace, a class, the linked enrolled student.
+    await db.user.update({ where: { id: teacherRow.id }, data: { premiumUntil: new Date(Date.now() + 30 * 86_400_000) } });
+    await db.user.update({ where: { id: pupilRow.id }, data: { phone } });
+    const workspaceName = `Biology ${e2eTag}`;
+    const created = await createWorkspace(db, teacherRow.id, { name: workspaceName });
+    if (!created.ok) throw new Error(`e2e workspace assessments: ${created.error}`);
+    const workspaceId = created.workspaceId;
+    centerIds.push(workspaceId);
+    const today = todayInTimezone("Africa/Cairo");
+    const klass = await createWorkspaceClass(
+      db,
+      teacherRow.id,
+      workspaceId,
+      {
+        educationSystemId: null,
+        gradeId: null,
+        subjectId: null,
+        price: 10_000,
+        lateThresholdMinutes: 10,
+        startDate: today,
+        endDate: addDays(today, 21),
+        slots: [{ dayOfWeek: addDays(today, 1).getUTCDay(), startTime: "17:00", endTime: "18:00" }],
+      },
+      { confirmConflicts: true, locale },
+    );
+    if (!klass.ok) throw new Error(`e2e workspace assessments: ${klass.error}`);
+    const added = await addWorkspaceStudent(db, teacherRow.id, workspaceId, { ...typed, phone, gradeId: null });
+    if (!added.ok) throw new Error(`e2e workspace assessments: ${added.error}`);
+    const invitation = await db.workspaceInvitation.findFirstOrThrow({ where: { centerId: workspaceId, targetUserId: pupilRow.id, status: "PENDING" } });
+    const accepted = await acceptWorkspaceInvitation(db, pupilRow.id, invitation.id);
+    if (!accepted.ok) throw new Error(`e2e workspace assessments: ${accepted.error}`);
+    await enrolWorkspaceStudent(db, teacherRow.id, workspaceId, klass.classGroupId, added.studentProfileId);
+
+    // The student's bell before anything is published.
+    await studentPage.goto(`/${locale}/student/assessments`);
+    await expectHealthy(studentPage, locale);
+    const unreadBefore = Number(await studentPage.locator("[data-notification-bell]").getAttribute("data-unread"));
+
+    // ── The owner: the class page's New exam, build, save, publish ─────────
+    await page.goto(`/${locale}/teacher/workspaces/${workspaceId}/classes/${klass.classGroupId}`);
+    await expectHealthy(page, locale);
+    await page.getByRole("link", { name: msg("TeacherAssessments.newExam"), exact: true }).click();
+    await page.waitForURL(/\/teacher\/assessments\/new\?/);
+    await expectHealthy(page, locale);
+    await page.locator("#assessment-title").fill(title);
+    const windowField = (name: string) => page.locator("fieldset", { has: page.locator(`#${name}-date`) });
+    await pickDate(windowField("windowStart"), locale, msg("TeacherAssessments.builder.date"), dayFromToday(0));
+    await page.locator("#windowStart-time").fill("00:00");
+    await page.locator("#windowStart-time").press("Tab");
+    await pickDate(windowField("windowEnd"), locale, msg("TeacherAssessments.builder.date"), dayFromToday(2));
+    await page.locator("#windowEnd-time").fill("23:00");
+    await page.locator("#windowEnd-time").press("Tab");
+    await fillBuilderQuestions(page, msg, ["First question", "Second question"]);
+    await page.getByRole("button", { name: msg("TeacherAssessments.builder.save"), exact: true }).click();
+    await page.waitForURL(/\/teacher\/assessments\/[0-9a-f-]{36}/);
+    const assessmentId = /assessments\/([0-9a-f-]{36})/.exec(page.url())![1];
+    await expect(page.getByText(msg("TeacherAssessments.privateTag"), { exact: true }).first()).toBeVisible();
+    const publish = page.getByRole("button", { name: msg("TeacherAssessments.publish.label"), exact: true });
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    await openDialog(page).getByRole("button", { name: msg("TeacherAssessments.publish.label"), exact: true }).click();
+    await expect(page.getByRole("button", { name: msg("TeacherAssessments.unpublish.label"), exact: true })).toBeVisible();
+    const stored = await db.assessment.findUniqueOrThrow({ where: { id: assessmentId } });
+    expect(stored.centerId, "the exam lives in the workspace").toBe(workspaceId);
+
+    // ── The student: the bell, the panel, the calendar ─────────────────────
+    await studentPage.reload();
+    await expectHealthy(studentPage, locale);
+    expect(Number(await studentPage.locator("[data-notification-bell]").getAttribute("data-unread")), "the bell rose after publishing").toBeGreaterThan(unreadBefore);
+    await studentPage.locator("[data-notification-bell]").click();
+    const notice = studentPage.locator("[data-notification-row]", { hasText: title });
+    await expect(notice, "the panel shows the notice").toBeVisible();
+    await notice.click();
+    await studentPage.waitForURL(new RegExp(`/student/assessments/${assessmentId}`));
+    await expectHealthy(studentPage, locale);
+    await expect(studentPage.getByText(msg("WorkspaceStudents.student.privateClass"), { exact: true }).first()).toBeVisible();
+
+    const dayKey = dateKey(today);
+    await studentPage.goto(`/${locale}/student/calendar?month=${dayKey.slice(0, 7)}&day=${dayKey}`);
+    await expectHealthy(studentPage, locale);
+    const entry = studentPage.getByRole("listitem").filter({ hasText: title }).first();
+    await expect(entry, "the calendar lists the exam on the day its window opens").toBeVisible();
+    await expect(entry.getByText(msg("WorkspaceStudents.student.privateClass"), { exact: true })).toBeVisible();
+
+    // ── Take it: start, answer, submit ─────────────────────────────────────
+    await studentPage.goto(`/${locale}/student/assessments/${assessmentId}`);
+    await expectHealthy(studentPage, locale);
+    await expect(studentPage.getByText("First question")).toHaveCount(0);
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.start.label"), exact: true }).click();
+    await openDialog(studentPage).getByRole("button", { name: msg("StudentAssessments.start.confirm"), exact: true }).click();
+    await expect(studentPage.getByRole("timer")).toBeVisible();
+    await studentPage.getByRole("radio").nth(1).check();
+    await expect(studentPage.getByText(msg("StudentAssessments.take.saved"), { exact: true })).toBeVisible();
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.take.next"), exact: true }).click();
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.take.review"), exact: true }).click();
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.take.submit"), exact: true }).click();
+    await openDialog(studentPage).getByRole("button", { name: msg("StudentAssessments.take.submit"), exact: true }).click();
+    await expect(studentPage.getByRole("paragraph").filter({ hasText: new RegExp(`^${escapeRegExp(msg("StudentAssessments.result.submitted"))}$`) })).toBeVisible();
+
+    // ── Rule 11: no correctness before reveal, in the page or any response ─
+    expect(await studentPage.content(), "the rendered page").not.toContain(LEAK);
+    expect(bodies.length, "responses were captured").toBeGreaterThan(0);
+    expect(bodies.filter((body) => body.includes(LEAK)), "no response before reveal").toEqual([]);
+
+    // ── The owner reads Results ────────────────────────────────────────────
+    await page.goto(`/${locale}/teacher/assessments/${assessmentId}/results`);
+    await expectHealthy(page, locale);
+    await expect(page.getByText(workspaceName).filter({ visible: true }).first()).toBeVisible();
+    // The table from `xl`, stacked cards below it: only the visible one counts.
+    const studentRow = page.getByText(`${typed.firstName} ${typed.lastName}`).filter({ visible: true }).first();
+    await expect(studentRow).toBeVisible();
+    await expect(page.getByText(msg("TeacherAssessments.results.status.SUBMITTED"), { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  } finally {
+    await studentContext.close();
+    await removeE2eAssessments(db, e2eTag);
+    await removeE2eUsers(db, e2eTag);
+    for (const authId of authIds) {
+      if ((await db.user.count({ where: { authId } })) === 0) await supabase.auth.admin.deleteUser(authId).catch(() => undefined);
+    }
+  }
+
+  expect(
+    await assessmentLeftovers(db, e2eTag, [teacher.email, pupil.email], userIds, centerIds),
+    "the teardown leaves nothing of this run behind",
+  ).toEqual({ users: 0, centers: 0, assessments: 0, attempts: 0, notifications: 0, audit: 0 });
   await db.$disconnect();
 });

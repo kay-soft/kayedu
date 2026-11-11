@@ -9,6 +9,7 @@ import {
   PublishAssessment,
   UnpublishAssessment,
 } from "@/app/[locale]/(teacher)/teacher/assessments/publish-controls";
+import { FormMessage } from "@/components/shared/form-message";
 import { LinkButton } from "@/components/shared/link-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { assessmentClosesAt, hasClosed, isReady, readiness, totalPoints } from "@/lib/assessments";
@@ -24,12 +25,18 @@ import { fieldsFromInstant } from "@/lib/validation/assessments";
  * builder with Publish and Delete beneath it; a published row read-only with its
  * questions, Extend, Preview, and Unpublish and Delete while nobody has started.
  * `surface` picks the links and the actions; the page found the row first.
+ *
+ * W9 (D-W42 item 5): `readOnly` — a PERSONAL workspace whose owner is not
+ * premium now, or that is archived — shows the reason and every row read-only:
+ * no builder, Publish, Extend, Unpublish or Delete (each writer refuses them
+ * anyway). Preview and Results stay.
  */
 export async function AssessmentDetailBody({
   row,
   zone,
   centerId,
   surface,
+  readOnly = null,
 }: {
   row: TeacherAssessment;
   /** The session's frozen timezone, else the branch's. */
@@ -37,6 +44,8 @@ export async function AssessmentDetailBody({
   /** The row's branch, posted for the teacher's actions (re-resolved there); an assistant's ignore it. */
   centerId: string;
   surface: AssessmentSurface;
+  /** W9: why this workspace takes no writes now (a translated sentence), or null. */
+  readOnly?: string | null;
 }) {
   const t = await getTranslations("TeacherAssessments");
   const locale = await getLocale();
@@ -46,15 +55,18 @@ export async function AssessmentDetailBody({
   const attempts = row._count.attempts;
   const closes = assessmentClosesAt(row);
 
+  const writable = readOnly === null;
+
   return (
     <>
-      {published ? (
+      {readOnly !== null ? <FormMessage tone="warning">{readOnly}</FormMessage> : null}
+      {published || !writable ? (
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="flex min-w-0 flex-col gap-6">
             <Card>
               <CardHeader>
                 <CardTitle dir="auto" className="break-words">{row.title}</CardTitle>
-                <CardDescription>{t("published.lockedHint")}</CardDescription>
+                {published ? <CardDescription>{t("published.lockedHint")}</CardDescription> : null}
               </CardHeader>
               <CardContent className="flex flex-col gap-3 text-sm">
                 {row.instructions ? (
@@ -122,31 +134,33 @@ export async function AssessmentDetailBody({
           </div>
 
           <aside className="flex min-w-0 flex-col gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("extend.sectionTitle")}</CardTitle>
-                <CardDescription>
-                  {hasClosed(row, now) ? t("extend.passedHint") : t("extend.sectionHint")}
-                </CardDescription>
-              </CardHeader>
-              {hasClosed(row, now) ? null : (
-                <CardContent>
-                  <ExtendAssessment
-                    surface={surface}
-                    centerId={centerId}
-                    assessmentId={row.id}
-                    zone={zone}
-                    todayIso={dateKey(todayInTimezone(zone, now))}
-                    current={fieldsFromInstant(closes, zone)}
-                  />
-                </CardContent>
-              )}
-            </Card>
+            {published && writable ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t("extend.sectionTitle")}</CardTitle>
+                  <CardDescription>
+                    {hasClosed(row, now) ? t("extend.passedHint") : t("extend.sectionHint")}
+                  </CardDescription>
+                </CardHeader>
+                {hasClosed(row, now) ? null : (
+                  <CardContent>
+                    <ExtendAssessment
+                      surface={surface}
+                      centerId={centerId}
+                      assessmentId={row.id}
+                      zone={zone}
+                      todayIso={dateKey(todayInTimezone(zone, now))}
+                      current={fieldsFromInstant(closes, zone)}
+                    />
+                  </CardContent>
+                )}
+              </Card>
+            ) : null}
             <LinkButton href={routes.preview(row.id)} className="self-start">
               <Eye className="size-4" aria-hidden />
               {t("builder.preview")}
             </LinkButton>
-            {attempts === 0 ? (
+            {published && writable && attempts === 0 ? (
               <Card>
                 <CardHeader>
                   <CardTitle>{t("published.manageTitle")}</CardTitle>

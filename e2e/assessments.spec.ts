@@ -1,11 +1,19 @@
 import { PrismaClient } from "@prisma/client";
 import type { Page } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
+
+import { PRESET_PERMISSIONS } from "@/lib/assistant-catalog";
+import { createWorkspace, createWorkspaceClass } from "@/lib/db/workspaces";
+import { addDays, todayInTimezone } from "@/lib/scheduling";
 
 import { E2E_ASSESSMENT_PREFIX, removeE2eAssessments } from "../scripts/lib/e2e-assessments";
+import { assertSafeToWrite } from "../scripts/lib/env";
+import { e2eEmail, removeE2eUsers } from "../scripts/lib/e2e-users";
 import { ACCOUNTS, uniqueTag, type AccountKey } from "./support/accounts";
-import { DAY, HOUR, findFixtureClass, insertExam } from "./support/assessment-fixtures";
-import { expect, expectHealthy, test } from "./support/fixtures";
+import { DAY, HOUR, fillBuilderQuestions, findFixtureClass, insertExam } from "./support/assessment-fixtures";
+import { expect, expectHealthy, primaryNav, test } from "./support/fixtures";
 import type { AppLocale } from "./support/i18n";
+import { E2E_PASSWORD, signInWith } from "./support/signup";
 import { dayFromToday, isoDayFromToday, openDialog, pickDate } from "./support/ui";
 
 /**
@@ -399,4 +407,127 @@ test("@write other roles cannot open a student's assessment, and a student canno
     );
     await expect(student.locator("#assessment-title")).toHaveCount(0);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W9 (D-W42): an assistant (Co-teacher) creates a homework in the teacher's
+// PERSONAL workspace. Two tagged fixture logins (the Supabase admin API) and a
+// premium teacher's workspace, class, session and assistant link set up
+// directly (staging-guarded); the assistant reaches Exams & homework from the
+// nav and Add homework from the workspace's session page, builds and saves.
+// The row is the teacher's (their membership) in the workspace, created by the
+// assistant, and its audit row carries both people. The teardown removes the
+// run's assessments, then its accounts and workspace, and asserts nothing is left.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("@write W9: a Co-teacher assistant creates a homework in the teacher's workspace, audited with both people", async ({ page, browser, appLocale, msg, e2eTag }, testInfo) => {
+  assertSafeToWrite("e2e: workspace assistant assessment fixtures");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e W9 assistant: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const db = new PrismaClient();
+  const teacher = { email: e2eEmail(e2eTag, "w9-teacher"), first: "Wnt", last: `Teacher ${e2eTag}` };
+  const helper = { email: e2eEmail(e2eTag, "w9-assistant"), first: "Wna", last: `Assistant ${e2eTag}` };
+  const title = `${E2E_ASSESSMENT_PREFIX}${e2eTag}-hw`;
+  const userIds: string[] = [];
+  const centerIds: string[] = [];
+  const authIds: string[] = [];
+
+  try {
+    for (const person of [teacher, helper]) {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: person.email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: { first_name: person.first, last_name: person.last, locale: appLocale },
+      });
+      if (error || !data.user) throw error ?? new Error("e2e W9 assistant: could not create a login");
+      authIds.push(data.user.id);
+    }
+    // The teacher's app User exists from their first sign-in (their own context, closed straight after).
+    const teacherContext = await browser.newContext({ ...testInfo.project.use });
+    try {
+      await signInWith(await teacherContext.newPage(), appLocale, teacher.email);
+    } finally {
+      await teacherContext.close();
+    }
+    await signInWith(page, appLocale, helper.email);
+    const teacherRow = await db.user.findUniqueOrThrow({ where: { email: teacher.email } });
+    const helperRow = await db.user.findUniqueOrThrow({ where: { email: helper.email } });
+    userIds.push(teacherRow.id, helperRow.id);
+
+    // Staging-guarded setup: premium, a workspace, a class with a session, the Co-teacher link.
+    await db.user.update({ where: { id: teacherRow.id }, data: { premiumUntil: new Date(Date.now() + 30 * 86_400_000) } });
+    const created = await createWorkspace(db, teacherRow.id, { name: `Algebra ${e2eTag}` });
+    if (!created.ok) throw new Error(`e2e W9 assistant: ${created.error}`);
+    const workspaceId = created.workspaceId;
+    centerIds.push(workspaceId);
+    const today = todayInTimezone("Africa/Cairo");
+    const klass = await createWorkspaceClass(
+      db,
+      teacherRow.id,
+      workspaceId,
+      {
+        educationSystemId: null,
+        gradeId: null,
+        subjectId: null,
+        price: 10_000,
+        lateThresholdMinutes: 10,
+        startDate: today,
+        endDate: addDays(today, 21),
+        slots: [{ dayOfWeek: addDays(today, 1).getUTCDay(), startTime: "17:00", endTime: "18:00" }],
+      },
+      { confirmConflicts: true, locale: appLocale },
+    );
+    if (!klass.ok) throw new Error(`e2e W9 assistant: ${klass.error}`);
+    const session = await db.session.findFirstOrThrow({ where: { centerId: workspaceId, classGroupId: klass.classGroupId }, orderBy: [{ date: "asc" }, { startTime: "asc" }] });
+    const link = await db.teacherAssistant.create({ data: { teacherUserId: teacherRow.id, assistantUserId: helperRow.id, preset: "CO_TEACHER" } });
+    await db.assistantPermissionGrant.createMany({ data: PRESET_PERMISSIONS.CO_TEACHER.map((permission) => ({ assistantId: link.id, permission })) });
+
+    // The nav lists Exams & homework for the workspace grant.
+    await page.goto(`/${appLocale}/assistant/${teacherRow.id}`);
+    await expectHealthy(page, appLocale);
+    await expect((await primaryNav(page, appLocale)).getByRole("link", { name: msg("Nav.assessments"), exact: true })).toBeVisible();
+
+    // The workspace session page's Add homework → the builder → Save.
+    await page.goto(`/${appLocale}/assistant/${teacherRow.id}/workspaces/${workspaceId}/sessions/${session.id}`);
+    await expectHealthy(page, appLocale);
+    await page.getByRole("link", { name: msg("TeacherAssessments.addHomework"), exact: true }).click();
+    await page.waitForURL(/\/assessments\/new\?/);
+    await expectHealthy(page, appLocale);
+    await page.locator("#assessment-title").fill(title);
+    await fillBuilderQuestions(page, msg, ["Homework question"]);
+    await page.getByRole("button", { name: msg("TeacherAssessments.builder.save"), exact: true }).click();
+    await page.waitForURL(new RegExp(`/assistant/${teacherRow.id}/assessments/[0-9a-f-]{36}`));
+    await expectHealthy(page, appLocale);
+    await expect(page.getByText(msg("TeacherAssessments.privateTag"), { exact: true }).first()).toBeVisible();
+
+    const row = await db.assessment.findFirstOrThrow({ where: { title }, include: { teacherMembership: true } });
+    expect([row.centerId, row.type, row.status, row.createdByUserId, row.teacherMembership.userId], "the teacher's draft in the workspace, made by the assistant").toEqual([
+      workspaceId,
+      "HOMEWORK",
+      "DRAFT",
+      helperRow.id,
+      teacherRow.id,
+    ]);
+    const audit = await db.auditLog.findFirstOrThrow({ where: { centerId: workspaceId, action: "assessment.create", entityId: row.id } });
+    expect([audit.actorUserId, audit.onBehalfOfUserId], "audited with the assistant as actor, on behalf of the teacher").toEqual([helperRow.id, teacherRow.id]);
+  } finally {
+    await removeE2eAssessments(db, e2eTag);
+    await removeE2eUsers(db, e2eTag);
+    for (const authId of authIds) {
+      if ((await db.user.count({ where: { authId } })) === 0) await supabase.auth.admin.deleteUser(authId).catch(() => undefined);
+    }
+  }
+
+  const [users, centers, assessments, links, audit] = await Promise.all([
+    db.user.count({ where: { OR: [{ email: { in: [teacher.email, helper.email] } }, { lastName: { contains: ` ${e2eTag}` } }] } }),
+    db.center.count({ where: { id: { in: centerIds } } }),
+    db.assessment.count({ where: { OR: [{ centerId: { in: centerIds } }, { title: { startsWith: `${E2E_ASSESSMENT_PREFIX}${e2eTag}` } }] } }),
+    db.teacherAssistant.count({ where: { OR: [{ teacherUserId: { in: userIds } }, { assistantUserId: { in: userIds } }] } }),
+    db.auditLog.count({ where: { OR: [{ actorUserId: { in: userIds } }, { centerId: { in: centerIds } }] } }),
+  ]);
+  expect({ users, centers, assessments, links, audit }, "the teardown leaves nothing of this run behind").toEqual({ users: 0, centers: 0, assessments: 0, links: 0, audit: 0 });
+  await db.$disconnect();
 });

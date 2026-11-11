@@ -4,12 +4,13 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { AssessmentBuilder } from "@/app/[locale]/(teacher)/teacher/assessments/builder";
 import { newPayload } from "@/app/[locale]/(teacher)/teacher/assessments/initial";
-import { assessmentBranches } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
+import { assessmentBranches, assessmentReadOnlyReason, requireAssessmentSources, type AssessmentBranch } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
 import { EmptyState } from "@/components/shared/empty-state";
+import { FormMessage } from "@/components/shared/form-message";
 import { PageHeader } from "@/components/shared/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { requirePermission } from "@/lib/auth/tenant";
-import { findInBranches, firstGranting, getTeacherScope } from "@/lib/auth/teacher-scope";
+import { findInBranches, getTeacherWorkspaceScope } from "@/lib/auth/teacher-scope";
 import {
   findOwnClassForExam,
   findOwnSessionForHomework,
@@ -35,21 +36,26 @@ import { sessionDisplayName } from "@/lib/session-label";
  *   active class.
  * - `?type=EXAM` alone — first choose the class (every branch in view that
  *   grants `assessment.manage.own`).
+ *
+ * W9 (D-W42 items 1, 5, 7): the teacher's own PERSONAL workspaces are sources
+ * too — their classes are offered (named, tagged Private) only while the
+ * workspace takes writes; a direct link to a read-only one shows the reason
+ * instead of the builder.
  */
 export default async function NewAssessmentPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const scope = await getTeacherScope();
-  const ctx = firstGranting(scope, "assessment.manage.own");
-  await requirePermission(ctx, "assessment.manage.own");
+  // W9 (D-W42 item 7): a workspace-only teacher reaches it too; the gate is below.
+  const scope = await getTeacherWorkspaceScope();
   const params = await searchParams;
   const type = params.type === "HOMEWORK" ? "HOMEWORK" : "EXAM";
 
   const t = await getTranslations("TeacherAssessments");
   const locale = await getLocale();
   const branches = await assessmentBranches(scope.inView);
+  await requireAssessmentSources(scope, branches);
   const teacherAt = (centerId: string) => branches.find((branch) => branch.ctx.center.id === centerId)!;
   // The named branch is asked first; the row is still found only where it really lives.
   const ordered = [
@@ -57,6 +63,13 @@ export default async function NewAssessmentPage({
     ...branches.filter((branch) => branch.ctx.center.id !== params.branch),
   ];
   const several = scope.inView.length > 1;
+  const isPrivate = (branch: AssessmentBranch) => branch.ctx.center.kind === "PERSONAL";
+  // A workspace is always named: it is never one of the branches in view.
+  const placeName = (branch: AssessmentBranch) => (several || isPrivate(branch) ? branch.ctx.center.name : null);
+  const readOnlyNotice = (branch: AssessmentBranch) => {
+    const reason = assessmentReadOnlyReason(branch, now);
+    return reason ? <FormMessage tone="warning">{t(`errors.${reason}`)}</FormMessage> : null;
+  };
   const back = { href: ROUTES.teacherAssessments, label: t("builder.back") };
   const now = new Date();
 
@@ -72,26 +85,32 @@ export default async function NewAssessmentPage({
     const zone = sessionZone(session, branch.zone);
     const { deadline, basis } = await homeworkDeadlineFor(prisma, branch.ctx.center.id, { ...session, classGroupId: session.classGroupId! }, branch.zone);
     const label = sessionDisplayName(locale, { classGroup: session.classGroup });
+    const readOnly = readOnlyNotice(branch);
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
           title={t("builder.newHomeworkTitle")}
-          description={[label, `${formatDate(session.date, locale)} · ${formatTimeRange(session.startTime, session.endTime, locale)}`, several ? branch.ctx.center.name : null]
+          description={[label, `${formatDate(session.date, locale)} · ${formatTimeRange(session.startTime, session.endTime, locale)}`, placeName(branch)]
             .filter(Boolean)
             .join(" · ")}
-          back={{ href: ROUTES.teacherSession(session.id), label: t("builder.backToSession") }}
+          back={{
+            href: isPrivate(branch) ? ROUTES.teacherWorkspaceSession(branch.ctx.center.id, session.id) : ROUTES.teacherSession(session.id),
+            label: t("builder.backToSession"),
+          }}
         />
-        <AssessmentBuilder
-          mode="create"
-          centerId={branch.ctx.center.id}
-          type="HOMEWORK"
-          sessionId={session.id}
-          zone={zone}
-          nowMs={now.getTime()}
-          todayIso={dateKey(todayInTimezone(zone, now))}
-          deadlineBasis={basis}
-          initial={newPayload("HOMEWORK", deadline, zone)}
-        />
+        {readOnly ?? (
+          <AssessmentBuilder
+            mode="create"
+            centerId={branch.ctx.center.id}
+            type="HOMEWORK"
+            sessionId={session.id}
+            zone={zone}
+            nowMs={now.getTime()}
+            todayIso={dateKey(todayInTimezone(zone, now))}
+            deadlineBasis={basis}
+            initial={newPayload("HOMEWORK", deadline, zone)}
+          />
+        )}
       </div>
     );
   }
@@ -104,30 +123,35 @@ export default async function NewAssessmentPage({
     if (!hit) notFound();
     const branch = teacherAt(hit!.ctx.center.id);
     const label = sessionDisplayName(locale, { classGroup: hit!.found });
+    const readOnly = readOnlyNotice(branch);
+    const place = placeName(branch);
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
           title={t("builder.newExamTitle")}
-          description={several ? `${label} · ${branch.ctx.center.name}` : label}
+          description={place ? `${label} · ${place}` : label}
           back={back}
         />
-        <AssessmentBuilder
-          mode="create"
-          centerId={branch.ctx.center.id}
-          type="EXAM"
-          classGroupId={hit!.found.id}
-          zone={branch.zone}
-          nowMs={now.getTime()}
-          todayIso={dateKey(todayInTimezone(branch.zone, now))}
-          initial={newPayload("EXAM", null, branch.zone)}
-        />
+        {readOnly ?? (
+          <AssessmentBuilder
+            mode="create"
+            centerId={branch.ctx.center.id}
+            type="EXAM"
+            classGroupId={hit!.found.id}
+            zone={branch.zone}
+            nowMs={now.getTime()}
+            todayIso={dateKey(todayInTimezone(branch.zone, now))}
+            initial={newPayload("EXAM", null, branch.zone)}
+          />
+        )}
       </div>
     );
   }
 
   // Choose the class first — the teacher's own active classes at each granting branch.
+  // W9: a read-only workspace (lapsed, archived) offers no class to start from.
   const perBranch = await Promise.all(
-    branches.map(async (branch) => ({
+    branches.filter((branch) => assessmentReadOnlyReason(branch, now) === null).map(async (branch) => ({
       branch,
       classes: await scoped(branch.ctx).classGroups.list({ teacherId: branch.ctx.user.id, active: true }),
     })),
@@ -150,7 +174,12 @@ export default async function NewAssessmentPage({
                     className="flex min-h-11 flex-col gap-1 rounded-xl border border-border p-4 transition-ui hover:border-border-strong hover:shadow-card-hover"
                   >
                     <span className="text-sm font-semibold text-text-primary">{sessionDisplayName(locale, { classGroup })}</span>
-                    {several ? <span className="text-xs text-text-muted">{branch.ctx.center.name}</span> : null}
+                    {placeName(branch) ? (
+                      <span className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                        <span dir="auto">{placeName(branch)}</span>
+                        {isPrivate(branch) ? <Badge variant="neutral">{t("privateTag")}</Badge> : null}
+                      </span>
+                    ) : null}
                   </Link>
                 </li>
               ))}

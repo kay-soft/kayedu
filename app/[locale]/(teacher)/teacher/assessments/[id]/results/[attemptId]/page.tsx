@@ -1,13 +1,12 @@
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { assessmentBranches } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
+import { assessmentBranches, requireAssessmentSources } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
 import { PageHeader } from "@/components/shared/page-header";
 import { AttemptResultBody } from "@/components/teacher/assessments/attempt-result-body";
 import { Badge } from "@/components/ui/badge";
 import { RESULT_STATUS_BADGE } from "@/lib/assessment-results";
-import { requirePermission } from "@/lib/auth/tenant";
-import { firstGranting, getTeacherScope } from "@/lib/auth/teacher-scope";
+import { getTeacherWorkspaceScope } from "@/lib/auth/teacher-scope";
 import { readAttemptResult } from "@/lib/db/assessment-results";
 import { prisma } from "@/lib/db/client";
 import { redirect } from "@/lib/i18n/navigation";
@@ -20,14 +19,14 @@ import { ROUTES } from "@/lib/routes";
  * does not return them. The same refusals as the results page.
  */
 export default async function AttemptResultPage({ params }: { params: Promise<{ id: string; attemptId: string }> }) {
-  const scope = await getTeacherScope();
-  const ctx = firstGranting(scope, "assessment.manage.own");
-  await requirePermission(ctx, "assessment.manage.own");
+  // W9 (D-W42 item 7): a workspace-only teacher reaches it too; the gate is below.
+  const scope = await getTeacherWorkspaceScope();
   const { id, attemptId } = await params;
   const locale = await getLocale();
 
   const now = new Date();
   const branches = await assessmentBranches(scope.inView);
+  await requireAssessmentSources(scope, branches);
   const reads = await Promise.all(
     branches.map((branch) => readAttemptResult(prisma, { userId: scope.user.id }, branch.teacher, id, attemptId, now)),
   );

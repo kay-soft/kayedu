@@ -2385,8 +2385,11 @@
       "type": "Type",
       "allTypes": "All types",
       "class": "Class",
-      "allClasses": "All classes"
+      "allClasses": "All classes",
+      "source": "Branch or workspace",
+      "allSources": "All branches and workspaces"
     },
+    "privateTag": "Private",
     "questionCount": "{count, plural, =0 {No questions} one {# question} other {# questions}}",
     "windowValue": "{start} – {end}",
     "windowNotSet": "Times not set",
@@ -2504,7 +2507,9 @@
       "classInactive": "This class is inactive, so no student could take it.",
       "notPublished": "Only something published can be changed here.",
       "passed": "It has already closed, so it can no longer be extended.",
-      "notLater": "Choose a time later than the current one."
+      "notLater": "Choose a time later than the current one.",
+      "premiumRequired": "Read-only — renew premium to make changes in this workspace.",
+      "workspaceArchived": "This workspace is archived. Unarchive it to make changes."
     },
     "draftErrors": {
       "titleRequired": "Enter a title.",

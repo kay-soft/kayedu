@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { teacherBranchContext } from "@/lib/auth/teacher-scope";
+import { getWorkspaceContext } from "@/lib/auth/workspace-context";
 import {
   createAssessment,
   deleteAssessment,
@@ -41,8 +42,13 @@ function refusal(result: Extract<AssessmentWriteResult, { ok: false }>): Assessm
   return { error: result.error };
 }
 
-function revalidateAssessmentPages(locale: string, ids: { assessmentId?: string; classGroupId?: string | null; sessionId?: string | null }) {
+function revalidateAssessmentPages(
+  locale: string,
+  ids: { assessmentId?: string; classGroupId?: string | null; sessionId?: string | null; workspace?: boolean },
+) {
   revalidatePath(`/${locale}${ROUTES.teacherAssessments}`);
+  // W9: a workspace's class and session pages list its assessments too.
+  if (ids.workspace) revalidatePath(`/${locale}${ROUTES.teacherWorkspaces}`, "layout");
   if (ids.assessmentId) revalidatePath(`/${locale}${ROUTES.teacherAssessment(ids.assessmentId)}`);
   if (ids.classGroupId) revalidatePath(`/${locale}${ROUTES.teacherClass(ids.classGroupId)}`);
   if (ids.sessionId) revalidatePath(`/${locale}${ROUTES.teacherSession(ids.sessionId)}`);
@@ -59,7 +65,8 @@ export async function saveAssessmentAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, centerId, assessmentId, type, classGroupId, sessionId } = parsed.data;
 
-  const ctx = await teacherBranchContext(centerId);
+  // W9 (D-W42 item 1): a branch of the actor's, or a PERSONAL workspace they own — never trusted.
+  const ctx = (await teacherBranchContext(centerId)) ?? (await getWorkspaceContext(centerId));
   if (!ctx) return { error: "forbidden" };
   const teacher = await resolveAssessmentTeacher(prisma, ctx);
   if (!teacher) return { error: "forbidden" };
@@ -102,7 +109,7 @@ export async function saveAssessmentAction(
   if (assessmentId) {
     const result = await saveAssessmentDraft(prisma, actor, teacher, assessmentId, draft);
     if (!result.ok) return refusal(result);
-    revalidateAssessmentPages(locale, { assessmentId, ...target });
+    revalidateAssessmentPages(locale, { assessmentId, ...target, workspace: ctx.center.kind === "PERSONAL" });
     return { status: "saved", savedAt: Date.now() };
   }
 
@@ -111,7 +118,7 @@ export async function saveAssessmentAction(
       ? await createAssessment(prisma, actor, teacher, { type, sessionId: target.sessionId!, draft })
       : await createAssessment(prisma, actor, teacher, { type, classGroupId: target.classGroupId!, draft });
   if (!result.ok) return refusal(result);
-  revalidateAssessmentPages(locale, { assessmentId: result.id, ...target });
+  revalidateAssessmentPages(locale, { assessmentId: result.id, ...target, workspace: ctx.center.kind === "PERSONAL" });
   redirect({ href: ROUTES.teacherAssessment(result.id), locale });
   return { status: "saved", savedAt: Date.now() };
 }
@@ -125,7 +132,8 @@ export async function deleteAssessmentAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, centerId, assessmentId } = parsed.data;
 
-  const ctx = await teacherBranchContext(centerId);
+  // W9 (D-W42 item 1): a branch of the actor's, or a PERSONAL workspace they own — never trusted.
+  const ctx = (await teacherBranchContext(centerId)) ?? (await getWorkspaceContext(centerId));
   if (!ctx) return { error: "forbidden" };
   const teacher = await resolveAssessmentTeacher(prisma, ctx);
   if (!teacher) return { error: "forbidden" };
@@ -134,7 +142,7 @@ export async function deleteAssessmentAction(
   if (!current) return { error: "notFound" };
   const result = await deleteAssessment(prisma, { userId: ctx.user.id }, teacher, assessmentId);
   if (!result.ok) return refusal(result);
-  revalidateAssessmentPages(locale, { classGroupId: current.classGroupId, sessionId: current.sessionId });
+  revalidateAssessmentPages(locale, { classGroupId: current.classGroupId, sessionId: current.sessionId, workspace: ctx.center.kind === "PERSONAL" });
   redirect({ href: ROUTES.teacherAssessments, locale });
   return { status: "deleted" };
 }

@@ -345,10 +345,13 @@ export const getStudentContexts = cache(
  * active, linked profile (`studentWorkspaceProfiles` — archived workspaces
  * included, so history stays). Used **only** by the schedule, the calendar
  * and the attendance history they carry, U8's leave (which those rows
- * render), and — through its input, `studentWorkspaceProfiles` — the
- * session-notice re-check (`lib/notifications/reach.ts`).
+ * render), **W9 (D-W42 item 4): the student's exams and homework** — every
+ * page, action and the page-close route through `studentBranches`
+ * (`app/[locale]/(student)/student/assessments/scope.ts`) — and, through its
+ * input, `studentWorkspaceProfiles`, the session- and assessment-notice
+ * re-check and the "soon" notices (`lib/notifications/reach.ts`).
  * Everything else — the hub, the switcher, staff and teacher resolution,
- * assessments, ratings, My requests, Discover and Explore — keeps
+ * ratings, My requests, Discover and Explore — keeps
  * `getStudentContexts` / `getUserCenterRelations` and so `BRANCH_ONLY`.
  *
  * A workspace context is a STUDENT context like a branch's (no grants), and is

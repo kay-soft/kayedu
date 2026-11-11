@@ -82,6 +82,10 @@ export const WORKSPACE_OWNER_CAPABILITIES = [
   // voiding and refunding payments (`lib/db/workspace-attendance.ts`).
   "workspace.attendance.manage",
   "workspace.payments.manage",
+  // W9 (D-W42 item 1): building, publishing, extending, unpublishing and
+  // deleting exams and homework, and reading their results
+  // (`lib/db/assessments.ts`, `lib/db/assessment-results.ts`).
+  "workspace.assessments.manage",
 ] as const;
 
 export type WorkspaceCapability = (typeof WORKSPACE_OWNER_CAPABILITIES)[number];

@@ -27,6 +27,7 @@ import {
 import { queueNotificationEmails } from "../notify/email.ts";
 import { centreTimeZone } from "../scheduling.ts";
 import { sessionLabelSelect } from "../session-label.ts";
+import { BRANCH_ONLY } from "./center-kind.ts";
 import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
@@ -217,10 +218,22 @@ export async function notifySessionRescheduled(
 
 // ── Assessment notices (W3b, D-W32) ─────────────────────────────────────────
 
-/** Each ACTIVE enrolled student of an active class. */
+/**
+ * Each ACTIVE enrolled student of an active class. W9 (D-W42 item 6): in a
+ * PERSONAL workspace, only a **linked** one — the profile's `User` holds a
+ * login — so an unlinked profile's placeholder is never written a notice. A
+ * branch is unchanged.
+ */
 async function enrolledInClass(tx: Db, centerId: string, classGroupId: string) {
+  const centre = await tx.center.findUnique({ where: { id: centerId }, select: { kind: true } });
+  const linkedOnly = centre?.kind === "PERSONAL";
   return tx.enrollment.findMany({
-    where: scopedWhere(centerId, { classGroupId, status: ACTIVE_ENROLLMENT, classGroup: { active: true } }),
+    where: scopedWhere(centerId, {
+      classGroupId,
+      status: ACTIVE_ENROLLMENT,
+      classGroup: { active: true },
+      ...(linkedOnly ? { studentProfile: { user: { authId: { not: null } } } } : {}),
+    }),
     select: { studentProfileId: true, studentProfile: { select: { userId: true } } },
   });
 }
@@ -323,7 +336,14 @@ export async function syncAssessmentSoonNotices(
           status: "PUBLISHED" as const,
           classGroup: {
             active: true,
-            enrollments: { some: { status: ACTIVE_ENROLLMENT, studentProfile: { userId, active: true } } },
+            // W9 (D-W42 item 6): in a PERSONAL workspace only a linked profile (its User holds a
+            // login) counts, so a placeholder is never written a "soon" notice; a branch is unchanged.
+            enrollments: {
+              some: {
+                status: ACTIVE_ENROLLMENT,
+                studentProfile: { userId, active: true, OR: [{ center: BRANCH_ONLY }, { user: { authId: { not: null } } }] },
+              },
+            },
           },
           OR: [
             { type: "EXAM" as const, windowStart: { gt: now, lte: opensBy } },

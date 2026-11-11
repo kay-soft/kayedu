@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { teacherBranchContext } from "@/lib/auth/teacher-scope";
+import { getWorkspaceContext } from "@/lib/auth/workspace-context";
 import {
   extendAssessment,
   findTeacherAssessment,
@@ -26,10 +27,16 @@ import {
  * builder's actions: the posted branch is re-resolved through the actor's own
  * relations (U7), then `resolveAssessmentTeacher` asks for the owning teacher
  * there. The rules are the data layer's (lib/db/assessments.ts).
+ *
+ * W9 (D-W42 item 1): the posted id may also name a PERSONAL workspace the actor
+ * owns (`getWorkspaceContext`, the owner only); the writer then re-runs the
+ * workspace gate — `workspace.assessments.manage`, premium, not archived.
  */
 
-function revalidateRow(locale: string, row: { id: string; classGroupId: string; sessionId: string | null }) {
+function revalidateRow(locale: string, row: { id: string; classGroupId: string; sessionId: string | null }, workspace = false) {
   revalidatePath(`/${locale}${ROUTES.teacherAssessments}`);
+  // W9: a workspace's class and session pages list its assessments too.
+  if (workspace) revalidatePath(`/${locale}${ROUTES.teacherWorkspaces}`, "layout");
   revalidatePath(`/${locale}${ROUTES.teacherAssessment(row.id)}`);
   revalidatePath(`/${locale}${ROUTES.teacherClass(row.classGroupId)}`);
   if (row.sessionId) revalidatePath(`/${locale}${ROUTES.teacherSession(row.sessionId)}`);
@@ -44,7 +51,8 @@ export async function publishAssessmentAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, centerId, assessmentId } = parsed.data;
 
-  const ctx = await teacherBranchContext(centerId);
+  // W9 (D-W42 item 1): a branch of the actor's, or a PERSONAL workspace they own — never trusted.
+  const ctx = (await teacherBranchContext(centerId)) ?? (await getWorkspaceContext(centerId));
   if (!ctx) return { error: "forbidden" };
   const teacher = await resolveAssessmentTeacher(prisma, ctx);
   if (!teacher) return { error: "forbidden" };
@@ -53,7 +61,7 @@ export async function publishAssessmentAction(
   if (!current) return { error: "notFound" };
   const result = await publishAssessment(prisma, { userId: ctx.user.id }, teacher, assessmentId, new Date());
   if (!result.ok) return { error: result.error };
-  revalidateRow(locale, current);
+  revalidateRow(locale, current, ctx.center.kind === "PERSONAL");
   return { status: "published" };
 }
 
@@ -66,7 +74,8 @@ export async function unpublishAssessmentAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, centerId, assessmentId } = parsed.data;
 
-  const ctx = await teacherBranchContext(centerId);
+  // W9 (D-W42 item 1): a branch of the actor's, or a PERSONAL workspace they own — never trusted.
+  const ctx = (await teacherBranchContext(centerId)) ?? (await getWorkspaceContext(centerId));
   if (!ctx) return { error: "forbidden" };
   const teacher = await resolveAssessmentTeacher(prisma, ctx);
   if (!teacher) return { error: "forbidden" };
@@ -75,7 +84,7 @@ export async function unpublishAssessmentAction(
   if (!current) return { error: "notFound" };
   const result = await unpublishAssessment(prisma, { userId: ctx.user.id }, teacher, assessmentId);
   if (!result.ok) return { error: result.error };
-  revalidateRow(locale, current);
+  revalidateRow(locale, current, ctx.center.kind === "PERSONAL");
   return { status: "unpublished" };
 }
 
@@ -88,7 +97,8 @@ export async function extendAssessmentAction(
   if (!parsed.success) return { error: "notFound" };
   const { locale, centerId, assessmentId, date, time } = parsed.data;
 
-  const ctx = await teacherBranchContext(centerId);
+  // W9 (D-W42 item 1): a branch of the actor's, or a PERSONAL workspace they own — never trusted.
+  const ctx = (await teacherBranchContext(centerId)) ?? (await getWorkspaceContext(centerId));
   if (!ctx) return { error: "forbidden" };
   const teacher = await resolveAssessmentTeacher(prisma, ctx);
   if (!teacher) return { error: "forbidden" };
@@ -102,6 +112,6 @@ export async function extendAssessmentAction(
 
   const result = await extendAssessment(prisma, { userId: ctx.user.id }, teacher, assessmentId, newEnd, new Date());
   if (!result.ok) return { error: result.error };
-  revalidateRow(locale, current);
+  revalidateRow(locale, current, ctx.center.kind === "PERSONAL");
   return { status: "extended" };
 }

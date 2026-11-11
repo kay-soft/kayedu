@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { assessmentBranches } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
+import { assessmentBranches, requireAssessmentSources } from "@/app/[locale]/(teacher)/teacher/assessments/scope";
 import { PageHeader } from "@/components/shared/page-header";
 import { AssessmentResultsBody } from "@/components/teacher/assessments/assessment-results-body";
 import { Badge } from "@/components/ui/badge";
@@ -12,8 +12,7 @@ import {
   type ResultSort,
   type ResultStatus,
 } from "@/lib/assessment-results";
-import { requirePermission } from "@/lib/auth/tenant";
-import { firstGranting, getTeacherScope } from "@/lib/auth/teacher-scope";
+import { getTeacherWorkspaceScope } from "@/lib/auth/teacher-scope";
 import { readAssessmentResults } from "@/lib/db/assessment-results";
 import { prisma } from "@/lib/db/client";
 import { redirect } from "@/lib/i18n/navigation";
@@ -34,15 +33,15 @@ export default async function AssessmentResultsPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const scope = await getTeacherScope();
-  const ctx = firstGranting(scope, "assessment.manage.own");
-  await requirePermission(ctx, "assessment.manage.own");
+  // W9 (D-W42 item 7): a workspace-only teacher reaches it too; the gate is below.
+  const scope = await getTeacherWorkspaceScope();
   const { id } = await params;
   const query = await searchParams;
   const locale = await getLocale();
 
   const now = new Date();
   const branches = await assessmentBranches(scope.inView);
+  await requireAssessmentSources(scope, branches);
   const reads = await Promise.all(
     branches.map(async (branch) => ({
       branch,

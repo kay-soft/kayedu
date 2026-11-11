@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { expect, type Page } from "@playwright/test";
 
 import { E2E_ASSESSMENT_PREFIX } from "../../scripts/lib/e2e-assessments";
 import { assertSafeToWrite } from "../../scripts/lib/env";
@@ -273,3 +274,26 @@ export async function insertAttempt(db: PrismaClient, fx: FixtureClass, exam: In
 }
 
 export { DAY, HOUR, MINUTE };
+
+/**
+ * W9: fills the builder's questions through the UI — each "Add question", its
+ * text, four options and the first one marked correct — the steps the W3a
+ * journey takes, shared by the workspace journeys (`workspaces.spec.ts`,
+ * `assessments.spec.ts`). The builder must already be open.
+ */
+export async function fillBuilderQuestions(
+  page: Page,
+  msg: (key: string) => string,
+  texts: string[],
+): Promise<void> {
+  for (const [questionIndex, text] of texts.entries()) {
+    await page.getByRole("button", { name: msg("TeacherAssessments.builder.addQuestion"), exact: true }).click();
+    const card = page.locator("main ol > li").nth(questionIndex);
+    await card.getByLabel(msg("TeacherAssessments.builder.questionText"), { exact: true }).fill(text);
+    // By position: the option labels carry an ICU number format `msg` does not apply.
+    const options = card.locator("fieldset input:not([type=radio])");
+    await expect(options).toHaveCount(4);
+    for (let option = 0; option < 4; option += 1) await options.nth(option).fill(`Option ${option + 1}`);
+    await card.getByRole("radio").first().check();
+  }
+}

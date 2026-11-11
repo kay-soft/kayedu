@@ -67,7 +67,7 @@ export default async function AssistantAssessmentPage({ params }: { params: Prom
     <div className="flex flex-col gap-6">
       <PageHeader
         title={title}
-        description={[label, sessionLine, scope.branches.length > 1 ? entry.branch.centerName : null].filter(Boolean).join(" · ")}
+        description={[label, sessionLine, scope.branches.length > 1 || entry.isPrivate ? entry.branch.centerName : null].filter(Boolean).join(" · ")}
         back={{ href: routes.list, label: t("builder.back") }}
         action={
           published ? (
@@ -81,10 +81,17 @@ export default async function AssistantAssessmentPage({ params }: { params: Prom
           <div className="flex flex-wrap gap-2">
             <Badge variant="neutral">{t(`type.${row.type}`)}</Badge>
             <Badge variant={published ? "info" : "neutral"}>{t(`status.${row.status}`)}</Badge>
+            {entry.isPrivate ? <Badge variant="neutral">{t("privateTag")}</Badge> : null}
           </div>
         }
       />
-      <AssessmentDetailBody row={row} zone={zone} centerId={entry.branch.centerId} surface={surface} />
+      <AssessmentDetailBody
+        row={row}
+        zone={zone}
+        centerId={entry.branch.centerId}
+        surface={surface}
+        readOnly={entry.readOnly ? t(`errors.${entry.readOnly}`) : null}
+      />
     </div>
   );
 }

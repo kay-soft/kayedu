@@ -5,6 +5,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
+import { LinkedAssessments } from "@/app/[locale]/(teacher)/teacher/assessments/linked-assessments";
 import {
   workspaceCheckInAction,
   workspaceCloseSessionAction,
@@ -175,20 +176,30 @@ export default async function WorkspaceSessionPage({ params }: { params: Promise
 
       <DetailLayout
         main={
-          <DetailCard
-            title={t("rosterTitle")}
-            description={session.classGroupId ? t("rosterDescription") : t("oneTimeNote")}
-          >
-            <WorkspaceSessionRoster
-              workspaceId={id}
+          <>
+            <DetailCard
+              title={t("rosterTitle")}
+              description={session.classGroupId ? t("rosterDescription") : t("oneTimeNote")}
+            >
+              <WorkspaceSessionRoster
+                workspaceId={id}
+                sessionId={session.id}
+                rows={rows}
+                priceLabel={priceLabel}
+                writable={writable}
+                readOnly={readOnly}
+                actions={TEACHER_ACTIONS}
+              />
+            </DetailCard>
+            {/* W9 (D-W42 item 7): homework set from this session, as at a branch (D-W03); none while read-only. */}
+            <LinkedAssessments
+              ctx={ctx}
+              kind="session"
               sessionId={session.id}
-              rows={rows}
-              priceLabel={priceLabel}
-              writable={writable}
-              readOnly={readOnly}
-              actions={TEACHER_ACTIONS}
+              hasClass={session.classGroupId !== null}
+              canCreate={writable && displayStatus !== "CANCELLED" && displayStatus !== "RESCHEDULED"}
             />
-          </DetailCard>
+          </>
         }
         side={
           <>

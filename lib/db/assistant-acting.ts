@@ -113,12 +113,14 @@ const TEACHER_EQUIVALENT: Readonly<Record<AssistantPermission, Permission | null
  * (W8d, D-W41 item 9): the teacher's fixed workspace capability, or `null` =
  * owning the workspace with its TEACHER membership alone (the read-only
  * workspace pages, the Earnings page and the rosters' phones), or `false` =
- * nothing there. Assessments in workspaces are W9; requests have no workspace
- * meaning (the teacher files none to themselves).
+ * nothing there. W9 (D-W42 item 9): both assessment keys stand for the
+ * teacher's `workspace.assessments.manage` — Review for results and answers,
+ * Manage for the builder, publish, unpublish, extend and delete. Requests have
+ * no workspace meaning (the teacher files none to themselves).
  */
 const WORKSPACE_EQUIVALENT: Readonly<Record<AssistantPermission, WorkspaceCapability | null | false>> = {
-  "assessments.review": false,
-  "assessments.manage": false,
+  "assessments.review": "workspace.assessments.manage",
+  "assessments.manage": "workspace.assessments.manage",
   "classes.view": null,
   "requests.manage": false,
   "checkin.workspace": "workspace.attendance.manage",

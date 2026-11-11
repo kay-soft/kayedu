@@ -29,8 +29,9 @@ import { ROUTES } from "../routes.ts";
  *    declined or cancelled, it is hidden, never deleted.
  *
  * W8b also lets the two session kinds reach a student through a **linked
- * workspace profile** (`NotificationReach.workspaceCenterIds`) — never the
- * assessment kinds, which wait for W9.
+ * workspace profile** (`NotificationReach.workspaceCenterIds`). W9 (D-W42):
+ * the assessment kinds reach that profile too, through the reader's student
+ * centres (`NotificationReach.studentCenterIds`) and the assessment re-check.
  */
 export type NotificationAudience = "relation" | "requester" | "invitation";
 
@@ -113,7 +114,7 @@ export const REQUESTER_KINDS = NOTIFICATION_KIND_LIST.filter(
   (kind) => NOTIFICATION_KINDS[kind].audience === "requester",
 );
 
-/** W8b: the kinds a linked workspace profile reaches (its sessions only — no assessment until W9). */
+/** W8b: the session kinds a linked workspace profile reaches (W9: the assessment kinds reach it through `studentCenterIds`). */
 export const WORKSPACE_SESSION_KINDS = [
   "SESSION_CANCELLED",
   "SESSION_RESCHEDULED",

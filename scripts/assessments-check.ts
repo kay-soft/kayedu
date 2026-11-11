@@ -864,6 +864,36 @@ function checkStatics() {
       }),
   );
   check("No builder action reads a teacher id from the form", !/formData\.get\("teacher|teacherMembershipId:\s*parsed/.test(actions));
+
+  // W9 (D-W42 items 1, 5): workspaces join through the owner's own context and the fixed capability.
+  const publishSource = readSource(join(ROOT, "app/[locale]/(teacher)/teacher/assessments/publish-actions.ts"));
+  check(
+    "W9: every teacher action falls back from the branch to the actor's own workspace only (teacherBranchContext ?? getWorkspaceContext)",
+    (actions.match(/\(await teacherBranchContext\(centerId\)\) \?\? \(await getWorkspaceContext\(centerId\)\)/g) ?? []).length === 2 &&
+      (publishSource.match(/\(await teacherBranchContext\(centerId\)\) \?\? \(await getWorkspaceContext\(centerId\)\)/g) ?? []).length === 3,
+  );
+  const dataSource = readSource(join(ROOT, "lib/db/assessments.ts"));
+  check(
+    "W9: resolveAssessmentTeacher decides a workspace by workspaceCan(workspace.assessments.manage), never the matrix",
+    /if \(ctx\.workspace\) \{[\s\S]{0,300}workspaceCan\(\{ workspace: ctx\.workspace \}, "workspace\.assessments\.manage"\)/.test(dataSource) &&
+      /\} else if \(!canInContext\(ctx, "assessment\.manage\.own"\)\) \{/.test(dataSource),
+  );
+  check(
+    "W9: every writer opens with writeGate — the membership, the actor, then the workspace's capability, premium and archive",
+    (dataSource.match(/const refused = await writeGate\(tx, actor, teacher, now\);/g) ?? []).length === 6 &&
+      /const refused = await workspaceWriteGate\(tx, teacher, now\);/.test(dataSource) &&
+      /assertWorkspaceWritable\(tx, access, now\)/.test(dataSource),
+  );
+  check(
+    "W9: results decide a workspace by workspaceCan too, and the student's attempts module never reads premium or the write gate",
+    /centre\.kind === "PERSONAL"[\s\S]{0,400}workspaceCan\(\{ workspace: access \}, "workspace\.assessments\.manage"\)/.test(readSource(join(ROOT, "lib/db/assessment-results.ts"))) &&
+      !/requirePremium|assertWorkspaceWritable|workspaceWriteGate/.test(readSource(join(ROOT, "lib/db/assessment-attempts.ts"))),
+  );
+  check(
+    "W9: a start in a PERSONAL workspace needs a linked profile (a login), on top of the ACTIVE enrolment",
+    /if \(!enrolled\) return \{ ok: false, error: "notEligible" \};\s*[\s\S]{0,300}linkedWhereRequired\(tx, centerId, studentProfileId\)/.test(readSource(join(ROOT, "lib/db/assessment-attempts.ts"))) &&
+      /user: \{ authId: \{ not: null \} \}/.test(readSource(join(ROOT, "lib/db/assessment-attempts.ts"))),
+  );
 }
 
 // ── 10–19. Publishing and taking (W3a, D-W02, D-W05–D-W11, D-W31) ───────────

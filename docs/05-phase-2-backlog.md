@@ -52,7 +52,7 @@
 
 ## 5. Learning content: materials, question bank, richer assessments, grades, progress, teacher notes
 
-> **Narrowed by the W-batch (3 Nov 2026, W-C1).** Teacher-built **multiple-choice exams and homework** — one correct option, text only, one attempt, auto-graded, in centre classes and PERSONAL workspaces — moved into `03-build-order.md` W2–W4 and W9 (`00-master-product-spec.md` D-W01…D-W11, D-W26), so they are no longer listed here. What stays deferred is everything else below. That includes **images in questions** (wait for Cloudinary, M20), **any other question type** (multi-select, free text, file answers, manual marking), **more than one attempt**, **assessments seen by centre staff or parents** (D-W11), a **gradebook** across assessments, and a **reusable question bank**.
+> **Narrowed by the W-batch (3 Nov 2026, W-C1).** Teacher-built **multiple-choice exams and homework** — one correct option, text only, one attempt, auto-graded, in centre classes and PERSONAL workspaces — moved into `03-build-order.md` W2–W4 and W9 (`00-master-product-spec.md` D-W01…D-W11, D-W26), so they are no longer listed here. What stays deferred is everything else below. That includes **images in questions** (wait for Cloudinary, M20 — at branches and in workspaces alike, D-W42), **any other question type** (multi-select, free text, file answers, manual marking), **more than one attempt**, **assessments seen by centre staff or parents** (D-W11), a **gradebook** across assessments, and a **reusable question bank**.
 
 **What it is.** The LMS half of an education platform — uploading materials, a reusable question bank, question types beyond single-answer multiple choice (and their manual marking), gradebooks, per-student progress tracking, and private teacher notes on a student.
 
@@ -402,6 +402,8 @@
 
 **Depends on.** A decision on what a parent may see against `showScore` and `showCorrectAnswers`; a read of its own (W4's `lib/db/assessment-results.ts` is teacher-only and returns correctness, so a parent must never reuse it); `check:assessments` extending its sweep to `(parent)` for anything it starts reading.
 
+*W9 (D-W42):* this covers **PERSONAL-workspace** assessments too — parents see none in v1. A parent's view of a private class's exams also depends on entry 57 (parents see no workspace class at all yet).
+
 ---
 
 ## 40. CSV export of an assessment's results
@@ -711,6 +713,26 @@
 **Why deferred.** Out of scope for W8d by decision (D-W41). A forecast is computed from current prices, which the money rules keep strictly apart from frozen snapshots (CLAUDE.md rule 2); it must never be confused with collected money.
 
 **Depends on.** A design that labels it as an estimate, never sums it with collected figures, and reads prices only for sessions with no payment.
+
+---
+
+## 71. Exam and homework notices to the teacher
+
+**What it is.** The teacher (and their assistants) told when a student submits, when an assessment closes, or when everyone has submitted — at a branch or in a workspace.
+
+**Why deferred.** D-W32 sends assessment notices to students only, and W9 kept that for workspaces (D-W42). The teacher reads the same facts on the list, the calendar and Results.
+
+**Depends on.** A decision on which events notify and how often (one per submit would flood a large class); a kind of its own in `lib/notifications/kinds.ts` with a teacher audience and a re-check against `workspace.assessments.manage` / `assessment.manage.own`; computed on read or written by the submit (no cron, rule 12).
+
+---
+
+## 72. Copying an assessment across workspaces (or from a branch)
+
+**What it is.** "Copy to…" on an exam or homework: its questions and settings as a new draft in another of the teacher's workspaces or classes.
+
+**Why deferred.** Out of scope for W9 by decision (D-W42). A copy crosses centres, so it is a read in one tenant and a write in another, and it must never copy attempts, scores or notices.
+
+**Depends on.** A copy through the builder's own `createAssessment` in the target (its authority and gate, never a raw insert), the source re-resolved for the same teacher, and a decision on copying between a branch and a workspace (a branch's row belongs to the centre's records). A reusable question bank (entry 5) would supersede it.
 
 ---
 

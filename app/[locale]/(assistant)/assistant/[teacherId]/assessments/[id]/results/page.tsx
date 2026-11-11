@@ -12,7 +12,7 @@ import {
   type ResultSort,
   type ResultStatus,
 } from "@/lib/assessment-results";
-import { getAssistantScope, scopeBranches } from "@/lib/auth/assistant-context";
+import { getAssistantScope, scopeBranches, scopeWorkspaces } from "@/lib/auth/assistant-context";
 import { readAssessmentResults } from "@/lib/db/assessment-results";
 import { prisma } from "@/lib/db/client";
 import { redirect } from "@/lib/i18n/navigation";
@@ -51,7 +51,7 @@ export default async function AssistantAssessmentResultsPage({
   );
   if (reads.some(({ read }) => !read.ok && read.error === "draft")) {
     // A draft has no results: its builder, for an assistant who may manage it (D-W01).
-    if (scopeBranches(scope, "assessments.manage").length === 0) notFound();
+    if (scopeBranches(scope, "assessments.manage").length === 0 && scopeWorkspaces(scope, "assessments.manage").length === 0) notFound();
     return redirect({ href: routes.detail(id), locale });
   }
   const hit = reads.find(({ read }) => read.ok);

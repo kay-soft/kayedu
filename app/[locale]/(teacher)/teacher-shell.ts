@@ -8,10 +8,12 @@ import {
   type ShellFrame,
 } from "@/components/shell/from-context";
 import { shellExperiences } from "@/components/shell/experience-switcher-data";
-import { teacherNavAcross, withPendingCount } from "@/components/shell/nav";
+import { TEACHER_WORKSPACE_ONLY_NAV, teacherNavAcross, withPendingCount } from "@/components/shell/nav";
 import { getPendingTeacherApprovalCounts } from "@/lib/auth/approval-counts";
 import { ctxCan, requireTeacherUser } from "@/lib/auth/tenant";
 import { getTeacherScope } from "@/lib/auth/teacher-scope";
+import { prisma } from "@/lib/db/client";
+import { ownsAnyWorkspace } from "@/lib/db/workspaces";
 import { unreadNotificationCount } from "@/lib/notifications/reach";
 import { ROUTES } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
@@ -29,6 +31,9 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  * the same minimal shell with Workspaces first (their landing), Earnings
  * (W8d — their workspaces' money), Assistants (W8d: an assistant works in
  * their workspaces too) and the centre directory.
+ * W9 (D-W42 item 7): that shell also lists the Calendar and Exams & homework
+ * (`TEACHER_WORKSPACE_ONLY_NAV`), and a teacher at a branch who owns a
+ * workspace always has Exams & homework.
  * A teacher with neither keeps the directory alone (M15, unchanged); with
  * premium, the directory links to Workspaces to create the first one.
  * Workspaces never join the branch scope.
@@ -54,13 +59,7 @@ export async function teacherShell(): Promise<ShellFrame> {
       props: {
         experience: "teacher",
         nav: session.workspaceOnly
-          ? [
-              { href: ROUTES.teacherWorkspaces, labelKey: "workspaces", icon: "workspaces" },
-              // W8d (D-W41): a workspace-only teacher's Earnings — their workspaces only.
-              { href: ROUTES.teacherEarnings, labelKey: "earnings", icon: "earnings" },
-              { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
-              { href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" },
-            ]
+          ? TEACHER_WORKSPACE_ONLY_NAV
           : [{ href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" }],
         brand: PLATFORM_BRAND,
         user: shellUser(session.user, "TEACHER"),
@@ -71,7 +70,7 @@ export async function teacherShell(): Promise<ShellFrame> {
     };
   }
 
-  const scope = await getTeacherScope();
+  const [scope, ownsWorkspace] = await Promise.all([getTeacherScope(), ownsAnyWorkspace(prisma, session.user.id)]);
   // F7 — the teacher's own count: only their classes, only where they may act.
   const approvalCounts = await Promise.all(
     scope.inView
@@ -84,7 +83,7 @@ export async function teacherShell(): Promise<ShellFrame> {
     props: {
       experience: "teacher",
       nav: withPendingCount(
-        teacherNavAcross(scope.inView.map((ctx) => ({ role: ctx.role, grants: ctx.grants }))),
+        teacherNavAcross(scope.inView.map((ctx) => ({ role: ctx.role, grants: ctx.grants })), { ownsWorkspace }),
         ROUTES.teacherApprovals,
         pending,
       ),

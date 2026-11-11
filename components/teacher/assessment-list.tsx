@@ -18,6 +18,8 @@ export type AssessmentListEntry = {
   branchZone: string;
   /** "submitted / eligible" (W4); only a published row has it. */
   progress?: ResultProgress;
+  /** W9 (D-W42 item 7): a PERSONAL workspace's row — always named, tagged "Private". */
+  isPrivate?: boolean;
 };
 
 /**
@@ -46,7 +48,7 @@ export async function AssessmentList({
 
   return (
     <ul className="flex flex-col gap-3">
-      {entries.map(({ row, branchName, branchZone, progress }) => {
+      {entries.map(({ row, branchName, branchZone, progress, isPrivate }) => {
         const zone = row.session ? sessionZone(row.session, branchZone) : branchZone;
         const timing =
           row.type === "HOMEWORK"
@@ -72,7 +74,7 @@ export async function AssessmentList({
                 {showClass ? (
                   <span className="font-medium text-text-secondary">{sessionDisplayName(locale, { classGroup: row.classGroup })}</span>
                 ) : null}
-                {showBranch ? <span>{branchName}</span> : null}
+                {showBranch || isPrivate ? <span dir="auto">{branchName}</span> : null}
                 <span>{timing}</span>
                 <span>{t("questionCount", { count: row._count.questions })}</span>
               </p>
@@ -80,6 +82,7 @@ export async function AssessmentList({
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Badge variant="neutral">{t(`type.${row.type}`)}</Badge>
               <Badge variant={row.status === "PUBLISHED" ? "info" : "neutral"}>{t(`status.${row.status}`)}</Badge>
+              {isPrivate ? <Badge variant="neutral">{t("privateTag")}</Badge> : null}
               {progress ? (
                 <span data-result-progress className="text-xs font-medium tabular-nums text-text-secondary">
                   {t("results.progress", { submitted: formatNumber(progress.submitted, locale), eligible: formatNumber(progress.eligible, locale) })}

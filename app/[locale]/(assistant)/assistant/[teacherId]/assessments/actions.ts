@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { assistantAssessmentBranches, type AssistantAssessmentBranch } from "@/app/[locale]/(assistant)/assistant/[teacherId]/assessments/scope";
+import { assistantAssessmentBranches, withinAssistantFloor, type AssistantAssessmentBranch } from "@/app/[locale]/(assistant)/assistant/[teacherId]/assessments/scope";
 import { assistantActionScope } from "@/lib/auth/assistant-context";
 import {
   createAssessment,
@@ -111,7 +111,7 @@ export async function assistantSaveAssessmentAction(
     if (!sessionId) return NOT_FOUND;
     for (const candidate of managed.branches) {
       const session = await findOwnSessionForHomework(prisma, candidate.teacher, sessionId);
-      if (session && session.date >= candidate.branch.floor) {
+      if (session && withinAssistantFloor(candidate, session.date)) {
         branch = candidate;
         zone = sessionZone(session, candidate.zone);
         target = { classGroupId: session.classGroupId, sessionId: session.id };

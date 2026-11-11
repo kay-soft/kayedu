@@ -23,7 +23,8 @@ type Page = {
 };
 
 const PAGES: Page[] = [
-  { keys: ["assessments.review"], where: "branches", labelKey: "assessments", icon: "assessments", href: ROUTES.assistantAssessments },
+  // W9 (D-W42 item 9): the teacher's exams and homework — at a branch or in a workspace.
+  { keys: ["assessments.review"], where: "both", labelKey: "assessments", icon: "assessments", href: ROUTES.assistantAssessments },
   { keys: ["classes.view"], where: "branches", labelKey: "classes", icon: "classes", href: ROUTES.assistantClasses },
   // W8d: the teacher's workspaces — to read their classes, or to act on their sessions.
   { keys: ASSISTANT_WORKSPACE_KEYS, where: "workspaces", labelKey: "workspaces", icon: "workspaces", href: ROUTES.assistantWorkspaces },

@@ -18,6 +18,7 @@ import {
 import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { DetailRow } from "@/components/shared/field";
 import { FormMessage } from "@/components/shared/form-message";
+import { LinkButton } from "@/components/shared/link-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { SessionKindBadge } from "@/components/shared/session-kind-badge";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +28,7 @@ import { closeSessionIfDayOver, sessionTimeZone } from "@/lib/db/session-lifecyc
 import { deriveSessionDisplayStatus } from "@/lib/db/sessions";
 import { workspaceSessionDetail, workspaceSessionRoster } from "@/lib/db/workspace-attendance";
 import { formatDate, formatMoney, formatTimeRange } from "@/lib/format";
-import { ROUTES } from "@/lib/routes";
+import { ROUTES, assessmentRoutes } from "@/lib/routes";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
 
 const STATUS_BADGE = {
@@ -100,6 +101,10 @@ export default async function AssistantWorkspaceSessionPage({
   const canEnd = writable && canCheckIn && !readOnly && displayStatus === "LIVE";
   const priceLabel = formatMoney(session.priceSnapshot, locale);
   const extraFields = { teacherId };
+  // W9 (D-W42 item 9): homework from this session, with `assessments.manage` here, as the teacher's own (D-W03).
+  const canAddHomework =
+    writable && scopeCan(scope, "assessments.manage", centerId) && session.classGroupId !== null && displayStatus !== "CANCELLED" && displayStatus !== "RESCHEDULED";
+  const tAssessments = await getTranslations("TeacherAssessments");
 
   return (
     <div className="flex flex-col gap-6">
@@ -122,6 +127,14 @@ export default async function AssistantWorkspaceSessionPage({
       />
       {writable ? null : <FormMessage tone="info">{tAssistant("archivedNote")}</FormMessage>}
       {!canCheckIn && !canPay ? <FormMessage tone="info">{tAssistant("readOnlyNote")}</FormMessage> : null}
+      {canAddHomework ? (
+        <LinkButton
+          href={`${assessmentRoutes({ kind: "assistant", teacherId }).newBase}?type=HOMEWORK&session=${encodeURIComponent(session.id)}`}
+          className="w-full sm:w-fit"
+        >
+          {tAssessments("addHomework")}
+        </LinkButton>
+      ) : null}
       <DetailLayout
         main={
           <DetailCard title={t("rosterTitle")} description={session.classGroupId ? t("rosterDescription") : t("oneTimeNote")}>

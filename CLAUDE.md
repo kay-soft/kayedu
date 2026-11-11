@@ -75,7 +75,7 @@ If the docs are silent on something that touches **money, permissions, or tenant
 
 10. **One normalizer per rule.** Phone numbers go through `lib/phone.ts` — used by validation, duplicate-matching **and** search alike. Money goes through `lib/money.ts`. Dates format through `lib/format.ts`. A second implementation of any of these is a second answer to the same question.
 
-**W-batch rules** (decisions D-W01…D-W26 in `docs/00-master-product-spec.md` §5.1 "W-batch"; planned W1–W9):
+**W-batch rules** (decisions D-W01…D-W42 in `docs/00-master-product-spec.md` §5.1 "W-batch"; delivered W1–W9):
 
 11. **Correct answers never leave the server before reveal.** No page payload, prop, Server Action answer or select a student or parent can reach contains a correct option or per-answer correctness until the window or deadline has closed **and** `showCorrectAnswers` is on. Time comes from the attempt's `startedAt` on the server, grading is server-side, and the score is frozen at submit (D-W09).
 12. **No cron for assessments or notifications.** A past-due attempt is finalised the next time it is read (D-W10). A notice is written by its event or computed on read (D-W12). Premium expiry is computed per request (D-W15). No scheduled job, timer route or polling — the R4 rule stands.

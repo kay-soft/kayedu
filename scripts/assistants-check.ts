@@ -561,7 +561,11 @@ function workspaceStatics(assistantSurface: string[], scopeSource: string, loade
   check(
     "assistantCan decides workspaces too: the workspace equivalents live beside the branch table, the teacher's capability through workspaceCan",
     /const WORKSPACE_EQUIVALENT:/.test(actingSource) && /return workspaceCan\(\{ workspace: access \}, capability \?\? "workspace\.sessions\.manage"\);/.test(actingSource) &&
-      /"assessments\.manage": false,[\s\S]{0,80}"requests\.manage": false/.test(actingSource.slice(actingSource.indexOf("WORKSPACE_EQUIVALENT"))),
+      // W9 old → new (A, approved in the W9 follow-up, D-W42): both assessment keys stand for the teacher's
+      // workspace.assessments.manage; requests.manage still grants nothing in a workspace.
+      /"assessments\.review": "workspace\.assessments\.manage",\s*"assessments\.manage": "workspace\.assessments\.manage",[\s\S]{0,80}"requests\.manage": false/.test(
+        actingSource.slice(actingSource.indexOf("const WORKSPACE_EQUIVALENT")),
+      ),
   );
 }
 
@@ -1092,17 +1096,20 @@ async function checkWorkspaceSource(input: {
     acting !== null && acting.branches.length === 0 && acting.workspaces.length === 1 && acting.workspaces[0].centerId === workspaceId &&
       acting.workspaces[0].teacherMembershipId !== null,
   );
+  // W9 old → new (E, approved in the W9 follow-up, D-W42): Co-teacher also holds both assessment keys there.
   check(
-    "Co-teacher there: classes, check-in and payments in the workspace, nothing else",
-    ASSISTANT_PERMISSIONS.filter((permission) => assistantCan(acting, permission, workspaceId)).join() === "classes.view,checkin.workspace,payments.workspace",
+    "Co-teacher there: assessments (review and manage), classes, check-in and payments in the workspace, nothing else",
+    ASSISTANT_PERMISSIONS.filter((permission) => assistantCan(acting, permission, workspaceId)).join() ===
+      "assessments.review,assessments.manage,classes.view,checkin.workspace,payments.workspace",
   );
   const navOf = async () => {
     const fresh = await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: wsOnly.id, now });
     return fresh ? assistantNavItems(wsOnly.id, fresh).map((item) => item.labelKey).join() : "none";
   };
-  check("The nav: Home and Workspaces (no branch page)", (await navOf()) === "home,workspaces", await navOf());
+  // W9 old → new (F, approved in the W9 follow-up, D-W42): Exams & homework shows for a workspace grant.
+  check("The nav: Home, Exams & homework (the workspace's) and Workspaces (no branch page)", (await navOf()) === "home,assessments,workspaces", await navOf());
   const toFull = await updateAssistantPermissions(prisma, { actorUserId: wsOnly.id, linkId: linked.linkId, change: { preset: "FULL" }, now });
-  check("With Full the nav adds Earnings (the workspace's analytics), never Overview (a branch summary)", toFull.ok && (await navOf()) === "home,workspaces,earnings", await navOf());
+  check("With Full the nav adds Earnings (the workspace's analytics), never Overview (a branch summary)", toFull.ok && (await navOf()) === "home,assessments,workspaces,earnings", await navOf());
   const other = await input.premiumAccount("ws-other");
   const otherWs = await createWorkspace(prisma, other.id, { name: "Someone else's" });
   const again = await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: wsOnly.id, now });

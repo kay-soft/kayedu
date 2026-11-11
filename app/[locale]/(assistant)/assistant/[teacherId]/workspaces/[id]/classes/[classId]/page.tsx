@@ -6,6 +6,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { weeklySlotsLine, workspaceClassLabel } from "@/components/teacher/workspaces/labels";
 import { WorkspaceSessionList } from "@/components/teacher/workspaces/workspace-session-list";
 import { EmptyState } from "@/components/shared/empty-state";
+import { LinkButton } from "@/components/shared/link-button";
 import { Ltr } from "@/components/shared/ltr";
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import { workspaceClass, workspaceSessions } from "@/lib/db/workspaces";
 import { formatDayRange, formatMoney } from "@/lib/format";
 import { fullName } from "@/lib/identity";
 import { formatPhone } from "@/lib/phone";
-import { ROUTES } from "@/lib/routes";
+import { ROUTES, assessmentRoutes } from "@/lib/routes";
 import { dateKey, todayInTimezone } from "@/lib/scheduling";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -56,6 +57,9 @@ export default async function AssistantWorkspaceClassPage({
     assistantWorkspaceClassRoster(prisma, workspace.centerId, row.id, { withPhones }),
   ]);
   const dayNames = tClasses.raw("dayNames") as string[];
+  // W9 (D-W42 item 9): a new exam on this class, with `assessments.manage` here, on an active class of a live workspace.
+  const canNewExam = row.active && workspace.archivedAt === null && scopeCan(scope, "assessments.manage", workspace.centerId);
+  const tAssessments = await getTranslations("TeacherAssessments");
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,6 +68,13 @@ export default async function AssistantWorkspaceClassPage({
         description={workspace.centerName}
         back={{ href: ROUTES.assistantWorkspace(teacherId, workspace.centerId), label: t("classesTitle") }}
         meta={row.active ? <Badge variant="neutral">{t("private")}</Badge> : <Badge variant="neutral">{t("inactive")}</Badge>}
+        action={
+          canNewExam ? (
+            <LinkButton href={`${assessmentRoutes({ kind: "assistant", teacherId }).newBase}?type=EXAM&class=${encodeURIComponent(row.id)}`}>
+              {tAssessments("newExam")}
+            </LinkButton>
+          ) : undefined
+        }
       />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start">
         <Card>

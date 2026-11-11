@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { Check, TriangleAlert, X } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
-import { studentBranches } from "@/app/[locale]/(student)/student/assessments/scope";
+import { privateTeacherNames, studentBranches } from "@/app/[locale]/(student)/student/assessments/scope";
 import { StartAttempt } from "@/app/[locale]/(student)/student/assessments/start-attempt";
 import { AssessmentTaker } from "@/app/[locale]/(student)/student/assessments/taker";
 import { FormMessage } from "@/components/shared/form-message";
@@ -29,6 +29,10 @@ import { cn } from "@/lib/utils";
  * only once `readAttemptReveal` allows it, the correct answers (rule 11). Found at
  * the branch whose profile can see it, otherwise a 404: a student who is not
  * enrolled, another centre's student, staff and parents all land there.
+ *
+ * W9 (D-W42 item 4): a linked PERSONAL workspace's assessment reads the same way
+ * (the opt-in resolver feeds `studentBranches`), labelled with the workspace's
+ * name, the teacher's and "Private class"; its times in the workspace's zone.
  */
 export default async function StudentAssessmentPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireStudentUser();
@@ -48,6 +52,8 @@ export default async function StudentAssessmentPage({ params }: { params: Promis
   const zone = view.timeZone ?? centreTimeZone(branch.ctx.settings);
   const classLabel = sessionDisplayName(locale, { classGroup: view.classGroup });
   const branchName = branch.ctx.center.name;
+  const privateTeacher = branch.ctx.center.kind === "PERSONAL" ? ((await privateTeacherNames([branch])).get(branch.ctx.center.id) ?? null) : null;
+  const tPrivate = await getTranslations("WorkspaceStudents.student");
   const closes = view.type === "EXAM" ? view.windowEnd : view.deadline;
   const closesValue = closes ? formatDateTime(closes, locale, zone) : "";
   const windowLabel = t(view.type === "EXAM" ? "windowLabel" : "deadlineLabel");
@@ -76,12 +82,13 @@ export default async function StudentAssessmentPage({ params }: { params: Promis
     <div className="flex flex-col gap-6">
       <PageHeader
         title={view.title}
-        description={[classLabel, branchName].join(" · ")}
+        description={[classLabel, branchName, ...(privateTeacher !== null ? [privateTeacher] : [])].join(" · ")}
         back={{ href: ROUTES.studentAssessments, label: t("title") }}
         meta={
           <div className="flex flex-wrap gap-2">
             <Badge variant="neutral">{t(`type.${view.type}`)}</Badge>
             <Badge variant={STUDENT_STATE_BADGE[view.state]}>{t(`state.${view.state}`)}</Badge>
+            {privateTeacher !== null ? <Badge variant="neutral">{tPrivate("privateClass")}</Badge> : null}
           </div>
         }
       />

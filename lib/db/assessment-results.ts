@@ -22,7 +22,8 @@ import { assistantMayAt } from "./assistant-acting.ts";
 import { classLabelSelect, sessionZone, teacherStillActive, type AssessmentActor, type AssessmentTeacher } from "./assessments.ts";
 import { loadPermissionGrants } from "./permissions.ts";
 import { teacherPortalHistoryFloor } from "./teacher-portal.ts";
-import { assistantReadFloor } from "./visibility.ts";
+import { assistantReadFloor, teacherHistoryFloor } from "./visibility.ts";
+import { resolveWorkspaceAccess, workspaceCan } from "./workspaces.ts";
 import { scopedWhere } from "./tenant-scope.ts";
 
 /**
@@ -45,6 +46,13 @@ import { scopedWhere } from "./tenant-scope.ts";
  * **The window.** The teacher reads within their own `teacherHistoryDays`; an
  * assistant within the stricter of that and the branch's teacher window
  * (`teacherDataVisibilityDays`, D-W19) — both re-read here, never passed in.
+ *
+ * **PERSONAL workspaces (W9, D-W42 items 8, 9).** No matrix cell exists there:
+ * the authority is the owner's fixed `workspace.assessments.manage`
+ * (`workspaceCan` on the workspace re-resolved for the owning teacher). Reads
+ * never need premium, so a lapsed or archived workspace keeps its results. The
+ * window is `teacherHistoryDays` only, for the teacher and the assistant alike —
+ * a workspace is not bound by a centre window (D-W19, D-W41 item 5).
  *
  * **Every read finalises what is due first (D-W10)**, so a student who ran out of
  * time with nothing reading their attempt still shows as Submitted.
@@ -72,6 +80,13 @@ async function holdsResultsAuthority(db: PrismaClient, actor: AssessmentActor, t
     return false;
   }
   if (!(await teacherStillActive(db, teacher))) return false;
+  const centre = await db.center.findUnique({ where: { id: teacher.centerId }, select: { kind: true } });
+  if (!centre) return false;
+  if (centre.kind === "PERSONAL") {
+    // W9: owning the workspace with its TEACHER membership and the fixed capability.
+    const access = await resolveWorkspaceAccess(db, teacher.userId, teacher.centerId);
+    return access !== null && access.membershipId === teacher.membershipId && workspaceCan({ workspace: access }, "workspace.assessments.manage");
+  }
   const grants = await loadPermissionGrants(db, teacher.centerId, "TEACHER");
   return can("TEACHER", "assessment.manage.own", grants);
 }
@@ -100,18 +115,21 @@ async function ownedPublished(db: PrismaClient, actor: AssessmentActor, teacher:
   if (!row) return { ok: false, error: "notFound" } as const;
   if (row.status !== "PUBLISHED") return { ok: false, error: "draft" } as const;
 
-  const [user, settings] = await Promise.all([
+  const [user, settings, centre] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id: teacher.userId }, select: { teacherHistoryDays: true } }),
     db.centerSettings.findFirst({
       where: scopedWhere(centerId, {}),
       select: { timezone: true, centerDataVisibilityDays: true, teacherDataVisibilityDays: true },
     }),
+    db.center.findUniqueOrThrow({ where: { id: centerId }, select: { kind: true } }),
   ]);
   const zone = row.session ? sessionZone(row.session, centreTimeZone(settings)) : centreTimeZone(settings);
   const floor =
     actor.userId === teacher.userId
       ? teacherPortalHistoryFloor({ user, settings }, now)
-      : assistantReadFloor({ settings, teacherHistoryDays: user.teacherHistoryDays }, now);
+      : centre.kind === "PERSONAL"
+        ? teacherHistoryFloor(user.teacherHistoryDays, centreTimeZone(settings), now)
+        : assistantReadFloor({ settings, teacherHistoryDays: user.teacherHistoryDays }, now);
   if (outsideTeacherHistory(row, zone, floor)) {
     return { ok: false, error: "notFound" } as const;
   }
