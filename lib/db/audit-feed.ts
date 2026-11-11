@@ -43,6 +43,9 @@ const FILTER_WHERE: Record<Exclude<AuditFilter, "unpaid">, Prisma.AuditLogWhereI
   pricing: { action: { in: PRICING_ACTIONS } },
 };
 
+/** Rows that belong to a teacher's own assessments, never to the centre's trail. */
+const TEACHER_ONLY_ENTITIES = ["Assessment", "AssessmentAttempt"];
+
 type Name = { firstName: string; lastName: string };
 
 export type AuditEntry = {
@@ -51,7 +54,13 @@ export type AuditEntry = {
   entityType: string;
   entityId: string;
   createdAt: Date;
+  /**
+   * Who did it. For an assistant's write (W7b, D-W18, D-W37) this is **the
+   * teacher** (`onBehalfOfUserId`), never the assistant — the assistant's id
+   * is not even looked up — and `viaAssistant` is true.
+   */
   actorName: Name | null;
+  viaAssistant: boolean;
   /** The person the row is about (the paying student; the paid teacher). */
   subjectName: Name | null;
   amount: number | null;
@@ -80,9 +89,14 @@ export async function loadAuditFeed(
   filter: Exclude<AuditFilter, "unpaid">,
   page: { take: number; skip: number },
 ): Promise<{ entries: AuditEntry[]; total: number }> {
-  const where: Prisma.AuditLogWhereInput = { centerId, ...FILTER_WHERE[filter] };
+  // D-W11: centre staff read nothing about assessments, the trail included.
+  const where: Prisma.AuditLogWhereInput = {
+    centerId,
+    entityType: { notIn: TEACHER_ONLY_ENTITIES },
+    ...FILTER_WHERE[filter],
+  };
   const [rows, total] = await Promise.all([
-    db.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: page.take, skip: page.skip }),
+    db.auditLog.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: page.take, skip: page.skip }),
     db.auditLog.count({ where }),
   ]);
   if (rows.length === 0) return { entries: [], total };
@@ -139,7 +153,8 @@ export async function loadAuditFeed(
 
   const people = await actorNames(db, centerId, [
     ...new Set([
-      ...rows.map((row) => row.actorUserId).filter((id): id is string => Boolean(id)),
+      // On an assistant's row the teacher is named; the assistant is never resolved.
+      ...rows.map((row) => row.onBehalfOfUserId ?? row.actorUserId).filter((id): id is string => Boolean(id)),
       ...settlements.map((s) => s.teacherId),
     ]),
   ]);
@@ -163,7 +178,11 @@ export async function loadAuditFeed(
       entityType: row.entityType,
       entityId: row.entityId,
       createdAt: row.createdAt,
-      actorName: row.actorUserId ? people.get(row.actorUserId) ?? null : null,
+      actorName: (() => {
+        const shown = row.onBehalfOfUserId ?? row.actorUserId;
+        return shown ? people.get(shown) ?? null : null;
+      })(),
+      viaAssistant: row.onBehalfOfUserId !== null,
       subjectName: settlement
         ? people.get(settlement.teacherId) ?? null
         : student(payment?.studentProfile ?? change?.studentProfile),

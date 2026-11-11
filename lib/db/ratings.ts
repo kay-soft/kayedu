@@ -4,6 +4,7 @@ import type { AttendanceStatus, Prisma, PrismaClient } from "@prisma/client";
 // lib/db/student-portal.ts and lib/db/parents.ts).
 import { addDays, centreTimeZone, todayInTimezone } from "../scheduling.ts";
 import { sessionCatalogIds } from "../session-label.ts";
+import { BRANCH_ONLY } from "./center-kind.ts";
 
 /**
  * Teacher ratings (M17, docs/00-master-product-spec.md §5 "Teacher ratings").
@@ -91,7 +92,9 @@ export async function attendedSessionsToRate(
       // SEC-59: only a session the student actually attended — never an
       // ABSENT row (the close writes one for every enrolled no-show).
       attendanceStatus: { in: ATTENDED },
-      session: { date: { gte: coarseFrom, lte: coarseTo } },
+      // W8c (D-W39, D-W40): ratings stay branch-only — a PERSONAL workspace's
+      // session is never offered, rated or skipped.
+      session: { date: { gte: coarseFrom, lte: coarseTo }, center: BRANCH_ONLY },
     },
     distinct: ["sessionId"],
     select: {
@@ -170,6 +173,7 @@ export async function submitSessionRating(
       sessionId: params.sessionId,
       studentProfile: { userId: params.studentUserId },
       attendanceStatus: { in: ATTENDED },
+      session: { center: BRANCH_ONLY },
     },
     select: {
       session: {
@@ -225,6 +229,7 @@ export async function skipSessionRating(
       sessionId: params.sessionId,
       studentProfile: { userId: params.studentUserId },
       attendanceStatus: { in: ATTENDED },
+      session: { center: BRANCH_ONLY },
     },
   });
   if (attended === 0) return;

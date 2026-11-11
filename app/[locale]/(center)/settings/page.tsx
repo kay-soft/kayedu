@@ -39,6 +39,7 @@ export default async function GeneralSettingsPage() {
           centerDataVisibilityDays: settings?.centerDataVisibilityDays ?? DEFAULT_CENTER_VISIBILITY_DAYS,
           teacherDataVisibilityDays: settings?.teacherDataVisibilityDays ?? DEFAULT_TEACHER_VISIBILITY_DAYS,
           publicListing: settings?.publicListing ?? true,
+          allowTeacherAssistants: settings?.allowTeacherAssistants ?? true,
         }}
       />
     </div>

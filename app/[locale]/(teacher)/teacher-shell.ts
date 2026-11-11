@@ -7,10 +7,14 @@ import {
   shellUser,
   type ShellFrame,
 } from "@/components/shell/from-context";
-import { teacherNavAcross, withPendingCount } from "@/components/shell/nav";
+import { shellExperiences } from "@/components/shell/experience-switcher-data";
+import { TEACHER_WORKSPACE_ONLY_NAV, teacherNavAcross, withPendingCount } from "@/components/shell/nav";
 import { getPendingTeacherApprovalCounts } from "@/lib/auth/approval-counts";
 import { ctxCan, requireTeacherUser } from "@/lib/auth/tenant";
 import { getTeacherScope } from "@/lib/auth/teacher-scope";
+import { prisma } from "@/lib/db/client";
+import { ownsAnyWorkspace } from "@/lib/db/workspaces";
+import { unreadNotificationCount } from "@/lib/notifications/reach";
 import { ROUTES } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 
@@ -23,6 +27,17 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  * `requireExperience("teacher")` — see its doc comment (`lib/auth/tenant.ts`)
  * for why that matters here.
  *
+ * W8a (D-W38 item 11): a teacher with no branch but a PERSONAL workspace gets
+ * the same minimal shell with Workspaces first (their landing), Earnings
+ * (W8d — their workspaces' money), Assistants (W8d: an assistant works in
+ * their workspaces too) and the centre directory.
+ * W9 (D-W42 item 7): that shell also lists the Calendar and Exams & homework
+ * (`TEACHER_WORKSPACE_ONLY_NAV`), and a teacher at a branch who owns a
+ * workspace always has Exams & homework.
+ * A teacher with neither keeps the directory alone (M15, unchanged); with
+ * premium, the directory links to Workspaces to create the first one.
+ * Workspaces never join the branch scope.
+ *
  * U7: the portal reads **All branches** by default (`getTeacherScope`). The
  * nav shows an item when any branch in view would show it, the Approvals
  * badge sums the branches that let this teacher act, and the header switcher
@@ -31,23 +46,31 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  */
 export async function teacherShell(): Promise<ShellFrame> {
   const session = await requireTeacherUser();
-  const defaultCollapsed = await cookies().then(
-    (store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1",
-  );
+  const [defaultCollapsed, unreadNotifications, experiences] = await Promise.all([
+    cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
+    // W1: the bell's count.
+    unreadNotificationCount(session.user.id),
+    // W5: the role switcher.
+    shellExperiences(session.user.id, "teacher"),
+  ]);
 
   if (!session.hasCenter) {
     return {
       props: {
         experience: "teacher",
-        nav: [{ href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" }],
+        nav: session.workspaceOnly
+          ? TEACHER_WORKSPACE_ONLY_NAV
+          : [{ href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" }],
         brand: PLATFORM_BRAND,
         user: shellUser(session.user, "TEACHER"),
+        experiences,
         defaultCollapsed,
+        unreadNotifications,
       },
     };
   }
 
-  const scope = await getTeacherScope();
+  const [scope, ownsWorkspace] = await Promise.all([getTeacherScope(), ownsAnyWorkspace(prisma, session.user.id)]);
   // F7 — the teacher's own count: only their classes, only where they may act.
   const approvalCounts = await Promise.all(
     scope.inView
@@ -60,14 +83,16 @@ export async function teacherShell(): Promise<ShellFrame> {
     props: {
       experience: "teacher",
       nav: withPendingCount(
-        teacherNavAcross(scope.inView.map((ctx) => ({ role: ctx.role, grants: ctx.grants }))),
+        teacherNavAcross(scope.inView.map((ctx) => ({ role: ctx.role, grants: ctx.grants })), { ownsWorkspace }),
         ROUTES.teacherApprovals,
         pending,
       ),
       brand: scope.selected ? brandFromContext(scope.selected) : PLATFORM_BRAND,
       user: shellUser(scope.user, "TEACHER"),
       scope: { ...shellScope(teacherRelations, [], scope.selected?.center.id ?? null), mode: "teacher" },
+      experiences,
       defaultCollapsed,
+      unreadNotifications,
     },
   };
 }

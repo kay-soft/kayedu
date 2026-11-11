@@ -42,7 +42,7 @@
  *
  * Needs a reachable database and cleans up after itself.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import { gatePrisma } from "./lib/gate-db.ts";
@@ -101,6 +101,7 @@ import {
   studentCountsRollup,
   teacherCountsRollup,
 } from "../lib/db/organizations.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 const ROOT = join(import.meta.dirname, "..");
@@ -430,19 +431,19 @@ async function checkAdminAddBranch() {
   check(
     "Settings → Branches does not exist (no page, no actions) and the settings sub-nav has no Branches item (static)",
     !existsSync(join(ROOT, "app", "[locale]", "(center)", "settings", "branches")) &&
-      !/branches/i.test(readFileSync(join(ROOT, "app", "[locale]", "(center)", "settings", "layout.tsx"), "utf8").replace(/\/\/.*$/gm, "")),
+      !/branches/i.test(readSource(join(ROOT, "app", "[locale]", "(center)", "settings", "layout.tsx")).replace(/\/\/.*$/gm, "")),
   );
   const branchWriters = /addBranchToOrganization|provisionBranch|createCenterWithSettings|lib\/db\/branch-admin|admin\/centers\/branch-actions|updateBranchDetails|createBranchPause|endBranchPause|deleteBranch|restoreBranch/;
   const centreFiles = ["(center)", "(teacher)", "(student)", "(parent)", "(auth)", "(public)", "(print)"].flatMap((group) =>
     filesUnder(`app/[locale]/${group}`),
   );
-  const reaching = centreFiles.filter((file) => branchWriters.test(readFileSync(join(ROOT, file), "utf8")));
+  const reaching = centreFiles.filter((file) => branchWriters.test(readSource(join(ROOT, file))));
   check(
     "No centre, teacher, student, parent, auth or public file can call a branch create/edit/pause/delete/restore (static)",
     centreFiles.length > 0 && reaching.length === 0,
     reaching.join(", "),
   );
-  const adminActions = readFileSync(join(ROOT, "app", "[locale]", "(admin)", "admin", "centers", "branch-actions.ts"), "utf8");
+  const adminActions = readSource(join(ROOT, "app", "[locale]", "(admin)", "admin", "centers", "branch-actions.ts"));
   const exported = [...adminActions.matchAll(/export async function (\w+)\([\s\S]*?\{\n([\s\S]*?)\n\}/g)];
   check(
     "Every branch-management action is platform-admin only: requirePlatformAdmin() is its first statement (static)",
@@ -450,7 +451,7 @@ async function checkAdminAddBranch() {
       exported.every((match) => /^\s*const admin = await requirePlatformAdmin\(\);/.test(match[2])),
     exported.map((match) => match[1]).join(", "),
   );
-  const centerActions = readFileSync(join(ROOT, "app", "[locale]", "(admin)", "admin", "centers", "actions.ts"), "utf8");
+  const centerActions = readSource(join(ROOT, "app", "[locale]", "(admin)", "admin", "centers", "actions.ts"));
   check(
     "The admin's create (new or existing organization) starts with requirePlatformAdmin() (static)",
     /export async function createCenterAction\([\s\S]*?\{\s*const admin = await requirePlatformAdmin\(\);/.test(centerActions),
@@ -687,11 +688,11 @@ async function checkAdminAddBranch() {
   );
 
   // Static: there is one provisioning path.
-  const platformSource = readFileSync(join(ROOT, "lib", "db", "platform.ts"), "utf8");
+  const platformSource = readSource(join(ROOT, "lib", "db", "platform.ts"));
   check(
     "addBranchToOrganization creates through provisionBranch and copies through copyBranchSetup on the same transaction (static)",
     /export async function addBranchToOrganization[\s\S]*?await provisionBranch\(tx,[\s\S]*?copyBranchSetup\(tx,/.test(platformSource) &&
-      !/\.center\.create\(/.test(readFileSync(join(ROOT, "lib", "db", "branches.ts"), "utf8")),
+      !/\.center\.create\(/.test(readSource(join(ROOT, "lib", "db", "branches.ts"))),
   );
 }
 
@@ -952,14 +953,14 @@ async function checkEditAndPause() {
       (await branchPauseRefusal(prisma, branch.id, { date: day(25), now })) === null,
     JSON.stringify(approved),
   );
-  const teacherActions = readFileSync(join(ROOT, "app", "[locale]", "(teacher)", "teacher", "sessions", "actions.ts"), "utf8");
+  const teacherActions = readSource(join(ROOT, "app", "[locale]", "(teacher)", "teacher", "sessions", "actions.ts"));
   check(
     "The teacher's request action asks branchPauseRefusal for its date before writing (static)",
     /branchPauseRefusal\(prisma, ctx\.center\.id, \{ date: dayMarker\(date\) \}\)[\s\S]*db\.changeRequests\.create/.test(teacherActions),
   );
   check(
     "Enrolment stays possible: no reservation or enrolment path asks about pauses (static)",
-    !/branch-pauses|branchPauseRefusal/.test(readFileSync(join(ROOT, "lib", "db", "reservations.ts"), "utf8")) &&
+    !/branch-pauses|branchPauseRefusal/.test(readSource(join(ROOT, "lib", "db", "reservations.ts"))) &&
       (await discoverCenter(prisma, branch.id)) !== null,
   );
   check(

@@ -42,8 +42,9 @@ import { centerVisibilityWindowSchema } from "../lib/validation/admin.ts";
 import { teacherHistorySchema } from "../lib/validation/account.ts";
 import { startOfUtcDay } from "../lib/scheduling.ts";
 import { scopedIgnoringVisibilityWindow, scopedWith } from "../lib/db/scoped.ts";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -493,13 +494,13 @@ async function main() {
   check(
     "Static: every centre page reads sessions/attendees/payments/expenses through scoped helpers — no direct prisma.session/payment/sessionAttendee/expense read under app/(center) or app/(print)",
     !listTs("app/[locale]/(center)").concat(listTs("app/[locale]/(print)")).some((file) =>
-      /\bprisma\.(session|payment|sessionAttendee|expense|sessionAttendanceChange)\.(find|count|aggregate|groupBy)/.test(readFileSync(file, "utf8")),
+      /\bprisma\.(session|payment|sessionAttendee|expense|sessionAttendanceChange)\.(find|count|aggregate|groupBy)/.test(readSource(file)),
     ),
   );
   check(
     "Static: the opt-out is only used with a stated reason, and only for integrity, settlement or audit reads",
     listTs("app").concat(listTs("lib")).every((file) => {
-      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      const source = readSource(file).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
       return [...source.matchAll(/scopedIgnoringVisibilityWindow\(([^)]*)\)/g)].every((m) =>
         /"(integrity|settlement|audit)"/.test(m[1]) || file.endsWith("lib/db/scoped.ts"),
       );
@@ -566,7 +567,7 @@ async function main() {
     JSON.stringify({ breakdown, filtered: filtered.paymentCount }),
   );
 
-  const analyticsPage = readFileSync("app/[locale]/(center)/analytics/page.tsx", "utf8");
+  const analyticsPage = readSource("app/[locale]/(center)/analytics/page.tsx");
   check(
     "Static: Analytics clamps to the teacher window when a teacher is selected, the centre window otherwise",
     /teacherSelected \? teacherVisibilityWindowFloor\(ctx, now\) : visibilityWindowFloor\(ctx, now\)/.test(analyticsPage),
@@ -583,18 +584,18 @@ async function main() {
   check(
     "Static: Sessions, Expenses and the audit unpaid list read under the centre window only",
     ["app/[locale]/(center)/sessions/page.tsx", "app/[locale]/(center)/expenses/page.tsx", "app/[locale]/(center)/audit/page.tsx"].every((file) => {
-      const source = readFileSync(file, "utf8");
+      const source = readSource(file);
       return /visibilityWindowFloor\(ctx/.test(source) && !/teacherVisibilityWindowFloor/.test(source);
     }),
   );
   check(
     "Static: the floor the scoped helpers inject is the centre window",
-    /return visibilityWindowFloor\(ctx, now\);/.test(readFileSync("lib/db/visibility.ts", "utf8").split("export function centreReadFloor")[1] ?? ""),
+    /return visibilityWindowFloor\(ctx, now\);/.test(readSource("lib/db/visibility.ts").split("export function centreReadFloor")[1] ?? ""),
   );
   check(
     "Static: no file reads the deprecated dataVisibilityDays except the branch-copy carry-over (backlog: drop it)",
     listTs("app").concat(listTs("lib")).every((file) => {
-      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      const source = readSource(file).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
       const uses = source.match(/\bdataVisibilityDays\b/g)?.length ?? 0;
       return uses === 0 || (file.endsWith("lib/db/branches.ts") && uses === 2);
     }),
@@ -670,13 +671,13 @@ async function main() {
   check(
     "Static: no teacher-portal file applies a centre window",
     listTs("app/[locale]/(teacher)").concat(listTs("app/[locale]/(print)/teacher")).every(
-      (file) => !/visibilityWindowFloor|centreReadFloor/.test(readFileSync(file, "utf8")),
+      (file) => !/visibilityWindowFloor|centreReadFloor/.test(readSource(file)),
     ),
   );
 
   // Backfill: the migration copies today's window into both fields, clamped to each cap.
   const migrationDir = readdirSync("prisma/migrations").find((name) => name.endsWith("_u6_split_visibility_windows"));
-  const migration = migrationDir ? readFileSync(join("prisma/migrations", migrationDir, "migration.sql"), "utf8") : "";
+  const migration = migrationDir ? readSource(join("prisma/migrations", migrationDir, "migration.sql")) : "";
   check(
     "Backfill: the U6 migration sets each field from dataVisibilityDays, clamped to 1–365 and 1–30",
     /"centerDataVisibilityDays"\s*=\s*LEAST\(GREATEST\("dataVisibilityDays", 1\), 365\)/.test(migration) &&

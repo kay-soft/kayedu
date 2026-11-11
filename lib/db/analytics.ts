@@ -68,7 +68,7 @@ type MoneyRow = { amount: bigint; center: bigint; teacher: bigint; count: number
  * `lib/db/refunds.ts`), so it is still counted in `revenueTotals`'s own
  * non-voided sum; this is what gets subtracted back out.
  */
-async function refundTotals(
+export async function refundTotals(
   db: Db,
   centerId: string,
   range: DateRange,
@@ -128,6 +128,143 @@ export async function revenueTotals(
     teacherShare: moneyNumber(agg.teacher) - refunds.teacherShare,
     paymentCount: agg.count,
   };
+}
+
+// ── One teacher's money at one centre, broken down (W8d, D-W29, D-W41) ─────
+//
+// The Earnings page's breakdowns. Each is one centre, one teacher, one range
+// — the same frozen columns and the same void/refund rules as `revenueTotals`
+// above, which stays the source of each centre's total (the page reconciles
+// every breakdown against it). A grouped sum is never a second answer: it is
+// the same rows, split by class or by day. Kind-agnostic on purpose: a
+// PERSONAL workspace's payments are ordinary payments with a 0 centre share
+// (D-W24), and which centres a caller passes is the caller's decision —
+// every centre-side reader passes branch ids only (BRANCH_ONLY).
+
+export type TeacherClassMoneyRow = {
+  /** null = the teacher's one-time sessions (no class, R5). */
+  classGroupId: string | null;
+  /** Gross: every non-voided payment, refunded ones included (refunds are their own line). */
+  collected: number;
+  teacherShare: number;
+  paymentCount: number;
+  /** Sessions holding at least one non-voided, non-refunded payment. */
+  paidSessions: number;
+  refundAmount: number;
+  refundTeacherShare: number;
+  refundCount: number;
+};
+
+/**
+ * One teacher's payments and refunds at one centre in a range, grouped by the
+ * session's class — gross and refunds kept apart, never netted (D-W41 item 2).
+ */
+export async function teacherMoneyByClass(
+  db: Db,
+  centerId: string,
+  teacherId: string,
+  range: DateRange,
+): Promise<TeacherClassMoneyRow[]> {
+  const [paid, refunded] = await Promise.all([
+    db.$queryRaw<(MoneyRow & { classGroupId: string | null; sessions: number })[]>`
+      SELECT s."classGroupId",
+             COALESCE(SUM(p."amount"), 0)::bigint AS "amount",
+             COALESCE(SUM(p."centerShareSnapshot"), 0)::bigint AS "center",
+             COALESCE(SUM(p."teacherShareSnapshot"), 0)::bigint AS "teacher",
+             COUNT(*)::int AS "count",
+             COUNT(DISTINCT CASE WHEN p."refunded" = false THEN p."sessionId" END)::int AS "sessions"
+      FROM "Payment" p
+      JOIN "Session" s ON s."id" = p."sessionId"
+      WHERE p."centerId" = ${centerId} AND p."voided" = false AND p."teacherId" = ${teacherId}
+        ${dayRangeSql(SESSION_DATE, range)}
+      GROUP BY s."classGroupId"`,
+    db.$queryRaw<(MoneyRow & { classGroupId: string | null })[]>`
+      SELECT s."classGroupId",
+             COALESCE(SUM(r."amount"), 0)::bigint AS "amount",
+             COALESCE(SUM(r."centerShareReversed"), 0)::bigint AS "center",
+             COALESCE(SUM(r."teacherShareReversed"), 0)::bigint AS "teacher",
+             COUNT(*)::int AS "count"
+      FROM "Refund" r
+      JOIN "Payment" p ON p."id" = r."paymentId"
+      JOIN "Session" s ON s."id" = p."sessionId"
+      WHERE r."centerId" = ${centerId} AND r."teacherId" = ${teacherId}
+        ${dayRangeSql(SESSION_DATE, range)}
+      GROUP BY s."classGroupId"`,
+  ]);
+  const refundByClass = new Map(refunded.map((row) => [row.classGroupId ?? "", row]));
+  // Every refunded payment is non-voided, so its class already has a row in `paid`.
+  return paid.map((row) => {
+    const refund = refundByClass.get(row.classGroupId ?? "");
+    return {
+      classGroupId: row.classGroupId,
+      collected: moneyNumber(row.amount),
+      teacherShare: moneyNumber(row.teacher),
+      paymentCount: row.count,
+      paidSessions: row.sessions,
+      refundAmount: moneyNumber(refund?.amount),
+      refundTeacherShare: moneyNumber(refund?.teacher),
+      refundCount: refund?.count ?? 0,
+    };
+  });
+}
+
+export type TeacherDayMoneyRow = { day: string; teacherShare: number; refundTeacherShare: number };
+
+/** The same rows by session day (`YYYY-MM-DD`) — the Earnings trend's input. */
+export async function teacherMoneyByDay(
+  db: Db,
+  centerId: string,
+  teacherId: string,
+  range: DateRange,
+): Promise<TeacherDayMoneyRow[]> {
+  const [paid, refunded] = await Promise.all([
+    db.$queryRaw<{ day: string; teacher: bigint }[]>`
+      SELECT to_char(s."date", 'YYYY-MM-DD') AS "day", COALESCE(SUM(p."teacherShareSnapshot"), 0)::bigint AS "teacher"
+      FROM "Payment" p
+      JOIN "Session" s ON s."id" = p."sessionId"
+      WHERE p."centerId" = ${centerId} AND p."voided" = false AND p."teacherId" = ${teacherId}
+        ${dayRangeSql(SESSION_DATE, range)}
+      GROUP BY 1`,
+    db.$queryRaw<{ day: string; teacher: bigint }[]>`
+      SELECT to_char(s."date", 'YYYY-MM-DD') AS "day", COALESCE(SUM(r."teacherShareReversed"), 0)::bigint AS "teacher"
+      FROM "Refund" r
+      JOIN "Payment" p ON p."id" = r."paymentId"
+      JOIN "Session" s ON s."id" = p."sessionId"
+      WHERE r."centerId" = ${centerId} AND r."teacherId" = ${teacherId}
+        ${dayRangeSql(SESSION_DATE, range)}
+      GROUP BY 1`,
+  ]);
+  const refundByDay = new Map(refunded.map((row) => [row.day, moneyNumber(row.teacher)]));
+  return paid.map((row) => ({ day: row.day, teacherShare: moneyNumber(row.teacher), refundTeacherShare: refundByDay.get(row.day) ?? 0 }));
+}
+
+/**
+ * The teacher share **paid out** (D-W41 item 3): the frozen `teacherShare` of
+ * every live claim (`releasedAt` null) on a PAID settlement, for this
+ * teacher's payments at this centre whose session falls in the range.
+ * Derived from the claims the settlement wrote, never recomputed. A claimed
+ * payment can be neither voided nor refunded (claims cover closed sessions
+ * only), so it never exceeds the net collected over the same range. Branches
+ * only: a workspace holds no settlement (D-W24, the W8c triggers), so this
+ * reads 0 there and the Earnings page never calls it for one.
+ */
+export async function paidOutTeacherShare(
+  db: Db,
+  centerId: string,
+  teacherId: string,
+  range: DateRange,
+): Promise<number> {
+  const rows = await db.$queryRaw<{ teacher: bigint }[]>`
+    SELECT COALESCE(SUM(c."teacherShare"), 0)::bigint AS "teacher"
+    FROM "SettlementClaim" c
+    JOIN "Settlement" st ON st."id" = c."settlementId"
+    JOIN "Payment" p ON p."id" = c."paymentId"
+    JOIN "Session" s ON s."id" = p."sessionId"
+    WHERE c."centerId" = ${centerId} AND c."releasedAt" IS NULL
+      AND st."status" = 'PAID' AND st."teacherId" = ${teacherId}
+      AND p."teacherId" = ${teacherId} AND p."voided" = false
+      ${dayRangeSql(SESSION_DATE, range)}`;
+  return moneyNumber(rows[0]?.teacher);
 }
 
 export type TeacherRevenueRow = RevenueTotals & { teacherId: string };

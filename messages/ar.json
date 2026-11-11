@@ -117,6 +117,30 @@
     "allBranches": "كل الفروع",
     "allBranchesHint": "{count, plural, one {فرع واحد} two {فرعان معًا} few {{count, number, arab} فروع معًا} many {{count, number, arab} فرعًا معًا} other {{count, number, arab} فرع معًا}}"
   },
+  "Experiences": {
+    "title": "تبديل الدور",
+    "trigger": "تبديل الدور. الدور الحالي: {current}",
+    "triggerNoCurrent": "تبديل الدور",
+    "listLabel": "أدوارك",
+    "roleSeparator": "، ",
+    "current": "الحالي",
+    "groupPortals": "بواباتك",
+    "groupBranches": "الفروع التي تعمل بها",
+    "groupPlatform": "المنصة",
+    "wholeManagement": "الإدارة الكاملة",
+    "wholeManagementPlace": "{organization}، {count, plural, one {فرع واحد} two {فرعان} few {{count, number, arab} فروع} many {{count, number, arab} فرعًا} other {{count, number, arab} فرع}}",
+    "student": "طالب",
+    "studentPlace": "كل فروعك",
+    "teacher": "مدرس",
+    "teacherPlace": "كل الفروع",
+    "parent": "ولي أمر",
+    "parentPlace": "أبناؤك",
+    "admin": "مشرف المنصة",
+    "adminPlace": "المنصة بالكامل",
+    "assistant": "مساعد",
+    "assistantOf": "مساعد {teacher}",
+    "assistantPlace": "تعمل نيابةً عن هذا المدرس"
+  },
   "NavGroups": {
     "frontDesk": "المكتب الأمامي",
     "academics": "الأكاديمي",
@@ -127,6 +151,7 @@
     "reception": "مكتب الاستقبال",
     "sessions": "الحصص",
     "classes": "المجموعات",
+    "assessments": "الامتحانات والواجبات",
     "students": "الطلاب",
     "teachers": "المدرسون",
     "analytics": "التحليلات",
@@ -142,9 +167,16 @@
     "centers": "الفروع",
     "platform": "المنصة",
     "catalog": "الكتالوج",
+    "premium": "المدرسون",
     "settings": "الإعدادات",
     "calendar": "التقويم",
-    "profile": "الملف الشخصي"
+    "profile": "الملف الشخصي",
+    "assistants": "المساعدون",
+    "home": "الرئيسية",
+    "requests": "الطلبات",
+    "overview": "نظرة عامة",
+    "workspaces": "مساحات العمل",
+    "earnings": "الأرباح"
   },
   "Roles": {
     "OWNER": "المالك",
@@ -154,7 +186,8 @@
     "TEACHER": "مدرس",
     "STUDENT": "طالب",
     "PLATFORM_ADMIN": "مشرف المنصة",
-    "PARENT": "ولي أمر"
+    "PARENT": "ولي أمر",
+    "ASSISTANT": "مساعد"
   },
   "Auth": {
     "fields": {
@@ -225,7 +258,15 @@
       "teacherPortal": "بوابة المدرّس",
       "teacherPortalHint": "حصصك وطلابك في كل الفروع",
       "parentPortal": "بوابة وليّ الأمر",
-      "parentPortalHint": "جداول أبنائك"
+      "parentPortalHint": "جداول أبنائك",
+      "lastUsed": "آخر استخدام",
+      "continue": "متابعة",
+      "assistantPortal": "مساعد {teacher}",
+      "assistantPortalHint": "اعمل نيابةً عن هذا المدرس في حدود ما يسمح به",
+      "invitationsLabel": "الدعوات",
+      "invitationTeacherFallback": "مدرّس",
+      "joinPrivateClass": "الانضمام إلى فصل خاص",
+      "joinPrivateClassHint": "معك رمز من مدرس؟ أدخله هنا"
     },
     "invite": {
       "title": "دعوة للانضمام",
@@ -856,7 +897,8 @@
       "enrollments": "{count, plural, one {تسجيل طالب واحد} two {تسجيلا طالبين} few {{count, number, arab} تسجيلات طلاب} many {{count, number, arab} تسجيل طلاب} other {{count, number, arab} تسجيل طلاب}}",
       "reservations": "{count, plural, one {طلب تسجيل واحد} two {طلبا تسجيل} few {{count, number, arab} طلبات تسجيل} many {{count, number, arab} طلب تسجيل} other {{count, number, arab} طلب تسجيل}}",
       "deactivateHint": "عطّلها بدلًا من ذلك: تُحذف حصصها القادمة ويُحتفظ بسجلها.",
-      "bookings": "{count, plural, one {حجز حصة مفردة واحد} two {حجزا حصص مفردة} few {{count, number, arab} حجوزات حصص مفردة} many {{count, number, arab} حجزًا لحصص مفردة} other {{count, number, arab} حجز حصص مفردة}}"
+      "bookings": "{count, plural, one {حجز حصة مفردة واحد} two {حجزا حصص مفردة} few {{count, number, arab} حجوزات حصص مفردة} many {{count, number, arab} حجزًا لحصص مفردة} other {{count, number, arab} حجز حصص مفردة}}",
+      "assessments": "{count, plural, one {امتحان أو واجب واحد} two {امتحانان أو واجبان} few {# امتحانات وواجبات} many {# امتحانًا وواجبًا} other {# امتحان وواجب}}"
     },
     "holidays": {
       "title": "تقويم الإجازات",
@@ -1683,7 +1725,8 @@
         "bookingOff": "الحجز مغلق لهذه المجموعة.",
         "failed": "حدث خطأ ما. حاول مرة أخرى."
       }
-    }
+    },
+    "viaAssistant": "عبر مساعد"
   },
   "Refunds": {
     "title": "المبالغ المستردة",
@@ -1742,6 +1785,7 @@
       "futureRange": "لا يمكن أن يكون تاريخ النهاية في المستقبل — سوِّ أيامًا مضت بالفعل.",
       "rangeTooLong": "يمكن أن تغطي التسوية ٣٦٦ يومًا على الأكثر.",
       "totalTooLarge": "هذا الإجمالي أكبر من أن يُسجَّل في تسوية واحدة — قسّم الفترة.",
+      "workspaceNotSettled": "مساحة العمل الخاصة بالمدرس لا تُسوّى أبدًا — مدفوعاتها للمدرس بالفعل.",
       "required": "هذا الحقل مطلوب."
     },
     "emptyHint": "التسوية تجمع ما استحقه المدرّس خلال فترة. أنشئ أول تسوية بالأسفل.",
@@ -1874,7 +1918,11 @@
       "publicListingTitle": "الظهور للعامة",
       "publicListingDescription": "هل يمكن لمن ليس لديه حساب أن يجد هذا الفرع في «استكشف»: اسمه وشعاره والمجموعات المفتوحة لطلاب جدد وأسعارها ومدرّسيها. لا تُعرض بيانات التواصل ولا الطلاب أبدًا.",
       "publicListingLabel": "إظهار هذا الفرع في «استكشف»",
-      "publicListingHint": "مفعَّل افتراضيًا. عند إيقافه تختفي صفحات الفرع العامة فورًا، ويظل بإمكان الطلاب المسجّلين الدخول إيجاد مجموعاته في «اكتشف»."
+      "publicListingHint": "مفعَّل افتراضيًا. عند إيقافه تختفي صفحات الفرع العامة فورًا، ويظل بإمكان الطلاب المسجّلين الدخول إيجاد مجموعاته في «اكتشف».",
+      "assistantsTitle": "مساعدو المدرّسين",
+      "assistantsDescription": "يمكن للمدرّس المميز أن يمنح مساعدًا الوصول إلى امتحاناته وواجباته ومجموعاته وطلباته هنا نيابةً عنه. كل ما يفعله المساعد يُسجَّل باسم المدرّس مع علامة «عبر مساعد».",
+      "assistantsLabel": "السماح بمساعدي المدرّسين",
+      "assistantsHint": "مفعّل افتراضيًا. عند إيقافه يفقد المساعدون هذا الفرع فورًا، ولا يتأثر المدرّسون أنفسهم."
     },
     "catalog": {
       "title": "الكتالوج الأكاديمي",
@@ -2073,6 +2121,7 @@
         "approvals_manage": "إدارة الموافقات",
         "changeRequest_create": "تقديم طلبات فصل/حصة",
         "reservation_manage_own": "إدارة حجوزات الفصول الخاصة",
+        "assessment_manage_own": "إدارة امتحاناته وواجباته",
         "audit_view": "عرض سجل التدقيق",
         "parent_link_manage": "إدارة ربط أولياء الأمور",
         "session_close": "إنهاء الحصص"
@@ -2154,7 +2203,73 @@
       "summary": "{today} اليوم · {week} هذا الأسبوع · {earnings} هذا الشهر",
       "viewSchedule": "عرض الجدول"
     },
-    "subtitleAll": "عملك في كل الفروع التي تُدرّس بها."
+    "subtitleAll": "عملك في كل الفروع التي تُدرّس بها.",
+    "withWorkspaces": "المُحصَّل هذا الشهر، بما فيه مساحات العمل: {amount}",
+    "withWorkspacesHint": "أرباحك في الفروع أعلاه مع مساحات عملك الخاصة. التفاصيل في صفحة الأرباح.",
+    "openEarnings": "فتح الأرباح"
+  },
+  "Earnings": {
+    "title": "الأرباح",
+    "subtitle": "نصيبك في كل فرع وفي كل مساحة عمل خاصة بك، حسب الفصل، خلال الفترة التي تختارها.",
+    "assistantSubtitle": "نصيب {teacher} في كل فرع ومساحة عمل يُسمح لك برؤيتها، للعرض فقط.",
+    "presets": {
+      "7d": "آخر ٧ أيام",
+      "30d": "آخر ٣٠ يومًا",
+      "90d": "آخر ٩٠ يومًا",
+      "month": "هذا الشهر"
+    },
+    "invalidPeriod": "تعذّر استخدام هذه الفترة، لذا تُعرض آخر ٣٠ يومًا. يمكن أن تصل الفترة المخصّصة إلى سنة.",
+    "clampedTeacher": "إعداد السجلّ لديك يخفي الحصص الأقدم، لذا تُحسب هذه الفترة من {date}.",
+    "clampedAssistant": "يمكنك الرؤية حتى {date} فقط، لذا تُحسب هذه الفترة من هناك.",
+    "periodLine": "الحصص من {range}",
+    "noSources": "لا توجد أرباح لعرضها",
+    "noSourcesTeacher": "تظهر الأرباح للفروع التي تسمح لك برؤية أرباحك، ولمساحات العمل الخاصة بك.",
+    "noSourcesAssistant": "لا يوجد هنا ما يُسمح لك برؤيته.",
+    "stats": {
+      "collected": "المُحصَّل",
+      "collectedHint": "الفروع ومساحات العمل معًا، بعد الاستردادات",
+      "refunded": "المُسترَد",
+      "refundedHint": "يُعرض وحده — وقد خُصم بالفعل من المُحصَّل",
+      "paidSessions": "حصص مدفوعة",
+      "present": "حاضر",
+      "late": "متأخر",
+      "absent": "غائب",
+      "zero": "لم يُحصَّل شيء في هذه الفترة"
+    },
+    "branches": {
+      "title": "الفروع",
+      "description": "نصيبك مما دفعه الطلاب في كل فرع.",
+      "teacherShare": "نصيبك المُحصَّل",
+      "refunds": "المُسترَد",
+      "net": "المُحصَّل بعد الاستردادات",
+      "paidOut": "صُرف لك",
+      "notPaidOut": "لم يُصرف بعد",
+      "paidOutHint": "المصروف = التسويات التي دفعها لك الفرع عن حصص هذه الفترة. أموال الفروع فقط — مساحات العمل لا تُسوّى أبدًا."
+    },
+    "workspaces": {
+      "title": "مساحات العمل",
+      "description": "مساحات عملك الخاصة. تحتفظ بكل ما يدفعه الطلاب فيها.",
+      "private": "خاص",
+      "teacherShare": "المُحصَّل",
+      "net": "المُحصَّل بعد الاستردادات",
+      "collectedOnly": "المُحصَّل فقط — مساحة العمل لا تُسوّى أبدًا، فلا شيء هنا ينتظر الصرف."
+    },
+    "classes": {
+      "title": "حسب الفصل",
+      "oneOff": "حصص لمرة واحدة",
+      "unnamed": "فصل",
+      "empty": "لا شيء في هذه الفترة.",
+      "line": "{paid} حصص مدفوعة · {present} حاضر · {late} متأخر · {absent} غائب",
+      "refunded": "مُسترَد {amount}"
+    },
+    "trend": {
+      "title": "حسب الأسبوع",
+      "description": "نصيبك في كل أسبوع من الفترة (يبدأ الأسبوع يوم الأحد)، والاستردادات بجانبه.",
+      "week": "أسبوع {date}",
+      "collected": "نصيبك {amount}",
+      "refunded": "مُسترَد {amount}",
+      "empty": "لا توجد مدفوعات في هذه الفترة."
+    }
   },
   "TeacherSessions": {
     "title": "حصصي",
@@ -2225,7 +2340,8 @@
       "time": "الوقت",
       "room": "القاعة",
       "grade": "الصف",
-      "price": "السعر"
+      "price": "السعر",
+      "class": "المجموعة"
     },
     "receipt": {
       "title": "أرباحك",
@@ -2249,6 +2365,334 @@
     },
     "emptyHint": "لا توجد حصة تطابق هذه التصفية. وسّع نطاق التاريخ أو امسح أحد عوامل التصفية.",
     "zeroHint": "لا نشاط في هذا النطاق"
+  },
+  "TeacherAssessments": {
+    "title": "الامتحانات والواجبات",
+    "subtitle": "أنشئ الامتحانات والواجبات، وعاينها، وانشرها عندما تصبح جاهزة. لا يرى الطلاب المسودات.",
+    "newExam": "امتحان جديد",
+    "addHomework": "إضافة واجب",
+    "empty": "لا توجد امتحانات أو واجبات بعد",
+    "emptyHint": "ابدأ امتحانًا من هنا أو من صفحة المجموعة، أو أضف واجبًا من صفحة الحصة.",
+    "emptyFiltered": "لا شيء يطابق هذه التصفية",
+    "untitled": "بدون عنوان",
+    "type": {
+      "EXAM": "امتحان",
+      "HOMEWORK": "واجب"
+    },
+    "status": {
+      "DRAFT": "مسودة",
+      "PUBLISHED": "منشور"
+    },
+    "filters": {
+      "type": "النوع",
+      "allTypes": "كل الأنواع",
+      "class": "المجموعة",
+      "allClasses": "كل المجموعات",
+      "source": "الفرع أو مساحة العمل",
+      "allSources": "كل الفروع ومساحات العمل"
+    },
+    "privateTag": "خاص",
+    "questionCount": "{count, plural, =0 {لا أسئلة} one {سؤال واحد} two {سؤالان} few {{count, number, arab} أسئلة} many {{count, number, arab} سؤالًا} other {{count, number, arab} سؤال}}",
+    "windowValue": "{start} – {end}",
+    "windowNotSet": "لم تُحدَّد المواعيد",
+    "deadlineValue": "التسليم {date}",
+    "deadlineNotSet": "بلا موعد تسليم",
+    "classSection": {
+      "title": "الامتحانات والواجبات",
+      "empty": "لا توجد امتحانات أو واجبات لهذه المجموعة بعد."
+    },
+    "sessionSection": {
+      "title": "الواجب",
+      "empty": "لا يوجد واجب لهذه الحصة بعد.",
+      "oneOff": "الحصة المنفردة ليس لها طلاب مسجَّلون، لذلك لا يمكن إضافة واجب لها."
+    },
+    "pickClass": {
+      "title": "امتحان جديد",
+      "description": "اختر المجموعة التي سيكون لها هذا الامتحان.",
+      "empty": "ليس لديك مجموعات نشطة لتضع لها امتحانًا."
+    },
+    "builder": {
+      "back": "الامتحانات والواجبات",
+      "backToSession": "العودة إلى الحصة",
+      "newExamTitle": "امتحان جديد",
+      "newHomeworkTitle": "واجب جديد",
+      "editExamTitle": "تعديل الامتحان",
+      "editHomeworkTitle": "تعديل الواجب",
+      "optional": "(اختياري)",
+      "details": "التفاصيل",
+      "titleLabel": "العنوان",
+      "titlePlaceholderExam": "مثلًا: اختبار الفصل الثالث",
+      "titlePlaceholderHomework": "مثلًا: تدريبات المجموعة ٤",
+      "instructionsLabel": "التعليمات",
+      "instructionsHint": "يقرؤها الطلاب قبل أن يبدؤوا.",
+      "timing": "التوقيت",
+      "timezoneNote": "المواعيد بتوقيت {zone}.",
+      "windowStart": "يبدأ",
+      "windowEnd": "ينتهي",
+      "deadline": "موعد التسليم",
+      "date": "التاريخ",
+      "time": "الوقت",
+      "deadlineBasisNext": "حُدِّد قبل الحصة التالية للمجموعة بـ٣٠ دقيقة. يمكنك تغييره.",
+      "deadlineBasisFallback": "لا توجد حصة تالية للمجموعة، لذلك حُدِّد بعد ٧ أيام من نهاية هذه الحصة. يمكنك تغييره.",
+      "duration": "المدة (بالدقائق)",
+      "durationHintExam": "يحصل كل طالب على هذه المدة من لحظة بدئه، دون تجاوز موعد الانتهاء.",
+      "durationHintHomework": "اتركها فارغة إن لم يكن هناك حد زمني.",
+      "oneSitting": "جلسة واحدة",
+      "oneSittingHint": "مغادرة الامتحان تعني تسليمه. عند إيقافها يمكن للطالب المغادرة والعودة ما دام الوقت متبقيًا.",
+      "settings": "الإعدادات",
+      "shuffle": "ترتيب عشوائي للأسئلة والاختيارات",
+      "shuffleHint": "يحصل كل طالب على ترتيبه الخاص عند بدئه.",
+      "showScore": "إظهار الدرجة",
+      "showScoreHint": "يرى الطلاب درجاتهم فور التسليم.",
+      "showCorrect": "إظهار الإجابات الصحيحة بعد الانتهاء",
+      "showCorrectHint": "تظهر الإجابات الصحيحة فقط بعد انتهاء الوقت أو موعد التسليم.",
+      "questions": "الأسئلة",
+      "questionNumber": "السؤال {n, number, arab}",
+      "questionText": "السؤال",
+      "points": "الدرجات",
+      "options": "الاختيارات",
+      "optionsHint": "حدِّد الإجابة الصحيحة بالدائرة المجاورة لها.",
+      "option": "الاختيار {n, number, arab}",
+      "correct": "الإجابة الصحيحة",
+      "markCorrect": "اجعل الاختيار {n, number, arab} الإجابة الصحيحة",
+      "removeOption": "حذف الاختيار {n, number, arab}",
+      "removeOptionDisabled": "يحتاج السؤال إلى اختيارين على الأقل.",
+      "addOption": "إضافة اختيار",
+      "moveUp": "نقل السؤال {n, number, arab} لأعلى",
+      "moveDown": "نقل السؤال {n, number, arab} لأسفل",
+      "deleteQuestion": "حذف السؤال {n, number, arab}",
+      "addQuestion": "إضافة سؤال",
+      "noQuestions": "لا أسئلة بعد",
+      "noQuestionsHint": "أضف سؤالك الأول بالأسفل.",
+      "maxQuestions": "وصلت إلى الحد الأقصى وهو ٢٠٠ سؤال.",
+      "totalPoints": "المجموع {count, plural, one {درجة واحدة} two {درجتان} few {{count, number, arab} درجات} many {{count, number, arab} درجة} other {{count, number, arab} درجة}}",
+      "save": "حفظ المسودة",
+      "saving": "جارٍ الحفظ…",
+      "saved": "تم حفظ المسودة.",
+      "unsaved": "تغييرات غير محفوظة",
+      "unsavedPreview": "تغييرات غير محفوظة. تعرض المعاينة آخر نسخة محفوظة.",
+      "noChanges": "لا توجد تغييرات غير محفوظة",
+      "preview": "معاينة",
+      "delete": {
+        "sectionTitle": "حذف المسودة",
+        "sectionHint": "يمكن حذف المسودات فقط.",
+        "label": "حذف المسودة",
+        "title": "حذف هذه المسودة؟",
+        "body": "ستُحذف المسودة وكل أسئلتها. لا يمكن التراجع عن ذلك."
+      },
+      "viewExamTitle": "امتحان",
+      "viewHomeworkTitle": "واجب"
+    },
+    "ready": {
+      "title": "جاهز للنشر",
+      "description": "ما يتطلبه النشر. يعتمد على آخر نسخة محفوظة.",
+      "hasQuestions": "سؤال واحد على الأقل",
+      "allTextFilled": "لكل سؤال واختيار نص",
+      "oneCorrectEach": "لكل سؤال إجابة صحيحة واحدة بالضبط",
+      "windowSet": "تم تحديد موعدي البدء والانتهاء",
+      "deadlineInFuture": "موعد التسليم في المستقبل",
+      "done": "مكتمل",
+      "missing": "لم يكتمل بعد",
+      "allDone": "كل شيء جاهز.",
+      "notYet": "ما زالت بعض البنود تحتاج إلى مراجعة.",
+      "windowEndInFuture": "وقت الإغلاق في المستقبل"
+    },
+    "errors": {
+      "forbidden": "لا يمكنك إدارة الامتحانات والواجبات في هذا الفرع.",
+      "notFound": "تعذّر العثور على هذا الامتحان أو الواجب.",
+      "notDraft": "لا يمكن تعديل غير المسودة هنا.",
+      "locked": "بدأ الطلاب بالفعل، لذلك الأسئلة مقفلة.",
+      "invalid": "بعض الحقول تحتاج إلى تصحيح. راجع الرسائل بالأسفل.",
+      "badTime": "أدخل تاريخًا ووقتًا صحيحين، أو اترك الاثنين فارغين.",
+      "pickBranch": "اختر فرعًا أولًا.",
+      "notReady": "ليس جاهزًا بعد. أكمل قائمة «جاهز للنشر» واحفظ أولًا.",
+      "classInactive": "هذا الفصل غير نشط، فلن يتمكن أي طالب من حله.",
+      "notPublished": "لا يمكن تغيير هذا هنا إلا إذا كان منشورًا.",
+      "passed": "تم إغلاقه بالفعل، فلم يعد التمديد ممكنًا.",
+      "notLater": "اختر وقتًا بعد الوقت الحالي.",
+      "premiumRequired": "للقراءة فقط — جدّد البريميوم لإجراء تغييرات في مساحة العمل هذه.",
+      "workspaceArchived": "مساحة العمل هذه مؤرشفة. ألغِ أرشفتها لإجراء تغييرات."
+    },
+    "draftErrors": {
+      "titleRequired": "أدخل عنوانًا.",
+      "titleTooLong": "اجعل العنوان في حدود ٢٠٠ حرف.",
+      "instructionsTooLong": "اجعل التعليمات في حدود ٢٬٠٠٠ حرف.",
+      "tooManyQuestions": "يمكن أن يحتوي الامتحان أو الواجب على ٢٠٠ سؤال كحد أقصى.",
+      "questionTooLong": "اجعل السؤال في حدود ٢٬٠٠٠ حرف.",
+      "pointsRange": "يجب أن تكون الدرجات عددًا صحيحًا من ١ إلى ١٠٠.",
+      "optionCount": "يحتاج السؤال إلى ما بين ٢ و٥ اختيارات.",
+      "optionTooLong": "اجعل كل اختيار في حدود ٥٠٠ حرف.",
+      "multipleCorrect": "حدِّد إجابة صحيحة واحدة فقط.",
+      "durationRange": "يجب أن تكون المدة من ١ إلى ٦٠٠ دقيقة.",
+      "windowOrder": "يجب أن يكون موعد الانتهاء بعد موعد البدء.",
+      "durationLongerThanWindow": "لا يمكن أن تكون المدة أطول من الوقت بين البدء والانتهاء.",
+      "deadlineRequired": "حدِّد موعد التسليم.",
+      "fieldsForType": "حقول التوقيت هذه لا تخص هذا النوع."
+    },
+    "preview": {
+      "title": "معاينة",
+      "description": "ما سيراه الطالب. لا يُسجَّل شيء، ولا تظهر الإجابات الصحيحة.",
+      "back": "العودة إلى المحرِّر",
+      "opens": "يبدأ",
+      "closes": "ينتهي",
+      "due": "موعد التسليم",
+      "notSet": "غير محدد",
+      "points": "مجموع الدرجات",
+      "timer": "الحد الزمني",
+      "timerPaused": "لا يعمل في المعاينة",
+      "untimed": "بلا حد زمني",
+      "oneSittingWarning": "مغادرة هذه الصفحة تعني تسليم امتحانك.",
+      "shuffled": "معروض بترتيب عشوائي كما سيحصل عليه الطالب. أعد تحميل الصفحة لترتيب جديد.",
+      "questionOf": "السؤال {n, number, arab} من {total, number, arab}",
+      "pointsLabel": "{count, plural, one {درجة واحدة} two {درجتان} few {{count, number, arab} درجات} many {{count, number, arab} درجة} other {{count, number, arab} درجة}}",
+      "empty": "لا تحتوي هذه المسودة على أسئلة بعد.",
+      "start": "ابدأ",
+      "startDisabled": "يمكن للطلاب البدء بعد النشر."
+    },
+    "publish": {
+      "sectionTitle": "النشر",
+      "sectionHint": "يُنشر آخر إصدار محفوظ. يمكن بعدها للطلاب المسجلين في الفصل رؤيته وبدؤه عند فتحه.",
+      "label": "نشر",
+      "title": "هل تنشر هذا الآن؟",
+      "body": "سيراه الطلاب المسجلون في الفصل وسيصلهم إشعار. يمكنك إلغاء النشر حتى يبدأ أول طالب. بعد ذلك تُقفل الأسئلة ولا يمكنك إلا تمديد الوقت.",
+      "notReadyHint": "أكمل قائمة «جاهز للنشر» واحفظ مسودتك أولًا.",
+      "done": "تم النشر."
+    },
+    "unpublish": {
+      "label": "إرجاع إلى مسودة",
+      "title": "هل تلغي النشر؟",
+      "body": "لن يراه الطلاب بعد الآن، ويمكنك تعديله مجددًا.",
+      "done": "أُعيد إلى مسودة."
+    },
+    "extend": {
+      "sectionTitle": "تمديد",
+      "sectionHint": "امنح الطلاب وقتًا أطول. لا يمكن إلا تأخير الوقت.",
+      "passedHint": "تم إغلاقه، فلم يعد التمديد ممكنًا.",
+      "label": "تمديد",
+      "saving": "جارٍ الحفظ…",
+      "zone": "الأوقات بتوقيت {zone}.",
+      "date": "التاريخ الجديد",
+      "time": "الوقت الجديد",
+      "done": "تم التمديد."
+    },
+    "published": {
+      "lockedHint": "منشور. لتغيير الأسئلة ألغِ النشر أولًا. تُقفل الأسئلة بمجرد أن يبدأ طالب.",
+      "minutes": "{count, plural, one {دقيقة واحدة} two {دقيقتان} few {# دقائق} many {# دقيقة} other {# دقيقة}}",
+      "started": "الطلاب الذين بدأوا",
+      "manageTitle": "ما دام لم يبدأ أحد",
+      "manageHint": "يمكنك إرجاعه إلى مسودة أو حذفه حتى يبدأ أول طالب.",
+      "delete": {
+        "sectionTitle": "حذف",
+        "sectionHint": "حتى يبدأ أول طالب فقط.",
+        "label": "حذف",
+        "title": "هل تحذف هذا؟",
+        "body": "لن يراه الطلاب بعد الآن، وستُحذف كل أسئلته. لا يمكن التراجع عن ذلك."
+      }
+    },
+    "results": {
+      "action": "النتائج",
+      "progress": "سلّم {submitted} / {eligible}",
+      "title": "النتائج",
+      "back": "العودة إلى التفاصيل",
+      "open": "مفتوح",
+      "closed": "مغلق",
+      "summaryTitle": "الملخص",
+      "summary": {
+        "eligible": "المؤهلون الآن",
+        "started": "بدأوا",
+        "submitted": "سلّموا",
+        "inProgress": "جارٍ",
+        "notStarted": "لم يبدأوا",
+        "missed": "فاتهم",
+        "average": "المتوسط",
+        "highest": "الأعلى",
+        "lowest": "الأقل"
+      },
+      "noSubmissions": "لا توجد تسليمات بعد",
+      "none": "—",
+      "percent": "{value}٪",
+      "score": "{score} / {max}",
+      "timeLeft": "متبقٍ {time}",
+      "leftClass": "ترك الفصل",
+      "viewAnswers": "عرض الإجابات",
+      "viewProgress": "عرض التقدم",
+      "studentsTitle": "الطلاب",
+      "studentsHint": "كل من أمكنه أداؤه، ومن بدأ ثم ترك الفصل.",
+      "empty": "لا يوجد طلاب مسجلون في هذا الفصل.",
+      "emptyFiltered": "لا يوجد طلاب يطابقون هذه الفلاتر.",
+      "status": {
+        "SUBMITTED": "تم التسليم",
+        "IN_PROGRESS": "جارٍ",
+        "NOT_STARTED": "لم يبدأ",
+        "MISSED": "فاته"
+      },
+      "ended": {
+        "STUDENT": "بواسطة الطالب",
+        "DEADLINE": "عند انتهاء الوقت",
+        "ONE_SITTING_GAP": "أغلق الصفحة"
+      },
+      "columns": {
+        "student": "الطالب",
+        "branch": "الفرع",
+        "status": "الحالة",
+        "score": "الدرجة",
+        "percentage": "النسبة",
+        "timeTaken": "الوقت المستغرق",
+        "ended": "طريقة الانتهاء",
+        "startedAt": "بدأ",
+        "submittedAt": "سلّم",
+        "answers": "الإجابات"
+      },
+      "filters": {
+        "search": "البحث بالاسم",
+        "searchPlaceholder": "اسم الطالب",
+        "status": "الحالة",
+        "allStatuses": "كل الحالات",
+        "sort": "الترتيب حسب",
+        "apply": "بحث",
+        "sorts": {
+          "name": "الاسم",
+          "scoreDesc": "الدرجة، الأعلى أولًا",
+          "scoreAsc": "الدرجة، الأقل أولًا",
+          "timeAsc": "الوقت المستغرق، الأقصر أولًا",
+          "timeDesc": "الوقت المستغرق، الأطول أولًا"
+        }
+      },
+      "duration": {
+        "hours": "{hours} س {minutes} د",
+        "minutes": "{minutes} د {seconds} ث",
+        "seconds": "{seconds} ث"
+      },
+      "analysis": {
+        "title": "سؤال بسؤال",
+        "hint": "تُحسب المحاولات المُسلَّمة فقط.",
+        "question": "السؤال {n}",
+        "correctLine": "{percent}٪ صحيحة · {correct} من {submitted}",
+        "correctAnswer": "الإجابة الصحيحة",
+        "chosenBy": "اختارها {count}",
+        "unanswered": "بلا إجابة"
+      },
+      "answers": {
+        "back": "العودة إلى النتائج",
+        "timeLeft": "الوقت المتبقي",
+        "inProgressHint": "هذا الطالب ما زال يجيب. تظهر إجاباته بعد تسليم المحاولة.",
+        "points": "{awarded} من {points} درجة",
+        "chosen": "إجابة الطالب",
+        "correct": "الإجابة الصحيحة",
+        "outcome": {
+          "CORRECT": "صحيحة",
+          "INCORRECT": "خاطئة",
+          "UNANSWERED": "بلا إجابة"
+        }
+      }
+    }
+  },
+  "TeacherClass": {
+    "backToAssessments": "الامتحانات والواجبات",
+    "backToSessions": "الحصص",
+    "inactive": "غير نشطة",
+    "schedule": "المواعيد",
+    "period": "الفترة"
   },
   "TeacherStudents": {
     "title": "طلابي",
@@ -2404,7 +2848,9 @@
       "invalidNumber": "أدخل رقمًا صحيحًا.",
       "subjectNotInGrade": "هذه المادة لا تُدرَّس في هذا الصف. اختر مادة من مواد الصف."
     },
-    "emptyHint": "لا يوجد فرع على المنصة مفتوح لمدرّسين جدد حاليًا."
+    "emptyHint": "لا يوجد فرع على المنصة مفتوح لمدرّسين جدد حاليًا.",
+    "workspacesHint": "لديك البريميوم: يمكنك أيضًا إدارة فصولك الخاصة في مساحة عمل خاصة.",
+    "workspacesLink": "فتح مساحات العمل"
   },
   "StudentActions": {
     "leave": {
@@ -3048,7 +3494,8 @@
       },
       "changeRequest": {
         "approve": "تمت الموافقة على طلب المدرّس",
-        "decline": "رُفض طلب المدرّس"
+        "decline": "رُفض طلب المدرّس",
+        "create": "قُدّم طلب مدرّس"
       },
       "expenseCategory": {
         "create": "أُضيفت فئة مصروفات",
@@ -3138,7 +3585,8 @@
       "timezone": "المنطقة الزمنية"
     },
     "unknownAction": "تغيير آخر",
-    "diffSet": "{field}: {after}"
+    "diffSet": "{field}: {after}",
+    "viaAssistant": "عبر مساعد"
   },
   "Toasts": {
     "saved": "تم الحفظ.",
@@ -3166,7 +3614,13 @@
     "familyAccessRemoved": "تمت إزالة وصول وليّ الأمر",
     "studentAccountGradeUsed": "تم تحديث الصف من حساب الطالب.",
     "logoSaved": "حُفظ الشعار.",
-    "logoRemoved": "أُزيل الشعار."
+    "logoRemoved": "أُزيل الشعار.",
+    "assistantJoined": "أصبحت مساعدًا الآن.",
+    "assistantInviteRevoked": "أُلغيت الدعوة. لم يعد رمزها يعمل.",
+    "assistantRemoved": "أُزيل المساعد.",
+    "assistantPermissionsSaved": "حُفظت الصلاحيات.",
+    "assistantPermissionsUnchanged": "لم يتغيّر شيء.",
+    "assistantLeft": "لم تعد مساعدًا لهذا المدرس."
   },
   "Account": {
     "title": "إعدادات الحساب",
@@ -3280,6 +3734,40 @@
       "save": "حفظ",
       "saving": "جارٍ الحفظ…",
       "saved": "تم حفظ سجل بوابة المدرس."
+    },
+    "premium": {
+      "title": "الباقة المميزة",
+      "description": "الباقة المميزة لحسابك أنت، لا لفرع.",
+      "cardTitle": "باقتك المميزة",
+      "activeNote": "تستمر باقتك المميزة حتى نهاية {date} بتوقيت القاهرة.",
+      "expiredNote": "انتهت باقتك المميزة في {date}.",
+      "noneNote": "ليست لديك الباقة المميزة.",
+      "addsTitle": "ما تضيفه الباقة المميزة",
+      "adds": {
+        "assistants": "مساعدون يعملون نيابةً عنك",
+        "workspaces": "مساحات عمل خاصة لفصولك أنت",
+        "assessments": "امتحانات وواجبات داخل مساحات عملك"
+      },
+      "contact": "تواصل مع KayEdu للاشتراك أو التجديد."
+    },
+    "assistant": {
+      "title": "أدوار المساعد",
+      "description": "المدرسون الذين تساعدهم، وما يسمح لك به كل منهم. رمز من مدرس يضيف دورًا هنا.",
+      "roleTitle": "مساعد {teacher}",
+      "roleDescription": "ما يسمح لك به هذا المدرس:",
+      "open": "فتح",
+      "leave": "مغادرة",
+      "leaveTitle": "التوقف عن العمل مساعدًا لـ {teacher}؟",
+      "leaveDescription": "تفقد الوصول فورًا. للعودة، يجب أن يرسل لك {teacher} رمزًا جديدًا.",
+      "joinTitle": "الانضمام مساعدًا",
+      "joinDescription": "أدخل الرمز الذي أعطاك إياه المدرس. سترى من أرسله وما يسمح به قبل أي ربط."
+    },
+    "privateClass": {
+      "title": "الفصول الخاصة",
+      "description": "الفصول الخاصة لمدرس، تُربط برمز يعطيك إياه.",
+      "joinTitle": "الانضمام إلى فصل خاص",
+      "joinDescription": "معك رمز من مدرس؟ سترى ممن هو قبل أي ربط.",
+      "open": "إدخال رمز"
     }
   },
   "AdminOrganizations": {
@@ -3648,11 +4136,11 @@
   },
   "Calendar": {
     "studentTitle": "التقويم",
-    "studentSubtitle": "حصصك في كل الفروع، شهرًا بشهر.",
-    "studentEmpty": "لا شيء هذا الشهر. تظهر هنا مجموعاتك وحضورك والحصص التي حجزتها.",
+    "studentSubtitle": "حصصك وامتحاناتك وواجباتك في كل الفروع، شهرًا بشهر.",
+    "studentEmpty": "لا شيء هذا الشهر. تظهر هنا مجموعاتك وحضورك والحصص التي حجزتها وامتحاناتك وواجباتك.",
     "teacherTitle": "التقويم",
-    "teacherSubtitle": "حصصك شهرًا بشهر. اضغط على يوم لعرض حصصه.",
-    "teacherEmpty": "لا حصص هذا الشهر.",
+    "teacherSubtitle": "حصصك وامتحاناتك وواجباتك شهرًا بشهر. اضغط على يوم لعرضها.",
+    "teacherEmpty": "لا حصص أو امتحانات أو واجبات هذا الشهر.",
     "parentTitle": "التقويم",
     "parentSubtitle": "حصص ابنك شهرًا بشهر، للعرض فقط.",
     "parentEmpty": "لا شيء هذا الشهر لهذا الابن.",
@@ -3670,6 +4158,11 @@
     "noSessions": "لا حصص في هذا اليوم.",
     "counts": "حاضر {present} · متأخر {late} · غائب {absent}",
     "openSession": "فتح الحصة",
+    "assessmentCount": "{count, plural, one {امتحان أو واجب واحد} other {{count, number, arab} امتحانات وواجبات}}",
+    "assessmentWindow": "{start} – {end}",
+    "assessmentDue": "موعد التسليم {date}",
+    "assessmentAttempts": "بدأ {started} · سلّم {submitted}",
+    "openAssessment": "فتح الامتحان أو الواجب",
     "tone": {
       "present": "حاضر",
       "late": "متأخر",
@@ -3678,8 +4171,11 @@
       "booked": "محجوزة",
       "requested": "مطلوبة",
       "cancelled": "ملغاة",
-      "held": "انعقدت"
-    }
+      "held": "انعقدت",
+      "exam": "امتحان",
+      "homework": "واجب"
+    },
+    "privateTag": "خاص"
   },
   "Media": {
     "comingSoon": "قريبًا",
@@ -3731,5 +4227,801 @@
     "classesEmpty": "ليس لديك حصص نشطة بعد.",
     "classesEmptyHint": "عندما يضيفك فرع إلى حصة ستظهر هنا.",
     "classActive": "نشطة"
+  },
+  "Notifications": {
+    "title": "الإشعارات",
+    "description": "تحديثات طلباتك وحصصك وامتحاناتك وواجباتك.",
+    "bell": "الإشعارات",
+    "bellUnread": "الإشعارات، {count} غير مقروءة",
+    "capped": "{max}+",
+    "loading": "جارٍ التحميل…",
+    "loadFailed": "تعذّر تحميل إشعاراتك.",
+    "retry": "إعادة المحاولة",
+    "seeAll": "عرض كل الإشعارات",
+    "markAllRead": "تعليم الكل كمقروء",
+    "markedAllRead": "عُلِّمت كل الإشعارات كمقروءة.",
+    "markAllFailed": "تعذّر تعليم إشعاراتك كمقروءة. سجّل الدخول وحاول مرة أخرى.",
+    "unread": "غير مقروء",
+    "fallback": "—",
+    "empty": {
+      "title": "لا توجد إشعارات بعد",
+      "description": "عندما يرد فرع على أحد طلباتك أو يغيّر إحدى حصصك، أو يضيف معلم امتحانًا أو واجبًا، ستجد ذلك هنا."
+    },
+    "kinds": {
+      "ENROLLMENT_APPROVED": "وافق {branch} على طلب انضمامك إلى {className}.",
+      "ENROLLMENT_DECLINED": "رفض {branch} طلب انضمامك إلى {className}.",
+      "BOOKING_APPROVED": "وافق {branch} على حجزك في {className} يوم {date}، {time}.",
+      "BOOKING_DECLINED": "رفض {branch} حجزك في {className} يوم {date}، {time}.",
+      "SESSION_CANCELLED": "أُلغيت حصة {className} في {branch} يوم {date}، {time}.",
+      "SESSION_RESCHEDULED": "نُقلت حصة {className} في {branch} من {oldDate}، {oldTime} إلى {newDate}، {newTime}.",
+      "ASSESSMENT_PUBLISHED": "{type, select, EXAM {امتحان جديد «{title}» لـ{className} في {branch}. يفتح {start} ويُغلق {end}.} other {واجب جديد «{title}» لـ{className} في {branch}. موعد التسليم {end}.}}",
+      "ASSESSMENT_EXTENDED": "{type, select, EXAM {وقت إضافي لامتحان «{title}» لـ{className} في {branch}. يُغلق الآن {end}.} other {وقت إضافي لواجب «{title}» لـ{className} في {branch}. موعد التسليم الآن {end}.}}",
+      "ASSESSMENT_OPENS_SOON": "يفتح امتحان «{title}» لـ{className} في {branch} قريبًا: {start}. ويُغلق {end}.",
+      "ASSESSMENT_DUE_SOON": "يحين قريبًا موعد تسليم واجب «{title}» لـ{className} في {branch}: {end}.",
+      "WORKSPACE_INVITATION": "دعاك {teacher} إلى فصوله الخاصة في «{workspace}». افتح صفحتك الرئيسية للتأكيد أو الإلغاء."
+    }
+  },
+  "StudentAssessments": {
+    "title": "الامتحانات والواجبات",
+    "subtitle": "كل ما حدده معلموك لفصولك، في كل الفروع.",
+    "empty": "لا يوجد شيء هنا بعد",
+    "emptyHint": "عندما ينشر معلم امتحانًا أو واجبًا لفصلك، سيظهر هنا.",
+    "type": {
+      "EXAM": "امتحان",
+      "HOMEWORK": "واجب"
+    },
+    "state": {
+      "UPCOMING": "قادم",
+      "OPEN": "مفتوح",
+      "IN_PROGRESS": "جارٍ",
+      "SUBMITTED": "تم التسليم",
+      "MISSED": "فاتك",
+      "CLOSED": "مغلق"
+    },
+    "dueOn": "موعد التسليم {date}",
+    "windowLine": "{start} – {end}",
+    "scoreLine": "{score} / {max} ({percent}٪)",
+    "windowLabel": "مفتوح",
+    "deadlineLabel": "موعد التسليم",
+    "durationLabel": "المدة",
+    "questionsLabel": "الأسئلة",
+    "pointsLabel": "إجمالي الدرجات",
+    "noTimer": "بدون حد زمني",
+    "minutes": "{count, plural, one {دقيقة واحدة} two {دقيقتان} few {# دقائق} many {# دقيقة} other {# دقيقة}}",
+    "questionOf": "السؤال {n} من {total}",
+    "upcomingHint": "لم يبدأ بعد. عد عند فتحه.",
+    "missedHint": "أُغلق هذا قبل أن تبدأه.",
+    "start": {
+      "label": "ابدأ",
+      "title": "هل تبدأ الآن؟",
+      "confirm": "ابدأ",
+      "cancel": "ليس الآن",
+      "noPause": "يبدأ المؤقت الآن ولا يتوقف، حتى لو غادرت الصفحة.",
+      "resumable": "تُحفظ إجاباتك أولًا بأول. يمكنك المغادرة والعودة حتى موعد التسليم.",
+      "oneSitting": "جلسة واحدة: إغلاق الصفحة أو إعادة تحميلها يسلّم الامتحان."
+    },
+    "take": {
+      "autosaves": "تُحفظ الإجابات فور اختيارها",
+      "saving": "جارٍ الحفظ…",
+      "saved": "تم الحفظ",
+      "saveFailed": "لم يتم الحفظ. اضغط للمحاولة مجددًا",
+      "daysShort": "ي",
+      "timeLeft": "الوقت المتبقي",
+      "timeUntilDeadline": "الوقت حتى موعد التسليم",
+      "oneSittingReminder": "جلسة واحدة: إغلاق هذه الصفحة أو إعادة تحميلها يسلّم الامتحان.",
+      "questionOf": "السؤال {n} من {total}",
+      "pointsLabel": "{count, plural, one {درجة واحدة} two {درجتان} few {# درجات} many {# درجة} other {# درجة}}",
+      "clearAnswer": "مسح إجابتي",
+      "gridLabel": "كل الأسئلة",
+      "gridAnswered": "السؤال {n}، تمت الإجابة",
+      "gridUnanswered": "السؤال {n}، لم تتم الإجابة",
+      "previous": "السابق",
+      "next": "التالي",
+      "review": "مراجعة",
+      "reviewTitle": "راجع إجاباتك",
+      "reviewCounts": "أجبت عن {answered} من {total}. اختر رقمًا للعودة إلى ذلك السؤال.",
+      "backToQuestions": "العودة إلى الأسئلة",
+      "submit": "تسليم",
+      "keepGoing": "متابعة الحل",
+      "confirmTitle": "هل تسلّم إجاباتك؟",
+      "confirmUnanswered": "{count, plural, one {سؤال واحد بلا إجابة وتكون درجته 0.} two {سؤالان بلا إجابة ودرجتهما 0.} few {# أسئلة بلا إجابة ودرجتها 0.} many {# سؤالًا بلا إجابة ودرجتها 0.} other {# سؤال بلا إجابة ودرجتها 0.}}",
+      "confirmAllAnswered": "أجبت عن كل الأسئلة.",
+      "confirmFinal": "لا يمكنك تغيير إجاباتك بعد ذلك."
+    },
+    "result": {
+      "title": "نتيجتك",
+      "submitted": "تم التسليم",
+      "at": "تم التسليم {date}",
+      "by": {
+        "STUDENT": "أنت من سلّمه.",
+        "DEADLINE": "انتهى الوقت، فسُلّم ما حفظته.",
+        "ONE_SITTING_GAP": "غادرت امتحان الجلسة الواحدة، فسُلّم ما حفظته."
+      },
+      "revealLater": "تظهر الإجابات الصحيحة بعد الإغلاق في {date}."
+    },
+    "reveal": {
+      "right": "صحيحة",
+      "wrong": "خاطئة",
+      "unanswered": "بلا إجابة",
+      "correct": "الإجابة الصحيحة",
+      "yours": "إجابتك",
+      "points": "{awarded} من {points} درجة"
+    },
+    "errors": {
+      "forbidden": "أنت لست طالبًا في هذا الفرع.",
+      "notFound": "تعذر العثور على هذا الامتحان أو الواجب.",
+      "notEligible": "لا يمكنك البدء لأنك لم تعد مسجلًا في الفصل.",
+      "notOpenYet": "لم يبدأ بعد.",
+      "closed": "تم إغلاقه.",
+      "submitted": "تم تسليم هذا بالفعل.",
+      "rateLimited": "طلبات كثيرة. انتظر لحظة ثم حاول مجددًا.",
+      "network": "تعذر الوصول إلى الخادم. تحقق من اتصالك وحاول مجددًا."
+    }
+  },
+  "Premium": {
+    "status": {
+      "none": "غير مميز",
+      "active": "مميز حتى {date}",
+      "expired": "انتهى في {date}",
+      "endsIn": "{count, plural, =0 {ينتهي اليوم} one {ينتهي خلال يوم واحد} two {ينتهي خلال يومين} few {ينتهي خلال {count, number, arab} أيام} many {ينتهي خلال {count, number, arab} يومًا} other {ينتهي خلال {count, number, arab} يوم}}"
+    }
+  },
+  "AdminPremium": {
+    "title": "المدرسون",
+    "subtitle": "منح الباقة المميزة لحساب واحد أو تمديدها أو إنهاؤها، بالبحث ببريده الإلكتروني الكامل. الباقة المميزة للشخص نفسه، لا لفرع.",
+    "lookup": {
+      "title": "البحث عن حساب",
+      "description": "اكتب البريد الإلكتروني الكامل للحساب. لا تُعرض أي قائمة، وجزء من البريد لا يعثر على شيء.",
+      "label": "البريد الإلكتروني",
+      "hint": "البريد الإلكتروني نفسه الذي يسجّل به الشخص دخوله.",
+      "submit": "بحث",
+      "searching": "جارٍ البحث…"
+    },
+    "noMatch": "لا يوجد حساب بهذا البريد الإلكتروني",
+    "account": {
+      "email": "البريد الإلكتروني"
+    },
+    "grant": {
+      "label": "مميز حتى",
+      "submit": "منح الباقة المميزة"
+    },
+    "extend": {
+      "label": "تاريخ الانتهاء الجديد",
+      "submit": "تمديد"
+    },
+    "endDayHint": "تستمر الباقة المميزة حتى نهاية هذا اليوم بتوقيت القاهرة. اليوم أو بعده، حتى {max}.",
+    "revoke": {
+      "hint": "إنهاء الباقة المميزة يسري فورًا.",
+      "trigger": "إنهاء الباقة المميزة",
+      "title": "إنهاء الباقة المميزة؟",
+      "description": "سيفقد {name} الباقة المميزة الآن. لا يُحذف شيء مما أنشأه، ومنحها من جديد يعيدها.",
+      "confirm": "إنهاء"
+    },
+    "saved": {
+      "granted": "تم منح الباقة المميزة.",
+      "extended": "تم تمديد الباقة المميزة.",
+      "revoked": "تم إنهاء الباقة المميزة."
+    },
+    "errors": {
+      "emailRequired": "أدخل بريدًا إلكترونيًا.",
+      "forbidden": "هذا متاح لمسؤول منصة KayEdu فقط.",
+      "accountNotFound": "لا يوجد حساب بهذا البريد الإلكتروني",
+      "alreadyPremium": "هذا الحساب مميز بالفعل. مدِّده بدلًا من ذلك.",
+      "notPremium": "هذا الحساب ليس مميزًا الآن.",
+      "notLater": "اختر تاريخًا بعد تاريخ الانتهاء الحالي.",
+      "stale": "تغيّر هذا الحساب للتو. ابحث عنه مرة أخرى وأعد المحاولة.",
+      "required": "اختر تاريخًا.",
+      "invalidDate": "اختر تاريخًا صحيحًا.",
+      "dateInPast": "اختر اليوم أو تاريخًا بعده.",
+      "dateTooFar": "اختر تاريخًا لا يتجاوز {max}."
+    }
+  },
+  "Assistants": {
+    "permissions": {
+      "none": "لا توجد صلاحيات مفعّلة.",
+      "assessments": {
+        "review": {
+          "label": "مراجعة الامتحانات والواجبات",
+          "description": "عرض النتائج وإجابات كل طالب."
+        },
+        "manage": {
+          "label": "إعداد الامتحانات والواجبات",
+          "description": "إنشاؤها وتعديلها ونشرها لمجموعاتك."
+        }
+      },
+      "classes": {
+        "view": {
+          "label": "عرض المجموعات والحصص",
+          "description": "مجموعاتك ومواعيدها وقوائم الحصص."
+        }
+      },
+      "requests": {
+        "manage": {
+          "label": "إرسال طلبات المجموعات والحصص",
+          "description": "طلب حصة جديدة أو تغيير موعد من الفرع."
+        }
+      },
+      "checkin": {
+        "workspace": {
+          "label": "تسجيل حضور الطلاب في مساحاتك",
+          "description": "تسجيل حاضر أو متأخر أو غائب في مساحاتك الخاصة."
+        }
+      },
+      "payments": {
+        "workspace": {
+          "label": "تحصيل المدفوعات في مساحاتك",
+          "description": "تسجيل المدفوعات في مساحاتك الخاصة."
+        }
+      },
+      "analytics": {
+        "view": {
+          "label": "عرض أرباحك وإحصاءاتك",
+          "description": "ملخص أرباحك وصفحة الأرباح."
+        }
+      },
+      "students": {
+        "phones": {
+          "label": "عرض أرقام هواتف الطلاب",
+          "description": "مخفية ما لم تفعّلها. لا تدخل في أي إعداد جاهز."
+        }
+      }
+    },
+    "presets": {
+      "GRADER": {
+        "label": "مصحّح",
+        "description": "يراجع الامتحانات والواجبات فقط."
+      },
+      "CO_TEACHER": {
+        "label": "مدرس مساعد",
+        "description": "يراجع الامتحانات والواجبات ويعدّها، ويرى مجموعاتك وحصصك، ويرسل الطلبات، ويسجّل الحضور ويحصّل المدفوعات في مساحاتك."
+      },
+      "FULL": {
+        "label": "كامل",
+        "description": "كل ما يفعله المدرس المساعد، إضافةً إلى أرباحك وإحصاءاتك."
+      },
+      "CUSTOM": {
+        "label": "مخصّص",
+        "description": "صلاحيات من اختيارك."
+      }
+    },
+    "code": {
+      "label": "رمز المساعد",
+      "expires": "يعمل مرة واحدة حتى {date}.",
+      "onceWarning": "يظهر هذا الرمز مرة واحدة فقط. انسخه أو شاركه الآن — لا يمكن عرضه مرة أخرى.",
+      "copy": "نسخ الرمز",
+      "copyLink": "نسخ الرابط",
+      "copied": "تم النسخ",
+      "copyFailed": "لم يسمح المتصفح بالنسخ. حدّد الرمز وانسخه يدويًا."
+    },
+    "teacher": {
+      "title": "المساعدون",
+      "description": "أشخاص يساعدونك، بالصلاحيات التي تمنحها لهم فقط.",
+      "premiumTitle": "المساعدون متاحون مع الاشتراك المميز",
+      "premiumDescription": "مع الاشتراك المميز يمكنك دعوة حتى {max} مساعدين واختيار ما يمكن لكل منهم فعله بالضبط.",
+      "premiumLapsedNote": "إذا انتهى اشتراكك المميز، يحتفظ مساعدوك بأماكنهم لكن لا يمكنهم فتح أي شيء حتى التجديد. ما زال بإمكانك إلغاء دعوة أو إزالة مساعد.",
+      "premiumContact": "تواصل مع KayEdu للاشتراك أو التجديد.",
+      "slots": "{used} من {max} أماكن مستخدمة",
+      "slotsHint": "يشغل كلٌّ من المساعدين والدعوات غير المستخدمة مكانًا.",
+      "slotsFull": "كل الأماكن الـ {max} مستخدمة. ألغِ دعوة غير مستخدمة أو أزل مساعدًا أولًا.",
+      "invite": "دعوة مساعد",
+      "pendingTitle": "دعوات غير مستخدمة",
+      "pendingDescription": "رموز لم يستخدمها أحد بعد. تشغل كل منها مكانًا حتى تُستخدم أو تُلغى أو تنتهي.",
+      "noPending": "لا توجد دعوات غير مستخدمة.",
+      "pendingPreset": "دعوة بصلاحيات: {preset}",
+      "pendingExpires": "تنتهي في {date}",
+      "revokeInvite": "إلغاء",
+      "revokeInviteTitle": "إلغاء هذه الدعوة؟",
+      "revokeInviteDescription": "يتوقف الرمز عن العمل فورًا ويُحرَّر مكانه.",
+      "assistantsTitle": "مساعدوك",
+      "assistantsDescription": "غيّر ما يمكن لكل منهم فعله، أو أزله.",
+      "noAssistants": "لا يوجد مساعدون بعد.",
+      "noAssistantsHint": "ادعُ شخصًا وأعطه الرمز. سيظهر هنا بعد أن يؤكده.",
+      "since": "مساعد منذ {date}",
+      "editPermissions": "تعديل الصلاحيات",
+      "remove": "إزالة",
+      "removeTitle": "إزالة {name}؟",
+      "removeDescription": "يفقد {name} الوصول فورًا. لإعادته، أرسل دعوة جديدة.",
+      "noBranchNote": "يعمل المساعدون في فروعك وفي مساحات عملك. درّس في فرع أو أنشئ مساحة عمل أولًا، ثم يمكنك دعوتهم من هنا."
+    },
+    "invite": {
+      "title": "دعوة مساعد",
+      "description": "اختر ما يمكنه فعله. يمكنك تغييره في أي وقت بعد انضمامه.",
+      "presetLabel": "الصلاحيات",
+      "presetHint": "نقطة بداية — يمكنك تفعيل صلاحيات منفردة أو إيقافها لاحقًا.",
+      "expiryNote": "يعمل الرمز مرة واحدة وتنتهي صلاحيته بعد 7 أيام.",
+      "cancel": "إلغاء",
+      "submit": "إنشاء الرمز",
+      "createdTitle": "أعطِ هذا الرمز لمساعدك",
+      "createdDescription": "يدخله في حسابه، أو عند التسجيل، ثم يؤكده.",
+      "done": "تم"
+    },
+    "edit": {
+      "title": "صلاحيات {name}",
+      "description": "اختر إعدادًا جاهزًا، أو فعّل صلاحيات منفردة أو أوقفها.",
+      "presetLabel": "الإعداد الجاهز",
+      "presetHint": "تغيير صلاحية واحدة يجعل الإعداد مخصّصًا.",
+      "togglesLabel": "ما يمكنه فعله",
+      "phonesNote": "تبقى أرقام هواتف الطلاب مخفية ما لم تفعّل ذلك.",
+      "cancel": "إلغاء",
+      "save": "حفظ الصلاحيات"
+    },
+    "join": {
+      "title": "الانضمام مساعدًا",
+      "description": "أدخل الرمز الذي أعطاك إياه المدرس.",
+      "signedInAs": "مسجّل الدخول باسم {name}.",
+      "howToGet": "ينشئ المدرس المشترك في الخدمة المميزة الرمز من صفحة المساعدين.",
+      "backToAccount": "العودة إلى إعدادات الحساب",
+      "codeLabel": "رمز المساعد",
+      "codeHint": "12 حرفًا ورقمًا. الشرطات والمسافات لا تهم.",
+      "continue": "متابعة",
+      "checking": "جارٍ التحقق…",
+      "signInFirst": "سجّل الدخول أو أنشئ حسابًا أولًا. رمزك ينتظرك هنا.",
+      "signIn": "تسجيل الدخول",
+      "register": "إنشاء حساب",
+      "confirmTitle": "هل تصبح مساعدًا لـ {teacher}؟",
+      "confirmDescription": "تحقق ممن أرسله وما يسمح لك به. لا يتم أي ربط قبل أن تؤكد.",
+      "presetLine": "الصلاحيات: {preset}",
+      "confirmNote": "يمكن للمدرس تغيير هذه الصلاحيات أو إزالتك في أي وقت. ويمكنك المغادرة من إعدادات الحساب.",
+      "cancel": "إلغاء",
+      "confirm": "تأكيد",
+      "confirming": "جارٍ الانضمام…",
+      "joined": "تم. الدور الجديد مذكور أعلاه."
+    },
+    "home": {
+      "metaTitle": "مساعد",
+      "title": "مساعد {teacher}",
+      "description": "تعمل نيابةً عن هذا المدرس في حدود ما يسمح به.",
+      "permissionsTitle": "ما يمكنك فعله",
+      "permissionsDescription": "الإعداد: {preset}. مساعد منذ {date}.",
+      "branchesTitle": "أين يمكنك العمل",
+      "branchesDescription": "فروع المدرّس التي تسمح بالمساعدين. كل صفحة في القائمة تعرض فقط ما سمح لك المدرّس به هناك.",
+      "noBranches": "غير متاح في فروع المدرّس",
+      "noBranchesHint": "لا يسمح أي فرع من فروع هذا المدرّس بالمساعدين حاليًا. القرار للفرع وليس للمدرّس.",
+      "workspacesTitle": "مساحات عمل المعلّم",
+      "workspacesDescription": "مساحات عمل خاصة يمكنك العمل فيها نيابة عن المعلّم.",
+      "noWorkspaces": "لا شيء لك في مساحات عمل المعلّم",
+      "noWorkspacesHint": "صلاحياتك لا تشمل الفصول أو تسجيل الحضور أو المدفوعات.",
+      "private": "خاص",
+      "archived": "مؤرشف"
+    },
+    "errors": {
+      "signInRequired": "سجّل الدخول أولًا.",
+      "forbidden": "ليست لديك صلاحية لذلك.",
+      "premiumRequired": "يتطلب هذا الاشتراك المميز. تواصل مع KayEdu للاشتراك أو التجديد.",
+      "slotsFull": "كل الأماكن الخمسة مستخدمة. ألغِ دعوة غير مستخدمة أو أزل مساعدًا أولًا.",
+      "notFound": "لم يعد هذا متاحًا. حدّث الصفحة.",
+      "unknownPreset": "اختر أحد الإعدادات الجاهزة.",
+      "unknownPermission": "إحدى هذه الصلاحيات غير موجودة. حدّث الصفحة وحاول مرة أخرى.",
+      "rateLimited": "محاولات كثيرة جدًا. حاول مرة أخرى بعد ساعة.",
+      "invalidCode": "هذا الرمز لا يعمل. ربما كُتب خطأً أو استُخدم أو أُلغي أو انتهت صلاحيته.",
+      "ownCode": "هذا رمزك أنت. أعطه للشخص الذي تريده مساعدًا لك.",
+      "teacherUnavailable": "لا يمكن لهذا المدرس إضافة مساعدين الآن. اسأله.",
+      "alreadyAssistant": "أنت بالفعل مساعد لهذا المدرس.",
+      "unverified": "أكّد بريدك الإلكتروني أولًا.",
+      "required": "هذا الحقل مطلوب.",
+      "tooLong": "هذه القيمة طويلة جدًا."
+    },
+    "work": {
+      "assessmentsSubtitle": "امتحانات وواجبات {teacher} في الفروع التي يمكنك العمل فيها.",
+      "assessmentsEmptyHint": "تظهر هنا امتحانات المدرّس وواجباته.",
+      "classes": {
+        "title": "المجموعات",
+        "subtitle": "مجموعات {teacher}، للعرض فقط.",
+        "listTitle": "مجموعات المدرّس",
+        "readOnly": "للعرض فقط. افتح مجموعة لترى حصصها وطلابها.",
+        "empty": "لا توجد مجموعات في الفروع التي يمكنك العمل فيها.",
+        "students": "{count, plural, zero {لا طلاب} one {طالب واحد} two {طالبان} few {{n} طلاب} many {{n} طالبًا} other {{n} طالب}}",
+        "inactive": "غير نشطة",
+        "back": "المجموعات",
+        "sessionsTitle": "الحصص",
+        "sessionsHint": "حصص المدرّس في هذه المجموعة، بالقدر الذي يسمح به الفرع.",
+        "noSessions": "لا توجد حصص في هذه الفترة.",
+        "addHomework": "إضافة واجب",
+        "schedule": "الجدول الأسبوعي",
+        "period": "الفترة",
+        "rosterTitle": "الطلاب",
+        "rosterHint": "الأسماء فقط.",
+        "rosterEmpty": "لا يوجد طلاب مسجّلون بعد."
+      },
+      "requests": {
+        "title": "الطلبات",
+        "subtitle": "اطلب من الفرع حصة أو مجموعة جديدة لـ {teacher}. القرار للفرع.",
+        "listTitle": "طلبات المدرّس",
+        "listHint": "كل طلب هو طلب المدرّس، والفرع هو من يوافق عليه أو يرفضه.",
+        "empty": "لا توجد طلبات بعد.",
+        "type": {
+          "NEW_SESSION": "حصة",
+          "NEW_CLASS": "مجموعة"
+        },
+        "viaAssistant": "عبر مساعد",
+        "filedOn": "أُرسل في {date}"
+      },
+      "overview": {
+        "title": "نظرة عامة",
+        "subtitle": "حصص {teacher} وأرباحه، للعرض فقط.",
+        "sessionsToday": "حصص اليوم",
+        "sessionsThisWeek": "حصص هذا الأسبوع",
+        "earningsThisMonth": "أرباح هذا الشهر",
+        "branchesTitle": "حسب الفرع",
+        "branchesHint": "نصيب المدرّس، بالقدر الذي يسمح به كل فرع.",
+        "branchLine": "اليوم {today} · هذا الأسبوع {week} · هذا الشهر {earnings}"
+      },
+      "workspaces": {
+        "title": "مساحات العمل",
+        "subtitle": "مساحات عمل {teacher} الخاصة التي يمكنك العمل فيها.",
+        "private": "خاص",
+        "archived": "مؤرشف",
+        "classes": "الفصول",
+        "sessions": "الحصص",
+        "back": "مساحات العمل",
+        "classesTitle": "الفصول",
+        "classesSubtitle": "فصول مساحة العمل، للعرض فقط.",
+        "noClasses": "لا توجد فصول في مساحة العمل هذه بعد.",
+        "untitledClass": "فصل",
+        "inactive": "غير نشط",
+        "openClass": "فتح الفصل",
+        "classTitle": "الفصل",
+        "sessionsTitle": "الحصص",
+        "sessionsHint": "حصص هذا الفصل، حتى أقدم تاريخ يُسمح لك برؤيته.",
+        "sessionsSubtitle": "افتح حصة لترى قائمة طلابها.",
+        "schedule": "الجدول الأسبوعي",
+        "rosterTitle": "الطلاب",
+        "rosterHint": "الأسماء فقط.",
+        "rosterHintPhones": "الأسماء وأرقام الهواتف.",
+        "rosterEmpty": "لا يوجد طلاب مسجّلون بعد.",
+        "archivedNote": "مساحة العمل هذه مؤرشفة، لذا فهي للعرض فقط.",
+        "readOnlyNote": "للعرض فقط. صلاحياتك لا تشمل تسجيل الحضور أو المدفوعات."
+      }
+    }
+  },
+  "Workspaces": {
+    "list": {
+      "title": "مساحات العمل",
+      "description": "مساحاتك الخاصة: فصول وحصص تديرها بنفسك خارج أي فرع.",
+      "count": "{active} من {max} نشطة",
+      "countHint": "مساحات العمل المؤرشفة لا تُحتسب.",
+      "new": "مساحة عمل جديدة",
+      "capReached": "لديك {max} مساحة عمل نشطة. أرشف واحدة لإنشاء أخرى.",
+      "premiumTitle": "مساحات العمل متاحة مع البريميوم",
+      "premiumDescription": "مع البريميوم يمكنك إنشاء حتى {max} مساحة عمل خاصة وإدارة فصولك وحصصك فيها.",
+      "readOnly": "للقراءة فقط — جدّد البريميوم لإجراء تغييرات. تبقى مساحات عملك وسجلها كما هي.",
+      "premiumContact": "تواصل مع KayEdu للاشتراك أو التجديد.",
+      "empty": "لا توجد مساحات عمل بعد",
+      "emptyHint": "أنشئ مساحة عمل لتدير فصولك الخاصة.",
+      "statusActive": "نشطة",
+      "statusArchived": "مؤرشفة",
+      "activeClasses": "{count, plural, =0 {لا فصول نشطة} one {فصل نشط واحد} two {فصلان نشطان} few {# فصول نشطة} many {# فصلًا نشطًا} other {# فصل نشط}}"
+    },
+    "create": {
+      "title": "مساحة عمل جديدة",
+      "description": "مساحة خاصة لفصولك. لا يراها أحد غيرك.",
+      "name": "الاسم",
+      "nameHint": "لك وحدك — لا يراه الطلاب أبدًا.",
+      "cancel": "إلغاء",
+      "submit": "إنشاء مساحة العمل"
+    },
+    "workspace": {
+      "back": "مساحات العمل",
+      "statusActive": "نشطة",
+      "statusArchived": "مؤرشفة",
+      "readOnlyBadge": "للقراءة فقط",
+      "lapsedBanner": "للقراءة فقط — جدّد البريميوم لإجراء تغييرات.",
+      "archivedBanner": "مساحة العمل هذه مؤرشفة وللقراءة فقط. ألغِ أرشفتها من الإعدادات لإجراء تغييرات."
+    },
+    "tabs": {
+      "label": "أقسام مساحة العمل",
+      "classes": "الفصول",
+      "sessions": "الحصص",
+      "settings": "الإعدادات",
+      "students": "الطلاب"
+    },
+    "classes": {
+      "title": "الفصول",
+      "classTitle": "الفصل",
+      "description": "ينشئ كل فصل حصصه من مواعيده الأسبوعية طوال مدته.",
+      "new": "فصل جديد",
+      "edit": "تعديل الفصل",
+      "newTitle": "فصل جديد",
+      "newDescription": "تُنشأ حصصه لكل موعد أسبوعي من اليوم حتى تاريخ النهاية.",
+      "editTitle": "تعديل الفصل",
+      "editDescription": "تغيير المدة أو السعر يحدّث الحصص القادمة التي ليس لها سجلات.",
+      "cancel": "إلغاء",
+      "create": "إنشاء الفصل",
+      "save": "حفظ التغييرات",
+      "created": "تم إنشاء الفصل.",
+      "saved": "تم حفظ التغييرات.",
+      "teacherNote": "أنت من يُدرّس كل فصل في مساحة عملك.",
+      "cutNote": "لا تُخصم أي نسبة في مساحة عملك: المبلغ كله لك.",
+      "scheduleHint": "صف واحد لكل موعد أسبوعي. صف واحد على الأقل.",
+      "empty": "لا توجد فصول بعد",
+      "emptyHint": "أنشئ فصلًا بموعد أسبوعي وستظهر حصصه هنا.",
+      "untitled": "فصل",
+      "active": "نشط",
+      "inactive": "غير نشط",
+      "noSlots": "لا مواعيد أسبوعية",
+      "upcoming": "{count, plural, =0 {لا حصص قادمة} one {حصة قادمة واحدة} two {حصتان قادمتان} few {# حصص قادمة} many {# حصة قادمة} other {# حصة قادمة}}",
+      "period": "مدة الفصل",
+      "slotsDescription": "إضافة موعد أو حذفه يحدّث الحصص القادمة.",
+      "sessionsTitle": "الحصص",
+      "slotRemoved": "تم حذف الموعد.",
+      "removeSlotTitle": "حذف هذا الموعد؟",
+      "removeSlotDescription": "تُحذف حصصه القادمة التي ليس لها سجلات. وتبقى الحصص التي لها سجلات.",
+      "removeSlotConfirm": "حذف الموعد",
+      "deactivate": "إيقاف",
+      "deactivateTitle": "إيقاف هذا الفصل؟",
+      "deactivateDescription": "تُحذف حصصه القادمة التي ليس لها سجلات وتُلغى الأخرى. يبقى السجل، ويمكنك إعادة تفعيله ما دامت مدته قائمة.",
+      "deactivated": "تم إيقاف الفصل.",
+      "reactivate": "إعادة التفعيل",
+      "reactivated": "تمت إعادة تفعيل الفصل.",
+      "delete": "حذف الفصل",
+      "deleteTitle": "حذف هذا الفصل؟",
+      "deleteDescription": "لا يمكن حذف إلا فصل لم يُعقد قط. لا يمكن التراجع عن ذلك."
+    },
+    "sessions": {
+      "title": "الحصص",
+      "description": "كل حصص مساحة العمل هذه، الأقدم أولًا.",
+      "new": "حصة جديدة",
+      "addExtra": "إضافة حصة",
+      "newTitle": "حصة جديدة",
+      "newDescription": "حصة إضافية لفصل، أو حصة لمرة واحدة قائمة بذاتها.",
+      "kind": "نوع الحصة",
+      "kindExtra": "حصة إضافية لفصل",
+      "kindOneOff": "حصة لمرة واحدة",
+      "class": "الفصل",
+      "titleField": "العنوان",
+      "cutNote": "لا تُخصم أي نسبة في مساحة عملك.",
+      "date": "التاريخ",
+      "start": "البداية",
+      "end": "النهاية",
+      "cancel": "إلغاء",
+      "create": "إنشاء الحصة",
+      "created": "تم إنشاء الحصة.",
+      "reschedule": "تغيير الموعد",
+      "rescheduleTitle": "تغيير موعد هذه الحصة",
+      "rescheduleDescription": "تُنشأ حصة جديدة في الموعد الجديد، وتبقى هذه الحصة كحصة منقولة.",
+      "rescheduled": "تم تغيير موعد الحصة.",
+      "cancelSession": "إلغاء الحصة",
+      "cancelTitle": "إلغاء هذه الحصة؟",
+      "cancelDescription": "تبقى في القائمة كحصة ملغاة. لا يمكن التراجع عن ذلك.",
+      "cancelled": "تم إلغاء الحصة.",
+      "delete": "حذف",
+      "deleteTitle": "حذف هذه الحصة؟",
+      "deleteDescription": "لا يمكن حذف إلا حصة إضافية أو لمرة واحدة لم تُعقد قط. لا يمكن التراجع عن ذلك.",
+      "deleted": "تم حذف الحصة.",
+      "empty": "لا توجد حصص",
+      "emptyHint": "تظهر الحصص هنا عندما يكون للفصل مواعيد أسبوعية.",
+      "untitledClass": "فصل",
+      "open": "فتح الحصة"
+    },
+    "settings": {
+      "title": "إعدادات مساحة العمل",
+      "nameTitle": "الاسم",
+      "nameDescription": "لا يراه أحد غيرك.",
+      "name": "اسم مساحة العمل",
+      "save": "حفظ الاسم",
+      "renamed": "تم حفظ الاسم.",
+      "archiveSection": "الأرشفة",
+      "archiveHelp": "الأرشفة تجعل مساحة العمل للقراءة فقط وتوقف كل الفصول: تُحذف الحصص القادمة التي ليس لها سجلات وتُلغى الأخرى. يبقى السجل، ولا تُحتسب ضمن حدّك بعد ذلك.",
+      "archive": "أرشفة مساحة العمل",
+      "archiveTitle": "أرشفة مساحة العمل هذه؟",
+      "archiveDescription": "تتوقف كل الفصول وتصبح مساحة العمل للقراءة فقط. يبقى السجل. يمكنك إلغاء الأرشفة لاحقًا ما دمت مشتركًا في البريميوم وضمن الحد.",
+      "archiveConfirm": "أرشفة",
+      "archived": "تمت أرشفة مساحة العمل.",
+      "unarchiveSection": "إلغاء الأرشفة",
+      "unarchiveHelp": "إلغاء الأرشفة يتيح التعديل من جديد. تبقى الفصول متوقفة حتى تعيد تفعيل كل منها.",
+      "unarchive": "إلغاء أرشفة مساحة العمل",
+      "unarchiveTitle": "إلغاء أرشفة مساحة العمل هذه؟",
+      "unarchiveDescription": "تُحتسب ضمن حدّك من جديد. تبقى الفصول متوقفة حتى تعيد تفعيلها.",
+      "unarchiveConfirm": "إلغاء الأرشفة",
+      "unarchived": "تم إلغاء أرشفة مساحة العمل.",
+      "unarchivePremium": "إلغاء الأرشفة يتطلب البريميوم.",
+      "unarchiveFull": "لديك {active} من {max} مساحة عمل نشطة. أرشف واحدة لإلغاء أرشفة هذه."
+    },
+    "errors": {
+      "generic": "لم يتم ذلك. حاول مرة أخرى.",
+      "forbidden": "لا يمكنك فعل ذلك في مساحة العمل هذه.",
+      "notFound": "غير موجود. ربما تمت إزالته.",
+      "premiumRequired": "للقراءة فقط — جدّد البريميوم لإجراء تغييرات.",
+      "workspaceArchived": "مساحة العمل هذه مؤرشفة. ألغِ أرشفتها لإجراء تغييرات.",
+      "workspaceCapReached": "لديك بالفعل {active} مساحة عمل نشطة — وهذا هو الحد. أرشف واحدة أولًا.",
+      "workspaceCutFixed": "لا يمكن تحديد نسبة في مساحة العمل.",
+      "alreadyArchived": "مساحة العمل هذه مؤرشفة بالفعل.",
+      "notArchived": "مساحة العمل هذه غير مؤرشفة.",
+      "nameRequired": "أدخل اسمًا.",
+      "nameTooLong": "استخدم 80 حرفًا أو أقل.",
+      "invalidName": "أدخل اسمًا من 80 حرفًا أو أقل.",
+      "educationSystemNotFound": "اختر نظامًا تعليميًا متاحًا.",
+      "gradeNotFound": "اختر صفًا متاحًا.",
+      "subjectNotFound": "اختر مادة متاحة.",
+      "titleRequired": "أدخل عنوانًا."
+    }
+  },
+  "WorkspaceSession": {
+    "metaTitle": "الحصة",
+    "back": "العودة إلى الحصص",
+    "rosterTitle": "قائمة الحضور",
+    "rosterDescription": "الطلاب الملتحقون بهذا الفصل. سجّل حضور الطالب — يُحدَّد «حاضر» أو «متأخر» من وقت الوصول — ثم سجّل دفعته. يمكن التصحيح حتى إنهاء الحصة.",
+    "oneTimeNote": "الحصة لمرة واحدة ليس لها طلاب ملتحقون، لذا لا يوجد من يُسجَّل حضوره هنا.",
+    "rosterEmpty": "لا يوجد طلاب ملتحقون",
+    "rosterEmptyHint": "ألحِق الطلاب بهذا الفصل من صفحة الفصل وسيظهرون هنا.",
+    "notCheckedIn": "لم يُسجَّل حضوره",
+    "noLongerEnrolled": "لم يعد ملتحقًا",
+    "amount": "المبلغ: {amount}",
+    "amountNote": "سعر الحصة، ويُثبَّت عند تسجيل الدفعة. المبلغ كله لك — لا يُخصم أي نصيب في مساحة عملك.",
+    "refundHelp": "يسجّل أنك أعدت المال إلى الطالب نقدًا.",
+    "receiptTitle": "الإيصال",
+    "receiptDescription": "ما حصّلته هذه الحصة، ونصيبك (كله)، ومن حضر.",
+    "detailsTitle": "التفاصيل",
+    "errors": {
+      "generic": "لم يتم ذلك. حاول مرة أخرى.",
+      "forbidden": "لا يمكنك فعل ذلك في مساحة العمل هذه.",
+      "notFound": "غير موجود. ربما تمت إزالته.",
+      "premiumRequired": "للقراءة فقط — جدّد البريميوم لإجراء تغييرات.",
+      "workspaceArchived": "مساحة العمل هذه مؤرشفة. ألغِ أرشفتها لإجراء تغييرات.",
+      "notEnrolled": "يمكن تسجيل حضور الطالب الملتحق بهذا الفصل فقط.",
+      "alreadyCheckedIn": "تم تسجيل حضور هذا الطالب بالفعل.",
+      "notCheckedIn": "لم يُسجَّل حضور هذا الطالب بعد. سجّل حضوره أولًا.",
+      "sessionCancelled": "هذه الحصة ملغاة — لم يعد يمكن تسجيل حضور أو دفع عليها.",
+      "sessionRescheduled": "أُعيدت جدولة هذه الحصة — لم يعد يمكن تسجيل حضور أو دفع عليها. استخدم الحصة الجديدة بدلًا من ذلك.",
+      "sessionClosed": "هذه الحصة مغلقة — لم يعد بالإمكان تعديل الحضور أو المدفوعات فيها.",
+      "reasonRequired": "اكتب السبب — تحويل طالب دفع إلى غائب يلغي دفعته.",
+      "voidConfirmationRequired": "هذا الطالب دفع. أكّد أن تسجيله غائبًا يُلغي الدفع.",
+      "attendanceNotPayable": "يمكن تسجيل الدفع فقط لطالب حاضر أو متأخر.",
+      "alreadyPaid": "هذا الطالب لديه دفعة بالفعل. ألغِها أولًا لتسجيل دفعة جديدة.",
+      "invalidMethod": "لا يمكن لمساحة العمل هذه تسجيل دفعة الآن. حاول لاحقًا.",
+      "missingCut": "لا يمكن تسجيل دفعة على هذه الحصة. حاول لاحقًا.",
+      "alreadyVoided": "هذه الدفعة أُلغيت بالفعل.",
+      "alreadyRefunded": "هذه الدفعة استُردت بالفعل.",
+      "alreadyClosed": "هذه الحصة مغلقة بالفعل.",
+      "notStarted": "لم تبدأ هذه الحصة بعد، لذا لا يمكن إنهاؤها.",
+      "required": "هذا الحقل مطلوب.",
+      "tooLong": "هذه القيمة طويلة جدًا."
+    }
+  },
+  "WorkspaceStudents": {
+    "title": "الطلاب",
+    "description": "طلاب مساحة العمل هذه. كل طالب سجلّك الخاص هنا، ولا ترى إلا إن كان قد ربطه بحسابه.",
+    "empty": "لا طلاب بعد",
+    "emptyHint": "أضف طالبًا برقم هاتفه، ثم سجّله في فصولك.",
+    "code": "الكود {code}",
+    "classes": "{count, plural, =0 {ليس في أي فصل} one {في فصل واحد} two {في فصلين} few {في # فصول} many {في # فصلًا} other {في # فصل}}",
+    "add": {
+      "button": "إضافة طالب",
+      "title": "إضافة طالب",
+      "description": "يُنشأ سجلّه في مساحة العمل هذه. إن كان الرقم لحساب على KayEdu فيمكن لصاحبه ربط هذا السجل من حسابه — وسترى «مرتبط» عندما يفعل.",
+      "phoneHint": "رقم موبايل مصري، مثل 01012345678. لا يمكن تغييره لاحقًا.",
+      "grade": "الصف (اختياري)",
+      "noGrade": "بلا صف",
+      "cancel": "إلغاء",
+      "submit": "إضافة طالب",
+      "added": "تمت إضافة الطالب."
+    },
+    "copy": {
+      "button": "إضافة من مساحات عملي الأخرى",
+      "title": "إضافة من مساحات عملي الأخرى",
+      "description": "تنسخ اسم أحد طلابك في مساحة عمل أخرى لك ورقم هاتفه وصفّه إلى سجل جديد هنا.",
+      "student": "الطالب",
+      "pick": "اختر طالبًا",
+      "cancel": "إلغاء",
+      "submit": "إضافة طالب",
+      "added": "تمت إضافة الطالب."
+    },
+    "row": {
+      "linked": "مرتبط",
+      "notLinked": "غير مرتبط",
+      "inviteAgain": "إعادة الدعوة",
+      "invited": "تم. إن كان هذا الرقم لحساب فقد طُلب من صاحبه مرة أخرى.",
+      "cancelInvitation": "إلغاء الدعوة",
+      "cancelTitle": "إلغاء أي دعوة؟",
+      "cancelDescription": "إن كانت هناك دعوة معلّقة لربط هذا السجل فستُسحب. يبقى السجل كما هو.",
+      "cancelConfirm": "إلغاء الدعوة",
+      "cancelled": "تم. لا شيء معلّق لهذا السجل الآن."
+    },
+    "shareCode": {
+      "share": "مشاركة رمز",
+      "title": "مشاركة رمز انضمام",
+      "description": "رمز يُستخدم مرة واحدة لسجل {name}. من يستخدمه من حسابه يُربط بهذا السجل.",
+      "howItWorks": "أرسل الرمز أو الرابط إلى هذا الطالب فقط. يفتحه، ويسجّل الدخول أو ينشئ حسابًا، ويتحقق من اسمك واسم مساحة العمل، ثم يؤكد. بعدها يظهر السجل «مرتبط».",
+      "expiryNote": "يعمل الرمز مرة واحدة ويتوقف بعد 7 أيام.",
+      "replaceWarning": "ما زال رمز شاركته لهذا السجل صالحًا. إنشاء رمز جديد يوقف الرمز القديم.",
+      "submit": "إنشاء الرمز",
+      "cancel": "إلغاء",
+      "createdTitle": "تم إنشاء رمز الانضمام",
+      "createdDescription": "شاركه مع {name} الآن.",
+      "done": "تم",
+      "label": "رمز الانضمام",
+      "expires": "يعمل مرة واحدة حتى {date}.",
+      "onceWarning": "يظهر هذا الرمز مرة واحدة فقط. انسخه أو شاركه الآن — لا يمكن عرضه مرة أخرى.",
+      "copy": "نسخ الرمز",
+      "copyLink": "نسخ الرابط",
+      "copied": "تم النسخ",
+      "copyFailed": "لم يسمح المتصفح بالنسخ. حدّد الرمز وانسخه يدويًا.",
+      "whatsApp": "مشاركة عبر واتساب",
+      "whatsAppText": "انضم إلى فصولي الخاصة على KayEdu: {link}",
+      "revoke": "إلغاء الرمز",
+      "revokeTitle": "إلغاء رمز الانضمام؟",
+      "revokeDescription": "يتوقف الرمز الذي شاركته لهذا السجل (كان سيعمل حتى {date}) فورًا. يبقى السجل كما هو.",
+      "revokeConfirm": "إلغاء الرمز",
+      "revoked": "تم. لم يعد هذا الرمز يعمل."
+    },
+    "roster": {
+      "title": "الطلاب",
+      "description": "{count, plural, =0 {لم يُسجَّل أحد بعد.} one {طالب واحد مسجّل.} two {طالبان مسجّلان.} few {# طلاب مسجّلين.} many {# طالبًا مسجّلًا.} other {# طالب مسجّل.}}",
+      "empty": "لم يُسجَّل أحد في هذا الفصل بعد.",
+      "student": "الطالب",
+      "pick": "اختر طالبًا",
+      "enrol": "تسجيل",
+      "enrolled": "تم تسجيل الطالب.",
+      "nobodyToEnrol": "كل طلاب مساحة العمل هذه في هذا الفصل بالفعل. أضف طلابًا من تبويب الطلاب.",
+      "remove": "إزالة {name} من هذا الفصل",
+      "removeTitle": "إزالة من هذا الفصل؟",
+      "removeDescription": "يغادر حصص الفصل القادمة. يبقى سجلّه السابق.",
+      "removeConfirm": "إزالة",
+      "removed": "تمت الإزالة من الفصل."
+    },
+    "invitation": {
+      "badge": "دعوة",
+      "title": "دعاك {teacher} إلى فصوله الخاصة في «{workspace}»",
+      "body": "أكّد لربط سجلّك لديه بحسابك: سترى بعدها الفصول التي يسجّلك فيها. ألغِ إن لم تكن أنت المقصود.",
+      "confirm": "تأكيد",
+      "cancel": "إلغاء",
+      "accepted": "تم الربط. فصولك الخاصة في تقويمك.",
+      "declined": "تم رفض الدعوة.",
+      "declinedInPlace": "رفضت الدعوة من «{workspace}»."
+    },
+    "student": {
+      "privateClass": "فصل خاص"
+    },
+    "errors": {
+      "phoneRequired": "أدخل رقم هاتف الطالب.",
+      "invalidPhone": "أدخل رقم موبايل مصريًا، مثل 01012345678.",
+      "duplicatePhone": "يوجد طالب بهذا الرقم في مساحة العمل هذه بالفعل.",
+      "nameRequired": "أدخل اسمًا.",
+      "tooLong": "استخدم 60 حرفًا أو أقل.",
+      "gradeNotFound": "اختر صفًا متاحًا.",
+      "rateLimited": "محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.",
+      "inviteTooSoon": "يمكنك دعوة هذا الطالب مرة أخرى بعد 24 ساعة من آخر دعوة.",
+      "alreadyLinked": "هذا الطالب مرتبط بالفعل.",
+      "pickStudent": "اختر طالبًا.",
+      "classInactive": "هذا الفصل معطّل. أعد تفعيله أولًا.",
+      "studentInactive": "هذا الطالب معطّل.",
+      "alreadyEnrolled": "هذا الطالب في هذا الفصل بالفعل.",
+      "invitationGone": "لم تعد هذه الدعوة متاحة.",
+      "alreadyInWorkspace": "لديك سجل في مساحة العمل هذه بالفعل، لذا لا يمكن استخدام هذه الدعوة.",
+      "codeGone": "لم يعد هناك رمز صالح لهذا السجل. حدّث الصفحة."
+    }
+  },
+  "WorkspaceJoin": {
+    "title": "الانضمام إلى فصل خاص",
+    "description": "أدخل الرمز الذي أعطاك إياه المدرس.",
+    "signedInAs": "مسجّل الدخول باسم {name}.",
+    "howToGet": "ينشئ المدرس الرمز من صفحة الطلاب في مساحة عمله ويرسله إليك.",
+    "backToHub": "رجوع",
+    "codeLabel": "رمز الانضمام",
+    "codeHint": "12 حرفًا ورقمًا. الشرطات والمسافات لا تهم.",
+    "continue": "متابعة",
+    "checking": "جارٍ التحقق…",
+    "signInFirst": "سجّل الدخول أو أنشئ حسابًا أولًا. رمزك ينتظرك هنا.",
+    "signIn": "تسجيل الدخول",
+    "register": "إنشاء حساب",
+    "confirmTitle": "هل تنضم إلى فصول {teacher} الخاصة في «{workspace}»؟",
+    "confirmTitleNoTeacher": "هل تنضم إلى الفصول الخاصة في «{workspace}»؟",
+    "confirmDescription": "تحقق ممن أرسله. لا يتم أي ربط قبل أن تؤكد.",
+    "confirmNote": "سترى الفصول التي يسجّلك فيها هذا المدرس في الحصص والتقويم. لا يرى المدرس إلا أن السجل مرتبط — لا اسمك ولا بريدك ولا حسابك.",
+    "cancel": "إلغاء",
+    "confirm": "تأكيد",
+    "confirming": "جارٍ الانضمام…",
+    "joined": "تم الربط. فصولك الخاصة في تقويمك.",
+    "errors": {
+      "signInRequired": "سجّل الدخول أولًا.",
+      "forbidden": "ليست لديك صلاحية لذلك.",
+      "unverified": "أكّد بريدك الإلكتروني أولًا.",
+      "rateLimited": "محاولات كثيرة. حاول مرة أخرى بعد ساعة.",
+      "invalidCode": "هذا الرمز لا يعمل. ربما كُتب خطأ أو استُخدم أو أُلغي أو انتهت صلاحيته.",
+      "ownWorkspace": "هذا الرمز لمساحة عملك أنت. أعطه للطالب الذي أُنشئ له.",
+      "alreadyInWorkspace": "لديك سجل في مساحة العمل هذه بالفعل، لذا لا يمكن استخدام هذا الرمز. اسأل المدرس.",
+      "alreadyLinked": "هذا السجل مرتبط بحساب بالفعل. اسأل المدرس.",
+      "required": "أدخل الرمز."
+    }
   }
 }

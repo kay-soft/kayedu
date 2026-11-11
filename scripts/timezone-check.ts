@@ -22,7 +22,7 @@
  *      calendar day from UTC (`toISOString().slice(0, 10)`-style,
  *      `setUTCHours`, `startOfUtcDay(now)`) or hand-rolls a second "today".
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,6 +47,7 @@ import {
   zonedClock,
   type SharedDateFilterInput,
 } from "../lib/scheduling.ts";
+import { readSource } from "./lib/source.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -538,7 +539,7 @@ function checkStaticSweep() {
   for (const file of files) {
     const rel = relative(ROOT, file).replace(/\\/g, "/");
     if (rel in ALLOWLIST) continue;
-    const lines = stripComments(readFileSync(file, "utf8")).split("\n");
+    const lines = stripComments(readSource(file)).split("\n");
     lines.forEach((line, index) => {
       for (const rule of FORBIDDEN) {
         if (rule.regex.test(line)) offenders.push(`${rel}:${index + 1} — ${rule.name}`);
@@ -571,7 +572,7 @@ function checkStaticSweep() {
     "lib/db/class-sessions.ts": /todayInTimezone\(/,
   };
   for (const [rel, pattern] of Object.entries(mustUseHelper)) {
-    check(`${rel} resolves its day through the helper`, pattern.test(readFileSync(join(ROOT, rel), "utf8")));
+    check(`${rel} resolves its day through the helper`, pattern.test(readSource(join(ROOT, rel))));
   }
 
   // Positive: every page that applies the shared date filter hands it the centre's zone.
@@ -580,7 +581,7 @@ function checkStaticSweep() {
     "app/[locale]/(center)/analytics/page.tsx",
     "app/[locale]/(center)/expenses/page.tsx",
   ]) {
-    const source = readFileSync(join(ROOT, rel), "utf8");
+    const source = readSource(join(ROOT, rel));
     check(
       `${rel} passes the centre's timezone to resolveSharedDateFilter and the floor`,
       /resolveSharedDateFilter\(toSharedDateFilterInput\(filters\),\s*timeZone,\s*now\)/.test(source) &&
@@ -589,13 +590,13 @@ function checkStaticSweep() {
   }
 
   // The analytics roll-up shares one range across branches — the documented rule is the active branch's zone.
-  const analytics = readFileSync(join(ROOT, "app/[locale]/(center)/analytics/page.tsx"), "utf8");
+  const analytics = readSource(join(ROOT, "app/[locale]/(center)/analytics/page.tsx"));
   check(
     "Analytics roll-up: the one combined range is resolved against the active branch's zone (documented rule)",
     /const timeZone = centreTimeZone\(ctx\.settings\)/.test(analytics),
   );
   // The teacher dashboard must not hold a page-level 'today' shared by every centre.
-  const teacherDashboard = readFileSync(join(ROOT, "app/[locale]/(teacher)/teacher/dashboard/page.tsx"), "utf8");
+  const teacherDashboard = readSource(join(ROOT, "app/[locale]/(teacher)/teacher/dashboard/page.tsx"));
   check(
     "Teacher dashboard: no page-level `today` shared across centres — anchors are computed inside the per-centre map",
     !/^\s*const today\b/m.test(teacherDashboard) && /contexts\.map\([\s\S]*teacherDashboardAnchors\(/.test(teacherDashboard),

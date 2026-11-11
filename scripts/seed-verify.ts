@@ -83,9 +83,10 @@ const EXPECTED_CENTER_NAV: Record<StaffRole, string[]> = {
   ACCOUNTANT: ["dashboard", "analytics", "expenses"],
 };
 // U7: Calendar joins the teacher, student and parent nav. (Teacher list: scripts/lib/expected-nav.ts.)
-const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "discover", "reservations"];
+const EXPECTED_STUDENT_NAV = ["schedule", "calendar", "assessments", "discover", "reservations"];
 const EXPECTED_PARENT_NAV = ["schedule", "calendar"];
-const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog"];
+// W6 (D-W35): + "premium" (Teachers).
+const EXPECTED_ADMIN_NAV = ["centers", "platform", "catalog", "premium"];
 
 /**
  * U3 — the bookable test classes (single-session attendance, F6) per branch
@@ -112,12 +113,19 @@ async function main() {
   // Gate fixtures (scripts/lib/gate-fixtures.ts) are not the seed world: sections
   // 1, 3, 4 and 7 leave them out, section 8 reports them.
   const allCenters = await prisma.center.findMany({ orderBy: { slug: "asc" } });
-  const centers = allCenters.filter((center) => !isGateFixtureSlug(center.slug));
+  // W8a old → new (the W8a prompt's allowed change; D-W20, D-W38): the seed
+  // world — the provisioning baseline (1), the orphan checks (4) and the counts
+  // (3, 7) — is BRANCH centres only. A teacher's PERSONAL workspace has no
+  // baseline and picks no catalogue entries by design, so it is left out of
+  // every seed-world section exactly like a gate fixture (and is not one).
+  const centers = allCenters.filter((center) => !isGateFixtureSlug(center.slug) && center.kind === "BRANCH");
   const fixtureCenters = allCenters.filter((center) => isGateFixtureSlug(center.slug));
   const fixtureIds = fixtureCenters.map((center) => center.id);
-  const seedCenterWhere = { centerId: { notIn: fixtureIds } };
-  /** SQL list of the fixture centre ids; a sentinel keeps `NOT IN ()` valid when there are none. */
-  const fixtureIdList = fixtureIds.length > 0 ? fixtureIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(", ") : "''";
+  const outsideSeedIds = [...fixtureIds, ...allCenters.filter((center) => center.kind === "PERSONAL").map((center) => center.id)];
+  const seedCenterWhere = { centerId: { notIn: outsideSeedIds } };
+  /** SQL list of the centre ids outside the seed world; a sentinel keeps `NOT IN ()` valid when there are none. */
+  const fixtureIdList =
+    outsideSeedIds.length > 0 ? outsideSeedIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(", ") : "''";
   const seedCenter = (alias: string, column = "centerId") => `${alias}."${column}" NOT IN (${fixtureIdList})`;
   const notFixtureUser = (alias: string) =>
     gateEmailPrefixes()
@@ -237,7 +245,7 @@ async function main() {
     const profiles = await prisma.studentProfile.findMany({ where: { userId: both.id }, include: { center: true } });
     check("The shared student studies in two organizations", new Set(profiles.map((p) => p.center.organizationId)).size === 2);
   }
-  check("Student nav is the 4 student items", same(navForExperience("student", "STUDENT").map((i) => i.labelKey), EXPECTED_STUDENT_NAV));
+  check("Student nav is the 5 student items", same(navForExperience("student", "STUDENT").map((i) => i.labelKey), EXPECTED_STUDENT_NAV));
   check("Parent nav is the 2 parent items", same(navForExperience("parent", "PARENT").map((i) => i.labelKey), EXPECTED_PARENT_NAV));
 
   // F3: families are FamilyLinks (a real code issued and accepted, or the
@@ -285,7 +293,7 @@ async function main() {
     `${unstamped.length} without it — re-run the seed`,
   );
   check("No account claim is pending in the demo world", (await prisma.accountClaim.count({ where: { status: "PENDING" } })) === 0);
-  check("Admin nav is the 3 platform items", same(navForExperience("admin", "PLATFORM_ADMIN").map((i) => i.labelKey), EXPECTED_ADMIN_NAV));
+  check("Admin nav is the 4 platform items", same(navForExperience("admin", "PLATFORM_ADMIN").map((i) => i.labelKey), EXPECTED_ADMIN_NAV));
 
   // The nav ⇄ page-gate rule (docs/02 §6.2) holds for the real definitions.
   for (const [experience, defs] of [["center", CENTER_NAV], ["teacher", TEACHER_NAV]] as const) {
@@ -585,7 +593,7 @@ async function main() {
   // ── 7. Counts ────────────────────────────────────────────────────────
   console.log("\n7. Entity counts (seed world, gate fixtures left out; catalog rows are global)");
   const counts: [string, number][] = [
-    ["Organizations", await prisma.organization.count({ where: { NOT: { centers: { some: { id: { in: fixtureIds } } } } } })],
+    ["Organizations", await prisma.organization.count({ where: { ownerUserId: null, NOT: { centers: { some: { id: { in: fixtureIds } } } } } })],
     ["Centres", centers.length],
     ["Users", await count(`SELECT COUNT(*)::int AS n FROM "User" u WHERE ${notFixtureUser("u")}`)],
     ["Memberships", await prisma.membership.count({ where: seedCenterWhere })],

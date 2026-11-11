@@ -8,13 +8,23 @@ import { requireEmailConfirmation } from "@/lib/auth/auth-config";
 import { clientIp } from "@/lib/auth/request-ip";
 import {
   clearActiveCenterId,
+  clearLastExperienceCookie,
+  getLastExperienceCookie,
   setActiveCenterId,
+  setLastExperienceCookie,
   setTeacherBranchId,
 } from "@/lib/auth/active-center";
+import {
+  lastExperienceOf,
+  resolveLastExperience,
+  rollupExperienceKey,
+  staffExperienceKey,
+} from "@/lib/auth/experiences";
 import {
   getOwnerOrgGroups,
   getTeacherContexts,
   getUserCenterRelations,
+  listExperiences,
   primaryRole,
   singleExperienceHome,
 } from "@/lib/auth/tenant";
@@ -31,6 +41,7 @@ import {
   selectTeacherBranchSchema,
   signInSchema,
   signUpSchema,
+  switchExperienceSchema,
 } from "@/lib/validation/auth";
 import type { User } from "@prisma/client";
 import { logBestEffort } from "@/lib/log";
@@ -294,6 +305,7 @@ export async function selectCenterAction(formData: FormData): Promise<void> {
   );
   if (relation) {
     await setActiveCenterId(relation.center.id);
+    await rememberExperience(user.id, staffExperienceKey(relation.center.id));
     // T6: a pick from the pick-a-branch screen returns to the page it was on;
     // that page still runs its own gate at the chosen branch.
     redirect({ href: safeNextPath(parsed.data.next) ?? homePathForRole(primaryRole(relation)), locale });
@@ -310,12 +322,76 @@ export async function selectCenterAction(formData: FormData): Promise<void> {
     );
     if (representative) {
       await setActiveCenterId(group.organizationId);
+      await rememberExperience(user.id, rollupExperienceKey(group.organizationId));
       redirect({ href: homePathForRole(primaryRole(representative)), locale });
       return;
     }
   }
 
   redirect({ href: `${ROUTES.selectCenter}?switch=1`, locale });
+}
+
+/**
+ * A switch made with the branch switcher is a switch of experience too (D-W34):
+ * the hub's "Last used" follows it. A branch held only as a teacher or a student
+ * is no staff entry, so it records nothing.
+ */
+async function rememberExperience(userId: string, key: string): Promise<void> {
+  const entry = (await listExperiences(userId)).find((item) => item.key === key);
+  if (entry) await setLastExperienceCookie(lastExperienceOf(entry));
+}
+
+/**
+ * The role switcher and the hub (W5, D-W13, D-W34): go to one experience's real
+ * landing page. The key is **looked up in the person's current list**, never
+ * trusted, and only then runs the existing selector for it: `kayedu_center` for
+ * a staff branch or Whole Management, All branches for the teacher portal (the
+ * list says "All branches", so it must be true). It lands on `entry.href`, which
+ * carries no query, so nothing of the old page follows. The target route's own
+ * gate still re-checks access. No audit row and no new permission: a switch
+ * changes no data and grants nothing.
+ */
+export async function switchExperienceAction(formData: FormData): Promise<void> {
+  const parsed = switchExperienceSchema.safeParse(Object.fromEntries(formData));
+  const locale = readLocale(formData);
+  if (!parsed.success) {
+    redirect({ href: `${ROUTES.selectCenter}?switch=1`, locale });
+    return;
+  }
+
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect({ href: ROUTES.login, locale });
+    return;
+  }
+
+  const entry = (await listExperiences(user.id)).find((item) => item.key === parsed.data.key);
+  if (!entry) {
+    // Access lost since the list was rendered: back to what is still theirs.
+    await clearLastExperienceCookie();
+    redirect({ href: `${ROUTES.selectCenter}?switch=1`, locale });
+    return;
+  }
+
+  const selection = entry.centerId ?? (entry.kind === "rollup" ? entry.organizationId : undefined);
+  if (selection) await setActiveCenterId(selection);
+  if (entry.kind === "teacher") await setTeacherBranchId(null);
+  await setLastExperienceCookie(lastExperienceOf(entry));
+
+  redirect({ href: entry.href, locale });
+}
+
+/**
+ * Clears a remembered experience the hub found stale (D-W34). A Server Component
+ * cannot delete a cookie, so the hub asks for this from the browser. It decides
+ * again here, against the current list, so a value that became valid is kept.
+ */
+export async function forgetStaleExperienceAction(): Promise<{ cleared: boolean }> {
+  const user = await getCurrentUser();
+  if (!user) return { cleared: false };
+  const { stale } = resolveLastExperience(await getLastExperienceCookie(), await listExperiences(user.id));
+  if (stale) await clearLastExperienceCookie();
+  return { cleared: stale };
 }
 
 class InvitationNoLongerPending extends Error {}

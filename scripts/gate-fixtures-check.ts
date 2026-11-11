@@ -9,7 +9,7 @@
  * seed-world data. It also covers the verdict rule (WARN under 30 minutes, FAIL
  * after, FAIL always under --strict-clean) with a faked age.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -21,6 +21,7 @@ import {
   isGateFixtureSlug,
   otherGateEmailPrefixes,
 } from "./lib/gate-fixtures.ts";
+import { readSource } from "./lib/source.ts";
 
 let failures = 0;
 function check(name: string, passed: boolean, detail = "") {
@@ -39,7 +40,7 @@ const allowed: readonly string[] = NOT_A_FIXTURE_LITERALS;
 
 const unregistered = new Map<string, string>();
 for (const file of files) {
-  const source = readFileSync(join(dir, file), "utf8");
+  const source = readSource(join(dir, file));
   for (const [index, rawLine] of source.split("\n").entries()) {
     const line = rawLine.trim();
     if (line.startsWith("//") || line.startsWith("*") || line.startsWith("/*")) continue;

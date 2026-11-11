@@ -1,6 +1,6 @@
 // Relative imports on purpose — `check:student-portal` and `check:teacher-portal`
 // exercise these rules directly, outside the Next.js runtime.
-import { addDays, dateKey } from "./scheduling.ts";
+import { addDays, dateKey, zonedClock } from "./scheduling.ts";
 
 /**
  * The month calendar's rules (U7, docs/04-design-system.md §11.28): its URL
@@ -15,7 +15,8 @@ import { addDays, dateKey } from "./scheduling.ts";
  * shows nothing), an enrolled session ahead (Upcoming), a single session
  * booked or asked for (Booked / Requested), a cancelled one. Teacher: a
  * session held (closed), ahead, or cancelled. A moved (RESCHEDULED) original
- * is never one of them (U2) — its replacement is.
+ * is never one of them (U2) — its replacement is. Student and teacher, not
+ * parent (W3b, D-W32): an exam or a homework, each with its own legend entry.
  */
 export type CalendarTone =
   | "present"
@@ -25,7 +26,9 @@ export type CalendarTone =
   | "booked"
   | "requested"
   | "cancelled"
-  | "held";
+  | "held"
+  | "exam"
+  | "homework";
 
 export const STUDENT_CALENDAR_TONES: CalendarTone[] = [
   "present",
@@ -37,6 +40,8 @@ export const STUDENT_CALENDAR_TONES: CalendarTone[] = [
   "cancelled",
 ];
 export const TEACHER_CALENDAR_TONES: CalendarTone[] = ["held", "upcoming", "cancelled"];
+/** Added by the student's and the teacher's pages; the parent's calendar never shows them. */
+export const ASSESSMENT_CALENDAR_TONES: CalendarTone[] = ["exam", "homework"];
 
 /** At most this many dots in a day cell; the rest read "+n". */
 export const CALENDAR_DOTS = 3;
@@ -101,4 +106,33 @@ export function calendarGrid(month: Date, weekStart: number): Date[] {
 export function teacherCalendarTone(session: { status: string; closedAt: Date | null }): CalendarTone {
   if (session.status === "CANCELLED") return "cancelled";
   return session.closedAt ? "held" : "upcoming";
+}
+
+/**
+ * The widest instants a month's assessments can fall in (W3b): a day marker is
+ * UTC midnight and a row sits on its own zone's day, so the read reaches a day
+ * past each end and `assessmentOnCalendar` then judges each row in its own zone.
+ * The D-14 reasoning of `earliestTodayAnywhere`.
+ */
+export function assessmentCalendarWindow(range: { start: Date; end: Date }): { from: Date; to: Date } {
+  return { from: addDays(range.start, -1), to: addDays(range.end, 2) };
+}
+
+/**
+ * Where an assessment sits (W3b, D-W32): an exam on the day of `windowStart`, a
+ * homework on the day of its deadline, in `timeZone` (the session's frozen one,
+ * else the branch's). Null with no such time yet (a draft exam with no window), or
+ * outside `range`. `startTime` orders it among the day's sessions.
+ */
+export function assessmentOnCalendar(
+  assessment: { type: "EXAM" | "HOMEWORK"; windowStart: Date | null; deadline: Date | null },
+  timeZone: string,
+  range: { start: Date; end: Date },
+): { day: string; startTime: string } | null {
+  const at = assessment.type === "EXAM" ? assessment.windowStart : assessment.deadline;
+  if (!at) return null;
+  const { dayKey, minutes } = zonedClock(at, timeZone);
+  if (dayKey < dateKey(range.start) || dayKey > dateKey(range.end)) return null;
+  const hours = String(Math.floor(minutes / 60)).padStart(2, "0");
+  return { day: dayKey, startTime: `${hours}:${String(minutes % 60).padStart(2, "0")}` };
 }

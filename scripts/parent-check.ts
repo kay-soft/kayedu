@@ -48,7 +48,7 @@
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   FAMILY_CODE_ALPHABET,
@@ -72,6 +72,7 @@ import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
 import { scopedData } from "../lib/db/tenant-scope.ts";
 import { studentPastAttendance } from "../lib/db/student-portal.ts";
 import { PERMISSIONS, permissionsFor, type PermissionGrants } from "../lib/auth/permissions.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -172,7 +173,7 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
+const read = (path: string) => readSource(join(ROOT, path));
 const stripComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 function exportedBody(path: string, name: string): string {
@@ -188,7 +189,7 @@ function staticChecks() {
   const parentDir = join(ROOT, "app", "[locale]", "(parent)");
   const parentFiles = walk(parentDir);
   check("At least one file exists under app/[locale]/(parent)/ (the sweep is exercising something)", parentFiles.length > 0);
-  const serverActionFiles = parentFiles.filter((file) => /["']use server["']/.test(readFileSync(file, "utf8")));
+  const serverActionFiles = parentFiles.filter((file) => /["']use server["']/.test(readSource(file)));
   check(
     "No file under app/[locale]/(parent)/ declares a Server Action (\"use server\") — no write path is reachable from this surface at all",
     serverActionFiles.length === 0,
@@ -207,7 +208,7 @@ function staticChecks() {
 
   // ParentLink is deprecated: nothing in the app reads or writes it.
   const appFiles = [...walk(join(ROOT, "app")), ...walk(join(ROOT, "lib")), ...walk(join(ROOT, "components")), join(ROOT, "prisma", "seed.ts")];
-  const parentLinkUsers = appFiles.filter((file) => /\.parentLink\b/.test(stripComments(readFileSync(file, "utf8"))));
+  const parentLinkUsers = appFiles.filter((file) => /\.parentLink\b/.test(stripComments(readSource(file))));
   check("No app, lib, component or seed code reads or writes ParentLink (deprecated at F3)", parentLinkUsers.length === 0, parentLinkUsers.join(", "));
 
   const studentEdit = stripComments(exportedBody("app/[locale]/(center)/students/actions.ts", "updateStudentAction"));

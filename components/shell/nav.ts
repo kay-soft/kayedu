@@ -30,7 +30,11 @@ export type ShellIconName =
   | "refunds"
   | "settlements"
   | "audit"
-  | "profile";
+  | "profile"
+  | "assessments"
+  | "assistants"
+  | "workspaces"
+  | "earnings";
 
 export type ShellNavItem = {
   href: string;
@@ -96,17 +100,35 @@ export const TEACHER_NAV: NavDef[] = [
     icon: "classes",
     permission: "changeRequest.create",
   },
+  // W2 (D-W30): the teacher's own exams and homework — the page asserts
+  // `assessment.manage.own`, in TEACHER's baseline.
+  {
+    href: ROUTES.teacherAssessments,
+    labelKey: "assessments",
+    icon: "assessments",
+    permission: "assessment.manage.own",
+  },
   {
     href: ROUTES.teacherApprovals,
     labelKey: "approvals",
     icon: "approvals",
     permission: "reservation.manage.own",
   },
-  // Spec §4.2 item 1's filterable earnings/sessions/students analytics screen
-  // is still a gap beyond the Dashboard's combined/per-center summary (M7) —
-  // docs/03-build-order.md M7 note. R10a removed its "Soon" nav placeholder:
-  // the nav lists only what a role can open. Add the item back with the screen.
+  // W8d (D-W29, D-W41): spec §4.2 item 1's analytics screen, delivered as
+  // Earnings — every branch where the teacher holds `analytics.own.view` and
+  // every workspace they own. No permission on the item: the page lists only
+  // the sources the teacher may see (and explains when there are none), like
+  // Assistants and Workspaces, and a workspace-only teacher has no cell at all.
+  { href: ROUTES.teacherEarnings, labelKey: "earnings", icon: "earnings" },
   { href: ROUTES.teacherSettlements, labelKey: "settlements", icon: "settlements" },
+  // W7a (D-W36): a premium teacher's assistants and invites. No permission: the
+  // page itself explains premium to a teacher without it, and every action is
+  // gated on premium on the server (lib/db/assistants.ts).
+  { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
+  // W8a (D-W38): the premium teacher's PERSONAL workspaces. No permission, like
+  // Assistants: the page explains premium, and ownership + premium are checked
+  // on the server for every read and write (lib/db/workspaces.ts).
+  { href: ROUTES.teacherWorkspaces, labelKey: "workspaces", icon: "workspaces" },
   // U9: the teacher's own photo per branch, and their classes' covers. Owning the row is the authority.
   { href: ROUTES.teacherProfile, labelKey: "profile", icon: "profile" },
 ];
@@ -114,6 +136,7 @@ export const TEACHER_NAV: NavDef[] = [
 const STUDENT_NAV: NavDef[] = [
   { href: ROUTES.studentSchedule, labelKey: "schedule", icon: "schedule" },
   { href: ROUTES.studentCalendar, labelKey: "calendar", icon: "calendar" },
+  { href: ROUTES.studentAssessments, labelKey: "assessments", icon: "assessments" },
   { href: ROUTES.studentDiscover, labelKey: "discover", icon: "discover" },
   { href: ROUTES.studentReservations, labelKey: "reservations", icon: "sessions" },
 ];
@@ -131,6 +154,8 @@ const ADMIN_NAV: NavDef[] = [
   { href: ROUTES.adminCenters, labelKey: "centers", icon: "centers" },
   { href: ROUTES.adminPlatform, labelKey: "platform", icon: "platform" },
   { href: ROUTES.adminCatalog, labelKey: "catalog", icon: "catalog" },
+  // W6 (D-W35): "Teachers" — premium for an account, by exact email.
+  { href: ROUTES.adminTeachers, labelKey: "premium", icon: "teachers" },
 ];
 
 /**
@@ -163,6 +188,22 @@ function visible(
 }
 
 /**
+ * The minimal shell of a teacher with no branch but a PERSONAL workspace (W8a,
+ * D-W38 item 11): Workspaces first (their landing), then — W9 (D-W42 item 7) —
+ * the Calendar and Exams & homework their workspaces feed, Earnings (W8d),
+ * Assistants (W8d) and the centre directory. No permission on any item: a
+ * workspace has no matrix, and each page checks ownership on the server.
+ */
+export const TEACHER_WORKSPACE_ONLY_NAV: ShellNavItem[] = [
+  { href: ROUTES.teacherWorkspaces, labelKey: "workspaces", icon: "workspaces" },
+  { href: ROUTES.teacherCalendar, labelKey: "calendar", icon: "calendar" },
+  { href: ROUTES.teacherAssessments, labelKey: "assessments", icon: "assessments" },
+  { href: ROUTES.teacherEarnings, labelKey: "earnings", icon: "earnings" },
+  { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
+  { href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" },
+];
+
+/**
  * The teacher nav under All branches (U7): an item shows when **any** branch
  * in view would show it — each branch's own grants, never a merged grant set —
  * in `TEACHER_NAV`'s order. A page reached this way still gates on the
@@ -170,10 +211,14 @@ function visible(
  */
 export function teacherNavAcross(
   grantsByBranch: { role: TenantRole; grants?: PermissionGrants }[],
+  options: { ownsWorkspace?: boolean } = {},
 ): ShellNavItem[] {
   const shown = new Set(
     grantsByBranch.flatMap(({ role, grants }) => visible(TEACHER_NAV, role, grants).map((item) => item.href)),
   );
+  // W9 (D-W42 item 7): a workspace owner's exams and homework live there too,
+  // whatever the branches' `assessment.manage.own` cells say.
+  if (options.ownsWorkspace) shown.add(ROUTES.teacherAssessments);
   return TEACHER_NAV.filter((item) => shown.has(item.href)).map((item) => ({
     href: item.href,
     labelKey: item.labelKey,

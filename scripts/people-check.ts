@@ -20,7 +20,8 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { type BlockScope, type Role } from "@prisma/client";
 import {
@@ -29,6 +30,7 @@ import {
   scopedFindById,
   scopedWhere,
 } from "../lib/db/tenant-scope.ts";
+import { loadExperiences, resolveLastExperience } from "../lib/auth/experiences.ts";
 import { fullName, localName } from "../lib/identity.ts";
 import {
   createPerson,
@@ -74,8 +76,12 @@ import {
   studentCreateSchema,
   teacherCreateSchema,
 } from "../lib/validation/people.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
+
+/** W5 (D-W34): every centre, organization and user the experience block creates. */
+const EXP_PREFIX = "people-check-exp-";
 
 // Typed so a spread into a Prisma `where` keeps the enum, not `string`.
 const TEACHER_ROLE: Role = "TEACHER";
@@ -146,7 +152,7 @@ function checkSingleNormalizer(): void {
   const offenders: string[] = [];
   for (const file of files) {
     if (file === phoneTs || file === selfPath) continue;
-    const contents = readFileSync(file, "utf8");
+    const contents = readSource(file);
     if (normalizerDefinitionPattern.test(contents)) {
       offenders.push(`${relative(root, file)} (defines normalizePhone)`);
     }
@@ -167,7 +173,7 @@ function checkSingleNormalizer(): void {
   const importPattern = /normalizePhone.*from\s+["']([^"']+)["']/;
   const badImports: string[] = [];
   for (const file of files) {
-    const contents = readFileSync(file, "utf8");
+    const contents = readSource(file);
     const match = contents.match(importPattern);
     if (!match) continue;
     const specifier = match[1];
@@ -192,7 +198,7 @@ function checkSingleNormalizer(): void {
 
 /** The body of `export async function <name>(` up to the next top-level export (as in check:security). */
 function exportedBody(path: string, name: string): string {
-  const source = readFileSync(path, "utf8");
+  const source = readSource(path);
   const start = source.search(new RegExp(`export (async )?function ${name}\\(`));
   if (start < 0) throw new Error(`${name} not found in ${path}`);
   const next = source.indexOf("\nexport ", start + 10);
@@ -231,10 +237,8 @@ async function checkPhoneLookupShape(): Promise<void> {
     );
   }
 
-  const peopleValidation = readFileSync(
-    join(root, "lib", "validation", "people.ts"),
-    "utf8",
-  );
+  const peopleValidation = readSource(
+    join(root, "lib", "validation", "people.ts"));
   check(
     "PhoneLookupResult's found case is a MatchCandidate — minimum fields, same shape the match panel already renders",
     /found";\s*match:\s*MatchCandidate/.test(
@@ -303,6 +307,171 @@ async function cleanup() {
   });
   // Global catalog rows (M13) don't cascade away with the centers above.
   await prisma.catalogGrade.deleteMany({ where: { nameEn: { startsWith: "People-Check" } } });
+  // W5: the experience fixtures.
+  await prisma.user.deleteMany({ where: { email: { startsWith: EXP_PREFIX } } });
+  await prisma.center.deleteMany({ where: { slug: { startsWith: EXP_PREFIX } } });
+  await prisma.organization.deleteMany({ where: { name: { startsWith: EXP_PREFIX } } });
+}
+
+/**
+ * W5 (D-W34) — `listExperiences` against real rows, through the real resolvers:
+ * every combination of experience, and what removes one. The cookie's own rules
+ * and the who-may-read-it scan are `check:account`'s W5 block (no database).
+ */
+async function checkExperiences(): Promise<void> {
+  console.log("\nW5 — the experience list (real rows)");
+
+  const organization = (name: string) => prisma.organization.create({ data: { name: `${EXP_PREFIX}${name}` } });
+  const branch = (slug: string, organizationId: string) =>
+    prisma.center.create({ data: { slug: `${EXP_PREFIX}${slug}`, name: `${EXP_PREFIX}${slug}`, themeColor: "#2563eb", organizationId } });
+  const person = (name: string, data: { isPlatformAdmin?: boolean } = {}) =>
+    prisma.user.create({ data: { firstName: "Exp", lastName: name, email: `${EXP_PREFIX}${name}@kayedu.test`, ...data } });
+  const member = (userId: string, centerId: string, role: Role, active = true) => prisma.membership.create({ data: { userId, centerId, role, active } });
+  const profile = (userId: string, centerId: string, code: string) => prisma.studentProfile.create({ data: { userId, centerId, studentCode: code } });
+  const keys = async (userId: string) => (await loadExperiences(prisma, userId)).map((entry) => entry.key);
+
+  const orgOne = await organization("one");
+  const orgTwo = await organization("two");
+  const one = await branch("one", orgOne.id);
+  const oneB = await branch("one-b", orgOne.id);
+  const two = await branch("two", orgTwo.id);
+
+  // A teacher who is also a student and a parent.
+  const child = await person("child");
+  const multi = await person("multi");
+  await member(multi.id, one.id, "TEACHER");
+  await profile(multi.id, two.id, "EXP-1");
+  await prisma.familyLink.create({ data: { parentUserId: multi.id, studentUserId: child.id, status: "ACTIVE", source: "STUDENT_INVITE" } });
+  check(
+    "A teacher who is also a student and a parent lists all three, and no staff branch",
+    (await keys(multi.id)).join() === "student,teacher,parent",
+    (await keys(multi.id)).join(),
+  );
+  const multiEntries = await loadExperiences(prisma, multi.id);
+  check(
+    "Each lists its real landing route, with no query",
+    multiEntries.map((entry) => entry.href).join() === "/student/schedule,/teacher/dashboard,/parent",
+  );
+
+  // An organization-level Owner: Whole Management and each branch.
+  const owner = await person("owner");
+  await member(owner.id, one.id, "OWNER");
+  check(
+    "An Owner of a two-branch organization lists Whole Management and both branches",
+    (await keys(owner.id)).join() === `org:${orgOne.id},staff:${one.id},staff:${oneB.id}`,
+    (await keys(owner.id)).join(),
+  );
+  const ownerEntries = await loadExperiences(prisma, owner.id);
+  check(
+    "Whole Management lands on Analytics and selects no branch; a branch lands on the dashboard and names it",
+    ownerEntries[0].href === "/analytics" && ownerEntries[0].centerId === undefined && ownerEntries[0].branchCount === 2 &&
+      ownerEntries[1].href === "/dashboard" && ownerEntries[1].centerId === one.id,
+  );
+  check(
+    "They group under the organization's name, with the role and branch as the label",
+    ownerEntries.every((entry) => entry.group.kind === "organization" && entry.group.name === orgOne.name) &&
+      ownerEntries[1].label.roles.join() === "OWNER" && ownerEntries[1].label.place === one.name,
+  );
+  const soloOwner = await person("solo-owner");
+  await member(soloOwner.id, two.id, "OWNER");
+  check("An Owner of a one-branch organization has no Whole Management", (await keys(soloOwner.id)).join() === `staff:${two.id}`);
+
+  // Staff at two branches: real memberships, and an Owner's branch grant.
+  const reception = await person("reception");
+  await member(reception.id, one.id, "RECEPTIONIST");
+  await member(reception.id, oneB.id, "RECEPTIONIST");
+  check("A receptionist at two branches lists both, and no Whole Management", (await keys(reception.id)).join() === `staff:${one.id},staff:${oneB.id}`);
+  const granted = await person("granted");
+  const grantedMembership = await member(granted.id, one.id, "MANAGER");
+  await prisma.membershipBranchGrant.create({ data: { membershipId: grantedMembership.id, centerId: oneB.id, grantedBy: owner.id } });
+  check("A manager with a branch grant lists both branches", (await keys(granted.id)).join() === `staff:${one.id},staff:${oneB.id}`);
+
+  // One branch as staff, another as a student: the branch names the role held there.
+  const mixed = await person("mixed");
+  await member(mixed.id, one.id, "ACCOUNTANT");
+  await profile(mixed.id, oneB.id, "EXP-2");
+  check("Staff here and a student there list the student portal and that one staff branch", (await keys(mixed.id)).join() === `student,staff:${one.id}`);
+
+  // Parents: an ACTIVE link only.
+  const verified = await person("parent-verified");
+  await prisma.familyLink.create({ data: { parentUserId: verified.id, studentUserId: child.id, status: "ACTIVE", source: "CENTER_CODE" } });
+  check("A verified parent lists the parent portal alone, with no child at any branch yet", (await keys(verified.id)).join() === "parent");
+  const revoked = await person("parent-revoked");
+  await prisma.familyLink.create({ data: { parentUserId: revoked.id, studentUserId: child.id, status: "REVOKED", source: "STUDENT_INVITE", revokedAt: new Date() } });
+  check("A revoked link lists nothing", (await keys(revoked.id)).length === 0);
+  const declared = await person("parent-declared");
+  await prisma.familyInvitation.create({
+    data: { studentUserId: child.id, codeHash: createHash("sha256").update(declared.id).digest("hex"), codeHint: "XX", source: "STUDENT_INVITE", createdBy: child.id, status: "PENDING", declaredParentPhone: "+201099999999" },
+  });
+  await prisma.studentProfile.create({ data: { userId: child.id, centerId: two.id, studentCode: "EXP-3", parentFirstName: "Exp", parentLastName: "Declared", parentPhone: "+201099999999" } });
+  check("An unverified parent (only declared, or holding a pending code) lists nothing", (await keys(declared.id)).length === 0);
+
+  // No centre, and the platform console.
+  const nobody = await person("nobody");
+  check("A person with no centre lists nothing", (await keys(nobody.id)).length === 0);
+  const admin = await person("admin", { isPlatformAdmin: true });
+  check("A platform admin lists the console alone", (await keys(admin.id)).join() === "admin");
+  await member(admin.id, two.id, "TEACHER");
+  check("A platform admin who also teaches lists both", (await keys(admin.id)).join() === "teacher,admin");
+
+  // Suspended, archived and deleted branches drop out, exactly as the hub does.
+  const lifecycleOrg = await organization("lifecycle");
+  const live = await branch("live", lifecycleOrg.id);
+  const suspended = await branch("suspended", lifecycleOrg.id);
+  const archived = await branch("archived", lifecycleOrg.id);
+  const deleted = await branch("deleted", lifecycleOrg.id);
+  const lifecycleOwner = await person("lifecycle-owner");
+  await member(lifecycleOwner.id, live.id, "OWNER");
+  const whole = `org:${lifecycleOrg.id}`;
+  check("Before: Whole Management and all four branches", (await keys(lifecycleOwner.id)).length === 5 && (await keys(lifecycleOwner.id)).includes(whole));
+  const beforeCookie = (await loadExperiences(prisma, lifecycleOwner.id)).find((entry) => entry.centerId === suspended.id)!;
+  const remembered = JSON.stringify({ key: beforeCookie.key, centerId: beforeCookie.centerId });
+  check("A remembered branch resolves while it is held", resolveLastExperience(remembered, await loadExperiences(prisma, lifecycleOwner.id)).entry?.key === beforeCookie.key);
+  await prisma.center.update({ where: { id: suspended.id }, data: { lifecycleState: "SUSPENDED" } });
+  await prisma.center.update({ where: { id: archived.id }, data: { lifecycleState: "ARCHIVED" } });
+  await prisma.center.update({ where: { id: deleted.id }, data: { deletedAt: new Date(), restorableUntil: new Date(Date.now() + 86_400_000) } });
+  const afterKeys = await keys(lifecycleOwner.id);
+  check(
+    "Suspended, archived and deleted branches are gone, and Whole Management with them when one branch is left",
+    afterKeys.join() === `staff:${live.id}`,
+    afterKeys.join(),
+  );
+  const afterSuspension = resolveLastExperience(remembered, await loadExperiences(prisma, lifecycleOwner.id));
+  check("Branch suspended: a stale cookie is ignored and marked for clearing", afterSuspension.entry === null && afterSuspension.stale === true);
+
+  const studentAtSuspended = await person("student-suspended");
+  await profile(studentAtSuspended.id, suspended.id, "EXP-4");
+  const teacherAtDeleted = await person("teacher-deleted");
+  await member(teacherAtDeleted.id, deleted.id, "TEACHER");
+  check(
+    "A student at a suspended branch and a teacher at a deleted one list nothing",
+    (await keys(studentAtSuspended.id)).length === 0 && (await keys(teacherAtDeleted.id)).length === 0,
+  );
+
+  // Losing access: the very next read, no sign-in in between.
+  const leaver = await person("leaver");
+  const leaverMembership = await member(leaver.id, one.id, "RECEPTIONIST");
+  await member(leaver.id, two.id, "RECEPTIONIST");
+  const leaverCookie = JSON.stringify({ key: `staff:${one.id}`, centerId: one.id });
+  check("A membership held is listed and its cookie resolves", resolveLastExperience(leaverCookie, await loadExperiences(prisma, leaver.id)).entry !== null);
+  await prisma.membership.update({ where: { id: leaverMembership.id }, data: { active: false } });
+  const afterRemoval = await loadExperiences(prisma, leaver.id);
+  check("Membership removed: the entry is gone on the next read", afterRemoval.map((entry) => entry.key).join() === `staff:${two.id}`);
+  check("Membership removed: a stale cookie is ignored and marked for clearing", resolveLastExperience(leaverCookie, afterRemoval).stale === true);
+  const inactive = await person("inactive");
+  await member(inactive.id, one.id, "TEACHER", false);
+  check("An inactive membership never lists", (await keys(inactive.id)).length === 0);
+
+  // One person's cookie is nothing to another.
+  const ownerList = await loadExperiences(prisma, owner.id);
+  const foreign = JSON.stringify({ key: `staff:${two.id}`, centerId: two.id });
+  check("A cookie naming a branch this person does not hold is stale, never a selection", resolveLastExperience(foreign, ownerList).entry === null && resolveLastExperience(foreign, ownerList).stale === true);
+  const forgedOrg = JSON.stringify({ key: `org:${orgTwo.id}` });
+  check("A cookie naming an organization this person does not own is stale", resolveLastExperience(forgedOrg, ownerList).entry === null);
+  check(
+    "The list reads the person's rows only: another Owner's list holds none of these branches",
+    (await keys(soloOwner.id)).every((key) => !ownerList.some((entry) => entry.key === key)),
+  );
 }
 
 /**
@@ -473,7 +642,7 @@ async function checkGradePromotion(
   check("Inside the window the same undo succeeds", inTime?.ok === true && inTime.reverted === 1 && (await gradeOf(s1.profileId)) === gFrom.id);
 
   // ── The old one-click path is gone ──────────────────────────────────────
-  const scopedSource = readFileSync(join(process.cwd(), "lib", "db", "scoped.ts"), "utf8");
+  const scopedSource = readSource(join(process.cwd(), "lib", "db", "scoped.ts"));
   check("scoped students has no one-click promoteGrade any more", !/promoteGrade\s*:/.test(scopedSource));
 
   // The audit trail is append-only and a deleted centre only nulls its rows'
@@ -1451,6 +1620,8 @@ async function main() {
     (await prisma.membership.count({ where: { id: teacherInA.id } })) === 0 &&
       (await prisma.user.count({ where: { id: teacher.id } })) === 1,
   );
+
+  await checkExperiences();
 }
 
 main()

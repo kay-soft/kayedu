@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
+import { assistantCreateClassRequestAction } from "@/app/[locale]/(assistant)/assistant/[teacherId]/requests/actions";
 import { createClassRequestAction } from "@/app/[locale]/(teacher)/teacher/classes/actions";
 import { CatalogPickerFields } from "@/components/center/catalog-picker-fields";
 import { TimeRangeFields } from "@/components/center/time-range-fields";
@@ -28,7 +29,14 @@ export type ClassRequestBranch = { id: string; name: string; catalog: CatalogPic
  * own catalog picks; with more than one, a Branch select comes first and the
  * catalog follows it. The action re-resolves the posted branch.
  */
-export function ClassRequestForm({ branches }: { branches: ClassRequestBranch[] }) {
+export function ClassRequestForm({
+  branches,
+  teacherId,
+}: {
+  branches: ClassRequestBranch[];
+  /** W7b: set on an assistant's page — the request is filed for this teacher (D-W37). */
+  teacherId?: string;
+}) {
   const t = useTranslations("TeacherClasses.request");
   const tScope = useTranslations("TeacherScope");
   const [branchId, setBranchId] = useState(branches.length === 1 ? branches[0].id : "");
@@ -38,11 +46,15 @@ export function ClassRequestForm({ branches }: { branches: ClassRequestBranch[] 
   const locale = useLocale();
   const dayNames = tClasses.raw("dayNames") as string[];
 
-  const [state, formAction] = useGuardedActionState(createClassRequestAction, IDLE_TEACHER_STATE);
+  const [state, formAction] = useGuardedActionState(
+    teacherId ? assistantCreateClassRequestAction : createClassRequestAction,
+    IDLE_TEACHER_STATE,
+  );
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
+      {teacherId ? <input type="hidden" name="teacherId" value={teacherId} /> : null}
       {branches.length === 1 ? <input type="hidden" name="centerId" value={branchId} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}

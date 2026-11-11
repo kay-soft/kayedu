@@ -72,6 +72,12 @@ export const signUpSchema = z
  * `getTenantContext()`, never trusted from the client beyond that lookup
  * (lib/auth/active-center.ts).
  */
+/** W5 (D-W34): an experience's key — never trusted, looked up in `listExperiences`. */
+export const switchExperienceSchema = z.object({
+  key: z.string().min(1).max(120),
+  locale: localeSchema,
+});
+
 export const selectCenterSchema = z.object({
   selectionId: z.string().uuid("invalidCenter"),
   locale: localeSchema,

@@ -18,7 +18,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
@@ -55,6 +55,7 @@ import { discoverClassesForCenter } from "../lib/db/discover.ts";
 import { reserveOrEnroll } from "../lib/db/reservations.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
 import { sessionDisplayName, sessionKind, sessionLabelParts } from "../lib/session-label.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -119,7 +120,7 @@ const norm = (file: string) => file.replace(/\\/g, "/");
 
 function staticChecks() {
   console.log("Static assertions (no database needed)");
-  const schema = readFileSync("prisma/schema.prisma", "utf8");
+  const schema = readSource("prisma/schema.prisma");
   const sessionModel = schema.slice(schema.indexOf("model Session {"), schema.indexOf("model SessionAttendee {"));
   check("Session.classGroupId is nullable (a one-time session has no class)", /\n\s*classGroupId\s+String\?/.test(sessionModel));
   check(
@@ -133,10 +134,8 @@ function staticChecks() {
   // away — a hand-written partial unique index, since Prisma 6 cannot declare
   // one; the schema keeps a plain index (check:session-lifecycle asserts the
   // live database's index and its WHERE clause).
-  const u2Migration = readFileSync(
-    "prisma/migrations/20261030120000_u2_session_slot_partial_unique/migration.sql",
-    "utf8",
-  );
+  const u2Migration = readSource(
+    "prisma/migrations/20261030120000_u2_session_slot_partial_unique/migration.sql");
   check(
     "(classGroupId, date, startTime) is unique among sessions not rescheduled away (partial index; NULLs are distinct in Postgres)",
     sessionModel.includes("@@index([classGroupId, date, startTime])") &&
@@ -150,45 +149,79 @@ function staticChecks() {
   // A session's class is nullable since R5: `session.classGroup.x` (no `?.`)
   // and `.classGroup._count` throw on a one-time session. The only file
   // allowed to read the class off a session is the label helper itself.
+  // V9: the guards the scan recognises — the dereference never runs on a
+  // one-time session:
+  //  - on the same line, a ternary `session.classGroup ? …` (as before), or
+  //    `session.classGroup && …` written BEFORE every dereference on the line;
+  //  - a JSX block whose condition opens with `{session.classGroup && …` or
+  //    `{session.classGroup ? …`, whose opening line ends with `(`, and which
+  //    closes with `) : null}` or `)}` at the same indentation: every line from
+  //    the opening one to that close. An unclosed block guards nothing.
+  // A dereference outside those — after the block closes, in a block opened by
+  // another condition, or before the `&&` — is still flagged.
+  const unguardedLines = (text: string): number[] => {
+    const lines = text.split("\n");
+    const guarded = new Set<number>();
+    lines.forEach((line, index) => {
+      const open = /^(\s*)\{session\.classGroup (?:&&|\?) .*\($/.exec(line);
+      if (!open) return;
+      const indent = open[1];
+      const close = lines.findIndex((later, at) => at > index && (later === `${indent}) : null}` || later === `${indent})}`));
+      if (close < 0) return;
+      for (let at = index; at <= close; at++) guarded.add(at);
+    });
+    const flagged: number[] = [];
+    lines.forEach((line, index) => {
+      const derefs = [...line.matchAll(/\bsession\.classGroup\.(?!\?)/g)].map((match) => match.index ?? 0);
+      const andGuard = line.indexOf("session.classGroup && ");
+      const sameLineGuard = /session\.classGroup \?/.test(line) || (andGuard >= 0 && derefs.every((at) => at > andGuard));
+      if (derefs.length > 0 && !sameLineGuard && !guarded.has(index)) flagged.push(index + 1);
+      // `row.classGroup._count` off a session row; a class's own `classGroup._count` is fine.
+      if (/\.classGroup\._count\b/.test(line)) flagged.push(index + 1);
+    });
+    return flagged;
+  };
   const unguarded: string[] = [];
   for (const file of readers) {
     if (norm(file).endsWith("lib/session-label.ts")) continue;
-    const text = readFileSync(file, "utf8");
-    text.split("\n").forEach((line, index) => {
-      if (/\bsession\.classGroup\.(?!\?)/.test(line) && !/session\.classGroup \?/.test(line)) {
-        unguarded.push(`${norm(file)}:${index + 1}`);
-      }
-      // `row.classGroup._count` off a session row; a class's own `classGroup._count` is fine.
-      if (/\.classGroup\._count\b/.test(line)) unguarded.push(`${norm(file)}:${index + 1}`);
-    });
+    for (const line of unguardedLines(readSource(file))) unguarded.push(`${norm(file)}:${line}`);
   }
   check("No reader dereferences a session's classGroup unguarded", unguarded.length === 0, unguarded.join(", "));
+  check(
+    "The unguarded-class scan still flags a bare dereference, one after a guarded block, one in a block with another condition, and one before its && (V9)",
+    unguardedLines("const id = session.classGroup.id;").length === 1 &&
+      unguardedLines("{session.classGroup && x ? (\n  <a href={session.classGroup.id} />\n) : null}\n<b>{session.classGroup.id}</b>").join() === "4" &&
+      unguardedLines("{other && x ? (\n  <a href={session.classGroup.id} />\n) : null}").join() === "2" &&
+      unguardedLines("{session.classGroup && x ? (\n  <a href={session.classGroup.id} />").join() === "2" &&
+      unguardedLines("f(session.classGroup.id) && session.classGroup && 1").length === 1 &&
+      unguardedLines("{session.classGroup && session.classGroup.teacherId === me ? (\n  <a href={session.classGroup.id} />\n) : null}").length === 0,
+  );
 
-  const labelOwners = readers.filter((file) => /function sessionDisplayName\b/.test(readFileSync(file, "utf8")));
+  const labelOwners = readers.filter((file) => /function sessionDisplayName\b/.test(readSource(file)));
   check(
     "lib/session-label.ts is the single owner of sessionDisplayName",
     labelOwners.length === 1 && norm(labelOwners[0]).endsWith("lib/session-label.ts"),
     labelOwners.map(norm).join(", "),
   );
   const staleImports = readers.filter((file) =>
-    /import\s*\{[^}]*\bsessionDisplayName\b[^}]*\}\s*from\s*"@\/lib\/db\/sessions"/.test(readFileSync(file, "utf8")),
+    /import\s*\{[^}]*\bsessionDisplayName\b[^}]*\}\s*from\s*"@\/lib\/db\/sessions"/.test(readSource(file)),
   );
   check("Nobody imports sessionDisplayName from lib/db/sessions any more", staleImports.length === 0, staleImports.join(", "));
 
-  const slotConflicts = readFileSync("lib/db/slot-conflicts.ts", "utf8");
+  const slotConflicts = readSource("lib/db/slot-conflicts.ts");
   check(
     "OPEN_CLASS_SESSION keeps one-time sessions (classGroupId: null) on every forward reader",
     /OPEN_CLASS_SESSION = \{\s*OR: \[\{ classGroupId: null \}/.test(slotConflicts),
   );
-  const lifecycle = readFileSync("lib/db/session-lifecycle.ts", "utf8");
+  const lifecycle = readSource("lib/db/session-lifecycle.ts");
   check(
     "The closure guard LEFT JOINs the class (a one-time session is never 'missing')",
     !/\n\s*JOIN "ClassGroup"/.test(lifecycle) && lifecycle.includes('LEFT JOIN "ClassGroup"'),
   );
 
-  const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { scripts: Record<string, string> };
+  const pkg = JSON.parse(readSource("package.json")) as { scripts: Record<string, string> };
   check("package.json wires check:one-off-sessions", (pkg.scripts["check:one-off-sessions"] ?? "").includes("scripts/one-off-sessions-check.ts"));
-  const ci = existsSync(".github/workflows/ci.yml") ? readFileSync(".github/workflows/ci.yml", "utf8") : "";
+  const ci = existsSync(".github/workflows/ci.yml") ? readSource(".github/workflows/ci.yml") : "";
   check("CI runs check:one-off-sessions", ci.includes("check:one-off-sessions"));
 }
 
@@ -693,15 +726,19 @@ async function main() {
     wedPristine !== null && !(await exists(wedPristine.id)) && (await exists(E4.sessionId)) && pruned.kept >= 1,
     JSON.stringify(pruned),
   );
+  // V9 (FIXTURE): the approval runs on the gate's clock (`now: NOW`, like every
+  // other write here). Without it the SEC-2b "no past date" rule read the real
+  // clock, and the fixed 5 Nov payload became `pastDate` once that day passed.
+  const approval = await (async () => {
+    const request = await prisma.changeRequest.create({
+      data: scopedData(A, { type: "NEW_SESSION", requestedBy: t3.id, payload: { classGroupId: C1, date: "2026-11-05", startTime: "08:00", endTime: "09:00" } }),
+    });
+    return resolveSessionRequest(prisma, A, request.id, "APPROVED", t3.id, "WARN", "en", { confirmConflicts: true, now: NOW });
+  })();
   check(
     "Approving a teacher's NEW_SESSION request creates an isManual session",
-    await (async () => {
-      const request = await prisma.changeRequest.create({
-        data: scopedData(A, { type: "NEW_SESSION", requestedBy: t3.id, payload: { classGroupId: C1, date: "2026-11-05", startTime: "08:00", endTime: "09:00" } }),
-      });
-      const result = await resolveSessionRequest(prisma, A, request.id, "APPROVED", t3.id, "WARN", "en", { confirmConflicts: true });
-      return result.ok && result.session !== null && result.session.isManual;
-    })(),
+    approval.ok && approval.session !== null && approval.session.isManual,
+    JSON.stringify(approval.ok ? { ok: true, isManual: approval.session?.isManual } : approval),
   );
 
   // ── 9. Deactivate: a manual session follows the normal rule ──────────────

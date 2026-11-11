@@ -278,6 +278,7 @@ export async function voidPayment(
     reason: reason.trim(),
     cause: { voidedPaymentId: voided.payment.id },
     now,
+    onBehalfOfUserId: options.onBehalfOfUserId ?? null,
   });
   return { ...voided, attendanceChange };
 }
@@ -357,10 +358,13 @@ export async function writePaymentRecordAudit(
   centerId: string,
   actorUserId: string,
   payment: Payment,
+  // W8d (D-W18): the teacher an assistant recorded it for; omitted everywhere else.
+  onBehalfOfUserId: string | null = null,
 ): Promise<void> {
   await writeAuditRow(tx, {
     centerId,
     actorUserId,
+    onBehalfOfUserId,
     action: "payment.record",
     entityType: "Payment",
     entityId: payment.id,
@@ -550,7 +554,7 @@ export async function sessionReceiptLines(
   const [voided, refunds, unpaid] = await Promise.all([
     db.payment.findMany({
       where: { centerId, sessionId, voided: true },
-      orderBy: { voidedAt: "asc" },
+      orderBy: [{ voidedAt: "asc" }, { id: "asc" }],
       select: {
         id: true,
         amount: true,
@@ -562,7 +566,7 @@ export async function sessionReceiptLines(
     }),
     db.refund.findMany({
       where: { centerId, payment: { centerId, sessionId } },
-      orderBy: { refundedAt: "asc" },
+      orderBy: [{ refundedAt: "asc" }, { id: "asc" }],
       select: {
         paymentId: true,
         amount: true,
@@ -580,7 +584,7 @@ export async function sessionReceiptLines(
         payments: { none: { voided: false, refunded: false } },
         studentProfileId: { not: null },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { id: true, attendanceStatus: true, studentProfile: { select: studentSelect } },
     }),
   ]);

@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
-import { Building2 } from "lucide-react";
+import { BriefcaseBusiness, Building2 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { TeachAtCenterCard } from "@/app/[locale]/(teacher)/teacher/centers/teach-at-center-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { LinkButton } from "@/components/shared/link-button";
+import { isPremium } from "@/lib/auth/premium";
 import { requireTeacherUser } from "@/lib/auth/tenant";
 import { listCatalogEducationSystems, listCatalogGrades, listCatalogSubjects } from "@/lib/db/catalog";
 import { prisma } from "@/lib/db/client";
@@ -62,6 +64,21 @@ export default async function TeacherCentersPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} description={t("subtitle")} />
+
+      {/* W8a (D-W38): a premium account with no branch can run its own
+          workspace instead — the only way in from here, since this shell's
+          nav stays the directory alone (M15). */}
+      {isPremium(session.user) ? (
+        <Card>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-text-secondary">{t("workspacesHint")}</p>
+            <LinkButton href={ROUTES.teacherWorkspaces} className="w-full sm:w-fit">
+              <BriefcaseBusiness className="size-4" aria-hidden />
+              {t("workspacesLink")}
+            </LinkButton>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {centers.length === 0 ? (
         <Card>

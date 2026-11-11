@@ -1,0 +1,533 @@
+import { PrismaClient } from "@prisma/client";
+import type { Page } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
+
+import { PRESET_PERMISSIONS } from "@/lib/assistant-catalog";
+import { createWorkspace, createWorkspaceClass } from "@/lib/db/workspaces";
+import { addDays, todayInTimezone } from "@/lib/scheduling";
+
+import { E2E_ASSESSMENT_PREFIX, removeE2eAssessments } from "../scripts/lib/e2e-assessments";
+import { assertSafeToWrite } from "../scripts/lib/env";
+import { e2eEmail, removeE2eUsers } from "../scripts/lib/e2e-users";
+import { ACCOUNTS, uniqueTag, type AccountKey } from "./support/accounts";
+import { DAY, HOUR, fillBuilderQuestions, findFixtureClass, insertExam } from "./support/assessment-fixtures";
+import { expect, expectHealthy, primaryNav, test } from "./support/fixtures";
+import type { AppLocale } from "./support/i18n";
+import { E2E_PASSWORD, signInWith } from "./support/signup";
+import { dayFromToday, isoDayFromToday, openDialog, pickDate } from "./support/ui";
+
+/**
+ * W3a: a teacher builds and publishes an exam through the UI, an enrolled student
+ * takes it, refreshes, resumes and submits. Throughout, neither the page nor any
+ * response the student receives contains `isCorrect` (rule 11, D-W09). W3b: publishing
+ * raises the student's bell, the panel opens the assessment, and the calendar shows it
+ * on its day. The exam's
+ * title carries the shared e2e prefix; the test removes what its tag created,
+ * pass or fail, so a second run leaves the same row counts.
+ */
+
+const LEAK = "isCorrect";
+
+/** Every document and data response this page receives, not the JS bundles. */
+function watchResponses(page: Page, bodies: string[]) {
+  page.on("response", (response) => {
+    const type = response.request().resourceType();
+    if (type !== "document" && type !== "fetch" && type !== "xhr") return;
+    void response.text().then(
+      (text) => bodies.push(text),
+      () => undefined,
+    );
+  });
+}
+
+/** Closes the student rating pop-up if it opened: it is modal, and closing persists nothing (M17). */
+async function closeRatingPopup(page: Page, title: string, close: string) {
+  const popup = page.getByRole("dialog", { name: title });
+  await popup.waitFor({ state: "visible", timeout: 3_000 }).catch(() => undefined);
+  if (await popup.isVisible().catch(() => false)) {
+    await popup.getByRole("button", { name: close, exact: true }).click();
+    await expect(popup).toBeHidden();
+  }
+}
+
+/** A class the seeded student is enrolled in, whose teacher is a seeded account. */
+async function findClass(): Promise<{ classGroupId: string; centerId: string; teacher: AccountKey }> {
+  const db = new PrismaClient();
+  try {
+    const teacherKeys: AccountKey[] = ["teacherDowntown", "teacherShared"];
+    for (const teacher of teacherKeys) {
+      const row = await db.enrollment.findFirst({
+        where: {
+          status: "ACTIVE",
+          studentProfile: { user: { email: ACCOUNTS.studentDowntown.email } },
+          classGroup: { active: true, teacher: { email: ACCOUNTS[teacher].email } },
+        },
+        select: { classGroupId: true, centerId: true },
+      });
+      if (row) return { ...row, teacher };
+    }
+    throw new Error("e2e: the seeded student has no active class with a seeded teacher");
+  } finally {
+    await db.$disconnect();
+  }
+}
+
+/** The bell's uncapped count, which the server rendered into the page (never polled). */
+async function unreadCount(page: Page): Promise<number> {
+  return Number(await page.locator("[data-notification-bell]").getAttribute("data-unread"));
+}
+
+test("@write a teacher publishes an exam, a student takes it, and no correct answer reaches the student", async ({ as, appLocale, msg }) => {
+  const tag = uniqueTag("").toLowerCase();
+  const title = `${E2E_ASSESSMENT_PREFIX}${tag}`;
+  const { classGroupId, centerId, teacher } = await findClass();
+
+  try {
+    // The student's bell before anything is published.
+    const studentPage = await as("studentDowntown");
+    const bodies: string[] = [];
+    watchResponses(studentPage, bodies);
+    await studentPage.goto(`/${appLocale}/student/assessments`);
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    const unreadBefore = await unreadCount(studentPage);
+
+    // ── The teacher: build, save, publish ──────────────────────────────────
+    const teacherPage = await as(teacher);
+    await teacherPage.goto(`/${appLocale}/teacher/assessments/new?type=EXAM&branch=${encodeURIComponent(centerId)}&class=${encodeURIComponent(classGroupId)}`);
+    await expectHealthy(teacherPage, appLocale);
+    await teacherPage.locator("#assessment-title").fill(title);
+
+    const windowField = (name: string) => teacherPage.locator("fieldset", { has: teacherPage.locator(`#${name}-date`) });
+    await pickDate(windowField("windowStart"), appLocale, msg("TeacherAssessments.builder.date"), dayFromToday(0));
+    await teacherPage.locator("#windowStart-time").fill("00:00");
+    await teacherPage.locator("#windowStart-time").press("Tab");
+    await pickDate(windowField("windowEnd"), appLocale, msg("TeacherAssessments.builder.date"), dayFromToday(2));
+    await teacherPage.locator("#windowEnd-time").fill("23:00");
+    await teacherPage.locator("#windowEnd-time").press("Tab");
+
+    for (const [questionIndex, text] of ["First question", "Second question"].entries()) {
+      await teacherPage.getByRole("button", { name: msg("TeacherAssessments.builder.addQuestion"), exact: true }).click();
+      const card = teacherPage.locator("main ol > li").nth(questionIndex);
+      await card.getByLabel(msg("TeacherAssessments.builder.questionText"), { exact: true }).fill(text);
+      // By position: the option labels carry an ICU number format `msg` does not apply.
+      const options = card.locator("fieldset input:not([type=radio])");
+      await expect(options).toHaveCount(4);
+      for (let option = 0; option < 4; option += 1) await options.nth(option).fill(`Option ${option + 1}`);
+      await card.getByRole("radio").first().check();
+    }
+    await teacherPage.getByRole("button", { name: msg("TeacherAssessments.builder.save"), exact: true }).click();
+    await teacherPage.waitForURL(/\/teacher\/assessments\/[0-9a-f-]{36}/);
+    const assessmentId = /assessments\/([0-9a-f-]{36})/.exec(teacherPage.url())![1];
+
+    const publish = teacherPage.getByRole("button", { name: msg("TeacherAssessments.publish.label"), exact: true });
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    await openDialog(teacherPage).getByRole("button", { name: msg("TeacherAssessments.publish.label"), exact: true }).click();
+    await expect(teacherPage.getByRole("button", { name: msg("TeacherAssessments.unpublish.label"), exact: true })).toBeVisible();
+
+    // ── W3b: the bell rises, the panel opens it, the calendar shows it ─────
+    await studentPage.reload();
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    expect(await unreadCount(studentPage), "the bell rose after publishing").toBeGreaterThan(unreadBefore);
+    await studentPage.locator("[data-notification-bell]").click();
+    const notice = studentPage.locator("[data-notification-row]", { hasText: title });
+    await expect(notice, "the panel shows the notice").toBeVisible();
+    await notice.click();
+    await studentPage.waitForURL(new RegExp(`/student/assessments/${assessmentId}`));
+    await expectHealthy(studentPage, appLocale);
+
+    const dayKey = isoDayFromToday(0);
+    await studentPage.goto(`/${appLocale}/student/calendar?month=${dayKey.slice(0, 7)}&day=${dayKey}`);
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    const entry = studentPage.getByRole("link", { name: new RegExp(title) });
+    await expect(entry, "the calendar lists the exam on the day its window opens").toBeVisible();
+    await expect(entry.getByText(msg("Calendar.tone.exam"), { exact: true })).toBeVisible();
+    await expect(entry.getByText(msg("StudentAssessments.state.OPEN"), { exact: true })).toBeVisible();
+    await expect(entry).toHaveAttribute("href", new RegExp(`/student/assessments/${assessmentId}$`));
+
+    // ── The student: list, start, answer, refresh, resume, submit ──────────
+    await studentPage.goto(`/${appLocale}/student/assessments`);
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    await studentPage.getByRole("link", { name: new RegExp(title) }).click();
+    await studentPage.waitForURL(new RegExp(`/student/assessments/${assessmentId}`));
+    await expect(studentPage.getByText("First question")).toHaveCount(0);
+
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.start.label"), exact: true }).click();
+    const dialog = openDialog(studentPage);
+    await expect(dialog.getByText(msg("StudentAssessments.start.noPause"))).toBeVisible();
+    await dialog.getByRole("button", { name: msg("StudentAssessments.start.confirm"), exact: true }).click();
+
+    await expect(studentPage.getByRole("timer")).toBeVisible();
+    await expect(studentPage.getByRole("radio")).toHaveCount(4);
+    await studentPage.getByRole("radio").nth(1).check();
+    await expect(studentPage.getByText(msg("StudentAssessments.take.saved"), { exact: true })).toBeVisible();
+    const shownBefore = await studentPage.locator("main p[dir=auto]").first().innerText();
+
+    await studentPage.reload();
+    await expectHealthy(studentPage, appLocale);
+    await closeRatingPopup(studentPage, msg("RatingPopup.title"), msg("Shared.close"));
+    await expect(studentPage.getByRole("timer")).toBeVisible();
+    await expect(studentPage.locator("main p[dir=auto]").first(), "the shuffled order survives a refresh").toHaveText(shownBefore);
+    await expect(studentPage.getByRole("radio").nth(1), "the saved answer survives a refresh").toBeChecked();
+
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.take.next"), exact: true }).click();
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.take.review"), exact: true }).click();
+    await studentPage.getByRole("button", { name: msg("StudentAssessments.take.submit"), exact: true }).click();
+    await openDialog(studentPage).getByRole("button", { name: msg("StudentAssessments.take.submit"), exact: true }).click();
+
+    // An exam's score is off by default, so the student reads only "Submitted".
+    await expect(studentPage.getByRole("paragraph").filter({ hasText: new RegExp(`^${msg("StudentAssessments.result.submitted")}$`) })).toBeVisible();
+    await expect(studentPage.getByRole("timer")).toHaveCount(0);
+
+    // ── Rule 11 ────────────────────────────────────────────────────────────
+    expect(await studentPage.content(), "the rendered page").not.toContain(LEAK);
+    await studentPage.reload();
+    await expectHealthy(studentPage, appLocale);
+    expect(await studentPage.content(), "the rendered page after submit").not.toContain(LEAK);
+    expect(bodies.length, "responses were captured").toBeGreaterThan(0);
+    expect(bodies.filter((body) => body.includes(LEAK)), "no response before reveal").toEqual([]);
+
+    // ── The teacher sees it is locked now ──────────────────────────────────
+    await teacherPage.reload();
+    await expect(teacherPage.getByRole("button", { name: msg("TeacherAssessments.unpublish.label"), exact: true })).toHaveCount(0);
+  } finally {
+    const db = new PrismaClient();
+    try {
+      await removeE2eAssessments(db, tag);
+    } finally {
+      await db.$disconnect();
+    }
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W3a follow-up: one sitting, the reveal, extend + unpublish, and access. Every
+// exam is inserted directly (staging-guarded) under the shared prefix + the test's
+// own tag, and removed by the same teardown, so a second run leaves the same rows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function withFixtures<T>(run: (db: PrismaClient, tag: string) => Promise<T>): Promise<T> {
+  const tag = uniqueTag("").toLowerCase();
+  const db = new PrismaClient();
+  try {
+    return await run(db, tag);
+  } finally {
+    try {
+      await removeE2eAssessments(db, tag);
+    } finally {
+      await db.$disconnect();
+    }
+  }
+}
+
+/** Opens a student's assessment page and dismisses the rating pop-up if it appears. */
+async function openStudentAssessment(page: Page, locale: AppLocale, id: string, msg: (key: string) => string) {
+  await page.goto(`/${locale}/student/assessments/${id}`);
+  await expectHealthy(page, locale);
+  await closeRatingPopup(page, msg("RatingPopup.title"), msg("Shared.close"));
+}
+
+test("@write a one-sitting exam is submitted when the student closes the page", async ({ as, appLocale, msg }) => {
+  await withFixtures(async (db, tag) => {
+    const fx = await findFixtureClass(db);
+    const exam = await insertExam(db, fx, { suffix: "sitting", tag, endsInMs: 2 * DAY, oneSitting: true, durationMinutes: 30 });
+
+    const page = await as("studentDowntown");
+    page.on("dialog", (dialog) => void dialog.accept());
+    await openStudentAssessment(page, appLocale, exam.id, msg);
+    await page.getByRole("button", { name: msg("StudentAssessments.start.label"), exact: true }).click();
+    await openDialog(page).getByRole("button", { name: msg("StudentAssessments.start.confirm"), exact: true }).click();
+    await expect(page.getByRole("timer")).toBeVisible();
+    await page.getByRole("radio").nth(1).check();
+    await expect(page.getByText(msg("StudentAssessments.take.saved"), { exact: true })).toBeVisible();
+
+    const before = await db.assessmentAttempt.findFirstOrThrow({ where: { assessmentId: exam.id }, select: { id: true, submittedAt: true } });
+    expect(before.submittedAt, "still open while the page is open").toBeNull();
+
+    // The student leaves: the page's `pagehide` sends the close beacon.
+    await page.close({ runBeforeUnload: true });
+    await expect
+      .poll(async () => (await db.assessmentAttempt.findUnique({ where: { id: before.id }, select: { finalisedBy: true } }))?.finalisedBy, {
+        timeout: 30_000,
+      })
+      .toBe("STUDENT");
+
+    const reopened = await as("studentDowntown");
+    await openStudentAssessment(reopened, appLocale, exam.id, msg);
+    await expect(
+      reopened.getByRole("paragraph").filter({ hasText: new RegExp(`^${msg("StudentAssessments.result.submitted")}$`) }),
+    ).toBeVisible();
+    await expect(reopened.getByRole("timer")).toHaveCount(0);
+  });
+});
+
+test("@write reveal: the score, the correct answers and the window decide what a student sees", async ({ as, appLocale, msg }) => {
+  await withFixtures(async (db, tag) => {
+    const fx = await findFixtureClass(db);
+    const closed = -HOUR; // the window ended an hour ago
+    const scoreOnly = await insertExam(db, fx, { suffix: "score", tag, endsInMs: closed, finalAttempt: true, showScore: true });
+    const neither = await insertExam(db, fx, { suffix: "neither", tag, endsInMs: closed, finalAttempt: true });
+    const both = await insertExam(db, fx, { suffix: "both", tag, endsInMs: closed, finalAttempt: true, showScore: true, showCorrectAnswers: true });
+    const open = await insertExam(db, fx, { suffix: "open", tag, endsInMs: 2 * DAY, finalAttempt: true, showScore: true, showCorrectAnswers: true });
+
+    const page = await as("studentDowntown");
+    const bodies: string[] = [];
+    watchResponses(page, bodies);
+    const submitted = page.getByRole("paragraph").filter({ hasText: new RegExp(`^${msg("StudentAssessments.result.submitted")}$`) });
+    const score = page.locator("p.text-2xl");
+    const correctLabel = page.getByText(msg("StudentAssessments.reveal.correct"), { exact: true });
+
+    // 1. showScore on, showCorrectAnswers off: the score, and no correctness.
+    await openStudentAssessment(page, appLocale, scoreOnly.id, msg);
+    await expect(score).toBeVisible();
+    await expect(submitted).toHaveCount(0);
+    await expect(correctLabel).toHaveCount(0);
+    await expect(page.locator("main ol")).toHaveCount(0);
+    await expect(page.locator('main svg[class*="lucide-check"]')).toHaveCount(0);
+    expect(await page.content(), "case 1: the rendered page").not.toContain(LEAK);
+    expect(bodies.filter((body) => body.includes(LEAK)), "case 1: no response").toEqual([]);
+
+    // 2. Both off: only "Submitted".
+    await openStudentAssessment(page, appLocale, neither.id, msg);
+    await expect(submitted).toBeVisible();
+    await expect(score).toHaveCount(0);
+    await expect(correctLabel).toHaveCount(0);
+    await expect(page.locator("main ol")).toHaveCount(0);
+    expect(await page.content(), "case 2: the rendered page").not.toContain(LEAK);
+    expect(bodies.filter((body) => body.includes(LEAK)), "case 2: no response").toEqual([]);
+
+    // 3. Still inside its window: no correctness even with showCorrectAnswers on.
+    await openStudentAssessment(page, appLocale, open.id, msg);
+    await expect(correctLabel).toHaveCount(0);
+    await expect(page.locator("main ol")).toHaveCount(0);
+    await expect(page.locator('main svg[class*="lucide-check"]')).toHaveCount(0);
+    expect(await page.content(), "case 3: the rendered page").not.toContain(LEAK);
+    expect(bodies.filter((body) => body.includes(LEAK)), "case 3: no response").toEqual([]);
+
+    // 4. Both on and the window closed: the correct answers, by icon and by text.
+    await openStudentAssessment(page, appLocale, both.id, msg);
+    await expect(score).toBeVisible();
+    const cards = page.locator("main ol > li");
+    await expect(cards).toHaveCount(2);
+    for (let index = 0; index < 2; index += 1) {
+      const marked = cards.nth(index).locator("ul > li").filter({ hasText: msg("StudentAssessments.reveal.correct") });
+      await expect(marked, `question ${index + 1} marks exactly one correct option`).toHaveCount(1);
+      await expect(marked.locator('svg[class*="lucide-check"]')).toHaveCount(1);
+      await expect(marked).toContainText(both.questions[index].options[both.questions[index].correct]);
+    }
+    // Question 2 was answered wrong: the chosen option carries the cross and "Your answer".
+    await expect(
+      cards.nth(1).locator("ul > li").filter({ hasText: msg("StudentAssessments.reveal.yours") }).locator('svg[class*="lucide-x"]'),
+    ).toHaveCount(1);
+  });
+});
+
+test("@write a published exam with an attempt: no question controls, an earlier end is refused, a later one saves, no back to draft", async ({
+  as,
+  appLocale,
+  msg,
+}) => {
+  await withFixtures(async (db, tag) => {
+    const fx = await findFixtureClass(db);
+    // Closes at 12:00 UTC two Cairo days from now: a fixed time of day to move the date around.
+    const closesAt = new Date(dayFromToday(2).getTime() + 12 * HOUR);
+    const exam = await insertExam(db, fx, { suffix: "extend", tag, endsAt: closesAt, finalAttempt: true });
+    const stored = () => db.assessment.findUniqueOrThrow({ where: { id: exam.id }, select: { windowEnd: true, status: true } });
+    expect((await stored()).windowEnd?.getTime()).toBe(closesAt.getTime());
+
+    const page = await as(fx.teacher);
+    await page.goto(`/${appLocale}/teacher/assessments/${exam.id}`);
+    await expectHealthy(page, appLocale);
+
+    // Locked: the questions are read-only and there is no way back to a draft.
+    await expect(page.getByText(exam.questions[0].text, { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: msg("TeacherAssessments.builder.addQuestion"), exact: true })).toHaveCount(0);
+    await expect(page.getByLabel(msg("TeacherAssessments.builder.questionText"), { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: msg("TeacherAssessments.unpublish.label"), exact: true })).toHaveCount(0);
+
+    // An earlier end is refused and saves nothing.
+    const extend = page.getByRole("button", { name: msg("TeacherAssessments.extend.label"), exact: true });
+    await pickDate(page, appLocale, msg("TeacherAssessments.extend.date"), dayFromToday(1));
+    await extend.click();
+    await expect(page.getByText(msg("TeacherAssessments.errors.notLater"), { exact: true })).toBeVisible();
+    expect((await stored()).windowEnd?.getTime(), "an earlier end changes nothing").toBe(closesAt.getTime());
+
+    // A later end saves.
+    await pickDate(page, appLocale, msg("TeacherAssessments.extend.date"), dayFromToday(3));
+    await extend.click();
+    await expect.poll(async () => (await stored()).windowEnd!.getTime(), { timeout: 30_000 }).toBeGreaterThan(closesAt.getTime());
+    expect((await stored()).status).toBe("PUBLISHED");
+
+    // Still no way back to a draft.
+    await page.reload();
+    await expect(page.getByRole("button", { name: msg("TeacherAssessments.unpublish.label"), exact: true })).toHaveCount(0);
+  });
+});
+
+test("@write other roles cannot open a student's assessment, and a student cannot open the builder", async ({ as, appLocale, msg }) => {
+  await withFixtures(async (db, tag) => {
+    const fx = await findFixtureClass(db);
+    const exam = await insertExam(db, fx, { suffix: "access", tag, endsInMs: 2 * DAY });
+    const hidden = [exam.title, exam.questions[0].text, exam.questions[0].options[0]];
+
+    // The student sees it - so the refusals below are about the account, not the fixture.
+    const student = await as("studentDowntown");
+    await openStudentAssessment(student, appLocale, exam.id, msg);
+    await expect(student.getByText(exam.title).first()).toBeVisible();
+
+    // `lands` is where the account ends up: the same URL (a 404 page) or a redirect.
+    const expectNothing = async (page: Page, path: string, buttonLabel: string, lands: string = path.split("?")[0]) => {
+      await page.goto(`/${appLocale}${path}`);
+      await page.waitForURL((url) => url.pathname === `/${appLocale}${lands}`);
+      await page.waitForLoadState("domcontentloaded");
+      const html = await page.content();
+      for (const text of hidden) expect(html, `${path} must not show "${text}"`).not.toContain(text);
+      expect(html, `${path} must not leak a correct answer`).not.toContain(LEAK);
+      await expect(page.getByRole("button", { name: buttonLabel, exact: true })).toHaveCount(0);
+      await expect(page.getByRole("radio")).toHaveCount(0);
+    };
+    const start = msg("StudentAssessments.start.label");
+
+    await expectNothing(await as("parentFamily"), `/student/assessments/${exam.id}`, start);
+    await expectNothing(await as("manager"), `/student/assessments/${exam.id}`, start);
+    await expectNothing(await as("receptionist"), `/student/assessments/${exam.id}`, start);
+
+    // A student opening the teacher's builder and viewer.
+    const save = msg("TeacherAssessments.builder.save");
+    await expectNothing(student, `/teacher/assessments/${exam.id}`, save, "/teacher/centers");
+    await expectNothing(
+      student,
+      `/teacher/assessments/new?type=EXAM&branch=${encodeURIComponent(fx.centerId)}&class=${encodeURIComponent(fx.classGroupId)}`,
+      save,
+      "/teacher/centers",
+    );
+    await expect(student.locator("#assessment-title")).toHaveCount(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W9 (D-W42): an assistant (Co-teacher) creates a homework in the teacher's
+// PERSONAL workspace. Two tagged fixture logins (the Supabase admin API) and a
+// premium teacher's workspace, class, session and assistant link set up
+// directly (staging-guarded); the assistant reaches Exams & homework from the
+// nav and Add homework from the workspace's session page, builds and saves.
+// The row is the teacher's (their membership) in the workspace, created by the
+// assistant, and its audit row carries both people. The teardown removes the
+// run's assessments, then its accounts and workspace, and asserts nothing is left.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("@write W9: a Co-teacher assistant creates a homework in the teacher's workspace, audited with both people", async ({ page, browser, appLocale, msg, e2eTag }, testInfo) => {
+  assertSafeToWrite("e2e: workspace assistant assessment fixtures");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e W9 assistant: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const db = new PrismaClient();
+  const teacher = { email: e2eEmail(e2eTag, "w9-teacher"), first: "Wnt", last: `Teacher ${e2eTag}` };
+  const helper = { email: e2eEmail(e2eTag, "w9-assistant"), first: "Wna", last: `Assistant ${e2eTag}` };
+  const title = `${E2E_ASSESSMENT_PREFIX}${e2eTag}-hw`;
+  const userIds: string[] = [];
+  const centerIds: string[] = [];
+  const authIds: string[] = [];
+
+  try {
+    for (const person of [teacher, helper]) {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: person.email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: { first_name: person.first, last_name: person.last, locale: appLocale },
+      });
+      if (error || !data.user) throw error ?? new Error("e2e W9 assistant: could not create a login");
+      authIds.push(data.user.id);
+    }
+    // The teacher's app User exists from their first sign-in (their own context, closed straight after).
+    const teacherContext = await browser.newContext({ ...testInfo.project.use });
+    try {
+      await signInWith(await teacherContext.newPage(), appLocale, teacher.email);
+    } finally {
+      await teacherContext.close();
+    }
+    await signInWith(page, appLocale, helper.email);
+    const teacherRow = await db.user.findUniqueOrThrow({ where: { email: teacher.email } });
+    const helperRow = await db.user.findUniqueOrThrow({ where: { email: helper.email } });
+    userIds.push(teacherRow.id, helperRow.id);
+
+    // Staging-guarded setup: premium, a workspace, a class with a session, the Co-teacher link.
+    await db.user.update({ where: { id: teacherRow.id }, data: { premiumUntil: new Date(Date.now() + 30 * 86_400_000) } });
+    const created = await createWorkspace(db, teacherRow.id, { name: `Algebra ${e2eTag}` });
+    if (!created.ok) throw new Error(`e2e W9 assistant: ${created.error}`);
+    const workspaceId = created.workspaceId;
+    centerIds.push(workspaceId);
+    const today = todayInTimezone("Africa/Cairo");
+    const klass = await createWorkspaceClass(
+      db,
+      teacherRow.id,
+      workspaceId,
+      {
+        educationSystemId: null,
+        gradeId: null,
+        subjectId: null,
+        price: 10_000,
+        lateThresholdMinutes: 10,
+        startDate: today,
+        endDate: addDays(today, 21),
+        slots: [{ dayOfWeek: addDays(today, 1).getUTCDay(), startTime: "17:00", endTime: "18:00" }],
+      },
+      { confirmConflicts: true, locale: appLocale },
+    );
+    if (!klass.ok) throw new Error(`e2e W9 assistant: ${klass.error}`);
+    const session = await db.session.findFirstOrThrow({ where: { centerId: workspaceId, classGroupId: klass.classGroupId }, orderBy: [{ date: "asc" }, { startTime: "asc" }] });
+    const link = await db.teacherAssistant.create({ data: { teacherUserId: teacherRow.id, assistantUserId: helperRow.id, preset: "CO_TEACHER" } });
+    await db.assistantPermissionGrant.createMany({ data: PRESET_PERMISSIONS.CO_TEACHER.map((permission) => ({ assistantId: link.id, permission })) });
+
+    // The nav lists Exams & homework for the workspace grant.
+    await page.goto(`/${appLocale}/assistant/${teacherRow.id}`);
+    await expectHealthy(page, appLocale);
+    await expect((await primaryNav(page, appLocale)).getByRole("link", { name: msg("Nav.assessments"), exact: true })).toBeVisible();
+
+    // The workspace session page's Add homework → the builder → Save.
+    await page.goto(`/${appLocale}/assistant/${teacherRow.id}/workspaces/${workspaceId}/sessions/${session.id}`);
+    await expectHealthy(page, appLocale);
+    await page.getByRole("link", { name: msg("TeacherAssessments.addHomework"), exact: true }).click();
+    await page.waitForURL(/\/assessments\/new\?/);
+    await expectHealthy(page, appLocale);
+    await page.locator("#assessment-title").fill(title);
+    await fillBuilderQuestions(page, msg, ["Homework question"]);
+    await page.getByRole("button", { name: msg("TeacherAssessments.builder.save"), exact: true }).click();
+    await page.waitForURL(new RegExp(`/assistant/${teacherRow.id}/assessments/[0-9a-f-]{36}`));
+    await expectHealthy(page, appLocale);
+    await expect(page.getByText(msg("TeacherAssessments.privateTag"), { exact: true }).first()).toBeVisible();
+
+    const row = await db.assessment.findFirstOrThrow({ where: { title }, include: { teacherMembership: true } });
+    expect([row.centerId, row.type, row.status, row.createdByUserId, row.teacherMembership.userId], "the teacher's draft in the workspace, made by the assistant").toEqual([
+      workspaceId,
+      "HOMEWORK",
+      "DRAFT",
+      helperRow.id,
+      teacherRow.id,
+    ]);
+    const audit = await db.auditLog.findFirstOrThrow({ where: { centerId: workspaceId, action: "assessment.create", entityId: row.id } });
+    expect([audit.actorUserId, audit.onBehalfOfUserId], "audited with the assistant as actor, on behalf of the teacher").toEqual([helperRow.id, teacherRow.id]);
+  } finally {
+    await removeE2eAssessments(db, e2eTag);
+    await removeE2eUsers(db, e2eTag);
+    for (const authId of authIds) {
+      if ((await db.user.count({ where: { authId } })) === 0) await supabase.auth.admin.deleteUser(authId).catch(() => undefined);
+    }
+  }
+
+  const [users, centers, assessments, links, audit] = await Promise.all([
+    db.user.count({ where: { OR: [{ email: { in: [teacher.email, helper.email] } }, { lastName: { contains: ` ${e2eTag}` } }] } }),
+    db.center.count({ where: { id: { in: centerIds } } }),
+    db.assessment.count({ where: { OR: [{ centerId: { in: centerIds } }, { title: { startsWith: `${E2E_ASSESSMENT_PREFIX}${e2eTag}` } }] } }),
+    db.teacherAssistant.count({ where: { OR: [{ teacherUserId: { in: userIds } }, { assistantUserId: { in: userIds } }] } }),
+    db.auditLog.count({ where: { OR: [{ actorUserId: { in: userIds } }, { centerId: { in: centerIds } }] } }),
+  ]);
+  expect({ users, centers, assessments, links, audit }, "the teardown leaves nothing of this run behind").toEqual({ users: 0, centers: 0, assessments: 0, links: 0, audit: 0 });
+  await db.$disconnect();
+});

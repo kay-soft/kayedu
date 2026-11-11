@@ -320,11 +320,13 @@ export async function changeAttendanceStatus(
       reason,
       voidedPaymentId: voidedPayment?.id ?? null,
       now,
+      onBehalfOfUserId: options.onBehalfOfUserId ?? null,
     });
     if (voidedPayment) {
       await writeAuditRow(tx, {
         centerId: params.centerId,
         actorUserId: params.changedBy,
+        onBehalfOfUserId: options.onBehalfOfUserId ?? null,
         action: "payment.void",
         entityType: "Payment",
         entityId: voidedPayment.id,
@@ -340,6 +342,7 @@ export async function changeAttendanceStatus(
         await writeAuditRow(tx, {
           centerId: params.centerId,
           actorUserId: params.changedBy,
+          onBehalfOfUserId: options.onBehalfOfUserId ?? null,
           action: "settlement.adjust",
           entityType: "Settlement",
           entityId: settlement.id,
@@ -417,7 +420,8 @@ export type RecheckInResult =
 export async function recheckInAttendee(
   db: Db,
   params: { centerId: string; attendeeId: string; recordedBy: string },
-  options: { now?: Date } = {},
+  // W8d (D-W18): `onBehalfOfUserId` only on an assistant's re-check-in in a workspace.
+  options: { now?: Date; onBehalfOfUserId?: string | null } = {},
 ): Promise<RecheckInResult> {
   const now = options.now ?? new Date();
   return runInTransaction(db, async (tx): Promise<RecheckInResult> => {
@@ -452,6 +456,7 @@ export async function recheckInAttendee(
       reason: null,
       trigger: "attendance.recheckIn",
       now,
+      onBehalfOfUserId: options.onBehalfOfUserId ?? null,
     });
     await tx.$executeRaw`
       UPDATE "SessionBooking" b

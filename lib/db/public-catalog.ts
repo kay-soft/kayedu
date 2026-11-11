@@ -11,6 +11,7 @@ import { centerLogoSrc, classImageSrc, pickClassImage, teacherPhotoSrc, type Cla
 import { scopedWhere } from "./tenant-scope.ts";
 import { teacherRatingAverages } from "./ratings.ts";
 import { pausedUntilFrom } from "./branch-pauses.ts";
+import { BRANCH_ONLY } from "./center-kind.ts";
 
 /**
  * The public catalog (F5, docs/02-architecture.md §2 "(public)"): everything a
@@ -87,6 +88,8 @@ export type PublicBranch = {
 function publicBranchWhere(extra: Prisma.CenterWhereInput = {}): Prisma.CenterWhereInput {
   return {
     ...extra,
+    // W8a (D-W20): a teacher's PERSONAL workspace is never public.
+    ...BRANCH_ONLY,
     lifecycleState: { in: [...PUBLIC_LIFECYCLE_STATES] },
     // U5: a branch a platform admin deleted is gone from Explore at once.
     deletedAt: null,

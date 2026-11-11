@@ -62,7 +62,7 @@
  * lib/db/, lib/money.ts, lib/auth/" constraint is reported with
  * `git diff --stat` in the R10a summary rather than gated here.)
  */
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import ts from "typescript";
@@ -70,6 +70,7 @@ import ts from "typescript";
 import { PICK_BRANCH, isPickBranch, requireBranchScope } from "../lib/auth/branch-scope.ts";
 import { centerInitial, nameInitial, personInitials } from "../lib/initials.ts";
 import { mergeFilterParams } from "../lib/ui/url-filter-params.ts";
+import { readSource } from "./lib/source.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -85,7 +86,7 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 function read(path: string): string {
-  return readFileSync(join(ROOT, path), "utf8");
+  return readSource(join(ROOT, path));
 }
 
 function norm(path: string): string {
@@ -298,6 +299,8 @@ const PAGEHEADER_EXEMPT: Record<string, string> = {
   "app/[locale]/(auth)/select-center/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/account-pending/page.tsx": "signed-out screen — AuthCard carries the heading",
   "app/[locale]/(auth)/family/join/page.tsx": "auth screen (F3, guests too) — AuthCard carries the heading",
+  "app/[locale]/(auth)/assistant-join/page.tsx": "auth screen (W7a, guests too) — AuthCard carries the heading",
+  "app/[locale]/(auth)/workspace-join/page.tsx": "auth screen (W10, guests too) — AuthCard carries the heading",
   "app/[locale]/(print)/sessions/[id]/print/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/card/page.tsx": "print sheet — no app chrome",
   "app/[locale]/(print)/students/[id]/paper/page.tsx": "print sheet — no app chrome",
@@ -543,7 +546,7 @@ function checkAddDialogs() {
 
 function checkRtlCentring() {
   const offenders = FILES.filter((file) => {
-    const source = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    const source = stripComments(readSource(join(ROOT, file)));
     return /(?:^|[\s"'`])(?:\w+:)*(?:start|end)-1\/2/.test(source) && /-?translate-x-/.test(source);
   });
   check(
@@ -583,7 +586,7 @@ function checkActionsReport() {
   const unreported: string[] = [];
   for (const file of FILES) {
     if (!file.endsWith(".tsx")) continue;
-    const source = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    const source = stripComments(readSource(join(ROOT, file)));
     if (/\buseActionState\(/.test(source)) plain.push(file);
     for (const match of source.matchAll(/const\s*\[\s*(\w+)\s*,[^\]]*\]\s*=\s*useGuardedActionState\(/g)) {
       const name = match[1];
@@ -614,13 +617,14 @@ const VOID_ACTION_ALLOWLIST: Record<string, string> = {
   signOutAction: "ends in redirect() to the sign-in page",
   selectCenterAction: "ends in redirect() into the chosen branch",
   selectTeacherBranchAction: "ends in redirect() back into the teacher portal (U7)",
+  switchExperienceAction: "ends in redirect() into the chosen experience's landing page (W5)",
 };
 
 function checkActionsReturnResults() {
   const offenders: string[] = [];
   for (const file of FILES) {
     if (!file.endsWith(".ts")) continue;
-    const raw = readFileSync(join(ROOT, file), "utf8");
+    const raw = readSource(join(ROOT, file));
     if (!/^\s*["']use server["']/.test(raw)) continue;
     const source = stripComments(raw);
     for (const match of source.matchAll(/export\s+async\s+function\s+(\w+)\s*\([^()]*\)\s*:\s*Promise<void>/g)) {
@@ -647,7 +651,7 @@ const SILENT_CATCH_ALLOWLIST: Record<string, string> = {
 function checkNoSilentCatches() {
   const offenders = FILES.filter((file) => {
     if (file in SILENT_CATCH_ALLOWLIST) return false;
-    const source = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    const source = stripComments(readSource(join(ROOT, file)));
     return (
       /\bcatch\s*(\([^)]*\))?\s*\{\s*\}/.test(source) ||
       /\.catch\(\s*(\(\s*\w*\s*\)|\w+)\s*=>\s*(\{\s*\}|undefined|null)\s*\)/.test(source)
@@ -1018,7 +1022,7 @@ function checkUseServerExports() {
   const offenders: string[] = [];
   let serverFiles = 0;
   for (const file of files) {
-    const source = readFileSync(join(ROOT, file), "utf8");
+    const source = readSource(join(ROOT, file));
     if (!/["']use server["']/.test(source)) continue;
     const found = nonFunctionServerExports(source);
     if (found === null) continue;

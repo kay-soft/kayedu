@@ -7,8 +7,10 @@ import {
   shellUser,
   type ShellFrame,
 } from "@/components/shell/from-context";
+import { shellExperiences } from "@/components/shell/experience-switcher-data";
 import { navForExperience, withPendingCount } from "@/components/shell/nav";
 import { PauseBanner } from "@/components/shell/pause-banner";
+import { rollupExperienceKey, staffExperienceKey } from "@/lib/auth/experiences";
 import { currentBranchPause } from "@/lib/db/branch-pauses";
 import { prisma } from "@/lib/db/client";
 import { getPendingApprovalCounts } from "@/lib/auth/approval-counts";
@@ -20,6 +22,7 @@ import {
   requireExperience,
 } from "@/lib/auth/tenant";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
+import { unreadNotificationCount } from "@/lib/notifications/reach";
 
 /**
  * The center ERP's shell (F2: shared by `(center)/layout.tsx` and Account
@@ -40,12 +43,19 @@ export async function centerShell(): Promise<ShellFrame> {
   const showApprovalsBadge = !ctx.rollupOrganizationId && ctxCan(ctx, "approvals.manage");
   // U5: a platform admin's pause covering the branch's today — a read-only
   // banner above every page (never under "Whole Management", which is no branch).
-  const [relations, orgGroups, defaultCollapsed, approvalCounts, pause] = await Promise.all([
+  const [relations, orgGroups, defaultCollapsed, approvalCounts, pause, unreadNotifications, experiences] = await Promise.all([
     getUserCenterRelations(ctx.user.id),
     getOwnerOrgGroups(ctx.user.id),
     cookies().then((store) => store.get(SIDEBAR_COLLAPSED_COOKIE)?.value === "1"),
     showApprovalsBadge ? getPendingApprovalCounts(ctx) : null,
     ctx.rollupOrganizationId ? null : currentBranchPause(prisma, ctx.center.id),
+    // W1: the bell's count — the person's own notices, every branch they reach.
+    unreadNotificationCount(ctx.user.id),
+    // W5: the role switcher. What is current comes from the resolved context.
+    shellExperiences(
+      ctx.user.id,
+      ctx.rollupOrganizationId ? rollupExperienceKey(ctx.rollupOrganizationId) : staffExperienceKey(ctx.center.id),
+    ),
   ]);
 
   // "Whole Management": the shell names the organization, never the
@@ -75,7 +85,9 @@ export async function centerShell(): Promise<ShellFrame> {
         : undefined,
       user: shellUser(ctx.user, ctx.role),
       scope: shellScope(relations, orgGroups, ctx.rollupOrganizationId ?? ctx.center.id),
+      experiences,
       defaultCollapsed,
+      unreadNotifications,
     },
     lead: pause ? <PauseBanner until={pause.endDate} /> : null,
   };

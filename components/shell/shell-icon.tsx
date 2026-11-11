@@ -3,11 +3,14 @@
 import {
   BarChart3,
   BookOpen,
+  BriefcaseBusiness,
   Building2,
   CalendarDays,
   CalendarRange,
   ClipboardCheck,
+  Coins,
   ConciergeBell,
+  FileQuestion,
   GraduationCap,
   HandCoins,
   LayoutDashboard,
@@ -16,6 +19,7 @@ import {
   Settings,
   ShieldCheck,
   Undo2,
+  UserCog,
   UserRound,
   Users,
   Wallet,
@@ -44,6 +48,10 @@ const ICONS: Record<ShellIconName, ComponentType<{ className?: string; "aria-hid
   settlements: HandCoins,
   audit: ScrollText,
   profile: UserRound,
+  assessments: FileQuestion,
+  assistants: UserCog,
+  workspaces: BriefcaseBusiness,
+  earnings: Coins,
 };
 
 export function ShellIcon({

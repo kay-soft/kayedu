@@ -42,6 +42,8 @@ export async function applyAttendanceChange(
     refundedPaymentId?: string | null;
     trigger?: AttendanceChangeTrigger;
     now: Date;
+    /** W8d (D-W18): the teacher an assistant acted for; null on everyone else's change. */
+    onBehalfOfUserId?: string | null;
   },
 ): Promise<{ attendee: SessionAttendee; change: SessionAttendanceChange }> {
   const { attendee } = params;
@@ -69,6 +71,7 @@ export async function applyAttendanceChange(
   await writeAuditRow(tx, {
     centerId: params.centerId,
     actorUserId: params.changedBy,
+    onBehalfOfUserId: params.onBehalfOfUserId ?? null,
     action: "attendance.correct",
     entityType: "SessionAttendee",
     entityId: attendee.id,
@@ -107,6 +110,7 @@ export async function resetAttendanceAfterReversal(
     reason: string;
     cause: { voidedPaymentId: string } | { refundedPaymentId: string };
     now: Date;
+    onBehalfOfUserId?: string | null;
   },
 ): Promise<SessionAttendanceChange | null> {
   const attendee = await tx.sessionAttendee.findFirst({
@@ -125,6 +129,7 @@ export async function resetAttendanceAfterReversal(
     refundedPaymentId: "refundedPaymentId" in params.cause ? params.cause.refundedPaymentId : null,
     trigger: voided ? "payment.void" : "payment.refund",
     now: params.now,
+    onBehalfOfUserId: params.onBehalfOfUserId ?? null,
   });
   return change;
 }

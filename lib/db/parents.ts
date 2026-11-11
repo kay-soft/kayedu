@@ -502,13 +502,13 @@ export async function revokeFamilyLink(db: PrismaClient, input: RevokeLinkInput)
 export function activeChildLinks(db: Db, parentUserId: string) {
   return db.familyLink.findMany({
     where: { parentUserId, status: ACTIVE },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     include: {
       studentUser: {
         include: {
           studentProfiles: {
             where: { active: true, center: ACCESSIBLE_CENTER },
-            orderBy: { createdAt: "asc" },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
             include: { center: true },
           },
         },
@@ -550,7 +550,7 @@ export async function familyAccessForStudent(
   const [links, pending, slotsUsed] = await Promise.all([
     db.familyLink.findMany({
       where: { studentUserId: profile.userId, status: ACTIVE },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       include: {
         parentUser: { select: { firstName: true, lastName: true } },
         invitation: {
@@ -619,7 +619,7 @@ export async function familyForAccount(db: Db, userId: string): Promise<AccountF
     db.user.findUnique({ where: { id: userId }, select: { isPlatformAdmin: true } }),
     db.familyLink.findMany({
       where: { parentUserId: userId, status: ACTIVE },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       include: {
         studentUser: {
           select: {
@@ -632,12 +632,12 @@ export async function familyForAccount(db: Db, userId: string): Promise<AccountF
     }),
     db.familyLink.findMany({
       where: { studentUserId: userId, status: ACTIVE },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       include: { parentUser: { select: { firstName: true, lastName: true } } },
     }),
     db.familyInvitation.findMany({
       where: { studentUserId: userId, status: PENDING },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       include: { issuingCenter: { select: { name: true } } },
     }),
     isStudentAccount(db, userId),

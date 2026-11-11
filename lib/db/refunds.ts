@@ -176,6 +176,7 @@ export async function refundPayment(
         reason: reason.trim(),
         cause: { refundedPaymentId: payment.id },
         now,
+        onBehalfOfUserId: options.onBehalfOfUserId ?? null,
       });
 
   return { ok: true, refund, payment: updatedPayment, adjustedSettlements, attendanceChange };

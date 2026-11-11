@@ -16,7 +16,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
@@ -72,6 +72,7 @@ import {
   isSessionDayOver,
   resolveLateThreshold,
 } from "../lib/scheduling.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -156,7 +157,7 @@ function checkStatic() {
   const appFiles = listFiles("app");
   const libFiles = listFiles("lib");
 
-  const backfillInApp = appFiles.filter((file) => readFileSync(file, "utf8").includes("historicalBackfill"));
+  const backfillInApp = appFiles.filter((file) => readSource(file).includes("historicalBackfill"));
   check(
     "No file under app/ passes historicalBackfill — the scripts-only escape hatch never reaches production",
     backfillInApp.length === 0,
@@ -169,10 +170,10 @@ function checkStatic() {
   // deletes exist only in lib/db/class-sessions.ts, and every one passes
   // through the pristine predicate". A closed session is still never deletable.
   const sessionDeletes = [...appFiles, ...libFiles].filter((file) =>
-    /\.session\.(delete|deleteMany)\(|sessions\.(remove|delete)\b/.test(readFileSync(file, "utf8")),
+    /\.session\.(delete|deleteMany)\(|sessions\.(remove|delete)\b/.test(readSource(file)),
   );
   const isEngineFile = (file: string) => file.replace(/\\/g, "/").endsWith("lib/db/class-sessions.ts");
-  const engine = readFileSync("lib/db/class-sessions.ts", "utf8");
+  const engine = readSource("lib/db/class-sessions.ts");
   const deleteCalls = [...engine.matchAll(/\.session\.(delete|deleteMany)\(/g)].map((match) => {
     let depth = 1;
     let i = (match.index ?? 0) + match[0].length;
@@ -228,7 +229,7 @@ function checkStatic() {
 
   const closedAtWriters = [...appFiles, ...libFiles].filter((file) => {
     if (file.replace(/\\/g, "/").endsWith("lib/db/session-lifecycle.ts")) return false;
-    return /data:\s*\{[^{}]*\bclosedAt\b/.test(readFileSync(file, "utf8"));
+    return /data:\s*\{[^{}]*\bclosedAt\b/.test(readSource(file));
   });
   check(
     "Nothing but lib/db/session-lifecycle.ts ever writes Session.closedAt",
@@ -236,18 +237,18 @@ function checkStatic() {
     closedAtWriters.join(", "),
   );
 
-  const lifecycle = readFileSync("lib/db/session-lifecycle.ts", "utf8");
+  const lifecycle = readSource("lib/db/session-lifecycle.ts");
   check(
     "lib/db/session-lifecycle.ts never writes closedAt back to null (no reopen)",
     !/closedAt:\s*null\s*,?\s*\n\s*closedBy/.test(lifecycle) &&
       !/data:\s*\{[^{}]*closedAt:\s*null/.test(lifecycle),
   );
   const reopenExports = [...appFiles, ...libFiles].filter((file) =>
-    /export\s+(async\s+)?function\s+\w*(reopen|unclose)\w*/i.test(readFileSync(file, "utf8")),
+    /export\s+(async\s+)?function\s+\w*(reopen|unclose)\w*/i.test(readSource(file)),
   );
   check("No reopen/unclose function is exported anywhere", reopenExports.length === 0, reopenExports.join(", "));
 
-  const sessionActions = readFileSync("app/[locale]/(center)/sessions/actions.ts", "utf8");
+  const sessionActions = readSource("app/[locale]/(center)/sessions/actions.ts");
   check(
     "endSessionAction re-checks session.close server-side",
     /export async function endSessionAction[\s\S]*?ctxCan\(ctx, "session\.close"\)/.test(sessionActions),
@@ -311,14 +312,12 @@ function checkStatic() {
 
   console.log("\nT5 — void/refund resets attendance (no database needed)");
   const normalize = (sql: string) => sql.replace(/\s+/g, " ").trim();
-  const migrationSql = readFileSync(
-    "prisma/migrations/20261027190000_t5_void_refund_reset_attendance/migration.sql",
-    "utf8",
-  );
+  const migrationSql = readSource(
+    "prisma/migrations/20261027190000_t5_void_refund_reset_attendance/migration.sql");
   const indexPredicate = migrationSql.match(
     /CREATE UNIQUE INDEX "Payment_one_active_per_attendee_t5"\s+ON "Payment"\("sessionAttendeeId"\) WHERE ([^;]+);/,
   )?.[1];
-  const paymentsSource = readFileSync("lib/db/payments.ts", "utf8");
+  const paymentsSource = readSource("lib/db/payments.ts");
   const conflictPredicate = paymentsSource.match(/ON CONFLICT \("sessionAttendeeId"\) WHERE (.+?) DO NOTHING/)?.[1];
   check(
     "recordPayment's ON CONFLICT predicate matches the active-payment index in the T5 migration exactly",
@@ -341,14 +340,14 @@ function checkStatic() {
   );
   check(
     "lockAttendeeRow's active-payment fact is 'not voided AND not refunded' too",
-    /p\."voided" = false AND p\."refunded" = false\s*\) AS "hasActivePayment"/.test(readFileSync("lib/db/session-lifecycle.ts", "utf8")),
+    /p\."voided" = false AND p\."refunded" = false\s*\) AS "hasActivePayment"/.test(readSource("lib/db/session-lifecycle.ts")),
   );
   const body = (source: string, name: string) => {
     const at = source.indexOf(`export async function ${name}(`);
     return at === -1 ? "" : source.slice(at, source.indexOf("\n}\n", at));
   };
   const voidBody = body(paymentsSource, "voidPayment");
-  const refundBody = body(readFileSync("lib/db/refunds.ts", "utf8"), "refundPayment");
+  const refundBody = body(readSource("lib/db/refunds.ts"), "refundPayment");
   check(
     "voidPayment and refundPayment lock session → attendee → payment, then reset through the one writer",
     voidBody.indexOf("ensureSessionOpenOrAutoClose") < voidBody.indexOf("lockAttendeeRow") &&
@@ -361,7 +360,7 @@ function checkStatic() {
   );
   check(
     "There is one attendance-change writer: only lib/db/attendance-change.ts creates SessionAttendanceChange rows",
-    [...appFiles, ...libFiles].filter((file) => /sessionAttendanceChange\.create\(/.test(readFileSync(file, "utf8")))
+    [...appFiles, ...libFiles].filter((file) => /sessionAttendanceChange\.create\(/.test(readSource(file)))
       .map((file) => file.replace(/\\/g, "/"))
       .join() === "lib/db/attendance-change.ts",
   );
@@ -378,10 +377,10 @@ function checkStatic() {
   );
   check(
     "Every consumer the drop-in rule covers applies the one filter (streak, analytics, student/parent history, teacher history)",
-    /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(body(readFileSync("lib/db/attendance.ts", "utf8"), "consecutiveAbsenceCount")) &&
-      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(body(readFileSync("lib/db/analytics.ts", "utf8"), "attendanceStatusCounts")) &&
-      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(readFileSync("lib/db/student-portal.ts", "utf8").split("export function studentPastAttendance")[1] ?? "") &&
-      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(readFileSync("lib/db/teacher-portal.ts", "utf8").split("export function studentSessionsWithTeacher")[1] ?? ""),
+    /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(body(readSource("lib/db/attendance.ts"), "consecutiveAbsenceCount")) &&
+      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(body(readSource("lib/db/analytics.ts"), "attendanceStatusCounts")) &&
+      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(readSource("lib/db/student-portal.ts").split("export function studentPastAttendance")[1] ?? "") &&
+      /\.\.\.EXCLUDE_DROP_IN_NO_SHOWS/.test(readSource("lib/db/teacher-portal.ts").split("export function studentSessionsWithTeacher")[1] ?? ""),
   );
   // The change log's order is causal: changes run on the app's clock and
   // payments on the database's — here the two clocks are a month apart.
@@ -892,15 +891,54 @@ async function main() {
     JSON.stringify({ revenueBefore, revenueAfter }),
   );
   const changeRows = await listSessionAttendanceChanges(prisma, centerA.id, sessionVoid.id);
+  // V8 (old → new): was "changeRows[0] is the voided-payment row, changeRows[3] is not",
+  // which leaned on the physical order of rows that share a changedAt. Now: the list is
+  // exactly the rows sorted by (changedAt, id), changedAt never decreases, and the
+  // voided-payment row is found by content.
+  const sortedChanges = [...changeRows].sort(
+    (a, b) => a.changedAt.getTime() - b.changedAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  const voidedRow = changeRows.find((row) => row.voidedPaymentId === vPay1.id);
   check(
-    "The receipt's change list reads them back in order, with local names and the voided payment",
+    "The receipt's change list reads them back in (changedAt, id) order, with local names and the voided payment",
     changeRows.length === 4 &&
-      changeRows[0].studentName.firstName === "S1" &&
-      changeRows[0].changedByName?.lastName === "Desk" &&
-      changeRows[0].voidedPaymentId === vPay1.id &&
-      changeRows[3].voidedPaymentId === null,
+      changeRows.every((row, index) => row.id === sortedChanges[index].id) &&
+      changeRows.every((row, index) => index === 0 || row.changedAt.getTime() >= changeRows[index - 1].changedAt.getTime()) &&
+      voidedRow !== undefined &&
+      voidedRow.studentName.firstName === "S1" &&
+      voidedRow.changedByName?.lastName === "Desk" &&
+      changeRows.some((row) => row.voidedPaymentId === null),
     JSON.stringify(changeRows.map((row) => [row.studentName.firstName, row.fromStatus, row.toStatus])),
   );
+
+  // Rows written in one transaction share a `changedAt`; `id` breaks the tie, so the
+  // order is the same on every read. Ids are chosen against insertion order on purpose.
+  const tieAt = cairo(11, 16, 59);
+  const tieIds = ["00000000-0000-4000-8000-0000000000c3", "00000000-0000-4000-8000-0000000000a1", "00000000-0000-4000-8000-0000000000b2"];
+  await prisma.sessionAttendanceChange.createMany({
+    data: tieIds.map((id) => ({
+      id,
+      centerId: centerA.id,
+      sessionId: sessionVoid.id,
+      studentProfileId: s1,
+      fromStatus: "PRESENT" as const,
+      toStatus: "ABSENT" as const,
+      changedBy: staff.id,
+      changedAt: tieAt,
+    })),
+  });
+  try {
+    const tied = (await listSessionAttendanceChanges(prisma, centerA.id, sessionVoid.id)).filter((row) => tieIds.includes(row.id));
+    check(
+      "Changes with an identical changedAt list in id order, the same on every read",
+      tied.map((row) => row.id).join() === [...tieIds].sort().join(),
+      JSON.stringify(tied.map((row) => row.id)),
+    );
+    const again = (await listSessionAttendanceChanges(prisma, centerA.id, sessionVoid.id)).filter((row) => tieIds.includes(row.id));
+    check("…and a second read returns the identical order", again.map((row) => row.id).join() === tied.map((row) => row.id).join());
+  } finally {
+    await prisma.sessionAttendanceChange.deleteMany({ where: { id: { in: tieIds } } });
+  }
 
   // ── 5. Settlements need a closed session ───────────────────────────────
   const settleLive = await prisma.$transaction((tx) =>
@@ -1111,7 +1149,7 @@ async function main() {
     const twice = await recheckInAttendee(prisma, { centerId: centerA.id, attendeeId: vA.id, recordedBy: staff.id }, { now: cairo(16, 16, 21) });
     check("checking in a PRESENT/LATE row again is refused (alreadyCheckedIn)", !twice.ok && twice.error === "alreadyCheckedIn");
     const p2 = await pay(vA.id, cairo(16, 16, 22));
-    const voiderPayments = await prisma.payment.findMany({ where: { sessionAttendeeId: vA.id }, orderBy: { recordedAt: "asc" } });
+    const voiderPayments = await prisma.payment.findMany({ where: { sessionAttendeeId: vA.id }, orderBy: [{ recordedAt: "asc" }, { id: "asc" }] });
     check(
       "void then re-check-in then re-pay yields two payments: the first still voided and untouched, the second active with fresh snapshots",
       voiderPayments.length === 2 &&
@@ -1341,7 +1379,7 @@ async function checkRescheduleFreesSlot(centerId: string, studentProfileId: stri
 
   // The schema and the database agree on the index; a future generated
   // migration must not have dropped it.
-  const schema = readFileSync("prisma/schema.prisma", "utf8");
+  const schema = readSource("prisma/schema.prisma");
   check(
     "schema.prisma declares a plain @@index, not @@unique, on (classGroupId, date, startTime)",
     !/@@unique\(\[classGroupId, date, startTime\]\)/.test(schema) &&
@@ -1390,7 +1428,7 @@ async function checkRescheduleFreesSlot(centerId: string, studentProfileId: stri
   const at = (date: Date) =>
     prisma.session.findMany({
       where: { centerId, classGroupId: classU.id, date, startTime: "17:00" },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
   const [mon7] = await at(day(7));
   const [mon14] = await at(day(14));
@@ -1421,6 +1459,17 @@ async function checkRescheduleFreesSlot(centerId: string, studentProfileId: stri
     atMon7.length === 2 &&
       atMon7.filter((row) => row.rescheduledToId === null).length === 1 &&
       atMon7.some((row) => row.id === back.session.id && row.rescheduledToId === null),
+  );
+  // The slot read is totally ordered: createdAt, then id as the tiebreaker (rows made in the same millisecond tie on createdAt).
+  check(
+    "The slot read is deterministically ordered (createdAt asc, then id asc)",
+    atMon7.every((row, i) => {
+      const prev = atMon7[i - 1];
+      if (!prev) return true;
+      const a = prev.createdAt.getTime();
+      const b = row.createdAt.getTime();
+      return a < b || (a === b && prev.id < row.id);
+    }),
   );
   let duplicateRefused = false;
   try {

@@ -25,9 +25,12 @@ function DialogContent({
   className,
   children,
   showClose = true,
+  backdropClassName,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Popup> & {
   showClose?: boolean;
+  /** W5: the role switcher dims nothing from `sm` up, where it is a header panel. */
+  backdropClassName?: string;
 }) {
   const t = useTranslations("Shared");
   return (
@@ -36,6 +39,7 @@ function DialogContent({
         className={cn(
           "fixed inset-0 z-50 bg-sidebar/50 transition-opacity duration-200",
           "data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
+          backdropClassName,
         )}
       />
       <DialogPrimitive.Popup

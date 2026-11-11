@@ -17,3 +17,18 @@ export function moneyNumber(value: bigint | number | null | undefined): number {
   }
   return result;
 }
+
+/**
+ * Adds already-exact piastre amounts in memory — the per-source totals the
+ * teacher's Earnings page unions (W8d, D-W41; a union of per-centre scoped
+ * reads, never one query across centres). Refuses a sum beyond exact integers.
+ */
+export function sumMoney(values: readonly number[]): number {
+  let total = 0;
+  for (const value of values) {
+    if (!Number.isSafeInteger(value)) throw new RangeError(`Money value ${String(value)} is not an exact integer.`);
+    total += value;
+  }
+  if (!Number.isSafeInteger(total)) throw new RangeError(`Money sum ${String(total)} is beyond exact JavaScript integers.`);
+  return total;
+}

@@ -1,6 +1,16 @@
+import { PrismaClient } from "@prisma/client";
+import { createClient } from "@supabase/supabase-js";
+
+import { formatDay } from "@/lib/format";
+
+import { deleteAuditRows } from "../scripts/lib/audit-maintenance";
+import { assertSafeToWrite } from "../scripts/lib/env";
+import { e2eEmail } from "../scripts/lib/e2e-users";
+
 import { uniqueTag } from "./support/accounts";
 import { expect, expectHealthy, test } from "./support/fixtures";
 import { tPattern } from "./support/i18n";
+import { E2E_PASSWORD, signInWith } from "./support/signup";
 import { dayFromToday, field, openDialog, pickDate } from "./support/ui";
 
 /**
@@ -181,5 +191,101 @@ test("@write branch tools: add with copy setup, edit, pause (preview), end the p
     await page.getByRole("checkbox", { name: msg("AdminCenters.archiveConfirm") }).check();
     await page.getByRole("button", { name: msg("AdminCenters.lifecycleTransitionSubmit"), exact: true }).click();
     await expect(page.getByText(msg("AdminCenters.lifecycleTerminal"))).toBeVisible();
+  }
+});
+
+// W6 (D-W35): premium for one account, found by its exact email. The account is
+// an e2e-tagged login (the W5 helper's `e2eTag` + `e2eEmail`), made through the
+// Supabase admin API rather than the register form, so the journey runs in both
+// write projects without spending the per-IP sign-up budget. The `e2eTag`
+// fixture deletes it (pass or fail); the teardown below removes its
+// `platform.premium.*` audit rows, so a second run leaves the same row counts.
+test("@write premium: grant to a date, the account's card shows it, revoke, Not premium", async ({ as, page, appLocale, msg, e2eTag }) => {
+  assertSafeToWrite("e2e: premium fixture");
+  const email = e2eEmail(e2eTag, "premium");
+  const lastName = `Premium ${e2eTag}`;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e premium: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const { data: created, error } = await supabase.auth.admin.createUser({
+    email,
+    password: E2E_PASSWORD,
+    email_confirm: true,
+    user_metadata: { first_name: "Prem", last_name: lastName, locale: appLocale },
+  });
+  if (error || !created.user) throw error ?? new Error("e2e premium: could not create the login");
+  const authId = created.user.id;
+
+  const db = new PrismaClient();
+  try {
+    // The account signs in once, so its User row exists; then the card says Not premium.
+    await signInWith(page, appLocale, email);
+    await page.goto(`/${appLocale}/account?from=hub`);
+    await expectHealthy(page, appLocale);
+    const card = page.getByRole("heading", { name: new RegExp(msg("Account.premium.cardTitle")) });
+    await expect(card).toContainText(msg("Premium.status.none"));
+    await expect(page.getByText(msg("Account.premium.contact"))).toBeVisible();
+
+    // The admin: an unknown email gets the neutral answer…
+    const admin = await as("admin");
+    await admin.goto(`/${appLocale}/admin/teachers`);
+    await expectHealthy(admin, appLocale);
+    const emailField = admin.getByLabel(field(msg("AdminPremium.lookup.label")));
+    const find = admin.getByRole("button", { name: msg("AdminPremium.lookup.submit"), exact: true });
+    await emailField.fill(`${e2eTag}-nobody@example.com`);
+    await find.click();
+    await expect(admin.getByText(msg("AdminPremium.noMatch"), { exact: true })).toBeVisible();
+
+    // …the exact email, in capitals with spaces, finds the account.
+    await emailField.fill(`  ${email.toUpperCase()} `);
+    await find.click();
+    const match = admin.getByRole("heading", { name: new RegExp(lastName) });
+    await expect(match).toBeVisible();
+    await expect(match).toContainText(msg("Premium.status.none"));
+
+    // Grant to 30 days from today (Cairo).
+    const end = dayFromToday(30);
+    const until = msg("Premium.status.active", { date: formatDay(end, appLocale) });
+    await pickDate(admin, appLocale, msg("AdminPremium.grant.label"), end);
+    await admin.getByRole("button", { name: msg("AdminPremium.grant.submit"), exact: true }).click();
+    await expect(match).toContainText(until);
+    // At 375px the success toast sits bottom-centre, over the card's last row
+    // (Revoke), and the pointer that tapped Grant rests on it, which pauses its
+    // timer: close it the way a phone user would.
+    // (On a desktop it may already have timed out.)
+    const toast = admin.getByText(msg("AdminPremium.saved.granted"), { exact: true });
+    const dismiss = admin.getByRole("button", { name: msg("Shared.toast.close"), exact: true });
+    await admin.mouse.move(1, 1);
+    await expect(async () => {
+      // The toast is still sliding, so it is never "stable" for a real click.
+      if (await dismiss.isVisible()) await dismiss.dispatchEvent("click");
+      await expect(toast).toBeHidden({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
+
+    // The account's own card shows it on the next request — no job involved.
+    await page.reload();
+    await expect(card).toContainText(until);
+
+    // Revoke, behind a confirmation.
+    await admin.getByRole("button", { name: msg("AdminPremium.revoke.trigger"), exact: true }).click();
+    await openDialog(admin).getByRole("button", { name: msg("AdminPremium.revoke.confirm"), exact: true }).click();
+    await expect(match).toContainText(msg("Premium.status.none"));
+    await page.reload();
+    await expect(card).toContainText(msg("Premium.status.none"));
+    await expect(card).not.toContainText(until);
+
+    // Not an admin: the page is not reachable by URL.
+    await page.goto(`/${appLocale}/admin/teachers`);
+    await expect(page).not.toHaveURL(/\/admin\/teachers/);
+  } finally {
+    const user = await db.user.findUnique({ where: { authId }, select: { id: true } });
+    if (user) {
+      await deleteAuditRows(db, { action: { startsWith: "platform.premium." }, entityType: "User", entityId: user.id });
+    } else {
+      // The login never reached the app: the e2eTag teardown cannot see it.
+      await supabase.auth.admin.deleteUser(authId);
+    }
+    await db.$disconnect();
   }
 });

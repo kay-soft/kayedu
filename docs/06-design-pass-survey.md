@@ -66,12 +66,20 @@ Two hand-built `Card`s (invalid / valid) with a third spacing. **R10a:** both on
 ### `app/[locale]/(auth)/family/join/page.tsx`
 **F3 (new).** Where a parent accepts a code; open to guests. `AuthCard` (title "Link your child", one-line description), then "Signed in as {name}" when signed in, the code field (LTR, monospaced, upper-case, `one-time-code` autofill, hint "Capitals and the dash don't matter") and **Link my child** (full width on a phone, `w-fit` from `sm`). A guest gets an info notice and **Sign in** / **Create a parent account** instead of the submit, both returning here with the code kept in the tab. A signed-in student account gets the refusal up front, with Sign out. A refusal is a `FormMessage` above the field; success toasts and lands on the parent portal.
 
+### `app/[locale]/(auth)/assistant-join/page.tsx` — **W7a (new)**
+Where any account redeems an assistant code; open to guests. `AuthCard` (title "Join as an assistant"), "Signed in as {name}" when signed in, the code field (LTR, monospaced, upper-case, `one-time-code`, hint "12 letters and numbers") and **Continue** (full width on a phone). Continue writes nothing: it swaps the field for a bordered confirmation — "Become {teacher}'s assistant?", the preset, the permission list with a check per line, a note that the teacher can change or remove it — with **Cancel** and **Confirm** (stacked full width at 375px, end-aligned from `sm`). A guest gets an info notice and **Sign in** / **Create an account**, both returning here with the code kept in the tab (never in a query). One `FormMessage` above the field for any refusal; success toasts and opens the assistant experience. `04-design-system.md` §11.36.
+
+### `app/[locale]/(auth)/workspace-join/page.tsx` — **W10 (new)**
+Where any signed-in account redeems a teacher's private-class share code (D-W43); open to guests. `AuthCard` (title "Join a private class"), "Signed in as {name}" when signed in, the same code field as `/assistant-join` (LTR, monospaced, upper-case, `one-time-code`, hint "12 letters and numbers") and **Continue** (full width on a phone, 44px). Continue writes nothing: it swaps the field for a bordered confirmation — "Join {teacher}'s private classes in “{workspace}”?", "Nothing is linked until you confirm", a muted note that the teacher sees only that the record is linked — with **Cancel** and **Confirm** (stacked full width at 375px, end-aligned from `sm`). A guest gets an info notice and **Sign in** / **Create an account**, both returning here with the code kept in the tab (never in a query). One `FormMessage` above the field for every refusal (one generic line for an unknown, expired, used or revoked code); success toasts and opens the student calendar. A ghost **Back** to the hub. `04-design-system.md` §11.37.
+
 ### `app/[locale]/(auth)/select-center/page.tsx`
 Branch cards had hover but **no selected state** — the branch you are already in looked like the others — and the "Whole Management" card was always brand-tinted, even when not selected. **R10a:** `AuthCard`; the active branch/roll-up gets a brand outline, tint and a check (not colour alone); idle cards share one hover state.
 **F3:** the empty state gains a third start, **I'm a parent: link my child** (to `/family/join`); a staff member or teacher who is also a parent gets a ghost **Your children (parent view)** link under their branches.
 **F4:** the three starts are ordered by the person's sign-up intent (theirs first and highlighted); no intent keeps the old order and emphasis.
 
 ---
+**W8b:** a pending workspace invitation (D-W39) shows as a card above the choices — an amber-tinted `article` with an Invitation badge, "<teacher> invited you to their private classes in “<workspace>”", one line of what Confirm does, and **Cancel** (outline) / **Confirm** (primary), 44px, full width and stacked below `sm`; Cancel turns the card into a one-line "You declined…" status in place, Confirm opens the student calendar. While one is pending the hub no longer skips straight to a single experience.
+**W10:** a last choice card, **Join a private class** ("Have a code from a teacher? Enter it here"), in the idle choice style with a graduation-cap mark and the chevron, opening `/workspace-join` (D-W43).
 
 ## Account (every experience)
 
@@ -79,6 +87,9 @@ Branch cards had hover but **no selected state** — the branch you are already 
 **F2 (new).** Account settings, reached from the user menu (and the branch hub) by every signed-in role, rendered inside the shell of the experience it was opened from (`?from=`). `PageHeader`, then two `PageSection`s: **Profile** — one card (first/last name side by side from `sm`, contact phone LTR with its hint, preferred-language `Select`) and, below it, one read-only card per branch record ("How {branch} has you on file": role, local name, phone, "Ask the branch to update this"), two columns from `md`; **Sign-in & security** — Email and Password cards, side by side from `lg`, stacked below. Email shows the current address LTR and is read-only with an info notice until the override or confirmation is on. Password uses `PasswordField` ×3 and a `Checkbox` "Sign out other devices", ticked by default, in a 44px label row. Two named extension points between the sections render nothing until F3/F4 fill them.
 
 **F4 (new section):** Account → **Study details** (a `PageSection` between Profile and Family, only for a student account): one card with the education-system → grade picker, a muted note that a branch's record is never changed, and **Save**.
+
+### `app/[locale]/notifications/page.tsx`
+**W1 (new).** The notification inbox (D-W12; docs/04 §11.31), reached from the bell's **See all notifications** in every shell and the hub, rendered inside the shell it was opened from (`?from=`, as Account settings). `PageHeader` (title + description) with **Mark all as read** in the action slot while anything is unread; one `Card` of whole-row 44px notice buttons (kind icon tile, sentence, relative time; unread bold + brand dot + "Unread:" for screen readers); `Pagination` at 20 per page inside `ResultsRegion`; `EmptyState` (`info`) when there is nothing. Same rows at 375px and 1280px — they already stack.
 
 ---
 
@@ -91,7 +102,7 @@ Branch cards had hover but **no selected state** — the branch you are already 
 Filter bar: date control and teacher select had **different label treatment** (date inline in the trigger, teacher visually hidden), so they shared no baseline; Reset floated; `pt-6` gaps on the table cards; accent borders on KPIs. **R10a:** `FilterBar` + labelled `FilterField`s, the date control is the only date affordance, KPI cards neutral, table cards even. Tables were already stacked cards below `md`.
 
 ### `app/[locale]/(center)/approvals/page.tsx`
-Empty state: icon + title + hint but **no action**; Approve/Decline buttons were different widths (text length) and right-aligned on mobile. **R10a:** empty state links to Teachers; the two actions are equal-width in a two-column grid, full-width below `lg`.
+Empty state: icon + title + hint but **no action**; Approve/Decline buttons were different widths (text length) and right-aligned on mobile. **R10a:** empty state links to Teachers; the two actions are equal-width in a two-column grid, full-width below `lg`. **W7b:** a class or session request filed by the teacher's assistant shows a neutral "via assistant" badge beside the kind badge; the requester is still the teacher.
 
 ### `app/[locale]/(center)/students/page.tsx`
 Header, filter, list and empty states already on the shared parts; hand-copied list-header row. **R10a:** `ListHeader`.
@@ -124,13 +135,13 @@ Red "Total" KPI border (money going out is not an error); the date filter sat in
 Consistent (PageHeader, card, empty state, bordered rows). No change.
 
 ### `app/[locale]/(center)/audit/page.tsx`
-**SEC-2b (new, D-06).** The centre audit trail, `audit.view` only, reached from the Dashboard and Analytics headers (not the nav — `check:permissions` pins each role's nav list; adding it there is a one-line change awaiting a decision). `PageHeader`, then a row of filter pills — Everything, Voids, Switched to absent, Refunds, Settlements, Price and cut changes, Present-not-paid — each a link with a 44 px touch height and `aria-current` on the active one, wrapping at 375 px. Every row is a stacked card at every width (nothing scrolls sideways): action, amount on the end side, "time · actor", the person it concerns, the reason, the before → after of any price/cut/status field, and an "Open the session" link. An OWNER's self-approved settlement carries an amber badge. Paged at 50.
+**SEC-2b (new, D-06).** The centre audit trail, `audit.view` only, reached from the Dashboard and Analytics headers (not the nav — `check:permissions` pins each role's nav list; adding it there is a one-line change awaiting a decision). `PageHeader`, then a row of filter pills — Everything, Voids, Switched to absent, Refunds, Settlements, Price and cut changes, Present-not-paid — each a link with a 44 px touch height and `aria-current` on the active one, wrapping at 375 px. Every row is a stacked card at every width (nothing scrolls sideways): action, amount on the end side, "time · actor", the person it concerns, the reason, the before → after of any price/cut/status field, and an "Open the session" link. An OWNER's self-approved settlement carries an amber badge. Paged at 50. **W7b:** an assistant's row names the teacher in the meta line and adds a neutral "via assistant" badge after it (it wraps below on a phone); never the assistant.
 
 ### `app/[locale]/(center)/reception/page.tsx`
 Page chrome already on the shared parts. Its "Recent check-ins" panel showed a bare muted sentence when empty. **R10a:** compact `EmptyState` there (`recent-check-ins.tsx`). Filter chips already use the single brand selected state.
 
 ### `app/[locale]/(center)/settings/page.tsx` (General)
-Section header under the settings layout's `PageHeader`; consistent. No change.
+Section header under the settings layout's `PageHeader`; consistent. No change. **W7b:** a card **Teacher assistants** after Public listing — one `ToggleRow` "Allow teacher assistants" with its hint, saved by the same Save bar.
 
 **DES:** the result is said once, in the sticky save bar — no second toast; client validation with the action's schema and an error summary (docs/04 §14.2, §14.8).
 
@@ -198,7 +209,7 @@ Hand-copied list header. **R10a:** `ListHeader`. **T1:** the members list is the
 ## Teacher experience (route group `(teacher)`)
 
 ### `app/[locale]/(teacher)/teacher/dashboard/page.tsx`
-Hand-drawn `charAt(0)` initial per centre; 5-card KPI row stranded two tiles at `lg`; blue/brand/amber KPI borders. **R10a:** `BrandAvatar`; five-up grid built on a six-column track; neutral KPIs.
+Hand-drawn `charAt(0)` initial per centre; 5-card KPI row stranded two tiles at `lg`; blue/brand/amber KPI borders. **R10a:** `BrandAvatar`; five-up grid built on a six-column track; neutral KPIs. **W8d (D-W41 item 6):** for a teacher who owns a workspace, one card under the KPI row — "Collected this month, including workspaces: <amount>" with its hint and **Open Earnings** (stacked on a phone, side by side from `sm`); the branch KPIs and cards are unchanged.
 
 ### `app/[locale]/(teacher)/teacher/sessions/page.tsx`
 Blue KPI border; hand-labelled filter grid (in `session-filters.tsx`). **R10a:** neutral KPI, `FilterField`. (Its forward-looking day/week/month filter stays bespoke — docs/04 §11.7.)
@@ -206,10 +217,34 @@ Blue KPI border; hand-labelled filter grid (in `session-filters.tsx`). **R10a:**
 **DES:** "Request a new session" is a closed disclosure above the list (docs/04 §14.9); Arabic counts in Arabic-Indic digits with proper plural forms.
 
 ### `app/[locale]/(teacher)/teacher/calendar/page.tsx` — **U7 (new)**
-The teacher's month calendar on the shared `SessionCalendar` (docs/04 §11.28): Held green, Upcoming blue, Cancelled grey, a legend, and the tapped day's sessions below with a text badge, branch (under All branches), room, present/late/absent counts and a link to each session. A Branch filter under All branches. Dots only at 375px, 44px day targets.
+The teacher's month calendar on the shared `SessionCalendar` (docs/04 §11.28): Held green, Upcoming blue, Cancelled grey, a legend, and the tapped day's sessions below with a text badge, branch (under All branches), room, present/late/absent counts and a link to each session. A Branch filter under All branches. Dots only at 375px, 44px day targets. **W8d (D-W41 item 8):** the teacher's own workspace sessions join the month (left out when the Branch filter names a branch): the workspace's name on the branch line, a neutral **Private** text badge, no room, the counts and a link to the workspace session page.
 
 ### `app/[locale]/(teacher)/teacher/profile/page.tsx` — **U9 (new)**
 The teacher's own picture and their classes' covers. A `PageSection` of one card per branch in view (the teacher's `PersonAvatar` with their photo at that branch, the shared `ImageUploadForm`, and — when they teach at more than one branch — a "Use this photo at all my branches" checkbox), then a `PageSection` of the shared `ClassCard`s with the cover controls in the card's action slot, so the teacher sees exactly what a student will. Flag off: each control is replaced by the "Coming soon" note. One column at 375px, two from `lg`; 44px targets.
+
+### `app/[locale]/(teacher)/teacher/assistants/page.tsx` — **W7a (new)**
+Assistants (D-W36). Not premium: `PageHeader` and one card — a brand sparkle, "Assistants come with premium" with the text premium badge, what premium allows, the lapsed note and "Contact KayEdu"; **W7b:** below it, when there is anything to reduce, the unused invites with **Revoke** and the assistants with **Remove** (no Invite, no Edit permissions). Premium: a slots card ("n of 5 places in use" and **Invite an assistant**, disabled with its reason when full), then `PageSection` **Unused invites** (a card per invite: preset, "Expires <date, time>", **Revoke** behind `ConfirmAction`; one column on a phone, two from `md`) and `PageSection` **Your assistants** (a card per assistant: name, a neutral preset badge or "Custom", "Assistant since", the compact permission list, **Edit permissions** and **Remove**; two columns from `lg`). Invite is a narrow `DialogShell` (the preset as three radio tiles, Co-teacher preselected, each with its summary and a check on the chosen one; the 7-day note) that turns into the once-only code reveal (code in an LTR run, expiry line, warning, Copy code / Copy link). Edit permissions is a narrow `DialogShell`: a preset `Select` and eight 44px checkbox rows; a single change reads Custom. Full-screen sheets below `md`. `04-design-system.md` §11.36. **W8a:** a teacher with no branch (a workspace-only account) sees the `PageHeader` and one card with one line — assistants work at branches, workspaces take none yet (D-W38) — and nothing to act on. **W8d (D-W41 item 11):** a workspace-only teacher gets the whole page; only an account with neither a branch nor a workspace sees the one-line card ("assistants work at your branches and in your workspaces").
+
+### `app/[locale]/(teacher)/teacher/workspaces/page.tsx` — **W8a (new)**
+Workspaces (D-W38). `PageHeader`, then one card: with premium, "n of 100 active" with its hint and **New workspace** (a narrow `DialogShell` with one name field; disabled with its reason at the cap); without premium, the Assistants page's premium card (sparkle, premium badge, what it allows, "Contact KayEdu") plus an amber lock line "Read-only — renew premium to make changes" when the account has workspaces. Below it one card per workspace — name, Active (green) / Archived (neutral) badge, "n active classes" — a link at least 96px tall; one column on a phone, two from `md`, three from `xl`. An empty `EmptyState` otherwise. `04-design-system.md` §11.37.
+
+### `app/[locale]/(teacher)/teacher/workspaces/[id]/page.tsx` — **W8a (new)**
+A workspace's Classes, under the workspace layout: `PageHeader` (the name, a back link to Workspaces, the Active/Archived badge and a "Read-only" amber badge when writes are off), an amber `role="status"` banner on lapsed premium and a neutral one when archived, then three even tab pills (Classes, Sessions, Settings; 44px, `aria-current`, no wrap at 375). A `PageSection` with **New class** (the branch class dialog's sections — catalogue picker, a teacher note, price with a "no cut" note, the period without terms, the late threshold, the weekly rows — minus teacher, rooms, cut, booking and terms) and one card per class (name, Active/Inactive badge, weekly slots line, period, price, upcoming count); one column until `xl`. `04-design-system.md` §11.37.
+
+### `app/[locale]/(teacher)/teacher/workspaces/[id]/classes/[classId]/page.tsx` — **W8a (new)**
+One workspace class: a card with the name and status, **Edit class** / **Deactivate** (confirmed) or **Reactivate** (with the conflict notice) / **Delete class** (confirmed) — stacked full-width on a phone — and its facts as `DetailRow`s with the "no cut" note; a `PageSection` of weekly slots (44px rows with an icon-only Remove behind `ConfirmAction`, then an inline add-slot form: weekday, time range, the conflict notice); a `PageSection` of the class's sessions (the session cards below) with **Add a session**. `04-design-system.md` §11.37. **W8b:** a `PageSection` **Students** between the slots and the sessions — the ACTIVE roster as 44px rows (name, the Linked / Not linked badge, an icon-only **Remove** behind `ConfirmAction`) and an inline **Enrol** form (one `Select` of the workspace's own students, full width on a phone).
+
+### `app/[locale]/(teacher)/teacher/workspaces/[id]/sessions/page.tsx` — **W8a (new)**
+The workspace's sessions from the teacher's window on, oldest first: stacked cards at every width (name and kind badge, date, time, price, "Moved from …" on a replacement, the status badge), each with **Reschedule** (a narrow `DialogShell`: date, time range, conflict notice), **Cancel session** and, for an extra or one-time session, **Delete** — only on a session that has not started and only while writes are on. **New session** is a narrow `DialogShell` (type, class or title + price, date, time range). `04-design-system.md` §11.37.
+
+### `app/[locale]/(teacher)/teacher/workspaces/[id]/sessions/[sessionId]/page.tsx` — **W8c (new)**
+One workspace session (D-W40), under the workspace layout (which owns the `PageHeader`). A card with **Back to sessions**, the session's name as an h2, the kind and status badges, date and time range, and — on a live session while writes are on — **End session** (the branch dialog's wording; full width on a phone). The closed banner (lock icon) when closed. `DetailLayout`: the **Roster** card in the main column — one stacked card per enrolled student at every width: name, code, a text status badge (Present green, Late amber, Absent red; Not checked in and Not arrived neutral), **Check in** (44px, full width on a phone), the Attendance control for corrections, the Absent-on-a-paid-student `DialogShell` with its required reason, **Record payment** with the amount read-only ("Amount: …" and the no-cut note), and once paid the green "Paid … · Cash" panel with **Void** and **Refund** and their U2 help lines and required reasons. The side column: the **Receipt** (the branch `SessionReceipt` — collected, centre share 0, teacher share, counts, voided / refunded / unpaid lines, the change log) above or below **Details** (it leads once closed). No settlement verb. `04-design-system.md` §11.37. The Sessions list gained **Open session** on every row.
+
+### `app/[locale]/(teacher)/teacher/workspaces/[id]/students/page.tsx` — **W8b (new)**
+A workspace's Students (D-W39), under the workspace layout (whose tab pills are now four — Classes, Students, Sessions, Settings — two per row below `sm`, one row from `sm`). A `PageSection` with **Add student** (a narrow `DialogShell`: first and last name, the phone in an LTR field with its "can't be changed later" hint, an optional grade `Select`) and, when the teacher has students in other workspaces, **Add from my other workspaces** (a narrow `DialogShell` with one `Select`, each option "name · phone · workspace"); both only while writes are on. One card per student — name, code, phone (LTR), grade, "In n classes" and a **Linked** (green) / **Not linked** (neutral) text badge; an unlinked card carries **Invite again** (while writes are on) and **Cancel invitation** (behind `ConfirmAction`, always). Never a pending-invitation state. One column until `xl`. An `EmptyState` otherwise. `04-design-system.md` §11.37.
+
+### `app/[locale]/(teacher)/teacher/workspaces/[id]/settings/page.tsx` — **W8a (new)**
+Two `PageSection`s: **Name** (a card with one field and Save, disabled while read-only) and **Archive** / **Unarchive** (a card with what it does and the confirmed button; Unarchive disabled with its reason without premium or at the cap). `04-design-system.md` §11.37.
 
 ### `app/[locale]/(teacher)/teacher/students/page.tsx`
 Consistent. No change.
@@ -220,6 +255,9 @@ Consistent. No change.
 ### `app/[locale]/(teacher)/teacher/approvals/page.tsx`
 Decline/Approve buttons unequal. **R10a:** equal-width pair (shared pattern with the centre queue).
 
+### `app/[locale]/(teacher)/teacher/earnings/page.tsx` — **W8d (new)**
+Earnings (D-W29, D-W41). `PageHeader` "Earnings", then one filter card: the shared date filter (§11.7) with this page's presets — Last 7 / 30 / 90 days, This month — and its calendar range. Under it, in the `ResultsRegion`: an amber note when a period could not be read, a blue note when the teacher's history setting cut the period ("counts from <date>"), and the period in words. A `StatGrid` of three — **Collected** ("Branches and workspaces together, after refunds"), **Refunded** (its own figure, never netted silently) and **Paid sessions** — and a dense row of three — Present, Late, Absent (two up on a phone). **Branches** (`PageSection`): a totals card (your share, refunded, collected after refunds, **Paid out to you**, **Not yet paid out** — one `dl`, amounts end-aligned and tabular) with its one-line hint, then a card per branch (the same lines and a **By class** list of stacked rows: class name, "n paid sessions · present · late · absent", the net amount and any refund). **Workspaces**: a card per workspace with a neutral **Private** badge, collected only and the "never settled" line, and its classes. **By week**: one card, a row per Sunday-start week with "Your share" and any refund — the one small trend, a list not a chart. Two columns of source cards from `lg`; everything stacks at 375px, nothing scrolls sideways. An `EmptyState` when the teacher has no source. `04-design-system.md` §11.38.
+
 ### `app/[locale]/(teacher)/teacher/settlements/page.tsx`
 `CardContent … pt-6` double padding. **R10a:** removed.
 
@@ -229,9 +267,37 @@ Decline/Approve buttons unequal. **R10a:** equal-width pair (shared pattern with
 ### `app/[locale]/(teacher)/teacher/sessions/[id]/page.tsx` — **R10b**
 Teacher session detail. Marked R10b but not among the four centre detail pages this pass covered — not touched.
 **T7:** a "Booked — not arrived (n)" card appears under the roster when students booked this session online and have not arrived (name, code LTR, Booked badge, and for `reservation.manage.own` the same **Cancel booking** button as the centre page, pinned to the teacher's own classes); nothing else on the page changed.
+**W2:** a **Class** row in the session's context card links to the new class page (only for the class's own teacher), and a **Homework** card under the description lists this session's assessments with **Add homework** (docs/04 §11.33).
 
 ### `app/[locale]/(teacher)/teacher/students/[id]/page.tsx` — **R10b**
 Teacher view of a student. Marked R10b but not among the four centre detail pages this pass covered — not touched.
+
+### `app/[locale]/(teacher)/teacher/assessments/page.tsx` — **W2 (new)**
+Exams & homework: `PageHeader` with **New exam**, a filter row (Type, Class, and Branch under All branches — the soft `UrlFilterForm`), and the list as stacked link cards — title (`dir="auto"`), class, branch, window or deadline in its own timezone, question count, and neutral Type / Status badges with text (Published will be `info`). One column at 375px; 44px rows.
+
+### `app/[locale]/(teacher)/teacher/assessments/new/page.tsx` — **W2 (new)**
+"New exam" with no class: a list of the teacher's active classes (one link card each, the branch under All branches). With a class or a session: the builder in create mode — nothing is written until the first **Save draft**.
+
+### `app/[locale]/(teacher)/teacher/assessments/[id]/page.tsx` — **W2 (new); W3a**
+**W3a:** a draft gains a **Publish** card under the builder. A published row opens read-only instead: details and questions in the main column; **Extend**, Preview, and while no student has started **Back to draft** and **Delete** in the side column, which stacks under the questions below `lg`. W2 entry: The builder (docs/04 §11.33): Details, Timing (shared `DatePicker` + `TimePicker`, the zone named), stacked question cards (text, LTR points, 2–5 option rows with a 44px radio and a 44px remove, up/down/delete as 44px icon buttons with labels), and an aside with Settings switches and the **Ready to publish** checklist (icon **and** text). A sticky save bar (total points, saved / unsaved text, Preview, **Save draft**); a Delete draft card with a confirmation. One column below `lg`, aside beside from `lg`.
+
+### `app/[locale]/(teacher)/teacher/assessments/[id]/preview/page.tsx` — **W2 (new)**
+The draft as a student sees it, from the student serializer: title, instructions, times, total points, a timer box showing the duration (not running), the one-sitting warning, then each question with 44px option tiles. No correct marks; Start is disabled. Max width 2xl, one column.
+
+### `app/[locale]/(teacher)/teacher/assessments/[id]/results/page.tsx` — **W4 (new)**
+One published assessment's results: `PageHeader` with the title, class and branch, three dense rows of stat cards, a filter row, the students as a table from `xl` and stacked cards below it, and one block per question. One column at 375px; 44px targets. `04-design-system.md` §11.35.
+
+### `app/[locale]/(teacher)/teacher/assessments/[id]/results/[attemptId]/page.tsx` — **W4 (new)**
+One student's attempt: `PageHeader` with their name, a card of facts, then one card per question with text badges, or the time left and no answers while in progress. §11.35.
+
+### `app/[locale]/(student)/student/assessments/page.tsx` — **W3a (new)**
+Exams & homework for a student: `PageHeader`, then one card per state (In progress, Open, Upcoming, Submitted, Missed, Closed), and under each the student's branches, each with stacked 44px link rows: title (`dir="auto"`), a semantic state badge, type and class, the times in the session's frozen timezone or the branch's, and the score when the teacher left it on. One-column at every width; never a table. docs/04 §11.34.
+
+### `app/[locale]/(student)/student/assessments/[id]/page.tsx` — **W3a (new)**
+One assessment, the face chosen by the server: details and **Start** (a `DialogShell` confirmation); the taking screen (sticky header with the countdown and saved indicator, one question, 44px option tiles, a question grid with answered markers, sticky Previous / Next, a review screen and a confirmation with the unanswered count); or the result and, once allowed, the reveal, each option marked by icon and text. Max width 2xl; 375px and RTL correct. docs/04 §11.34.
+
+### `app/[locale]/(teacher)/teacher/classes/[id]/page.tsx` — **W2 (new)**
+One class the teacher teaches: `PageHeader` (the class name, the branch under All branches, an Inactive badge), its **Exams and homework** card with **New exam**, and a Schedule card (weekly slots, the period). One column below `xl`.
 
 ---
 
@@ -242,9 +308,11 @@ Consistent. No change.
 **T7:** booked single sessions join the upcoming list with a **Booked** (`info`) or **Requested** (`warning`) badge in place of "Upcoming"; the header description says so (docs/04 §11.25).
 
 **DES:** upcoming sessions show eight, then "Show N more" (`CappedList`, docs/04 §14.9).
+**W8b:** a linked workspace profile's sessions join both lists under the workspace's name and the teacher's, with a neutral **Private class** text badge; no room is shown for them (D-W39).
 
 ### `app/[locale]/(student)/student/calendar/page.tsx` — **U7 (new)**
 The student's month calendar on the shared `SessionCalendar` (docs/04 §11.28) across every branch: Present green, Late amber, Absent red, Upcoming blue, Booked blue ring, Requested dashed amber, Cancelled grey struck through; a legend; the tapped day's sessions below, each with a text badge, its branch and room. No branch switcher anywhere in the student shell (U7).
+**W8b:** a workspace session's day-list row carries the workspace's name, the teacher's name (`CalendarEntry.privateClass`) and a neutral **Private class** badge, and no room (D-W39). The parent calendar never sets it.
 
 ### `app/[locale]/(student)/student/discover/page.tsx`
 Filter labels hand-built (in `discover-filters.tsx`). **R10a:** `FilterField`. The class card's subject-accent top border is the documented rotating subject palette (docs/04 §2), not a status colour.
@@ -265,6 +333,61 @@ A Discover class on the shared `ClassDetail` (the Explore class page's body) und
 
 ### `app/[locale]/(student)/student/profile/page.tsx`
 Redirect only. No change.
+
+---
+
+## Assistant experience (route group `(assistant)`)
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/page.tsx` — **W7a (new)**
+The assistant's landing page, inside its own `AppShell` (platform brand, no branch switcher, the role switcher with this teacher current; **W7b:** the nav is Home plus each granted working page): `PageHeader` "Assistant of <teacher>", one card **What you may do** (the preset and since-date, the full permission list with descriptions) and, from W7b, a card **Where you can work** listing the teacher's branches that allow assistants (44px rows) or a compact `EmptyState` "Not available at the teacher's branches". A teacher this account does not effectively assist reads as not-found. One column at every width. **W8d:** a third card **The teacher's workspaces** when the teacher owns any — each workspace where a workspace permission applies (44px rows with **Private** and **Archived**), or a compact `EmptyState` when none does. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/assessments/page.tsx` — **W7b (new)**
+The teacher's exams and homework for the assistant (`assessments.review`). `PageHeader` "Exams & homework" with "<teacher>'s exams and homework…" and **New exam** only with `assessments.manage`; then the teacher's list card unchanged — Type, Class and (several branches) Branch filters, the stacked link cards with type and status badges, "submitted / eligible" and **Results** on a published row. A Grader's list has no drafts. `04-design-system.md` §11.33, §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/assessments/new/page.tsx` — **W7b (new)**
+New exam or homework for the teacher (`assessments.manage`). Same three states as the teacher's page: choose a class (link rows, branch under several), the exam builder on a class, the homework builder on a session (back to the assistant's class page). The builder is the teacher's component with the assistant surface. `04-design-system.md` §11.33.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/assessments/[id]/page.tsx` — **W7b (new)**
+One assessment for the assistant (`assessments.manage`): the teacher's shared body — the builder with Publish and Delete for a draft; the read-only published view with Extend, Preview, Unpublish and Delete (no attempts) — under a `PageHeader` whose back link is the assistant's list and whose action is **Results** on a published row. A Grader is sent to the results. `04-design-system.md` §11.33.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/assessments/[id]/preview/page.tsx` — **W7b (new)**
+The student's view for the assistant (`assessments.manage`): the teacher's preview body (the student serializer only, a paused timer, a disabled Start), `max-w-2xl`, back to the assistant's assessment page. `04-design-system.md` §11.34.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/assessments/[id]/results/page.tsx` — **W7b (new)**
+Results for the assistant (`assessments.review` or `.manage`): the teacher's results body — summary stat grids, the filters, the student table from `xl` and stacked cards below, the per-question analysis — with the attempt links under the assistant's path. `04-design-system.md` §11.35.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/assessments/[id]/results/[attemptId]/page.tsx` — **W7b (new)**
+One student's attempt for the assistant: the teacher's attempt body (the facts grid, then each question with chosen and correct options as text badges; in progress, the time left and no answers), back to the assistant's results. `04-design-system.md` §11.35.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/classes/page.tsx` — **W7b (new)**
+The teacher's classes, read-only (`classes.view`): `PageHeader` "Classes", one card of link rows (class name; branch under several; weekly slots with LTR times; the period; "n students"; an Inactive badge), each at least 44px. Stacked at every width. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/classes/[id]/page.tsx` — **W7b (new)**
+One of the teacher's classes, read-only: `PageHeader` with back to Classes and **New exam** when allowed; a **Sessions** card (date, LTR times, the status badge, **Add homework** on an open session when allowed) and, beside it from `xl` (below it under), **Weekly schedule** and **Students** (names only, 44px rows). `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/requests/page.tsx` — **W7b (new)**
+Requests for the teacher (`requests.manage`): the teacher's two forms (Request new session, Request a new class) in two cards side by side from `lg`, stacked below; then **The teacher's requests** — rows with the class or subject, a type badge, "via assistant" when one filed it, branch under several, day and LTR times, "Sent <date>", and the status badge (amber / green / red). No cancel control. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/overview/page.tsx` — **W7b (new)**
+The teacher's overview (`analytics.view`, Full): three `StatCard`s (sessions today, this week, earnings this month; one column on a phone) and a **By branch** card (branch avatar, name, one summary line). Read-only. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/earnings/page.tsx` — **W8d (new)**
+The teacher's Earnings for the assistant (`analytics.view`, Full): `PageHeader` "Earnings" with "<teacher>'s share…, read-only", then the teacher page's body unchanged in shape — the filter card, the notes (the window note reads "You can see back to <date> only"), the stat rows, Branches and Workspaces cards and By week — **without** the paid-out lines (no settlement figure ever reaches an assistant). A 404 without `analytics.view` anywhere. `04-design-system.md` §11.36, §11.38.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/workspaces/page.tsx` — **W8d (new)**
+The teacher's workspaces where the assistant may work (`classes.view`, `checkin.workspace` or `payments.workspace`): `PageHeader` "Workspaces", a card per workspace (name, **Private**, **Archived** when read-only) with **Classes** (with `classes.view`) and **Sessions** link buttons, full width on a phone; one column on a phone, two from `md`. No create, rename, archive, students or settings. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/workspaces/[id]/page.tsx` — **W8d (new)**
+One workspace's classes, read-only (`classes.view`): `PageHeader` (workspace name, back to Workspaces, **Private**, a **Sessions** action), a card per class (name, Inactive badge, weekly slots, period · price, **Open class**); one column on a phone, two from `md`. No class form. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/workspaces/[id]/classes/[classId]/page.tsx` — **W8d (new)**
+One workspace class, read-only: `PageHeader` (class name, the workspace, back to its classes); a **Sessions** card with the W8a session cards (every row opens the assistant's session page; no reschedule, cancel or delete) and, beside it from `xl` (below it under), **Weekly schedule** and **Students** — names, plus the phone in an LTR run only with `students.phones` (44px rows). No enrol or remove. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/workspaces/[id]/sessions/page.tsx` — **W8d (new)**
+A workspace's sessions for the assistant: `PageHeader` (workspace name, back to Workspaces, **Private**, **Classes** with `classes.view`) and the W8a session cards from the assistant's floor, read-only, each opening its session page. `04-design-system.md` §11.36.
+
+### `app/[locale]/(assistant)/assistant/[teacherId]/workspaces/[id]/sessions/[sessionId]/page.tsx` — **W8d (new)**
+One workspace session for the assistant: `PageHeader` (session name, the workspace, kind, status and **Private** badges; **End session** as the action under `checkin.workspace` on a live session), an info line when archived or when the assistant may only read, then the W8c roster in the main column — **Check in**, the Attendance control and the Absent dialog with `checkin.workspace`; **Record payment** (the read-only amount), **Void** and **Refund** with `payments.workspace`; phones (LTR) only with `students.phones` — and **Details** beside it from `lg`. No receipt and no settlement verb. `04-design-system.md` §11.36, §11.37.
 
 ---
 
@@ -302,6 +425,9 @@ New. `PageHeader` (back to the list, the usage badge as meta), the **Branch limi
 
 ### `app/[locale]/(admin)/admin/catalog/page.tsx`
 Consistent. No change.
+
+### `app/[locale]/(admin)/admin/teachers/page.tsx` — **W6 (new)**
+Teachers (premium, D-W35): `PageHeader`, a **Find an account** card (one email field, LTR, and Find beside it from `sm`, stacked below), then either the neutral empty state "No account with that email" or one card for the match: name with a text status badge (Not premium / Premium until <date> green / Expired on <date>, plus an amber "Ends in n days"), the email row, an end-date `DatePicker` with Grant or Extend, and, while premium, **Revoke premium** behind the shared `ConfirmAction`. One column at every width; 44px targets. `04-design-system.md` §11.36.
 
 ---
 

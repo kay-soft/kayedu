@@ -4,6 +4,7 @@ import { BookOpen } from "lucide-react";
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 
+import { assistantCreateSessionRequestAction } from "@/app/[locale]/(assistant)/assistant/[teacherId]/requests/actions";
 import { createSessionRequestAction } from "@/app/[locale]/(teacher)/teacher/sessions/actions";
 import { TimeRangeFields } from "@/components/center/time-range-fields";
 import { FieldError, FormMessage } from "@/components/shared/form-message";
@@ -28,7 +29,14 @@ export type RequestBranchOption = { id: string; name: string; classes: TeacherCl
  * one, a Branch select comes first and the class list follows it. The action
  * re-resolves the posted branch and re-checks the class there.
  */
-export function SessionRequestForm({ branches }: { branches: RequestBranchOption[] }) {
+export function SessionRequestForm({
+  branches,
+  teacherId,
+}: {
+  branches: RequestBranchOption[];
+  /** W7b: set on an assistant's page — the request is filed for this teacher (D-W37). */
+  teacherId?: string;
+}) {
   const t = useTranslations("TeacherSessions.request");
   const tScope = useTranslations("TeacherScope");
   const tErrors = useTranslations("TeacherSessions.errors");
@@ -37,7 +45,7 @@ export function SessionRequestForm({ branches }: { branches: RequestBranchOption
   const classes = branches.find((branch) => branch.id === branchId)?.classes ?? [];
 
   const [state, formAction] = useGuardedActionState(
-    createSessionRequestAction,
+    teacherId ? assistantCreateSessionRequestAction : createSessionRequestAction,
     IDLE_TEACHER_STATE,
   );
 
@@ -48,6 +56,7 @@ export function SessionRequestForm({ branches }: { branches: RequestBranchOption
   return (
     <form action={formAction} className="flex flex-col gap-3" noValidate>
       <input type="hidden" name="locale" value={locale} />
+      {teacherId ? <input type="hidden" name="teacherId" value={teacherId} /> : null}
       {branches.length === 1 ? <input type="hidden" name="centerId" value={branchId} /> : null}
 
       {state.error ? <FormMessage>{tErrors(state.error)}</FormMessage> : null}

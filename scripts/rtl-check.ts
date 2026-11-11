@@ -30,8 +30,9 @@
  *
  * Pure static analysis — no database needed.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { readSource } from "./lib/source.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -62,8 +63,8 @@ function flattenKeys(obj: unknown, prefix = ""): string[] {
 function checkTranslationParity() {
   console.log("Translation key parity (messages/en.json ↔ messages/ar.json)");
 
-  const en = JSON.parse(readFileSync(join(ROOT, "messages/en.json"), "utf8"));
-  const ar = JSON.parse(readFileSync(join(ROOT, "messages/ar.json"), "utf8"));
+  const en = JSON.parse(readSource(join(ROOT, "messages/en.json")));
+  const ar = JSON.parse(readSource(join(ROOT, "messages/ar.json")));
 
   const enKeys = new Set(flattenKeys(en));
   const arKeys = new Set(flattenKeys(ar));
@@ -155,7 +156,7 @@ function checkNoPhysicalDirectionClasses() {
 
   const hits: { file: string; line: number; pattern: string; text: string }[] = [];
   for (const file of files) {
-    const lines = readFileSync(file, "utf8").split("\n");
+    const lines = readSource(file).split("\n");
     lines.forEach((line, index) => {
       for (const { name, regex } of FORBIDDEN_PATTERNS) {
         if (regex.test(line)) {
@@ -189,7 +190,7 @@ function checkNoInlineLocaleFormatting() {
   const pattern = /\.toLocale(String|DateString|TimeString)\s*\(/;
   const hits: { file: string; line: number }[] = [];
   for (const file of files) {
-    const lines = readFileSync(file, "utf8").split("\n");
+    const lines = readSource(file).split("\n");
     lines.forEach((line, index) => {
       if (pattern.test(line)) hits.push({ file: relative(ROOT, file), line: index + 1 });
     });
@@ -208,7 +209,7 @@ function checkRootLayoutDirWiring() {
   console.log("\nRoot layout dir/lang wiring");
 
   const layoutPath = join(ROOT, "app/[locale]/layout.tsx");
-  const source = readFileSync(layoutPath, "utf8");
+  const source = readSource(layoutPath);
 
   check(
     "app/[locale]/layout.tsx sets dir from the locale (rtl for ar, ltr otherwise)",
@@ -233,13 +234,13 @@ function checkRootLayoutDirWiring() {
 
 function checkMessageKeysResolve() {
   console.log("\nEvery literal message key resolves (SYS)");
-  const en = JSON.parse(readFileSync(join(ROOT, "messages/en.json"), "utf8")) as unknown;
+  const en = JSON.parse(readSource(join(ROOT, "messages/en.json"))) as unknown;
   const missing: string[] = [];
   const scan = (dir: string) =>
     walk(join(ROOT, dir)).concat(dir === "components" ? walkAll(join(ROOT, "components/ui")) : []);
   const files = [...new Set([...scan("app"), ...scan("components"), ...scan("lib")])];
   for (const file of files) {
-    const source = readFileSync(file, "utf8");
+    const source = readSource(file);
     const rel = relative(ROOT, file).replace(/\\/g, "/");
     // Each translator variable with every place it is (re)declared — a file may
     // hold several components that each name theirs `t`; a call resolves

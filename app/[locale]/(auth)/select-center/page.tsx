@@ -1,27 +1,27 @@
 import type { SignupIntent } from "@prisma/client";
 import { getLocale, getTranslations } from "next-intl/server";
-import { Building2, Check, ChevronLeft, GraduationCap, Presentation, Users } from "lucide-react";
+import { Building2, Check, ChevronLeft, GraduationCap } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { selectCenterAction } from "@/app/[locale]/(auth)/actions";
+import { switchExperienceAction } from "@/app/[locale]/(auth)/actions";
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { AnchorButton } from "@/components/shared/link-button";
 import { AuthCard } from "@/components/shared/auth-card";
 import { BrandAvatar } from "@/components/shared/brand-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
+import { SubmitButton } from "@/components/shared/submit-button";
+import { ExperienceGlyph } from "@/components/shell/experience-glyph";
+import { ForgetStaleExperience } from "@/components/shell/forget-stale-experience";
+import { WorkspaceInvitationCard } from "@/components/shell/workspace-invitation-card";
 import { Badge } from "@/components/ui/badge";
-import { getActiveCenterId } from "@/lib/auth/active-center";
-import { isCenterStaffRole } from "@/lib/auth/permissions";
+import { getActiveCenterId, getLastExperienceCookie } from "@/lib/auth/active-center";
+import { resolveLastExperience, type ExperienceEntry } from "@/lib/auth/experiences";
 import { getCurrentUser } from "@/lib/auth/session";
-import {
-  experienceHomes,
-  getOwnerOrgGroups,
-  getUserCenterRelations,
-  getParentChildren,
-} from "@/lib/auth/tenant";
-import { Link, redirect } from "@/lib/i18n/navigation";
+import { getUserCenterRelations, listExperiences } from "@/lib/auth/tenant";
+import { prisma } from "@/lib/db/client";
+import { pendingWorkspaceInvitations } from "@/lib/db/workspace-students";
+import { redirect } from "@/lib/i18n/navigation";
 import { ACCOUNT_HUB_HINT, ROUTES, accountPath } from "@/lib/routes";
-import { centerLogoSrc } from "@/lib/storage-paths";
 import { cn } from "@/lib/utils";
 
 /** The student's own start: onboarding while their grade is unset, else Discover (F4). */
@@ -43,37 +43,99 @@ export default async function SelectCenterPage({
   const tShell = await getTranslations("Shell");
 
   const { switch: switchMode } = await searchParams;
-  const [relations, orgGroups, activeId, children, homes] = await Promise.all([
+  const [relations, experiences, activeId, rememberedExperience, invitations] = await Promise.all([
     getUserCenterRelations(user!.id),
-    getOwnerOrgGroups(user!.id),
+    listExperiences(user!.id),
     getActiveCenterId(),
-    getParentChildren(user!.id),
-    experienceHomes(user!),
+    getLastExperienceCookie(),
+    pendingWorkspaceInvitations(prisma, user!.id),
   ]);
 
   // U7: one experience → straight into it, never the hub (a parent with no
   // branch, SYS; a student or a teacher at several branches; one staff
   // branch, which `getTenantContext` resolves on its own). An Owner of a
   // multi-branch organization always has several: each branch and the roll-up.
-  if (homes.length === 1 && switchMode !== "1") {
-    redirect({ href: homes[0].href, locale });
+  // W8b (D-W39 item 7): a pending workspace invitation keeps the hub open —
+  // its card lives here, and the invitation notice links here.
+  if (experiences.length === 1 && switchMode !== "1" && invitations.length === 0) {
+    redirect({ href: experiences[0].href, locale });
   }
 
-  // The hub offers experiences (U7): the student, teacher and parent portals —
-  // each spans every branch, so none is a branch card — then the branches this
-  // person works at as staff, as before.
-  const staffRelations = relations.filter((relation) => relation.roles.some((role) => isCenterStaffRole(role)));
-  const portals: { key: string; href: string; icon: ReactNode; title: string; hint: string }[] = [
-    ...(relations.some((relation) => relation.roles.includes("STUDENT"))
-      ? [{ key: "student", href: ROUTES.studentSchedule, icon: <GraduationCap className="size-5" />, title: t("studentPortal"), hint: t("studentPortalHint") }]
-      : []),
-    ...(relations.some((relation) => relation.roles.includes("TEACHER"))
-      ? [{ key: "teacher", href: ROUTES.teacherDashboard, icon: <Presentation className="size-5" />, title: t("teacherPortal"), hint: t("teacherPortalHint") }]
-      : []),
-    ...(children.linked.length > 0
-      ? [{ key: "parent", href: ROUTES.parentHome, icon: <Users className="size-5" />, title: t("parentPortal"), hint: t("parentPortalHint") }]
-      : []),
-  ];
+  // D-W34: the last one used goes first, labelled, with Continue. It never
+  // redirects (D-W13), and the list stays the authority: a value naming
+  // anything not in it is ignored, and cleared from the browser below.
+  const { entry: lastUsed, stale } = resolveLastExperience(rememberedExperience, experiences);
+  const others = experiences.filter((entry) => entry.key !== lastUsed?.key);
+  const hasPortal = experiences.some((entry) => entry.group.kind === "portals");
+  const portals = others.filter((entry) => entry.group.kind === "portals");
+  const staff = others.filter((entry) => entry.group.kind === "organization");
+  const platform = others.filter((entry) => entry.group.kind === "platform");
+  // W7a: an assistant link is no branch relation, but it is something to open.
+  const connected = relations.length > 0 || experiences.some((entry) => entry.kind === "assistant");
+
+  /** The hub's own wording for an entry; the same list the switcher renders. */
+  const copyOf = (entry: ExperienceEntry): { title: string; hint: string | null } => {
+    switch (entry.kind) {
+      case "student":
+        return { title: t("studentPortal"), hint: t("studentPortalHint") };
+      case "teacher":
+        return { title: t("teacherPortal"), hint: t("teacherPortalHint") };
+      case "parent":
+        return { title: t("parentPortal"), hint: t("parentPortalHint") };
+      case "assistant":
+        return { title: t("assistantPortal", { teacher: entry.label.place ?? "" }), hint: t("assistantPortalHint") };
+      case "rollup":
+        return {
+          title: t("wholeManagement", { organization: entry.label.place ?? "" }),
+          hint: t("wholeManagementHint", { count: entry.branchCount ?? 0 }),
+        };
+      case "staff":
+        return { title: entry.label.place ?? "", hint: null };
+      case "admin":
+        return { title: t("platformAdminLink"), hint: null };
+    }
+  };
+
+  /** One entry's form: its key only, looked up in the current list by the action. */
+  const switchForm = (entry: ExperienceEntry, children: ReactNode) => (
+    <form key={entry.key} action={switchExperienceAction}>
+      <input type="hidden" name="locale" value={locale} />
+      <input type="hidden" name="key" value={entry.key} />
+      {children}
+    </form>
+  );
+
+  const roleBadges = (entry: ExperienceEntry) =>
+    entry.kind === "staff"
+      ? entry.label.roles.map((role) => (
+          // A role is not a status (docs/04 §14.1).
+          <Badge key={role} variant="neutral">
+            {tRoles(role)}
+          </Badge>
+        ))
+      : null;
+
+  const choiceCard = (entry: ExperienceEntry) => {
+    const { title, hint } = copyOf(entry);
+    // The active staff branch keeps its mark until "Last used" takes that job.
+    const selected = !lastUsed && (activeId === entry.centerId || (entry.kind === "rollup" && activeId === entry.organizationId));
+    return switchForm(
+      entry,
+      <button
+        type="submit"
+        aria-current={selected ? "true" : undefined}
+        className={cn(CHOICE_CARD, selected ? CHOICE_SELECTED : CHOICE_IDLE)}
+      >
+        <EntryMark entry={entry} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">{title}</span>
+          {hint ? <span className="block truncate text-xs text-text-secondary">{hint}</span> : null}
+          {entry.kind === "staff" ? <span className="mt-1 flex flex-wrap gap-1">{roleBadges(entry)}</span> : null}
+        </span>
+        <ChoiceMark selected={selected} />
+      </button>,
+    );
+  };
 
   // F4: the three starting points, the person's declared sign-up intent first
   // (and highlighted). A null intent keeps today's order and emphasis. All three
@@ -91,38 +153,64 @@ export default async function SelectCenterPage({
 
   return (
     <div className="flex flex-col gap-4">
+      {stale ? <ForgetStaleExperience /> : null}
       <AuthCard
         // With nothing to choose, the title says so (DES, docs/04 §12).
-        title={relations.length > 0 ? (portals.length > 0 ? t("titleExperiences") : t("title")) : t("emptyTitle")}
+        title={connected ? (hasPortal ? t("titleExperiences") : t("title")) : t("emptyTitle")}
         // The empty state below carries its own title — not said twice.
-        description={relations.length > 0 ? (portals.length > 0 ? t("subtitleExperiences") : t("subtitle")) : undefined}
+        description={connected ? (hasPortal ? t("subtitleExperiences") : t("subtitle")) : undefined}
       >
         <div className="flex flex-col gap-3">
+          {invitations.length > 0 ? (
+            <section aria-label={t("invitationsLabel")} className="flex flex-col gap-3">
+              {invitations.map((invitation) => (
+                <WorkspaceInvitationCard
+                  key={invitation.id}
+                  invitationId={invitation.id}
+                  teacherName={invitation.teacherName ?? t("invitationTeacherFallback")}
+                  workspaceName={invitation.workspaceName}
+                />
+              ))}
+            </section>
+          ) : null}
+
+          {lastUsed ? (
+            <div className={cn("flex flex-col gap-3 rounded-xl border p-3 sm:p-4", CHOICE_SELECTED)}>
+              <div className="flex items-center gap-3">
+                <EntryMark entry={lastUsed} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{copyOf(lastUsed).title}</span>
+                  {copyOf(lastUsed).hint ? (
+                    <span className="block truncate text-xs text-text-secondary">{copyOf(lastUsed).hint}</span>
+                  ) : null}
+                  {/* Text, never colour alone. */}
+                  <span className="mt-1 flex flex-wrap gap-1">
+                    <Badge variant="neutral">{t("lastUsed")}</Badge>
+                    {roleBadges(lastUsed)}
+                  </span>
+                </span>
+              </div>
+              {switchForm(
+                lastUsed,
+                <SubmitButton className="w-full">
+                  {t("continue")}
+                  <span className="sr-only">: {copyOf(lastUsed).title}</span>
+                </SubmitButton>,
+              )}
+            </div>
+          ) : null}
+
           {portals.length > 0 ? (
             <nav aria-label={t("portalsLabel")} className="flex flex-col gap-3">
-              {portals.map((portal) => (
-                <Link key={portal.key} href={portal.href} className={cn(CHOICE_CARD, CHOICE_IDLE)}>
-                  <span
-                    aria-hidden
-                    className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand"
-                  >
-                    {portal.icon}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">{portal.title}</span>
-                    <span className="block truncate text-xs text-text-secondary">{portal.hint}</span>
-                  </span>
-                  <ChoiceMark selected={false} />
-                </Link>
-              ))}
+              {portals.map((entry) => choiceCard(entry))}
             </nav>
           ) : null}
 
-          {portals.length > 0 && (staffRelations.length > 0 || orgGroups.length > 0) ? (
+          {hasPortal && staff.length > 0 ? (
             <p className="pt-1 text-xs font-medium text-text-muted">{t("branchesHeading")}</p>
           ) : null}
 
-          {relations.length === 0 ? (
+          {!connected ? (
             <EmptyState
               icon={<Building2 />}
               tone="info"
@@ -151,95 +239,29 @@ export default async function SelectCenterPage({
             />
           ) : null}
 
-          {orgGroups.map((group) => {
-            const selected = activeId === group.organizationId;
-            return (
-              <form key={group.organizationId} action={selectCenterAction}>
-                <input type="hidden" name="locale" value={locale} />
-                <input
-                  type="hidden"
-                  name="selectionId"
-                  value={group.organizationId}
-                />
-                <button
-                  type="submit"
-                  aria-current={selected ? "true" : undefined}
-                  className={cn(CHOICE_CARD, selected ? CHOICE_SELECTED : CHOICE_IDLE)}
-                >
-                  <span
-                    aria-hidden
-                    className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground"
-                  >
-                    <Building2 className="size-5" />
-                  </span>
+          {staff.map((entry) => choiceCard(entry))}
 
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">
-                      {t("wholeManagement", { organization: group.organizationName })}
-                    </span>
-                    <span className="block truncate text-xs text-text-secondary">
-                      {t("wholeManagementHint", { count: group.branches.length })}
-                    </span>
-                  </span>
+          {platform.map((entry) =>
+            switchForm(
+              entry,
+              <SubmitButton variant="ghost" className="w-full justify-start text-brand">
+                <ExperienceGlyph icon={entry.icon} className="size-4" />
+                {copyOf(entry).title}
+              </SubmitButton>,
+            ),
+          )}
 
-                  <ChoiceMark selected={selected} />
-                </button>
-              </form>
-            );
-          })}
-
-          {staffRelations.map((relation) => {
-            const selected = activeId === relation.center.id;
-            return (
-              <form key={relation.center.id} action={selectCenterAction}>
-                <input type="hidden" name="locale" value={locale} />
-                <input
-                  type="hidden"
-                  name="selectionId"
-                  value={relation.center.id}
-                />
-                <button
-                  type="submit"
-                  aria-current={selected ? "true" : undefined}
-                  className={cn(CHOICE_CARD, selected ? CHOICE_SELECTED : CHOICE_IDLE)}
-                >
-                  <BrandAvatar
-                    name={relation.center.name}
-                    logoUrl={centerLogoSrc(relation.center)}
-                    themeColor={relation.center.themeColor}
-                    size="lg"
-                  />
-
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">
-                      {relation.center.name}
-                    </span>
-                    <span className="mt-1 flex flex-wrap gap-1">
-                      {relation.roles.filter((role) => isCenterStaffRole(role)).map((role) => (
-                        // A role is not a status (docs/04 §14.1).
-                        <Badge key={role} variant="neutral">
-                          {tRoles(role)}
-                        </Badge>
-                      ))}
-                    </span>
-                  </span>
-
-                  <ChoiceMark selected={selected} />
-                </button>
-              </form>
-            );
-          })}
-
-          {user!.isPlatformAdmin ? (
-            <AnchorButton
-              href={`/${locale}${ROUTES.adminCenters}`}
-              variant="ghost"
-              className="w-full justify-start text-brand"
-            >
-              <Building2 className="size-4" aria-hidden />
-              {t("platformAdminLink")}
-            </AnchorButton>
-          ) : null}
+          {/* W10 (D-W43): a teacher's share code links a private class — every account. */}
+          <a href={`/${locale}${ROUTES.workspaceJoin}`} className={cn(CHOICE_CARD, CHOICE_IDLE)}>
+            <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+              <GraduationCap className="size-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold">{t("joinPrivateClass")}</span>
+              <span className="block text-xs text-text-secondary">{t("joinPrivateClassHint")}</span>
+            </span>
+            <ChoiceMark selected={false} />
+          </a>
         </div>
       </AuthCard>
 
@@ -267,6 +289,30 @@ const CHOICE_IDLE =
 // The branch you are already working in: brand outline + tint + a check, so
 // "current" never depends on colour alone.
 const CHOICE_SELECTED = "border-brand bg-brand/5 ring-2 ring-brand/20";
+
+function EntryMark({ entry }: { entry: ExperienceEntry }) {
+  if (entry.brand) {
+    return (
+      <BrandAvatar
+        name={entry.brand.name}
+        logoUrl={entry.brand.logoUrl}
+        themeColor={entry.brand.themeColor}
+        size="lg"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "flex size-11 shrink-0 items-center justify-center rounded-lg",
+        entry.kind === "rollup" ? "bg-brand text-brand-foreground" : "bg-brand/10 text-brand",
+      )}
+    >
+      <ExperienceGlyph icon={entry.icon} className="size-5" />
+    </span>
+  );
+}
 
 function ChoiceMark({ selected }: { selected: boolean }) {
   return selected ? (

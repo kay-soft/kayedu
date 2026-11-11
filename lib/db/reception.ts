@@ -450,7 +450,7 @@ export async function recentCheckIns(
       attendanceStatus: { in: PRESENT_OR_LATE },
       studentProfileId: { not: null },
     },
-    orderBy: { recordedAt: "desc" },
+    orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
     take: RECENT_CHECK_INS,
     include: { studentProfile: { include: { user: true } } },
   });

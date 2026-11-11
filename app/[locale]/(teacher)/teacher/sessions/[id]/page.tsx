@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { cancelOwnBookingAction } from "@/app/[locale]/(teacher)/teacher/approvals/actions";
 import { SessionDescriptionForm } from "@/app/[locale]/(teacher)/teacher/sessions/[id]/description-form";
+import { LinkedAssessments } from "@/app/[locale]/(teacher)/teacher/assessments/linked-assessments";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { CancelBookingButton } from "@/components/center/cancel-booking-button";
@@ -35,6 +36,7 @@ import { ROUTES } from "@/lib/routes";
 import { DEFAULT_TIMEZONE } from "@/lib/scheduling";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LinkButton } from "@/components/shared/link-button";
+import { Link } from "@/lib/i18n/navigation";
 
 const STATUS_BADGE = {
   SCHEDULED: "info",
@@ -278,6 +280,14 @@ export default async function TeacherSessionDetailPage({
             </CardContent>
           </Card>
 
+          {/* W2: homework set from this session (D-W03); the card renders nothing without the branch's grant. */}
+          <LinkedAssessments
+            ctx={ctx}
+            kind="session"
+            sessionId={session.id}
+            hasClass={session.classGroupId !== null}
+            canCreate={displayStatus !== "CANCELLED" && displayStatus !== "RESCHEDULED"}
+          />
         </div>
 
         <div className="flex flex-col gap-6">
@@ -290,6 +300,18 @@ export default async function TeacherSessionDetailPage({
                 <div className="flex justify-between gap-3">
                   <span className="text-text-secondary">{tScope("branch")}</span>
                   <span className="min-w-0 text-end font-medium break-words text-text-primary">{ctx.center.name}</span>
+                </div>
+              ) : null}
+              {/* W2: the class page opens for the class's own teacher only (a per-session cover sees no link). */}
+              {session.classGroup && session.classGroup.teacherId === ctx.user.id ? (
+                <div className="flex justify-between gap-3">
+                  <span className="text-text-secondary">{t("fields.class")}</span>
+                  <Link
+                    href={ROUTES.teacherClass(session.classGroup.id)}
+                    className="min-w-0 text-end font-medium break-words text-brand underline-offset-4 hover:underline focus-ring"
+                  >
+                    {className}
+                  </Link>
                 </div>
               ) : null}
               <div className="flex justify-between gap-3">

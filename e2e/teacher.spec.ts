@@ -1,5 +1,10 @@
-import { SEED } from "./support/accounts";
+import { PrismaClient } from "@prisma/client";
+
+import { E2E_USER_PREFIX } from "../scripts/lib/e2e-users";
+import { e2eOneOffSessionWhere, removeE2eOneOffSessions } from "../scripts/lib/e2e-sessions";
+import { SEED, uniqueTag } from "./support/accounts";
 import { expect, expectHealthy, primaryNav, test } from "./support/fixtures";
+import { insertOneOffSession } from "./support/session-fixtures";
 
 /**
  * Journey 6 — the teacher at one centre, at two centres and at none (SYS
@@ -40,6 +45,30 @@ test("one centre: every teacher page renders; a session opens with its note card
     await expect(
       page.getByText(msg("TeacherSessions.description.hintNoDeadline")).or(page.getByText(/after the start of the session's day|بعد بداية يوم الحصة/)),
     ).toBeVisible();
+  }
+});
+
+// V9: a one-time session (no class) opens for its teacher. The session page reads
+// its class only behind a guard; this proves the guard in a real render.
+test("@write a one-time session renders for its teacher, without homework and with the reason", async ({ as, appLocale, msg }) => {
+  const tag = uniqueTag(E2E_USER_PREFIX).toLowerCase();
+  const db = new PrismaClient();
+  try {
+    const session = await insertOneOffSession(db, tag);
+    const page = await as("teacherDowntown");
+    await page.goto(`/${appLocale}/teacher/sessions/${session.id}`);
+    await expect(page).toHaveURL(new RegExp(`/${appLocale}/teacher/sessions/${session.id}$`));
+    await expectHealthy(page, appLocale);
+    await expect(page.getByRole("heading", { level: 1, name: session.title })).toBeVisible();
+    await expect(page.getByText(msg("TeacherAssessments.sessionSection.oneOff"), { exact: true })).toBeVisible();
+    await expect(page.getByText(msg("TeacherAssessments.addHomework"), { exact: true })).toHaveCount(0);
+  } finally {
+    try {
+      await removeE2eOneOffSessions(db, tag);
+      expect(await db.session.count({ where: e2eOneOffSessionWhere(tag) }), "the teardown removed this run's session").toBe(0);
+    } finally {
+      await db.$disconnect();
+    }
   }
 });
 

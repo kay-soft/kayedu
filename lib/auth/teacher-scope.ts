@@ -5,6 +5,8 @@ import type { User } from "@prisma/client";
 import { getTeacherBranchId } from "@/lib/auth/active-center";
 import type { Permission } from "@/lib/auth/permissions";
 import { getCurrentUser } from "@/lib/auth/session";
+import { prisma } from "@/lib/db/client";
+import { ownsAnyWorkspace } from "@/lib/db/workspaces";
 import {
   ctxCan,
   getTeacherContexts,
@@ -44,13 +46,35 @@ async function redirectTo(href: string): Promise<never> {
 
 /**
  * The teacher portal's gate and scope, once per request. A signed-out user
- * goes to sign-in; a user who teaches nowhere to the centre directory (M15).
+ * goes to sign-in; a user who teaches at no branch to their own workspaces
+ * when they own one (W8a, D-W38 item 11), else to the centre directory (M15).
+ * Workspaces are never in this scope — they are read through their own
+ * context (`lib/auth/workspace-context.ts`), not the All-branches union.
  */
 export const getTeacherScope = cache(async (): Promise<TeacherScope> => {
   const user = await getCurrentUser();
   if (!user) return redirectTo(ROUTES.login);
   const scope = await resolveTeacherScope(user);
-  return scope ?? redirectTo(ROUTES.teacherCenters);
+  if (scope) return scope;
+  return redirectTo((await ownsAnyWorkspace(prisma, user.id)) ? ROUTES.teacherWorkspaces : ROUTES.teacherCenters);
+});
+
+/**
+ * W9 (D-W42 item 7): the scope of the pages that also read the teacher's
+ * PERSONAL workspaces — Exams & homework (list, builder, preview, results) and
+ * the Calendar. The same as `getTeacherScope` for a teacher at a branch; a
+ * workspace-only teacher gets an **empty** branch scope (`inView: []`) instead
+ * of the redirect, because those pages union their workspaces beside the
+ * branches, each under its own context (`getWorkspaceContext`). An account with
+ * neither still goes to the centre directory. Workspaces never join `inView`.
+ */
+export const getTeacherWorkspaceScope = cache(async (): Promise<TeacherScope> => {
+  const user = await getCurrentUser();
+  if (!user) return redirectTo(ROUTES.login);
+  const scope = await resolveTeacherScope(user);
+  if (scope) return scope;
+  if (!(await ownsAnyWorkspace(prisma, user.id))) return redirectTo(ROUTES.teacherCenters);
+  return { user, relations: await getUserCenterRelations(user.id), contexts: [], selected: null, inView: [] };
 });
 
 /**

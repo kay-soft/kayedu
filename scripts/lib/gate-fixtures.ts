@@ -19,6 +19,8 @@ export const GATE_FIXTURE_STEMS = [
   "admin-check",
   "analytics-check",
   "approvals-check",
+  "assessments-check",
+  "assistants-check",
   "branches-check",
   "card-layout-check",
   "catalog-check",
@@ -28,6 +30,7 @@ export const GATE_FIXTURE_STEMS = [
   "config-check",
   "enrollment-check",
   "isolation-check",
+  "notifications-check",
   "one-off-sessions-check",
   "parent-check",
   "payment-methods-check",
@@ -44,7 +47,16 @@ export const GATE_FIXTURE_STEMS = [
   "student-portal-check",
   "teacher-portal-check",
   "visibility-check",
+  // W8a (D-W38): a workspace centre's slug is generated (never a fixture
+  // stem), so check:workspaces finds its centres through these users.
+  "workspaces-check",
 ] as const;
+
+/**
+ * The one title prefix of every assessment the e2e suite creates (W3a). Not a
+ * gate fixture: `scripts/lib/e2e-assessments.ts` deletes by it.
+ */
+export const E2E_ASSESSMENT_PREFIX = "E2E-assessment-";
 
 /** Other email prefixes a gate creates users under (not of the `<gate>-check` shape). */
 export const GATE_FIXTURE_EXTRA_EMAIL_PREFIXES = ["isolation-family-"] as const;

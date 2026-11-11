@@ -13,10 +13,21 @@
  *
  * The behaviour against a database (wrong password, collisions, a
  * staff-created email, the flag off) is `check:security`'s F2 block.
+ * W5 (D-W34): the experience list's shape and the remembered experience's rules
+ * are here too; the list against real rows is `check:people`'s W5 block.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import type { Center } from "@prisma/client";
+import {
+  LAST_EXPERIENCE_COOKIE,
+  buildExperiences,
+  lastExperienceOf,
+  parseLastExperience,
+  resolveLastExperience,
+} from "../lib/auth/experiences.ts";
+import type { CenterRelation } from "../lib/auth/relations.ts";
 import { profileFromMetadata } from "../lib/auth/identity-link.ts";
 import { onboardingPath } from "../lib/auth/onboarding.ts";
 import { PROMOTION_UNDO_DAYS, isWithinUndoWindow, undoDeadline } from "../lib/promotion.ts";
@@ -26,6 +37,7 @@ import {
   emailChangeMode,
   productionAuthProblems,
 } from "../lib/auth/auth-config.ts";
+import { readSource } from "./lib/source.ts";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
 
@@ -41,7 +53,7 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 function read(path: string): string {
-  return readFileSync(join(ROOT, path), "utf8");
+  return readSource(join(ROOT, path));
 }
 
 /** Comments blanked — a doc comment may *name* the field; code may not read it. */
@@ -171,9 +183,14 @@ for (const [group, file, builder, experience] of [
   check(`${group}: the layout renders ${builder}()'s frame`, layout.includes(`await ${builder}()`) && /<AppShell \{\.\.\.frame\.props\}>/.test(layout));
 }
 const page = code("app/[locale]/account/page.tsx");
+// W6: since W1 the five shell calls live in `shellFrameFor` (components/shell/
+// experience-frame.ts), which the account page and the inbox share. Same meaning:
+// every experience's frame is built there, and the account page renders it.
+const frameSelector = code("components/shell/experience-frame.ts");
 check(
   "the account page renders every experience's shared frame",
-  ["centerShell()", "teacherShell()", "studentShell({ interruptions: false })", "parentShell()", "adminShell()"].every((call) => page.includes(call)) &&
+  ["centerShell()", "teacherShell()", "studentShell({ interruptions: false })", "parentShell()", "adminShell()"].every((call) => frameSelector.includes(call)) &&
+    /shellFrameFor\(experience\)/.test(page) &&
     /<AppShell \{\.\.\.frame\.props\}>/.test(page),
 );
 check("the account page keeps both named extension points", /<StudyDetailsSection\b/.test(page) && /<FamilySection\b/.test(page));
@@ -294,6 +311,148 @@ check(
   !/next(Grade)?\b/i.test(code("lib/student-grade-options.ts")) &&
     gradePickerData("en", [catalogGrade], null, { noSystem: "Other", inactive: "Off" }).systems[0].value === "none",
 );
+
+// ── W5 (D-W34): the experience list and the remembered one. The list against
+// real rows is check:people's W5 block; this is what needs no database.
+console.log("\nW5 - the role switcher's list and its cookie");
+{
+  const center = (id: string, organizationId: string): Center =>
+    ({ id, organizationId, name: id, themeColor: "#2563eb", logoPath: null }) as unknown as Center;
+  const relation = (id: string, organizationId: string, roles: CenterRelation["roles"]): CenterRelation => ({
+    center: center(id, organizationId),
+    memberships: [],
+    studentProfile: null,
+    roles,
+  });
+  const none = { relations: [], orgGroups: [], hasLinkedChild: false, isPlatformAdmin: false, organizationNames: new Map<string, string>() };
+  const everything = buildExperiences({
+    relations: [
+      relation("b-1", "org-1", ["OWNER"]),
+      relation("b-2", "org-1", ["OWNER", "TEACHER"]),
+      relation("b-3", "org-2", ["RECEPTIONIST", "STUDENT"]),
+    ],
+    orgGroups: [{ organizationId: "org-1", organizationName: "Org One", branches: [center("b-1", "org-1"), center("b-2", "org-1")] }],
+    hasLinkedChild: true,
+    isPlatformAdmin: true,
+    organizationNames: new Map([["org-1", "Org One"], ["org-2", "Org Two"]]),
+  });
+  check(
+    "every kind is listed once, portals first, each organization's Whole Management above its branches, the platform last",
+    everything.map((entry) => entry.key).join() === "student,teacher,parent,org:org-1,staff:b-1,staff:b-2,staff:b-3,admin",
+    everything.map((entry) => entry.key).join(),
+  );
+  check("keys are unique", new Set(everything.map((entry) => entry.key)).size === everything.length);
+  check(
+    "every entry has a label, an icon and a real landing route with no query",
+    everything.every((entry) => entry.label.roles.length > 0 && entry.icon && entry.href.startsWith("/") && !entry.href.includes("?")),
+  );
+  check(
+    "a staff entry names its branch and role; the student and teacher roles held there stay in the portals",
+    (() => {
+      const row = everything.find((entry) => entry.key === "staff:b-3");
+      return row?.label.place === "b-3" && row.label.roles.join() === "RECEPTIONIST" && row.centerId === "b-3";
+    })(),
+  );
+  check(
+    "a person holding nothing has no experience; one kind has one entry",
+    buildExperiences(none).length === 0 && buildExperiences({ ...none, isPlatformAdmin: true }).map((entry) => entry.key).join() === "admin",
+  );
+  check(
+    "two branches as a teacher are one experience; two as staff are two",
+    buildExperiences({ ...none, relations: [relation("a", "o", ["TEACHER"]), relation("b", "o", ["TEACHER"])] }).length === 1 &&
+      buildExperiences({ ...none, relations: [relation("a", "o", ["RECEPTIONIST"]), relation("b", "o", ["RECEPTIONIST"])] }).length === 2,
+  );
+
+  const staff = everything.find((entry) => entry.key === "staff:b-1")!;
+  const student = everything.find((entry) => entry.key === "student")!;
+  const stored = (value: unknown) => JSON.stringify(value);
+  check("a written value parses back", parseLastExperience(stored(lastExperienceOf(staff)))?.centerId === "b-1" && parseLastExperience(stored(lastExperienceOf(student)))?.key === "student");
+  check(
+    "a value the app never wrote does not parse: not JSON, wrong shape, an extra field, too long",
+    ["{", "null", "[]", stored({ centerId: "b-1" }), stored({ key: 7 }), stored({ key: "student", role: "OWNER" }), stored({ key: "x".repeat(300) })].every(
+      (raw) => parseLastExperience(raw) === null,
+    ),
+  );
+  const resolved = (raw: string | null) => resolveLastExperience(raw, everything);
+  check("no cookie is neither an entry nor stale", resolved(null).entry === null && resolved(null).stale === false);
+  check("a value naming a held entry resolves to it", resolved(stored(lastExperienceOf(staff))).entry?.key === "staff:b-1" && resolved(stored(lastExperienceOf(staff))).stale === false);
+  check(
+    "access lost: a value naming no current entry is ignored and marked stale",
+    resolved(stored({ key: "staff:gone", centerId: "gone" })).entry === null && resolved(stored({ key: "staff:gone", centerId: "gone" })).stale === true,
+  );
+  check("tampered: garbage is ignored and marked stale", resolved("not json").entry === null && resolved("not json").stale === true);
+  check(
+    "tampered: a held key with another branch's centerId, or a centerId on a portal, is stale, never a selection",
+    resolved(stored({ key: "staff:b-1", centerId: "b-2" })).stale === true && resolved(stored({ key: "student", centerId: "b-1" })).stale === true,
+  );
+  check("the admin key means nothing to an account that is no admin", resolveLastExperience(stored({ key: "admin" }), [student]).entry === null);
+
+  // Who may read it: the hub and the two actions, and nothing a gate is built on.
+  const readers = sources.filter((file) => /getLastExperienceCookie|LAST_EXPERIENCE_COOKIE|parseLastExperience|resolveLastExperience/.test(code(file))).sort();
+  check(
+    "the cookie is read only by its own module, the hub and the auth actions; no gate, tenant or permission module reads it",
+    readers.join() === ["app/[locale]/(auth)/actions.ts", "app/[locale]/(auth)/select-center/page.tsx", "lib/auth/active-center.ts", "lib/auth/experiences.ts"].join(),
+    readers.join(", "),
+  );
+  check(LAST_EXPERIENCE_COOKIE, LAST_EXPERIENCE_COOKIE === "kayedu_last_experience");
+  const setter = functionBody("lib/auth/active-center.ts", "setLastExperienceCookie");
+  check(
+    "the cookie is httpOnly, sameSite lax, secure in production, 90 days",
+    /httpOnly: true/.test(setter) && /sameSite: "lax"/.test(setter) && /secure: process\.env\.NODE_ENV === "production"/.test(setter) && /maxAge: LAST_EXPERIENCE_MAX_AGE/.test(setter) &&
+      /LAST_EXPERIENCE_MAX_AGE = 60 \* 60 \* 24 \* 90/.test(code("lib/auth/active-center.ts")),
+  );
+
+  const switchAction = exportedBody("app/[locale]/(auth)/actions.ts", "switchExperienceAction");
+  check(
+    "a switch looks the key up in the current list before it writes anything",
+    /await listExperiences\(user\.id\)\)\.find\(\(item\) => item\.key === parsed\.data\.key\)/.test(switchAction) &&
+      switchAction.indexOf("listExperiences") < switchAction.indexOf("setActiveCenterId") &&
+      switchAction.indexOf("listExperiences") < switchAction.indexOf("setLastExperienceCookie"),
+  );
+  check("a switch lands on the entry's route alone: no next, no query", /redirect\(\{ href: entry\.href, locale \}\)/.test(switchAction) && !/next|safeNextPath|searchParams/.test(switchAction));
+  check(
+    "a switch runs the existing selectors: kayedu_center for staff and Whole Management, All branches for the teacher portal (the row says so)",
+    /if \(selection\) await setActiveCenterId\(selection\)/.test(switchAction) && /entry\.kind === "teacher"\) await setTeacherBranchId\(null\)/.test(switchAction),
+  );
+  check("a switch writes no audit row and checks no permission", !/writeAuditLog|ctxCan|requirePermission/.test(switchAction));
+  check("a key that is no longer listed clears the cookie and goes to the hub", /if \(!entry\) \{\s*[^}]*clearLastExperienceCookie\(\)/.test(switchAction));
+  check(
+    "the action that clears decides against the current list",
+    /resolveLastExperience\(await getLastExperienceCookie\(\), await listExperiences\(user\.id\)\)/.test(exportedBody("app/[locale]/(auth)/actions.ts", "forgetStaleExperienceAction")),
+  );
+
+  // One list: sign-in's landing, the hub and the switcher.
+  const tenant = code("lib/auth/tenant.ts");
+  check("sign-in's landing reads the same list", /experienceHomes[\s\S]{0,200}listExperiences\(user\.id\)/.test(tenant));
+  const hub = code("app/[locale]/(auth)/select-center/page.tsx");
+  check("the hub reads only listExperiences for its choices, and clears a stale value", /listExperiences\(user!\.id\)/.test(hub) && /resolveLastExperience\(/.test(hub) && /\{stale \? <ForgetStaleExperience \/> : null\}/.test(hub));
+  check("the hub never redirects on the remembered value (D-W13)", !/redirect\(\{ href: lastUsed/.test(hub) && (hub.match(/\bredirect\(/g) ?? []).length === 2);
+  check("the hub still goes straight in for one experience", /experiences\.length === 1 && switchMode !== "1"/.test(hub));
+
+  // Every shell, and the switcher's own rules.
+  for (const [file, current] of [
+    ["app/[locale]/(center)/center-shell.tsx", /shellExperiences\(\s*ctx\.user\.id,\s*ctx\.rollupOrganizationId \? rollupExperienceKey\(ctx\.rollupOrganizationId\) : staffExperienceKey\(ctx\.center\.id\)/],
+    ["app/[locale]/(teacher)/teacher-shell.ts", /shellExperiences\(session\.user\.id, "teacher"\)/],
+    ["app/[locale]/(student)/student-shell.tsx", /shellExperiences\(session\.user\.id, "student"\)/],
+    ["app/[locale]/(parent)/parent-shell.ts", /shellExperiences\(session\.user\.id, "parent"\)/],
+    ["app/[locale]/(admin)/admin-shell.ts", /shellExperiences\(user\.id, "admin"\)/],
+  ] as const) {
+    const shell = code(file);
+    const frames = shell.match(/\bprops:\s*\{/g)?.length ?? 0;
+    const carrying = shell.match(/^\s*experiences,$/gm)?.length ?? 0;
+    check(`${file}: every frame carries the switcher, current from its own gate`, current.test(shell) && frames > 0 && frames === carrying, `${carrying}/${frames}`);
+  }
+  check("AppShell and the hub shell render the switcher beside the user menu", /<ExperienceSwitcher\b[^\n]*\n\s*<UserMenu\b/.test(code("components/shell/app-shell.tsx")) && /<ExperienceSwitcher\b[^\n]*\n\s*<UserMenu\b/.test(code("components/shell/hub-shell.tsx")));
+  check("one experience or none renders no switcher", /entries\.length <= 1\) return undefined/.test(code("components/shell/experience-switcher-data.ts")));
+  const switcher = code("components/shell/experience-switcher.tsx");
+  check("the switcher names no role; wording comes from messages", !/\b(owner|manager|receptionist|accountant|teacher|student|parent|admin)\b/i.test(switcher.replace(/^import .*$/gm, "")));
+  check(
+    "the switcher posts a key only, marks the current one with aria-current and text, and is a menu with the keyboard keys",
+    /name="key"/.test(switcher) && !/NextPathInput|name="next"/.test(switcher) && /aria-current="true"/.test(switcher) && /t\("current"\)/.test(switcher) &&
+      /role="menu"/.test(switcher) && /role="menuitem"/.test(switcher) && /ArrowDown/.test(switcher) && /popoverItemClass/.test(switcher),
+  );
+  check("the switcher is a full-width bottom sheet below sm", /inset-x-0 top-auto bottom-0/.test(switcher));
+}
 
 if (failures > 0) {
   console.error(`\n${failures} account check(s) failed.`);

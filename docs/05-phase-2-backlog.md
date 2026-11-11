@@ -50,9 +50,11 @@
 
 ---
 
-## 5. Learning content: materials, homework, exams, question bank, grades, progress, teacher notes
+## 5. Learning content: materials, question bank, richer assessments, grades, progress, teacher notes
 
-**What it is.** The LMS half of an education platform — uploading materials, assigning and collecting homework, building and marking exams, a reusable question bank, gradebooks, per-student progress tracking, and private teacher notes on a student.
+> **Narrowed by the W-batch (3 Nov 2026, W-C1).** Teacher-built **multiple-choice exams and homework** — one correct option, text only, one attempt, auto-graded, in centre classes and PERSONAL workspaces — moved into `03-build-order.md` W2–W4 and W9 (`00-master-product-spec.md` D-W01…D-W11, D-W26), so they are no longer listed here. What stays deferred is everything else below. That includes **images in questions** (wait for Cloudinary, M20 — at branches and in workspaces alike, D-W42), **any other question type** (multi-select, free text, file answers, manual marking), **more than one attempt**, **assessments seen by centre staff or parents** (D-W11), a **gradebook** across assessments, and a **reusable question bank**.
+
+**What it is.** The LMS half of an education platform — uploading materials, a reusable question bank, question types beyond single-answer multiple choice (and their manual marking), gradebooks, per-student progress tracking, and private teacher notes on a student.
 
 **Why deferred.** This is a second product, not a feature. KayEdu Phase 1 is an **operations** system: who came, who paid, who gets what share. Every item here is content and pedagogy, needs its own storage/permission/ownership model (who owns a question a teacher wrote at a center they later leave?), and none of it is what a center pays for on day one.
 
@@ -97,6 +99,8 @@
 **Why deferred.** `Center.plan` was a free-text field with an editor and no behavior behind it; it **was removed entirely at M19** rather than left to imply a billing system that does not exist (`00-master-product-spec.md` §5 "Center lifecycle"). Module entitlements are explicitly rejected for Phase 1 — one product, configured, never forked per center (§8) — and a plan flag that switches features on and off is the first step toward that fork. Support tickets and announcements both need the messaging entity this app has nowhere: the Approvals screen's "contact" action was punted for exactly this reason (`03-build-order.md`, Approvals).
 
 **Depends on.** A real billing relationship with more than one paying customer (the `Organization` model at M11 is the entity that would carry it); and one messaging/notification substrate serving tickets, announcements and Approvals-contact together, rather than three one-off inboxes.
+
+**W-batch note (3 Nov 2026, W-C2 / W-C5).** Two things nearby are now in the build and are **not** this entry. (1) **Premium teachers** (`03-build-order.md` W6, D-W14): a platform admin sets an end date on a *teacher's* account, with no payment flow. It is not a centre plan and switches nothing on or off for a centre, so "module entitlements" for centres stay rejected. (2) **The in-app inbox** (W1, D-W12) is the notification substrate this entry depends on, and it carries system notices only. Support tickets, announcements and Approvals-contact stay here and would build on it.
 
 ---
 
@@ -306,6 +310,8 @@
 
 **Depends on.** A realtime transport (Supabase Realtime or server-sent events) that carries only "a request landed for branch X" — never the rows — and re-reads `pendingApprovalCounts` on receipt, subscribed per branch so `center_id` stays the sole isolation key; a decision on the load it adds against the connection budget.
 
+**W1 note (3 Nov 2026).** The notification bell's unread count (D-W12) is in the same position, for the same reason: server-rendered on every navigation, never polled. The same transport would serve it, carrying "a notice landed for user X" only.
+
 ---
 
 ## 31. A note on a staff-cancelled booking
@@ -355,6 +361,414 @@
 **Why deferred.** It has never been written: F8's personal profile photo had no storage destination, and U9 removed that feature (only teachers have photos, per branch, on `Membership.photoKey`). Dropping the column is not backward-compatible with a build that still selects it (any `User` `include` returns it), so it waits until no such build can be running.
 
 **Depends on.** The pilot (M20 → first centre live) on the U9 build; a backup taken before the drop (M20's tested restore). Remove, in the same change: the column and its schema comment in `prisma/schema.prisma`, and the mention in `docs/01-data-model.md` (User).
+
+---
+
+## 36. Notify parents
+
+**What it is.** A parent gets the notices their linked child gets — an enrolment or booking decision, a session cancelled or moved — in the parent portal's bell, one per child, naming the child.
+
+**Why deferred.** W1 decided parents are not notified in v1 (decision 10 of the W1 prompt). A parent's reach is through `FamilyLink` (a per-child view, M16/F3), not a relation of their own, so the read-time access re-check needs a second rule ("the child is still linked, and the child still reaches the branch"), and the text would name a child — a person's name rendered in a notice, which needs its own decision on what a parent may see after a link ends.
+
+**Depends on.** A `PARENT`-audience rule in `lib/notifications/kinds.ts` and `visibleWhere` that re-checks the active `FamilyLink` at read time; fan-out at the producer (one row per linked parent, in the event's transaction); a decision on whether a revoked link hides the parent's past notices.
+
+---
+
+## 37. Prune old notifications
+
+**What it is.** A retention rule for `Notification` rows — for example, read notices older than 90 days removed.
+
+**Why deferred.** W1 keeps every notice (decision 11 of the W1 prompt): volumes are small at pilot scale, the inbox is paged, and a deletion needs a scheduled job, which the product does not run anywhere (the R4 / D-W10 / D-W12 rule — no cron).
+
+**Depends on.** A decision on the retention period and whether unread notices are kept longer; a place to run it without a cron — lazily on the owner's own inbox read (delete that person's expired rows, D-W10's shape) is the likely answer; the `(userId, readAt, createdAt)` index already serves it.
+
+---
+
+## 38. A notice when "End pause now" restores a session
+
+**What it is.** When a platform admin ends a branch pause early and a session the pause cancelled is restored to SCHEDULED (U5), the students who were told it was cancelled are told it is back on.
+
+**Why deferred.** W1's producers are the four events the prompt named; a restore is a fifth. Until then a student who got "cancelled" sees the session reappear on their schedule with no notice, and the old "cancelled" notice stays in their inbox (it is history, not a status).
+
+**Depends on.** A `SESSION_RESTORED` kind and a producer inside `endBranchPause`'s per-session write; a decision on whether restoring also notifies bookers (bookings are not restored — U5).
+
+---
+
+## 39. Parents seeing exams, homework and results
+
+**What it is.** A parent seeing what their child has been set, whether it was submitted, and the score, in the per-child mirror of the student portal.
+
+**Why deferred.** W3a decided parents see nothing in v1 (D-W11, D-W31). Reveal rules were designed around the student: a parent's view needs its own answer to whether a score hidden from the student is hidden from the parent too, and before reveal it must carry the same guarantee (CLAUDE.md rule 11).
+
+**Depends on.** A decision on what a parent may see against `showScore` and `showCorrectAnswers`; a read of its own (W4's `lib/db/assessment-results.ts` is teacher-only and returns correctness, so a parent must never reuse it); `check:assessments` extending its sweep to `(parent)` for anything it starts reading.
+
+*W9 (D-W42):* this covers **PERSONAL-workspace** assessments too — parents see none in v1. A parent's view of a private class's exams also depends on entry 57 (parents see no workspace class at all yet).
+
+---
+
+## 40. CSV export of an assessment's results
+
+**What it is.** Downloading a results table, and perhaps the per-question analysis, as a CSV from the results page.
+
+**Why deferred.** W4's job is reading results on screen (D-W33). An export is a new way for students' names and marks to leave the system, so it needs its own answer on what it carries and whether it is audited.
+
+**Depends on.** W4's `readAssessmentResults`; a decision on columns and audit; the same owning-teacher authority.
+
+---
+
+## 41. Manual regrade and point overrides
+
+**What it is.** A teacher correcting a question's key or awarding points by hand after attempts are final.
+
+**Why deferred.** Scores are frozen at submit and never recomputed (D-W09), and that is what makes the results reconcile. A regrade needs a designed answer for how a corrected score sits beside the frozen one, what the student is told, and how it is audited.
+
+**Depends on.** A decision that replaces "never recomputed" for this one case, with an audited, append-only correction (the void-and-recreate shape of rule 2); the lock (D-W08).
+
+---
+
+## 42. Comparing a student across assessments
+
+**What it is.** One student's scores over time, across every exam and homework in a class or from a teacher.
+
+**Why deferred.** W4 is per assessment (D-W11). A longitudinal view is the gradebook and progress tracking entry 5 keeps deferred, and it raises questions W4 does not: how homework and exams weigh against each other, and what happens across a left and rejoined class.
+
+**Depends on.** Entry 5's gradebook decision; W4's reads.
+
+---
+
+## 43. Changing the reveal toggles after a student has started
+
+**What it is.** A teacher turning `showScore` or `showCorrectAnswers` on or off once an attempt exists, for example to show answers after the exam, having published with them off.
+
+**Why deferred.** W2 and W3a let the teacher choose them before publishing, and D-W08/D-W31 fix everything except the closing time once an attempt exists. The W4 plan named these toggles as editable afterwards, which contradicts that lock, so the founder deferred them at W4 (D-W33). Turning `showCorrectAnswers` on reaches rule 11 directly, since it changes who can read correct answers.
+
+**Depends on.** A recorded exception to D-W08/D-W31; audit of the change; a `check:assessments` proof that the reveal still needs a final attempt and a closed assessment; whether students are told.
+
+---
+
+## 44. An admin premium overview and an expiring-soon list
+
+**What it is.** A page under `/admin/teachers` listing the accounts that are premium now, with their end dates, and a list of those ending within the next few weeks, so KayEdu can follow up on renewals.
+
+**Why deferred.** W6 (D-W35) deliberately builds an exact-email lookup only: no listing, no partial search, no browsing of users. A list of premium accounts is a list of users with names and emails, so it needs its own decision on what the admin may browse. The renewal conversation happens outside the product in v1 ("Contact KayEdu").
+
+**Depends on.** A decision on what a list may show (name, email, end date) and to which admins; paging and a count read over `User.premiumUntil` (an index if the list grows); the same `requirePlatformAdmin()` and `lib/db/premium.ts` re-check.
+
+---
+
+## 45. Notices for a premium grant, expiry or renewal
+
+**What it is.** An inbox notice (and, once `EMAIL_ENABLED` has a sender, an email) when an account is granted premium, when it is about to end, when it has ended, and when it is renewed.
+
+**Why deferred.** Out of scope at W6 (D-W35, item 7). An "about to end" or "has ended" notice has no event to write it, and rule 12 allows no cron, so it would have to be computed on read (the D-W32 "soon" pattern) — a design of its own. The grant and renewal notices are simple, but shipping only those would be half a feature.
+
+**Depends on.** A new notification kind or kinds (an additive enum migration), the compute-on-read producer for expiry, the audience (the account holder only), and the M20 email sender for anything beyond the inbox.
+
+---
+
+## 46. Inviting an assistant by email
+
+**What it is.** The teacher types an assistant's email on `/teacher/assistants` and KayEdu sends the invite: a link to `/assistant-join` with the code in its fragment, so the person never has to be handed the code.
+
+**Why deferred.** W7a (D-W36) ships the code only, shown once and handed over by the teacher (D-W16: "an email invite comes later, behind `EMAIL_ENABLED`"). There is no email sender until M20, and an emailed invite is the first feature that addresses an assistant by contact before they accept, which needs the D-02 / W-C6 rule written for it (an email may address an invitation; it never links).
+
+**Depends on.** M20's SMTP sender and `EMAIL_ENABLED`; the same `createAssistantInvite` (one code, one slot), with the address used only to send and never stored on the invite or the audit row (D-20); a rate limit on sends per teacher; copy in both locales.
+
+---
+
+## 47. A notice when an assistant joins or leaves
+
+**What it is.** An inbox notice to the teacher when someone redeems their code ("<name> is now your assistant"), and when an assistant leaves; optionally one to the assistant when the teacher removes them or changes their permissions.
+
+**Why deferred.** Out of scope at W7a (D-W36): the teacher sees the new assistant on their own page at the next request, and nothing yet acts on an assistant's grants. The planned `ASSISTANT_INVITATION` kind does not fit a code invite at all (nobody is addressed before redemption), so these are new kinds, each a decision about who is told what.
+
+**Depends on.** New `NotificationKind` values (an additive enum migration), written in the redemption's and the leave's own transactions (`notify(tx, …)`, D-W12), ids only in the payload (the link id), names loaded at read time — and only while the link is effective, so a lapsed teacher's name is never shown.
+
+---
+
+## 48. Notices to and about assistants
+
+**What it is.** An assistant receives the notices that matter to their work (a student submitted, a request the assistant filed was approved or declined), and the teacher is told when an assistant acts for them ("<assistant> published <exam>").
+
+**Why deferred.** W7b (D-W37 item 11) sends nothing to or about an assistant. Each kind is a decision about who learns what about whom, and an assistant has no centre relation, so the read-time access re-check notices use (D-W12) has no reach to test them against. A notice about an assistant's act would also be the first place the teacher sees the assistant's name tied to an action.
+
+**Depends on.** New `NotificationKind` values (an additive enum migration) written in the event's own transaction; a reach rule for assistants built on `resolveAssistantActing` (an effective link, the branch allowing assistants), re-checked on read; ids only in the payload, names at read time.
+
+---
+
+## 49. A teacher's view of their assistants' activity
+
+**What it is.** On the teacher's own side, a list of what each assistant did for them: the exams published, the requests filed, each with "via <assistant>". The teacher's request list could also tag a request filed through an assistant.
+
+**Why deferred.** D-W37 item 10 puts the "via assistant" tag on the teacher's own audit-style views only where one exists, and the teacher portal has none: its pages list rows, not who acted on them. The audit rows already carry both people (`actorUserId` = the assistant, `onBehalfOfUserId` = the teacher), so the data is there.
+
+**Depends on.** A teacher-facing read of `AuditLog` by `onBehalfOfUserId`. Unlike every centre read it would show the assistant's name to the teacher, who sees their assistants already (the Assistants page). It also needs a page under the teacher nav (P1: the nav permission, the baseline, the expected navs).
+
+---
+
+## 50. A reschedule request (teacher and assistant)
+
+**What it is.** A teacher, or their assistant with `requests.manage`, asks the branch to move one of the teacher's sessions to another date and time, and the branch approves it in `/approvals` like the other teacher requests.
+
+**Why deferred.** The W7b prompt listed "reschedule" among the requests a teacher can file, but the teacher cannot file one: `ChangeRequestType` is only `NEW_CLASS` and `NEW_SESSION`, and rescheduling is a staff action (`rescheduleSession`). Decided with the founder at W7b: assistants file exactly what the teacher can, so this waits for both.
+
+**Depends on.** A `RESCHEDULE` value on `ChangeRequestType` (an additive enum migration), a payload naming the session and the new slot, an approval branch in `/approvals` that calls the unchanged `rescheduleSession` (so its conflict, pause and notice rules apply), and the trusted-teacher and `changeRequest.create` gates of the other requests.
+
+---
+
+## 51. Cancelling a pending request (teacher and assistant)
+
+**What it is.** The teacher, or their assistant, withdraws a request the branch has not decided yet.
+
+**Why deferred.** Teachers cannot do it today: `ChangeRequestStatus` has no cancelled state and there is no withdraw action. Decided with the founder at W7b: the assistant sees each request's status and cannot cancel one until the teacher can.
+
+**Depends on.** A `CANCELLED` status (an additive enum migration) or a delete rule, an action for the teacher and the assistant (the assistant's through `assistantCan(…, "requests.manage")`, audited on behalf), the approvals queue and counts leaving cancelled rows out, and a decision on whether a cancelled request stays in the teacher's list.
+
+---
+
+## 52. Student phones for the teacher and the assistant
+
+**What it is.** A teacher sees their students' phone numbers on their class roster, and an assistant sees them only when the teacher grants `students.phones`. *(W8d, D-W41: in the teacher's PERSONAL workspaces — whose Students tab already shows the phone the teacher typed — `students.phones` now shows phones on the assistant's workspace rosters. What stays here is the branch half.)*
+
+**Why deferred.** The teacher's own portal shows no student phone today; it searches by phone but never displays one. An assistant is never wider than the teacher (CLAUDE.md rule 6, D-W19). So in W7b `students.phones` stays in the catalogue and reveals nothing, and every assistant roster is names only (decided with the founder). Showing phones to teachers is a product decision about student contact data.
+
+**Depends on.** The decision for teachers first. Then the teacher's roster read, and the assistant's `assistantClassDetail`, select the profile phone only when allowed (`assistantCan(…, "students.phones")` returns true once the equivalent teacher view exists). It is formatted through `lib/phone.ts` and never written to an audit row.
+
+---
+
+## 53. Workspace sessions in the teacher's Sessions list
+
+**What it is.** A premium teacher's PERSONAL-workspace sessions shown in `/teacher/sessions` beside their branch sessions, marked as the workspace's. *(Narrowed at W8d — D-W41 item 8: the **calendar** half is delivered; `/teacher/calendar` reads each owned workspace as a second source, tagged Private.)*
+
+**Why deferred.** The W8d prompt decided the calendar only. The Sessions list has filters (grade, student search, status) and a request form that are branch concepts, and its rows open the branch session page; a workspace row needs its own link and a decision on which filters apply. Each workspace's sessions stay on its own Sessions page meanwhile.
+
+**Depends on.** The calendar's pattern (W8d): `listOwnedWorkspaces` + `getWorkspaceContext` per workspace, the same `teacherSessionListWhere` search under the teacher's history floor, merged in memory; a decision on the filters for a workspace row.
+
+---
+
+## 54. A live conflict preview in workspace forms
+
+**What it is.** The debounced "this clashes with…" preview the branch class and session dialogs show while the teacher types, in the workspace's New class, Add slot, New session and Reschedule forms.
+
+**Why deferred.** The preview action (`checkSlotConflictsAction`) reads the branch context (`getTenantContext("center")`), which a workspace never resolves. In W8a the workspace forms show the server's own refusal list with the same "I understand" tick (`useSlotConflicts(null, state)`), so nothing double-books silently — the teacher just learns of a clash on submit rather than while typing.
+
+**Depends on.** A workspace twin of the preview action that resolves `getWorkspaceContext` and runs the same `findSessionConflicts`.
+
+---
+
+## 55. A grade and subject on a workspace one-time session
+
+**What it is.** The optional grade and subject a branch's one-time session can carry, on a workspace's one-time session.
+
+**Why deferred.** `createOneOffSession` resolves them through the centre's own `CenterCatalogSelection` rows, which a workspace does not have (D-W38: its offered pairs are the whole linked catalogue). W8a's workspace one-time session has a title and a price only.
+
+**Depends on.** The PERSONAL branch of the pair rule (`isWorkspacePairOffered`, W8a) applied in the one-time session writer.
+
+---
+
+## 56. ~~A share code or link to link a workspace student~~ — delivered at W10 (D-W43)
+
+**Delivered, not dropped.** Built as `WorkspaceShareCode` and `/workspace-join` (`03-build-order.md` W10, `00-master-product-spec.md` §5.1 D-W43): a per-profile, single-use, sha256-stored code the teacher shares by WhatsApp or a copied link, redeemed from the student's own account after a confirmation, through W8b's move. The number is kept so older references still resolve; an item lives in one list only. What W10 left out is entries 73–76.
+
+---
+
+## 57. Parent visibility of workspace classes
+
+**What it is.** A linked child's private classes and sessions on the parent portal's schedule and calendar.
+
+**Why deferred.** The parent portal reads only `activeChildLinks` at accessible **branches** (`BRANCH_ONLY`), and W8b's opt-in student resolver is the student's own. Showing a teacher's private classes to a parent is a separate consent question the W8b prompt left out.
+
+**Depends on.** A parent-side counterpart of `getStudentScheduleContexts`, and a decision on whether the workspace teacher or the student consents to it.
+
+---
+
+## 58. Editing a workspace student's record after creation
+
+**What it is.** Changing a workspace student's phone (and name or grade) after they were added.
+
+**Why deferred.** The phone is what an invitation matched on; changing it after an invitation exists raises "re-match, cancel, or keep?" questions W8b did not need. The add dialog says the phone cannot be changed later.
+
+**Depends on.** A rule for pending invitations when the phone changes (cancel them, then the 24-hour "Invite again" window), and the centre's local-record editor (`components/center/person-fields.tsx`) reused for the workspace.
+
+---
+
+## 59. Deactivating or removing a workspace student
+
+**What it is.** Taking a student out of a workspace — deactivating the profile (history kept) or deleting one that never attended or paid.
+
+**Why deferred.** W8b adds, invites and enrols; removing a student from a class (REMOVED) covers the day-to-day need. A delete must honour the delete blockers (`studentDeleteBlockers`) and the placeholder's own removal, which waits for attendance and payments in workspaces (W8c).
+
+**Depends on.** W8c (attendance and payments in workspaces), then the centre's deactivate / delete rules applied with `workspaceCan`.
+
+---
+
+## 60. Drop-in attendees in a workspace
+
+**What it is.** Checking in a workspace student who is not enrolled in the session's class — and so any check-in or payment on a workspace **one-time session**, which has no class and therefore no enrolled students.
+
+**Why deferred.** W8c (D-W40 item 4) checks in ACTIVE-enrolled students only, by direct call, so a workspace's roster is exactly its class. Drop-ins raise questions a branch answers with its desk (search, the confirm panel's photo, blocks) that a workspace does not have yet.
+
+**Depends on.** W8c's `workspaceCheckIn` with an `isDropIn: true` branch, a student picker over the workspace's own profiles, and a decision on whether a one-time session lists the whole workspace.
+
+---
+
+## 61. Expenses in a workspace
+
+**What it is.** A teacher recording their own costs (rent, printing) against a workspace, as a branch records expenses.
+
+**Why deferred.** W8c is about money in (payments), not money out; a workspace has no expense categories and no Expenses screen, and the Earnings page (W8d) shows the teacher share collected only.
+
+**Depends on.** The branch expense model (`Expense`, `ExpenseCategory`) under `workspaceCan`, and a place on the Earnings page for "net of expenses".
+
+---
+
+## 62. A refunds report for the workspace teacher
+
+**What it is.** A list of every refund in a workspace over a period — the branches' Refunds page for the teacher.
+
+**Why deferred.** W8c records refunds and shows them on each session's receipt; a period report belongs with the Earnings page and is not in W8d's scope.
+
+**Depends on.** W8d (Earnings), then a scoped `Refund` read per workspace.
+
+---
+
+## 63. Receipts shared with workspace students
+
+**What it is.** A student (or parent) seeing or downloading the receipt of what they paid for a workspace session.
+
+**Why deferred.** D-W40 item 10: a Private class row shows attendance and no money. Showing a student their own payments in a workspace is a separate decision from a branch's, where the past list shows the amount.
+
+**Depends on.** A decision on what a student may see of a workspace's money, and a student-side receipt view.
+
+---
+
+## 64. Payment methods other than Cash in a workspace
+
+**What it is.** InstaPay, Vodafone Cash or a teacher-named method in a workspace, with a picker on the payment form.
+
+**Why deferred.** W8c gives each workspace one hidden "Cash" method (D-W40 item 2) so `recordPayment` has the active method it requires, with nothing to configure. Several methods need a workspace settings screen and the picker.
+
+**Depends on.** `lib/db/payment-methods.ts`'s writers under `workspaceCan`, and the payment form's `PaymentMethodSelector`.
+
+---
+
+## 65. CSV export of the teacher's Earnings
+
+**What it is.** A download of the Earnings page's figures — per source, per class, per week — for the period shown.
+
+**Why deferred.** Out of scope for W8d by decision (D-W41). Export scope for the whole product is still an open decision (OD-4), and a file leaving the server is a new data surface to review.
+
+**Depends on.** OD-4; the same per-source reads (`lib/db/teacher-earnings.ts`), formatted through `lib/format.ts`; the assistant's windows applied identically.
+
+---
+
+## 66. More charts on the Earnings page
+
+**What it is.** Charts beyond the one weekly trend list — by source, by class, attendance over time.
+
+**Why deferred.** D-W41 item 2 allows one small trend, a table or a chart, not both; W8d shipped the list. More visuals need a design pass and the dataviz rules (`04-design-system.md`).
+
+**Depends on.** A chart component that meets §6 (375px, no colour alone) and the same summed reads.
+
+---
+
+## 67. Notices to the teacher about payments
+
+**What it is.** An in-app notice when a payment is recorded, voided or refunded in the teacher's workspace (for example by an assistant), or when a branch settlement is paid.
+
+**Why deferred.** Out of scope for W8d by decision (D-W41). Notices to and about assistants are already deferred (entry 48), and a money notice needs a rate rule so a busy session does not flood the bell.
+
+**Depends on.** The W1 notice kinds (one new kind per event), the audit rows' ids (D-W18), and entry 48's decision on assistant-related notices.
+
+---
+
+## 68. Assistants managing workspace students and classes
+
+**What it is.** An assistant adding or enrolling workspace students, editing classes or sessions for the teacher.
+
+**Why deferred.** D-W41 item 9 limits assistants to check-in, payments and reads in a workspace. Adding a student sends an invitation that names the teacher (D-W27), and editing classes changes money (the price); both widen what an assistant can do beyond the W8d catalogue.
+
+**Depends on.** New catalogue keys (or a decision to reuse `classes.view` / a new `classes.manage`), the W8a/W8b writers taking a `WorkspaceActor` like the W8c ones, and the on-behalf audit (D-W18).
+
+---
+
+## 69. Centre-side visibility of a teacher's workspaces
+
+**What it is.** A branch's staff seeing that a teacher also runs private classes, or their size.
+
+**Why deferred.** D-W20/D-W41: a workspace is private and every centre-side surface spreads `BRANCH_ONLY`. Showing any of it to a centre is a product and privacy decision, not a missing feature.
+
+**Depends on.** A founder decision on what (if anything) a centre may see, and the teacher's consent.
+
+---
+
+## 70. Earnings forecasts
+
+**What it is.** Projected earnings from upcoming sessions and enrolments.
+
+**Why deferred.** Out of scope for W8d by decision (D-W41). A forecast is computed from current prices, which the money rules keep strictly apart from frozen snapshots (CLAUDE.md rule 2); it must never be confused with collected money.
+
+**Depends on.** A design that labels it as an estimate, never sums it with collected figures, and reads prices only for sessions with no payment.
+
+---
+
+## 71. Exam and homework notices to the teacher
+
+**What it is.** The teacher (and their assistants) told when a student submits, when an assessment closes, or when everyone has submitted — at a branch or in a workspace.
+
+**Why deferred.** D-W32 sends assessment notices to students only, and W9 kept that for workspaces (D-W42). The teacher reads the same facts on the list, the calendar and Results.
+
+**Depends on.** A decision on which events notify and how often (one per submit would flood a large class); a kind of its own in `lib/notifications/kinds.ts` with a teacher audience and a re-check against `workspace.assessments.manage` / `assessment.manage.own`; computed on read or written by the submit (no cron, rule 12).
+
+---
+
+## 72. Copying an assessment across workspaces (or from a branch)
+
+**What it is.** "Copy to…" on an exam or homework: its questions and settings as a new draft in another of the teacher's workspaces or classes.
+
+**Why deferred.** Out of scope for W9 by decision (D-W42). A copy crosses centres, so it is a read in one tenant and a write in another, and it must never copy attempts, scores or notices.
+
+**Depends on.** A copy through the builder's own `createAssessment` in the target (its authority and gate, never a raw insert), the source re-resolved for the same teacher, and a decision on copying between a branch and a workspace (a branch's row belongs to the centre's records). A reusable question bank (entry 5) would supersede it.
+
+---
+
+## 73. Emailing a workspace share code
+
+**What it is.** A "Send by email" beside Copy code, Copy link and WhatsApp on the Share code dialog: the join link mailed to an address the teacher types.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). Email is off (`EMAIL_ENABLED`, W1), and a typed address is a contact the teacher would be handing to the platform for someone who has not agreed to anything.
+
+**Depends on.** `EMAIL_ENABLED` and a real provider (M20), a decision on whether the typed address is stored (it must not become a matching key — CLAUDE.md rule 4), and the same rate limit as Share code.
+
+---
+
+## 74. Generating share codes in bulk
+
+**What it is.** "Share codes for all unlinked students": one code per unlinked profile of a workspace at once, listed for copying or printing.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). Each code is shown once, so a bulk list is a page of secrets the teacher must hand out one by one without mixing them up; one at a time keeps each code beside its student's name.
+
+**Depends on.** A printable or exportable list that is never stored (the codes stay sha256-only), the 30-a-day limit reconsidered for a batch, and each code still revoking that profile's previous one.
+
+---
+
+## 75. A class-wide join link
+
+**What it is.** One link per workspace class that any student can open to join it, creating or linking their own profile — not tied to a profile the teacher typed.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). W10's code links an existing profile the teacher created; a class link would let anyone holding it create a record in the workspace, which is enrolment by self-service — something a workspace has never had (it is never browsable, D-W20, D-W22).
+
+**Depends on.** A decision on approval (the teacher confirms each joiner, or not), on the profile's local record (who types the name and phone), on a cap and expiry for the link, and on how it interacts with the one-profile-per-account rule.
+
+---
+
+## 76. A parent redeeming a workspace share code
+
+**What it is.** A parent redeeming the code on their child's behalf, so the child's account is linked from the parent's.
+
+**Why deferred.** Out of scope for W10 by decision (D-W43). Parents see nothing from a workspace yet (entry 57), and redemption links the profile to the **redeemer's own** account — a parent redeeming would link the parent, not the child.
+
+**Depends on.** Entry 57 (parent visibility of workspace classes), and a redemption that targets a linked child's account through an ACTIVE `FamilyLink` with the child's consent rules decided.
 
 ---
 

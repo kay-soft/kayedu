@@ -112,6 +112,26 @@ export function teacherHistoryFloor(
   return addDays(todayInTimezone(timeZone, now), -historyDays);
 }
 
+/**
+ * An assistant's floor at one branch (W7b, D-W19, D-W37): the **stricter**
+ * (later) of the branch's teacher window (`teacherDataVisibilityDays`, the
+ * centre's limit on reads about one teacher) and the teacher's own
+ * `teacherHistoryDays` preference when set. Never `null`: the branch window
+ * always binds an assistant (a platform admin's bypass is theirs alone, and an
+ * assistant is never one through the link). Applied in the data layer and the
+ * assistant's reads, never only in the UI (rule 9).
+ */
+export function assistantReadFloor(
+  input: { settings: VisibilitySettings | null; teacherHistoryDays: number },
+  now: Date = new Date(),
+): Date {
+  const zone = centreTimeZone(input.settings);
+  const branchDays = input.settings?.teacherDataVisibilityDays ?? DEFAULT_TEACHER_VISIBILITY_DAYS;
+  const branchFloor = addDays(todayInTimezone(zone, now), -branchDays);
+  const teacherFloor = teacherHistoryFloor(input.teacherHistoryDays, zone, now);
+  return teacherFloor && teacherFloor.getTime() > branchFloor.getTime() ? teacherFloor : branchFloor;
+}
+
 /** The roles the window binds — the centre-side ERP roles (docs/01 §7). */
 const CENTRE_SIDE_ROLES: ReadonlySet<string> = new Set(["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT"]);
 

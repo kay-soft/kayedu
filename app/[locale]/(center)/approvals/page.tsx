@@ -304,6 +304,7 @@ export default async function ApprovalsPage({
                       requesterName={
                         teacherNameById.get(request.requestedBy) ?? tCommon("none")
                       }
+                      viaAssistantLabel={request.viaAssistant ? t("viaAssistant") : null}
                       headline={[
                         onboarding
                           ? t("onboarding.headline")
@@ -384,6 +385,7 @@ export default async function ApprovalsPage({
                     requesterName={
                       teacherNameById.get(request.requestedBy) ?? tCommon("none")
                     }
+                    viaAssistantLabel={request.viaAssistant ? t("viaAssistant") : null}
                     headline={[t("sessionRequests.headline"), classLabel].join(" — ")}
                     requestedOn={t("changeRequests.requestedOn", {
                       date: formatDate(request.createdAt, locale),

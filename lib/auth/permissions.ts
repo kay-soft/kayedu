@@ -66,6 +66,11 @@ export const PERMISSIONS = [
   // `approvals.manage` queue, and scoped in the action itself to reservations
   // whose class this teacher actually teaches.
   "reservation.manage.own",
+  // A teacher's own exams and homework (W2, D-W30): build, edit, preview and
+  // delete drafts on classes and sessions they teach. Owning the row is still
+  // the authority (lib/db/assessments.ts); this cell is the Owner's switch.
+  // Never grantable to a centre staff role (the ceiling below).
+  "assessment.manage.own",
   // Trust
   "audit.view",
   // Parent access (M16, F3 — OD-6 decided): from a student's page, generate
@@ -107,6 +112,10 @@ const OWNER_ONLY_ACTIONS: readonly Permission[] = [
  */
 const FORBIDDEN_CEILING: Partial<Record<TenantRole, readonly Permission[]>> = {
   TEACHER: ["center.profit.view", "analytics.center.view"],
+  // D-W30 / D-W11: centre staff never build, read or manage assessments.
+  MANAGER: ["assessment.manage.own"],
+  RECEPTIONIST: ["assessment.manage.own"],
+  ACCOUNTANT: ["assessment.manage.own"],
 };
 
 /** Resolved-role actions that are not Memberships and never go through the matrix. */
@@ -276,6 +285,7 @@ export const DEFAULT_ROLE_GRANTS: Record<Role, readonly Permission[]> = {
     "changeRequest.create",
     "student.block",
     "reservation.manage.own",
+    "assessment.manage.own",
   ],
 };
 

@@ -46,7 +46,7 @@ Navigation is gated on the stored permission matrix (`PermissionGrant`), with ea
 | Teacher | Dashboard · Sessions · Students · Classes · Approvals · Settlements |
 | Student | Schedule · Discover · Reservations |
 | Parent | Schedule |
-| Platform admin | Centers · Platform · Catalog |
+| Platform admin | Centers · Platform · Catalog · Teachers (W6: premium by exact email) |
 
 `owner.suspended@example.com` resolves no centre at all and is sent to the select-centre screen's empty state; `owner.onboarding@example.com` signs in normally. A parent with a linked child lands on `/parent` (SYS — the select-centre hub used to tell them they were not connected to a branch); `teacher.new@example.com` lands on the hub, whose "Find a branch to teach at" leads to the directory, and any `/teacher/*` URL sends them there directly. `npm run e2e` (SYS) signs in as these accounts and checks each row of this table.
 

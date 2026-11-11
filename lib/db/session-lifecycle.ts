@@ -110,6 +110,13 @@ export class SessionClosedError extends Error {
 export type SessionWriteOptions = {
   now?: Date;
   historicalBackfill?: true;
+  /**
+   * W8d (D-W18, D-W41): the teacher an assistant acted for, stamped on every
+   * audit row the write produces (`AuditLog.onBehalfOfUserId`). Set only by
+   * lib/db/workspace-attendance.ts on an assistant's write; absent (null) on
+   * every other caller's, so a branch write is exactly as before.
+   */
+  onBehalfOfUserId?: string | null;
 };
 
 /**
@@ -752,7 +759,7 @@ export async function listSessionAttendanceChanges(
 ): Promise<SessionAttendanceChangeRow[]> {
   const rows = await db.sessionAttendanceChange.findMany({
     where: { centerId, sessionId },
-    orderBy: { changedAt: "asc" },
+    orderBy: [{ changedAt: "asc" }, { id: "asc" }],
     include: { studentProfile: { include: { user: true } } },
   });
   if (rows.length === 0) return [];

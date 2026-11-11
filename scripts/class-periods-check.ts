@@ -19,7 +19,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { scopedData, scopedFindById, scopedWhere } from "../lib/db/tenant-scope.ts";
@@ -67,6 +67,7 @@ import { discoverClassesForCenter } from "../lib/db/discover.ts";
 import { confirmReservation, reserveOrEnroll } from "../lib/db/reservations.ts";
 import { resolveSessionRequest } from "../lib/db/approvals.ts";
 import { revenueTotals } from "../lib/db/analytics.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -148,15 +149,15 @@ function staticChecks() {
     .filter((file) => file.replaceAll("\\", "/") !== THIS_FILE && !file.includes("migrations"));
 
   check("No cron route remains (app/api/cron)", !existsSync("app/api/cron"));
-  const cronSecret = codeFiles.filter((file) => readFileSync(file, "utf8").includes("CRON_SECRET"));
+  const cronSecret = codeFiles.filter((file) => readSource(file).includes("CRON_SECRET"));
   check("No code or config references CRON_SECRET", cronSecret.length === 0, cronSecret.join(", "));
   const vercelCron = ["vercel.json", "vercel.ts"].filter(
-    (file) => existsSync(file) && /crons/.test(readFileSync(file, "utf8")),
+    (file) => existsSync(file) && /crons/.test(readSource(file)),
   );
   check("No vercel.json / vercel.ts cron entry exists", vercelCron.length === 0, vercelCron.join(", "));
 
   const rolling = codeFiles.filter((file) =>
-    /\bgenerateSessions\b|\bGENERATION_WINDOW_DAYS\b|\bgenerateSessionsAction\b/.test(readFileSync(file, "utf8")),
+    /\bgenerateSessions\b|\bGENERATION_WINDOW_DAYS\b|\bgenerateSessionsAction\b/.test(readSource(file)),
   );
   check(
     "No rolling-window generator export or caller remains (generateSessions, GENERATION_WINDOW_DAYS)",
@@ -167,11 +168,11 @@ function staticChecks() {
     "lib/db/class-sessions.ts is the one module that creates a class's sessions (no other createMany of Session in lib/db)",
     listFiles("lib/db")
       .filter((file) => !file.endsWith("class-sessions.ts"))
-      .every((file) => !/session\.createMany\(/.test(readFileSync(file, "utf8"))),
+      .every((file) => !/session\.createMany\(/.test(readSource(file))),
   );
 
   // confirmConflicts is required on every slot-writing data-layer function.
-  const libDb = listFiles("lib/db").map((file) => [file, readFileSync(file, "utf8")] as const);
+  const libDb = listFiles("lib/db").map((file) => [file, readSource(file)] as const);
   check(
     "No data-layer type declares confirmConflicts optional",
     libDb.every(([, text]) => !/confirmConflicts\?\s*:/.test(text)),
@@ -191,15 +192,15 @@ function staticChecks() {
     ["lib/db/class-sessions.ts", "materializeClassSessions"],
     ["lib/db/class-sessions.ts", "resyncClassSessions"],
   ];
-  const sessionsSource = readFileSync("lib/db/sessions.ts", "utf8");
-  const engineSource = readFileSync("lib/db/class-sessions.ts", "utf8");
+  const sessionsSource = readSource("lib/db/sessions.ts");
+  const engineSource = readSource("lib/db/class-sessions.ts");
   check(
     "ConflictConfirmation and ClassSessionsOptions both declare `confirmConflicts: boolean` (required)",
     /export type ConflictConfirmation = \{\s*confirmConflicts: boolean;/.test(sessionsSource) &&
       /export type ClassSessionsOptions = \{\s*confirmConflicts: boolean;/.test(engineSource),
   );
   const loose = writers.filter(([file, name]) => {
-    const params = signature(readFileSync(file, "utf8"), name);
+    const params = signature(readSource(file), name);
     if (params === null) return true;
     const requires = /ConflictConfirmation|ClassSessionsOptions|confirmConflicts: boolean/.test(params);
     const lastParam = params.trim().replace(/,$/, "").split("\n").at(-1) ?? "";
@@ -212,7 +213,7 @@ function staticChecks() {
   );
 
   // Terms are a tenant table like any other; classes copy dates, never link.
-  const schema = readFileSync("prisma/schema.prisma", "utf8");
+  const schema = readSource("prisma/schema.prisma");
   // The block ends at the first line that is only "}" — NOT the first "}",
   // which a field comment can contain (U9's `{centerId}/` cut it short).
   const classGroupModel = /^model ClassGroup \{[\s\S]*?^\}/m.exec(schema)?.[0];
@@ -223,7 +224,7 @@ function staticChecks() {
       /^\s*endDate\s+DateTime\s*$/m.test(classGroupModel) &&
       !/term/i.test(classGroupModel.replace(/\/\/.*$/gm, "")),
   );
-  check("CenterTerm is exposed through lib/db/scoped.ts", /terms:\s*\{/.test(readFileSync("lib/db/scoped.ts", "utf8")));
+  check("CenterTerm is exposed through lib/db/scoped.ts", /terms:\s*\{/.test(readSource("lib/db/scoped.ts")));
   // SEC-30 (SEC-2a): the hand-listed M10 script is gone — it named tables
   // that no longer existed and missed fourteen that did. The lockdown
   // migration enables RLS on every public table, CenterTerm included, and
@@ -231,10 +232,10 @@ function staticChecks() {
   check(
     "CenterTerm is covered by the Data API lockdown (RLS on every public table; check:rls asserts it live)",
     /FOR r IN[\s\S]*n\.nspname = 'public' AND c\.relkind IN \('r', 'p'\)[\s\S]*ENABLE ROW LEVEL SECURITY/.test(
-      readFileSync("prisma/migrations/20261017090100_sec2a_data_api_lockdown/migration.sql", "utf8"),
+      readSource("prisma/migrations/20261017090100_sec2a_data_api_lockdown/migration.sql"),
     ),
   );
-  const settingsActions = readFileSync("app/[locale]/(center)/settings/actions.ts", "utf8");
+  const settingsActions = readSource("app/[locale]/(center)/settings/actions.ts");
   check(
     "Every term change is audited (create/update/activate/deactivate/delete)",
     ["term.create", "term.update", "term.activate", "term.deactivate", "term.delete"].every((action) =>
@@ -244,7 +245,7 @@ function staticChecks() {
 
   // Forward-looking readers that live behind `@/` imports (not runnable
   // here) — asserted on their source.
-  const scopedSource = readFileSync("lib/db/scoped.ts", "utf8");
+  const scopedSource = readSource("lib/db/scoped.ts");
   const listForDay = scopedSource.slice(scopedSource.indexOf("listForDay:"), scopedSource.indexOf("updateDescription:"));
   check("Today's lists (listForDay) exclude a deactivated class's open sessions", listForDay.includes("OPEN_CLASS_SESSION"));
   const pending = scopedSource.slice(scopedSource.indexOf("listPending:"), scopedSource.indexOf("findById: (id: string) => scopedFindById(prisma.reservation"));
@@ -252,15 +253,15 @@ function staticChecks() {
     "Both approvals queues (listPending, listPendingForTeacher) list active classes only",
     (pending.match(/active: true/g) ?? []).length >= 2,
   );
-  const classActions = readFileSync("app/[locale]/(center)/classes/actions.ts", "utf8");
+  const classActions = readSource("app/[locale]/(center)/classes/actions.ts");
   check(
     "Staff enrolment refuses a deactivated class (classInactive)",
     /if \(!classGroup\.active\) return \{ error: "classInactive" \}/.test(classActions),
   );
   check(
     "package.json and CI run check:class-periods",
-    readFileSync("package.json", "utf8").includes('"check:class-periods"') &&
-      readFileSync(".github/workflows/ci.yml", "utf8").includes("npm run check:class-periods"),
+    readSource("package.json").includes('"check:class-periods"') &&
+      readSource(".github/workflows/ci.yml").includes("npm run check:class-periods"),
   );
 }
 
@@ -318,7 +319,7 @@ function pureChecks() {
     description: null as string | null,
     rescheduledToId: null as string | null,
     rescheduledFrom: null as { id: string } | null,
-    _count: { attendees: 0, payments: 0, settlements: 0, ratings: 0 },
+    _count: { attendees: 0, payments: 0, settlements: 0, ratings: 0, assessments: 0 },
   };
   const baseline = { teacherId: "t1", roomIds: ["r1", "r2"] };
   const only = (patch: Partial<typeof pristine>, rooms = ["r1", "r2"]) =>
@@ -330,6 +331,7 @@ function pureChecks() {
   check("a payment → payments", only({ _count: { ...pristine._count, payments: 1 } }) === "payments");
   check("a settlement → settlement", only({ _count: { ...pristine._count, settlements: 1 } }) === "settlement");
   check("a rating → ratings", only({ _count: { ...pristine._count, ratings: 1 } }) === "ratings");
+  check("an exam or homework on it → assessments", only({ _count: { ...pristine._count, assessments: 1 } }) === "assessments");
   check("a per-session share override → shareOverride", only({ centerShareType: "FIXED", centerShareValue: 500 }) === "shareOverride");
   check("a description → description", only({ description: "Bring the past paper" }) === "description");
   check("rescheduled to → rescheduled", only({ rescheduledToId: "x" }) === "rescheduled");
@@ -722,6 +724,45 @@ async function main() {
     JSON.stringify([...keptIds.keys()].sort()) ===
       JSON.stringify((await keptClassSessions(prisma, A, classZ.classGroupId, NOW)).map((k) => k.sessionId).sort()),
   );
+  // D-W31 (OD-18): any assessment keeps its session and is reported; the rest follow the class.
+  const t6h = await makeTeacher(A, "t6h");
+  const r6h = await makeRoom(A, "R6h");
+  const classHw = await createClass(A, classInput(t6h.id, r6h.id, day("2026-10-12"), day("2026-11-16")), tueMorning);
+  const hwSessions = (await sessionsOf(classHw.classGroupId)).map((s) => s.id);
+  const hwMembership = await prisma.membership.findFirstOrThrow({ where: { centerId: A, userId: t6h.id, role: "TEACHER" }, select: { id: true } });
+  await prisma.assessment.create({
+    data: scopedData(A, {
+      classGroupId: classHw.classGroupId,
+      sessionId: hwSessions[0],
+      teacherMembershipId: hwMembership.id,
+      type: "HOMEWORK",
+      title: "Class-periods homework",
+      deadline: day("2026-12-01"),
+      createdByUserId: t6h.id,
+      updatedByUserId: t6h.id,
+    }),
+  });
+  const hwSchedule = await prisma.classSchedule.findFirstOrThrow({ where: { classGroupId: classHw.classGroupId } });
+  const hwMove = await writeClassSlot(
+    prisma,
+    A,
+    { kind: "update", scheduleId: hwSchedule.id, classGroupId: classHw.classGroupId, slot: { dayOfWeek: 3, startTime: "10:00", endTime: "11:00" } },
+    { confirmConflicts: false, now: NOW },
+  );
+  const hwKept = hwMove.ok ? hwMove.report?.kept ?? [] : [];
+  check(
+    "A resync keeps a session that has homework, and reports it with the reason `assessments`",
+    hwMove.ok && (await prisma.session.count({ where: { id: hwSessions[0] } })) === 1 &&
+      hwKept.find((k) => k.sessionId === hwSessions[0])?.reasons.includes("assessments") === true,
+    JSON.stringify(hwKept),
+  );
+  check("…the class page's kept list reports it too", (await keptClassSessions(prisma, A, classHw.classGroupId, NOW)).some((k) => k.sessionId === hwSessions[0] && k.reasons.includes("assessments")));
+  check(
+    "…while the class's other, pristine sessions are deleted",
+    (await prisma.session.count({ where: { id: { in: hwSessions.slice(1) } } })) === 0,
+  );
+  check("…and the homework still has its session", (await prisma.assessment.count({ where: { sessionId: hwSessions[0] } })) === 1);
+
   const zRerun = await inClassTransaction(prisma, (tx) =>
     materializeClassSessions(tx, A, classZ.classGroupId, { from: NOW, confirmConflicts: false }),
   );
@@ -937,6 +978,19 @@ async function main() {
   await blocked("a session has a settlement", "settlements", (c) =>
     prisma.settlement.create({ data: scopedData(A, { teacherId: c.teacherId, sessionId: c.sessions[0].id, totalAmount: 0, createdBy: staff.id }) }),
   );
+  await blocked("it has an exam or homework", "assessments", async (c) => {
+    const membership = await prisma.membership.findFirstOrThrow({ where: { centerId: A, userId: c.teacherId, role: "TEACHER" }, select: { id: true } });
+    return prisma.assessment.create({
+      data: scopedData(A, {
+        classGroupId: c.id,
+        teacherMembershipId: membership.id,
+        type: "EXAM",
+        title: "Class-periods exam",
+        createdByUserId: c.teacherId,
+        updatedByUserId: c.teacherId,
+      }),
+    });
+  });
   await blocked("a session has ratings", "ratings", (c) =>
     prisma.sessionRating.create({ data: { studentUserId: student.user.id, sessionId: c.sessions[0].id, teacherId: c.teacherId, score: 4 } }),
   );
@@ -1039,7 +1093,7 @@ async function main() {
   );
   check(
     "recordPayment freezes the session price read under its locks (lockAttendeeRow), not the unlocked peek",
-    /const amount = roster\.sessionPrice;/.test(readFileSync("lib/db/payments.ts", "utf8")),
+    /const amount = roster\.sessionPrice;/.test(readSource("lib/db/payments.ts")),
   );
 }
 

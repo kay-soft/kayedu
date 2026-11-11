@@ -32,6 +32,7 @@ import {
 import { resolveRoomSet, writeSessionExtraRooms, type RoomSetError } from "./room-sets.ts";
 import { loadSessionOccupancy, slotTakenError, writeConfirmedConflictAudit } from "./slot-conflicts.ts";
 import { cancelSessionBookings } from "./session-bookings.ts";
+import { notifySessionCancelled, notifySessionRescheduled } from "./notifications.ts";
 import { branchPauseRefusal } from "./branch-pauses.ts";
 import { CATALOG_OVERRIDE_SELECT } from "../catalog.ts";
 
@@ -165,6 +166,10 @@ export async function cancelSession(
         ...(options.pause ? { pauseId: options.pause.id, updatedAt: options.pause.stampedAt } : {}),
       },
     });
+    // W1: enrolled students and confirmed bookers are told, in this
+    // transaction — read before the bookings below are cancelled. A branch
+    // pause and a class deactivation cancel through here too.
+    await notifySessionCancelled(tx, centerId, sessionId);
     // F6: its open bookings are cancelled with it, in this transaction.
     const bookingsCancelled = await cancelSessionBookings(tx, centerId, sessionId, "SESSION_CANCELLED", options.now);
     return { ok: true, session: updated, bookingsCancelled };
@@ -426,6 +431,9 @@ export async function rescheduleSession(
         where: { id: sessionId },
         data: { rescheduledToId: created.id },
       });
+      // W1: enrolled students and confirmed bookers are told (old and new
+      // time), in this transaction — before the bookings below are cancelled.
+      await notifySessionRescheduled(tx, centerId, sessionId, created.id);
       // F6: a booking is for one dated session — the student books the
       // replacement again ("This session moved to <date> — book again").
       await cancelSessionBookings(tx, centerId, sessionId, "SESSION_RESCHEDULED", options.now);
@@ -624,7 +632,7 @@ export function sessionListSelect(centerId: string) {
     // R3 — rooms combined with the primary for this session.
     extraRooms: {
       select: { room: { select: { id: true, name: true, capacity: true } } },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     },
     _count: { select: { attendees: true } },
   } satisfies Prisma.SessionSelect;
@@ -650,7 +658,7 @@ export function sessionDetailInclude(centerId: string) {
     room: true,
     // U2 — a replacement's "Moved from <date, time>".
     rescheduledFrom: { select: { date: true, startTime: true } },
-    extraRooms: { include: { room: true }, orderBy: { createdAt: "asc" } },
+    extraRooms: { include: { room: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     // Null on a one-time session (R5) — its own subject/grade below label it.
     classGroup: { include: { subject: withSelection, grade: withSelection } },
     subject: withSelection,
@@ -659,9 +667,9 @@ export function sessionDetailInclude(centerId: string) {
       include: {
         studentProfile: { include: { user: true } },
         enrollment: true,
-        payments: { orderBy: { recordedAt: "desc" } },
+        payments: { orderBy: [{ recordedAt: "desc" }, { id: "desc" }] },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     },
   } satisfies Prisma.SessionInclude;
 }

@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 
-import { adminShell } from "@/app/[locale]/(admin)/admin-shell";
-import { centerShell } from "@/app/[locale]/(center)/center-shell";
-import { parentShell } from "@/app/[locale]/(parent)/parent-shell";
-import { studentShell } from "@/app/[locale]/(student)/student-shell";
-import { teacherShell } from "@/app/[locale]/(teacher)/teacher-shell";
 import { AccountEmailForm, AccountPasswordForm, AccountProfileForm } from "@/app/[locale]/account/account-forms";
-import { FamilySection, StudyDetailsSection, TeacherHistorySection } from "@/app/[locale]/account/extension-points";
+import {
+  AssistantSection,
+  FamilySection,
+  PremiumSection,
+  PrivateClassSection,
+  StudyDetailsSection,
+  TeacherHistorySection,
+} from "@/app/[locale]/account/extension-points";
 import { Ltr } from "@/components/shared/ltr";
 import { AppShell } from "@/components/shell/app-shell";
-import type { ShellFrame } from "@/components/shell/from-context";
+import { shellFrameFor } from "@/components/shell/experience-frame";
 import { PageHeader } from "@/components/shared/page-header";
 import { PageSection } from "@/components/shared/page-section";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,32 +25,13 @@ import { fullName, localName } from "@/lib/identity";
 import { personInitials } from "@/lib/initials";
 import { formatPhone } from "@/lib/phone";
 import { HubShell } from "@/components/shell/hub-shell";
+import { unreadNotificationCount } from "@/lib/notifications/reach";
 import type { ShellUser } from "@/components/shell/app-shell";
-import { ACCOUNT_HUB_HINT, type ShellExperience } from "@/lib/routes";
+import { ACCOUNT_HUB_HINT } from "@/lib/routes";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("Account");
   return { title: t("title") };
-}
-
-/**
- * The experience's own shell — the same frame its route group's layout
- * renders. Not the student portal itself: no completion gate, no rating
- * pop-up, so only `props` is used.
- */
-function shellFrame(experience: ShellExperience): Promise<ShellFrame> {
-  switch (experience) {
-    case "center":
-      return centerShell();
-    case "teacher":
-      return teacherShell();
-    case "student":
-      return studentShell({ interruptions: false });
-    case "parent":
-      return parentShell();
-    case "admin":
-      return adminShell();
-  }
 }
 
 /**
@@ -61,7 +44,7 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
   const { from } = await searchParams;
   const experience = await resolveAccountExperience(typeof from === "string" ? from : undefined);
   const [frame, user, authUser] = await Promise.all([
-    experience === ACCOUNT_HUB_HINT ? null : shellFrame(experience),
+    experience === ACCOUNT_HUB_HINT ? null : shellFrameFor(experience),
     getCurrentUser(),
     getAuthUser(),
   ]);
@@ -112,10 +95,17 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
           )}
         </PageSection>
 
+        {/* W7a (D-W36): the assistant roles sit with the roles above — every account. */}
+        <AssistantSection user={user} />
+        {/* W10 (D-W43): "Join a private class" — every account. */}
+        <PrivateClassSection />
+
         {/* Extension points (F4 Study details, F3 Family) — each renders nothing for an account it does not apply to. */}
         <StudyDetailsSection user={user} />
         <FamilySection user={user} />
         <TeacherHistorySection user={user} />
+        {/* W6 (D-W35): every account — premium belongs to the person, not a branch. */}
+        <PremiumSection user={user} />
 
         <PageSection title={t("securitySection")} description={t("securitySectionDescription")}>
           <div className="grid items-start gap-4 lg:grid-cols-2">
@@ -138,7 +128,11 @@ export default async function AccountPage({ searchParams }: PageProps<"/[locale]
       initials: personInitials(user.firstName, user.lastName),
       roleKey: "",
     };
-    return <HubShell user={hubUser}>{body}</HubShell>;
+    return (
+      <HubShell userId={user.id} user={hubUser} unreadNotifications={await unreadNotificationCount(user.id)}>
+        {body}
+      </HubShell>
+    );
   }
 
   return <AppShell {...frame.props}>{body}</AppShell>;

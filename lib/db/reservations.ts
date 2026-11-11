@@ -19,6 +19,8 @@ import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { cooldownUntil, enrollmentCap, isAtCapacity, isInCooldown } from "../capacity.ts";
 import { classRoomSetFrom, ROOM_SET_SELECT } from "./room-sets.ts";
 import { firstOverflowingSession } from "./session-seats.ts";
+import { notifyReservationResolved } from "./notifications.ts";
+import { runInTransaction } from "./session-lifecycle.ts";
 
 /**
  * D-18 (SEC-2c, SEC-26): what one account may hold through the student
@@ -447,6 +449,8 @@ export async function confirmReservation(
     where: { id: reservation.id },
     data: { status: "CONFIRMED", resolvedAt: new Date(), resolvedBy },
   });
+  // W1: the student's notice commits with the approval (D-W12).
+  await notifyReservationResolved(tx, updated, "approved");
 
   return { ok: true, reservation: updated, enrollment };
 }
@@ -512,27 +516,34 @@ export type RejectOrCancelResult =
   | { ok: true; reservation: Reservation }
   | { ok: false; error: "notFound" | "notPending" };
 
-/** Center/teacher-side decline. Same "no Approvals UI yet" note as above. */
+/**
+ * Center/teacher-side decline. Same "no Approvals UI yet" note as above.
+ * W1: runs in a transaction of its own (or the caller's), so the student's
+ * notice commits with the decline or not at all.
+ */
 export async function rejectReservation(
   db: Db,
   centerId: string,
   reservationId: string,
   resolvedBy: string,
 ): Promise<RejectOrCancelResult> {
-  const reservation = await db.reservation.findFirst({
-    where: scopedWhere(centerId, { id: reservationId }),
-  });
-  if (!reservation) return { ok: false, error: "notFound" };
-  if (reservation.status !== "PENDING") return { ok: false, error: "notPending" };
+  return runInTransaction(db, async (tx): Promise<RejectOrCancelResult> => {
+    const reservation = await tx.reservation.findFirst({
+      where: scopedWhere(centerId, { id: reservationId }),
+    });
+    if (!reservation) return { ok: false, error: "notFound" };
+    if (reservation.status !== "PENDING") return { ok: false, error: "notPending" };
 
-  const now = new Date();
-  const updated = await db.reservation.update({
-    where: { id: reservation.id },
-    // `rejectedAt` (M15) starts this (student, class) pair's 7-day
-    // cooling-off — `reserveOrEnroll` reads it back off this same row.
-    data: { status: "REJECTED", resolvedAt: now, resolvedBy, rejectedAt: now },
+    const now = new Date();
+    const updated = await tx.reservation.update({
+      where: { id: reservation.id },
+      // `rejectedAt` (M15) starts this (student, class) pair's 7-day
+      // cooling-off — `reserveOrEnroll` reads it back off this same row.
+      data: { status: "REJECTED", resolvedAt: now, resolvedBy, rejectedAt: now },
+    });
+    await notifyReservationResolved(tx, updated, "declined");
+    return { ok: true, reservation: updated };
   });
-  return { ok: true, reservation: updated };
 }
 
 /**

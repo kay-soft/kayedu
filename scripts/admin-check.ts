@@ -31,6 +31,15 @@
  * and being writable — the same shape `updateCenterVisibilityWindowAction`
  * writes in, under the caps its schema enforces.
  *
+ * W6 (D-W35) adds §9: premium — `isPremium` at the boundary instant, the
+ * end-date rule in Cairo (past and 401 days refused, exactly 400 allowed),
+ * every non-admin role refused on lookup, grant, extend and revoke by direct
+ * call to `lib/db/premium.ts`, the neutral answer for an unknown email, the
+ * state rules (extend must be later, revoke sets null), audit rows carrying
+ * ids and the new end date only, `requirePremium`, and the statics (admin-only
+ * actions and nav, and — since W7a — `requirePremium` called only from
+ * `lib/db/assistants.ts`).
+ *
  * Needs a reachable database and cleans up after itself.
  */
 import { gatePrisma } from "./lib/gate-db.ts";
@@ -54,10 +63,38 @@ import {
   validNextLifecycleStates,
 } from "../lib/db/platform.ts";
 import { centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
-import { centerVisibilityWindowSchema, createCenterSchema } from "../lib/validation/admin.ts";
-import { readFileSync } from "node:fs";
+import {
+  centerVisibilityWindowSchema,
+  createCenterSchema,
+  premiumGrantSchema,
+  premiumLookupSchema,
+} from "../lib/validation/admin.ts";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import {
+  PREMIUM_ENDING_SOON_DAYS,
+  PREMIUM_MAX_DAYS_AHEAD,
+  isPremium,
+  premiumEndDay,
+  premiumEndDayError,
+  premiumStatus,
+  premiumToday,
+  premiumUntilForDay,
+  requirePremium,
+} from "../lib/auth/premium.ts";
+import {
+  PREMIUM_AUDIT_ACTIONS,
+  extendPremium,
+  findPremiumAccountByEmail,
+  findPremiumAccountById,
+  grantPremium,
+  revokePremium,
+} from "../lib/db/premium.ts";
+import { forbiddenAuditKey } from "../lib/db/audit-row.ts";
+import { addDays, dateKey, dayMarker } from "../lib/scheduling.ts";
+import { navForExperience } from "../components/shell/nav.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -89,6 +126,13 @@ async function cleanup() {
     where: { slug: { in: [SLUG_A, SLUG_B, SLUG_F1_FOUNDER, SLUG_F1_SECOND, SLUG_F1_THIRD, SLUG_F1_FOURTH] } },
   });
   await prisma.organization.deleteMany({ where: { id: { in: f1Orgs.map((org) => org.id) } } });
+  // W6: the premium rows name their User, not a centre — they go with the fixtures.
+  const premiumFixtures = await prisma.user.findMany({ where: { email: { startsWith: "admin-check-premium-" } }, select: { id: true } });
+  await deleteAuditRows(prisma, {
+    action: { startsWith: "platform.premium." },
+    entityType: "User",
+    entityId: { in: premiumFixtures.map((user) => user.id) },
+  });
   await prisma.user.deleteMany({ where: { email: { startsWith: "admin-check-" } } });
   // CatalogSubject is global (M13) — it doesn't cascade away with the
   // throwaway centers above.
@@ -338,7 +382,7 @@ async function main() {
   check(
     "The override action writes both windows and audits both, before and after",
     (() => {
-      const source = readFileSync(join(process.cwd(), "app/[locale]/(admin)/admin/centers/actions.ts"), "utf8");
+      const source = readSource(join(process.cwd(), "app/[locale]/(admin)/admin/centers/actions.ts"));
       return (
         /data: \{ centerDataVisibilityDays, teacherDataVisibilityDays \}/.test(source) &&
         /after: \{ centerDataVisibilityDays, teacherDataVisibilityDays \}/.test(source)
@@ -511,6 +555,7 @@ async function main() {
   );
 
   await checkOrganizationsAndLimits(admin.id, centerA.organizationId);
+  await checkPremium(admin.id, centerA.id);
 }
 
 // ── 8. F1: organizations, the branch limit, "add to an existing organization" ─
@@ -665,6 +710,298 @@ async function checkOrganizationsAndLimits(adminId: string, centerAOrganizationI
       existingNoOwner.success &&
       !newNoOwner.success,
   );
+}
+
+// ── 9. W6 (D-W35): premium — the predicate, the date rules, admin-only writes ─
+
+const PREMIUM_TARGET_EMAIL = "admin-check-premium-target@kayedu.test";
+const PREMIUM_AUDIT_PREFIX = "platform.premium.";
+
+/** Every source file under `dir` (relative to the repo root), node_modules and .next skipped. */
+function sourceFiles(dir: string): string[] {
+  const root = process.cwd();
+  return readdirSync(join(root, dir), { withFileTypes: true }).flatMap((entry) => {
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) return entry.name === "node_modules" || entry.name === ".next" ? [] : sourceFiles(rel);
+    return /\.(ts|tsx)$/.test(entry.name) ? [rel] : [];
+  });
+}
+
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+async function checkPremium(adminId: string, centerId: string) {
+  console.log("\nW6 — premium (D-W14, D-W35)");
+
+  // ── 9a. The predicate, at the boundary instant — no job involved ──────────
+  const now = new Date("2026-11-07T10:00:00.000Z");
+  check("isPremium: premiumUntil equal to now is NOT premium", !isPremium({ premiumUntil: new Date(now) }, now));
+  check("isPremium: one millisecond after now is premium", isPremium({ premiumUntil: new Date(now.getTime() + 1) }, now));
+  check("isPremium: a past date is not premium", !isPremium({ premiumUntil: new Date(now.getTime() - 86_400_000) }, now));
+  check("isPremium: null (never premium) is not premium", !isPremium({ premiumUntil: null }, now) && !isPremium(null, now));
+
+  // ── 9b. The end-date rule, in Cairo ───────────────────────────────────────
+  const today = premiumToday(now);
+  const plus = (days: number) => dateKey(addDays(dayMarker(today), days));
+  check("End date: today is allowed", premiumEndDayError(today, now) === null);
+  check("End date: yesterday is refused (dateInPast)", premiumEndDayError(plus(-1), now) === "dateInPast");
+  check("End date: exactly 400 days ahead is allowed (the boundary)", premiumEndDayError(plus(PREMIUM_MAX_DAYS_AHEAD), now) === null && PREMIUM_MAX_DAYS_AHEAD === 400);
+  check("End date: 401 days ahead is refused (dateTooFar)", premiumEndDayError(plus(401), now) === "dateTooFar");
+  check(
+    "End date: not a real day is refused (invalidDate)",
+    premiumEndDayError("2026-02-30", now) === "invalidDate" && premiumEndDayError("31/12/2026", now) === "invalidDate",
+  );
+  // 22:30 UTC on 7 Nov is 00:30 on 8 Nov in Cairo: "today" is the Cairo day.
+  const lateNight = new Date("2026-11-07T22:30:00.000Z");
+  check("Today is the Cairo day, not the UTC day", premiumToday(lateNight) === "2026-11-08" && premiumEndDayError("2026-11-07", lateNight) === "dateInPast");
+  check(
+    "An end day ends at the following Cairo midnight (winter UTC+2, summer UTC+3)",
+    premiumUntilForDay("2026-12-31").toISOString() === "2026-12-31T22:00:00.000Z" &&
+      premiumUntilForDay("2026-07-15").toISOString() === "2026-07-15T21:00:00.000Z",
+    `${premiumUntilForDay("2026-12-31").toISOString()} ${premiumUntilForDay("2026-07-15").toISOString()}`,
+  );
+  check(
+    "premiumEndDay reads the stored instant back as the picked day",
+    ["2026-01-01", "2026-04-24", "2026-07-15", "2026-10-30", "2026-12-31"].every((day) => premiumEndDay(premiumUntilForDay(day)) === day),
+  );
+  const endsToday = premiumUntilForDay(today);
+  check("The picked day itself is still premium at its last minute in Cairo", isPremium({ premiumUntil: endsToday }, new Date(endsToday.getTime() - 60_000)));
+  check("…and not at its end", !isPremium({ premiumUntil: endsToday }, endsToday));
+
+  // ── 9c. What the card and the admin page show ─────────────────────────────
+  const soon = premiumStatus(premiumUntilForDay(plus(PREMIUM_ENDING_SOON_DAYS)), now);
+  const notSoon = premiumStatus(premiumUntilForDay(plus(PREMIUM_ENDING_SOON_DAYS + 1)), now);
+  const lastDay = premiumStatus(premiumUntilForDay(today), now);
+  const expired = premiumStatus(premiumUntilForDay(plus(-3)), now);
+  check("Status: null is Not premium", premiumStatus(null, now).kind === "none");
+  check(
+    `Status: ${PREMIUM_ENDING_SOON_DAYS} days left is "ending soon", ${PREMIUM_ENDING_SOON_DAYS + 1} is not (one constant, 14)`,
+    PREMIUM_ENDING_SOON_DAYS === 14 &&
+      soon.kind === "active" && soon.daysLeft === 14 && soon.endingSoon &&
+      notSoon.kind === "active" && notSoon.daysLeft === 15 && !notSoon.endingSoon,
+    JSON.stringify({ soon, notSoon }),
+  );
+  check("Status: the last day reads 0 days left", lastDay.kind === "active" && lastDay.daysLeft === 0 && lastDay.endDay === today);
+  check("Status: a past end is Expired on that day", expired.kind === "expired" && expired.endDay === plus(-3));
+
+  // ── 9d. Fixtures: the account, and one actor per non-admin role ───────────
+  const target = await prisma.user.create({
+    data: { firstName: "Premium", lastName: "Target", email: PREMIUM_TARGET_EMAIL, locale: "en" },
+  });
+  const makeUser = (key: string) =>
+    prisma.user.create({ data: { firstName: "Admin", lastName: `Check ${key}`, email: `admin-check-premium-${key}@kayedu.test`, locale: "en" } });
+  const actors: { label: string; id: string | null }[] = [{ label: "no actor", id: null }];
+  actors.push({ label: "an account with no relation", id: (await makeUser("bare")).id });
+  for (const role of ["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER"] as const) {
+    const user = await makeUser(role.toLowerCase());
+    await prisma.membership.create({ data: { userId: user.id, centerId, role } });
+    actors.push({ label: `a centre ${role}`, id: user.id });
+  }
+  const student = await makeUser("student");
+  await prisma.studentProfile.create({ data: { userId: student.id, centerId, studentCode: "ADMIN-CHECK-1" } });
+  actors.push({ label: "a student", id: student.id });
+  const parent = await makeUser("parent");
+  await prisma.familyLink.create({ data: { parentUserId: parent.id, studentUserId: student.id, status: "ACTIVE", source: "STUDENT_INVITE" } });
+  actors.push({ label: "a parent", id: parent.id });
+
+  const auditCount = () => prisma.auditLog.count({ where: { action: { startsWith: PREMIUM_AUDIT_PREFIX }, entityId: target.id } });
+  const premiumOf = async () => (await prisma.user.findUniqueOrThrow({ where: { id: target.id }, select: { premiumUntil: true } })).premiumUntil;
+
+  // ── 9e. Every non-admin is refused on lookup, grant, extend and revoke ────
+  // Give the target a live period first, so extend and revoke would have
+  // something to change if the refusal were missing.
+  await prisma.user.update({ where: { id: target.id }, data: { premiumUntil: premiumUntilForDay(plus(30)) } });
+  const before = await premiumOf();
+  const auditsBefore = await auditCount();
+  for (const actor of actors) {
+    const lookup = await findPremiumAccountByEmail(prisma, { actorUserId: actor.id, email: PREMIUM_TARGET_EMAIL });
+    const unknown = await findPremiumAccountByEmail(prisma, { actorUserId: actor.id, email: "admin-check-nobody@kayedu.test" });
+    const byId = await findPremiumAccountById(prisma, { actorUserId: actor.id, userId: target.id });
+    const grant = await grantPremium(prisma, { actorUserId: actor.id, userId: target.id, endDay: plus(60) });
+    const extend = await extendPremium(prisma, { actorUserId: actor.id, userId: target.id, endDay: plus(60) });
+    const revoke = await revokePremium(prisma, { actorUserId: actor.id, userId: target.id });
+    const refused = [lookup, unknown, byId, grant, extend, revoke].every((result) => !result.ok && result.error === "forbidden");
+    check(`${actor.label}: lookup (known and unknown email), grant, extend and revoke are all forbidden`, refused);
+  }
+  check("…and nothing changed: the end date and the audit trail are untouched", (await premiumOf())?.getTime() === before?.getTime() && (await auditCount()) === auditsBefore);
+  // A refused write is refused before any date check: no hint about the rules either.
+  const refusedBadDate = await grantPremium(prisma, { actorUserId: actors[1].id, userId: target.id, endDay: "not-a-date" });
+  check("A non-admin with a bad date still gets forbidden, not a date error", !refusedBadDate.ok && refusedBadDate.error === "forbidden");
+
+  await prisma.user.update({ where: { id: target.id }, data: { premiumUntil: null } });
+
+  // ── 9f. Lookup: exact email only, one neutral answer ──────────────────────
+  const exact = await findPremiumAccountByEmail(prisma, { actorUserId: adminId, email: `  ${PREMIUM_TARGET_EMAIL.toUpperCase()}  ` });
+  check("Lookup is case-insensitive and trimmed", exact.ok && exact.account?.userId === target.id && exact.account.premiumUntil === null);
+  const partial = await findPremiumAccountByEmail(prisma, { actorUserId: adminId, email: "admin-check-premium-target" });
+  const domainOnly = await findPremiumAccountByEmail(prisma, { actorUserId: adminId, email: "@kayedu.test" });
+  const nobody = await findPremiumAccountByEmail(prisma, { actorUserId: adminId, email: "admin-check-nobody@kayedu.test" });
+  check(
+    "Part of an email finds nobody, and an unknown email gets the same answer (account: null)",
+    partial.ok && partial.account === null && domainOnly.ok && domainOnly.account === null && nobody.ok && nobody.account === null &&
+      JSON.stringify(partial) === JSON.stringify(nobody),
+  );
+  const blank = await findPremiumAccountByEmail(prisma, { actorUserId: adminId, email: "   " });
+  check("A blank email matches nobody (never the accounts without an email)", blank.ok && blank.account === null);
+  check(
+    "The lookup schema needs an email and keeps it whole",
+    !premiumLookupSchema.safeParse({ locale: "en", email: "  " }).success &&
+      premiumLookupSchema.safeParse({ locale: "en", email: PREMIUM_TARGET_EMAIL }).success,
+  );
+
+  // ── 9g. Grant, extend, revoke — the date rules and the state rules ────────
+  const pastGrant = await grantPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: plus(-1) });
+  const farGrant = await grantPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: plus(401) });
+  const extendNone = await extendPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: plus(10) });
+  const revokeNone = await revokePremium(prisma, { actorUserId: adminId, userId: target.id });
+  const missing = await grantPremium(prisma, { actorUserId: adminId, userId: "00000000-0000-4000-8000-000000000000", endDay: plus(10) });
+  check(
+    "Grant: a past date and a date 401 days ahead are refused; extend and revoke refuse a non-premium account; an unknown id is accountNotFound",
+    !pastGrant.ok && pastGrant.error === "dateInPast" &&
+      !farGrant.ok && farGrant.error === "dateTooFar" &&
+      !extendNone.ok && extendNone.error === "notPremium" &&
+      !revokeNone.ok && revokeNone.error === "notPremium" &&
+      !missing.ok && missing.error === "accountNotFound",
+    JSON.stringify({ pastGrant, farGrant, extendNone, revokeNone, missing }),
+  );
+  check("…and none of them wrote anything", (await premiumOf()) === null && (await auditCount()) === auditsBefore);
+  check(
+    "The grant schema refuses a past date and 401 days at the form too",
+    !premiumGrantSchema.safeParse({ locale: "en", userId: target.id, endDay: premiumToday(new Date(Date.now() - 2 * 86_400_000)) }).success &&
+      premiumGrantSchema.safeParse({ locale: "en", userId: target.id, endDay: premiumToday() }).success,
+  );
+
+  const realNow = new Date();
+  const realPlus = (days: number) => dateKey(addDays(dayMarker(premiumToday(realNow)), days));
+  const granted = await grantPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(30) });
+  check(
+    "Grant stores the end of that day in Cairo, and the account is premium on the next read",
+    granted.ok &&
+      granted.account.premiumUntil?.toISOString() === premiumUntilForDay(realPlus(30)).toISOString() &&
+      isPremium({ premiumUntil: await premiumOf() }),
+    JSON.stringify(granted),
+  );
+  const grantAgain = await grantPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(60) });
+  check("Grant on a premium account is refused (alreadyPremium) — extend it instead", !grantAgain.ok && grantAgain.error === "alreadyPremium");
+
+  const extendSame = await extendPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(30) });
+  const extendEarlier = await extendPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(10) });
+  const extendFar = await extendPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(401) });
+  check(
+    "Extend must be later: the same day and an earlier day are notLater; 401 days is dateTooFar",
+    !extendSame.ok && extendSame.error === "notLater" &&
+      !extendEarlier.ok && extendEarlier.error === "notLater" &&
+      !extendFar.ok && extendFar.error === "dateTooFar",
+  );
+  const extended = await extendPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(PREMIUM_MAX_DAYS_AHEAD) });
+  check(
+    "Extend to exactly 400 days ahead succeeds",
+    extended.ok && extended.account.premiumUntil?.toISOString() === premiumUntilForDay(realPlus(PREMIUM_MAX_DAYS_AHEAD)).toISOString(),
+  );
+
+  const premiumGate = await requirePremium(prisma, target.id);
+  check("requirePremium passes a premium account (one with no centre relation at all)", premiumGate.ok);
+
+  const revoked = await revokePremium(prisma, { actorUserId: adminId, userId: target.id });
+  check("Revoke sets premiumUntil to null", revoked.ok && revoked.account.premiumUntil === null && (await premiumOf()) === null);
+  const revokeAgain = await revokePremium(prisma, { actorUserId: adminId, userId: target.id });
+  check("Revoke twice: the second is notPremium and writes nothing", !revokeAgain.ok && revokeAgain.error === "notPremium");
+
+  // An expired period: not premium, extend refused, a new grant allowed.
+  await prisma.user.update({ where: { id: target.id }, data: { premiumUntil: new Date(realNow.getTime() - 60_000) } });
+  const extendExpired = await extendPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(10) });
+  check("An expired account is not premium, and extend refuses it (notPremium)", !isPremium({ premiumUntil: await premiumOf() }) && !extendExpired.ok && extendExpired.error === "notPremium");
+  const lapsedGate = await requirePremium(prisma, target.id);
+  check("requirePremium refuses an expired account with premiumRequired", !lapsedGate.ok && lapsedGate.error === "premiumRequired");
+  const renewed = await grantPremium(prisma, { actorUserId: adminId, userId: target.id, endDay: realPlus(5) });
+  check("Grant renews an expired account", renewed.ok && isPremium({ premiumUntil: await premiumOf() }));
+  const revokedAgain = await revokePremium(prisma, { actorUserId: adminId, userId: target.id });
+  check("…and revoke ends it again", revokedAgain.ok);
+
+  // ── 9h. requirePremium ────────────────────────────────────────────────────
+  const noneGate = await requirePremium(prisma, target.id);
+  const unknownGate = await requirePremium(prisma, "00000000-0000-4000-8000-000000000000");
+  check(
+    "requirePremium refuses a never-premium and an unknown account with the typed premiumRequired",
+    !noneGate.ok && noneGate.error === "premiumRequired" && !unknownGate.ok && unknownGate.error === "premiumRequired",
+  );
+  const boundary = premiumUntilForDay(realPlus(1));
+  await prisma.user.update({ where: { id: target.id }, data: { premiumUntil: boundary } });
+  const atBoundary = await requirePremium(prisma, target.id, boundary);
+  const justBefore = await requirePremium(prisma, target.id, new Date(boundary.getTime() - 1));
+  check("requirePremium at the boundary: refused at premiumUntil, passes 1 ms before", !atBoundary.ok && justBefore.ok);
+  await prisma.user.update({ where: { id: target.id }, data: { premiumUntil: null } });
+
+  // ── 9i. Audit rows: ids and the new end date only ─────────────────────────
+  const rows = await prisma.auditLog.findMany({
+    where: { action: { startsWith: PREMIUM_AUDIT_PREFIX }, entityId: target.id },
+    orderBy: { createdAt: "asc" },
+  });
+  const actions = rows.map((row) => row.action);
+  check(
+    "Each write wrote exactly one row: grant, extend, revoke, grant, revoke",
+    JSON.stringify(actions) ===
+      JSON.stringify([PREMIUM_AUDIT_ACTIONS.grant, PREMIUM_AUDIT_ACTIONS.extend, PREMIUM_AUDIT_ACTIONS.revoke, PREMIUM_AUDIT_ACTIONS.grant, PREMIUM_AUDIT_ACTIONS.revoke]),
+    JSON.stringify(actions),
+  );
+  check(
+    "Every row: no centre, the admin as actor, the User as entity",
+    rows.length === 5 && rows.every((row) => row.centerId === null && row.actorUserId === adminId && row.entityType === "User" && row.entityId === target.id),
+  );
+  const expectedAfter = [
+    premiumUntilForDay(realPlus(30)).toISOString(),
+    premiumUntilForDay(realPlus(PREMIUM_MAX_DAYS_AHEAD)).toISOString(),
+    null,
+    premiumUntilForDay(realPlus(5)).toISOString(),
+    null,
+  ];
+  check(
+    "Every row carries the new end date only ({ premiumUntil }) and no before",
+    rows.every((row, index) => row.before === null && JSON.stringify(row.after) === JSON.stringify({ premiumUntil: expectedAfter[index] })),
+    JSON.stringify(rows.map((row) => [row.before, row.after])),
+  );
+  const serialised = JSON.stringify(rows);
+  check(
+    "No row carries an email or a name",
+    !serialised.includes("@") && !serialised.toLowerCase().includes(PREMIUM_TARGET_EMAIL) && !serialised.includes("Premium Target") &&
+      rows.every((row) => forbiddenAuditKey(row.after) === null && forbiddenAuditKey(row.before) === null),
+  );
+
+  // ── 9j. Statics: admin-only by nav and action, and nothing gated yet ──────
+  const navKeys = navForExperience("admin", "PLATFORM_ADMIN").map((item) => item.labelKey);
+  check('The admin nav has "premium" (Teachers), linking /admin/teachers', navKeys.includes("premium") &&
+    navForExperience("admin", "PLATFORM_ADMIN").some((item) => item.labelKey === "premium" && item.href === "/admin/teachers"));
+  const otherNavs = (["center", "teacher", "student", "parent"] as const).flatMap((experience) =>
+    (["OWNER", "MANAGER", "RECEPTIONIST", "ACCOUNTANT", "TEACHER", "STUDENT", "PARENT"] as const).map((role) => navForExperience(experience, role)),
+  );
+  check("No other experience's nav links /admin/teachers", otherNavs.every((nav) => nav.every((item) => item.href !== "/admin/teachers")));
+
+  const actionsSource = stripComments(readSource(join(process.cwd(), "app/[locale]/(admin)/admin/teachers/actions.ts")));
+  const exported = [...actionsSource.matchAll(/export async function (\w+)\([\s\S]*?\{([\s\S]*?)\n\}/g)];
+  check(
+    "Every Teachers action starts with requirePlatformAdmin()",
+    exported.length === 4 && exported.every(([, , body]) => /^\s*const admin = await requirePlatformAdmin\(\);/.test(body)),
+    exported.map(([, name]) => name).join(", "),
+  );
+  const pageSource = stripComments(readSource(join(process.cwd(), "app/[locale]/(admin)/admin/teachers/page.tsx")));
+  check("The Teachers page calls requirePlatformAdmin()", /await requirePlatformAdmin\(\)/.test(pageSource));
+
+  const files = ["app", "components", "lib"].flatMap((dir) => sourceFiles(dir));
+  const callers = files.filter((file) => file !== "lib/auth/premium.ts" && /\brequirePremium\s*\(/.test(stripComments(readSource(join(process.cwd(), file)))));
+  // W7a old → new (the W7a prompt's allowed change): "no caller outside the tests"
+  // → "called only from the assistant invite and permission actions".
+  // W8a old → new (the W8a prompt's allowed change): → "the assistants and
+  // workspace actions" — lib/db/assistants.ts and lib/db/workspaces.ts.
+  check(
+    "requirePremium is called only from the assistant and workspace actions (W7a, W8a)",
+    callers.length === 2 && callers.includes("lib/db/assistants.ts") && callers.includes("lib/db/workspaces.ts"),
+    callers.join(", "),
+  );
+  const writers = files.filter((file) => /data:\s*\{[^}]*\bpremiumUntil\b/.test(stripComments(readSource(join(process.cwd(), file)))));
+  check("Only lib/db/premium.ts writes User.premiumUntil", writers.length === 1 && writers[0] === "lib/db/premium.ts", writers.join(", "));
+  const deciders = files.filter((file) => file !== "lib/auth/premium.ts" && /premiumUntil\??\.getTime\(\)|premiumUntil\s*[<>]=?|[<>]=?\s*\w*\.premiumUntil/.test(stripComments(readSource(join(process.cwd(), file)))));
+  check("Nothing outside lib/auth/premium.ts (and the writer's notLater rule) compares premiumUntil with a time", deciders.every((file) => file === "lib/db/premium.ts"), deciders.join(", "));
 }
 
 main()

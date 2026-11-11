@@ -133,6 +133,8 @@ export type SessionDisqualifier =
   | "ratings"
   /** F6 — a student holds a PENDING or CONFIRMED booking on it. */
   | "bookings"
+  /** D-W31 — an exam or homework (draft or published) belongs to it. */
+  | "assessments"
   | "shareOverride"
   | "description"
   | "rescheduled"
@@ -220,6 +222,7 @@ const SESSION_STATE_SELECT = {
       settlements: true,
       ratings: true,
       bookings: { where: { status: { in: ["PENDING", "CONFIRMED"] } } },
+      assessments: true,
     },
   },
 } satisfies Prisma.SessionSelect;
@@ -244,7 +247,8 @@ function sessionRoomIds(session: SessionState): string[] {
  * from or to, its teacher and room set still equal `baseline` (the class's
  * values before the edit), and — R5 — not created by hand (`isManual`) and —
  * F6 — no open (PENDING/CONFIRMED) booking, so a booked session is cancelled
- * (its bookings with it) rather than silently deleted. The one definition
+ * (its bookings with it) rather than silently deleted — and, D-W31, no
+ * assessment on it, so the homework keeps its session. The one definition
  * every caller shares.
  */
 export function sessionDisqualifiers(
@@ -260,7 +264,7 @@ export function sessionDisqualifiers(
     rescheduledToId: string | null;
     rescheduledFrom: { id: string } | null;
     /** `bookings` optional so a fixture predating F6 can omit it (= 0). */
-    _count: { attendees: number; payments: number; settlements: number; ratings: number; bookings?: number };
+    _count: { attendees: number; payments: number; settlements: number; ratings: number; bookings?: number; assessments?: number };
   },
   roomIds: readonly string[],
   baseline: Baseline,
@@ -273,6 +277,7 @@ export function sessionDisqualifiers(
   if (session._count.settlements > 0) reasons.push("settlement");
   if (session._count.ratings > 0) reasons.push("ratings");
   if ((session._count.bookings ?? 0) > 0) reasons.push("bookings");
+  if ((session._count.assessments ?? 0) > 0) reasons.push("assessments");
   if (session.centerShareType !== null || session.centerShareValue !== null) reasons.push("shareOverride");
   if (session.description !== null && session.description.trim() !== "") reasons.push("description");
   if (session.rescheduledToId || session.rescheduledFrom) reasons.push("rescheduled");
@@ -286,7 +291,7 @@ export function sessionDisqualifiers(
  * Nothing has happened on this session — the part of "pristine" every
  * delete shares (R5: including `deleteManualSession`): still SCHEDULED, not
  * closed, no attendee, payment, settlement or rating, no open booking (F6),
- * no reschedule link.
+ * no assessment (D-W31), no reschedule link.
  * A closed session can therefore never match any session delete.
  */
 const UNTOUCHED = {
@@ -299,6 +304,7 @@ const UNTOUCHED = {
   settlements: { none: {} },
   ratings: { none: {} },
   bookings: { none: { status: { in: ["PENDING", "CONFIRMED"] } } },
+  assessments: { none: {} },
 } satisfies Prisma.SessionWhereInput;
 
 /** `UNTOUCHED`, and no per-session centre-cut override. */
@@ -687,7 +693,7 @@ async function loadPlan(db: Db, centerId: string, classGroupId: string) {
       price: true,
       startDate: true,
       endDate: true,
-      extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } },
+      extraRooms: { select: { roomId: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       schedules: { select: { dayOfWeek: true, startTime: true, endTime: true } },
     },
   });
@@ -1317,7 +1323,38 @@ export async function deactivateClass(
   if (!current.active) return { ok: false, error: "alreadyInactive" };
   const now = options.now ?? new Date();
 
-  return db.$transaction(async (tx) => {
+  return db.$transaction((tx) => writeDeactivation(tx, centerId, classGroupId, current, options.actorUserId, now), WRITE_TRANSACTION_OPTIONS);
+}
+
+/**
+ * The same deactivation on the **caller's** transaction (W8a, D-W28): a
+ * workspace archive deactivates every active class of the workspace under one
+ * lock and one transaction (`lib/db/workspaces.ts`). The class is read on
+ * that transaction; everything after the read is `deactivateClass`'s own body
+ * (`writeDeactivation`), so the two cannot drift.
+ */
+export async function deactivateClassInTransaction(
+  tx: Tx,
+  centerId: string,
+  classGroupId: string,
+  options: { actorUserId?: string | null; now?: Date } = {},
+): Promise<DeactivateClassResult> {
+  const current = await loadPlan(tx, centerId, classGroupId);
+  if (!current) return { ok: false, error: "notFound" };
+  if (!current.active) return { ok: false, error: "alreadyInactive" };
+  return writeDeactivation(tx, centerId, classGroupId, current, options.actorUserId, options.now ?? new Date());
+}
+
+/** `deactivateClass`'s body: the writes after the class was read and found active. */
+async function writeDeactivation(
+  tx: Tx,
+  centerId: string,
+  classGroupId: string,
+  current: NonNullable<Awaited<ReturnType<typeof loadPlan>>>,
+  actorUserId: string | null | undefined,
+  now: Date,
+): Promise<DeactivateClassResult> {
+  {
     await tx.classGroup.updateMany({ where: scopedWhere(centerId, { id: classGroupId }), data: { active: false } });
     const { timeZone } = await centreScheduling(tx, centerId);
     const sessions = await futureSessions(tx, centerId, classGroupId, centreClock(now, timeZone));
@@ -1349,7 +1386,7 @@ export async function deactivateClass(
     }
     await audit(tx, {
       centerId,
-      actorUserId: options.actorUserId,
+      actorUserId,
       action: "classGroup.deactivate",
       entityType: "ClassGroup",
       entityId: classGroupId,
@@ -1357,7 +1394,7 @@ export async function deactivateClass(
       after: { active: false, sessionsDeleted: deleted, sessionsCancelled: cancelled },
     });
     return { ok: true as const, deleted, cancelled };
-  }, WRITE_TRANSACTION_OPTIONS);
+  }
 }
 
 export type ReactivateClassResult =
@@ -1414,6 +1451,8 @@ export type ClassDeleteBlockers = {
   reservations: number;
   /** F6 — single-session bookings on any of its sessions, any status. */
   bookings: number;
+  /** D-W31 — exams and homework on the class, draft or published. */
+  assessments: number;
 };
 
 /**
@@ -1432,7 +1471,7 @@ export async function classDeleteBlockers(
   const { timeZone } = await centreScheduling(db, centerId);
   const clock = centreClock(now, timeZone);
   const inClass = { classGroupId };
-  const [sessions, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations, bookings] =
+  const [sessions, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations, bookings, assessments] =
     await Promise.all([
       db.session.findMany({
         where: scopedWhere(centerId, { ...inClass, date: { lte: clock.today } }),
@@ -1451,13 +1490,14 @@ export async function classDeleteBlockers(
       db.enrollment.count({ where: scopedWhere(centerId, inClass) }),
       db.reservation.count({ where: scopedWhere(centerId, inClass) }),
       db.sessionBooking.count({ where: scopedWhere(centerId, { session: inClass }) }),
+      db.assessment.count({ where: scopedWhere(centerId, inClass) }),
     ]);
   const started = sessions.filter(
     (session) =>
       session.closedAt !== null ||
       (session.status !== CANCELLED && !session.rescheduledToId && hasStarted(session, clock)),
   ).length;
-  return { started, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations, bookings };
+  return { started, attendees, payments, settlements, ratings, rescheduled, enrollments, reservations, bookings, assessments };
 }
 
 export function hasDeleteBlockers(blockers: ClassDeleteBlockers): boolean {
@@ -1537,7 +1577,7 @@ export async function removeSessionsOnHoliday(
     where: scopedWhere(centerId, { date, OR: [{ classGroupId: null }, { classGroup: { active: true } }] }),
     select: {
       ...SESSION_STATE_SELECT,
-      classGroup: { select: { teacherId: true, roomId: true, extraRooms: { select: { roomId: true }, orderBy: { createdAt: "asc" } } } },
+      classGroup: { select: { teacherId: true, roomId: true, extraRooms: { select: { roomId: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } } },
     },
   });
   const pristine: string[] = [];
@@ -2061,6 +2101,8 @@ export type ManualSessionDeleteBlocker =
   | "payments"
   | "settlement"
   | "ratings"
+  /** D-W31 — an exam or homework belongs to it. */
+  | "assessments"
   | "shareOverride"
   | "rescheduled";
 
@@ -2085,7 +2127,7 @@ export function manualSessionDeleteBlockers(
     rescheduledToId: string | null;
     rescheduledFrom: { id: string } | null;
     timezone?: string | null;
-    _count: { attendees: number; payments: number; settlements: number; ratings: number };
+    _count: { attendees: number; payments: number; settlements: number; ratings: number; assessments?: number };
   },
   now: Date,
   timeZone: string,
@@ -2099,6 +2141,7 @@ export function manualSessionDeleteBlockers(
   if (session._count.payments > 0) blockers.push("payments");
   if (session._count.settlements > 0) blockers.push("settlement");
   if (session._count.ratings > 0) blockers.push("ratings");
+  if ((session._count.assessments ?? 0) > 0) blockers.push("assessments");
   if (session.classGroupId !== null && (session.centerShareType !== null || session.centerShareValue !== null)) {
     blockers.push("shareOverride");
   }

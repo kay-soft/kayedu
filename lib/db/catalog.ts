@@ -277,16 +277,35 @@ export async function isPairOffered(
   gradeId: string,
   subjectId: string,
 ): Promise<boolean> {
-  const [grade, subject, linked] = await Promise.all([
+  const [center, grade, subject, linked] = await Promise.all([
+    db.center.findUnique({ where: { id: centerId }, select: { kind: true } }),
     centerGradeById(db, centerId, gradeId),
     centerSubjectById(db, centerId, subjectId),
     isPairLinked(db, gradeId, subjectId),
   ]);
+  // W8a (D-W38): a PERSONAL workspace picks nothing (it has no
+  // CenterCatalogSelection rows), so it is offered every active catalogue
+  // pair linked in CatalogSubjectGrade — an unlinked pair is still refused.
+  if (center?.kind === "PERSONAL") return isWorkspacePairOffered(db, gradeId, subjectId);
   return (
     linked &&
     grade !== null && grade.active && grade.catalogActive &&
     subject !== null && subject.active && subject.catalogActive
   );
+}
+
+/**
+ * The PERSONAL-only branch of the pair rule (W8a, D-W38): both entries active
+ * in the global catalogue and linked. Used by `isPairOffered` for a workspace,
+ * and by the workspace class writer (`lib/db/workspaces.ts`).
+ */
+export async function isWorkspacePairOffered(db: Db, gradeId: string, subjectId: string): Promise<boolean> {
+  const [grade, subject, linked] = await Promise.all([
+    db.catalogGrade.findUnique({ where: { id: gradeId }, select: { active: true } }),
+    db.catalogSubject.findUnique({ where: { id: subjectId }, select: { active: true } }),
+    isPairLinked(db, gradeId, subjectId),
+  ]);
+  return linked && grade?.active === true && subject?.active === true;
 }
 
 // ── Selecting / renaming / deselecting a catalog entry ────────────────────

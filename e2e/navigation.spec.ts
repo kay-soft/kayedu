@@ -50,9 +50,10 @@ const ROLES: RoleCase[] = [
   // No relation yet: the root shows the hub (with "Find a branch to teach at");
   // any teacher route sends them to the directory (M15) — never to Discover.
   { account: "teacherNew", nav: ["centers"], home: "/teacher/centers", entry: "/teacher/dashboard" },
-  { account: "studentDowntown", nav: ["schedule", "calendar", "discover", "reservations"], home: "/student/schedule" },
+  { account: "studentDowntown", nav: ["schedule", "calendar", "assessments", "discover", "reservations"], home: "/student/schedule" },
   { account: "parentFamily", nav: ["schedule", "calendar"], home: "/parent" },
-  { account: "admin", nav: ["centers", "platform", "catalog"], home: "/admin/centers" },
+  // W6 (D-W35): + "premium" (Teachers).
+  { account: "admin", nav: ["centers", "platform", "catalog", "premium"], home: "/admin/centers" },
 ];
 
 /** `/{locale}` → the role's home, choosing the Downtown branch on the hub when asked. */
@@ -116,6 +117,49 @@ for (const role of ROLES) {
     expect(problems).toEqual([]);
   });
 }
+
+// W1 (D-W12): a bell in every shell's header — its badge a count or the
+// capped "9+" — whose panel opens the inbox inside the same shell.
+for (const role of ROLES) {
+  test(`${role.account}: the header's bell opens the notification inbox`, async ({ as, appLocale, problems }) => {
+    const page = await as(role.account);
+    await enterAs(page, appLocale, role.picksBranch, role.entry);
+    await dismissRatingPopup(page, appLocale);
+
+    const bell = page.getByRole("banner").getByRole("button", { name: t(appLocale, "Notifications.bell") });
+    await expect(bell, "every shell's header carries the bell").toBeVisible();
+    const badge = bell.locator("[data-notification-badge]");
+    if (await badge.count()) {
+      const digits = appLocale === "ar" ? "[٠-٩]+" : "[0-9]+";
+      const capped = t(appLocale, "Notifications.capped", { max: appLocale === "ar" ? "٩" : "9" });
+      await expect(badge, "the bell's badge is a count or the capped count").toHaveText(
+        new RegExp(`^(${digits}|${capped.replace(/[+]/g, "\\+")})$`),
+      );
+    }
+
+    await bell.click();
+    const seeAll = page.getByRole("link", { name: t(appLocale, "Notifications.seeAll") });
+    await expect(seeAll).toBeVisible();
+    await seeAll.click();
+    await expect(page).toHaveURL(new RegExp(`/${appLocale}/notifications\\?from=`));
+    await expectHealthy(page, appLocale);
+    await expect(page.getByRole("heading", { name: t(appLocale, "Notifications.title"), exact: true })).toBeVisible();
+    await expect(page.getByRole("banner").getByRole("button", { name: t(appLocale, "Notifications.bell") })).toBeVisible();
+    expect(problems).toEqual([]);
+  });
+}
+
+test("the branch hub has the bell too, and its inbox opens in the hub shell", async ({ as, appLocale }) => {
+  const page = await as("owner");
+  await page.goto(`/${appLocale}/select-center`);
+  const bell = page.getByRole("button", { name: t(appLocale, "Notifications.bell") });
+  await expect(bell).toBeVisible();
+  await bell.click();
+  await page.getByRole("link", { name: t(appLocale, "Notifications.seeAll") }).click();
+  await expect(page).toHaveURL(new RegExp(`/${appLocale}/notifications\\?from=hub`));
+  await expectHealthy(page, appLocale);
+  await expect(page.getByRole("link", { name: t(appLocale, "Shell.backToHub") })).toBeVisible();
+});
 
 test("a zero-centre teacher's root shows the hub, whose link leads to the directory", async ({ as, appLocale }) => {
   const page = await as("teacherNew");

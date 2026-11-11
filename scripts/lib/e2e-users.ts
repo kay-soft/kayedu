@@ -13,6 +13,8 @@
 import { createClient } from "@supabase/supabase-js";
 import type { PrismaClient } from "@prisma/client";
 
+import { deleteAuditRows } from "./audit-maintenance.ts";
+
 /** First characters of every e2e tag, hence of every e2e account's email. */
 export const E2E_USER_PREFIX = "e2e";
 export const E2E_EMAIL_DOMAIN = "example.com";
@@ -49,6 +51,28 @@ export async function removeE2eUsers(db: PrismaClient, needle: string = E2E_USER
       if (user.authId) await admin.auth.admin.deleteUser(user.authId);
     }
   }
+  await removePersonalWorkspaces(db, users.map((user) => user.id));
   const { count } = await db.user.deleteMany({ where: { id: { in: users.map((user) => user.id) } } });
+  return count;
+}
+
+/**
+ * W8a (D-W38): a fixture teacher's PERSONAL workspaces and personal
+ * organization go first — the organization's owner is `ON DELETE RESTRICT`,
+ * and a workspace class names its teacher. Deleting the workspace centre
+ * cascades its settings, membership, room, classes and sessions; its audit
+ * rows go before it (AuditLog does not cascade). Only centres under these
+ * users' own personal organizations are touched.
+ */
+export async function removePersonalWorkspaces(db: PrismaClient, userIds: string[]): Promise<number> {
+  if (userIds.length === 0) return 0;
+  const orgs = await db.organization.findMany({ where: { ownerUserId: { in: userIds } }, select: { id: true } });
+  if (orgs.length === 0) return 0;
+  const orgIds = orgs.map((org) => org.id);
+  const centers = await db.center.findMany({ where: { organizationId: { in: orgIds }, kind: "PERSONAL" }, select: { id: true } });
+  const centerIds = centers.map((center) => center.id);
+  if (centerIds.length > 0) await deleteAuditRows(db, { centerId: { in: centerIds } });
+  const { count } = await db.center.deleteMany({ where: { id: { in: centerIds } } });
+  await db.organization.deleteMany({ where: { id: { in: orgIds }, centers: { none: {} } } });
   return count;
 }

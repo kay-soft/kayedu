@@ -38,6 +38,18 @@ enum CenterLifecycleState {
   ARCHIVED
 }
 
+// W8a (D-W20, D-W38): what a centre row is. BRANCH is a centre's branch, made
+// only by a platform admin (U5). PERSONAL is a premium teacher's own
+// workspace, made only by `createPersonalWorkspace` (lib/db/platform.ts) under
+// the teacher's personal organization. Both are tenants: center_id isolation
+// is the same. Every centre-wide surface (Explore, Discover, the directory,
+// the admin lists and KPIs, the branch limit, the baseline, the seed-world
+// checks) reads BRANCH only, through `BRANCH_ONLY` / `ACCESSIBLE_CENTER`.
+enum CenterKind {
+  BRANCH
+  PERSONAL
+}
+
 enum ShareType {
   FIXED // centerShareValue is piastres taken by the center
   PERCENTAGE // centerShareValue is a whole-number percent (e.g. 15)
@@ -222,6 +234,33 @@ enum AccountClaimStatus {
   REJECTED
 }
 
+// W1 (D-W12): what an in-app notice is about. Each kind declares, in
+// lib/notifications/kinds.ts, its text keys, its deep link and its payload ids.
+enum NotificationKind {
+  ENROLLMENT_APPROVED
+  ENROLLMENT_DECLINED
+  BOOKING_APPROVED
+  BOOKING_DECLINED
+  SESSION_CANCELLED
+  SESSION_RESCHEDULED
+  ASSESSMENT_PUBLISHED
+  ASSESSMENT_EXTENDED
+  ASSESSMENT_OPENS_SOON
+  ASSESSMENT_DUE_SOON
+  // W8b (D-W39): a premium teacher's workspace invited this account to link
+  // a student profile. Payload {invitationId}; deep link the hub.
+  WORKSPACE_INVITATION
+}
+
+// W8b (D-W39): a workspace student invitation's state. At most one PENDING
+// per profile (a hand-written partial unique index, CLAUDE.md rule 7).
+enum WorkspaceInvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
 // ─────────────────────────────────────────────────────────────
 // IDENTITY (global — no centerId)
 // ─────────────────────────────────────────────────────────────
@@ -273,6 +312,12 @@ model User {
   // the default; 1–3650 otherwise. The teacher's own preference only — it
   // never widens any centre window and no centre-side read consults it.
   teacherHistoryDays Int    @default(0)
+  // W6 (D-W14, D-W35): premium belongs to the person, not a centre. The end of
+  // the last covered day in Africa/Cairo, as an exclusive instant (UTC); null =
+  // never premium. Premium is `premiumUntil > now`, decided only by
+  // lib/auth/premium.ts's `isPremium` — no stored boolean, no cron. Only a
+  // platform admin writes it (lib/db/premium.ts, audited `platform.premium.*`).
+  premiumUntil    DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -305,6 +350,21 @@ model User {
   sessionRatingSkips   SessionRatingSkip[] @relation("SessionRatingSkipStudent")
   // SEC-2a (D-01) — sign-ups claiming this staff-created person.
   accountClaims        AccountClaim[]      @relation("AccountClaimTarget")
+  notifications        Notification[]
+  // W7a (D-W16, D-W17, D-W36) — the teacher side and the assistant side of an
+  // assistant link, and the codes a premium teacher issued / an account used.
+  assistantInvitesIssued AssistantInvite[]  @relation("AssistantInviteTeacher")
+  assistantInvitesUsed   AssistantInvite[]  @relation("AssistantInviteUsedBy")
+  assistantsAsTeacher    TeacherAssistant[] @relation("TeacherAssistantTeacher")
+  assistantLinks         TeacherAssistant[] @relation("TeacherAssistantAssistant")
+  // W8a (D-W38) — this teacher's personal organization, the parent of their
+  // PERSONAL workspaces (at most one).
+  personalOrganization   Organization?      @relation("PersonalOrganization")
+  // W8b (D-W39) — workspace invitations addressed to this account.
+  workspaceInvitations   WorkspaceInvitation[]
+  // W10 (D-W43) — workspace share codes this teacher issued / this account redeemed.
+  workspaceShareCodesIssued WorkspaceShareCode[] @relation("WorkspaceShareCodeCreatedBy")
+  workspaceShareCodesUsed   WorkspaceShareCode[] @relation("WorkspaceShareCodeUsedBy")
 }
 
 /**
@@ -372,6 +432,13 @@ model Organization {
   // count only blocks new branches — nothing existing is touched. >= 1 is a
   // CHECK constraint in the migration (`20261026100000_f1_branch_limits`).
   maxBranches Int      @default(1)
+  // W8a (D-W38): set only for a teacher's personal organization, the parent of
+  // their PERSONAL workspaces; unique, so one per person. Created in the same
+  // transaction as the first workspace. Null for every centre organization.
+  // `maxBranches` is never read for it (D-W21). A trigger in the W8a
+  // migration refuses a PERSONAL centre under an organization without one.
+  ownerUserId String?  @unique
+  owner       User?    @relation("PersonalOrganization", fields: [ownerUserId], references: [id], onDelete: Restrict)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -403,6 +470,15 @@ model Center {
   deletedAt       DateTime?
   deletedBy       String?
   restorableUntil DateTime?
+  // W8a (D-W20, D-W38): BRANCH (every existing row) or PERSONAL (a teacher's
+  // workspace). See the enum.
+  kind            CenterKind           @default(BRANCH)
+  // W8a (D-W28, D-W38): the teacher's own archive of a PERSONAL workspace —
+  // read-only, its classes deactivated, not counted toward the 100 cap.
+  // Separate from `lifecycleState` (the admin's) and from `deletedAt`. CHECKs
+  // in the migration: both or neither, and only on a PERSONAL centre.
+  archivedAt       DateTime?
+  archivedByUserId String?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -443,6 +519,19 @@ model Center {
   gradePromotions   GradePromotionBatch[]
   // U5 — the platform admin's pauses of this branch.
   pauses            BranchPause[]
+  // W1 — notices about this branch (hidden when the reader no longer reaches it).
+  notifications     Notification[]
+  // W2 — teachers' exams and homework, with their questions and options.
+  assessments         Assessment[]
+  assessmentQuestions AssessmentQuestion[]
+  assessmentOptions   AssessmentOption[]
+  // W3a — students' attempts and their saved answers.
+  assessmentAttempts  AssessmentAttempt[]
+  assessmentAnswers   AssessmentAnswer[]
+  // W8b — a PERSONAL workspace's student invitations (D-W39).
+  workspaceInvitations WorkspaceInvitation[]
+  // W10 — a PERSONAL workspace's student share codes (D-W43).
+  workspaceShareCodes  WorkspaceShareCode[]
 
   @@index([organizationId])
 }
@@ -510,6 +599,11 @@ model CenterSettings {
   // sign-in). Only ACTIVE/GRACE branches are ever listed, whatever this says
   // (lib/db/public-catalog.ts). It never affects the signed-in student Discover.
   publicListing            Boolean        @default(true)
+  // W7b (D-W19, D-W37): whether a premium teacher's assistants may read and
+  // act at this branch on the teacher's behalf. Off removes the branch from
+  // every assistant page and read on the next request; the teacher is
+  // unaffected. Edited in Settings → General (`center.settings.edit`).
+  allowTeacherAssistants   Boolean        @default(true)
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt
 }
@@ -548,6 +642,8 @@ model Membership {
   updatedAt        DateTime  @updatedAt
 
   branchGrants MembershipBranchGrant[]
+  // W2 — the exams and homework this TEACHER membership owns (D-W30).
+  assessments  Assessment[]
 
   @@unique([userId, centerId, role])
   @@index([centerId])
@@ -912,6 +1008,8 @@ model ClassGroup {
   reservations Reservation[]
   // R3 — rooms combined with the primary `roomId` (each linked to it).
   extraRooms   ClassGroupRoom[]
+  // W2 — the class's exams and homework (D-W02, D-W03).
+  assessments  Assessment[]
 
   @@index([centerId])
   @@index([centerId, teacherId])
@@ -982,6 +1080,12 @@ model StudentProfile {
   parentLinks       ParentLink[]
   // F4 — the promotion batches that moved this student (undo reads these).
   promotionItems    GradePromotionItem[]
+  // W3a — this student's exam and homework attempts (one per assessment).
+  assessmentAttempts AssessmentAttempt[]
+  // W8b — the invitations a workspace sent for this (unlinked) profile.
+  workspaceInvitations WorkspaceInvitation[]
+  // W10 (D-W43) — the share codes a workspace issued for this (unlinked) profile.
+  workspaceShareCodes  WorkspaceShareCode[]
 
   @@unique([userId, centerId])
   @@unique([centerId, studentCode])
@@ -996,7 +1100,6 @@ model StudentProfile {
  * batch is both the audit anchor (`student.grade.promote`: batch id + count)
  * and the undo ledger. Tenant-scoped: `centerId` is the sole key (CLAUDE.md
  * rule 1), reached only through `scoped(ctx).gradePromotions`.
- *
  * It touches a branch's own `StudentProfile.gradeId` and nothing else —
  * never an enrolment, class, session, money row, another branch, or
  * `User.gradeId`. `undoneAt`/`undoneBy` are both set or both null (CHECK in
@@ -1197,6 +1300,8 @@ model Session {
   ratingSkips       SessionRatingSkip[]
   // F6 — students who booked this one session online without enrolling.
   bookings          SessionBooking[]
+  // W2 — homework set from this session, and exams linked to it (D-W02/D-W03).
+  assessments       Assessment[]
 
   // The idempotency backstop of the class-sessions engine (R4, docs/02 §11,
   // lib/db/class-sessions.ts): materializing a class's range is a
@@ -1666,6 +1771,11 @@ model ChangeRequest {
   center      Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
   type        ChangeRequestType
   requestedBy String // teacher userId
+  // W7b (D-W37): the assistant who filed it on the teacher's behalf, else
+  // null. The request is the teacher's (`requestedBy`); centre screens show
+  // only a "via assistant" tag, never this person. A plain id, like
+  // `requestedBy` — no relation.
+  viaAssistantUserId String?
   payload     Json // proposed class/session details
   status      ChangeRequestStatus @default(PENDING)
   resolvedBy  String?
@@ -1888,6 +1998,11 @@ model AuditLog {
   center      Center?  @relation(fields: [centerId], references: [id])
   actorUserId String?
   actor       User?    @relation(fields: [actorUserId], references: [id])
+  // W7b (D-W18, D-W37): set only on a write an assistant made — the teacher
+  // they acted for; `actorUserId` is then the assistant. Null on everyone
+  // else's rows, the teacher's own included. A plain id (no relation, so no
+  // referential action ever touches this append-only table).
+  onBehalfOfUserId String?
   action      String // "payment.void", "attendance.correct", "share.change"…
   entityType  String
   entityId    String
@@ -1899,4 +2014,328 @@ model AuditLog {
   @@index([entityType, entityId])
   // SYS: the audit screen reads a centre's newest rows.
   @@index([centerId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// NOTIFICATIONS (W1, D-W12) — per person, not a tenant table
+// ─────────────────────────────────────────────────────────────
+
+// One notice in a person's in-app inbox. Written in the transaction of the
+// event that causes it (lib/db/notifications.ts), read only by `userId` = the
+// signed-in person. `payload` holds ids only (D-20) — the text is rendered
+// from next-intl at read time, names loaded then. `centerId` is the branch the
+// notice concerns: a notice whose branch the reader no longer reaches is
+// hidden, never deleted. `dedupeKey` makes a producer that fires twice write
+// one row. No retention in v1 (backlog).
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      NotificationKind
+  centerId  String?
+  center    Center?          @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  payload   Json
+  dedupeKey String
+  createdAt DateTime         @default(now())
+  readAt    DateTime?
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@index([centerId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ASSESSMENTS (W2, D-W01–D-W11, D-W30) — tenant tables, centerId-scoped
+// ─────────────────────────────────────────────────────────────
+
+enum AssessmentType {
+  EXAM
+  HOMEWORK
+}
+
+// DRAFT → PUBLISHED, nothing else in v1 (D-W01). Published while no attempt
+// exists can go back to DRAFT (W3a).
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+// A teacher's multiple-choice exam (a class, a window, a duration) or homework
+// (a session, a deadline). Written only by lib/db/assessments.ts and authorised
+// by owning the row: an ACTIVE TEACHER membership at this branch that holds
+// `assessment.manage.own` (D-W30). Centre staff never read it (D-W11). Times
+// are UTC instants, shown and typed in the session's frozen timezone, else the
+// branch's. CHECKs in the migration: the type says which fields apply,
+// windowEnd > windowStart, durationMinutes 1–600, one sitting is EXAM-only.
+model Assessment {
+  id                  String           @id @default(uuid())
+  centerId            String
+  center              Center           @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  classGroupId        String
+  classGroup          ClassGroup       @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+  // Required for HOMEWORK, optional for EXAM. Cascade stays for a centre's own
+  // removal only: an assessment makes its session non-pristine, and session and
+  // class deletes are refused while one exists (D-W31, closes OD-18).
+  sessionId           String?
+  session             Session?         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // The owning teacher — the authority. Separate from the actor columns below,
+  // so W7's on-behalf writes fit without reshaping anything (D-W18).
+  teacherMembershipId String
+  teacherMembership   Membership       @relation(fields: [teacherMembershipId], references: [id], onDelete: Cascade)
+  type                AssessmentType
+  status              AssessmentStatus @default(DRAFT)
+  title               String
+  instructions        String?
+  windowStart         DateTime?
+  windowEnd           DateTime?
+  deadline            DateTime?
+  durationMinutes     Int?
+  oneSitting          Boolean          @default(false)
+  shuffle             Boolean          @default(false)
+  showScore           Boolean          @default(false)
+  showCorrectAnswers  Boolean          @default(false)
+  createdByUserId     String
+  updatedByUserId     String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  publishedAt         DateTime?
+
+  questions AssessmentQuestion[]
+  attempts  AssessmentAttempt[]
+
+  @@index([centerId])
+  @@index([centerId, teacherMembershipId])
+  @@index([centerId, classGroupId])
+  @@index([centerId, sessionId])
+  // W3b (D-W32): the "soon" reads and the calendar's range reads.
+  @@index([centerId, status, windowStart])
+  @@index([centerId, status, deadline])
+}
+
+// Text only in v1 (D-W04). Points 1–100 (a CHECK).
+model AssessmentQuestion {
+  id           String     @id @default(uuid())
+  centerId     String
+  center       Center     @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  position     Int
+  text         String
+  points       Int        @default(1)
+
+  options AssessmentOption[]
+  answers AssessmentAnswer[]
+
+  @@index([centerId])
+  @@index([assessmentId, position])
+}
+
+// At most one correct option per question: a hand-written partial unique index
+// `AssessmentOption_one_correct_per_question … WHERE "isCorrect"`. Prisma
+// cannot express it, so delete its DROP INDEX from every generated diff
+// (CLAUDE.md rule 7). `isCorrect` never reaches a student before reveal — the
+// student shape is lib/assessments.ts's `toStudentAssessment` (D-W09).
+model AssessmentOption {
+  id         String             @id @default(uuid())
+  centerId   String
+  center     Center             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  questionId String
+  question   AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  position   Int
+  text       String
+  isCorrect  Boolean            @default(false)
+
+  answers AssessmentAnswer[]
+
+  @@index([centerId])
+  @@index([questionId, position])
+}
+
+// How an attempt became final (W3a). STUDENT: their own submit, or the best-
+// effort submit on page close. DEADLINE: past its derived end when something
+// read it (D-W10). ONE_SITTING_GAP: a one-sitting exam the student left.
+enum AssessmentFinalisedBy {
+  STUDENT
+  DEADLINE
+  ONE_SITTING_GAP
+}
+
+// One student's one attempt (D-W07): a second start resumes this row. Its end
+// is derived from startedAt, never stored (lib/assessments.ts, attemptEnd).
+// Final = submittedAt set; a deadline finalisation stamps the derived end, so
+// time taken is capped. score/maxScore are frozen at finalisation and never
+// recomputed (D-W09). The shuffled order is derived from the attempt id, not
+// stored. CHECK in the migration: submittedAt and finalisedBy are both set or
+// both null. Written only by lib/db/assessment-attempts.ts.
+model AssessmentAttempt {
+  id               String                 @id @default(uuid())
+  centerId         String
+  center           Center                 @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  assessmentId     String
+  assessment       Assessment             @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile         @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  startedAt        DateTime
+  lastSeenAt       DateTime
+  submittedAt      DateTime?
+  finalisedBy      AssessmentFinalisedBy?
+  score            Int?
+  maxScore         Int?
+
+  answers AssessmentAnswer[]
+
+  @@unique([assessmentId, studentProfileId])
+  @@index([centerId])
+  @@index([centerId, studentProfileId])
+}
+
+// One saved answer per question (autosave overwrites it until the attempt is
+// final). isCorrect and pointsAwarded are set only at finalisation and are
+// never selected by a student read before reveal (D-W09, CLAUDE.md rule 11).
+model AssessmentAnswer {
+  id            String             @id @default(uuid())
+  centerId      String
+  center        Center             @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  attemptId     String
+  attempt       AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId    String
+  question      AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  optionId      String?
+  option        AssessmentOption?  @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  isCorrect     Boolean?
+  pointsAwarded Int?
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([attemptId, questionId])
+  @@index([centerId])
+  @@index([questionId])
+  @@index([optionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ASSISTANTS (W7a, D-W16, D-W17, D-W36) — per person, not tenant tables
+// ─────────────────────────────────────────────────────────────
+
+// The three presets a teacher picks from (D-W17). The fixed permission
+// catalogue and each preset's grants live in code (lib/assistant-catalog.ts);
+// a link whose grants match no preset reads as "Custom" — never stored.
+enum AssistantPreset {
+  GRADER
+  CO_TEACHER
+  FULL
+}
+
+// A premium teacher's single-use invitation code (D-W16). Stored as sha256
+// only (a CHECK refuses anything that is not a 64-hex digest); the plaintext
+// is shown once, at creation. Pending = unused, unrevoked and unexpired, and a
+// pending invite holds one of the teacher's 5 slots. Not a tenant table: it
+// names two people and no centre (rule 1 has nothing to scope here).
+model AssistantInvite {
+  id            String          @id @default(uuid())
+  teacherUserId String
+  teacher       User            @relation("AssistantInviteTeacher", fields: [teacherUserId], references: [id], onDelete: Cascade)
+  codeHash      String          @unique
+  preset        AssistantPreset
+  expiresAt     DateTime
+  usedAt        DateTime?
+  usedByUserId  String?
+  usedBy        User?           @relation("AssistantInviteUsedBy", fields: [usedByUserId], references: [id], onDelete: SetNull)
+  revokedAt     DateTime?
+  createdAt     DateTime        @default(now())
+
+  @@index([teacherUserId])
+}
+
+// One person acting for one premium teacher (D-W16). Effective only while
+// the teacher is premium (computed per request, D-W15) and `revokedAt` is
+// null. At most one live link per pair: a hand-written partial unique index
+// `TeacherAssistant_pair_live_key … WHERE "revokedAt" IS NULL` (Prisma cannot
+// express it — CLAUDE.md rule 7), and a CHECK refuses a self-link. An
+// assistant is never a Membership and gains no centre permission (W7a).
+model TeacherAssistant {
+  id              String          @id @default(uuid())
+  teacherUserId   String
+  teacher         User            @relation("TeacherAssistantTeacher", fields: [teacherUserId], references: [id], onDelete: Cascade)
+  assistantUserId String
+  assistant       User            @relation("TeacherAssistantAssistant", fields: [assistantUserId], references: [id], onDelete: Cascade)
+  // The preset last chosen. What the link may do is its grants below.
+  preset          AssistantPreset
+  createdAt       DateTime        @default(now())
+  revokedAt       DateTime?
+
+  grants AssistantPermissionGrant[]
+
+  @@index([teacherUserId])
+  @@index([assistantUserId])
+}
+
+// One permission of the fixed catalogue granted on one link (D-W17).
+// Deny-by-default: no row, no right. `permission` is validated against the
+// catalogue in code before any write (lib/db/assistants.ts).
+model AssistantPermissionGrant {
+  assistantId String
+  assistant   TeacherAssistant @relation(fields: [assistantId], references: [id], onDelete: Cascade)
+  permission  String
+
+  @@id([assistantId, permission])
+}
+
+/**
+ * W8b (D-W27, D-W39): a PERSONAL workspace's invitation to the account whose
+ * `User.phone` (never `contactPhone`, never another tenant's profile phone)
+ * equals the phone the teacher typed, and which has a login (`authId` set).
+ * Written only on such a match, in the add's own transaction; with no match
+ * nothing is written beyond the audit row, and the teacher's answer is the
+ * same either way. Accepting moves the profile from its placeholder `User` to
+ * the account (`lib/db/workspace-students.ts`), declining leaves it unlinked.
+ * A tenant table: `centerId` is the workspace. At most one PENDING per
+ * profile (the hand-written partial unique index
+ * `WorkspaceInvitation_one_pending_per_profile`, CLAUDE.md rule 7). Ids only.
+ */
+model WorkspaceInvitation {
+  id               String                    @id @default(uuid())
+  centerId         String
+  center           Center                    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile            @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  targetUserId     String
+  targetUser       User                      @relation(fields: [targetUserId], references: [id], onDelete: Cascade)
+  status           WorkspaceInvitationStatus @default(PENDING)
+  createdAt        DateTime                  @default(now())
+  respondedAt      DateTime?
+
+  @@index([centerId])
+  @@index([studentProfileId])
+  @@index([targetUserId, status])
+}
+
+/**
+ * W10 (D-W43): a one-time share code a premium workspace owner gives an
+ * unlinked workspace student, which any signed-in account redeems after a
+ * confirmation — moving the profile from its placeholder to that account
+ * (the W8b move, `lib/db/workspace-share-codes.ts`). Stored as **sha256
+ * only**, shown once, single use (a conditional claim), expires after 7 days.
+ * A tenant table: `centerId` is the workspace. At most one active code per
+ * profile (the hand-written partial unique index
+ * `WorkspaceShareCode_one_active_per_profile … WHERE "usedAt" IS NULL AND
+ * "revokedAt" IS NULL`, CLAUDE.md rule 7). Ids only — never the code.
+ */
+model WorkspaceShareCode {
+  id               String         @id @default(uuid())
+  centerId         String
+  center           Center         @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  studentProfileId String
+  studentProfile   StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  createdByUserId  String
+  createdBy        User           @relation("WorkspaceShareCodeCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  codeHash         String         @unique
+  expiresAt        DateTime
+  usedAt           DateTime?
+  usedByUserId     String?
+  usedBy           User?          @relation("WorkspaceShareCodeUsedBy", fields: [usedByUserId], references: [id], onDelete: SetNull)
+  revokedAt        DateTime?
+  createdAt        DateTime       @default(now())
+
+  @@index([centerId])
+  @@index([studentProfileId])
 }

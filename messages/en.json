@@ -117,6 +117,30 @@
     "allBranches": "All branches",
     "allBranchesHint": "{count, plural, one {# branch} other {# branches, together}}"
   },
+  "Experiences": {
+    "title": "Switch role",
+    "trigger": "Switch role. Now: {current}",
+    "triggerNoCurrent": "Switch role",
+    "listLabel": "Your roles",
+    "roleSeparator": ", ",
+    "current": "Current",
+    "groupPortals": "Your portals",
+    "groupBranches": "Branches you work at",
+    "groupPlatform": "Platform",
+    "wholeManagement": "Whole Management",
+    "wholeManagementPlace": "{organization}, {count, plural, one {# branch} other {# branches}}",
+    "student": "Student",
+    "studentPlace": "All your branches",
+    "teacher": "Teacher",
+    "teacherPlace": "All branches",
+    "parent": "Parent",
+    "parentPlace": "Your children",
+    "admin": "Platform admin",
+    "adminPlace": "The whole platform",
+    "assistant": "Assistant",
+    "assistantOf": "Assistant of {teacher}",
+    "assistantPlace": "Acting for this teacher"
+  },
   "NavGroups": {
     "frontDesk": "Front desk",
     "academics": "Academics",
@@ -127,6 +151,7 @@
     "reception": "Reception desk",
     "sessions": "Sessions",
     "classes": "Classes",
+    "assessments": "Exams & homework",
     "students": "Students",
     "teachers": "Teachers",
     "analytics": "Analytics",
@@ -142,9 +167,16 @@
     "centers": "Branches",
     "platform": "Platform",
     "catalog": "Catalog",
+    "premium": "Teachers",
     "settings": "Settings",
     "calendar": "Calendar",
-    "profile": "Profile"
+    "profile": "Profile",
+    "assistants": "Assistants",
+    "home": "Home",
+    "requests": "Requests",
+    "overview": "Overview",
+    "workspaces": "Workspaces",
+    "earnings": "Earnings"
   },
   "Roles": {
     "OWNER": "Owner",
@@ -154,7 +186,8 @@
     "TEACHER": "Teacher",
     "STUDENT": "Student",
     "PLATFORM_ADMIN": "Super admin",
-    "PARENT": "Parent"
+    "PARENT": "Parent",
+    "ASSISTANT": "Assistant"
   },
   "Auth": {
     "fields": {
@@ -225,7 +258,15 @@
       "teacherPortal": "Teacher portal",
       "teacherPortalHint": "Your sessions and students at every branch",
       "parentPortal": "Parent portal",
-      "parentPortalHint": "Your children's schedules"
+      "parentPortalHint": "Your children's schedules",
+      "lastUsed": "Last used",
+      "continue": "Continue",
+      "assistantPortal": "Assistant of {teacher}",
+      "assistantPortalHint": "Act for this teacher, within what they allow",
+      "invitationsLabel": "Invitations",
+      "invitationTeacherFallback": "A teacher",
+      "joinPrivateClass": "Join a private class",
+      "joinPrivateClassHint": "Have a code from a teacher? Enter it here"
     },
     "invite": {
       "title": "Staff invitation",
@@ -856,7 +897,8 @@
       "enrollments": "{count, plural, one {# student enrolment} other {# student enrolments}}",
       "reservations": "{count, plural, one {# enrolment request} other {# enrolment requests}}",
       "deactivateHint": "Deactivate it instead: its upcoming sessions are removed and its history is kept.",
-      "bookings": "{count, plural, one {# single-session booking} other {# single-session bookings}}"
+      "bookings": "{count, plural, one {# single-session booking} other {# single-session bookings}}",
+      "assessments": "{count, plural, one {# exam or homework} other {# exams and homework}}"
     },
     "holidays": {
       "title": "Holiday calendar",
@@ -1683,7 +1725,8 @@
         "bookingOff": "Booking is closed for this class.",
         "failed": "Something went wrong. Try again."
       }
-    }
+    },
+    "viaAssistant": "via assistant"
   },
   "Refunds": {
     "title": "Refunds",
@@ -1742,6 +1785,7 @@
       "futureRange": "The end date can't be in the future — settle days that have already happened.",
       "rangeTooLong": "A settlement can cover at most 366 days.",
       "totalTooLarge": "That total is too large to record in one settlement — split the period.",
+      "workspaceNotSettled": "A teacher's private workspace is never settled — its payments are already the teacher's.",
       "required": "This field is required."
     },
     "emptyHint": "A settlement rolls up what a teacher has earned across a period. Create the first one below.",
@@ -1874,7 +1918,11 @@
       "publicListingTitle": "Public listing",
       "publicListingDescription": "Whether people without an account can find this branch on Explore — its name, logo, classes open to new students, their prices and teachers. Contact details and students are never shown.",
       "publicListingLabel": "List this branch on Explore",
-      "publicListingHint": "On by default. Turn it off and the branch's public pages disappear at once; signed-in students can still find its classes in Discover."
+      "publicListingHint": "On by default. Turn it off and the branch's public pages disappear at once; signed-in students can still find its classes in Discover.",
+      "assistantsTitle": "Teacher assistants",
+      "assistantsDescription": "A premium teacher can give an assistant access to their exams, homework, classes and requests here, on the teacher's behalf. Everything an assistant does is recorded as the teacher's, marked \"via assistant\".",
+      "assistantsLabel": "Allow teacher assistants",
+      "assistantsHint": "On by default. Turn it off and assistants lose this branch at once; the teachers themselves are not affected."
     },
     "catalog": {
       "title": "Academic catalog",
@@ -2073,6 +2121,7 @@
         "approvals_manage": "Manage approvals",
         "changeRequest_create": "Submit class/session requests",
         "reservation_manage_own": "Manage own class reservations",
+        "assessment_manage_own": "Manage own exams and homework",
         "audit_view": "View audit log",
         "parent_link_manage": "Manage parent links",
         "session_close": "End sessions"
@@ -2154,7 +2203,73 @@
       "summary": "{today} today · {week} this week · {earnings} this month",
       "viewSchedule": "View schedule"
     },
-    "subtitleAll": "Your work at every branch you teach at."
+    "subtitleAll": "Your work at every branch you teach at.",
+    "withWorkspaces": "Collected this month, including workspaces: {amount}",
+    "withWorkspacesHint": "Your branch earnings above plus your private workspaces. See the breakdown on Earnings.",
+    "openEarnings": "Open Earnings"
+  },
+  "Earnings": {
+    "title": "Earnings",
+    "subtitle": "Your share at each branch and in each of your workspaces, by class, over the period you pick.",
+    "assistantSubtitle": "{teacher}'s share at each branch and workspace where you may see it, read-only.",
+    "presets": {
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days",
+      "month": "This month"
+    },
+    "invalidPeriod": "That period couldn't be used, so the last 30 days are shown. A custom range can be up to a year.",
+    "clampedTeacher": "Your history setting hides older sessions, so this period counts from {date}.",
+    "clampedAssistant": "You can see back to {date} only, so this period counts from there.",
+    "periodLine": "Sessions from {range}",
+    "noSources": "No earnings to show",
+    "noSourcesTeacher": "Earnings show for branches that let you see your own earnings, and for your workspaces.",
+    "noSourcesAssistant": "There is nothing here you may see.",
+    "stats": {
+      "collected": "Collected",
+      "collectedHint": "Branches and workspaces together, after refunds",
+      "refunded": "Refunded",
+      "refundedHint": "Shown on its own — already taken out of Collected",
+      "paidSessions": "Paid sessions",
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent",
+      "zero": "Nothing collected in this period"
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "Your share of what students paid at each branch.",
+      "teacherShare": "Your share collected",
+      "refunds": "Refunded",
+      "net": "Collected after refunds",
+      "paidOut": "Paid out to you",
+      "notPaidOut": "Not yet paid out",
+      "paidOutHint": "Paid out = settlements the branch has paid you for this period's sessions. Branch money only — workspaces are never settled."
+    },
+    "workspaces": {
+      "title": "Workspaces",
+      "description": "Your private workspaces. You keep everything students pay there.",
+      "private": "Private",
+      "teacherShare": "Collected",
+      "net": "Collected after refunds",
+      "collectedOnly": "Collected only — a workspace is never settled, so nothing here is waiting to be paid out."
+    },
+    "classes": {
+      "title": "By class",
+      "oneOff": "One-time sessions",
+      "unnamed": "Class",
+      "empty": "Nothing in this period.",
+      "line": "{paid} paid sessions · {present} present · {late} late · {absent} absent",
+      "refunded": "Refunded {amount}"
+    },
+    "trend": {
+      "title": "By week",
+      "description": "Your share each week of the period (weeks start on Sunday), with refunds beside it.",
+      "week": "Week of {date}",
+      "collected": "Your share {amount}",
+      "refunded": "Refunded {amount}",
+      "empty": "No payments in this period."
+    }
   },
   "TeacherSessions": {
     "title": "My sessions",
@@ -2225,7 +2340,8 @@
       "time": "Time",
       "room": "Room",
       "grade": "Grade",
-      "price": "Price"
+      "price": "Price",
+      "class": "Class"
     },
     "receipt": {
       "title": "Your earnings",
@@ -2249,6 +2365,334 @@
     },
     "emptyHint": "No session matches these filters. Widen the date range, or clear a filter.",
     "zeroHint": "No activity in this range"
+  },
+  "TeacherAssessments": {
+    "title": "Exams & homework",
+    "subtitle": "Build exams and homework, preview them and publish when they're ready. Students can't see a draft.",
+    "newExam": "New exam",
+    "addHomework": "Add homework",
+    "empty": "No exams or homework yet",
+    "emptyHint": "Start an exam here or from a class page, or add homework from a session.",
+    "emptyFiltered": "Nothing matches these filters",
+    "untitled": "Untitled",
+    "type": {
+      "EXAM": "Exam",
+      "HOMEWORK": "Homework"
+    },
+    "status": {
+      "DRAFT": "Draft",
+      "PUBLISHED": "Published"
+    },
+    "filters": {
+      "type": "Type",
+      "allTypes": "All types",
+      "class": "Class",
+      "allClasses": "All classes",
+      "source": "Branch or workspace",
+      "allSources": "All branches and workspaces"
+    },
+    "privateTag": "Private",
+    "questionCount": "{count, plural, =0 {No questions} one {# question} other {# questions}}",
+    "windowValue": "{start} – {end}",
+    "windowNotSet": "Times not set",
+    "deadlineValue": "Due {date}",
+    "deadlineNotSet": "No deadline",
+    "classSection": {
+      "title": "Exams and homework",
+      "empty": "No exams or homework for this class yet."
+    },
+    "sessionSection": {
+      "title": "Homework",
+      "empty": "No homework for this session yet.",
+      "oneOff": "A one-time session has no enrolled students, so it can't have homework."
+    },
+    "pickClass": {
+      "title": "New exam",
+      "description": "Choose the class this exam is for.",
+      "empty": "You have no active classes to set an exam for."
+    },
+    "builder": {
+      "back": "Exams & homework",
+      "backToSession": "Back to the session",
+      "newExamTitle": "New exam",
+      "newHomeworkTitle": "New homework",
+      "editExamTitle": "Edit exam",
+      "editHomeworkTitle": "Edit homework",
+      "optional": "(optional)",
+      "details": "Details",
+      "titleLabel": "Title",
+      "titlePlaceholderExam": "e.g. Chapter 3 quiz",
+      "titlePlaceholderHomework": "e.g. Practice set 4",
+      "instructionsLabel": "Instructions",
+      "instructionsHint": "Students read this before they start.",
+      "timing": "Timing",
+      "timezoneNote": "Times are in {zone}.",
+      "windowStart": "Opens",
+      "windowEnd": "Closes",
+      "deadline": "Deadline",
+      "date": "Date",
+      "time": "Time",
+      "deadlineBasisNext": "Set to 30 minutes before the class's next session. You can change it.",
+      "deadlineBasisFallback": "The class has no next session, so it's set to 7 days after this session ends. You can change it.",
+      "duration": "Duration (minutes)",
+      "durationHintExam": "Each student gets this long from when they start, but never past the closing time.",
+      "durationHintHomework": "Leave empty for no time limit.",
+      "oneSitting": "One sitting",
+      "oneSittingHint": "Leaving the exam submits it. When off, a student can leave and come back while time remains.",
+      "settings": "Settings",
+      "shuffle": "Shuffle questions and options",
+      "shuffleHint": "Each student gets their own order, drawn when they start.",
+      "showScore": "Show score",
+      "showScoreHint": "Students see their score as soon as they submit.",
+      "showCorrect": "Show correct answers after it closes",
+      "showCorrectHint": "Correct answers appear only after the closing time or deadline has passed.",
+      "questions": "Questions",
+      "questionNumber": "Question {n}",
+      "questionText": "Question",
+      "points": "Points",
+      "options": "Options",
+      "optionsHint": "Pick the correct answer with the circle beside it.",
+      "option": "Option {n}",
+      "correct": "Correct answer",
+      "markCorrect": "Mark option {n} as the correct answer",
+      "removeOption": "Remove option {n}",
+      "removeOptionDisabled": "A question needs at least 2 options.",
+      "addOption": "Add option",
+      "moveUp": "Move question {n} up",
+      "moveDown": "Move question {n} down",
+      "deleteQuestion": "Delete question {n}",
+      "addQuestion": "Add question",
+      "noQuestions": "No questions yet",
+      "noQuestionsHint": "Add your first question below.",
+      "maxQuestions": "You've reached the limit of 200 questions.",
+      "totalPoints": "{count, plural, one {# point} other {# points}} in total",
+      "save": "Save draft",
+      "saving": "Saving…",
+      "saved": "Draft saved.",
+      "unsaved": "Unsaved changes",
+      "unsavedPreview": "Unsaved changes. Preview shows the last saved version.",
+      "noChanges": "No unsaved changes",
+      "preview": "Preview",
+      "delete": {
+        "sectionTitle": "Delete draft",
+        "sectionHint": "Only drafts can be deleted.",
+        "label": "Delete draft",
+        "title": "Delete this draft?",
+        "body": "The draft and all its questions will be deleted. This can't be undone."
+      },
+      "viewExamTitle": "Exam",
+      "viewHomeworkTitle": "Homework"
+    },
+    "ready": {
+      "title": "Ready to publish",
+      "description": "What publishing asks for. It reads your last saved version.",
+      "hasQuestions": "At least one question",
+      "allTextFilled": "Every question and option has text",
+      "oneCorrectEach": "Each question has exactly one correct option",
+      "windowSet": "Opening and closing times are set",
+      "deadlineInFuture": "The deadline is in the future",
+      "done": "done",
+      "missing": "not yet",
+      "allDone": "Everything is ready.",
+      "notYet": "Some items still need attention.",
+      "windowEndInFuture": "The closing time is in the future"
+    },
+    "errors": {
+      "forbidden": "You can't manage exams and homework at this branch.",
+      "notFound": "This exam or homework couldn't be found.",
+      "notDraft": "Only a draft can be changed here.",
+      "locked": "Students have started, so the questions are locked.",
+      "invalid": "Some fields need fixing. See the messages below.",
+      "badTime": "Enter both a valid date and a valid time, or leave both empty.",
+      "pickBranch": "Pick a branch first.",
+      "notReady": "It isn't ready yet. Finish the list under Ready to publish and save first.",
+      "classInactive": "This class is inactive, so no student could take it.",
+      "notPublished": "Only something published can be changed here.",
+      "passed": "It has already closed, so it can no longer be extended.",
+      "notLater": "Choose a time later than the current one.",
+      "premiumRequired": "Read-only — renew premium to make changes in this workspace.",
+      "workspaceArchived": "This workspace is archived. Unarchive it to make changes."
+    },
+    "draftErrors": {
+      "titleRequired": "Enter a title.",
+      "titleTooLong": "Keep the title to 200 characters.",
+      "instructionsTooLong": "Keep the instructions to 2,000 characters.",
+      "tooManyQuestions": "An exam or homework can have up to 200 questions.",
+      "questionTooLong": "Keep the question to 2,000 characters.",
+      "pointsRange": "Points must be a whole number from 1 to 100.",
+      "optionCount": "A question needs 2 to 5 options.",
+      "optionTooLong": "Keep each option to 500 characters.",
+      "multipleCorrect": "Mark only one correct option.",
+      "durationRange": "The duration must be 1 to 600 minutes.",
+      "windowOrder": "The closing time must be after the opening time.",
+      "durationLongerThanWindow": "The duration can't be longer than the time between opening and closing.",
+      "deadlineRequired": "Set a deadline.",
+      "fieldsForType": "These timing fields don't apply to this type."
+    },
+    "preview": {
+      "title": "Preview",
+      "description": "What a student will see. Nothing is recorded, and correct answers aren't shown.",
+      "back": "Back to the builder",
+      "opens": "Opens",
+      "closes": "Closes",
+      "due": "Due",
+      "notSet": "Not set",
+      "points": "Total points",
+      "timer": "Time limit",
+      "timerPaused": "Not running in preview",
+      "untimed": "No time limit",
+      "oneSittingWarning": "Leaving this page submits your exam.",
+      "shuffled": "Shown in a shuffled order, as a student would get it. Reload the page for a new order.",
+      "questionOf": "Question {n} of {total}",
+      "pointsLabel": "{count, plural, one {# point} other {# points}}",
+      "empty": "This draft has no questions yet.",
+      "start": "Start",
+      "startDisabled": "Students can start once it's published."
+    },
+    "publish": {
+      "sectionTitle": "Publish",
+      "sectionHint": "Publishes the last saved version. Students enrolled in the class can then see it and start it when it opens.",
+      "label": "Publish",
+      "title": "Publish this now?",
+      "body": "Students enrolled in the class will see it and get a notification. You can unpublish until the first student starts. After that the questions are locked, and you can only extend the time.",
+      "notReadyHint": "Finish the Ready to publish list and save your draft first.",
+      "done": "Published."
+    },
+    "unpublish": {
+      "label": "Back to draft",
+      "title": "Unpublish this?",
+      "body": "Students will no longer see it, and you can edit it again.",
+      "done": "Back to draft."
+    },
+    "extend": {
+      "sectionTitle": "Extend",
+      "sectionHint": "Give students longer. The time can only move later.",
+      "passedHint": "It has closed, so it can no longer be extended.",
+      "label": "Extend",
+      "saving": "Saving…",
+      "zone": "Times are in {zone}.",
+      "date": "New date",
+      "time": "New time",
+      "done": "Extended."
+    },
+    "published": {
+      "lockedHint": "Published. To change the questions, unpublish it first. Once a student has started they're locked.",
+      "minutes": "{count, plural, one {# minute} other {# minutes}}",
+      "started": "Students who started",
+      "manageTitle": "While no one has started",
+      "manageHint": "You can go back to a draft or delete it until the first student starts.",
+      "delete": {
+        "sectionTitle": "Delete",
+        "sectionHint": "Only until the first student starts.",
+        "label": "Delete",
+        "title": "Delete this?",
+        "body": "Students will no longer see it, and all its questions will be deleted. This can't be undone."
+      }
+    },
+    "results": {
+      "action": "Results",
+      "progress": "{submitted} / {eligible} submitted",
+      "title": "Results",
+      "back": "Back to details",
+      "open": "Open",
+      "closed": "Closed",
+      "summaryTitle": "Summary",
+      "summary": {
+        "eligible": "Eligible now",
+        "started": "Started",
+        "submitted": "Submitted",
+        "inProgress": "In progress",
+        "notStarted": "Not started",
+        "missed": "Missed",
+        "average": "Average",
+        "highest": "Highest",
+        "lowest": "Lowest"
+      },
+      "noSubmissions": "No submissions yet",
+      "none": "—",
+      "percent": "{value}%",
+      "score": "{score} / {max}",
+      "timeLeft": "{time} left",
+      "leftClass": "Left class",
+      "viewAnswers": "View answers",
+      "viewProgress": "View progress",
+      "studentsTitle": "Students",
+      "studentsHint": "Everyone who could take it, and anyone who started and has since left.",
+      "empty": "No students are enrolled in this class.",
+      "emptyFiltered": "No students match these filters.",
+      "status": {
+        "SUBMITTED": "Submitted",
+        "IN_PROGRESS": "In progress",
+        "NOT_STARTED": "Not started",
+        "MISSED": "Missed"
+      },
+      "ended": {
+        "STUDENT": "By the student",
+        "DEADLINE": "At the deadline",
+        "ONE_SITTING_GAP": "Closed the page"
+      },
+      "columns": {
+        "student": "Student",
+        "branch": "Branch",
+        "status": "Status",
+        "score": "Score",
+        "percentage": "Percentage",
+        "timeTaken": "Time taken",
+        "ended": "How it ended",
+        "startedAt": "Started",
+        "submittedAt": "Submitted",
+        "answers": "Answers"
+      },
+      "filters": {
+        "search": "Search by name",
+        "searchPlaceholder": "Student name",
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "sort": "Sort by",
+        "apply": "Search",
+        "sorts": {
+          "name": "Name",
+          "scoreDesc": "Score, highest first",
+          "scoreAsc": "Score, lowest first",
+          "timeAsc": "Time taken, shortest first",
+          "timeDesc": "Time taken, longest first"
+        }
+      },
+      "duration": {
+        "hours": "{hours} h {minutes} min",
+        "minutes": "{minutes} min {seconds} s",
+        "seconds": "{seconds} s"
+      },
+      "analysis": {
+        "title": "Question by question",
+        "hint": "Counts submitted attempts only.",
+        "question": "Question {n}",
+        "correctLine": "{percent}% correct · {correct} of {submitted}",
+        "correctAnswer": "Correct answer",
+        "chosenBy": "Chosen by {count}",
+        "unanswered": "Unanswered"
+      },
+      "answers": {
+        "back": "Back to results",
+        "timeLeft": "Time left",
+        "inProgressHint": "This student is still working. Their answers show once the attempt is submitted.",
+        "points": "{awarded} of {points} points",
+        "chosen": "Student's answer",
+        "correct": "Correct answer",
+        "outcome": {
+          "CORRECT": "Correct",
+          "INCORRECT": "Incorrect",
+          "UNANSWERED": "Unanswered"
+        }
+      }
+    }
+  },
+  "TeacherClass": {
+    "backToAssessments": "Exams & homework",
+    "backToSessions": "Sessions",
+    "inactive": "Inactive",
+    "schedule": "Schedule",
+    "period": "Period"
   },
   "TeacherStudents": {
     "title": "My students",
@@ -2404,7 +2848,9 @@
       "invalidNumber": "Enter a whole number.",
       "subjectNotInGrade": "This subject isn’t taught in that grade. Pick a subject listed under the grade."
     },
-    "emptyHint": "No branch on the platform is open to new teachers right now."
+    "emptyHint": "No branch on the platform is open to new teachers right now.",
+    "workspacesHint": "You have premium: you can also run classes of your own in a private workspace.",
+    "workspacesLink": "Open Workspaces"
   },
   "StudentActions": {
     "leave": {
@@ -3048,7 +3494,8 @@
       },
       "changeRequest": {
         "approve": "Teacher request approved",
-        "decline": "Teacher request declined"
+        "decline": "Teacher request declined",
+        "create": "Teacher request filed"
       },
       "expenseCategory": {
         "create": "Expense category added",
@@ -3138,7 +3585,8 @@
       "timezone": "Timezone"
     },
     "unknownAction": "Other change",
-    "diffSet": "{field}: {after}"
+    "diffSet": "{field}: {after}",
+    "viaAssistant": "via assistant"
   },
   "Toasts": {
     "saved": "Saved.",
@@ -3166,7 +3614,13 @@
     "familyAccessRemoved": "Parent access removed",
     "studentAccountGradeUsed": "Grade updated from the student's account.",
     "logoSaved": "Logo saved.",
-    "logoRemoved": "Logo removed."
+    "logoRemoved": "Logo removed.",
+    "assistantJoined": "You're now an assistant.",
+    "assistantInviteRevoked": "Invite revoked. Its code no longer works.",
+    "assistantRemoved": "Assistant removed.",
+    "assistantPermissionsSaved": "Permissions saved.",
+    "assistantPermissionsUnchanged": "Nothing changed.",
+    "assistantLeft": "You're no longer this teacher's assistant."
   },
   "Account": {
     "title": "Account settings",
@@ -3280,6 +3734,40 @@
       "save": "Save",
       "saving": "Saving…",
       "saved": "Your teacher portal history was saved."
+    },
+    "premium": {
+      "title": "Premium",
+      "description": "Premium belongs to your account, not to a branch.",
+      "cardTitle": "Your premium",
+      "activeNote": "Your premium runs to the end of {date}, Cairo time.",
+      "expiredNote": "Your premium ended on {date}.",
+      "noneNote": "You don't have premium.",
+      "addsTitle": "What premium adds",
+      "adds": {
+        "assistants": "Assistants who work on your behalf",
+        "workspaces": "Personal workspaces for your own classes",
+        "assessments": "Exams and homework inside your workspaces"
+      },
+      "contact": "Contact KayEdu to subscribe or renew."
+    },
+    "assistant": {
+      "title": "Assistant roles",
+      "description": "Teachers you help, and what each one lets you do. A code from a teacher adds one here.",
+      "roleTitle": "Assistant of {teacher}",
+      "roleDescription": "What this teacher lets you do:",
+      "open": "Open",
+      "leave": "Leave",
+      "leaveTitle": "Stop being {teacher}'s assistant?",
+      "leaveDescription": "You lose access straight away. To come back, {teacher} has to send you a new code.",
+      "joinTitle": "Join as an assistant",
+      "joinDescription": "Enter the code a teacher gave you. You'll see who it's from and what it allows before anything is linked."
+    },
+    "privateClass": {
+      "title": "Private classes",
+      "description": "A teacher's private classes, linked with a code they give you.",
+      "joinTitle": "Join a private class",
+      "joinDescription": "Have a code from a teacher? You'll see who it's from before anything is linked.",
+      "open": "Enter a code"
     }
   },
   "AdminOrganizations": {
@@ -3648,11 +4136,11 @@
   },
   "Calendar": {
     "studentTitle": "Calendar",
-    "studentSubtitle": "Your sessions at every branch, month by month.",
-    "studentEmpty": "Nothing this month. Your classes, attendance and booked sessions appear here.",
+    "studentSubtitle": "Your sessions, exams and homework at every branch, month by month.",
+    "studentEmpty": "Nothing this month. Your classes, attendance, booked sessions, exams and homework appear here.",
     "teacherTitle": "Calendar",
-    "teacherSubtitle": "Your sessions month by month. Tap a day to see its sessions.",
-    "teacherEmpty": "No sessions this month.",
+    "teacherSubtitle": "Your sessions, exams and homework month by month. Tap a day to see them.",
+    "teacherEmpty": "No sessions, exams or homework this month.",
     "parentTitle": "Calendar",
     "parentSubtitle": "Your child's sessions, month by month. Read-only.",
     "parentEmpty": "Nothing this month for this child.",
@@ -3670,6 +4158,11 @@
     "noSessions": "No sessions on this day.",
     "counts": "Present {present} · Late {late} · Absent {absent}",
     "openSession": "Open session",
+    "assessmentCount": "{count, plural, one {# exam or homework} other {# exams and homework}}",
+    "assessmentWindow": "{start} – {end}",
+    "assessmentDue": "Due {date}",
+    "assessmentAttempts": "Started {started} · Submitted {submitted}",
+    "openAssessment": "Open exam or homework",
     "tone": {
       "present": "Present",
       "late": "Late",
@@ -3678,8 +4171,11 @@
       "booked": "Booked",
       "requested": "Requested",
       "cancelled": "Cancelled",
-      "held": "Held"
-    }
+      "held": "Held",
+      "exam": "Exam",
+      "homework": "Homework"
+    },
+    "privateTag": "Private"
   },
   "Media": {
     "comingSoon": "Coming soon",
@@ -3731,5 +4227,801 @@
     "classesEmpty": "You have no active classes yet.",
     "classesEmptyHint": "Once a branch adds you to a class, it appears here.",
     "classActive": "Active"
+  },
+  "Notifications": {
+    "title": "Notifications",
+    "description": "Updates about your requests, your sessions, and your exams and homework.",
+    "bell": "Notifications",
+    "bellUnread": "Notifications, {count} unread",
+    "capped": "{max}+",
+    "loading": "Loading…",
+    "loadFailed": "Couldn't load your notifications.",
+    "retry": "Try again",
+    "seeAll": "See all notifications",
+    "markAllRead": "Mark all as read",
+    "markedAllRead": "All notifications marked as read.",
+    "markAllFailed": "Couldn't mark your notifications as read. Sign in and try again.",
+    "unread": "Unread",
+    "fallback": "—",
+    "empty": {
+      "title": "No notifications yet",
+      "description": "When a branch answers one of your requests or changes one of your sessions, or a teacher sets an exam or homework, you'll see it here."
+    },
+    "kinds": {
+      "ENROLLMENT_APPROVED": "{branch} approved your request to join {className}.",
+      "ENROLLMENT_DECLINED": "{branch} declined your request to join {className}.",
+      "BOOKING_APPROVED": "{branch} approved your booking for {className} on {date}, {time}.",
+      "BOOKING_DECLINED": "{branch} declined your booking for {className} on {date}, {time}.",
+      "SESSION_CANCELLED": "{className} at {branch} on {date}, {time} was cancelled.",
+      "SESSION_RESCHEDULED": "{className} at {branch} moved from {oldDate}, {oldTime} to {newDate}, {newTime}.",
+      "ASSESSMENT_PUBLISHED": "{type, select, EXAM {New exam “{title}” for {className} at {branch}. Opens {start}, closes {end}.} other {New homework “{title}” for {className} at {branch}. Due {end}.}}",
+      "ASSESSMENT_EXTENDED": "{type, select, EXAM {More time on the exam “{title}” for {className} at {branch}. It now closes {end}.} other {More time on the homework “{title}” for {className} at {branch}. It is now due {end}.}}",
+      "ASSESSMENT_OPENS_SOON": "The exam “{title}” for {className} at {branch} opens soon: {start}. It closes {end}.",
+      "ASSESSMENT_DUE_SOON": "The homework “{title}” for {className} at {branch} is due soon: {end}.",
+      "WORKSPACE_INVITATION": "{teacher} invited you to their private classes in “{workspace}”. Open your hub to confirm or cancel."
+    }
+  },
+  "StudentAssessments": {
+    "title": "Exams & homework",
+    "subtitle": "Everything your teachers have set for your classes, at every branch.",
+    "empty": "Nothing here yet",
+    "emptyHint": "When a teacher publishes an exam or homework for your class, it appears here.",
+    "type": {
+      "EXAM": "Exam",
+      "HOMEWORK": "Homework"
+    },
+    "state": {
+      "UPCOMING": "Upcoming",
+      "OPEN": "Open",
+      "IN_PROGRESS": "In progress",
+      "SUBMITTED": "Submitted",
+      "MISSED": "Missed",
+      "CLOSED": "Closed"
+    },
+    "dueOn": "Due {date}",
+    "windowLine": "{start} – {end}",
+    "scoreLine": "{score} / {max} ({percent}%)",
+    "windowLabel": "Open",
+    "deadlineLabel": "Deadline",
+    "durationLabel": "Time limit",
+    "questionsLabel": "Questions",
+    "pointsLabel": "Total points",
+    "noTimer": "No time limit",
+    "minutes": "{count, plural, one {# minute} other {# minutes}}",
+    "questionOf": "Question {n} of {total}",
+    "upcomingHint": "It has not opened yet. Come back when it opens.",
+    "missedHint": "This closed before you started it.",
+    "start": {
+      "label": "Start",
+      "title": "Start now?",
+      "confirm": "Start",
+      "cancel": "Not yet",
+      "noPause": "The timer starts now and does not pause, even if you leave the page.",
+      "resumable": "Your answers save as you go. You can leave and come back until the deadline.",
+      "oneSitting": "One sitting: closing or reloading the page submits it."
+    },
+    "take": {
+      "autosaves": "Answers save as you pick them",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "saveFailed": "Not saved. Tap to try again",
+      "daysShort": "d",
+      "timeLeft": "Time left",
+      "timeUntilDeadline": "Time until the deadline",
+      "oneSittingReminder": "One sitting: closing or reloading this page submits it.",
+      "questionOf": "Question {n} of {total}",
+      "pointsLabel": "{count, plural, one {# point} other {# points}}",
+      "clearAnswer": "Clear my answer",
+      "gridLabel": "All questions",
+      "gridAnswered": "Question {n}, answered",
+      "gridUnanswered": "Question {n}, not answered",
+      "previous": "Previous",
+      "next": "Next",
+      "review": "Review",
+      "reviewTitle": "Review your answers",
+      "reviewCounts": "You answered {answered} of {total}. Pick a number to go back to that question.",
+      "backToQuestions": "Back to questions",
+      "submit": "Submit",
+      "keepGoing": "Keep going",
+      "confirmTitle": "Submit your answers?",
+      "confirmUnanswered": "{count, plural, one {# question is not answered and scores 0.} other {# questions are not answered and score 0.}}",
+      "confirmAllAnswered": "You answered every question.",
+      "confirmFinal": "You can't change your answers after this."
+    },
+    "result": {
+      "title": "Your result",
+      "submitted": "Submitted",
+      "at": "Submitted {date}",
+      "by": {
+        "STUDENT": "You submitted it.",
+        "DEADLINE": "Time ran out, so what you had saved was submitted.",
+        "ONE_SITTING_GAP": "You left this one-sitting exam, so what you had saved was submitted."
+      },
+      "revealLater": "Correct answers appear after it closes on {date}."
+    },
+    "reveal": {
+      "right": "Right",
+      "wrong": "Wrong",
+      "unanswered": "Not answered",
+      "correct": "Correct answer",
+      "yours": "Your answer",
+      "points": "{awarded} of {points} points"
+    },
+    "errors": {
+      "forbidden": "You are not a student at this branch.",
+      "notFound": "This exam or homework couldn't be found.",
+      "notEligible": "You can't start this because you're no longer enrolled in the class.",
+      "notOpenYet": "It has not opened yet.",
+      "closed": "It has closed.",
+      "submitted": "This has already been submitted.",
+      "rateLimited": "Too many requests. Wait a moment and try again.",
+      "network": "Couldn't reach the server. Check your connection and try again."
+    }
+  },
+  "Premium": {
+    "status": {
+      "none": "Not premium",
+      "active": "Premium until {date}",
+      "expired": "Expired on {date}",
+      "endsIn": "{count, plural, =0 {Ends today} one {Ends in # day} other {Ends in # days}}"
+    }
+  },
+  "AdminPremium": {
+    "title": "Teachers",
+    "subtitle": "Grant, extend or end premium for one account, found by its exact email. Premium belongs to the person, not to a branch.",
+    "lookup": {
+      "title": "Find an account",
+      "description": "Type the account's full email address. Nothing is listed, and part of an email finds nothing.",
+      "label": "Email",
+      "hint": "The exact email the person signs in with.",
+      "submit": "Find",
+      "searching": "Searching…"
+    },
+    "noMatch": "No account with that email",
+    "account": {
+      "email": "Email"
+    },
+    "grant": {
+      "label": "Premium until",
+      "submit": "Grant premium"
+    },
+    "extend": {
+      "label": "New end date",
+      "submit": "Extend"
+    },
+    "endDayHint": "Premium runs to the end of this day, Cairo time. Today or later, up to {max}.",
+    "revoke": {
+      "hint": "Ending premium takes effect at once.",
+      "trigger": "Revoke premium",
+      "title": "Revoke premium?",
+      "description": "{name} loses premium now. Nothing they made is deleted, and granting premium again restores it.",
+      "confirm": "Revoke"
+    },
+    "saved": {
+      "granted": "Premium granted.",
+      "extended": "Premium extended.",
+      "revoked": "Premium revoked."
+    },
+    "errors": {
+      "emailRequired": "Enter an email address.",
+      "forbidden": "Only a KayEdu platform admin can do this.",
+      "accountNotFound": "No account with that email",
+      "alreadyPremium": "This account is already premium. Extend it instead.",
+      "notPremium": "This account is not premium right now.",
+      "notLater": "Choose a date later than the current end date.",
+      "stale": "This account just changed. Find it again and retry.",
+      "required": "Choose a date.",
+      "invalidDate": "Choose a valid date.",
+      "dateInPast": "Choose today or a later date.",
+      "dateTooFar": "Choose a date no later than {max}."
+    }
+  },
+  "Assistants": {
+    "permissions": {
+      "none": "No permissions are turned on.",
+      "assessments": {
+        "review": {
+          "label": "Review exams and homework",
+          "description": "See results and each student's answers."
+        },
+        "manage": {
+          "label": "Build exams and homework",
+          "description": "Create, edit and publish them for your classes."
+        }
+      },
+      "classes": {
+        "view": {
+          "label": "See classes and sessions",
+          "description": "Your classes, schedules and session lists."
+        }
+      },
+      "requests": {
+        "manage": {
+          "label": "Send class and session requests",
+          "description": "Ask a branch for a new session or a reschedule."
+        }
+      },
+      "checkin": {
+        "workspace": {
+          "label": "Check in students in your workspaces",
+          "description": "Mark Present, Late or Absent in your own workspaces."
+        }
+      },
+      "payments": {
+        "workspace": {
+          "label": "Take payments in your workspaces",
+          "description": "Record payments in your own workspaces."
+        }
+      },
+      "analytics": {
+        "view": {
+          "label": "See your earnings and analytics",
+          "description": "Your earnings summary and Earnings page."
+        }
+      },
+      "students": {
+        "phones": {
+          "label": "See students' phone numbers",
+          "description": "Hidden unless you turn this on. Never part of a preset."
+        }
+      }
+    },
+    "presets": {
+      "GRADER": {
+        "label": "Grader",
+        "description": "Reviews exams and homework. Nothing else."
+      },
+      "CO_TEACHER": {
+        "label": "Co-teacher",
+        "description": "Reviews and builds exams and homework, sees your classes and sessions, sends requests, and checks in and takes payments in your workspaces."
+      },
+      "FULL": {
+        "label": "Full",
+        "description": "Everything a co-teacher does, plus your earnings and analytics."
+      },
+      "CUSTOM": {
+        "label": "Custom",
+        "description": "Your own choice of permissions."
+      }
+    },
+    "code": {
+      "label": "Assistant code",
+      "expires": "Works once, until {date}.",
+      "onceWarning": "This code is shown only once. Copy it or share it now — it can't be shown again.",
+      "copy": "Copy code",
+      "copyLink": "Copy link",
+      "copied": "Copied",
+      "copyFailed": "The browser didn't allow copying. Select the code and copy it by hand."
+    },
+    "teacher": {
+      "title": "Assistants",
+      "description": "People who help you, with only the permissions you give them.",
+      "premiumTitle": "Assistants come with premium",
+      "premiumDescription": "With premium you can invite up to {max} assistants and choose exactly what each one may do.",
+      "premiumLapsedNote": "If your premium has ended, your assistants keep their place but can't open anything until it's renewed. You can still cancel an invite or remove an assistant.",
+      "premiumContact": "Contact KayEdu to subscribe or renew.",
+      "slots": "{used} of {max} places in use",
+      "slotsHint": "Assistants and unused invites both take a place.",
+      "slotsFull": "All {max} places are in use. Revoke an unused invite or remove an assistant first.",
+      "invite": "Invite an assistant",
+      "pendingTitle": "Unused invites",
+      "pendingDescription": "Codes nobody has used yet. Each one holds a place until it's used, revoked or expires.",
+      "noPending": "No unused invites.",
+      "pendingPreset": "Invite as {preset}",
+      "pendingExpires": "Expires {date}",
+      "revokeInvite": "Revoke",
+      "revokeInviteTitle": "Revoke this invite?",
+      "revokeInviteDescription": "The code stops working straight away and its place is freed.",
+      "assistantsTitle": "Your assistants",
+      "assistantsDescription": "Change what each one may do, or remove them.",
+      "noAssistants": "No assistants yet.",
+      "noAssistantsHint": "Invite someone and give them the code. They'll appear here once they confirm it.",
+      "since": "Assistant since {date}",
+      "editPermissions": "Edit permissions",
+      "remove": "Remove",
+      "removeTitle": "Remove {name}?",
+      "removeDescription": "{name} loses access straight away. To bring them back, send a new invite.",
+      "noBranchNote": "Assistants work at your branches and in your workspaces. Teach at a branch or create a workspace first, then you can invite them here."
+    },
+    "invite": {
+      "title": "Invite an assistant",
+      "description": "Choose what they may do. You can change it at any time after they join.",
+      "presetLabel": "Permissions",
+      "presetHint": "A starting point — you can turn single permissions on or off later.",
+      "expiryNote": "The code works once and expires in 7 days.",
+      "cancel": "Cancel",
+      "submit": "Create code",
+      "createdTitle": "Give this code to your assistant",
+      "createdDescription": "They enter it on their account, or at sign-up, and confirm.",
+      "done": "Done"
+    },
+    "edit": {
+      "title": "Permissions for {name}",
+      "description": "Pick a preset, or turn single permissions on or off.",
+      "presetLabel": "Preset",
+      "presetHint": "Changing a single permission makes it Custom.",
+      "togglesLabel": "What they may do",
+      "phonesNote": "Students' phone numbers stay hidden unless you turn that on.",
+      "cancel": "Cancel",
+      "save": "Save permissions"
+    },
+    "join": {
+      "title": "Join as an assistant",
+      "description": "Enter the code a teacher gave you.",
+      "signedInAs": "Signed in as {name}.",
+      "howToGet": "A teacher with premium creates the code on their Assistants page.",
+      "backToAccount": "Back to account settings",
+      "codeLabel": "Assistant code",
+      "codeHint": "12 letters and numbers. Dashes and spaces don't matter.",
+      "continue": "Continue",
+      "checking": "Checking…",
+      "signInFirst": "Sign in or create an account first. Your code waits here.",
+      "signIn": "Sign in",
+      "register": "Create an account",
+      "confirmTitle": "Become {teacher}'s assistant?",
+      "confirmDescription": "Check who this is from and what it lets you do. Nothing is linked until you confirm.",
+      "presetLine": "Permissions: {preset}",
+      "confirmNote": "The teacher can change these permissions or remove you at any time. You can leave from account settings.",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "confirming": "Joining…",
+      "joined": "Done. The new role is listed above."
+    },
+    "home": {
+      "metaTitle": "Assistant",
+      "title": "Assistant of {teacher}",
+      "description": "You act for this teacher, within what they allow.",
+      "permissionsTitle": "What you may do",
+      "permissionsDescription": "Preset: {preset}. Assistant since {date}.",
+      "branchesTitle": "Where you can work",
+      "branchesDescription": "The teacher's branches that allow assistants. Each page in the menu shows only what the teacher let you do there.",
+      "noBranches": "Not available at the teacher's branches",
+      "noBranchesHint": "None of this teacher's branches allows assistants right now. The branch decides this, not the teacher.",
+      "workspacesTitle": "The teacher's workspaces",
+      "workspacesDescription": "Private workspaces where you may work for the teacher.",
+      "noWorkspaces": "Nothing to do in the teacher's workspaces",
+      "noWorkspacesHint": "Your permissions don't include classes, check-in or payments.",
+      "private": "Private",
+      "archived": "Archived"
+    },
+    "errors": {
+      "signInRequired": "Sign in first.",
+      "forbidden": "You don't have permission to do that.",
+      "premiumRequired": "This needs premium. Contact KayEdu to subscribe or renew.",
+      "slotsFull": "All 5 places are in use. Revoke an unused invite or remove an assistant first.",
+      "notFound": "That is no longer available. Refresh the page.",
+      "unknownPreset": "Choose one of the presets.",
+      "unknownPermission": "One of those permissions doesn't exist. Refresh the page and try again.",
+      "rateLimited": "Too many attempts. Try again in an hour.",
+      "invalidCode": "This code doesn't work. It may be mistyped, used, revoked or expired.",
+      "ownCode": "This is your own code. Give it to the person you want as your assistant.",
+      "teacherUnavailable": "This teacher can't add assistants right now. Ask them.",
+      "alreadyAssistant": "You're already this teacher's assistant.",
+      "unverified": "Confirm your email address first.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long."
+    },
+    "work": {
+      "assessmentsSubtitle": "{teacher}'s exams and homework, at the branches where you may work.",
+      "assessmentsEmptyHint": "The teacher's exams and homework appear here.",
+      "classes": {
+        "title": "Classes",
+        "subtitle": "{teacher}'s classes, read-only.",
+        "listTitle": "The teacher's classes",
+        "readOnly": "Read-only. Open a class to see its sessions and students.",
+        "empty": "No classes at the branches where you may work.",
+        "students": "{count, plural, one {# student} other {{n} students}}",
+        "inactive": "Inactive",
+        "back": "Classes",
+        "sessionsTitle": "Sessions",
+        "sessionsHint": "The teacher's sessions of this class, as far back as the branch allows.",
+        "noSessions": "No sessions in this period.",
+        "addHomework": "Add homework",
+        "schedule": "Weekly schedule",
+        "period": "Period",
+        "rosterTitle": "Students",
+        "rosterHint": "Names only.",
+        "rosterEmpty": "No students are enrolled yet."
+      },
+      "requests": {
+        "title": "Requests",
+        "subtitle": "Ask the branch for a new session or class for {teacher}. The branch decides.",
+        "listTitle": "The teacher's requests",
+        "listHint": "Every request is the teacher's. The branch approves or declines it.",
+        "empty": "No requests yet.",
+        "type": {
+          "NEW_SESSION": "Session",
+          "NEW_CLASS": "Class"
+        },
+        "viaAssistant": "via assistant",
+        "filedOn": "Sent {date}"
+      },
+      "overview": {
+        "title": "Overview",
+        "subtitle": "{teacher}'s sessions and earnings, read-only.",
+        "sessionsToday": "Sessions today",
+        "sessionsThisWeek": "Sessions this week",
+        "earningsThisMonth": "Earnings this month",
+        "branchesTitle": "By branch",
+        "branchesHint": "The teacher's share, as far back as each branch allows.",
+        "branchLine": "Today {today} · This week {week} · This month {earnings}"
+      },
+      "workspaces": {
+        "title": "Workspaces",
+        "subtitle": "{teacher}'s private workspaces where you may work.",
+        "private": "Private",
+        "archived": "Archived",
+        "classes": "Classes",
+        "sessions": "Sessions",
+        "back": "Workspaces",
+        "classesTitle": "Classes",
+        "classesSubtitle": "The workspace's classes, read-only.",
+        "noClasses": "No classes in this workspace yet.",
+        "untitledClass": "Class",
+        "inactive": "Inactive",
+        "openClass": "Open class",
+        "classTitle": "Class",
+        "sessionsTitle": "Sessions",
+        "sessionsHint": "This class's sessions, as far back as you may see.",
+        "sessionsSubtitle": "Open a session to see its roster.",
+        "schedule": "Weekly schedule",
+        "rosterTitle": "Students",
+        "rosterHint": "Names only.",
+        "rosterHintPhones": "Names and phone numbers.",
+        "rosterEmpty": "No students are enrolled yet.",
+        "archivedNote": "This workspace is archived, so it is read-only.",
+        "readOnlyNote": "Read-only. Your permissions don't include check-in or payments."
+      }
+    }
+  },
+  "Workspaces": {
+    "list": {
+      "title": "Workspaces",
+      "description": "Your own private workspaces: classes and sessions you run yourself, outside any branch.",
+      "count": "{active} of {max} active",
+      "countHint": "Archived workspaces don't count.",
+      "new": "New workspace",
+      "capReached": "You have {max} active workspaces. Archive one to create another.",
+      "premiumTitle": "Workspaces come with premium",
+      "premiumDescription": "With premium you can create up to {max} private workspaces and run your own classes and sessions in them.",
+      "readOnly": "Read-only — renew premium to make changes. Your workspaces and their history stay as they are.",
+      "premiumContact": "Contact KayEdu to subscribe or renew.",
+      "empty": "No workspaces yet",
+      "emptyHint": "Create a workspace to run classes of your own.",
+      "statusActive": "Active",
+      "statusArchived": "Archived",
+      "activeClasses": "{count, plural, =0 {No active classes} one {# active class} other {# active classes}}"
+    },
+    "create": {
+      "title": "New workspace",
+      "description": "A private space for your own classes. Only you can see it.",
+      "name": "Name",
+      "nameHint": "For you only — students never see it.",
+      "cancel": "Cancel",
+      "submit": "Create workspace"
+    },
+    "workspace": {
+      "back": "Workspaces",
+      "statusActive": "Active",
+      "statusArchived": "Archived",
+      "readOnlyBadge": "Read-only",
+      "lapsedBanner": "Read-only — renew premium to make changes.",
+      "archivedBanner": "This workspace is archived and read-only. Unarchive it in Settings to make changes."
+    },
+    "tabs": {
+      "label": "Workspace sections",
+      "classes": "Classes",
+      "sessions": "Sessions",
+      "settings": "Settings",
+      "students": "Students"
+    },
+    "classes": {
+      "title": "Classes",
+      "classTitle": "Class",
+      "description": "Each class creates its sessions from its weekly slots for the whole period.",
+      "new": "New class",
+      "edit": "Edit class",
+      "newTitle": "New class",
+      "newDescription": "Its sessions are created for every weekly slot from today until the end date.",
+      "editTitle": "Edit class",
+      "editDescription": "Changing the period or price updates the upcoming sessions that have no records.",
+      "cancel": "Cancel",
+      "create": "Create class",
+      "save": "Save changes",
+      "created": "Class created.",
+      "saved": "Changes saved.",
+      "teacherNote": "You teach every class in your workspace.",
+      "cutNote": "No cut is taken in your workspace: you keep the whole amount.",
+      "scheduleHint": "One row per weekly slot. At least one row.",
+      "empty": "No classes yet",
+      "emptyHint": "Create a class with a weekly slot and its sessions appear here.",
+      "untitled": "Class",
+      "active": "Active",
+      "inactive": "Inactive",
+      "noSlots": "No weekly slots",
+      "upcoming": "{count, plural, =0 {No upcoming sessions} one {# upcoming session} other {# upcoming sessions}}",
+      "period": "Class period",
+      "slotsDescription": "Adding or removing a slot updates the upcoming sessions.",
+      "sessionsTitle": "Sessions",
+      "slotRemoved": "Slot removed.",
+      "removeSlotTitle": "Remove this slot?",
+      "removeSlotDescription": "Its upcoming sessions without records are removed. Sessions that already have records are kept.",
+      "removeSlotConfirm": "Remove slot",
+      "deactivate": "Deactivate",
+      "deactivateTitle": "Deactivate this class?",
+      "deactivateDescription": "Its upcoming sessions without records are removed and the others are cancelled. History is kept, and you can reactivate it while its period lasts.",
+      "deactivated": "Class deactivated.",
+      "reactivate": "Reactivate",
+      "reactivated": "Class reactivated.",
+      "delete": "Delete class",
+      "deleteTitle": "Delete this class?",
+      "deleteDescription": "Only a class that never ran can be deleted. This cannot be undone."
+    },
+    "sessions": {
+      "title": "Sessions",
+      "description": "Every session of this workspace, oldest first.",
+      "new": "New session",
+      "addExtra": "Add a session",
+      "newTitle": "New session",
+      "newDescription": "An extra session for a class, or a one-time session of its own.",
+      "kind": "Session type",
+      "kindExtra": "Extra session for a class",
+      "kindOneOff": "One-time session",
+      "class": "Class",
+      "titleField": "Title",
+      "cutNote": "No cut is taken in your workspace.",
+      "date": "Date",
+      "start": "Start",
+      "end": "End",
+      "cancel": "Cancel",
+      "create": "Create session",
+      "created": "Session created.",
+      "reschedule": "Reschedule",
+      "rescheduleTitle": "Reschedule this session",
+      "rescheduleDescription": "A new session is created at the new time; this one is kept as moved.",
+      "rescheduled": "Session rescheduled.",
+      "cancelSession": "Cancel session",
+      "cancelTitle": "Cancel this session?",
+      "cancelDescription": "It stays in the list as cancelled. This cannot be undone.",
+      "cancelled": "Session cancelled.",
+      "delete": "Delete",
+      "deleteTitle": "Delete this session?",
+      "deleteDescription": "Only an extra or one-time session that never ran can be deleted. This cannot be undone.",
+      "deleted": "Session deleted.",
+      "empty": "No sessions",
+      "emptyHint": "Sessions appear here once a class has weekly slots.",
+      "untitledClass": "Class",
+      "open": "Open session"
+    },
+    "settings": {
+      "title": "Workspace settings",
+      "nameTitle": "Name",
+      "nameDescription": "Only you see it.",
+      "name": "Workspace name",
+      "save": "Save name",
+      "renamed": "Name saved.",
+      "archiveSection": "Archive",
+      "archiveHelp": "Archiving makes this workspace read-only and deactivates every class: upcoming sessions without records are removed and the others are cancelled. History is kept, and it stops counting toward your limit.",
+      "archive": "Archive workspace",
+      "archiveTitle": "Archive this workspace?",
+      "archiveDescription": "Every class is deactivated and the workspace becomes read-only. History is kept. You can unarchive it later while you are premium and under the limit.",
+      "archiveConfirm": "Archive",
+      "archived": "Workspace archived.",
+      "unarchiveSection": "Unarchive",
+      "unarchiveHelp": "Unarchiving makes the workspace writable again. Its classes stay deactivated until you reactivate each one.",
+      "unarchive": "Unarchive workspace",
+      "unarchiveTitle": "Unarchive this workspace?",
+      "unarchiveDescription": "It counts toward your limit again. Classes stay deactivated until you reactivate them.",
+      "unarchiveConfirm": "Unarchive",
+      "unarchived": "Workspace unarchived.",
+      "unarchivePremium": "Unarchiving needs premium.",
+      "unarchiveFull": "You have {active} of {max} active workspaces. Archive one to unarchive this one."
+    },
+    "errors": {
+      "generic": "That didn't work. Try again.",
+      "forbidden": "You can't do that in this workspace.",
+      "notFound": "Not found. It may have been removed.",
+      "premiumRequired": "Read-only — renew premium to make changes.",
+      "workspaceArchived": "This workspace is archived. Unarchive it to make changes.",
+      "workspaceCapReached": "You already have {active} active workspaces — the limit. Archive one first.",
+      "workspaceCutFixed": "No cut can be set in a workspace.",
+      "alreadyArchived": "This workspace is already archived.",
+      "notArchived": "This workspace isn't archived.",
+      "nameRequired": "Enter a name.",
+      "nameTooLong": "Use 80 characters or fewer.",
+      "invalidName": "Enter a name of 80 characters or fewer.",
+      "educationSystemNotFound": "Choose an available education system.",
+      "gradeNotFound": "Choose an available grade.",
+      "subjectNotFound": "Choose an available subject.",
+      "titleRequired": "Enter a title."
+    }
+  },
+  "WorkspaceSession": {
+    "metaTitle": "Session",
+    "back": "Back to sessions",
+    "rosterTitle": "Roster",
+    "rosterDescription": "The students enrolled in this class. Check a student in — Present or Late is set from the arrival time — then record their payment. Corrections are possible until the session is ended.",
+    "oneTimeNote": "A one-time session has no enrolled students, so there is nobody to check in here.",
+    "rosterEmpty": "No students enrolled",
+    "rosterEmptyHint": "Enrol students in this class from the class page; they appear here.",
+    "notCheckedIn": "Not checked in",
+    "noLongerEnrolled": "No longer enrolled",
+    "amount": "Amount: {amount}",
+    "amountNote": "The session's price, frozen when you record the payment. It is all yours — no cut is taken in your workspace.",
+    "refundHelp": "Records that you gave the money back to the student, in cash.",
+    "receiptTitle": "Receipt",
+    "receiptDescription": "What this session collected, your share (all of it) and who came.",
+    "detailsTitle": "Details",
+    "errors": {
+      "generic": "That didn't work. Try again.",
+      "forbidden": "You can't do that in this workspace.",
+      "notFound": "Not found. It may have been removed.",
+      "premiumRequired": "Read-only — renew premium to make changes.",
+      "workspaceArchived": "This workspace is archived. Unarchive it to make changes.",
+      "notEnrolled": "Only a student enrolled in this class can be checked in.",
+      "alreadyCheckedIn": "This student is already checked in.",
+      "notCheckedIn": "This student hasn't been checked in yet. Check them in first.",
+      "sessionCancelled": "This session is cancelled — attendance and payment can no longer be recorded on it.",
+      "sessionRescheduled": "This session was rescheduled — attendance and payment can no longer be recorded on it. Use the new session instead.",
+      "sessionClosed": "This session is closed — attendance and payments can no longer be changed on it.",
+      "reasonRequired": "Give a reason — switching a paid student to Absent voids their payment.",
+      "voidConfirmationRequired": "This student has paid. Confirm that marking them absent voids the payment.",
+      "attendanceNotPayable": "Only a Present or Late student can have a payment recorded.",
+      "alreadyPaid": "This student already has a payment. Void it first to record a new one.",
+      "invalidMethod": "This workspace can't record a payment right now. Try again later.",
+      "missingCut": "This session can't take a payment. Try again later.",
+      "alreadyVoided": "This payment was already voided.",
+      "alreadyRefunded": "This payment was already refunded.",
+      "alreadyClosed": "This session is already closed.",
+      "notStarted": "This session hasn't started yet, so it can't be ended.",
+      "required": "This field is required.",
+      "tooLong": "This value is too long."
+    }
+  },
+  "WorkspaceStudents": {
+    "title": "Students",
+    "description": "The students of this workspace. Each one is your own record here; you see only whether they have linked it to their account.",
+    "empty": "No students yet",
+    "emptyHint": "Add a student by their phone number, then enrol them in your classes.",
+    "code": "Code {code}",
+    "classes": "{count, plural, =0 {In no class} one {In # class} other {In # classes}}",
+    "add": {
+      "button": "Add student",
+      "title": "Add a student",
+      "description": "Their record is created in this workspace. If the phone belongs to a KayEdu account, its owner can link to this record from their account — you will see “Linked” once they do.",
+      "phoneHint": "Egyptian mobile, e.g. 01012345678. It can't be changed later.",
+      "grade": "Grade (optional)",
+      "noGrade": "No grade",
+      "cancel": "Cancel",
+      "submit": "Add student",
+      "added": "Student added."
+    },
+    "copy": {
+      "button": "Add from my other workspaces",
+      "title": "Add from my other workspaces",
+      "description": "Copies the name, phone and grade of one of your students in another of your workspaces into a new record here.",
+      "student": "Student",
+      "pick": "Choose a student",
+      "cancel": "Cancel",
+      "submit": "Add student",
+      "added": "Student added."
+    },
+    "row": {
+      "linked": "Linked",
+      "notLinked": "Not linked",
+      "inviteAgain": "Invite again",
+      "invited": "Done. If this phone belongs to an account, its owner has been asked again.",
+      "cancelInvitation": "Cancel invitation",
+      "cancelTitle": "Cancel any invitation?",
+      "cancelDescription": "If an invitation to link this record is waiting, it is withdrawn. The record stays as it is.",
+      "cancelConfirm": "Cancel invitation",
+      "cancelled": "Done. Nothing is waiting for this record now."
+    },
+    "shareCode": {
+      "share": "Share code",
+      "title": "Share a join code",
+      "description": "A one-time code for {name}'s record. Whoever redeems it from their own account is linked to this record.",
+      "howItWorks": "Send the code or the link only to this student. They open it, sign in or create an account, check your name and the workspace's, and confirm. The record then reads Linked.",
+      "expiryNote": "The code works once and stops working after 7 days.",
+      "replaceWarning": "A code you shared for this record is still active. Creating a new one stops the old one from working.",
+      "submit": "Create code",
+      "cancel": "Cancel",
+      "createdTitle": "Join code created",
+      "createdDescription": "Share it with {name} now.",
+      "done": "Done",
+      "label": "Join code",
+      "expires": "Works once, until {date}.",
+      "onceWarning": "This code is shown only once. Copy it or share it now — it can't be shown again.",
+      "copy": "Copy code",
+      "copyLink": "Copy link",
+      "copied": "Copied",
+      "copyFailed": "The browser didn't allow copying. Select the code and copy it by hand.",
+      "whatsApp": "Share on WhatsApp",
+      "whatsAppText": "Join my private classes on KayEdu: {link}",
+      "revoke": "Revoke code",
+      "revokeTitle": "Revoke the join code?",
+      "revokeDescription": "The code you shared for this record (it would have worked until {date}) stops working at once. The record stays as it is.",
+      "revokeConfirm": "Revoke code",
+      "revoked": "Done. That code no longer works."
+    },
+    "roster": {
+      "title": "Students",
+      "description": "{count, plural, =0 {Nobody is enrolled yet.} one {# student enrolled.} other {# students enrolled.}}",
+      "empty": "Nobody is enrolled in this class yet.",
+      "student": "Student",
+      "pick": "Choose a student",
+      "enrol": "Enrol",
+      "enrolled": "Student enrolled.",
+      "nobodyToEnrol": "Every student of this workspace is already in this class. Add students on the Students tab.",
+      "remove": "Remove {name} from this class",
+      "removeTitle": "Remove from this class?",
+      "removeDescription": "They leave the class's future sessions. Their history stays.",
+      "removeConfirm": "Remove",
+      "removed": "Removed from the class."
+    },
+    "invitation": {
+      "badge": "Invitation",
+      "title": "{teacher} invited you to their private classes in “{workspace}”",
+      "body": "Confirm to link their student record to your account: you will then see the classes they enrol you in. Cancel if this isn't you.",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "accepted": "Linked. Your private classes are on your calendar.",
+      "declined": "Invitation declined.",
+      "declinedInPlace": "You declined the invitation from “{workspace}”."
+    },
+    "student": {
+      "privateClass": "Private class"
+    },
+    "errors": {
+      "phoneRequired": "Enter the student's phone number.",
+      "invalidPhone": "Enter an Egyptian mobile number, e.g. 01012345678.",
+      "duplicatePhone": "A student with this phone is already in this workspace.",
+      "nameRequired": "Enter a name.",
+      "tooLong": "Use 60 characters or fewer.",
+      "gradeNotFound": "Choose an available grade.",
+      "rateLimited": "Too many tries. Wait a while and try again.",
+      "inviteTooSoon": "You can invite this student again 24 hours after the last invitation.",
+      "alreadyLinked": "This student is already linked.",
+      "pickStudent": "Choose a student.",
+      "classInactive": "This class is deactivated. Reactivate it first.",
+      "studentInactive": "This student is deactivated.",
+      "alreadyEnrolled": "This student is already in this class.",
+      "invitationGone": "This invitation is no longer available.",
+      "alreadyInWorkspace": "You already have a record in this workspace, so this invitation can't be used.",
+      "codeGone": "No code is active for this record any more. Refresh the page."
+    }
+  },
+  "WorkspaceJoin": {
+    "title": "Join a private class",
+    "description": "Enter the code a teacher gave you.",
+    "signedInAs": "Signed in as {name}.",
+    "howToGet": "A teacher creates the code on their workspace's Students page and sends it to you.",
+    "backToHub": "Back",
+    "codeLabel": "Join code",
+    "codeHint": "12 letters and numbers. Dashes and spaces don't matter.",
+    "continue": "Continue",
+    "checking": "Checking…",
+    "signInFirst": "Sign in or create an account first. Your code waits here.",
+    "signIn": "Sign in",
+    "register": "Create an account",
+    "confirmTitle": "Join {teacher}'s private classes in “{workspace}”?",
+    "confirmTitleNoTeacher": "Join the private classes in “{workspace}”?",
+    "confirmDescription": "Check who this is from. Nothing is linked until you confirm.",
+    "confirmNote": "You will see the classes this teacher enrols you in, on your Sessions and Calendar. The teacher sees only that the record is linked — not your name, email or account.",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "confirming": "Joining…",
+    "joined": "Linked. Your private classes are on your calendar.",
+    "errors": {
+      "signInRequired": "Sign in first.",
+      "forbidden": "You don't have permission to do that.",
+      "unverified": "Confirm your email address first.",
+      "rateLimited": "Too many attempts. Try again in an hour.",
+      "invalidCode": "This code doesn't work. It may be mistyped, used, revoked or expired.",
+      "ownWorkspace": "This code is for your own workspace. Give it to the student it was made for.",
+      "alreadyInWorkspace": "You already have a record in this workspace, so this code can't be used. Ask the teacher.",
+      "alreadyLinked": "This record is already linked to an account. Ask the teacher.",
+      "required": "Enter the code."
+    }
   }
 }

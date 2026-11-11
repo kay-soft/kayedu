@@ -28,7 +28,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { deleteAuditRows } from "./lib/audit-maintenance.ts";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { type Role } from "@prisma/client";
 import { scopedData, scopedFindById } from "../lib/db/tenant-scope.ts";
@@ -77,6 +77,7 @@ import {
   gradesForSystem,
   subjectsForGrade,
 } from "../lib/catalog-picker.ts";
+import { readSource } from "./lib/source.ts";
 
 const prisma = await gatePrisma();
 
@@ -1314,10 +1315,8 @@ async function main() {
 
   // …then the actual SQL in the shipped migration, run over the same samples
   // in a temporary table, must agree with it.
-  const migrationSql = readFileSync(
-    join("prisma", "migrations", "20261016090000_r8_catalog_admin_bilingual_names", "migration.sql"),
-    "utf8",
-  );
+  const migrationSql = readSource(
+    join("prisma", "migrations", "20261016090000_r8_catalog_admin_bilingual_names", "migration.sql"));
   const updates = migrationSql.match(/UPDATE "CenterCatalogSelection"[\s\S]*?;/g) ?? [];
   check("The migration contains the two backfill UPDATE statements", updates.length === 2, `found ${updates.length}`);
   const sqlResult = await prisma.$transaction(async (tx) => {
@@ -1512,7 +1511,7 @@ async function main() {
 
   const grepCode = (pattern: RegExp, within = scannable) =>
     within
-      .filter((file) => !file.endsWith(".json") && !file.endsWith(".sql") ? pattern.test(stripComments(readFileSync(file, "utf8"))) : pattern.test(readFileSync(file, "utf8")))
+      .filter((file) => !file.endsWith(".json") && !file.endsWith(".sql") ? pattern.test(stripComments(readSource(file))) : pattern.test(readSource(file)))
       .map(rel);
 
   check(
@@ -1535,7 +1534,7 @@ async function main() {
     displayNameHits.length === 0,
     displayNameHits.join(", "),
   );
-  const schemaText = readFileSync(join(root, "prisma", "schema.prisma"), "utf8");
+  const schemaText = readSource(join(root, "prisma", "schema.prisma"));
   const selectionModel = schemaText.match(/model CenterCatalogSelection \{[\s\S]*?\n\}/)?.[0] ?? "";
   check(
     "schema.prisma: CenterCatalogSelection has displayNameAr + displayNameEn, no displayName; no suggestion model or enum",
@@ -1559,7 +1558,7 @@ async function main() {
     }
   };
   for (const locale of ["en", "ar"]) {
-    walkKeys(JSON.parse(readFileSync(join(root, "messages", `${locale}.json`), "utf8")), "");
+    walkKeys(JSON.parse(readSource(join(root, "messages", `${locale}.json`))), "");
   }
   check(
     "messages (en + ar): no suggestion keys under Settings.catalog or AdminCatalog",
@@ -1575,7 +1574,7 @@ async function main() {
     writers.length === 0,
     writers.join(", "),
   );
-  const adminSource = stripComments(readFileSync(join(root, "lib", "db", "catalog-admin.ts"), "utf8"));
+  const adminSource = stripComments(readSource(join(root, "lib", "db", "catalog-admin.ts")));
   const exportedWrites = ["createCatalogEntry", "updateCatalogEntry", "setCatalogEntryActive", "deleteCatalogEntry"];
   check(
     "Every exported global write starts with the platform-admin check",
@@ -1584,7 +1583,7 @@ async function main() {
       return /if \(!\(await isPlatformAdminUser\(db, actorUserId\)\)\) return \{ ok: false, error: "forbidden" \};/.test(body);
     }),
   );
-  const adminActions = readFileSync(join(root, "app", "[locale]", "(admin)", "admin", "catalog", "actions.ts"), "utf8");
+  const adminActions = readSource(join(root, "app", "[locale]", "(admin)", "admin", "catalog", "actions.ts"));
   check(
     "Every admin catalog Server Action calls requirePlatformAdmin() before anything else",
     (adminActions.match(/export async function \w+Action/g) ?? []).length === 4 &&

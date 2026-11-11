@@ -6,7 +6,7 @@ import { LeaveClassButton } from "@/app/[locale]/(student)/student/reservations/
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getStudentContexts, requireStudentUser } from "@/lib/auth/tenant";
+import { getStudentScheduleContexts, requireStudentUser } from "@/lib/auth/tenant";
 import { prisma } from "@/lib/db/client";
 import { isBookableNow } from "@/lib/db/session-seats";
 import { teacherDisplayNames } from "@/lib/db/discover";
@@ -50,6 +50,8 @@ type UpcomingRow = {
   bookingStatus?: "PENDING" | "CONFIRMED";
   /** U2 — a replacement's original slot ("Moved from …"). */
   movedFrom?: { date: Date; startTime: string } | null;
+  /** W8b (D-W39 item 8): a PERSONAL workspace's class — tagged "Private class". */
+  privateClass?: boolean;
 };
 
 type PastRow = {
@@ -64,6 +66,7 @@ type PastRow = {
   isDropIn: boolean;
   paidAmount: number | null;
   teacherName: string;
+  privateClass?: boolean;
 };
 
 async function loadCenterSchedule(
@@ -73,6 +76,7 @@ async function loadCenterSchedule(
   timeZone: string,
   now: Date,
   locale: string,
+  privateClass: boolean,
 ): Promise<{ upcoming: UpcomingRow[]; past: PastRow[] }> {
   // R7b: each centre's own calendar day splits its upcoming from its past.
   const today = todayInTimezone(timeZone, now);
@@ -98,9 +102,11 @@ async function loadCenterSchedule(
     startTime: row.startTime,
     endTime: row.endTime,
     ...sessionLabelParts(locale, row),
-    roomName: row.room?.name ?? row.classGroup?.room?.name ?? null,
+    // A workspace's one room is internal (D-W38): never shown to a student.
+    roomName: privateClass ? null : (row.room?.name ?? row.classGroup?.room?.name ?? null),
     teacherName: names.get(row.teacherId) ?? "—",
     movedFrom: row.rescheduledFrom,
+    privateClass,
   }));
 
   const past = history.map((row) => ({
@@ -113,8 +119,11 @@ async function loadCenterSchedule(
     ...sessionLabelParts(locale, row.session),
     attendanceStatus: row.attendanceStatus,
     isDropIn: row.isDropIn,
-    paidAmount: row.payments[0]?.amount ?? null,
+    // W8c (D-W40 item 10): a Private class row shows attendance, never money —
+    // a branch row keeps its paid amount, as before.
+    paidAmount: privateClass ? null : (row.payments[0]?.amount ?? null),
     teacherName: names.get(row.session.teacherId) ?? "—",
+    privateClass,
   }));
 
   return { upcoming, past };
@@ -165,6 +174,11 @@ async function loadBookedRows(booked: BookedUpcomingSession[], locale: string, n
  * queries in memory, the same shape as the teacher dashboard (M7) —
  * `getStudentContexts` gives one `TenantContext` per center this student has
  * a `StudentProfile` at.
+ *
+ * W8b (D-W39 item 8): read through `getStudentScheduleContexts`, which adds
+ * the PERSONAL workspaces where the student holds their own linked profile —
+ * only their ACTIVE enrolled classes' sessions, under the workspace's name and
+ * the teacher's, tagged "Private class".
  */
 export default async function StudentSchedulePage({
   searchParams,
@@ -172,7 +186,7 @@ export default async function StudentSchedulePage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireStudentUser();
-  const contexts = await getStudentContexts(session.user.id);
+  const contexts = await getStudentScheduleContexts(session.user.id);
   const rawParams = await searchParams;
   const dateFilter = rawParams.date?.trim() || "";
 
@@ -180,6 +194,7 @@ export default async function StudentSchedulePage({
   const tAttendance = await getTranslations("Sessions.attendance");
   const tCommon = await getTranslations("Settings.common");
   const tSessions = await getTranslations("Sessions");
+  const tPrivate = await getTranslations("WorkspaceStudents.student");
   const locale = await getLocale();
 
   const now = new Date();
@@ -196,6 +211,7 @@ export default async function StudentSchedulePage({
             centreTimeZone(ctx.settings),
             now,
             locale,
+            ctx.center.kind === "PERSONAL",
           ),
         ),
     ),
@@ -279,6 +295,7 @@ export default async function StudentSchedulePage({
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    {row.privateClass ? <Badge variant="neutral">{tPrivate("privateClass")}</Badge> : null}
                     <Badge variant={row.bookingStatus === "PENDING" ? "warning" : "info"}>
                       {row.bookingStatus === "CONFIRMED"
                         ? t("bookedBadge")
@@ -327,9 +344,12 @@ export default async function StudentSchedulePage({
                       {row.paidAmount !== null ? <span>{formatMoney(row.paidAmount, locale)}</span> : null}
                     </p>
                   </div>
-                  <Badge variant={ATTENDANCE_BADGE[row.attendanceStatus]}>
-                    {tAttendance(row.attendanceStatus)}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    {row.privateClass ? <Badge variant="neutral">{tPrivate("privateClass")}</Badge> : null}
+                    <Badge variant={ATTENDANCE_BADGE[row.attendanceStatus]}>
+                      {tAttendance(row.attendanceStatus)}
+                    </Badge>
+                  </div>
                 </div>
               ))
             )}

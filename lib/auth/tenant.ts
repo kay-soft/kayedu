@@ -17,15 +17,20 @@ import {
   type PermissionGrants,
   type TenantRole,
 } from "@/lib/auth/permissions";
+import { assistantExperienceSources, loadExperiences, type ExperienceEntry } from "@/lib/auth/experiences";
 import {
   resolveCenterRelations,
+  resolveOwnerOrgGroups,
   roleForExperience,
   type CenterRelation,
   type Experience,
+  type OwnerOrgGroup,
 } from "@/lib/auth/relations";
 import { onboardingPath } from "@/lib/auth/onboarding";
 import { loadPermissionGrants } from "@/lib/db/permissions";
 import { activeChildLinks } from "@/lib/db/parents";
+import { ownsAnyWorkspace } from "@/lib/db/workspaces";
+import { hasWorkspaceStudentProfile, studentWorkspaceProfiles } from "@/lib/db/workspace-students";
 import { fullName, localName } from "@/lib/identity";
 import { redirect } from "@/lib/i18n/navigation";
 import {
@@ -38,7 +43,7 @@ import {
 } from "@/lib/routes";
 import { centerLogoSrc } from "@/lib/storage-paths";
 
-export type { CenterRelation, Experience };
+export type { CenterRelation, Experience, OwnerOrgGroup };
 
 /**
  * Everything a request needs to be safely tenant-scoped
@@ -97,12 +102,6 @@ export const getUserCenterRelations = cache(
   async (userId: string): Promise<CenterRelation[]> => resolveCenterRelations(prisma, userId),
 );
 
-export type OwnerOrgGroup = {
-  organizationId: string;
-  organizationName: string;
-  branches: Center[];
-};
-
 /**
  * The organizations this user is an Owner of, where the organization actually
  * has more than one branch — the set the "Whole Management" option in the
@@ -111,34 +110,35 @@ export type OwnerOrgGroup = {
  * lists that one branch as an ordinary card via `getUserCenterRelations`.
  */
 export const getOwnerOrgGroups = cache(
-  async (userId: string): Promise<OwnerOrgGroup[]> => {
-    const relations = await getUserCenterRelations(userId);
-    const branchesByOrg = new Map<string, Center[]>();
-    for (const relation of relations) {
-      if (!relation.roles.includes("OWNER")) continue;
-      const orgId = relation.center.organizationId;
-      const list = branchesByOrg.get(orgId) ?? [];
-      list.push(relation.center);
-      branchesByOrg.set(orgId, list);
-    }
+  async (userId: string): Promise<OwnerOrgGroup[]> =>
+    resolveOwnerOrgGroups(prisma, await getUserCenterRelations(userId)),
+);
 
-    const multiOrgIds = [...branchesByOrg.entries()]
-      .filter(([, branches]) => branches.length > 1)
-      .map(([orgId]) => orgId);
-    if (multiOrgIds.length === 0) return [];
-
-    const organizations = await prisma.organization.findMany({
-      where: { id: { in: multiOrgIds } },
-    });
-
-    return organizations.map((organization) => ({
-      organizationId: organization.id,
-      organizationName: organization.name,
-      branches: (branchesByOrg.get(organization.id) ?? []).sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ),
-    }));
-  },
+/**
+ * Every experience this account has (W5, D-W34): the one list behind the hub,
+ * the header switcher and sign-in's landing, derived on every request. See
+ * `lib/auth/experiences.ts`. It re-uses this request's cached resolvers, so a
+ * shell that already read the relations pays for no second read of them.
+ */
+export const listExperiences = cache(
+  async (userId: string): Promise<ExperienceEntry[]> =>
+    loadExperiences(prisma, userId, {
+      relations: getUserCenterRelations,
+      orgGroups: getOwnerOrgGroups,
+      hasLinkedChild: async (id) => (await getParentChildren(id)).linked.length > 0,
+      isPlatformAdmin: async (id) => {
+        const user = await getCurrentUser();
+        if (user?.id === id) return user.isPlatformAdmin;
+        const row = await prisma.user.findUnique({ where: { id }, select: { isPlatformAdmin: true } });
+        return row?.isPlatformAdmin ?? false;
+      },
+      // W7a: effective links only, premium worked out on this request.
+      assistantLinks: (id) => assistantExperienceSources(prisma, id),
+      // W8a (D-W38 item 11): owning a workspace gives the Teacher entry.
+      ownsWorkspace: (id) => ownsAnyWorkspace(prisma, id),
+      // W8b (D-W39 item 9): a linked workspace profile gives the Student entry.
+      studentInWorkspace: (id) => hasWorkspaceStudentProfile(prisma, id),
+    }),
 );
 
 async function redirectTo(href: string): Promise<never> {
@@ -235,7 +235,10 @@ export const getTenantContext = cache(
       // gate that actually renders `/teacher/centers` itself without ever
       // reaching this redirect, so this only covers a teacher-experience page
       // reached some other way (a direct `/teacher/dashboard` URL, say).
-      if (experience === "teacher") return redirectTo(ROUTES.teacherCenters);
+      // W8a (D-W38 item 11): unless they own a workspace — then that is home.
+      if (experience === "teacher") {
+        return redirectTo((await ownsAnyWorkspace(prisma, user.id)) ? ROUTES.teacherWorkspaces : ROUTES.teacherCenters);
+      }
       return redirectTo(ROUTES.selectCenter);
     }
 
@@ -336,9 +339,51 @@ export const getStudentContexts = cache(
   },
 );
 
+/**
+ * **The opt-in student resolver** (W8b, D-W39 item 8): `getStudentContexts`
+ * plus one context per PERSONAL workspace where this account holds its **own**
+ * active, linked profile (`studentWorkspaceProfiles` — archived workspaces
+ * included, so history stays). Used **only** by the schedule, the calendar
+ * and the attendance history they carry, U8's leave (which those rows
+ * render), **W9 (D-W42 item 4): the student's exams and homework** — every
+ * page, action and the page-close route through `studentBranches`
+ * (`app/[locale]/(student)/student/assessments/scope.ts`) — and, through its
+ * input, `studentWorkspaceProfiles`, the session- and assessment-notice
+ * re-check and the "soon" notices (`lib/notifications/reach.ts`).
+ * Everything else — the hub, the switcher, staff and teacher resolution,
+ * ratings, My requests, Discover and Explore — keeps
+ * `getStudentContexts` / `getUserCenterRelations` and so `BRANCH_ONLY`.
+ *
+ * A workspace context is a STUDENT context like a branch's (no grants), and is
+ * told apart by `center.kind === "PERSONAL"`, which the pages read to tag
+ * "Private class".
+ */
+export const getStudentScheduleContexts = cache(
+  async (userId: string): Promise<TenantContext[]> => {
+    const [branchContexts, user, profiles] = await Promise.all([
+      getStudentContexts(userId),
+      prisma.user.findUnique({ where: { id: userId } }),
+      studentWorkspaceProfiles(prisma, userId),
+    ]);
+    if (!user || profiles.length === 0) return branchContexts;
+    const workspaceContexts = await Promise.all(
+      profiles.map(({ center, ...profile }) =>
+        buildContext(user, { center, memberships: [], studentProfile: profile, roles: ["STUDENT"] }, "student"),
+      ),
+    );
+    return [...branchContexts, ...workspaceContexts];
+  },
+);
+
 export type TeacherSession =
-  | { hasCenter: true; user: User; relations: CenterRelation[] }
-  | { hasCenter: false; user: User; relations: CenterRelation[] };
+  | { hasCenter: true; workspaceOnly: false; user: User; relations: CenterRelation[] }
+  | {
+      hasCenter: false;
+      /** W8a (D-W38 item 11): teaches at no branch but owns a PERSONAL workspace. */
+      workspaceOnly: boolean;
+      user: User;
+      relations: CenterRelation[];
+    };
 
 /**
  * The (teacher) route group's gate — deliberately **not**
@@ -361,7 +406,9 @@ export async function requireTeacherUser(): Promise<TeacherSession> {
   // U7: which branch(es) the portal reads is `getTeacherScope()`'s concern
   // (`lib/auth/teacher-scope.ts`) — All branches by default, never the staff
   // experience's `kayedu_center`.
-  return { hasCenter: hasTeacherCenter, user, relations };
+  if (hasTeacherCenter) return { hasCenter: true, workspaceOnly: false, user, relations };
+  // W8a: only an account with no branch pays for the workspace read.
+  return { hasCenter: false, workspaceOnly: await ownsAnyWorkspace(prisma, user.id), user, relations };
 }
 
 export type StudentSession = {
@@ -451,13 +498,15 @@ export const getParentChildren = cache(async (parentUserId: string): Promise<Par
  * Where a signed-in user with NO centre relation belongs (SYS): the platform
  * admin's console, the parent portal when they hold an active family link
  * (a link is not a centre relation, so the hub would otherwise tell a parent
- * "not connected to a branch" with no way to their children), else the
- * hub's empty state.
+ * "not connected to a branch" with no way to their children), their own
+ * workspaces when they own one (W8a, D-W38 item 11 — a workspace is not a
+ * centre relation either), else the hub's empty state.
  */
 export async function homeWithoutBranch(user: Pick<User, "id" | "isPlatformAdmin">): Promise<string> {
   if (user.isPlatformAdmin) return ROUTES.adminCenters;
-  const children = await getParentChildren(user.id);
-  return children.linked.length > 0 ? ROUTES.parentHome : ROUTES.selectCenter;
+  const [children, ownsWorkspace] = await Promise.all([getParentChildren(user.id), ownsAnyWorkspace(prisma, user.id)]);
+  if (children.linked.length > 0) return ROUTES.parentHome;
+  return ownsWorkspace ? ROUTES.teacherWorkspaces : ROUTES.selectCenter;
 }
 
 /**
@@ -497,23 +546,10 @@ export async function singleExperienceHome(
   return homes.length === 1 ? homes[0] : null;
 }
 
-/** Every experience this person holds, one home each — see `singleExperienceHome`. */
-export async function experienceHomes(user: Pick<User, "id" | "isPlatformAdmin">): Promise<ExperienceHome[]> {
-  const [relations, orgGroups, children] = await Promise.all([
-    getUserCenterRelations(user.id),
-    getOwnerOrgGroups(user.id),
-    getParentChildren(user.id),
-  ]);
-  return [
-    ...relations
-      .filter((relation) => relation.roles.some((role) => isCenterStaffRole(role)))
-      .map((relation) => ({ href: ROUTES.centerDashboard, centerId: relation.center.id })),
-    ...orgGroups.map(() => ({ href: ROUTES.centerDashboard })),
-    ...(relations.some((relation) => relation.roles.includes("TEACHER")) ? [{ href: ROUTES.teacherDashboard }] : []),
-    ...(relations.some((relation) => relation.roles.includes("STUDENT")) ? [{ href: ROUTES.studentSchedule }] : []),
-    ...(children.linked.length > 0 ? [{ href: ROUTES.parentHome }] : []),
-    ...(user.isPlatformAdmin ? [{ href: ROUTES.adminCenters }] : []),
-  ];
+/** Every experience this person holds, one home each: `listExperiences`, see `singleExperienceHome`. */
+export async function experienceHomes(user: Pick<User, "id">): Promise<ExperienceHome[]> {
+  const entries = await listExperiences(user.id);
+  return entries.map((entry) => ({ href: entry.href, centerId: entry.centerId }));
 }
 
 export type ParentSession = {
@@ -687,6 +723,7 @@ export async function resolveAccountExperience(hint: string | undefined): Promis
   if (relations.length === 0) {
     const home = await homeWithoutBranch(user);
     if (home === ROUTES.adminCenters) return "admin";
+    if (home === ROUTES.teacherWorkspaces) return "teacher";
     return home === ROUTES.parentHome ? "parent" : "student";
   }
 

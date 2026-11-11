@@ -34,7 +34,7 @@
  */
 import { gatePrisma } from "./lib/gate-db.ts";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Role } from "@prisma/client";
@@ -80,6 +80,7 @@ import {
   cardLayoutSchema,
   memberRoleSchema,
 } from "../lib/validation/settings.ts";
+import { readSource } from "./lib/source.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const prisma = await gatePrisma();
@@ -101,7 +102,7 @@ function check(name: string, passed: boolean, detail = "") {
 }
 
 function source(path: string): string {
-  return readFileSync(join(ROOT, path), "utf8");
+  return readSource(join(ROOT, path));
 }
 
 /** A file's code without its comments — a doc comment naming a function is not a call. */
@@ -568,7 +569,7 @@ async function main() {
 
   const scopedSource = source("lib/db/scoped.ts");
   check("the scoped staff helpers apply those exact filters", /listStaffWithUser[\s\S]{0,260}staffMembershipFilter\(/.test(scopedSource) && /listStaff:[\s\S]{0,260}staffInvitationFilter\(/.test(scopedSource));
-  check("the old unfiltered listWithUser helper is gone", !/listWithUser\b/.test(scopedSource) && !walk(join(ROOT, "app")).some((file) => /\.memberships\.listWithUser\b/.test(readFileSync(file, "utf8"))));
+  check("the old unfiltered listWithUser helper is gone", !/listWithUser\b/.test(scopedSource) && !walk(join(ROOT, "app")).some((file) => /\.memberships\.listWithUser\b/.test(readSource(file))));
   const staffPage = source("app/[locale]/(center)/settings/staff/page.tsx");
   check("the Users & Roles page reads only the staff helpers", /memberships\.listStaffWithUser\(/.test(staffPage) && /invitations\.listStaff\(/.test(staffPage) && !/invitations\.list\(/.test(staffPage));
 

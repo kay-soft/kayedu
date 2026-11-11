@@ -14,6 +14,8 @@ export const ROUTES = {
   accountPending: "/account-pending",
   /** Account settings (F2): every signed-in person, inside the shell they came from. */
   account: "/account",
+  /** The notification inbox (W1): every signed-in person, inside the shell they came from. */
+  notifications: "/notifications",
   /** Where Supabase's confirmation link lands (SEC-66). */
   authConfirm: "/auth/confirm",
   selectCenter: "/select-center",
@@ -23,6 +25,18 @@ export const ROUTES = {
    * query parameter, so it never reaches a server or proxy log.
    */
   familyJoin: "/family/join",
+  /**
+   * W7a: an account redeems an assistant code here — guests too, who sign in
+   * or sign up and come back. Like `familyJoin`, the code travels in the URL
+   * fragment (`assistantJoinUrl`), never a query.
+   */
+  assistantJoin: "/assistant-join",
+  /**
+   * W10 (D-W43): any signed-in account redeems a workspace share code here —
+   * guests sign in or sign up and come back. The code travels in the URL
+   * fragment (`workspaceJoinUrl`), never a query.
+   */
+  workspaceJoin: "/workspace-join",
   invite: (token: string) => `/invite/${token}`,
   // F5: the public Explore pages — guests, no sign-in (`(public)` route group).
   explore: "/explore",
@@ -80,11 +94,50 @@ export const ROUTES = {
   teacherStudents: "/teacher/students",
   teacherStudent: (id: string) => `/teacher/students/${id}`,
   teacherClasses: "/teacher/classes",
+  // W2: one class the teacher teaches — its exams and homework.
+  teacherClass: (id: string) => `/teacher/classes/${id}`,
+  // W2 (D-W30): the teacher's exams and homework, the builder and its preview.
+  teacherAssessments: "/teacher/assessments",
+  teacherAssessmentNew: "/teacher/assessments/new",
+  teacherAssessment: (id: string) => `/teacher/assessments/${id}`,
+  teacherAssessmentPreview: (id: string) => `/teacher/assessments/${id}/preview`,
+  teacherAssessmentResults: (id: string) => `/teacher/assessments/${id}/results`,
+  teacherAssessmentAttempt: (id: string, attemptId: string) => `/teacher/assessments/${id}/results/${attemptId}`,
   teacherApprovals: "/teacher/approvals",
   teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",
+  // W8d (D-W29, D-W41): every branch and workspace, each class, over a period.
+  teacherEarnings: "/teacher/earnings",
   // U9: the teacher's photo (per branch) and their classes' cover images.
   teacherProfile: "/teacher/profile",
+  // W7a (D-W36): a premium teacher's assistants and invites.
+  teacherAssistants: "/teacher/assistants",
+  // W8a (D-W38): a premium teacher's PERSONAL workspaces — the list, and one
+  // workspace's Classes (its home), a class, Sessions and Settings.
+  teacherWorkspaces: "/teacher/workspaces",
+  teacherWorkspace: (id: string) => `/teacher/workspaces/${id}`,
+  teacherWorkspaceClass: (id: string, classId: string) => `/teacher/workspaces/${id}/classes/${classId}`,
+  teacherWorkspaceSessions: (id: string) => `/teacher/workspaces/${id}/sessions`,
+  teacherWorkspaceSession: (id: string, sessionId: string) => `/teacher/workspaces/${id}/sessions/${sessionId}`,
+  teacherWorkspaceStudents: (id: string) => `/teacher/workspaces/${id}/students`,
+  teacherWorkspaceSettings: (id: string) => `/teacher/workspaces/${id}/settings`,
+  // W7a: the assistant experience, one per teacher the account assists.
+  assistantHome: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}`,
+  // W7b (D-W37): the assistant's working pages, under the teacher they assist.
+  assistantAssessments: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/assessments`,
+  assistantClasses: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/classes`,
+  assistantClass: (teacherUserId: string, id: string) => `/assistant/${encodeURIComponent(teacherUserId)}/classes/${id}`,
+  assistantRequests: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/requests`,
+  assistantOverview: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/overview`,
+  // W8d (D-W41 items 9, 10): the teacher's Earnings (Full only) and workspaces.
+  assistantEarnings: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/earnings`,
+  assistantWorkspaces: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/workspaces`,
+  assistantWorkspace: (teacherUserId: string, id: string) => `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}`,
+  assistantWorkspaceClass: (teacherUserId: string, id: string, classId: string) =>
+    `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}/classes/${classId}`,
+  assistantWorkspaceSessions: (teacherUserId: string, id: string) => `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}/sessions`,
+  assistantWorkspaceSession: (teacherUserId: string, id: string, sessionId: string) =>
+    `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}/sessions/${sessionId}`,
   studentSchedule: "/student/schedule",
   studentCalendar: "/student/calendar",
   studentDiscover: "/student/discover",
@@ -92,6 +145,10 @@ export const ROUTES = {
   studentDiscoverClass: (centerId: string, classId: string) =>
     `/student/discover/${encodeURIComponent(centerId)}/${encodeURIComponent(classId)}`,
   studentReservations: "/student/reservations",
+  studentAssessments: "/student/assessments",
+  studentAssessment: (id: string) => `/student/assessments/${id}`,
+  /** Not a page: the beacon a one-sitting exam sends when it closes (no locale prefix). */
+  assessmentAttemptClose: (attemptId: string) => `/api/assessment-attempts/${attemptId}/close`,
   studentProfile: "/student/profile",
   // F4: "Your studies" — a new student's grade, then an optional parent invite.
   studentOnboarding: "/student/onboarding",
@@ -104,7 +161,51 @@ export const ROUTES = {
   adminOrganization: (id: string) => `/admin/organizations/${id}`,
   adminPlatform: "/admin/platform",
   adminCatalog: "/admin/catalog",
+  // W6 (D-W35): premium for an account, found by its exact email.
+  adminTeachers: "/admin/teachers",
 } as const;
+
+/**
+ * Which portal an assessment screen is part of (W7b): the teacher's own, or an
+ * assistant's for one teacher. Serializable, so a client component takes it
+ * as a prop and builds its own links and posts with `assessmentRoutes`.
+ */
+export type AssessmentSurface = { kind: "teacher" } | { kind: "assistant"; teacherId: string };
+
+export const TEACHER_SURFACE: AssessmentSurface = { kind: "teacher" };
+
+/** The assessment pages of a surface — the teacher's `/teacher/assessments/…` or the assistant's mirror. */
+export function assessmentRoutes(surface: AssessmentSurface) {
+  if (surface.kind === "teacher") {
+    return {
+      list: ROUTES.teacherAssessments,
+      newBase: ROUTES.teacherAssessmentNew,
+      detail: ROUTES.teacherAssessment,
+      preview: ROUTES.teacherAssessmentPreview,
+      results: ROUTES.teacherAssessmentResults,
+      attempt: ROUTES.teacherAssessmentAttempt,
+      klass: ROUTES.teacherClass,
+      session: ROUTES.teacherSession as ((id: string) => string) | null,
+    };
+  }
+  const base = ROUTES.assistantAssessments(surface.teacherId);
+  return {
+    list: base,
+    newBase: `${base}/new`,
+    detail: (id: string) => `${base}/${id}`,
+    preview: (id: string) => `${base}/${id}/preview`,
+    results: (id: string) => `${base}/${id}/results`,
+    attempt: (id: string, attemptId: string) => `${base}/${id}/results/${attemptId}`,
+    klass: (id: string) => ROUTES.assistantClass(surface.teacherId, id),
+    // The assistant has no session page; a homework's back link goes to its class list.
+    session: null,
+  };
+}
+
+/** The hidden fields an assistant's post carries besides the row's own ids (the route's teacher). */
+export function surfaceFields(surface: AssessmentSurface): Record<string, string> {
+  return surface.kind === "assistant" ? { teacherId: surface.teacherId } : {};
+}
 
 /**
  * Where a Supabase confirmation link should land (SEC-66) — sign-up's and
@@ -122,6 +223,24 @@ export function authConfirmUrl(locale: "ar" | "en"): string | undefined {
  */
 export function familyJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
   return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.familyJoin}#${code}`;
+}
+
+/** The link an assistant code is shared with (W7a): `<origin>/<locale>/assistant-join#CODE`. */
+export function assistantJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
+  return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.assistantJoin}#${code}`;
+}
+
+/** The link a workspace share code is shared with (W10): `<origin>/<locale>/workspace-join#CODE`. */
+export function workspaceJoinUrl(origin: string, locale: "ar" | "en", code: string): string {
+  return `${origin.replace(/\/+$/, "")}/${locale}${ROUTES.workspaceJoin}#${code}`;
+}
+
+/**
+ * The WhatsApp share for a join link (W10, D-W43 item 2): `wa.me` with the
+ * text only — never a phone number, so WhatsApp asks whom to send it to.
+ */
+export function whatsAppShareUrl(text: string): string {
+  return `https://wa.me/?text=${encodeURIComponent(text)}`;
 }
 
 /** The signed-in experiences, each with its own shell (docs/02 §2). */
@@ -143,6 +262,11 @@ export type AccountOrigin = ShellExperience | typeof ACCOUNT_HUB_HINT;
  */
 export function accountPath(experience: AccountOrigin): string {
   return `${ROUTES.account}?from=${experience}`;
+}
+
+/** The notification inbox, asked for from inside `experience` (W1) — the same `?from=` hint as Account settings. */
+export function notificationsPath(experience: AccountOrigin): string {
+  return `${ROUTES.notifications}?from=${experience}`;
 }
 
 export function homePathForRole(role: TenantRole): string {

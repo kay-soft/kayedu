@@ -11,12 +11,15 @@ import {
   type BranchOption,
   type RollupOption,
 } from "@/components/shell/branch-switcher";
+import { ExperienceSwitcher } from "@/components/shell/experience-switcher";
+import type { ExperienceSwitcherData } from "@/components/shell/experience-switcher-data";
 import { NavItem } from "@/components/shell/nav-item";
+import { NotificationBell } from "@/components/shell/notification-bell";
 import { RollupNavItem } from "@/components/shell/rollup-nav-item";
 import type { ShellNavItem } from "@/components/shell/nav";
 import { SignOutButton } from "@/components/shell/sign-out-button";
 import { UserMenu } from "@/components/shell/user-menu";
-import type { ShellExperience } from "@/lib/routes";
+import type { AccountOrigin } from "@/lib/routes";
 import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
 import { cn } from "@/lib/utils";
 
@@ -52,17 +55,25 @@ export type ShellScope = {
 };
 
 export type AppShellProps = {
-  /** Which experience this shell is — the user menu's Account settings link returns into it (F2). */
-  experience: ShellExperience;
+  /**
+   * Which experience this shell is — the user menu's Account settings link returns
+   * into it (F2). The assistant shell (W7a) passes the hub hint: its frame needs
+   * the route's teacher, so Account settings and the inbox open in the hub shell.
+   */
+  experience: AccountOrigin;
   nav: ShellNavItem[];
   brand: ShellBrand;
   user: ShellUser;
   /** Omitted for an experience with nothing to switch between. */
   scope?: ShellScope;
+  /** W5 (D-W34): the role switcher's list. Omitted for a person with one experience. */
+  experiences?: ExperienceSwitcherData;
   /** Nav hrefs shown disabled with a reason — "Whole Management" only. */
   disabledHrefs?: string[];
   /** Read server-side from the cookie, so the first paint is already correct. */
   defaultCollapsed: boolean;
+  /** W1: the bell's count — server-rendered on every navigation, never polled. */
+  unreadNotifications: number;
   children: ReactNode;
 };
 
@@ -239,8 +250,10 @@ export function AppShell({
   brand,
   user,
   scope,
+  experiences,
   disabledHrefs,
   defaultCollapsed,
+  unreadNotifications,
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -428,6 +441,10 @@ export function AppShell({
 
             <div className="content-edge-end ms-auto flex items-center gap-2">
               <LocaleToggle />
+              <NotificationBell unread={unreadNotifications} from={experience} />
+              {/* Keyed by what is current: a switch closes the sheet, even when
+                  the destination keeps this same layout (one branch to another). */}
+              {experiences ? <ExperienceSwitcher key={experiences.current?.key ?? "none"} data={experiences} /> : null}
               <UserMenu user={user} experience={experience} />
             </div>
           </div>
