@@ -26,8 +26,9 @@ import { SIDEBAR_COLLAPSED_COOKIE } from "@/lib/ui/sidebar-cookie";
  * for why that matters here.
  *
  * W8a (D-W38 item 11): a teacher with no branch but a PERSONAL workspace gets
- * the same minimal shell with Workspaces first (their landing), Assistants
- * (which says assistants need a branch until W8d) and the centre directory.
+ * the same minimal shell with Workspaces first (their landing), Earnings
+ * (W8d — their workspaces' money), Assistants (W8d: an assistant works in
+ * their workspaces too) and the centre directory.
  * A teacher with neither keeps the directory alone (M15, unchanged); with
  * premium, the directory links to Workspaces to create the first one.
  * Workspaces never join the branch scope.
@@ -55,6 +56,8 @@ export async function teacherShell(): Promise<ShellFrame> {
         nav: session.workspaceOnly
           ? [
               { href: ROUTES.teacherWorkspaces, labelKey: "workspaces", icon: "workspaces" },
+              // W8d (D-W41): a workspace-only teacher's Earnings — their workspaces only.
+              { href: ROUTES.teacherEarnings, labelKey: "earnings", icon: "earnings" },
               { href: ROUTES.teacherAssistants, labelKey: "assistants", icon: "assistants" },
               { href: ROUTES.teacherCenters, labelKey: "centers", icon: "centers" },
             ]

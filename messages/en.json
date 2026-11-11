@@ -175,7 +175,8 @@
     "home": "Home",
     "requests": "Requests",
     "overview": "Overview",
-    "workspaces": "Workspaces"
+    "workspaces": "Workspaces",
+    "earnings": "Earnings"
   },
   "Roles": {
     "OWNER": "Owner",
@@ -2200,7 +2201,73 @@
       "summary": "{today} today · {week} this week · {earnings} this month",
       "viewSchedule": "View schedule"
     },
-    "subtitleAll": "Your work at every branch you teach at."
+    "subtitleAll": "Your work at every branch you teach at.",
+    "withWorkspaces": "Collected this month, including workspaces: {amount}",
+    "withWorkspacesHint": "Your branch earnings above plus your private workspaces. See the breakdown on Earnings.",
+    "openEarnings": "Open Earnings"
+  },
+  "Earnings": {
+    "title": "Earnings",
+    "subtitle": "Your share at each branch and in each of your workspaces, by class, over the period you pick.",
+    "assistantSubtitle": "{teacher}'s share at each branch and workspace where you may see it, read-only.",
+    "presets": {
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days",
+      "month": "This month"
+    },
+    "invalidPeriod": "That period couldn't be used, so the last 30 days are shown. A custom range can be up to a year.",
+    "clampedTeacher": "Your history setting hides older sessions, so this period counts from {date}.",
+    "clampedAssistant": "You can see back to {date} only, so this period counts from there.",
+    "periodLine": "Sessions from {range}",
+    "noSources": "No earnings to show",
+    "noSourcesTeacher": "Earnings show for branches that let you see your own earnings, and for your workspaces.",
+    "noSourcesAssistant": "There is nothing here you may see.",
+    "stats": {
+      "collected": "Collected",
+      "collectedHint": "Branches and workspaces together, after refunds",
+      "refunded": "Refunded",
+      "refundedHint": "Shown on its own — already taken out of Collected",
+      "paidSessions": "Paid sessions",
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent",
+      "zero": "Nothing collected in this period"
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "Your share of what students paid at each branch.",
+      "teacherShare": "Your share collected",
+      "refunds": "Refunded",
+      "net": "Collected after refunds",
+      "paidOut": "Paid out to you",
+      "notPaidOut": "Not yet paid out",
+      "paidOutHint": "Paid out = settlements the branch has paid you for this period's sessions. Branch money only — workspaces are never settled."
+    },
+    "workspaces": {
+      "title": "Workspaces",
+      "description": "Your private workspaces. You keep everything students pay there.",
+      "private": "Private",
+      "teacherShare": "Collected",
+      "net": "Collected after refunds",
+      "collectedOnly": "Collected only — a workspace is never settled, so nothing here is waiting to be paid out."
+    },
+    "classes": {
+      "title": "By class",
+      "oneOff": "One-time sessions",
+      "unnamed": "Class",
+      "empty": "Nothing in this period.",
+      "line": "{paid} paid sessions · {present} present · {late} late · {absent} absent",
+      "refunded": "Refunded {amount}"
+    },
+    "trend": {
+      "title": "By week",
+      "description": "Your share each week of the period (weeks start on Sunday), with refunds beside it.",
+      "week": "Week of {date}",
+      "collected": "Your share {amount}",
+      "refunded": "Refunded {amount}",
+      "empty": "No payments in this period."
+    }
   },
   "TeacherSessions": {
     "title": "My sessions",
@@ -4093,7 +4160,8 @@
       "held": "Held",
       "exam": "Exam",
       "homework": "Homework"
-    }
+    },
+    "privateTag": "Private"
   },
   "Media": {
     "comingSoon": "Coming soon",
@@ -4439,7 +4507,7 @@
       "remove": "Remove",
       "removeTitle": "Remove {name}?",
       "removeDescription": "{name} loses access straight away. To bring them back, send a new invite.",
-      "noBranchNote": "Assistants work at your branches. Your workspaces don't take assistants yet, so there is no one to invite until you teach at a branch."
+      "noBranchNote": "Assistants work at your branches and in your workspaces. Teach at a branch or create a workspace first, then you can invite them here."
     },
     "invite": {
       "title": "Invite an assistant",
@@ -4494,7 +4562,13 @@
       "branchesTitle": "Where you can work",
       "branchesDescription": "The teacher's branches that allow assistants. Each page in the menu shows only what the teacher let you do there.",
       "noBranches": "Not available at the teacher's branches",
-      "noBranchesHint": "None of this teacher's branches allows assistants right now. The branch decides this, not the teacher."
+      "noBranchesHint": "None of this teacher's branches allows assistants right now. The branch decides this, not the teacher.",
+      "workspacesTitle": "The teacher's workspaces",
+      "workspacesDescription": "Private workspaces where you may work for the teacher.",
+      "noWorkspaces": "Nothing to do in the teacher's workspaces",
+      "noWorkspacesHint": "Your permissions don't include classes, check-in or payments.",
+      "private": "Private",
+      "archived": "Archived"
     },
     "errors": {
       "signInRequired": "Sign in first.",
@@ -4557,6 +4631,32 @@
         "branchesTitle": "By branch",
         "branchesHint": "The teacher's share, as far back as each branch allows.",
         "branchLine": "Today {today} · This week {week} · This month {earnings}"
+      },
+      "workspaces": {
+        "title": "Workspaces",
+        "subtitle": "{teacher}'s private workspaces where you may work.",
+        "private": "Private",
+        "archived": "Archived",
+        "classes": "Classes",
+        "sessions": "Sessions",
+        "back": "Workspaces",
+        "classesTitle": "Classes",
+        "classesSubtitle": "The workspace's classes, read-only.",
+        "noClasses": "No classes in this workspace yet.",
+        "untitledClass": "Class",
+        "inactive": "Inactive",
+        "openClass": "Open class",
+        "classTitle": "Class",
+        "sessionsTitle": "Sessions",
+        "sessionsHint": "This class's sessions, as far back as you may see.",
+        "sessionsSubtitle": "Open a session to see its roster.",
+        "schedule": "Weekly schedule",
+        "rosterTitle": "Students",
+        "rosterHint": "Names only.",
+        "rosterHintPhones": "Names and phone numbers.",
+        "rosterEmpty": "No students are enrolled yet.",
+        "archivedNote": "This workspace is archived, so it is read-only.",
+        "readOnlyNote": "Read-only. Your permissions don't include check-in or payments."
       }
     }
   },

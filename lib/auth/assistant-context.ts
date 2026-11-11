@@ -6,11 +6,14 @@ import type { AssistantPermission } from "@/lib/assistant-catalog";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getTeacherContexts, type TenantContext } from "@/lib/auth/tenant";
 import {
+  ASSISTANT_WORKSPACE_KEYS,
   assistantCan,
   assistantFloorAt,
+  assistantWorkspaceFloor,
   resolveAssistantActing,
   type AssistantActing,
   type AssistantActingBranch,
+  type AssistantActingWorkspace,
 } from "@/lib/db/assistant-acting";
 import { findEffectiveAssistantLink, type EffectiveAssistantLink } from "@/lib/db/assistants";
 import { prisma } from "@/lib/db/client";
@@ -50,20 +53,32 @@ export const getAssistantSession = cache(async (teacherUserId: string): Promise<
  */
 export type AssistantBranch = AssistantActingBranch & { ctx: TenantContext; floor: Date; zone: string };
 
+/**
+ * One of the teacher's PERSONAL workspaces the assistant may reach (W8d,
+ * D-W41 items 9, 12): the acting workspace — from `resolveAssistantActing`,
+ * i.e. from the teacher's id alone — and the assistant's read floor there
+ * (the teacher's `teacherHistoryDays` only, D-W19). No `TenantContext`: every
+ * workspace read takes the workspace's centre id, which comes from here.
+ */
+export type AssistantWorkspace = AssistantActingWorkspace & { floor: Date | null; zone: string };
+
 export type AssistantScope = {
   user: User;
   link: EffectiveAssistantLink;
   acting: AssistantActing;
   /** The teacher's branches that allow assistants; a branch with the setting off is absent. */
   branches: AssistantBranch[];
+  /** W8d: the teacher's own workspaces, exactly as `resolveAssistantActing` returned them. */
+  workspaces: AssistantWorkspace[];
 };
 
 /**
  * The one way an assistant's scope is built (D-W37 items 1 and 13):
- * `resolveAssistantActing` first — the effective link and the teacher's
- * branches — and only then the **teacher's** contexts, one per branch it
- * returned. Nothing is ever resolved from the assistant's own identity: no
- * relation, no Membership, no context (`check:assistants`, statically).
+ * `resolveAssistantActing` first — the effective link, the teacher's branches
+ * and (W8d) the teacher's workspaces — and only then the **teacher's**
+ * contexts, one per branch it returned. Nothing is ever resolved from the
+ * assistant's own identity: no relation, no Membership, no context
+ * (`check:assistants`, statically).
  */
 async function loadAssistantScope(user: User, teacherUserId: string): Promise<AssistantScope | null> {
   const acting = await resolveAssistantActing(prisma, { assistantUserId: user.id, teacherUserId });
@@ -76,7 +91,12 @@ async function loadAssistantScope(user: User, teacherUserId: string): Promise<As
     if (!ctx) return [];
     return [{ ...branch, ctx, floor: assistantFloorAt(acting, branch, now), zone: centreTimeZone(ctx.settings) }];
   });
-  return { user, link, acting: { ...acting, branches: acting.branches.filter((b) => branches.some((x) => x.centerId === b.centerId)) }, branches };
+  const workspaces = acting.workspaces.map((workspace): AssistantWorkspace => ({
+    ...workspace,
+    floor: assistantWorkspaceFloor(acting, workspace, now),
+    zone: workspace.timezone,
+  }));
+  return { user, link, acting: { ...acting, branches: acting.branches.filter((b) => branches.some((x) => x.centerId === b.centerId)) }, branches, workspaces };
 }
 
 /**
@@ -109,6 +129,25 @@ export function scopeCan(scope: AssistantScope, permission: AssistantPermission,
 /** The branches where the assistant holds `permission`, in branch order. */
 export function scopeBranches(scope: AssistantScope, permission: AssistantPermission): AssistantBranch[] {
   return scope.branches.filter((branch) => scopeCan(scope, permission, branch.centerId));
+}
+
+/** The workspaces where the assistant holds `permission` (W8d), in name order. */
+export function scopeWorkspaces(scope: AssistantScope, permission: AssistantPermission): AssistantWorkspace[] {
+  return scope.workspaces.filter((workspace) => scopeCan(scope, permission, workspace.centerId));
+}
+
+/** The workspaces the assistant may open at all: reading classes, or acting on sessions (W8d). */
+export function scopeOpenWorkspaces(scope: AssistantScope): AssistantWorkspace[] {
+  return scope.workspaces.filter((workspace) => ASSISTANT_WORKSPACE_KEYS.some((key) => scopeCan(scope, key, workspace.centerId)));
+}
+
+/**
+ * The route's workspace among the ones the assistant may open, or null — a
+ * workspace id is matched only against the teacher's own workspaces from the
+ * scope, never looked up by itself (another teacher's id is not-found).
+ */
+export function scopeWorkspace(scope: AssistantScope, workspaceId: string): AssistantWorkspace | null {
+  return scopeOpenWorkspaces(scope).find((workspace) => workspace.centerId === workspaceId) ?? null;
 }
 
 /** The branch an entity lives at among `branches` — a per-branch lookup, the first that finds it (U7). */

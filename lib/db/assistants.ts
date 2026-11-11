@@ -23,6 +23,7 @@ import { checkRateLimits } from "../rate-limit.ts";
 import { writeAuditRow } from "./audit-row.ts";
 import { ACCESSIBLE_CENTER } from "./platform.ts";
 import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
+import { ownedWorkspaceWhere } from "./workspaces.ts";
 
 /**
  * Teacher assistants (W7a — D-W16, D-W17, D-W36; docs/01-data-model.md
@@ -30,8 +31,8 @@ import { WRITE_TRANSACTION_OPTIONS } from "./session-lifecycle.ts";
  * and `AssistantPermissionGrant`, and the one place every rule lives:
  *
  * 1. **The teacher side.** Every teacher write loads the actor fresh inside
- *    its transaction: an active TEACHER membership at an accessible branch
- *    (`forbidden` otherwise). **Widening access needs premium** — creating an
+ *    its transaction: an active TEACHER membership at an accessible branch,
+ *    or (W8d) in a workspace the account owns (`forbidden` otherwise). **Widening access needs premium** — creating an
  *    invite and changing permissions add `requirePremium` (`premiumRequired`).
  *    **Reducing access never does** (W7b, D-W37 item 12): revoking an invite
  *    and removing an assistant work for a lapsed teacher too, like the
@@ -132,9 +133,17 @@ export function isInviteUsable(invite: { usedAt: Date | null; revokedAt: Date | 
   return invite.usedAt === null && invite.revokedAt === null && invite.expiresAt.getTime() > now.getTime();
 }
 
-/** An active TEACHER membership at an accessible branch (the `hasTeacherMembership` rule). */
+/**
+ * A teacher account: an active TEACHER membership at an accessible branch (the
+ * `hasTeacherMembership` rule) **or — since W8d (D-W41 item 11) — in a
+ * PERSONAL workspace the account owns** (`ownedWorkspaceWhere`), so a
+ * workspace-only premium teacher may invite: the resolver no longer needs a
+ * branch for the link to mean something.
+ */
 export async function isTeacherAccount(db: Db, userId: string): Promise<boolean> {
-  const count = await db.membership.count({ where: { userId, role: "TEACHER", active: true, center: ACCESSIBLE_CENTER } });
+  const count = await db.membership.count({
+    where: { userId, role: "TEACHER", active: true, OR: [{ center: ACCESSIBLE_CENTER }, { center: ownedWorkspaceWhere(userId) }] },
+  });
   return count > 0;
 }
 

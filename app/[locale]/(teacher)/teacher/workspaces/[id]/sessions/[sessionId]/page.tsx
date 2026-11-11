@@ -5,7 +5,19 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { loadSessionReceiptView } from "@/app/[locale]/(center)/sessions/[id]/receipt-data";
 import { SessionReceipt } from "@/app/[locale]/(center)/sessions/[id]/session-receipt";
-import { WorkspaceEndSessionButton, WorkspaceSessionRoster } from "@/components/teacher/workspaces/workspace-session-roster";
+import {
+  workspaceCheckInAction,
+  workspaceCloseSessionAction,
+  workspaceRecordPaymentAction,
+  workspaceRefundPaymentAction,
+  workspaceSetAttendanceAction,
+  workspaceVoidPaymentAction,
+} from "@/app/[locale]/(teacher)/teacher/workspaces/session-actions";
+import {
+  WorkspaceEndSessionButton,
+  WorkspaceSessionRoster,
+  type WorkspaceSessionActions,
+} from "@/components/teacher/workspaces/workspace-session-roster";
 import { DetailCard, DetailLayout } from "@/components/shared/detail-layout";
 import { DetailRow } from "@/components/shared/field";
 import { LinkButton } from "@/components/shared/link-button";
@@ -22,6 +34,16 @@ import { formatDate, formatDateTime, formatMoney, formatTimeRange } from "@/lib/
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone } from "@/lib/scheduling";
 import { sessionDisplayName, sessionKind } from "@/lib/session-label";
+
+/** The teacher's own six actions (W8d: the roster takes its actions from the page). */
+const TEACHER_ACTIONS: WorkspaceSessionActions = {
+  checkIn: workspaceCheckInAction,
+  setAttendance: workspaceSetAttendanceAction,
+  record: workspaceRecordPaymentAction,
+  voidPayment: workspaceVoidPaymentAction,
+  refundPayment: workspaceRefundPaymentAction,
+  close: workspaceCloseSessionAction,
+};
 
 const STATUS_BADGE = {
   SCHEDULED: "info",
@@ -123,7 +145,7 @@ export default async function WorkspaceSessionPage({ params }: { params: Promise
             </div>
             {canEnd ? (
               <div className="flex flex-col gap-2 sm:items-end">
-                <WorkspaceEndSessionButton workspaceId={id} sessionId={session.id} />
+                <WorkspaceEndSessionButton workspaceId={id} sessionId={session.id} closeAction={TEACHER_ACTIONS.close} />
               </div>
             ) : null}
           </div>
@@ -164,6 +186,7 @@ export default async function WorkspaceSessionPage({ params }: { params: Promise
               priceLabel={priceLabel}
               writable={writable}
               readOnly={readOnly}
+              actions={TEACHER_ACTIONS}
             />
           </DetailCard>
         }

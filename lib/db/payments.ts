@@ -278,6 +278,7 @@ export async function voidPayment(
     reason: reason.trim(),
     cause: { voidedPaymentId: voided.payment.id },
     now,
+    onBehalfOfUserId: options.onBehalfOfUserId ?? null,
   });
   return { ...voided, attendanceChange };
 }
@@ -357,10 +358,13 @@ export async function writePaymentRecordAudit(
   centerId: string,
   actorUserId: string,
   payment: Payment,
+  // W8d (D-W18): the teacher an assistant recorded it for; omitted everywhere else.
+  onBehalfOfUserId: string | null = null,
 ): Promise<void> {
   await writeAuditRow(tx, {
     centerId,
     actorUserId,
+    onBehalfOfUserId,
     action: "payment.record",
     entityType: "Payment",
     entityId: payment.id,

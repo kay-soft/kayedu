@@ -2,7 +2,11 @@ import { PrismaClient } from "@prisma/client";
 import type { Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-import { formatDay } from "@/lib/format";
+import { PRESET_PERMISSIONS } from "@/lib/assistant-catalog";
+import { addWorkspaceStudent, enrolWorkspaceStudent } from "@/lib/db/workspace-students";
+import { createWorkspace, createWorkspaceClass, createWorkspaceSession } from "@/lib/db/workspaces";
+import { formatDay, formatMoney } from "@/lib/format";
+import { addDays, todayInTimezone, zonedClock } from "@/lib/scheduling";
 
 import { deleteAuditRows } from "../scripts/lib/audit-maintenance";
 import { E2E_ASSESSMENT_PREFIX, removeE2eAssessments } from "../scripts/lib/e2e-assessments";
@@ -488,5 +492,172 @@ test("@write assistants act on behalf: an exam built, published and read, a requ
     },
     "the teardown leaves nothing of this run behind",
   ).toEqual({ users: 0, links: 0, invites: 0, requests: 0, assessments: 0, audit: 0 });
+  await db.$disconnect();
+});
+
+const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+/**
+ * W8d (D-W41 items 9, 10): assistants in the teacher's PERSONAL workspace. A
+ * workspace-only premium teacher with an enrolled typed student and a session
+ * that started 20 minutes ago, and a Co-teacher link — all set up directly,
+ * staging-guarded (the invite and redemption are the first test's). The
+ * assistant opens Workspaces from the nav, opens the session, checks the
+ * student in (Late) and records the payment at the read-only price; the audit
+ * row carries both people; the assistant's Earnings is not found (no Full);
+ * and the teacher's own Earnings reads the payment as collected. The teardown
+ * is `removeE2eUsers(db, tag)` (both accounts, the workspace and the link go
+ * with them), and the run asserts nothing of it is left. Skipped too close to
+ * midnight (the session must have started today).
+ */
+test("@write assistants in a workspace: Co-teacher checks in and records a payment as the teacher; the teacher's Earnings has it; no Earnings without Full", async ({
+  browser,
+  page,
+  appLocale,
+  msg,
+  e2eTag,
+}, testInfo) => {
+  assertSafeToWrite("e2e: assistants in a workspace fixtures");
+  const clock = zonedClock(new Date(), "Africa/Cairo");
+  test.skip(clock.minutes < 40 || clock.minutes > 22 * 60 + 30, "needs a session that started today and is not over (Cairo time)");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("e2e assistants in a workspace: NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set");
+  const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const db = new PrismaClient();
+  const locale: AppLocale = appLocale;
+  const people = {
+    teacher: { email: e2eEmail(e2eTag, "wsa-teacher"), first: "Wat", last: `Teacher ${e2eTag}` },
+    assistant: { email: e2eEmail(e2eTag, "wsa-assistant"), first: "Waa", last: `Assistant ${e2eTag}` },
+  };
+  const typed = { firstName: "Typed", lastName: `Attendee ${e2eTag}` };
+  const authIds: string[] = [];
+  const userIds: string[] = [];
+  const centerIds: string[] = [];
+  const assistantContext = await browser.newContext({ ...testInfo.project.use });
+  const price = 9_000;
+
+  try {
+    for (const person of Object.values(people)) {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: person.email,
+        password: E2E_PASSWORD,
+        email_confirm: true,
+        user_metadata: { first_name: person.first, last_name: person.last, locale },
+      });
+      if (error || !data.user) throw error ?? new Error("e2e assistants in a workspace: could not create a login");
+      authIds.push(data.user.id);
+    }
+    const assistantPage = await assistantContext.newPage();
+    await signInWith(page, locale, people.teacher.email);
+    await signInWith(assistantPage, locale, people.assistant.email);
+    const teacherRow = await db.user.findUniqueOrThrow({ where: { email: people.teacher.email } });
+    const assistantRow = await db.user.findUniqueOrThrow({ where: { email: people.assistant.email } });
+    userIds.push(teacherRow.id, assistantRow.id);
+
+    // Staging-guarded setup: premium, a workspace, a class, an enrolled student, a session 20 minutes in, a Co-teacher link.
+    await db.user.update({ where: { id: teacherRow.id }, data: { premiumUntil: new Date(Date.now() + 30 * 86_400_000) } });
+    const workspaceName = `Physics ${e2eTag}`;
+    const created = await createWorkspace(db, teacherRow.id, { name: workspaceName });
+    if (!created.ok) throw new Error(`e2e assistants in a workspace: ${created.error}`);
+    const workspaceId = created.workspaceId;
+    centerIds.push(workspaceId);
+    const today = todayInTimezone("Africa/Cairo");
+    const klass = await createWorkspaceClass(
+      db,
+      teacherRow.id,
+      workspaceId,
+      {
+        educationSystemId: null,
+        gradeId: null,
+        subjectId: null,
+        price,
+        lateThresholdMinutes: 10,
+        startDate: today,
+        endDate: addDays(today, 21),
+        slots: [{ dayOfWeek: addDays(today, 1).getUTCDay(), startTime: "17:00", endTime: "18:00" }],
+      },
+      { confirmConflicts: true, locale },
+    );
+    if (!klass.ok) throw new Error(`e2e assistants in a workspace: ${klass.error}`);
+    const phone = `+2015${String(Math.floor(Math.random() * 100_000_000)).padStart(8, "0")}`;
+    const added = await addWorkspaceStudent(db, teacherRow.id, workspaceId, { ...typed, phone, gradeId: null });
+    if (!added.ok) throw new Error(`e2e assistants in a workspace: ${added.error}`);
+    await enrolWorkspaceStudent(db, teacherRow.id, workspaceId, klass.classGroupId, added.studentProfileId);
+    const start = Math.floor((clock.minutes - 20) / 5) * 5;
+    const session = await createWorkspaceSession(
+      db,
+      teacherRow.id,
+      workspaceId,
+      { kind: "extra", classGroupId: klass.classGroupId, date: today, startTime: hhmm(start), endTime: hhmm(Math.min(start + 120, 23 * 60 + 55)) },
+      { confirmConflicts: true, locale },
+    );
+    if (!session.ok) throw new Error(`e2e assistants in a workspace: ${"error" in session ? session.error : "session"}`);
+    const sessionId = session.sessionId;
+    const link = await db.teacherAssistant.create({ data: { teacherUserId: teacherRow.id, assistantUserId: assistantRow.id, preset: "CO_TEACHER" } });
+    await db.assistantPermissionGrant.createMany({ data: PRESET_PERMISSIONS.CO_TEACHER.map((permission) => ({ assistantId: link.id, permission })) });
+
+    // The assistant: Workspaces from the nav (no Earnings item without Full), then the session.
+    await assistantPage.goto(`/${locale}/assistant/${teacherRow.id}`);
+    await expectHealthy(assistantPage, locale);
+    const nav = await primaryNav(assistantPage, locale);
+    await expect(nav.getByRole("link", { name: msg("Nav.earnings"), exact: true })).toHaveCount(0);
+    await nav.getByRole("link", { name: msg("Nav.workspaces"), exact: true }).click();
+    await assistantPage.waitForURL(new RegExp(`/${locale}/assistant/${teacherRow.id}/workspaces$`));
+    await expectHealthy(assistantPage, locale);
+    await expect(assistantPage.getByText(workspaceName).first()).toBeVisible();
+    await assistantPage.goto(`/${locale}/assistant/${teacherRow.id}/workspaces/${workspaceId}/sessions`);
+    await expectHealthy(assistantPage, locale);
+    await assistantPage.locator(`a[href$="/assistant/${teacherRow.id}/workspaces/${workspaceId}/sessions/${sessionId}"]`).first().click();
+    await assistantPage.waitForURL(new RegExp(`/${locale}/assistant/${teacherRow.id}/workspaces/${workspaceId}/sessions/${sessionId}$`));
+    await expectHealthy(assistantPage, locale);
+    const row = assistantPage.getByRole("listitem").filter({ hasText: typed.lastName });
+    // No phone without students.phones.
+    await expect(row.getByText(phone.slice(-4))).toHaveCount(0);
+    await row.getByRole("button", { name: msg("Sessions.roster.checkIn"), exact: true }).click();
+    await expect(row.getByText(msg("Sessions.attendance.LATE"), { exact: true }).first()).toBeVisible();
+    await expect(row.getByText(msg("WorkspaceSession.amount", { amount: formatMoney(price, locale) }))).toBeVisible();
+    await row.getByRole("button", { name: msg("Sessions.roster.recordPayment"), exact: true }).click();
+    await expect(row.getByText(msg("Sessions.roster.paid", { amount: formatMoney(price, locale), method: "Cash" }))).toBeVisible();
+
+    const payment = await db.payment.findFirstOrThrow({ where: { centerId: workspaceId, sessionId, voided: false } });
+    expect([payment.amount, payment.centerShareSnapshot, payment.teacherShareSnapshot, payment.teacherId, payment.recordedBy], "the teacher's payment, recorded by the assistant").toEqual([
+      price,
+      0,
+      price,
+      teacherRow.id,
+      assistantRow.id,
+    ]);
+    const audit = await db.auditLog.findFirstOrThrow({ where: { centerId: workspaceId, action: "payment.record", entityId: payment.id } });
+    expect([audit.actorUserId, audit.onBehalfOfUserId], "audited with both people").toEqual([assistantRow.id, teacherRow.id]);
+
+    // Without Full the assistant's Earnings is not found.
+    await assistantPage.goto(`/${locale}/assistant/${teacherRow.id}/earnings`);
+    await expect(assistantPage.getByRole("heading", { name: msg("Shared.notFound.recordTitle") })).toBeVisible();
+    await expect(assistantPage.getByText(msg("Earnings.stats.collected"), { exact: true })).toHaveCount(0);
+
+    // The teacher's Earnings reflects the assistant's payment.
+    await page.goto(`/${locale}/teacher/earnings`);
+    await expectHealthy(page, locale);
+    const tile = page.locator("div.rounded-xl").filter({ has: page.getByText(msg("Earnings.stats.collected"), { exact: true }) }).first();
+    await expect(tile).toContainText(formatMoney(price, locale));
+  } finally {
+    await assistantContext.close();
+    await removeE2eUsers(db, e2eTag);
+    for (const authId of authIds) {
+      if ((await db.user.count({ where: { authId } })) === 0) await supabase.auth.admin.deleteUser(authId).catch(() => undefined);
+    }
+  }
+
+  expect(
+    {
+      users: await db.user.count({ where: { email: { in: Object.values(people).map((person) => person.email) } } }),
+      links: await db.teacherAssistant.count({ where: { OR: [{ teacherUserId: { in: userIds } }, { assistantUserId: { in: userIds } }] } }),
+      centers: await db.center.count({ where: { id: { in: centerIds } } }),
+      payments: await db.payment.count({ where: { centerId: { in: centerIds } } }),
+      audit: await db.auditLog.count({ where: { OR: [{ actorUserId: { in: userIds } }, { onBehalfOfUserId: { in: userIds } }, { centerId: { in: centerIds } }] } }),
+    },
+    "the teardown leaves nothing of this run behind",
+  ).toEqual({ users: 0, links: 0, centers: 0, payments: 0, audit: 0 });
   await db.$disconnect();
 });

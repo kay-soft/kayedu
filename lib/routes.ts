@@ -100,6 +100,8 @@ export const ROUTES = {
   teacherApprovals: "/teacher/approvals",
   teacherCenters: "/teacher/centers",
   teacherSettlements: "/teacher/settlements",
+  // W8d (D-W29, D-W41): every branch and workspace, each class, over a period.
+  teacherEarnings: "/teacher/earnings",
   // U9: the teacher's photo (per branch) and their classes' cover images.
   teacherProfile: "/teacher/profile",
   // W7a (D-W36): a premium teacher's assistants and invites.
@@ -121,6 +123,15 @@ export const ROUTES = {
   assistantClass: (teacherUserId: string, id: string) => `/assistant/${encodeURIComponent(teacherUserId)}/classes/${id}`,
   assistantRequests: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/requests`,
   assistantOverview: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/overview`,
+  // W8d (D-W41 items 9, 10): the teacher's Earnings (Full only) and workspaces.
+  assistantEarnings: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/earnings`,
+  assistantWorkspaces: (teacherUserId: string) => `/assistant/${encodeURIComponent(teacherUserId)}/workspaces`,
+  assistantWorkspace: (teacherUserId: string, id: string) => `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}`,
+  assistantWorkspaceClass: (teacherUserId: string, id: string, classId: string) =>
+    `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}/classes/${classId}`,
+  assistantWorkspaceSessions: (teacherUserId: string, id: string) => `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}/sessions`,
+  assistantWorkspaceSession: (teacherUserId: string, id: string, sessionId: string) =>
+    `/assistant/${encodeURIComponent(teacherUserId)}/workspaces/${id}/sessions/${sessionId}`,
   studentSchedule: "/student/schedule",
   studentCalendar: "/student/calendar",
   studentDiscover: "/student/discover",

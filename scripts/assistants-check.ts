@@ -50,6 +50,18 @@
  *     nav per preset; every branch off → Home only.
  * 20. Removing the link, lapsing premium or swapping the teacher cuts access.
  *
+ * W8d — the teacher's workspaces (D-W41 items 9–12):
+ * 21. The resolver's second source (only the teacher's own workspaces, from
+ *     the teacher's id), the nav with Workspaces and Earnings, a workspace-only
+ *     premium teacher inviting (an account with neither still cannot), and the
+ *     statics extended: the workspace source is built from the teacher's id,
+ *     every workspace action resolves first and matches the workspace among
+ *     the teacher's, the writers' assistant path decides with assistantCan
+ *     and then the teacher's own gate, and the assistant surface never reaches
+ *     a workspace creation, student, class, session, settings or settlement
+ *     writer. (The matrix of keys × actions on real workspace rows is
+ *     `check:workspaces` §16.)
+ *
  * Writes throwaway rows under the `assistants-check` stem and cleans up.
  */
 import { createHash, randomUUID } from "node:crypto";
@@ -114,6 +126,8 @@ import { provisionCenterBaseline } from "../lib/db/provision.ts";
 import { withoutAssistantId } from "../lib/db/request-view.ts";
 import { assistantReadFloor } from "../lib/db/visibility.ts";
 import { todayInTimezone } from "../lib/scheduling.ts";
+import { assistantCan } from "../lib/db/assistant-acting.ts";
+import { createWorkspace } from "../lib/db/workspaces.ts";
 
 const prisma = await gatePrisma();
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -149,6 +163,14 @@ async function cleanup() {
   if (centers.length > 0) await deleteAuditRows(prisma, { centerId: { in: centers.map((center) => center.id) } });
   await prisma.center.deleteMany({ where: { slug: { startsWith: STEM } } });
   await prisma.organization.deleteMany({ where: { name: { startsWith: ORG_NAME }, centers: { none: {} } } });
+  // W8d: the fixture teachers' PERSONAL workspaces and personal organizations (an owner is RESTRICT).
+  const personal = userIds.length > 0 ? await prisma.organization.findMany({ where: { ownerUserId: { in: userIds } }, select: { id: true } }) : [];
+  if (personal.length > 0) {
+    const workspaces = await prisma.center.findMany({ where: { organizationId: { in: personal.map((org) => org.id) } }, select: { id: true } });
+    if (workspaces.length > 0) await deleteAuditRows(prisma, { centerId: { in: workspaces.map((center) => center.id) } });
+    await prisma.center.deleteMany({ where: { id: { in: workspaces.map((center) => center.id) } } });
+    await prisma.organization.deleteMany({ where: { id: { in: personal.map((org) => org.id) } } });
+  }
   // Cascades every invite, link and grant of these accounts.
   await prisma.user.deleteMany({ where: { email: { startsWith: EMAIL_PREFIX } } });
   await prisma.rateLimitBucket.deleteMany({
@@ -262,6 +284,8 @@ function staticChecks() {
     join(ROOT, "lib", "db", "assistant-acting.ts"),
     join(ROOT, "lib", "db", "assistant-reads.ts"),
     join(ROOT, "lib", "db", "assistant-requests.ts"),
+    // W8d: the assistant's workspace reads.
+    join(ROOT, "lib", "db", "assistant-workspaces.ts"),
   ];
   const ownContext = assistantSurface.filter((file) =>
     /getTenantContext\(|getTenantContextForBranch\(|requireExperience\(|getTeacherScope\(|teacherBranchContext\(|actionContext\(|ctxCan\(|requirePermission\(/.test(stripComments(readSource(file))),
@@ -399,7 +423,8 @@ function staticChecks() {
   }
   check(
     `(b) Every Server Action under (assistant) (${serverActionFiles.length} files) resolves the acting before its first data-layer call, refuses without it, and trusts no posted user, link or centre id`,
-    serverActionFiles.length === 2 && actionProblems.length === 0,
+    // W8d (approved old → new): 2 → 3 files — assessments, requests and the workspace check-in and payments.
+    serverActionFiles.length === 3 && actionProblems.length === 0,
     actionProblems.join(", "),
   );
   const assessmentActions = stripComments(read("app/[locale]/(assistant)/assistant/[teacherId]/assessments/actions.ts"));
@@ -433,7 +458,8 @@ function staticChecks() {
     /row\.onBehalfOfUserId \?\? row\.actorUserId/.test(read("lib/db/audit-feed.ts")),
   );
   check(
-    "No assistant path writes attendance, so the session change log and the receipt list never hold an assistant's row",
+    // W8d (approved re-wording): the claim is now about branches — the workspace path is pinned by the W8d statics below.
+    "No assistant path writes attendance or money at a branch (no engine writer is called from the assistant surface)",
     !assistantSurface.some((file) => /applyAttendanceChange|changeAttendanceStatus|createAttendance|recordPayment|sessionAttendanceChange/.test(stripComments(readSource(file)))),
   );
   check(
@@ -454,6 +480,88 @@ function staticChecks() {
   check(
     "Confirm is the only path to the link: the form previews first, and only the confirmation posts the redemption",
     /post\("preview", previewAction\)/.test(joinForm) && (joinForm.match(/post\("redeem", redeemAction\)/g) ?? []).length === 1,
+  );
+  workspaceStatics(assistantSurface, scopeSource, loader, actingSource);
+}
+
+/** W8d (D-W41 item 12): the W7a/W7b statics extended to the second source. */
+function workspaceStatics(assistantSurface: string[], scopeSource: string, loader: string, actingSource: string) {
+  console.log("Static sweeps — W8d workspaces");
+  check(
+    "(a) The resolver's workspace source is the teacher's own, from the teacher's id only (ownedWorkspaceWhere(teacherUserId), the teacher's membership there)",
+    /db\.center\.findMany\(\{\s*where: ownedWorkspaceWhere\(teacherUserId\)/.test(actingSource) &&
+      /memberships: \{ where: \{ userId: teacherUserId, role: "TEACHER", active: true \}/.test(actingSource) &&
+      !/ownedWorkspaceWhere\((assistantUserId|actorUserId|user\.id)\)/.test(actingSource),
+  );
+  check(
+    "(a) The scope's workspaces are exactly the resolver's (acting.workspaces.map), with no read of their own",
+    /const workspaces = acting\.workspaces\.map\(/.test(loader) && !/ownedWorkspaceWhere|listOwnedWorkspaces|getWorkspaceContext|resolveWorkspaceAccess/.test(scopeSource),
+  );
+  check(
+    "(a) A route's workspace id is only matched among the scope's workspaces (scopeWorkspace over scopeOpenWorkspaces)",
+    /scopeOpenWorkspaces\(scope\)\.find\(\(workspace\) => workspace\.centerId === workspaceId\)/.test(scopeSource),
+  );
+  const workspacePages = assistantSurface.filter((file) => /[\\/]workspaces[\\/]/.test(file) && /[\\/]page\.tsx$/.test(file));
+  const unmatched = workspacePages.filter((file) => {
+    const source = stripComments(readSource(file));
+    return !/getAssistantScope\(teacherId\)/.test(source) || !/(scopeWorkspace\(scope, id\)|scopeOpenWorkspaces\(scope\))/.test(source) || /getWorkspaceContext\(|resolveWorkspaceAccess\(/.test(source);
+  });
+  check(
+    `(a) Every assistant workspace page (${workspacePages.length}) re-resolves the link and takes its workspace from the scope, never getWorkspaceContext`,
+    workspacePages.length === 5 && unmatched.length === 0,
+    unmatched.map((file) => relative(ROOT, file)).join(", "),
+  );
+  const actions = stripComments(read("app/[locale]/(assistant)/assistant/[teacherId]/workspaces/actions.ts"));
+  const bodies = [...actions.matchAll(/export async function (\w+)\([\s\S]*?\n\}/g)].map((match) => match[0]);
+  check(
+    "(b) Every workspace action resolves the acting first, matches the workspace among the teacher's, then calls the writer as { assistant, the scope's teacher }",
+    bodies.length === 6 &&
+      bodies.every((body) => {
+        const scopeAt = body.indexOf("assistantActionScope(teacherId)");
+        const matchAt = body.indexOf("scopeWorkspace(scope, workspaceId)");
+        const writeAt = body.search(/await workspace\w+\(prisma, actorOf\(scope\), workspace\.centerId/);
+        return scopeAt > 0 && scopeAt < matchAt && matchAt < writeAt && /if \(!workspace\) return NOT_FOUND;/.test(body);
+      }) &&
+      /return \{ actorUserId: scope\.user\.id, teacherUserId: scope\.acting\.teacherUserId \};/.test(actions) &&
+      !/formData\.get\(|amount|paymentMethodId/.test(actions),
+  );
+  const writers = stripComments(read("lib/db/workspace-attendance.ts"));
+  const authorizeBody = writers.slice(writers.indexOf("async function authorize("), writers.indexOf("function findWorkspaceSession("));
+  const resolveAt = authorizeBody.indexOf("resolveAssistantActing(db, { assistantUserId: actor.actorUserId, teacherUserId: actor.teacherUserId, now })");
+  const decideAt = authorizeBody.indexOf("assistantCan(acting, key, workspaceId)");
+  const gateAt = authorizeBody.indexOf("authorizeWrite(db, acting.teacherUserId, workspaceId, action, now)");
+  check(
+    "The writers' assistant path: resolve from both ids, decide with assistantCan, then the teacher's own authorizeWrite (capability, premium, not archived) — in that order",
+    resolveAt > 0 && resolveAt < decideAt && decideAt < gateAt && /onBehalfOfUserId: onBehalfOf\(actor\.actorUserId, acting\.teacherUserId\)/.test(authorizeBody),
+  );
+  check(
+    "Every workspace writer stamps onBehalfOf on its own audit rows and passes it to the engine's",
+    (writers.match(/onBehalfOfUserId: auth\.onBehalfOfUserId/g) ?? []).length >= 7 && /writePaymentRecordAudit\(tx, centerId, actor\.actorUserId, recorded\.payment, auth\.onBehalfOfUserId\)/.test(writers),
+  );
+  const workspaceWriteCallers = assistantSurface.filter((file) => /\bworkspace(CheckIn|SetAttendance|RecordPayment|VoidPayment|RefundPayment|CloseSession)\(/.test(stripComments(readSource(file))));
+  check(
+    "The assistant's only attendance and money writes are the six workspace-attendance writers, from the one workspace actions file",
+    workspaceWriteCallers.length === 1 && /workspaces[\\/]actions\.ts$/.test(workspaceWriteCallers[0]),
+    workspaceWriteCallers.map((file) => relative(ROOT, file)).join(", "),
+  );
+  const forbidden =
+    /\b(createWorkspace|createWorkspaceClass|updateWorkspaceClass|setWorkspaceClassActive|deleteWorkspaceClass|writeWorkspaceClassSlot|createWorkspaceSession|rescheduleWorkspaceSession|cancelWorkspaceSession|deleteWorkspaceSession|renameWorkspace|archiveWorkspace|unarchiveWorkspace|addWorkspaceStudent|copyWorkspaceStudent|inviteWorkspaceStudentAgain|cancelWorkspaceInvitation|enrolWorkspaceStudent|removeWorkspaceEnrollment|createSessionSettlement|createPeriodSettlement|approveSettlement|paySettlement)\(|@\/app\/\[locale\]\/\(teacher\)\/teacher\/workspaces\/(actions|student-actions|session-actions)"/;
+  const reaching = assistantSurface.filter((file) => forbidden.test(stripComments(readSource(file))));
+  check(
+    "The assistant surface never reaches a workspace creation, class, session, student, invitation, settings or settlement writer, nor the teacher's workspace actions",
+    reaching.length === 0,
+    reaching.map((file) => relative(ROOT, file)).join(", "),
+  );
+  const listCallers = assistantSurface.filter((file) => /<WorkspaceSessionList/.test(readSource(file)));
+  check(
+    "The assistant's session lists are read-only (writable={false}) and link to the assistant's own session page",
+    listCallers.length === 2 &&
+      listCallers.every((file) => /writable=\{false\}/.test(readSource(file)) && /sessionHref=\{\(sessionId\) => ROUTES\.assistantWorkspaceSession\(/.test(readSource(file))),
+  );
+  check(
+    "assistantCan decides workspaces too: the workspace equivalents live beside the branch table, the teacher's capability through workspaceCan",
+    /const WORKSPACE_EQUIVALENT:/.test(actingSource) && /return workspaceCan\(\{ workspace: access \}, capability \?\? "workspace\.sessions\.manage"\);/.test(actingSource) &&
+      /"assessments\.manage": false,[\s\S]{0,80}"requests\.manage": false/.test(actingSource.slice(actingSource.indexOf("WORKSPACE_EQUIVALENT"))),
   );
 }
 
@@ -950,6 +1058,76 @@ async function main() {
   );
 
   await checkActingOnBehalf({ centerA: center.id, now, premiumTeacher, link });
+
+  /** A premium account with no branch membership (W8d). */
+  async function premiumAccount(tag: string) {
+    const user = await makeUser(tag);
+    const granted = await grantPremium(prisma, { actorUserId: admin.id, userId: user.id, endDay: premiumLatestEndDay(now), now });
+    if (!granted.ok) throw new Error(`grantPremium: ${granted.error}`);
+    return user;
+  }
+  await checkWorkspaceSource({ now, premiumAccount, link });
+}
+
+// ── 21. W8d: the teacher's workspaces as a second source (D-W41 items 9–12) ──
+
+async function checkWorkspaceSource(input: {
+  now: Date;
+  premiumAccount: (tag: string) => Promise<{ id: string }>;
+  link: (teacherId: string, preset?: string) => Promise<{ assistant: { id: string }; linkId: string }>;
+}) {
+  const { now } = input;
+  console.log("\n21. W8d: the teacher's workspaces — the resolver's second source, the nav, a workspace-only teacher invites");
+  const neither = await input.premiumAccount("ws-neither");
+  const refused = await createAssistantInvite(prisma, { actorUserId: neither.id, preset: "GRADER", now });
+  check("A premium account with neither a branch nor a workspace still cannot invite (forbidden)", !refused.ok && refused.error === "forbidden");
+  const wsOnly = await input.premiumAccount("ws-only");
+  const created = await createWorkspace(prisma, wsOnly.id, { name: "Assistants check workspace" });
+  const workspaceId = created.ok ? created.workspaceId : "";
+  const linked = await input.link(wsOnly.id, "CO_TEACHER");
+  check("A workspace-only premium teacher invites an assistant, who redeems the code (D-W41 item 11)", created.ok && Boolean(linked.linkId));
+  const acting = await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: wsOnly.id, now });
+  check(
+    "The resolver for a workspace-only teacher: no branch, the teacher's one workspace with the teacher's membership",
+    acting !== null && acting.branches.length === 0 && acting.workspaces.length === 1 && acting.workspaces[0].centerId === workspaceId &&
+      acting.workspaces[0].teacherMembershipId !== null,
+  );
+  check(
+    "Co-teacher there: classes, check-in and payments in the workspace, nothing else",
+    ASSISTANT_PERMISSIONS.filter((permission) => assistantCan(acting, permission, workspaceId)).join() === "classes.view,checkin.workspace,payments.workspace",
+  );
+  const navOf = async () => {
+    const fresh = await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: wsOnly.id, now });
+    return fresh ? assistantNavItems(wsOnly.id, fresh).map((item) => item.labelKey).join() : "none";
+  };
+  check("The nav: Home and Workspaces (no branch page)", (await navOf()) === "home,workspaces", await navOf());
+  const toFull = await updateAssistantPermissions(prisma, { actorUserId: wsOnly.id, linkId: linked.linkId, change: { preset: "FULL" }, now });
+  check("With Full the nav adds Earnings (the workspace's analytics), never Overview (a branch summary)", toFull.ok && (await navOf()) === "home,workspaces,earnings", await navOf());
+  const other = await input.premiumAccount("ws-other");
+  const otherWs = await createWorkspace(prisma, other.id, { name: "Someone else's" });
+  const again = await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: wsOnly.id, now });
+  check(
+    "Another teacher's workspace is never in the source, and a swapped teacherId resolves nothing",
+    otherWs.ok && again !== null && !again.workspaces.some((row) => row.centerId === otherWs.workspaceId) &&
+      (await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: other.id, now })) === null &&
+      !assistantCan(again, "checkin.workspace", otherWs.workspaceId),
+  );
+  const archived = await prisma.center.update({ where: { id: workspaceId }, data: { archivedAt: now, archivedByUserId: wsOnly.id } });
+  const whileArchived = await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: wsOnly.id, now });
+  check(
+    "An archived workspace stays in the source (read-only — writes are refused by assertWorkspaceWritable, check:workspaces §16)",
+    archived.archivedAt !== null && whileArchived?.workspaces[0]?.archivedAt !== null && whileArchived?.workspaces.length === 1,
+  );
+  await prisma.center.update({ where: { id: workspaceId }, data: { archivedAt: null, archivedByUserId: null } });
+  check(
+    "The assistant gained no Membership (in the workspace or anywhere) and no PermissionGrant",
+    (await prisma.membership.count({ where: { userId: linked.assistant.id } })) === 0 && (await resolveCenterRelations(prisma, linked.assistant.id)).length === 0,
+  );
+  const removedLink = await removeAssistant(prisma, { actorUserId: wsOnly.id, linkId: linked.linkId, now });
+  check(
+    "The workspace-only teacher removes the assistant, and the source is gone",
+    removedLink.ok && (await resolveAssistantActing(prisma, { assistantUserId: linked.assistant.id, teacherUserId: wsOnly.id, now })) === null,
+  );
 }
 
 // ── 13–20. W7b: acting on behalf (D-W17, D-W18, D-W19, D-W37) ────────────
@@ -1280,10 +1458,11 @@ async function checkActingOnBehalf(input: {
     return acting ? assistantNavItems(t.id, acting).map((item) => item.labelKey).join() : "none";
   };
   check(
-    "The assistant nav per preset: Grader → home, assessments; Co-teacher → + classes, requests; Full → + overview; classes.view only → home, classes",
+    // W8d (the prompt's old → new: the assistant nav is dynamic): Full also gets Earnings.
+    "The assistant nav per preset: Grader → home, assessments; Co-teacher → + classes, requests; Full → + overview, earnings; classes.view only → home, classes",
     (await navOf(grader.assistant.id)) === "home,assessments" &&
       (await navOf(co.id)) === "home,assessments,classes,requests" &&
-      (await navOf(full.assistant.id)) === "home,assessments,classes,requests,overview" &&
+      (await navOf(full.assistant.id)) === "home,assessments,classes,requests,overview,earnings" &&
       (await navOf(custom.assistant.id)) === "home,classes",
   );
   await prisma.centerSettings.updateMany({ where: { centerId: { in: [b1.id, b2.id] } }, data: { allowTeacherAssistants: false } });

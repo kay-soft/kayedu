@@ -22,6 +22,8 @@ import {
   type WorkspaceAuthError,
   type WorkspaceCapability,
 } from "./workspaces.ts";
+import type { AssistantPermission } from "../assistant-catalog.ts";
+import { assistantCan, assistantWorkspaceFloor, onBehalfOf, resolveAssistantActing } from "./assistant-acting.ts";
 
 /**
  * Check-in and payments in a PERSONAL workspace (W8c, D-W23, D-W24, D-W40;
@@ -44,8 +46,15 @@ import {
  *   `assertWorkspaceWritable` (premium now, not archived). Reads need none of
  *   it beyond `resolveWorkspaceAccess`.
  * - `teacherUserId` must be the workspace's owner. It is a separate argument
- *   from the actor (D-W40 item 7) so W8d's assistants fit in without
- *   reshaping these signatures; in W8c the actor must be that owner.
+ *   from the actor (D-W40 item 7). The actor is that owner, or — since W8d
+ *   (D-W41 items 9, 10) — the teacher's assistant: resolved fresh
+ *   (`resolveAssistantActing`), decided by `assistantCan` (`checkin.workspace`
+ *   for check-in, corrections and close; `payments.workspace` for record, void
+ *   and refund, and for the Absent switch's void), then the **teacher's own**
+ *   `authorizeWrite`, and only on a session within the assistant's floor (the
+ *   teacher's `teacherHistoryDays`, D-W19). Every audit row an assistant's
+ *   write produces — the wrapper's and the engine's — carries
+ *   `onBehalfOfUserId` = the teacher (D-W18), on the same transaction.
  * - **Enrolled students only** (D-W40 item 4): a student with no ACTIVE
  *   enrolment in the session's class is refused (`notEnrolled`) — there are
  *   no drop-ins in a workspace, so a one-time session (no class) takes no
@@ -63,7 +72,11 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 const ACTIVE: EnrollmentStatus = "ACTIVE";
 
-/** Who acts, and for whom (D-W40 item 7). In W8c both are the owner. */
+/**
+ * Who acts, and for whom (D-W40 item 7). The teacher's own write: both are the
+ * owner. **An assistant's write (W8d, D-W41 items 9, 10):** `actorUserId` is
+ * the assistant, `teacherUserId` the teacher whose workspace it is.
+ */
 export type WorkspaceActor = { actorUserId: string; teacherUserId: string };
 
 export type WorkspaceSessionError =
@@ -75,26 +88,102 @@ export type WorkspaceSessionError =
   | "reasonRequired"
   | "voidConfirmationRequired";
 
+/** The assistant key that stands for each workspace capability an assistant may exercise (D-W41 item 9). */
+const ASSISTANT_KEY_FOR: Partial<Record<WorkspaceCapability, AssistantPermission>> = {
+  "workspace.attendance.manage": "checkin.workspace",
+  "workspace.payments.manage": "payments.workspace",
+};
+
+type Authorized = {
+  ok: true;
+  access: WorkspaceAccess;
+  /** The assistant's read floor (the teacher's `teacherHistoryDays`), or null for the teacher's own write. */
+  floor: Date | null;
+  /** Whether this actor may also void (the Absent switch on a paid student). */
+  mayPay: boolean;
+  /** D-W18: the teacher, on an assistant's write; null on the teacher's own. */
+  onBehalfOfUserId: string | null;
+};
+
+/**
+ * The gate every writer below opens with, re-run from the ids on every call.
+ *
+ * - **The teacher** (actor = teacher): `authorizeWrite` for the actor — owning
+ *   the workspace, `workspaceCan`, `assertWorkspaceWritable` — and the teacher
+ *   named must be the owner (a swapped teacher id is not-found).
+ * - **An assistant** (W8d): `resolveAssistantActing` from both ids, fresh (an
+ *   effective link, the teacher premium now); the workspace must be one the
+ *   teacher owns (not-found otherwise); `assistantCan` with the capability's
+ *   key (`checkin.workspace` / `payments.workspace` — forbidden without it);
+ *   then the **teacher's own** `authorizeWrite` (the teacher's capability, and
+ *   premium and "not archived"). Effective = the intersection. Anything an
+ *   assistant has no key for (classes, sessions, students, settings, archive)
+ *   is forbidden here, and those writers take no `WorkspaceActor` at all.
+ */
 async function authorize(
   db: Db,
   actor: WorkspaceActor,
   workspaceId: string,
   action: WorkspaceCapability,
   now: Date,
-): Promise<{ ok: true; access: WorkspaceAccess } | { ok: false; error: WorkspaceAuthError }> {
-  const auth = await authorizeWrite(db, actor.actorUserId, workspaceId, action, now);
+): Promise<Authorized | { ok: false; error: WorkspaceAuthError }> {
+  if (actor.actorUserId === actor.teacherUserId) {
+    const auth = await authorizeWrite(db, actor.actorUserId, workspaceId, action, now);
+    if (!auth.ok) return auth;
+    // The teacher named must own this workspace — a swapped teacher id is not-found.
+    if (auth.access.ownerUserId !== actor.teacherUserId) return { ok: false, error: "notFound" };
+    return {
+      ok: true,
+      access: auth.access,
+      floor: null,
+      mayPay: workspaceCan({ workspace: auth.access }, "workspace.payments.manage"),
+      onBehalfOfUserId: null,
+    };
+  }
+  const acting = await resolveAssistantActing(db, { assistantUserId: actor.actorUserId, teacherUserId: actor.teacherUserId, now });
+  const workspace = acting?.workspaces.find((entry) => entry.centerId === workspaceId);
+  if (!acting || !workspace) return { ok: false, error: "notFound" };
+  const key = ASSISTANT_KEY_FOR[action];
+  if (!key || !assistantCan(acting, key, workspaceId)) return { ok: false, error: "forbidden" };
+  const auth = await authorizeWrite(db, acting.teacherUserId, workspaceId, action, now);
   if (!auth.ok) return auth;
-  // The teacher named must own this workspace — a swapped teacher id is not-found.
-  if (auth.access.ownerUserId !== actor.teacherUserId) return { ok: false, error: "notFound" };
-  return auth;
+  return {
+    ok: true,
+    access: auth.access,
+    floor: assistantWorkspaceFloor(acting, workspace, now),
+    mayPay:
+      assistantCan(acting, "payments.workspace", workspaceId) && workspaceCan({ workspace: auth.access }, "workspace.payments.manage"),
+    onBehalfOfUserId: onBehalfOf(actor.actorUserId, acting.teacherUserId),
+  };
 }
 
 /** The workspace's session, by id, or null — scoped by its centre (tenant rule 1). */
 function findWorkspaceSession(db: Db, centerId: string, sessionId: string) {
   return db.session.findFirst({
     where: scopedWhere(centerId, { id: sessionId }),
-    select: { id: true, classGroupId: true, teacherId: true },
+    select: { id: true, classGroupId: true, teacherId: true, date: true },
   });
+}
+
+/**
+ * D-W19 for writes: an assistant acts only on a session they can see — one on
+ * or after their floor (the teacher's `teacherHistoryDays`). True when the row
+ * is outside it (or missing). The teacher's own writes pass no floor.
+ */
+async function beforeFloor(
+  db: Db,
+  centerId: string,
+  floor: Date | null,
+  ref: { sessionId: string } | { attendeeId: string } | { paymentId: string },
+): Promise<boolean> {
+  if (!floor) return false;
+  const row =
+    "sessionId" in ref
+      ? await db.session.findFirst({ where: scopedWhere(centerId, { id: ref.sessionId }), select: { date: true } })
+      : "attendeeId" in ref
+        ? (await db.sessionAttendee.findFirst({ where: scopedWhere(centerId, { id: ref.attendeeId }), select: { session: { select: { date: true } } } }))?.session
+        : (await db.payment.findFirst({ where: scopedWhere(centerId, { id: ref.paymentId }), select: { session: { select: { date: true } } } }))?.session;
+  return !row || row.date.getTime() < floor.getTime();
 }
 
 /** The workspace's hidden Cash method (D-W40 item 2), or null if it is missing. */
@@ -127,10 +216,10 @@ export async function workspaceCheckIn(
   now: Date = new Date(),
 ): Promise<WorkspaceCheckInResult> {
   const auth = await authorize(db, actor, workspaceId, "workspace.attendance.manage", now);
-  if (!auth.ok) return auth;
+  if (!auth.ok) return { ok: false, error: auth.error };
   const centerId = auth.access.centerId;
   const session = await findWorkspaceSession(db, centerId, input.sessionId);
-  if (!session) return { ok: false, error: "notFound" };
+  if (!session || (auth.floor && session.date < auth.floor)) return { ok: false, error: "notFound" };
   // No drop-ins (D-W40 item 4): an ACTIVE enrolment in this session's class, or nothing.
   const enrollment = session.classGroupId
     ? await db.enrollment.findFirst({
@@ -148,7 +237,11 @@ export async function workspaceCheckIn(
   const existing = await findAttendee(db, centerId, session.id, input.studentProfileId);
   if (existing) {
     if (existing.attendanceStatus !== "ABSENT") return { ok: false, error: "alreadyCheckedIn" };
-    const again = await recheckInAttendee(db, { centerId, attendeeId: existing.id, recordedBy: actor.actorUserId }, { now });
+    const again = await recheckInAttendee(
+      db,
+      { centerId, attendeeId: existing.id, recordedBy: actor.actorUserId },
+      { now, onBehalfOfUserId: auth.onBehalfOfUserId },
+    );
     if (!again.ok) return { ok: false, error: again.error === "branchPaused" ? "forbidden" : again.error };
     return { ok: true, attendee: again.attendee };
   }
@@ -206,10 +299,10 @@ export async function workspaceSetAttendance(
   now: Date = new Date(),
 ): Promise<WorkspaceAttendanceChangeResult> {
   const auth = await authorize(db, actor, workspaceId, "workspace.attendance.manage", now);
-  if (!auth.ok) return auth;
+  if (!auth.ok) return { ok: false, error: auth.error };
   const centerId = auth.access.centerId;
   const session = await findWorkspaceSession(db, centerId, input.sessionId);
-  if (!session) return { ok: false, error: "notFound" };
+  if (!session || (auth.floor && session.date < auth.floor)) return { ok: false, error: "notFound" };
   const existing = await findAttendee(db, centerId, session.id, input.studentProfileId);
   if (!existing) return { ok: false, error: "notCheckedIn" };
   if (input.status === "ABSENT" && input.confirmVoid === false) {
@@ -227,9 +320,11 @@ export async function workspaceSetAttendance(
       status: input.status,
       changedBy: actor.actorUserId,
       reason: input.reason ?? null,
-      mayVoidPayment: workspaceCan({ workspace: auth.access }, "workspace.payments.manage"),
+      // The Absent switch voids only for an actor who may void directly:
+      // the teacher's capability, and for an assistant `payments.workspace` too.
+      mayVoidPayment: auth.mayPay,
     },
-    { now },
+    { now, onBehalfOfUserId: auth.onBehalfOfUserId },
   );
   if (!result.ok) {
     if (result.error === "voidNotPermitted") return { ok: false, error: "forbidden" };
@@ -260,12 +355,13 @@ export async function workspaceRecordPayment(
 ): Promise<WorkspaceRecordPaymentResult> {
   return db.$transaction(async (tx): Promise<WorkspaceRecordPaymentResult> => {
     const auth = await authorize(tx, actor, workspaceId, "workspace.payments.manage", now);
-    if (!auth.ok) return auth;
+    if (!auth.ok) return { ok: false, error: auth.error };
     const centerId = auth.access.centerId;
+    if (await beforeFloor(tx, centerId, auth.floor, { attendeeId: input.attendeeId })) return { ok: false, error: "notFound" };
     const method = await workspacePaymentMethod(tx, centerId);
     if (!method) return { ok: false, error: "invalidMethod" };
     const recorded = await recordPayment(tx, centerId, input.attendeeId, method.id, actor.actorUserId, { now });
-    if (recorded.ok) await writePaymentRecordAudit(tx, centerId, actor.actorUserId, recorded.payment);
+    if (recorded.ok) await writePaymentRecordAudit(tx, centerId, actor.actorUserId, recorded.payment, auth.onBehalfOfUserId);
     return recorded;
   }, WRITE_TRANSACTION_OPTIONS);
 }
@@ -291,13 +387,18 @@ export async function workspaceVoidPayment(
 ): Promise<WorkspaceReversalResult> {
   return db.$transaction(async (tx): Promise<WorkspaceReversalResult> => {
     const auth = await authorize(tx, actor, workspaceId, "workspace.payments.manage", now);
-    if (!auth.ok) return auth;
+    if (!auth.ok) return { ok: false, error: auth.error };
     const centerId = auth.access.centerId;
-    const voided = await voidPayment(tx, centerId, input.paymentId, input.reason, actor.actorUserId, { now });
+    if (await beforeFloor(tx, centerId, auth.floor, { paymentId: input.paymentId })) return { ok: false, error: "notFound" };
+    const voided = await voidPayment(tx, centerId, input.paymentId, input.reason, actor.actorUserId, {
+      now,
+      onBehalfOfUserId: auth.onBehalfOfUserId,
+    });
     if (!voided.ok) return voided;
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.actorUserId,
+      onBehalfOfUserId: auth.onBehalfOfUserId,
       action: "payment.void",
       entityType: "Payment",
       entityId: voided.payment.id,
@@ -323,13 +424,18 @@ export async function workspaceRefundPayment(
 ): Promise<WorkspaceReversalResult> {
   return db.$transaction(async (tx): Promise<WorkspaceReversalResult> => {
     const auth = await authorize(tx, actor, workspaceId, "workspace.payments.manage", now);
-    if (!auth.ok) return auth;
+    if (!auth.ok) return { ok: false, error: auth.error };
     const centerId = auth.access.centerId;
-    const refunded = await refundPayment(tx, centerId, input.paymentId, input.reason, actor.actorUserId, { now });
+    if (await beforeFloor(tx, centerId, auth.floor, { paymentId: input.paymentId })) return { ok: false, error: "notFound" };
+    const refunded = await refundPayment(tx, centerId, input.paymentId, input.reason, actor.actorUserId, {
+      now,
+      onBehalfOfUserId: auth.onBehalfOfUserId,
+    });
     if (!refunded.ok) return refunded;
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.actorUserId,
+      onBehalfOfUserId: auth.onBehalfOfUserId,
       action: "payment.refund",
       entityType: "Payment",
       entityId: refunded.payment.id,
@@ -372,13 +478,15 @@ export async function workspaceCloseSession(
 ): Promise<WorkspaceCloseResult> {
   return db.$transaction(async (tx): Promise<WorkspaceCloseResult> => {
     const auth = await authorize(tx, actor, workspaceId, "workspace.attendance.manage", now);
-    if (!auth.ok) return auth;
+    if (!auth.ok) return { ok: false, error: auth.error };
     const centerId = auth.access.centerId;
+    if (await beforeFloor(tx, centerId, auth.floor, { sessionId: input.sessionId })) return { ok: false, error: "notFound" };
     const result = await closeSession(tx, centerId, input.sessionId, { closedBy: actor.actorUserId, now });
     if (!result.ok) return { ok: false, error: result.error };
     await writeAuditRow(tx, {
       centerId,
       actorUserId: actor.actorUserId,
+      onBehalfOfUserId: auth.onBehalfOfUserId,
       action: "session.close",
       entityType: "Session",
       entityId: input.sessionId,
@@ -441,6 +549,13 @@ export type WorkspaceSessionRosterRow = {
   notArrived: boolean;
   /** The active payment — or, once closed, a refunded one, as history. */
   payment: { id: string; amount: number; methodLabel: string; refunded: boolean } | null;
+  /**
+   * W8d (D-W41 item 9): the student's phone in this workspace's own record —
+   * read only when the caller asks (`withPhones`: an assistant granted
+   * `students.phones`); absent otherwise, so it never reaches a page that
+   * did not ask for it.
+   */
+  phone?: string | null;
 };
 
 /**
@@ -453,8 +568,10 @@ export async function workspaceSessionRoster(
   centerId: string,
   session: { id: string; classGroupId: string | null; closedAt: Date | null },
   readOnly: boolean,
+  options: { withPhones?: boolean } = {},
 ): Promise<WorkspaceSessionRosterRow[]> {
-  const profileSelect = { id: true, firstName: true, lastName: true, studentCode: true } as const;
+  const withPhones = options.withPhones === true;
+  const profileSelect = { id: true, firstName: true, lastName: true, studentCode: true, phone: withPhones } as const;
   const [enrollments, attendees] = await Promise.all([
     session.classGroupId
       ? db.enrollment.findMany({
@@ -480,7 +597,7 @@ export async function workspaceSessionRoster(
   const closed = session.closedAt !== null;
   const enrolledIds = new Set(enrollments.map((row) => row.studentProfile.id));
   const byStudent = new Map(attendees.map((row) => [row.studentProfile!.id, row]));
-  const profiles = new Map<string, { id: string; firstName: string | null; lastName: string | null; studentCode: string }>();
+  const profiles = new Map<string, { id: string; firstName: string | null; lastName: string | null; studentCode: string; phone?: string | null }>();
   for (const row of enrollments) profiles.set(row.studentProfile.id, row.studentProfile);
   for (const row of attendees) if (row.studentProfile) profiles.set(row.studentProfile.id, row.studentProfile);
 
@@ -500,6 +617,7 @@ export async function workspaceSessionRoster(
       payment: payment
         ? { id: payment.id, amount: payment.amount, methodLabel: payment.methodLabelSnapshot, refunded: payment.refunded }
         : null,
+      ...(withPhones ? { phone: profile.phone ?? null } : {}),
     };
   });
   return rows.sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));

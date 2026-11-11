@@ -26,6 +26,8 @@ import {
   teacherSessionListWhere,
 } from "@/lib/db/teacher-portal";
 import { clampRangeToVisibility } from "@/lib/db/visibility";
+import { listOwnedWorkspaces } from "@/lib/db/workspaces";
+import { getWorkspaceContext } from "@/lib/auth/workspace-context";
 import { formatNumber, formatTimeRange } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { centreTimeZone, commonTimeZone, dateKey, todayInTimezone } from "@/lib/scheduling";
@@ -113,6 +115,39 @@ export default async function TeacherCalendarPage({
     }),
   );
 
+  // W8d (D-W41 item 8; backlog 53's calendar half): the teacher's own
+  // PERSONAL-workspace sessions, read-only — one more source in the union,
+  // each workspace read under its own context (`getWorkspaceContext`, the
+  // owner's) with the same session search, the same lazy close, the frozen
+  // session timezone and the teacher's own history floor. Left out when the
+  // Branch filter names a branch. Never the hidden room's name.
+  const perWorkspace = branchFilter
+    ? []
+    : (
+        await Promise.all(
+          (await listOwnedWorkspaces(prisma, scope.user.id)).map(async (workspace) => {
+            const ctx = await getWorkspaceContext(workspace.id);
+            if (!ctx) return null;
+            const timeZone = centreTimeZone(ctx.settings);
+            const workspaceToday = todayInTimezone(timeZone, now);
+            if (range.start.getTime() <= workspaceToday.getTime()) {
+              await closeEndedSessions(prisma, ctx.center.id, now, {
+                from: range.start,
+                to: range.end.getTime() < workspaceToday.getTime() ? range.end : workspaceToday,
+                teacherId: ctx.user.id,
+              });
+            }
+            const { start: from, end: to } = clampRangeToVisibility(range, teacherPortalHistoryFloor(ctx, now));
+            const rows = (
+              await scoped(ctx).sessions.search({ where: teacherSessionListWhere({ teacherId: ctx.user.id, from, to }) })
+            ).filter((row) => deriveSessionDisplayStatus(row, now, timeZone) !== "RESCHEDULED");
+            const onDay = selectedDay ? rows.filter((row) => dateKey(row.date) === selectedDay) : [];
+            const counts = await sessionAttendanceCounts(prisma, ctx.center.id, onDay);
+            return { workspace, rows, counts };
+          }),
+        )
+      ).filter((entry) => entry !== null);
+
   const labels: AssessmentCalendarLabels = {
     due: (date) => t("assessmentDue", { date }),
     window: (start, end) => t("assessmentWindow", { start, end }),
@@ -152,6 +187,24 @@ export default async function TeacherCalendarPage({
       });
     }),
   ]);
+  for (const { workspace, rows, counts } of perWorkspace) {
+    for (const row of rows) {
+      entries.push({
+        id: row.id,
+        day: dateKey(row.date),
+        tone: teacherCalendarTone(row),
+        time: formatTimeRange(row.startTime, row.endTime, locale),
+        startTime: row.startTime,
+        title: sessionDisplayName(locale, row) || tCommon("none"),
+        // Always named: a workspace is never one of the branches in view.
+        branch: workspace.name,
+        room: null,
+        href: ROUTES.teacherWorkspaceSession(workspace.id, row.id),
+        counts: counts.get(row.id),
+        privateClass: { label: t("privateTag") },
+      });
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">

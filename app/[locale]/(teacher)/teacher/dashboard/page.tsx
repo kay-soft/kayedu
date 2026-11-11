@@ -16,6 +16,7 @@ import { ctxCan } from "@/lib/auth/tenant";
 import { getTeacherScope } from "@/lib/auth/teacher-scope";
 import { prisma } from "@/lib/db/client";
 import { teacherRatingAverage } from "@/lib/db/ratings";
+import { ownedWorkspaceSources, workspacesCollectedThisMonth } from "@/lib/db/teacher-earnings";
 import {
   combineTeacherSummaries,
   teacherCenterSummary,
@@ -81,6 +82,13 @@ export default async function TeacherDashboardPage() {
     .filter((summary) => earningsVisibleAt.has(summary.centerId))
     .reduce((sum, summary) => sum + summary.earnings.teacherShare, 0);
 
+  // W8d (D-W41 item 6): the branch figures above are unchanged; a teacher who
+  // owns workspaces also gets one line — collected this month at the branches
+  // above plus their workspaces (each its own scoped read, summed here).
+  const workspaceSources = await ownedWorkspaceSources(prisma, user.id, user.teacherHistoryDays, now);
+  const workspaceMonth =
+    workspaceSources.length > 0 ? await workspacesCollectedThisMonth(prisma, user.id, workspaceSources, now) : 0;
+
   // M17, spec §5 "Teacher ratings": the same average-out-of-5-only shape
   // every other reader of this aggregate gets — a teacher reading their own
   // rating is never shown a count either, and there is no separate,
@@ -129,6 +137,22 @@ export default async function TeacherDashboardPage() {
           icon={<Star className="size-4" />}
         />
       </StatGrid>
+
+      {workspaceSources.length > 0 ? (
+        <Card>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-text-primary">
+                {t("withWorkspaces", { amount: formatMoney(visibleEarnings + workspaceMonth, locale) })}
+              </p>
+              <p className="mt-1 text-xs text-text-secondary">{t("withWorkspacesHint")}</p>
+            </div>
+            <LinkButton href={ROUTES.teacherEarnings} className="shrink-0">
+              {t("openEarnings")}
+            </LinkButton>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

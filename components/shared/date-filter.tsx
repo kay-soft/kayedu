@@ -16,7 +16,12 @@ import { useUrlFilterSync } from "@/lib/ui/url-filter-sync";
 import { cn } from "@/lib/utils";
 
 export type DateFilterValue = {
-  range: "day" | "week" | "month" | "date" | "range";
+  /**
+   * The mode. The default presets are "day" / "week" / "month"; a screen
+   * with its own `presets` (W8d: Earnings' last 7 / 30 / 90 days and this
+   * month) uses its own kinds. "date" and "range" are always the calendar's.
+   */
+  range: "day" | "week" | "month" | "date" | "range" | (string & {});
   /** "YYYY-MM-DD" — only meaningful when range === "date". */
   date: string;
   /** "YYYY-MM-DD" — only meaningful when range === "range". */
@@ -69,15 +74,24 @@ export function DateFilter({
   value,
   todayIso,
   resetHref,
+  presets,
 }: {
   value: DateFilterValue;
   /** Today's date, "YYYY-MM-DD" — computed server-side so it can't drift from the query's own "now". */
   todayIso: string;
   /** Where "Reset" navigates — the bare page path, no query string. */
   resetHref: string;
+  /**
+   * W8d: the screen's own quick presets in place of Day / Week / Month — each
+   * a `range` value and its already-translated label (the Earnings page's
+   * last 7, 30 and 90 days and this month). The calendar, Apply and Reset are
+   * unchanged; omitted, the filter is exactly the M18 one.
+   */
+  presets?: ReadonlyArray<{ kind: string; label: string }>;
 }) {
   const t = useTranslations("Shared.dateFilter");
   const locale = useLocale();
+  const quick = presets ?? QUICK.map((preset) => ({ kind: preset.kind as string, label: t(preset.labelKey) }));
 
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<DateFilterValue["range"]>(value.range);
@@ -152,7 +166,7 @@ export function DateFilter({
         >
           <CalendarDays className="size-4 shrink-0 text-text-muted" aria-hidden />
           <span id="date-filter-value" className="min-w-0 truncate">
-            {describeDateFilter(value, locale, t)}
+            {quick.find((preset) => preset.kind === value.range)?.label ?? describeDateFilter(value, locale, t)}
           </span>
           <ChevronDown
             className="size-4 shrink-0 text-text-muted transition-transform duration-[var(--motion-fast)] group-data-[popup-open]:rotate-180"
@@ -163,7 +177,7 @@ export function DateFilter({
         <PopoverContent className="w-auto max-w-none p-0">
           <div className="flex flex-col sm:flex-row">
             <div className="flex shrink-0 flex-row gap-1 border-border p-2 sm:flex-col sm:border-e">
-              {QUICK.map((preset) => (
+              {quick.map((preset) => (
                 <button
                   key={preset.kind}
                   type="button"
@@ -182,7 +196,7 @@ export function DateFilter({
                     "sm:w-40 sm:flex-none",
                   )}
                 >
-                  {t(preset.labelKey)}
+                  {preset.label}
                 </button>
               ))}
             </div>
@@ -278,5 +292,7 @@ function describeDateFilter(
       const to = value.to ? formatDate(new Date(`${value.to}T00:00:00.000Z`), locale) : "—";
       return t("activeRange", { from, to });
     }
+    default:
+      return t("activeDay");
   }
 }

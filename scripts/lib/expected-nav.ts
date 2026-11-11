@@ -3,6 +3,6 @@
  * `TEACHER_NAV`, so it stays an independent oracle: if the real nav changes,
  * `check:permissions` and `seed:verify` fail until this list is updated too.
  * Shared so the two cannot drift apart (they did, at U9 — `profile`).
- * W7a (D-W36): + "assistants". W8a (D-W38): + "workspaces".
+ * W7a (D-W36): + "assistants". W8a (D-W38): + "workspaces". W8d (D-W41): + "earnings".
  */
-export const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "assessments", "approvals", "settlements", "assistants", "workspaces", "profile"];
+export const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "students", "classes", "assessments", "approvals", "earnings", "settlements", "assistants", "workspaces", "profile"];

@@ -31,7 +31,8 @@ const STATUS_BADGE = {
  * a session that has not started: Reschedule and Cancel, and Delete for an
  * extra or one-time one. Write controls only while the workspace takes writes.
  * W8c: every row opens its session page (roster, payments, receipt), read-only
- * included.
+ * included. W8d (D-W41 item 10): the assistant's pages pass their own
+ * `sessionHref` and `writable={false}` — they never reschedule, cancel or delete.
  */
 export async function WorkspaceSessionList({
   workspaceId,
@@ -39,12 +40,15 @@ export async function WorkspaceSessionList({
   timeZone,
   todayIso,
   writable,
+  sessionHref,
 }: {
   workspaceId: string;
   rows: WorkspaceSessionRow[];
   timeZone: string;
   todayIso: string;
   writable: boolean;
+  /** Where a row opens — the teacher's session page unless given. */
+  sessionHref?: (sessionId: string) => string;
 }) {
   const [t, tStatus, tSessions, locale] = await Promise.all([
     getTranslations("Workspaces.sessions"),
@@ -89,7 +93,10 @@ export async function WorkspaceSessionList({
               </Badge>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <LinkButton href={ROUTES.teacherWorkspaceSession(workspaceId, row.id)} className="w-full sm:w-fit">
+              <LinkButton
+                href={sessionHref ? sessionHref(row.id) : ROUTES.teacherWorkspaceSession(workspaceId, row.id)}
+                className="w-full sm:w-fit"
+              >
                 {t("open")}
               </LinkButton>
               {actionable ? (

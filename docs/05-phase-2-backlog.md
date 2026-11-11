@@ -526,7 +526,7 @@
 
 ## 52. Student phones for the teacher and the assistant
 
-**What it is.** A teacher sees their students' phone numbers on their class roster, and an assistant sees them only when the teacher grants `students.phones`.
+**What it is.** A teacher sees their students' phone numbers on their class roster, and an assistant sees them only when the teacher grants `students.phones`. *(W8d, D-W41: in the teacher's PERSONAL workspaces — whose Students tab already shows the phone the teacher typed — `students.phones` now shows phones on the assistant's workspace rosters. What stays here is the branch half.)*
 
 **Why deferred.** The teacher's own portal shows no student phone today; it searches by phone but never displays one. An assistant is never wider than the teacher (CLAUDE.md rule 6, D-W19). So in W7b `students.phones` stays in the catalogue and reveals nothing, and every assistant roster is names only (decided with the founder). Showing phones to teachers is a product decision about student contact data.
 
@@ -534,13 +534,13 @@
 
 ---
 
-## 53. Workspace sessions in the teacher's calendar and Sessions lists
+## 53. Workspace sessions in the teacher's Sessions list
 
-**What it is.** A premium teacher's PERSONAL-workspace sessions shown in `/teacher/calendar` and `/teacher/sessions` beside their branch sessions, marked as the workspace's.
+**What it is.** A premium teacher's PERSONAL-workspace sessions shown in `/teacher/sessions` beside their branch sessions, marked as the workspace's. *(Narrowed at W8d — D-W41 item 8: the **calendar** half is delivered; `/teacher/calendar` reads each owned workspace as a second source, tagged Private.)*
 
-**Why deferred.** W8a keeps every workspace out of the teacher's All-branches union (D-W38: a workspace is never a centre relation), so the calendar and Sessions list stay branch-only and a workspace's sessions live on its own Sessions page. Adding them is a second source in the union — each workspace's own scoped read, merged in memory — and a design for telling the two apart in one list.
+**Why deferred.** The W8d prompt decided the calendar only. The Sessions list has filters (grade, student search, status) and a request form that are branch concepts, and its rows open the branch session page; a workspace row needs its own link and a decision on which filters apply. Each workspace's sessions stay on its own Sessions page meanwhile.
 
-**Depends on.** W8a's `getWorkspaceContext` and `workspaceSessions`; the U7 union's shape (`getTeacherScope`), extended with the teacher's owned workspaces rather than widening `resolveCenterRelations`.
+**Depends on.** The calendar's pattern (W8d): `listOwnedWorkspaces` + `getWorkspaceContext` per workspace, the same `teacherSessionListWhere` search under the teacher's history floor, merged in memory; a decision on the filters for a workspace row.
 
 ---
 
@@ -651,6 +651,66 @@
 **Why deferred.** W8c gives each workspace one hidden "Cash" method (D-W40 item 2) so `recordPayment` has the active method it requires, with nothing to configure. Several methods need a workspace settings screen and the picker.
 
 **Depends on.** `lib/db/payment-methods.ts`'s writers under `workspaceCan`, and the payment form's `PaymentMethodSelector`.
+
+---
+
+## 65. CSV export of the teacher's Earnings
+
+**What it is.** A download of the Earnings page's figures — per source, per class, per week — for the period shown.
+
+**Why deferred.** Out of scope for W8d by decision (D-W41). Export scope for the whole product is still an open decision (OD-4), and a file leaving the server is a new data surface to review.
+
+**Depends on.** OD-4; the same per-source reads (`lib/db/teacher-earnings.ts`), formatted through `lib/format.ts`; the assistant's windows applied identically.
+
+---
+
+## 66. More charts on the Earnings page
+
+**What it is.** Charts beyond the one weekly trend list — by source, by class, attendance over time.
+
+**Why deferred.** D-W41 item 2 allows one small trend, a table or a chart, not both; W8d shipped the list. More visuals need a design pass and the dataviz rules (`04-design-system.md`).
+
+**Depends on.** A chart component that meets §6 (375px, no colour alone) and the same summed reads.
+
+---
+
+## 67. Notices to the teacher about payments
+
+**What it is.** An in-app notice when a payment is recorded, voided or refunded in the teacher's workspace (for example by an assistant), or when a branch settlement is paid.
+
+**Why deferred.** Out of scope for W8d by decision (D-W41). Notices to and about assistants are already deferred (entry 48), and a money notice needs a rate rule so a busy session does not flood the bell.
+
+**Depends on.** The W1 notice kinds (one new kind per event), the audit rows' ids (D-W18), and entry 48's decision on assistant-related notices.
+
+---
+
+## 68. Assistants managing workspace students and classes
+
+**What it is.** An assistant adding or enrolling workspace students, editing classes or sessions for the teacher.
+
+**Why deferred.** D-W41 item 9 limits assistants to check-in, payments and reads in a workspace. Adding a student sends an invitation that names the teacher (D-W27), and editing classes changes money (the price); both widen what an assistant can do beyond the W8d catalogue.
+
+**Depends on.** New catalogue keys (or a decision to reuse `classes.view` / a new `classes.manage`), the W8a/W8b writers taking a `WorkspaceActor` like the W8c ones, and the on-behalf audit (D-W18).
+
+---
+
+## 69. Centre-side visibility of a teacher's workspaces
+
+**What it is.** A branch's staff seeing that a teacher also runs private classes, or their size.
+
+**Why deferred.** D-W20/D-W41: a workspace is private and every centre-side surface spreads `BRANCH_ONLY`. Showing any of it to a centre is a product and privacy decision, not a missing feature.
+
+**Depends on.** A founder decision on what (if anything) a centre may see, and the teacher's consent.
+
+---
+
+## 70. Earnings forecasts
+
+**What it is.** Projected earnings from upcoming sessions and enrolments.
+
+**Why deferred.** Out of scope for W8d by decision (D-W41). A forecast is computed from current prices, which the money rules keep strictly apart from frozen snapshots (CLAUDE.md rule 2); it must never be confused with collected money.
+
+**Depends on.** A design that labels it as an estimate, never sums it with collected figures, and reads prices only for sessions with no payment.
 
 ---
 

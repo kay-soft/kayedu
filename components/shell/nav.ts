@@ -33,7 +33,8 @@ export type ShellIconName =
   | "profile"
   | "assessments"
   | "assistants"
-  | "workspaces";
+  | "workspaces"
+  | "earnings";
 
 export type ShellNavItem = {
   href: string;
@@ -113,10 +114,12 @@ export const TEACHER_NAV: NavDef[] = [
     icon: "approvals",
     permission: "reservation.manage.own",
   },
-  // Spec §4.2 item 1's filterable earnings/sessions/students analytics screen
-  // is still a gap beyond the Dashboard's combined/per-center summary (M7) —
-  // docs/03-build-order.md M7 note. R10a removed its "Soon" nav placeholder:
-  // the nav lists only what a role can open. Add the item back with the screen.
+  // W8d (D-W29, D-W41): spec §4.2 item 1's analytics screen, delivered as
+  // Earnings — every branch where the teacher holds `analytics.own.view` and
+  // every workspace they own. No permission on the item: the page lists only
+  // the sources the teacher may see (and explains when there are none), like
+  // Assistants and Workspaces, and a workspace-only teacher has no cell at all.
+  { href: ROUTES.teacherEarnings, labelKey: "earnings", icon: "earnings" },
   { href: ROUTES.teacherSettlements, labelKey: "settlements", icon: "settlements" },
   // W7a (D-W36): a premium teacher's assistants and invites. No permission: the
   // page itself explains premium to a teacher without it, and every action is

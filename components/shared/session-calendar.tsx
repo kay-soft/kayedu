@@ -56,8 +56,10 @@ export type CalendarEntry = {
    * W8b (D-W39 item 8): a PERSONAL workspace's session on the student's own
    * calendar — the teacher's name and a "Private class" text tag (the branch
    * line already carries the workspace's name). Never set for a parent.
+   * W8d (D-W41 item 8): also on the teacher's own calendar, for their own
+   * workspace sessions — the "Private" tag only, no teacher name.
    */
-  privateClass?: { label: string; teacher: string };
+  privateClass?: { label: string; teacher?: string };
   /**
    * W3b (D-W32): this row is an exam or a homework. `tone` is its type, and its
    * text badge reads so; these add the class, the state badge and, for a
@@ -344,7 +346,7 @@ function DayRow({
             {entry.assessment ? <span>{entry.assessment.className}</span> : null}
             <span className="tabular-nums">{entry.time}</span>
             {entry.branch ? <span className="font-medium">{entry.branch}</span> : null}
-            {entry.privateClass ? <span>{entry.privateClass.teacher}</span> : null}
+            {entry.privateClass?.teacher ? <span>{entry.privateClass.teacher}</span> : null}
             {entry.room ? <span>{entry.room}</span> : null}
           </p>
           {countsLabel ? <p className="mt-1 text-xs text-text-muted">{countsLabel}</p> : null}

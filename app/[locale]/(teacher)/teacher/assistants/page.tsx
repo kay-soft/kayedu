@@ -43,11 +43,12 @@ export async function generateMetadata(): Promise<Metadata> {
  * read — the rows belong to the teacher's account.
  */
 export default async function TeacherAssistantsPage() {
-  // W8a (D-W38): an assistant acts at the teacher's branches only until W8d
-  // brings workspaces in — so a teacher with no branch (a workspace-only
-  // account) is told so here, and offered nothing to invite.
+  // W8d (D-W41 item 11): assistants work at the teacher's branches **and** in
+  // their workspaces, so a workspace-only account gets the whole page (the
+  // server's teacher gate counts an owned workspace). Only an account with
+  // neither is told there is nowhere for an assistant to work yet.
   const session = await requireTeacherUser();
-  if (!session.hasCenter) {
+  if (!session.hasCenter && !session.workspaceOnly) {
     const tNoBranch = await getTranslations("Assistants.teacher");
     return (
       <div className="flex flex-col gap-6">
@@ -60,18 +61,18 @@ export default async function TeacherAssistantsPage() {
       </div>
     );
   }
-  const scope = await getTeacherScope();
+  const user = session.hasCenter ? (await getTeacherScope()).user : session.user;
   const [t, tPresets, locale] = await Promise.all([
     getTranslations("Assistants.teacher"),
     getTranslations("Assistants.presets"),
     getLocale(),
   ]);
   const now = new Date();
-  const premium = isPremium(scope.user, now);
+  const premium = isPremium(user, now);
 
-  const overview = await teacherAssistantsOverview(prisma, scope.user.id, now);
+  const overview = await teacherAssistantsOverview(prisma, user.id, now);
   const slotsFull = overview.slotsUsed >= ASSISTANT_LIMITS.slotsPerTeacher;
-  const status = premiumStatus(scope.user.premiumUntil, now);
+  const status = premiumStatus(user.premiumUntil, now);
   // Without premium only what reduces access is offered, and only when there is something to reduce.
   const showLists = premium || overview.pendingInvites.length > 0 || overview.assistants.length > 0;
 

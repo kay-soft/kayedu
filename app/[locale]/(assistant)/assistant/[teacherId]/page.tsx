@@ -6,8 +6,9 @@ import { AssistantPermissionList } from "@/components/assistants/assistant-permi
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getAssistantScope } from "@/lib/auth/assistant-context";
-import { Building2 } from "lucide-react";
+import { getAssistantScope, scopeOpenWorkspaces } from "@/lib/auth/assistant-context";
+import { Badge } from "@/components/ui/badge";
+import { BriefcaseBusiness, Building2 } from "lucide-react";
 
 import { formatDate } from "@/lib/format";
 
@@ -20,7 +21,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * The assistant's landing page (W7a, D-W36; W7b, D-W37; docs/04 §11.36): the
  * teacher's name, what the teacher granted, and the teacher's branches where
  * the assistant may work (those whose "Allow teacher assistants" is on) — or
- * "Not available at the teacher's branches" when none is. The working pages
+ * "Not available at the teacher's branches" when none is — and (W8d, D-W41
+ * item 10) the teacher's workspaces where a workspace permission applies,
+ * tagged Private (Archived when read-only). The working pages
  * are in the nav, each shown only when it is granted somewhere. The name is
  * read only through an effective link of the session's user for this route's
  * teacher (the layout's gate, re-run here from the per-request cache).
@@ -35,6 +38,7 @@ export default async function AssistantHomePage({ params }: { params: Promise<{ 
     getLocale(),
   ]);
   const { link } = session;
+  const workspaces = scopeOpenWorkspaces(session);
 
   return (
     <div className="flex flex-col gap-6">
@@ -72,6 +76,32 @@ export default async function AssistantHomePage({ params }: { params: Promise<{ 
           )}
         </CardContent>
       </Card>
+      {session.workspaces.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle as="h2">{t("workspacesTitle")}</CardTitle>
+            <CardDescription>{t("workspacesDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {workspaces.length === 0 ? (
+              <EmptyState compact icon={<BriefcaseBusiness />} title={t("noWorkspaces")} description={t("noWorkspacesHint")} />
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {workspaces.map((workspace) => (
+                  <li
+                    key={workspace.centerId}
+                    className="flex min-h-11 flex-wrap items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-medium text-text-primary"
+                  >
+                    <span className="min-w-0 break-words">{workspace.centerName}</span>
+                    <Badge variant="neutral">{t("private")}</Badge>
+                    {workspace.archivedAt ? <Badge variant="neutral">{t("archived")}</Badge> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }
