@@ -59,7 +59,11 @@ import {
   editableActionsFor,
   isBranchGrantableRole,
   type Permission,
+  type PermissionGrants,
 } from "../lib/auth/permissions.ts";
+import { PRESET_PERMISSIONS, type AssistantPermission } from "../lib/assistant-catalog.ts";
+import { assistantNavItems } from "../lib/assistant-nav.ts";
+import type { AssistantActingBranch } from "../lib/db/assistant-acting.ts";
 import { resolveCenterRelations, roleForExperience } from "../lib/auth/relations.ts";
 import { createCenterWithSettings } from "../lib/db/platform.ts";
 import {
@@ -69,7 +73,7 @@ import {
   provisionCenterBaseline,
 } from "../lib/db/provision.ts";
 import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
-import { EXPECTED_TEACHER_NAV } from "./lib/expected-nav.ts";
+import { EXPECTED_ASSISTANT_NAV, EXPECTED_TEACHER_NAV } from "./lib/expected-nav.ts";
 import { pageGateFor } from "./lib/nav-gates.ts";
 import {
   grantMembershipBranch,
@@ -519,6 +523,33 @@ async function checkProvisioningBaseline() {
   }
   const teacherNav = await navFor(created.center.id, teacher.id, "TEACHER");
   check("A freshly provisioned centre: its teacher sees the teacher nav", same(teacherNav, EXPECTED_TEACHER_NAV), `got [${teacherNav.join(", ")}]`);
+
+  // X1: the assistant shell nav of the two seeded cases, through the real
+  // assistantNavItems on a synthetic teacher — one branch with the baseline
+  // TEACHER cells (trusted) and one PERSONAL workspace — against the
+  // hand-written oracle (scripts/lib/expected-nav.ts). No database.
+  const baselineTeacherCells: PermissionGrants = Object.fromEntries(DEFAULT_ROLE_GRANTS.TEACHER.map((permission) => [permission, true]));
+  const syntheticBranch: AssistantActingBranch = {
+    centerId: "x1-branch",
+    centerName: "Branch",
+    teacherMembershipId: "x1-membership",
+    isTrustedTeacher: true,
+    teacherGrants: baselineTeacherCells,
+    settings: {} as AssistantActingBranch["settings"],
+  };
+  const assistantNavCases: [string, readonly AssistantPermission[], readonly string[]][] = [
+    ["FULL", PRESET_PERMISSIONS.FULL, EXPECTED_ASSISTANT_NAV.FULL],
+    // Hand-written: the seed's custom check-in assistant (CO_TEACHER cut down).
+    ["custom check-in + payments", ["checkin.workspace", "payments.workspace"], EXPECTED_ASSISTANT_NAV.CHECKIN],
+  ];
+  for (const [label, grants, expected] of assistantNavCases) {
+    const labels = assistantNavItems("x1-teacher", {
+      grants: [...grants],
+      branches: [syntheticBranch],
+      workspaces: [{ centerId: "x1-workspace", centerName: "Workspace", teacherMembershipId: "x1-ws-membership", archivedAt: null, timezone: "Africa/Cairo" }],
+    }).map((item) => item.labelKey);
+    check(`The assistant nav (${label}) is the hand-written expected list`, same(labels, [...expected]), `got [${labels.join(", ")}]`);
+  }
 
   // The seed's path gives the same answer as the admin path.
   const seedOwner = await staffMember(seeded.id, "seed", "OWNER");

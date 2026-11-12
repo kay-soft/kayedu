@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-import { EXPECTED_TEACHER_NAV } from "../scripts/lib/expected-nav";
+import { EXPECTED_ASSISTANT_NAV, EXPECTED_TEACHER_NAV } from "../scripts/lib/expected-nav";
 import { SEED, type AccountKey } from "./support/accounts";
 import { expect, expectHealthy, primaryNav, test } from "./support/fixtures";
 import { t, type AppLocale } from "./support/i18n";
@@ -54,6 +54,10 @@ const ROLES: RoleCase[] = [
   { account: "parentFamily", nav: ["schedule", "calendar"], home: "/parent" },
   // W6 (D-W35): + "premium" (Teachers).
   { account: "admin", nav: ["centers", "platform", "catalog", "premium"], home: "/admin/centers" },
+  // X1: an assistant-only account has one experience and lands in its shell,
+  // under the teacher's id (`/assistant/<teacherUserId>`).
+  { account: "assistantPremium", nav: [...EXPECTED_ASSISTANT_NAV.FULL], home: "/assistant/[^/]+" },
+  { account: "assistantCheckin", nav: [...EXPECTED_ASSISTANT_NAV.CHECKIN], home: "/assistant/[^/]+" },
 ];
 
 /** `/{locale}` → the role's home, choosing the Downtown branch on the hub when asked. */

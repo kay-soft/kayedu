@@ -21,6 +21,9 @@ export const ACCOUNTS = {
   studentNew: { email: `student.new@${SEED_DOMAIN}` },
   parentFamily: { email: `parent.family@${SEED_DOMAIN}` },
   parentNokhba: { email: `parent.nokhba@${SEED_DOMAIN}` },
+  // X1: teacher.premium's two assistants (FULL, and a custom check-in + payments set).
+  assistantPremium: { email: `assistant.premium@${SEED_DOMAIN}` },
+  assistantCheckin: { email: `assistant.checkin@${SEED_DOMAIN}` },
 } as const;
 
 export type AccountKey = keyof typeof ACCOUNTS;

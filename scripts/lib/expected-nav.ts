@@ -14,3 +14,23 @@ export const EXPECTED_TEACHER_NAV = ["dashboard", "sessions", "calendar", "stude
  * assessments. `check:workspaces` compares it with `TEACHER_WORKSPACE_ONLY_NAV`.
  */
 export const EXPECTED_WORKSPACE_ONLY_TEACHER_NAV = ["workspaces", "calendar", "assessments", "earnings", "assistants", "centers"];
+
+/**
+ * The assistant shell's nav per seeded case (X1) — hand-written from the
+ * catalogue (`lib/assistant-catalog.ts`), NOT derived from
+ * `lib/assistant-nav.ts`, the same oracle discipline. For a teacher with one
+ * branch that allows assistants (baseline TEACHER cells, trusted) and one
+ * PERSONAL workspace:
+ *  - FULL grants every key but `students.phones`: Home, Exams & homework
+ *    (assessments.review), Classes (classes.view, branches), Workspaces,
+ *    Requests (requests.manage, a trusted teacher), Overview (analytics.view,
+ *    branches) and Earnings (analytics.view);
+ *  - the custom check-in case (`checkin.workspace` + `payments.workspace`)
+ *    acts only in workspaces: Home and Workspaces — no Earnings, nothing at
+ *    the branch.
+ * Imported by `seed:verify`, `check:permissions` and `e2e/navigation.spec.ts`.
+ */
+export const EXPECTED_ASSISTANT_NAV = {
+  FULL: ["home", "assessments", "classes", "workspaces", "requests", "overview", "earnings"],
+  CHECKIN: ["home", "workspaces"],
+} as const;
