@@ -23,7 +23,16 @@
  *   6. the catalog shape (U3) — each subject once with its grade links, no
  *      two subjects sharing a name, every class's (grade, subject) pair
  *      linked — and the three bookable test classes;
- *   7. the entity counts, printed.
+ *   7. the entity counts, printed;
+ *   9. (X1) premium, assistants and workspaces — who is premium (only
+ *      teacher.premium and teacher.expired), each new account's experiences
+ *      and nav, the assistant grants and their intersection, the workspace's
+ *      counts, money and Earnings, the assessments, the multi-experience
+ *      fixture link and the two dev-only codes. Hand-written expectations.
+ *
+ * X1 also counts a live assistant link as a relationship in section 4's
+ * "no relationship at all" check: an assistant-only account (W7a) holds no
+ * membership, profile or family link by design.
  *
  * SEC-2b adds the money-integrity invariants to 3: one active payment per
  * roster row, never voided-and-refunded, one live claim per payment, every
@@ -45,11 +54,28 @@ import { loadPermissionGrants } from "../lib/db/permissions.ts";
 import { activeChildLinks, hashFamilyCode } from "../lib/db/parents.ts";
 import { baselineGrantKeys, centerBaselineGaps, hasFullBaseline } from "../lib/db/provision.ts";
 import { splitShare } from "../lib/money.ts";
-import { CENTER_NAV, TEACHER_NAV, navForExperience } from "../components/shell/nav.ts";
-import { EXPECTED_TEACHER_NAV } from "./lib/expected-nav.ts";
+import { CENTER_NAV, TEACHER_NAV, TEACHER_WORKSPACE_ONLY_NAV, navForExperience } from "../components/shell/nav.ts";
+import { EXPECTED_ASSISTANT_NAV, EXPECTED_TEACHER_NAV, EXPECTED_WORKSPACE_ONLY_TEACHER_NAV } from "./lib/expected-nav.ts";
 import { seedSubjectLinkCounts } from "../prisma/seed-data/catalog.ts";
 import { DEFAULT_SEED_EMAIL_DOMAIN, SEED_EMAIL_DOMAIN, mail } from "../prisma/seed-data/domain.ts";
-import { BRANCHES, DEV_FAMILY_CODES, seedAccounts, type StaffRole } from "../prisma/seed-data/plan.ts";
+import {
+  BRANCHES,
+  DEV_FAMILY_CODES,
+  DEV_W_CODES,
+  EXPIRED_WORKSPACE,
+  PREMIUM_WORKSPACE,
+  seedAccounts,
+  type StaffRole,
+} from "../prisma/seed-data/plan.ts";
+import { loadExperiences } from "../lib/auth/experiences.ts";
+import { isPremium } from "../lib/auth/premium.ts";
+import { ASSISTANT_PERMISSIONS, detectPreset, sortPermissions } from "../lib/assistant-catalog.ts";
+import { assistantNavItems } from "../lib/assistant-nav.ts";
+import { assistantCan, resolveAssistantActing } from "../lib/db/assistant-acting.ts";
+import { hashAssistantCode } from "../lib/db/assistants.ts";
+import { ownedWorkspaceSources, sourceEarnings } from "../lib/db/teacher-earnings.ts";
+import { ownedWorkspaceWhere } from "../lib/db/workspaces.ts";
+import { addDays, dateKey, todayInTimezone } from "../lib/scheduling.ts";
 import { pageGateFor } from "./lib/nav-gates.ts";
 import {
   FIXTURE_STALE_AFTER_MS,
@@ -483,7 +509,8 @@ async function main() {
          AND NOT EXISTS (SELECT 1 FROM "StudentProfile" s WHERE s."userId" = u."id")
          AND NOT EXISTS (SELECT 1 FROM "FamilyLink" p WHERE p."parentUserId" = u."id")
          AND NOT EXISTS (SELECT 1 FROM "Reservation" r WHERE r."studentId" = u."id")
-         AND NOT EXISTS (SELECT 1 FROM "ChangeRequest" q WHERE q."requestedBy" = u."id")`,
+         AND NOT EXISTS (SELECT 1 FROM "ChangeRequest" q WHERE q."requestedBy" = u."id")
+         AND NOT EXISTS (SELECT 1 FROM "TeacherAssistant" t WHERE t."assistantUserId" = u."id" AND t."revokedAt" IS NULL)`,
     ],
   ];
   for (const [name, rawSql] of orphanChecks) {
@@ -675,12 +702,278 @@ async function main() {
   if (leftovers.length === 0) check("No gate fixture is left in the database", true);
   else if (leftBehind === 0) console.log(`  ${warnings} young gate fixture(s): a WARN, not a failure`);
 
+  await verifyWWorld({ byEmail, centers, allCenters, localDatabase });
+
   console.log(
     failures === 0
       ? `\nAll seed checks passed.${warnings > 0 ? ` (${warnings} warning(s))` : ""}`
       : `\n${failures} seed check(s) FAILED.`,
   );
   if (failures > 0) process.exitCode = 1;
+}
+
+// ── 9. Premium, assistants and workspaces (X1) ─────────────────────────────
+//
+// Hand-written expectations, independent of the seed's code (prisma/seed-data/
+// w-world.ts): who is premium, each new account's experiences and nav, the
+// assistant grants, the workspace's counts and money, the assessments, and the
+// two dev-only codes. Audit timestamps are deliberately NOT ordered here: the
+// backdated writers (teacher.expired, the closed exams) write audit rows at
+// the real time.
+
+/** FULL's grants and the custom check-in assistant's, written out by hand (lib/assistant-catalog.ts is the code). */
+const EXPECTED_FULL_GRANTS = ["assessments.review", "assessments.manage", "classes.view", "requests.manage", "checkin.workspace", "payments.workspace", "analytics.view"];
+const EXPECTED_CHECKIN_GRANTS = ["checkin.workspace", "payments.workspace"];
+
+type VerifyUser = { id: string; email: string | null; authId: string | null; premiumUntil: Date | null };
+
+async function verifyWWorld(input: {
+  byEmail: Map<string | null, VerifyUser>;
+  centers: { id: string; kind: string; slug: string }[];
+  allCenters: { id: string; kind: string; name: string }[];
+  localDatabase: boolean;
+}) {
+  console.log("\n9. Premium, assistants and workspaces (X1)");
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const get = (local: string) => input.byEmail.get(mail(local));
+  const premium = get("teacher.premium");
+  const expired = get("teacher.expired");
+  const full = get("assistant.premium");
+  const checkinAssistant = get("assistant.checkin");
+  const wsStudent = get("student.workspace");
+  const invited = get("student.invited");
+  const multi = get("multi.experience");
+  const studentNew = get("student.new");
+  const youssef = get("student.downtown");
+  if (!premium || !expired || !full || !checkinAssistant || !wsStudent || !invited || !multi || !studentNew || !youssef) {
+    check("The seven X1 accounts exist", false, "run npm run db:seed");
+    return;
+  }
+  const kindsOf = async (userId: string) => (await loadExperiences(prisma, userId)).map((entry) => entry.kind).sort();
+  const loginOnly = (user: VerifyUser, name: string, run: () => Promise<void>) =>
+    input.localDatabase && !user.authId ? (console.log(`  SKIP  ${name} — needs a login (local database)`), Promise.resolve()) : run();
+
+  // Premium: only teacher.premium and teacher.expired are ever premium in the seed.
+  check("teacher.premium is premium now", isPremium(premium, now), String(premium.premiumUntil));
+  check(
+    "teacher.expired's premium has lapsed (premiumUntil in the past)",
+    expired.premiumUntil !== null && expired.premiumUntil.getTime() < now.getTime(),
+    String(expired.premiumUntil),
+  );
+  const otherPremium = seedAccounts()
+    .filter((account) => account.email !== premium.email && account.email !== expired.email)
+    .filter((account) => input.byEmail.get(account.email)?.premiumUntil);
+  check(
+    "No other seed account is premium — teacher.downtown (the e2e premium target), teacher.shared and the rest never are",
+    otherPremium.length === 0,
+    otherPremium.map((account) => account.email).join(", "),
+  );
+
+  // PERSONAL centres stay out of sections 1, 3, 4 and 7.
+  const workspaces = input.allCenters.filter((center) => center.kind === "PERSONAL");
+  check("The seed world of sections 1, 3, 4 and 7 holds no PERSONAL centre", input.centers.every((center) => center.kind === "BRANCH"));
+  const premiumWs = await prisma.center.findMany({ where: ownedWorkspaceWhere(premium.id), select: { id: true, name: true, archivedAt: true } });
+  const expiredWs = await prisma.center.findMany({ where: ownedWorkspaceWhere(expired.id), select: { id: true, name: true } });
+  check(
+    `teacher.premium owns exactly one live workspace, "${PREMIUM_WORKSPACE.name}"`,
+    premiumWs.length === 1 && premiumWs[0].name === PREMIUM_WORKSPACE.name && premiumWs[0].archivedAt === null,
+    premiumWs.map((row) => row.name).join(", "),
+  );
+  check(`teacher.expired owns exactly one workspace, "${EXPIRED_WORKSPACE.name}"`, expiredWs.length === 1 && expiredWs[0].name === EXPIRED_WORKSPACE.name);
+  check("Both seeded workspaces are PERSONAL centres", [...premiumWs, ...expiredWs].every((row) => workspaces.some((center) => center.id === row.id)));
+  const downtownTeacher = get("teacher.downtown");
+  if (downtownTeacher) {
+    check(
+      "teacher.downtown (the free teacher) has no workspace and no assistant",
+      (await prisma.center.count({ where: ownedWorkspaceWhere(downtownTeacher.id) })) === 0 &&
+        (await prisma.teacherAssistant.count({ where: { teacherUserId: downtownTeacher.id, revokedAt: null } })) === 0,
+    );
+  }
+
+  // Experiences and nav.
+  const premiumRelations = (await resolveCenterRelations(prisma, premium.id)).filter((relation) => relation.roles.includes("TEACHER"));
+  check("teacher.premium resolves one teacher relation, at Downtown", premiumRelations.length === 1 && premiumRelations[0].center.slug === "center-60-downtown");
+  for (const relation of premiumRelations) {
+    const grants = await loadPermissionGrants(prisma, relation.center.id, "TEACHER");
+    const labels = navForExperience("teacher", "TEACHER", grants).map((item) => item.labelKey);
+    check("teacher.premium @ Downtown: the teacher nav (premium does not change it)", same(labels, EXPECTED_TEACHER_NAV), `got [${labels.join(", ")}]`);
+  }
+  check("teacher.premium has one experience: Teacher", same(await kindsOf(premium.id), ["teacher"]));
+  check("teacher.expired has no branch, one experience (Teacher, workspace only)", (await resolveCenterRelations(prisma, expired.id)).length === 0 && same(await kindsOf(expired.id), ["teacher"]));
+  check(
+    "The workspace-only teacher nav is the hand-written list",
+    same(TEACHER_WORKSPACE_ONLY_NAV.map((item) => item.labelKey), EXPECTED_WORKSPACE_ONLY_TEACHER_NAV),
+  );
+  check("multi.experience holds three kinds of experience: Teacher, Student, Parent", same(await kindsOf(multi.id), ["parent", "student", "teacher"]), (await kindsOf(multi.id)).join(", "));
+  const multiLink = await prisma.familyLink.findUnique({ where: { parentUserId_studentUserId: { parentUserId: multi.id, studentUserId: studentNew.id } } });
+  check(
+    "multi.experience → student.new: the fixture link's exact shape (ACTIVE, STUDENT_INVITE, no invitation, never revoked)",
+    multiLink !== null && multiLink.status === "ACTIVE" && multiLink.source === "STUDENT_INVITE" && multiLink.invitationId === null && multiLink.revokedAt === null,
+  );
+  check(
+    "multi.experience: a TEACHER membership and a student profile at Downtown",
+    (await prisma.membership.count({ where: { userId: multi.id, role: "TEACHER", active: true, center: { slug: "center-60-downtown" } } })) === 1 &&
+      (await prisma.studentProfile.count({ where: { userId: multi.id, active: true, center: { slug: "center-60-downtown" } } })) === 1,
+  );
+
+  // Assistants: links, grants, effective experiences, nav and the three-way intersection.
+  const grantsOf = async (teacherUserId: string, assistantUserId: string) => {
+    const link = await prisma.teacherAssistant.findFirst({ where: { teacherUserId, assistantUserId, revokedAt: null }, include: { grants: true } });
+    return link ? sortPermissions(link.grants.map((grant) => grant.permission)) : null;
+  };
+  const fullGrants = await grantsOf(premium.id, full.id);
+  const checkinGrants = await grantsOf(premium.id, checkinAssistant.id);
+  await loginOnly(full, "assistant links", async () => {
+    check("assistant.premium → teacher.premium: the FULL grants", fullGrants !== null && same(fullGrants, EXPECTED_FULL_GRANTS), fullGrants?.join(", ") ?? "no link");
+    check(
+      "assistant.checkin → teacher.premium: exactly check-in + payments, read as Custom",
+      checkinGrants !== null && same(checkinGrants, EXPECTED_CHECKIN_GRANTS) && detectPreset(checkinGrants) === "CUSTOM",
+      checkinGrants?.join(", ") ?? "no link",
+    );
+    check("teacher.expired keeps one live assistant link (inert while lapsed)", (await prisma.teacherAssistant.count({ where: { teacherUserId: expired.id, revokedAt: null } })) === 1);
+    const fullExperiences = await loadExperiences(prisma, full.id);
+    check(
+      "assistant.premium has one experience: teacher.premium's assistant (the lapsed teacher's never shows)",
+      fullExperiences.length === 1 && fullExperiences[0].kind === "assistant" && fullExperiences[0].teacherUserId === premium.id,
+      fullExperiences.map((entry) => `${entry.kind}:${entry.teacherUserId ?? ""}`).join(", "),
+    );
+    check("assistant.checkin has one experience: an assistant", same(await kindsOf(checkinAssistant.id), ["assistant"]));
+    for (const [label, assistant, expected] of [
+      ["FULL", full, EXPECTED_ASSISTANT_NAV.FULL],
+      ["custom check-in", checkinAssistant, EXPECTED_ASSISTANT_NAV.CHECKIN],
+    ] as const) {
+      const acting = await resolveAssistantActing(prisma, { assistantUserId: assistant.id, teacherUserId: premium.id, now });
+      const labels = acting ? assistantNavItems(premium.id, acting).map((item) => item.labelKey) : [];
+      check(`The ${label} assistant's nav is the hand-written list`, acting !== null && same(labels, [...expected]), `got [${labels.join(", ")}]`);
+      if (acting && label === "custom check-in") {
+        const everywhere = [...acting.branches.map((branch) => branch.centerId), ...acting.workspaces.map((ws) => ws.centerId)];
+        check("The custom assistant cannot see Earnings anywhere (no analytics.view)", everywhere.every((centerId) => !assistantCan(acting, "analytics.view", centerId)));
+        check(
+          "The custom assistant does nothing at the branch, and checks in and takes payments in the workspace",
+          acting.branches.every((branch) => ASSISTANT_PERMISSIONS.every((key) => !assistantCan(acting, key, branch.centerId))) &&
+            acting.workspaces.every((ws) => assistantCan(acting, "checkin.workspace", ws.centerId) && assistantCan(acting, "payments.workspace", ws.centerId)),
+        );
+      }
+      if (acting && label === "FULL") {
+        check(
+          "The FULL assistant sees Earnings and works at Downtown and in the workspace",
+          acting.branches.some((branch) => assistantCan(acting, "analytics.view", branch.centerId)) &&
+            acting.workspaces.some((ws) => assistantCan(acting, "checkin.workspace", ws.centerId)),
+        );
+      }
+    }
+  });
+
+  // The workspace: counts, money, Earnings.
+  const ws = premiumWs[0];
+  if (ws) {
+    const classes = await prisma.classGroup.findMany({ where: { centerId: ws.id }, select: { id: true, price: true, centerShareType: true, centerShareValue: true } });
+    check(
+      "The workspace has 2 classes, both PERCENTAGE 0, at different prices",
+      classes.length === 2 && classes.every((row) => row.centerShareType === "PERCENTAGE" && row.centerShareValue === 0) && classes[0].price !== classes[1].price,
+    );
+    const profiles = await prisma.studentProfile.count({ where: { centerId: ws.id, active: true } });
+    const enrolments = await prisma.enrollment.count({ where: { centerId: ws.id, status: "ACTIVE" } });
+    check("The workspace has 9 students, each enrolled in one class", profiles === 9 && enrolments === 9, `${profiles} profiles, ${enrolments} enrolments`);
+    const methods = await prisma.centerPaymentMethod.findMany({ where: { centerId: ws.id }, select: { id: true, name: true } });
+    check("The workspace has its one hidden Cash method", methods.length === 1 && methods[0].name === "Cash");
+    const pastClosed = await prisma.session.count({ where: { centerId: ws.id, date: { lt: today }, closedAt: { not: null } } });
+    check("The workspace's last 45 days hold at least 10 closed sessions", pastClosed >= 10, `${pastClosed}`);
+    const payments = await prisma.payment.findMany({ where: { centerId: ws.id }, select: { id: true, amount: true, centerShareSnapshot: true, teacherShareSnapshot: true, voided: true, refunded: true, paymentMethodId: true } });
+    check("Every workspace payment: centre share 0, teacher share = amount, the Cash method", payments.length > 0 && payments.every((p) => p.centerShareSnapshot === 0 && p.teacherShareSnapshot === p.amount && p.paymentMethodId === methods[0]?.id));
+    check(
+      "The workspace has exactly one voided and one refunded payment",
+      payments.filter((p) => p.voided).length === 1 && payments.filter((p) => p.refunded).length === 1,
+      `${payments.filter((p) => p.voided).length} voided, ${payments.filter((p) => p.refunded).length} refunded`,
+    );
+    check("No workspace payment is claimed by a settlement (D-W24, D-W40)", (await prisma.settlementClaim.count({ where: { paymentId: { in: payments.map((p) => p.id) } } })) === 0);
+    const gross = payments.filter((p) => !p.voided).reduce((sum, p) => sum + p.teacherShareSnapshot, 0);
+    const refundRows = await prisma.$queryRaw<{ t: bigint | null }[]>`
+      SELECT SUM(r."teacherShareReversed") AS t FROM "Refund" r JOIN "Payment" p ON p."id" = r."paymentId" WHERE p."centerId" = ${ws.id}`;
+    const refunds = Number(refundRows[0]?.t ?? 0);
+    const sources = (await ownedWorkspaceSources(prisma, premium.id, 0, now)).filter((source) => source.centerId === ws.id);
+    const zone = "Africa/Cairo";
+    const to = todayInTimezone(zone, now);
+    const earnings = sources[0]
+      ? await sourceEarnings(prisma, sources[0], premium.id, { period: "custom", from: dateKey(addDays(to, -90)), to: dateKey(to), invalid: false }, now)
+      : null;
+    check(
+      `Workspace Earnings = payments − refunds: ${gross} − ${refunds} = ${gross - refunds}`,
+      earnings !== null && earnings.teacherShare === gross && earnings.refunds === refunds && earnings.net === gross - refunds,
+      earnings ? `Earnings read ${earnings.teacherShare} − ${earnings.refunds} = ${earnings.net}` : "no source",
+    );
+    const live = await prisma.session.findFirst({ where: { centerId: ws.id, date: to, isManual: true }, include: { _count: { select: { attendees: true } } } });
+    console.log(live ? `  INFO  today's live workspace session ${live.startTime}–${live.endTime}: ${live._count.attendees} checked in, ${live.closedAt ? "ended" : "open"}` : "  INFO  no live workspace session today (the seed skips it before 00:40 Cairo)");
+
+    // Workspace assessments (W9).
+    const wsAssessments = await prisma.assessment.findMany({ where: { centerId: ws.id }, include: { _count: { select: { attempts: { where: { submittedAt: { not: null } } } } } } });
+    const byTitle = (title: string) => wsAssessments.find((row) => row.title === title);
+    const kinematics = byTitle("Kinematics quiz");
+    const forces = byTitle("Forces test");
+    check("Workspace: an exam open now", kinematics?.status === "PUBLISHED" && kinematics.windowStart !== null && kinematics.windowEnd !== null && kinematics.windowStart <= now && kinematics.windowEnd > now);
+    check("Workspace: a closed exam with answers and score revealed", forces?.status === "PUBLISHED" && forces.windowEnd !== null && forces.windowEnd < now && forces.showCorrectAnswers && forces.showScore);
+    check("Workspace: a published homework and one draft", byTitle("Homework: motion graphs")?.status === "PUBLISHED" && byTitle("Energy exam (draft)")?.status === "DRAFT");
+
+    // Students: the accepted link, the pending invitation, the unused share code.
+    await loginOnly(wsStudent, "student.workspace's link", async () => {
+      check("student.workspace holds a linked profile in the workspace, and is a student", (await prisma.studentProfile.count({ where: { centerId: ws.id, userId: wsStudent.id, active: true } })) === 1 && same(await kindsOf(wsStudent.id), ["student"]));
+      const forcesAttempt = forces ? await prisma.assessmentAttempt.count({ where: { assessmentId: forces.id, studentProfile: { userId: wsStudent.id }, submittedAt: { not: null } } }) : 0;
+      check("student.workspace submitted the closed workspace exam", forcesAttempt === 1);
+    });
+    await loginOnly(invited, "student.invited's invitation", async () => {
+      check(
+        "student.invited has one PENDING invitation from the workspace and no profile there",
+        (await prisma.workspaceInvitation.count({ where: { centerId: ws.id, targetUserId: invited.id, status: "PENDING" } })) === 1 &&
+          (await prisma.studentProfile.count({ where: { centerId: ws.id, userId: invited.id } })) === 0,
+      );
+    });
+  }
+
+  // teacher.premium's Downtown class: FIXED, upcoming only, no money.
+  const downtownClass = await prisma.classGroup.findFirst({
+    where: { teacherId: premium.id, center: { slug: "center-60-downtown" } },
+    select: { id: true, price: true, centerShareType: true, centerShareValue: true, _count: { select: { enrollments: { where: { status: "ACTIVE" } } } } },
+  });
+  check("teacher.premium's Downtown class: FIXED 30 EGP of 150 EGP", downtownClass?.centerShareType === "FIXED" && downtownClass.centerShareValue === 3_000 && downtownClass.price === 15_000);
+  if (downtownClass) {
+    check("…11 enrolled, student.downtown among them", downtownClass._count.enrollments === 11 && (await prisma.enrollment.count({ where: { classGroupId: downtownClass.id, studentProfile: { userId: youssef.id }, status: "ACTIVE" } })) === 1, `${downtownClass._count.enrollments}`);
+    check(
+      "…no history and no money: no past session, no roster row, no payment",
+      (await prisma.session.count({ where: { classGroupId: downtownClass.id, date: { lt: today } } })) === 0 &&
+        (await prisma.sessionAttendee.count({ where: { session: { classGroupId: downtownClass.id } } })) === 0 &&
+        (await prisma.payment.count({ where: { session: { classGroupId: downtownClass.id } } })) === 0,
+    );
+    const branchAssessments = await prisma.assessment.findMany({ where: { classGroupId: downtownClass.id }, select: { id: true, title: true, status: true, type: true, windowStart: true, windowEnd: true, showScore: true, showCorrectAnswers: true } });
+    const t = (title: string) => branchAssessments.find((row) => row.title === title);
+    const electricity = t("Electricity quiz");
+    const waves = t("Waves exam");
+    const optics = t("Optics exam");
+    check("Downtown: an exam open now and a published homework", electricity?.status === "PUBLISHED" && electricity.windowEnd !== null && electricity.windowEnd > now && t("Homework: circuits")?.status === "PUBLISHED");
+    check("Downtown: a closed exam with answers and score revealed", waves?.status === "PUBLISHED" && waves.windowEnd !== null && waves.windowEnd < now && waves.showCorrectAnswers && waves.showScore);
+    check("Downtown: a closed exam still hidden (no score, no answers)", optics?.status === "PUBLISHED" && optics.windowEnd !== null && optics.windowEnd < now && !optics.showCorrectAnswers && !optics.showScore);
+    const youssefAttempts = await prisma.assessmentAttempt.count({ where: { assessmentId: { in: [waves?.id ?? "", optics?.id ?? ""] }, studentProfile: { userId: youssef.id }, submittedAt: { not: null } } });
+    check("student.downtown submitted both closed Downtown exams", youssefAttempts === 2);
+    check("student.downtown's bell has notices (published assessments)", (await prisma.notification.count({ where: { userId: youssef.id } })) > 0);
+  }
+  console.log("  INFO  teacher.premium's bell: no notification kind is addressed to a teacher (W1, D-W12), so it stays empty by design");
+
+  // The two dev-only codes: waiting, unexpired, stored as a sha256 only.
+  const invite = await prisma.assistantInvite.findUnique({ where: { codeHash: hashAssistantCode(DEV_W_CODES.assistantInvite) } });
+  check(
+    `The dev assistant invite ${DEV_W_CODES.assistantInvite.slice(0, 4)}-${DEV_W_CODES.assistantInvite.slice(4, 8)}-${DEV_W_CODES.assistantInvite.slice(8)} is teacher.premium's, waiting and unexpired (re-run db:seed to renew)`,
+    invite !== null && invite.teacherUserId === premium.id && invite.usedAt === null && invite.revokedAt === null && invite.expiresAt > now,
+    invite ? `used=${Boolean(invite.usedAt)} revoked=${Boolean(invite.revokedAt)} expires=${invite.expiresAt.toISOString()}` : "missing",
+  );
+  const shareCode = await prisma.workspaceShareCode.findUnique({ where: { codeHash: hashAssistantCode(DEV_W_CODES.shareCode) } });
+  check(
+    `The dev share code ${DEV_W_CODES.shareCode.slice(0, 4)}-${DEV_W_CODES.shareCode.slice(4, 8)}-${DEV_W_CODES.shareCode.slice(8)} is the workspace's, waiting and unexpired (re-run db:seed to renew)`,
+    shareCode !== null && shareCode.centerId === ws?.id && shareCode.usedAt === null && shareCode.revokedAt === null && shareCode.expiresAt > now,
+    shareCode ? `used=${Boolean(shareCode.usedAt)} revoked=${Boolean(shareCode.revokedAt)} expires=${shareCode.expiresAt.toISOString()}` : "missing",
+  );
+  const plainCodes = await prisma.$queryRaw<{ n: number }[]>`
+    SELECT ((SELECT COUNT(*) FROM "AssistantInvite" WHERE "codeHash" !~ '^[0-9a-f]{64}$') + (SELECT COUNT(*) FROM "WorkspaceShareCode" WHERE "codeHash" !~ '^[0-9a-f]{64}$'))::int AS n`;
+  check("Every assistant invite and share code is stored as a sha256 only", (plainCodes[0]?.n ?? 1) === 0);
 }
 
 main()

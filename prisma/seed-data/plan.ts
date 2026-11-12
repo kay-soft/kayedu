@@ -401,6 +401,122 @@ export const ORGANIZATIONS: Record<string, { name: string; nameEn: string; maxBr
   suspended: { name: "Future Skills Academy", nameEn: "Future Skills Academy", maxBranches: 1 },
 };
 
+// ── Premium, assistants and workspaces (X1 — the W6–W10 world) ─────────────
+
+/**
+ * The seven accounts that show W1–W10 (X1). Only `premium` and `expired` are
+ * ever premium in the seed; teacher.downtown, teacher.shared and every other
+ * seeded account never are (teacher.downtown stays the e2e premium target).
+ */
+export const W_PEOPLE = {
+  /** Premium (about a year ahead): a TEACHER at Downtown and a PERSONAL workspace. */
+  premium: { key: "w-premium", first: "Amira", last: "Soliman", email: mail("teacher.premium"), locale: "en" },
+  /** Premium that has lapsed (granted on a backdated clock): a workspace, one student, one past session, one assistant link. */
+  expired: { key: "w-expired", first: "Khaled", last: "Fawzy", email: mail("teacher.expired"), locale: "en" },
+  /** teacher.premium's assistant on the FULL preset (and teacher.expired's, inert while that premium is lapsed). */
+  assistantFull: { key: "w-assistant-full", first: "Laila", last: "Hamdy", email: mail("assistant.premium"), locale: "en" },
+  /** teacher.premium's assistant, invited as CO_TEACHER and cut down to check-in + payments (reads "Custom"). */
+  assistantCheckin: { key: "w-assistant-checkin", first: "Bassem", last: "Naguib", email: mail("assistant.checkin"), locale: "en" },
+  /** A login with a User.phone, ACCEPTED into teacher.premium's workspace (no branch profile). */
+  wsStudent: { key: "w-ws-student", first: "Seif", last: "Ragab", email: mail("student.workspace"), locale: "en" },
+  /** A Downtown student whose User.phone matches a PENDING invitation from teacher.premium's workspace. */
+  invited: { key: "w-invited", first: "Malak", last: "Ezzat", email: mail("student.invited"), locale: "ar" },
+  /** The one seeded multi-experience account (W5): a Downtown TEACHER, a Downtown student, and student.new's parent. */
+  multi: { key: "w-multi", first: "Rami", last: "Wahba", email: mail("multi.experience"), locale: "en" },
+} satisfies Record<string, PersonDef>;
+
+/**
+ * Two waiting dev-only codes (X1), printed in docs/dev-accounts.md like the F3
+ * family codes. Stored only as their sha256 (the writers' own hash functions);
+ * only these plaintexts are fixed. 12 symbols of the shared code alphabet.
+ */
+export const DEV_W_CODES = {
+  /** teacher.premium's unredeemed assistant invite (CO_TEACHER preset). */
+  assistantInvite: "SEEDASSTNVTE",
+  /** The share code of one unlinked typed profile in teacher.premium's workspace. */
+  shareCode: "SEEDSHREKEYS",
+} as const;
+
+/** How long a seeded premium lasts from the seed run (D-W14 allows at most 400 days). */
+export const PREMIUM_SEED_DAYS = 365;
+
+/**
+ * teacher.premium's Downtown class — the FIXED-cut contrast (a branch class
+ * may be FIXED; a workspace class never is, D-W24). Upcoming sessions and
+ * assessments only: no history, no payments, so Downtown's analytics and
+ * settlements are exactly what they were.
+ */
+export const PREMIUM_DOWNTOWN_CLASS = {
+  system: "EG" as SystemKey,
+  grade: "Secondary 2",
+  subject: "Physics",
+  /** Index into Downtown's rooms: the Lab (12 seats). */
+  room: 2,
+  day: 4,
+  start: "15:00",
+  end: "16:30",
+  price: 15_000,
+  share: { type: "FIXED" as ShareType, value: 3_000 },
+  /** New non-login Secondary 2 students enrolled here only (plus student.downtown, student.invited, multi.experience). */
+  newStudents: 8,
+};
+
+export type WorkspaceClassDef = {
+  key: string;
+  system: SystemKey;
+  grade: string;
+  subject: string;
+  /** Piastres per session; the cut is always PERCENTAGE 0. */
+  price: number;
+  day: number;
+  start: string;
+  end: string;
+};
+
+/** A workspace student, typed by the teacher with a phone. */
+export type WorkspaceStudentDef = {
+  key: string;
+  first: string;
+  last: string;
+  /** Which class of the workspace they are enrolled in. */
+  classKey: string;
+  /** "account": the phone is that seed account's User.phone (an invitation follows). "code": the dev share code. */
+  kind: "placeholder" | "account" | "code";
+  account?: keyof typeof W_PEOPLE;
+};
+
+export const PREMIUM_WORKSPACE = {
+  name: "Premium Physics",
+  /** The past this workspace has, in days (closed sessions with check-ins and payments). */
+  historyDays: 45,
+  classes: [
+    { key: "ws-physics-s3", system: "EG", grade: "Secondary 3", subject: "Physics", price: 20_000, day: 0, start: "19:00", end: "20:30" },
+    { key: "ws-physics-s2", system: "EG", grade: "Secondary 2", subject: "Physics", price: 15_000, day: 3, start: "19:00", end: "20:30" },
+  ] satisfies WorkspaceClassDef[],
+  students: [
+    { key: "ws:01", first: "Youssef", last: "Mahran", classKey: "ws-physics-s3", kind: "placeholder" },
+    { key: "ws:02", first: "Nour", last: "Elshamy", classKey: "ws-physics-s3", kind: "placeholder" },
+    { key: "ws:03", first: "Karim", last: "Abdelaziz", classKey: "ws-physics-s3", kind: "placeholder" },
+    { key: "ws:student", first: "Seif", last: "Ragab", classKey: "ws-physics-s3", kind: "account", account: "wsStudent" },
+    { key: "ws:04", first: "Habiba", last: "Fekry", classKey: "ws-physics-s2", kind: "placeholder" },
+    { key: "ws:05", first: "Omar", last: "Sherif", classKey: "ws-physics-s2", kind: "placeholder" },
+    { key: "ws:06", first: "Jana", last: "Moussa", classKey: "ws-physics-s2", kind: "placeholder" },
+    { key: "ws:invited", first: "Malak", last: "Ezzat", classKey: "ws-physics-s2", kind: "account", account: "invited" },
+    { key: "ws:coded", first: "Hazem", last: "Lotfy", classKey: "ws-physics-s2", kind: "code" },
+  ] satisfies WorkspaceStudentDef[],
+};
+
+/** teacher.expired's workspace: one class with one past session, one student. */
+export const EXPIRED_WORKSPACE = {
+  name: "Chemistry Circle",
+  class: { key: "ws-chem-s3", system: "EG" as SystemKey, grade: "Secondary 3", subject: "Chemistry", price: 12_000, start: "17:00", end: "18:30" },
+  student: { key: "wsx:01", first: "Salma", last: "Abouzeid" },
+  /** The backdated clock everything of this teacher was written on: this many days before the seed run. */
+  clockDaysAgo: 50,
+  /** The granted premium's last covered day, counted from that backdated clock. */
+  premiumDays: 40,
+};
+
 // ── The fixed account list ─────────────────────────────────────────────────
 
 export type SeedAccount = {
@@ -462,5 +578,14 @@ export function seedAccounts(): SeedAccount[] {
   add(DISCOVER_STUDENT, "Student (no centre — has a pending reservation)", "—");
   add(PARENTS.family, "Parent (2 linked children)", "Center 60 — Downtown + Nasr City");
   add(PARENTS.nokhba, "Parent (one child at two branches)", "Al Nokhba Academy + Center 60 — Downtown");
+  // X1 — premium, assistants and workspaces (W6–W10).
+  const ws = `workspace “${PREMIUM_WORKSPACE.name}”`;
+  add(W_PEOPLE.premium, "Teacher, premium (Downtown class + a personal workspace)", `Center 60 — Downtown + ${ws}`);
+  add(W_PEOPLE.expired, "Teacher, premium lapsed (workspace only, read-only)", `workspace “${EXPIRED_WORKSPACE.name}”`);
+  add(W_PEOPLE.assistantFull, "Assistant of teacher.premium (Full)", "— (works at Downtown and in the workspace)");
+  add(W_PEOPLE.assistantCheckin, "Assistant of teacher.premium (Custom: check-in + payments)", `— (works in the ${ws} only)`);
+  add(W_PEOPLE.wsStudent, "Workspace student (linked by invitation)", ws);
+  add(W_PEOPLE.invited, "Student (with a pending workspace invitation)", "Center 60 — Downtown");
+  add(W_PEOPLE.multi, "Teacher + student + parent (the role switcher)", "Center 60 — Downtown (+ student.new's parent)");
   return out;
 }

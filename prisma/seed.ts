@@ -28,6 +28,11 @@
  * expenses, catalog selections, change requests) — written in the exact shape
  * the app's own actions write them.
  *
+ * **X1** adds the W1–W10 world — premium, assistants, PERSONAL workspaces,
+ * exams and homework, notices, the role switcher's account — in its own
+ * phase, `prisma/seed-data/w-world.ts`, through the W writers (its few direct
+ * writes are listed and commented there).
+ *
  * Auth users are created/updated through the Supabase admin API for the seed's
  * own fixed list only (`prisma/seed-data/auth.ts`) - and the very first thing
  * the seed does, before any database write, is the same Auth preflight
@@ -106,6 +111,7 @@ import { SEED_EMAIL_DOMAIN, mail } from "./seed-data/domain.ts";
 import { ensureCatalog, type Catalog, type SystemKey } from "./seed-data/catalog.ts";
 import { PhoneBook, dayOf, hashString, hhmm, makeRng, pool, toMinutes } from "./seed-data/helpers.ts";
 import { generatePerson, parentFirstName } from "./seed-data/names.ts";
+import { seedWWorld } from "./seed-data/w-world.ts";
 import {
   BRANCHES,
   DEV_FAMILY_CODES,
@@ -1619,6 +1625,25 @@ async function main() {
 
   // Parents once their children exist.
   await seedParents(centres);
+
+  // X1 — premium, assistants and workspaces (W6–W10), once the branches, their
+  // history and the families exist (prisma/seed-data/w-world.ts).
+  const downtown = centres.find((ctx) => ctx.branch.key === "downtown");
+  const youssef = downtown?.students.find((student) => student.key === "dt-youssef");
+  if (!downtown || !youssef) throw new Error("Downtown and student.downtown must exist before the X1 phase");
+  await seedWWorld({
+    prisma,
+    phones,
+    line,
+    ensurePerson: (def) => ensurePerson(def),
+    addTeacher,
+    catalog,
+    adminId: admin.id,
+    downtown: { centerId: downtown.center.id, actorId: downtown.actorId, rooms: downtown.rooms, youssefProfileId: youssef.profileId },
+    today,
+    fullYearEnd: terms.FULL.endDate,
+    local: mode === "local",
+  });
 
   // The deactivation of a class comes last: its history stays, its future goes.
   for (const ctx of centres) {
